@@ -172,13 +172,13 @@ The type deliberately separates activation from availability:
 | absent, exact environment value supplies a non-null value | environment | true | true |
 | absent, no source supplies a value | none | true | false |
 
-This permits a staged Skoolit migration: register the intended provider, change the destination type, replace the overlapping descendant `MapSecret(...)` claim with one complete disabled reference in the same reviewed change, keep the current environment value temporarily, and provision the remote resource. Then enable the reference, prove the provider lookup is healthy, and run a bounded verification deployment with the exact environment rescue removed so Google is the effective source before calling the migration complete. A disabled reference or an enabled reference whose effective source remains environment does not prove remote readiness.
+This permits a staged Skoolit migration, but the minimum safe migration unit is one requested configuration root rather than one property. Register the intended provider, convert every mapped destination inside that root to `Secret<T>` or remove mappings that are outside the new composition contract, replace overlapping claims with complete disabled references in the same reviewed change, keep current environment values temporarily, and provision the remote resources. Then enable the references and run a bounded verification deployment with the exact environment rescues removed so Google is the effective source before calling the migration complete. A disabled reference or an enabled reference whose effective source remains environment does not prove remote readiness.
 
 ### Supported destination object model
 
-The new composition path owns one explicit serializer contract: `JsonSerializerOptions.Default.GetTypeInfo(destinationType)` plus an internal `Secret<T>` converter factory. The first release does not accept DI-provided serializer options, a custom naming policy, or a generated serializer context. File, LocalSecrets, Google raw-root, direct environment-root, plan discovery, audit topology, and final composition binding all use that contract after they enter the new path. Existing roots without `Secret<T>` keep their current provider-specific conversion paths.
+The new composition path owns one explicit `ConfigCompositionJsonContract`. It contains an immutable structural serializer profile cloned from the platform defaults before first use plus cached value-free type metadata. Plan discovery uses that structural profile. Each execution creates a short-lived `JsonSerializerOptions` clone from the same structural settings, installs an invocation-owned `Secret<T>` converter factory that captures only that execution's binding context, makes the clone read-only, binds once, and releases the clone and slot references. Cached plans are keyed by structural-contract identity; invocation options and converters are never cached or shared. The contract is never `JsonSerializerOptions.Default` itself because the platform default instance cannot be mutated. The first release does not accept DI-provided serializer options, a custom naming policy, or a generated serializer context. File, LocalSecrets, Google raw-root, direct environment-root, plan discovery, audit topology, and final composition binding use the same naming and metadata policy after they enter the new path. Existing roots without `Secret<T>` keep their current provider-specific conversion paths.
 
-The compiler discovers members from that same `System.Text.Json` `JsonTypeInfo` used for final composition binding:
+The compiler discovers members from `System.Text.Json` metadata produced by the shared structural contract. Execution metadata must be behaviorally equivalent but is invocation-owned so its converters can safely capture that execution:
 
 - public properties, inherited properties, records, primary-constructor parameters, init-only properties, and `[JsonInclude]` fields are supported when the default System.Text.Json contract can bind them;
 - `[JsonPropertyName]`, `[JsonInclude]`, and ordinary default scalar converters are honored because discovery and binding share the same metadata;
@@ -186,8 +186,10 @@ The compiler discovers members from that same `System.Text.Json` `JsonTypeInfo` 
 - a custom converter for the containing object, polymorphic contract that hides the concrete property graph, extension-data destination, or member name containing `.` or `:` is rejected when it prevents deterministic discovery;
 - a custom converter for inner scalar `T` is outside the first release; `ConfigValueConverter` is the conversion authority; and
 - a `Secret<T>` member inside an array, collection, dictionary, or object-valued `Secret<T>` is rejected with a stable unsupported-destination diagnostic.
+- `ConfigStruct<T>` roots containing `Secret<T>` are rejected in the first release; supported composition roots use `Config<T>` and reference types; and
+- recursive member paths that can reach a secret destination are rejected. Discovery uses an active traversal stack, not a global visited-type set, so repeated acyclic occurrences of the same type remain supported. The compiler enforces the existing audit-style graph bounds with explicit maximum depth and node/slot counts and reports a stable no-I/O diagnostic on self-recursive, mutually recursive, or over-budget graphs.
 
-`DefaultConfigManager.GetValue<T>` detects the supported `Secret<T>` graph and delegates that request to the shared composition engine after direct-root environment probing. `Config<T>.Init` remains unchanged and receives either the final typed `T` or `null`. Final composition binding uses the internal converter factory for `Secret<T>`; the execution frame supplies opaque slot ids mapped to already-classified `Secret<T>` instances. Payloads are never inserted into the value-free plan or a format-capable declaration node. This is a new binding stage for opted-in roots, not an extension of the current provider-returned typed-object path.
+`DefaultConfigManager.GetValue<T>` detects the supported `Secret<T>` graph and delegates that request to the shared composition engine after direct-root environment probing. `Config<T>.Init` remains unchanged and receives either the final typed `T` or `null`. Final composition binding uses an invocation-owned binding context passed by constructor to that invocation's internal converter factory; opaque slot ids map to already-classified `Secret<T>` instances. The context is never ambient static state, `AsyncLocal`, or shared mutable singleton state, so concurrent runtime/audit executions and nested serializer calls cannot cross-contaminate payloads. A `try/finally` releases all slot references after success or exception. Payloads are never inserted into the value-free plan or a format-capable declaration node. This is a new binding stage for opted-in roots, not an extension of the current provider-returned typed-object path.
 
 ## File Declaration Contract
 
@@ -235,6 +237,7 @@ Rules:
 - `enabled` is optional and defaults to `true`.
 - Descriptor member names use ordinal case-insensitive matching so normal System.Text.Json naming behavior is unsurprising. Unknown members, wrong member types, and duplicate members differing only by case fail plan compilation.
 - The descriptor is interpreted only because the destination is `Secret<T>`.
+- Before any provider validation or resolution, the compiler requires inner `T` to be one of the existing `ConfigScalarTypes` shapes, including supported nullable scalar forms. Object, array, collection, dictionary, and nested-secret payloads fail with `secret-destination-type-unsupported` and make zero provider calls.
 - A plain file scalar at a `Secret<T>` path is rejected. Checked-in configuration cannot masquerade as a secret source.
 - A value arriving from a recognized secret-capable base source such as LocalSecrets, or from an exact environment override, may be wrapped as the effective `Secret<T>` value.
 
@@ -242,7 +245,7 @@ A “complete descriptor” contains the required nonblank `key`, contains only 
 
 ## Compiled Composition Plan
 
-Add one internal plan compiler and one executor used by both `DefaultConfigManager` and `ConfigAuditReporter`.
+Register one singleton `ConfigCompositionEngine` used by both `DefaultConfigManager` and `ConfigAuditReporter`. The engine owns one `ConfigCompositionPlanCompiler`, one `ConfigCompositionExecutor`, the immutable `ConfigCompositionJsonContract`, and one immutable-snapshot `ConfigSecretProviderRegistry`. Every multi-capability Google or LocalSecrets registration aliases the same concrete singleton instance; it is never constructed once per interface. Runtime, audit, and startup validation obtain the same engine, registry entries, file snapshot source, environment candidate service, and legacy-claim inspectors. DI identity tests must prove these aliases and reject duplicate canonical provider ids before any plan or provider I/O.
 
 The value-free plan records:
 
@@ -257,7 +260,7 @@ The value-free plan records:
 - precedence and exact environment-rescue edges; and
 - sensitivity and audit metadata for every secret destination.
 
-The plan never contains a secret payload. Runtime execution owns payloads only long enough to convert and assemble the requested object.
+The plan never contains a secret payload. Runtime execution owns payloads only long enough to convert and assemble the requested object. Plans are immutable and cacheable only by a key that includes requested environment, root logical path, destination structural-contract identity, file snapshot generation, ordered provider registration instances and canonical ids, relevant legacy mapping/configuration fingerprint, and any options that change validation or providerless budgeting. Payloads, invocation serializer options, provider runtime outcomes, environment values, and audit traces are never cached in the plan. A new snapshot or changed registration/options fingerprint produces a new plan; concurrent callers may share only the immutable compiled metadata.
 
 ### Execution algorithm
 
@@ -306,13 +309,15 @@ The executor returns one internal `ConfigCompositionExecutionResult<T>` with:
 - safe plan, provider, and conversion diagnostics; and
 - a value-free provenance and secret-slot trace.
 
-Runtime and audit invoke the same providers in the same order and consume that same result shape. Runtime maps `Missing` to `null`, returns the effective `T` for `Resolved`, and throws the existing value-safe configuration exception shape for `Failed`. `Config<T>.Init` then performs its unchanged presence, DataAnnotations, and scalar/custom-hook validation. Audit maps composition states to missing, resolved, or invalid entries, passes the resolved `T` through the existing `IConfigInspectable.Inspect` validation projection, and renders the safe trace. It does not continue to lower providers after the shared executor stopped and does not run a second precedence algorithm. Existing roots without `Secret<T>` retain their current runtime and audit paths in this issue.
+Runtime and audit invoke the same providers in the same order and consume that same result shape. Runtime maps `Missing` to `null`, returns the effective `T` for `Resolved`, and throws a new sealed, value-safe `ConfigurationCompositionException` for `Failed`; the existing sealed `ConfigurationResolutionException` and its serialized/message behavior remain unchanged for legacy roots. The new exception exposes `EnvironmentName`, `RootKey`, and an immutable ordered list of `ConfigCompositionFailure` records. Each record carries only canonical destination path, stable code, provider ids/roles when safe, retryability, source location, and the existing problem/cause/fix/documentation fields. It cannot carry a payload, raw exception text, or parent-object serialization, and its `Message`, `ToString()`, debugger display, and JSON shape are snapshot-tested.
+
+`Config<T>.Init` then performs its unchanged presence, DataAnnotations, and scalar/custom-hook validation. Audit maps a failed composition root to `ConfigAuditEntryState.Invalid`, emits one opaque child entry per secret destination using the existing append-only entry/source/diagnostic contracts, and places plan-global failures on the root. A fully resolved single-source root remains `Resolved`; a resolved root with base plus slot/environment contributions is `PartiallyResolved`; missing remains `Missing`. Per-slot state names live in stable diagnostic codes rather than extending the public `ConfigAuditEntryState` enum. Audit passes a resolved `T` through the existing `IConfigInspectable.Inspect` validation projection and renders the safe trace. It does not continue to lower providers after the shared executor stopped and does not run a second precedence algorithm. Existing roots without `Secret<T>` retain their current runtime and audit paths in this issue.
 
 ### File-layer preservation
 
 `FileBasedConfigProvider` currently stores a merged `JsonNode`. Direct descriptors cannot be merged safely before the destination type is known because an ordinary object may legitimately contain the same property names.
 
-Extend the internal `ConfigFileProviderSnapshot` with `Layers`, an immutable ordered list of `ConfigFileLayer` records. Each layer owns a deep clone of the parsed `JsonObject` plus its environment, full source path, deterministic order, and source-location map. Keep the existing `Environments`, `Origins`, `Diagnostics`, and `SourceLocationMaps` members and their current merge construction unchanged. Existing `GetValue<T>`, audit enumeration, and ordinary diagnostics continue to read those existing merged members. Only the new type-aware plan compiler reads `Layers`.
+Extend the internal `ConfigFileProviderSnapshot` with `Layers`, an immutable ordered list of `ConfigFileLayer` records, and `LoadEvents`, an immutable ordered list containing both successful layers and file-load failures. Each successful layer owns a deep clone of the parsed `JsonObject` plus its environment, full source path, deterministic order, and source-location map. Each failure contains only a stable code, affected environment when derivable, safe display path, deterministic order, and sanitized parse/read classification. Keep the existing `Environments`, `Origins`, `Diagnostics`, and `SourceLocationMaps` members and their current merge construction unchanged. Existing `GetValue<T>`, audit enumeration, and ordinary diagnostics continue to read those existing merged members. Only the new type-aware plan compiler reads `Layers` and `LoadEvents`.
 
 During type-aware plan compilation:
 
@@ -333,6 +338,8 @@ Per-layer behavior at a `Secret<T>` path is exact:
 `Layers` is authoritative for every discovered `Secret<T>` path. A present JSON null is retained as a layer event and causes replace-and-fail there even though the legacy merged `Environments` view continues its current null-skipping behavior for ordinary paths. Regression tests snapshot existing ordinary-object merges, null handling, `Environments`, `Origins`, and audit enumeration before and after `Layers` is populated. The new history is additive internal state, not a replacement file-provider algorithm.
 
 When file is the selected base, the executor starts from the existing merged root for ordinary members but replaces every discovered `Secret<T>` node with an opaque slot marker before final binding. Descriptor contents come only from `Layers`; the deep-merged descriptor-shaped node is never treated as an effective secret value. This prevents an omitted optional field in a higher complete descriptor from leaking in from the lower merged node.
+
+The loader performs a streaming duplicate-member scan before building each `JsonObject`, using ordinal case-insensitive member comparison independently inside every object. Exact duplicates and case-only duplicates are retained as a failed load event instead of silently taking a winner. If two discovered file paths collapse under ordinal case-insensitive full-path comparison, the snapshot records a deterministic collision failure rather than depending on host filesystem behavior. Successful files continue in ordinal-ignore-case order with ordinal spelling as the tie-breaker. For opted-in roots, an applicable malformed or unreadable file event is a plan-global failure. If parsing failed before the loader can determine which roots the file contains, every opted-in root for that file's environment fails safely; direct environment root success still bypasses file compilation, and legacy roots retain the current skip-and-diagnostic behavior.
 
 ### Base contribution
 
@@ -516,6 +523,12 @@ public sealed class AppSurfaceConfigOptions
 {
     public TimeSpan ProviderlessResolutionBudget { get; set; }
         = TimeSpan.FromSeconds(30);
+
+    public int MaxCompositionGraphDepth { get; set; } = 32;
+
+    public int MaxCompositionGraphNodes { get; set; } = 4096;
+
+    public int MaxSecretDestinationsPerRoot { get; set; } = 256;
 }
 
 public enum ConfigSecretReferenceValidationStatus
@@ -537,15 +550,17 @@ public enum ConfigSecretProviderResolutionStatus
 }
 ```
 
+All four `AppSurfaceConfigOptions` properties are validated eagerly as positive. Depth, node, and secret-destination limits apply during value-free plan discovery before provider I/O. The defaults are intentionally above normal configuration models but bound accidental or hostile metadata expansion. Provider registrations remain trusted host code rather than file-controlled input.
+
 The core owns `provider` filtering and `enabled` state. It passes only the descriptor's environment, canonical destination path, opaque key, and version to provider validation. Disabled descriptors still call `ValidateReference` on the selected registration set but never call `Resolve`; enabled descriptors call `Resolve` only after all local validation succeeds. Providers therefore do not need, and cannot reinterpret, the activation flag or provider constraint.
 
 `IConfigSecretDeclarationSource` is a provider-neutral, local-only compatibility seam for existing code-configured mappings. It performs no secret-store I/O. The Google implementation inspects its already-validated options and reports:
 
 - an exact root mapping or current root convention claim, which remains a whole-root Google base claim;
-- exact configured mappings equal to, above, or below discovered `Secret<T>` destinations under the requested root; and
+- every exact configured mapping below the requested root, plus mappings equal to or above it, regardless of whether the mapped child is already typed `Secret<T>`; and
 - safe mapping origin metadata for overlap diagnostics.
 
-An exact `MapSecret(...)` claim at a discovered `Secret<T>` destination becomes an enabled, Google-constrained plan reference when no inline descriptor exists. Its secret id/resource and version become `key` and `version`; its provider is the Google canonical id. The same-path mapping plus an inline descriptor is a duplicate claim. Root, ancestor, or descendant intersections are overlap failures. A mapping aimed at a plain destination under a root that has entered the new composition path fails with guidance to change that destination to `Secret<T>`. Google does not report descendant convention matches, so this feature does not broaden convention discovery. Other secret-provider packages need not implement this seam unless they already expose a legacy mapping API.
+An exact `MapSecret(...)` claim at a discovered `Secret<T>` destination becomes an enabled, Google-constrained plan reference when no inline descriptor exists. Its secret id/resource and version become `key` and `version`; its provider is the Google canonical id. The same-path mapping plus an inline descriptor is a duplicate claim. Root, ancestor, or descendant intersections are overlap failures. A mapping aimed at a plain destination under a root that has entered the new composition path fails with guidance to migrate the containing requested root as one unit: convert every mapped child intended for composition to `Secret<T>` and remove or relocate incompatible claims. Google does not report descendant convention matches, so this feature does not broaden convention discovery. Other secret-provider packages need not implement this seam unless they already expose a legacy mapping API.
 
 Supporting sealed result types use named factories rather than public positional constructors:
 
@@ -554,17 +569,23 @@ Supporting sealed result types use named factories rather than public positional
 - `Resolved(string sensitiveValue, ConfigSecretSourceMetadata source)` accepts a payload but stores it behind an internal non-formatting accessor used by the core Config assembly;
 - non-success factories cannot carry a payload;
 - `ToString()`, equality diagnostics, and debugger display redact payload presence; and
-- `ConfigSecretSourceMetadata` contains only canonical provider id, normalized configured identity, requested version, and provider-owned safe source kind.
+- `ConfigSecretSourceMetadata` contains canonical provider id and a provider-owned allowlisted source kind. Provider-normalized identity and requested version remain internal sensitive-support metadata and are omitted from default exception, log, text-audit, and JSON-audit rendering. A provider may emit a bounded opaque correlation token only through an explicit safe-metadata factory; arbitrary key/resource text is never presumed safe.
 
 Provider ids use lower-case kebab-case, compare case-insensitively, and must be unique. Registration uses ordinary DI enumeration of `IConfigSecretProvider`; Config validates ids before compiling a plan. Providers must not perform I/O from `ValidateReference`.
 
 The current configuration API is synchronous and has no cancellation token. The resolver seam remains synchronous for this release. `ConfigSecretResolutionContext` exposes a monotonic remaining budget and requires the provider to cap its native synchronous timeout to the smaller of its configured per-call timeout and that remaining budget. Implementations must not block on an asynchronous task. Google clamps `LookupTimeout`, uses its synchronous client adapter, and retains its successful-value cache. Cache ownership and lifetime remain provider-specific; the composition engine adds no cache.
 
-Providerless candidates execute sequentially in canonical provider-id order so diagnostics and tests are deterministic. Every compatible provider after a success must still run to detect ambiguity unless a terminal outcome already fixes failure. All providerless references in one requested root share `AppSurfaceConfigOptions.ProviderlessResolutionBudget`, defaulting to 30 seconds and validated as positive during module startup. The core checks the monotonic deadline before every call, passes the remaining duration to the provider, and fails unresolved providerless paths with `secret-providerless-resolution-budget-exceeded` when exhausted. There is no parallel fan-out in the first release. The registered provider count is not capped because DI registration is trusted application configuration, but total providerless work for the root is bounded. Applications with a tighter startup SLO should lower the budget or specify `provider`.
+Providerless candidates execute sequentially in canonical provider-id order so diagnostics and tests are deterministic. Secret destinations also execute in canonical path order; one root owns one providerless deadline across all of them. Every compatible provider after a success must still run to detect ambiguity unless a terminal outcome already fixes failure. All providerless references in one requested root share `AppSurfaceConfigOptions.ProviderlessResolutionBudget`, defaulting to 30 seconds and validated as positive during options validation. The core uses `TimeProvider.GetTimestamp()` and elapsed-time APIs for the monotonic deadline, checks the deadline before every call, passes the remaining duration to the provider, and fails unresolved providerless paths with `secret-providerless-resolution-budget-exceeded` when exhausted. A non-positive remaining duration is never passed to a provider. There is no parallel fan-out in the first release. Provider registrations are trusted application code and are not statically capped, but execution is only cooperatively budgeted because the synchronous contract cannot preempt a non-conforming provider. Applications with a tighter startup SLO should lower the budget or specify `provider`.
+
+The synchronous budget is cooperative, not preemptive: core cannot interrupt a provider that ignores `Remaining`. It checks the deadline again after every call. If the deadline expired before uniqueness was established, the root fails budget-exceeded and does not accept a late success. Provider documentation and conformance tests must prove that built-in implementations cap their native timeout to `Remaining`; third-party implementations that cannot do so must reject the contract during local validation rather than overrun it.
+
+Provider-id/options validation is eager at host startup. Config registers an options validator and a small hosted startup validator that enumerates secret-provider registrations and known `Config<T>` roots, validates unique canonical ids, and compiles every discovered secret plan whose direct-root environment short circuit does not already win. Configuration wrapper values remain lazily resolved when DI activates them, preserving existing behavior, but invalid ids, unsupported destination graphs, descriptor conflicts, and local reference validation fail before the host reports ready. Disabled plans still perform only local validation. This startup service never performs enabled secret resolution; applications that require fail-fast payload availability must explicitly resolve their required config wrapper during startup, as shown in the golden-path example.
 
 The core catches unexpected provider exceptions and emits a generic `ProviderFailed` diagnostic containing only provider id, exception type name, retryability, and a stable documentation hint. It never copies `Exception.Message`, stack data, or arbitrary provider text. Provider-returned codes, identity/version metadata, and documentation hints are length-bounded, stripped of control characters, and passed through the existing value-safe diagnostic constructors before audit or logging.
 
-The Google package adapts its existing option validation, resource construction, client, status taxonomy, timeout, and successful-value cache to this seam. Its canonical id is a public constant. Existing exact `GoogleSecretManagerConfigProvider` behavior remains available.
+The Google package adapts its existing option validation, resource construction, client, status taxonomy, timeout, and successful-value cache to this seam. Its canonical id is a public constant. Existing exact `GoogleSecretManagerConfigProvider` behavior remains available. Child-reference cache identity uses a distinct key containing the provider id, environment, canonical Google version resource name, and a fingerprint of provider settings that affect resource interpretation or access; project, secret id, and requested version/alias therefore cannot collide with a prior descriptor. A changed file key/version or relevant options snapshot cannot reuse the previous descriptor's payload. The implementation uses the existing provider singleton and cache, injects `TimeProvider` so TTL tests do not depend on wall-clock timing, and never shares the legacy logical-path cache entry with the child-reference cache.
+
+The composition core does not memoize one provider result across different logical destinations because `ConfigSecretReference.LogicalPath` is provider-visible policy input. Two destinations may name the same external key yet have different authorization or validation meaning. A provider may deduplicate safe equivalent remote work behind its own canonical cache; the Google adapter therefore receives two contract calls but performs one remote access when both references normalize to the same child cache identity. Tests distinguish provider-call parity from remote-client call count.
 
 The LocalSecrets package participates as a lower object contribution in this issue. Registering LocalSecrets as a providerless inline resolver is deferred because its current store has no runtime version contract. AppSurface must not silently satisfy a version-pinned declaration with an unversioned local value. The existing materialized-remote attestation may support a future explicit design.
 
@@ -573,7 +594,7 @@ The LocalSecrets package participates as a lower object contribution in this iss
 The plan uses one segment model:
 
 - the canonical AppSurface logical path starts with the key produced by `ConfigKeyAttribute`, normalized to colon-delimited segments;
-- nested CLR and JSON property names append one colon-delimited segment;
+- nested members append the serialized JSON member name from the structural `JsonTypeInfo`; `[JsonPropertyName]` therefore changes file, diagnostic, mapping, and environment destination identity while the CLR member name remains code-only metadata;
 - logical-path comparison is ordinal case-insensitive, matching AppSurface configuration identity across file, environment, and code-mapping spellings;
 - `.` and `:` are accepted as separators when parsing a logical path for overlap, but the original source spelling and legacy direct lookup behavior are preserved;
 - distinct file declarations that collapse to the same canonical logical path fail as a same-layer collision before provider-specific normalization;
@@ -582,6 +603,8 @@ The plan uses one segment model:
 - arrays, numeric index segments, dictionaries, and collection-item references are outside the first release.
 
 Overlap compares segment arrays, never raw string prefixes. Two claims overlap when their normalized paths are equal or when one complete segment array is an ancestor of the other. Sibling paths do not overlap. A current Google convention conflicts only when its existing predicate claims the requested root and the plan also contains a descendant secret claim. The compiler never asks a convention to discover descendant matches, so convention scope does not broaden.
+
+Canonical logical identity and environment aliases are separate collision domains. During compilation, the shared environment candidate service generates every scoped, unscoped, legacy-flat, and hierarchical candidate for each secret destination and maps each candidate back to its canonical path. If one environment variable candidate can target two distinct secret destinations, the opted-in root fails with `secret-environment-alias-collision` before provider I/O. The diagnostic names both canonical paths and the colliding variable name but never a value. Existing legacy roots retain their current behavior. Tests cover underscores, hyphens, `:`/`.` separators, scoped/unscoped forms, `[JsonPropertyName]`, and two simultaneously failing destinations so one environment variable can never rescue both.
 
 The secret provider's `key`, version, and other external resource identifiers are opaque provider input. Their spelling and case are preserved, and they are never parsed or normalized as AppSurface logical paths.
 
@@ -605,9 +628,12 @@ The secret provider's `key`, version, and other external resource identifiers ar
 | Environment value targets only a sibling | Original failure remains terminal |
 | Two secret paths fail and environment rescues one | Unrescued path blocks the object |
 | Inline declaration overlaps a legacy mapping or convention | Plan validation failure |
+| Two secret destinations generate the same environment candidate | Plan-global `secret-environment-alias-collision` before provider I/O |
 | Parseable direct environment root exists | Bind and validate it; ignore file declarations, secret-provider lookup, and environment descendants |
 | Higher file layer omits the property | Preserve the lower complete descriptor |
 | Higher file layer supplies null, scalar, array, or malformed descriptor | Replace-and-fail; never inherit lower descriptor fields |
+| Higher applicable file is unreadable or malformed before root attribution | Opted-in roots in that environment fail plan compilation; legacy roots keep current skip behavior |
+| Supported-type discovery reaches a recursive secret-capable path or graph budget | Plan-global unsupported-destination failure before provider I/O |
 
 There is no `optional: true`, fallback payload, “ignore denied,” “first provider wins,” or “missing means disabled” behavior.
 
@@ -619,7 +645,7 @@ The shared executor emits a value-free trace consumed by audit:
 - requested provider constraint, if any;
 - providers considered;
 - canonical winning provider, if any;
-- key/resource identity and requested version;
+- a provider-approved opaque correlation token when explicitly classified safe; raw key/resource identity and requested version are omitted by default;
 - enabled, disabled, resolved, rescued, missing, ambiguous, and terminal states;
 - provider priority or role where relevant; and
 - existing stable remediation and documentation hints.
@@ -659,17 +685,17 @@ Each resolved payload remains reachable only inside the provider result and curr
 ### Skoolit migration sequence
 
 1. Register the intended secret-provider module; disabled means no resource access, not deferred provider-schema validation.
-2. Convert one typed secret destination from `string` to `Secret<string>`, update its typed consumer, and identify every mapping at, above, or below the containing root.
-3. In the same reviewed change, remove the overlapping descendant `MapSecret(...)`/manifest claim and place its key and pinned version beside the surrounding configuration. Leaving both declarations active is a compile-time overlap failure, even when the inline declaration is disabled.
+2. Choose one requested configuration root as the migration unit. Enumerate every mapping at, above, or below it, convert every mapped child that will participate in composition from `string` to `Secret<string>`, and update all typed consumers in that root.
+3. In the same reviewed change, remove every overlapping or plain-child `MapSecret(...)`/manifest claim inside that root and place each key and pinned version beside its surrounding configuration. Leaving either a duplicate claim or a mapped plain sibling is a compile-time failure, even when every inline declaration is disabled.
 4. Set `enabled: false` while the current environment variable remains the effective value.
 5. Verify audit reports `Enabled=false`, `HasValue=true`, and environment as the winner without contacting Google for the inline reference.
 6. Provision the resource version and IAM.
 7. Enable the reference in an environment-specific file. The environment override may remain for an initial safety deployment, but that deployment is not proof that Google is the effective source.
 8. Run a bounded verification deployment with the exact environment override removed; require Google as the effective source and successful application validation.
 9. Delete the now-unused environment-bridge precedence branch for the migrated typed consumer.
-10. Repeat by bounded configuration area, then remove the application-owned manifest infrastructure when no rows remain.
+10. Repeat root by root, then remove the application-owned manifest infrastructure when no rows remain.
 
-Rollback reverts the reviewed file declaration and, during migration, may restore the exact environment override. It never changes or deletes the remote secret version.
+Rollback deploys the previously built application artifact together with its matching AppSurface package set and restores the matching environment/mapping configuration when required. Merely pinning an older package under an application binary compiled against `Secret<T>` is not a valid rollback. Rollback never changes or deletes the remote secret version. Release rehearsal must prove this artifact-level rollback before stable publication.
 
 ## Cross-Model Perspective
 
@@ -748,8 +774,14 @@ Implementation may land as linked pull requests or commits matching Stage 1 and 
 11. Overlap tests cover exact, ancestor, descendant, convention, duplicate-provider-id, dotted-versus-colon, and case-only logical-path conflicts while proving opaque provider keys retain their original case.
 12. Runtime and audit produce the same semantic trace and provider-call sequence for identical immutable inputs and fake-provider outcomes in a shared behavior matrix; direct environment roots make zero base or secret-provider calls in both paths. Tests do not assume two real remote executions observe unchanged external state.
 13. Default System.Text.Json serialization, AppSurface `ToString()`, audit, exceptions, and framework-owned logs never reveal provider, LocalSecrets, or environment payloads.
-14. A Skoolit-shaped adoption test demonstrates removal of one manifest row and its bridge precedence logic.
-15. Changed code approaches complete branch coverage, formatting passes, analyzer and documentation warnings are clean, and solution-level coverage is run when practical.
+14. Concurrent runtime and audit requests for the same model but different payloads prove invocation-owned serializer/converter state, nested binding, and cleanup after exceptions.
+15. Environment-alias tests prove distinct canonical secret destinations cannot share one scoped, unscoped, legacy-flat, or hierarchical environment candidate.
+16. File-load tests retain truncated JSON, syntax error, duplicate member, case-only file path, and unreadable higher-file events and fail opted-in roots without changing legacy skip behavior.
+17. Graph tests cover self recursion, mutual recursion, repeated acyclic sibling types, `ConfigStruct<T>`, scalar gating, and each depth/node/slot boundary with zero provider calls on failure.
+18. A two-mapped-sibling Skoolit-shaped adoption test rejects a one-property partial transition, then demonstrates root-sized conversion and removal of its bridge precedence logic.
+19. Public exception and audit report snapshots preserve legacy shapes while proving deterministic multi-slot failures, opaque slot traversal, and default omission of key/version metadata.
+20. Artifact-level rollback and packed-consumer verification prove the prior application binary runs with its matching package/configuration set.
+21. Changed code approaches complete branch coverage, formatting passes, analyzer and documentation warnings are clean, and solution-level coverage is run when practical.
 
 ## Distribution Plan
 
@@ -1085,7 +1117,7 @@ All ten are handled by explicit plan rules and require tests. No edge case is le
 ### Section 5 — Code Quality Review
 
 1. **Path logic duplication:** introduce one internal segment/canonical-path value type used by overlap, environment projection, diagnostics, and mapping compatibility.
-2. **Binding logic duplication:** discovery and final binding must use the same `JsonTypeInfo`; do not add a second reflection-only object model.
+2. **Binding logic duplication:** discovery and final binding must use one structural metadata policy; execution creates invocation-owned equivalent metadata and converters rather than a second reflection-only model or a shared context-bearing converter.
 3. **Outcome invariants:** use named factories and sealed result types so non-success states cannot carry payloads and success cannot carry null.
 4. **Provider identity drift:** define a public Google provider-id constant and validate all ids in core startup; keep legacy `Name` for existing diagnostics where required.
 
@@ -1108,10 +1140,12 @@ enabled providerless                           zero/one/many/uncertain/budget ma
 disabled descriptor                            local validation + zero Resolve calls
 descriptor absent                              lower/env/missing matrix
 atomic layered descriptor                      omit/replace/null/scalar/array/malformed
-path identity/overlap                          case/separator/ancestor/sibling/convention
+file load history                              truncated/syntax/unreadable/duplicate/path collision
+path identity/overlap                          case/separator/ancestor/sibling/convention/env alias
 exact environment descendant                   override/rescue/invalid/sibling matrix
 multiple secret slots                          independent success/failure/rescue matrix
-final bind and validation                      records/init/JsonPropertyName/annotations
+final bind and validation                      records/init/JsonPropertyName/annotations/concurrency
+finite object model                            recursion/repeated type/depth/node/slot/ConfigStruct
 audit                                          semantic + provider-call parity
 redaction                                      unique sentinel across every output surface
 ```
@@ -1120,7 +1154,9 @@ Pre-implementation gaps are expected because the feature does not yet exist. The
 
 - a shared fake-provider behavior matrix consumed by runtime and audit tests;
 - provider spies asserting exact call order, remaining budgets, and zero-call states;
-- layer-event fixtures proving descriptors cannot be assembled across files;
+- layer/load-event fixtures proving descriptors cannot be assembled across files and malformed higher files cannot disappear;
+- concurrent binding fixtures proving invocation converter isolation and exception cleanup;
+- root-sized migration and environment-alias collision fixtures;
 - value-sentinel tests covering default System.Text.Json, `ToString`, exceptions, audit text/JSON, logs, ambiguity, and validation;
 - complete branch verification for Google and LocalSecrets adapters; and
 - solution-level coverage through `./scripts/coverage-solution.sh` when practical.
@@ -1171,8 +1207,9 @@ problem during staged adoption?
           +-- rescue removed --------------------> restore exact environment value,
                                                     disable declaration, redeploy
           |
-          +-- framework regression --------------> pin previous package and restore
-                                                    prior mapping/bridge temporarily
+          +-- framework regression --------------> deploy previous application artifact
+                                                    with its matching package/config set
+                                                    and restore mapping/bridge temporarily
 
 Never mutate or delete the remote secret version as part of application rollback.
 ```
@@ -1362,7 +1399,7 @@ Mode: `DX POLISH`.
 |---|---|
 | Primary user | Experienced .NET application/platform maintainer |
 | Starting point | Existing AppSurface service using `Config<T>`, file configuration, and either `MapSecret(...)`, LocalSecrets, environment variables, or application-owned mapping glue |
-| Goal | Move one nested secret to a checked-in, typed, version-pinned reference without disclosing the payload or losing emergency override behavior |
+| Goal | Move one bounded configuration root to checked-in, typed, version-pinned references without disclosing payloads or losing emergency override behavior |
 | Constraints | Existing production deployment, limited migration window, no appetite for a new sidecar manifest, must diagnose failure from startup/audit output |
 | Mental model | Strongly typed options plus deterministic provider precedence |
 | Trust test | “Can I prove which source won, know why a failure happened, and roll back without touching the remote secret?” |
@@ -1371,7 +1408,7 @@ Prior DX reviews for this repository commonly moved developer packages from a 5�
 
 #### Developer Empathy Narrative
 
-> I already have a working service and a working secret, so my risk is migration—not setup from scratch. I want to change one property to `Secret<string>`, put the resource reference in the same file as its siblings, and see a safe diagnostic that proves the environment rescue worked. Then I want one deliberate step that removes the old mapping and rescue, proves Google is the effective source, and leaves me with less application code than I started with. If the guide makes me infer module registration, file placement, wrapper activation, validation, or whether audit performs network I/O, I will preserve the bridge I already trust.
+> I already have a working service and working secrets, so my risk is migration—not setup from scratch. I want to migrate one bounded configuration root, put each resource reference beside its typed destination, and see a safe diagnostic that proves the environment rescues worked. Then I want one deliberate step that removes the old mappings and rescues, proves Google is the effective source, and leaves me with less application code than I started with. If the guide makes me infer the root-sized migration boundary, module registration, file placement, wrapper activation, validation, or whether audit performs network I/O, I will preserve the bridge I already trust.
 
 #### Competitive DX Benchmark
 
@@ -1408,7 +1445,7 @@ The second scenario uses the existing fake Google client through the real compos
 ```text
 Enabled=true  HasValue=true
 Effective source: google-secret-manager
-Requested version: 4
+Requested version: [declared and locally validated]
 Value: [redacted]
 ```
 
@@ -1803,7 +1840,7 @@ The plan reuses these structures. It does not create a second documentation site
 | DX-D2 | Wrapper state is subtle | Keep API; make state/validation guidance primary | P5 simple API |
 | DX-D3 | Error contract lacks guaranteed destinations | Add scoped diagnostic catalog and docs-anchor CI | P1 completeness |
 | DX-D4 | Docs are fragmented | Reuse existing package/start-here structure with one canonical guide | P5 consistency |
-| DX-D5 | Migration order violated overlap rules | Remove old claim in the same change as the descriptor | P4 correctness |
+| DX-D5 | Migration order and one-property scope violated root overlap rules | Migrate the requested root as one unit and remove incompatible claims in the same change | P4 correctness |
 | DX-D6 | No-network and OS proof incomplete | Add fake real-path, packed-consumer, and multi-OS acceptance | P1 completeness |
 | DX-D7 | Provider seam lacks adoption guidance | Add sample/compatibility table; defer a new SDK package | P2/P3 |
 | DX-D8 | TTHW unmeasured | Measure locally against <5-minute threshold | P1 evidence |
@@ -1845,3 +1882,465 @@ The plan reuses these structures. It does not create a second documentation site
 
 - **UC1 (shared with CEO):** Require a bounded real Skoolit prerelease rehearsal before stable publication.
 - **TD4 — Effective audit naming:** Keep the existing audit entry point with explicit side-effect documentation, or introduce a separately named effective-resolution request while compile-only preflight remains deferred.
+
+## Autoplan Phase 3 — Engineering Review
+
+Autoplan review status: `AWAITING FINAL APPROVAL`
+
+### Step 0 — Scope Challenge and Code Map
+
+The feature is an XL configuration-composition change, not a descriptor-parser patch. It crosses the public wrapper model, provider capability contracts, file snapshot history, logical/environment path projection, final binding, runtime exceptions, audit reports, package adapters, and release proof. Reducing it to “parse `{ key, version }` and call Google” would leave the approved disabled, providerless, exact-rescue, typed-sensitivity, and runtime/audit guarantees false.
+
+| Sub-problem | Existing code | Engineering disposition |
+|---|---|---|
+| Root precedence and terminal failures | `DefaultConfigManager` | Preserve direct-root environment short circuit; delegate opted-in roots to one engine |
+| Environment candidates and descendant patching | `EnvironmentConfigProvider` | Extract/reuse candidate generation and add a secret-path alias collision compiler check |
+| File load, merge, origins, source locations | `FileBasedConfigProvider` | Preserve legacy merged views; add immutable successful and failed load events |
+| Scalar conversion | `ConfigValueConverter`, `ConfigScalarTypes` | Gate `Secret<T>` shape before provider calls and retain one conversion authority |
+| Wrapper activation and validation | `Config<T>`, `ConfigDataAnnotationsValidator` | Keep post-composition presence, annotation, and custom validation |
+| Struct wrapper behavior | `ConfigStruct<T>` | Explicitly reject secret-containing struct roots in the first release |
+| Runtime terminal exception | sealed `ConfigurationResolutionException` | Preserve it; add a separate deterministic multi-failure composition exception |
+| Audit orchestration | `ConfigAuditReporter` | Route opted-in roots through the same engine and result |
+| Audit traversal/redaction | `ConfigAuditValueTraverser`, `ConfigAuditRedactor` | Treat compiled secret slots as opaque sensitive leaves before reflection |
+| Google validation, timeout, cache, failures | Google provider package | Adapt the existing singleton to raw-root and child-reference capabilities |
+| Local sensitive values | LocalSecrets provider/store | Reuse as a lower raw contribution; do not claim versioned inline references |
+| DI wrapper discovery | `StartupContext.CustomRegistrations` and Config module | Add local-only hosted plan validation without eagerly retrieving payloads |
+
+Complexity verdict: keep the approved scope, but split implementation into explicit stages with hard investment checkpoints. The first vertical must prove invocation isolation, redaction, exact rescue, and one real runtime/audit call sequence before providerless breadth or migration tooling proceeds.
+
+### Step 0.5 — Engineering Dual Voices
+
+#### CLAUDE SUBAGENT — Independent Engineering Review
+
+The independent `combo/sub` reviewer raised eleven findings:
+
+1. The composition engine and capability registry did not have an enforceable singleton identity.
+2. Multi-slot failures did not fit the existing sealed one-provider exception or current audit state model.
+3. A synchronous providerless deadline cannot preempt a provider that ignores its remaining budget.
+4. Child-reference cache identity omitted provider/environment/options dimensions and repeated-resource behavior.
+5. “Logical path” did not fully define CLR-name versus serialized-name behavior.
+6. Parser-level duplicate members and case-only file paths were not covered.
+7. Effective audit remote-read behavior needed an explicit product posture.
+8. Provider identity/version metadata was being treated as safe too broadly.
+9. Unsupported inner `T` had to fail before provider I/O.
+10. `ConfigStruct<T>` support was unspecified.
+11. Package pinning was not a valid rollback after application code compiled against `Secret<T>`.
+
+All correctness and security findings were folded into the plan. The audit entry-point name remains TD4 because changing it is a compatibility/taste decision, not a missing implementation rule.
+
+#### CODEX SAYS — Engineering Architecture Challenge
+
+Codex found five implementation blockers:
+
+1. One cached `JsonSerializerOptions`/converter graph could not safely accept invocation-local slot state.
+2. Existing environment normalization can map distinct canonical secret paths to one variable and rescue both.
+3. Malformed higher files currently disappear before atomic descriptor validation.
+4. Recursive destination types made “discover every secret path” unbounded.
+5. A one-property migration fails when the same opted-in root still contains a mapped plain sibling.
+
+Codex explicitly said these fixes do not reopen `Secret<T>`, provider neutrality, exhaustive providerless uniqueness, direct descriptor placement, or the shared runtime/audit engine. It agreed that UC1 remains the only release-scope challenge.
+
+#### Engineering Dual Voices — Consensus Table
+
+| Dimension | `combo/sub` | Codex | Consensus |
+|---|---|---|---|
+| 1. Architecture sound? | No until singleton/error/cache boundaries are explicit | No until binding lifetime and migration unit are corrected | CONFIRMED blockers, amended |
+| 2. Test coverage sufficient? | Missing concurrency, parser, cache, compatibility, and rollback cases | Missing alias, malformed-file, recursion, and two-sibling cases | CONFIRMED gaps, added |
+| 3. Performance risks addressed? | Cooperative timeout and cache identity incomplete | Graph traversal and invocation lifetime unbounded/unsafe | CONFIRMED concerns, bounded |
+| 4. Security threats covered? | Metadata and provider-overrun risks | Cross-invocation payload exposure and alias rescue risks | CONFIRMED concerns, hardened |
+| 5. Error paths handled? | Multi-slot public mapping missing | Malformed layers and recursive graphs could silently misbehave | CONFIRMED gaps, mapped |
+| 6. Deployment risk manageable? | Package-pin rollback invalid | Partial-root migration invalid; real consumer proof still open | CONFIRMED risk, rollback amended; UC1 open |
+
+Consensus: 6/6 dimensions confirmed material gaps in the pre-engineering draft. The plan now closes every implementation blocker. There are no cross-model disagreements about the architecture; UC1 is a shared release-scope challenge, and TD4 is a one-voice compatibility/taste decision.
+
+### Section 1 — Architecture Review
+
+The architecture has one semantic authority and three kinds of state: cached value-free structure, immutable source/registration snapshots, and invocation-owned sensitive execution state.
+
+```text
+                              host startup
+                                   |
+                     local-only composition validator
+                                   |
+          +------------------------+------------------------+
+          |                                                 |
+   Config<T>/manager                                ConfigAuditReporter
+          |                                                 |
+          +------------------ same singleton ----------------+
+                                   |
+                         ConfigCompositionEngine
+               +-------------------+--------------------+
+               |                   |                    |
+        PlanCompiler          Executor          JsonContract
+        (value-free)       (invocation state)   structural metadata
+               |                   |                    |
+      +--------+---------+         |          invocation-owned options
+      |        |         |         |          + context converter
+      v        v         v         |
+ file load  logical/  provider     +------------------------------+
+  events    env paths  registry                                    |
+      |        |         |                                        |
+      |        |    same singleton aliases                         |
+      |        |         |                                        |
+      +--------+---------+--------> base providers                 |
+                              +---> secret providers -- cache ----> remote store
+                              +---> exact environment rescue        |
+                              +---> bind opaque slots <--------------+
+                                           |
+                              ConfigCompositionExecutionResult<T>
+                                  /                       \
+                     runtime value/exception         audit entries/trace
+```
+
+Architecture decisions:
+
+1. **One singleton authority.** `ConfigCompositionEngine`, its registry, and built-in capability aliases have one DI identity. Accepted under P4/P5 because duplicate instances would split cache and diagnostic truth.
+2. **Structural versus invocation serializer state.** Cache only value-free metadata. Create context-bearing options/converters per execution. Accepted under P1/P4 because shared converters can cross-contaminate payloads.
+3. **Separate public composition exception.** Preserve the sealed legacy exception; expose deterministic ordered failures for opted-in roots. Accepted under P2/P4 because forcing multiple paths into a one-provider shape would be lossy and breaking.
+4. **Successful and failed file events.** A malformed higher layer remains evidence, not absence. Accepted under P1 because silent fallback violates atomic replacement.
+5. **Two path collision domains.** Canonical logical paths and generated environment aliases are both compiled and independently collision-checked. Accepted under P1/P4 because exact rescue depends on one-to-one destination identity.
+6. **Finite supported object model.** Scalar slots, reference-type `Config<T>` roots, active-stack recursion rejection, and explicit graph limits. Accepted under P2/P5 rather than inventing recursive path semantics.
+7. **Root-sized migration.** Once a root opts into composition, all descendant mappings are inspected and incompatible mapped siblings must migrate together. Accepted under P1 because a one-property transition cannot satisfy overlap rules.
+
+Scaling is bounded by `O(graph nodes + file-layer nodes + secret slots × compatible providers)`. Graph and slot counts have validated limits. Provider calls are sequential and cooperatively deadline-bound; built-in provider conformance is mandatory because a synchronous interface cannot hard-cancel arbitrary third-party code.
+
+Security boundaries remain clear:
+
+```text
+untrusted file syntax ------ duplicate/shape/bounds scan -----> value-free plan
+trusted DI registrations --- id/capability validation --------> immutable registry
+provider metadata ---------- allowlist/sanitize/bound --------> safe trace
+provider/environment value - invocation-owned execution ------> Secret<T>.Value
+                                                                (never plan/trace)
+```
+
+### Section 2 — Code Quality Review
+
+1. **Candidate-generation duplication.** `DefaultConfigManager`, composition, and audit must call one environment candidate service; copying `BuildDirectCandidates` or flattening rules is rejected.
+2. **Path-string drift.** Use one internal segment value type carrying canonical serialized names plus original source spelling; raw string-prefix overlap checks are rejected.
+3. **Serializer cleverness.** No `AsyncLocal`, mutable singleton converter, hidden static context, reflection-only binder, or payload-bearing plan marker. Invocation context is a normal constructor dependency with `try/finally` cleanup.
+4. **Result-state invalid combinations.** Use sealed results and named factories. Non-success cannot carry a payload; success cannot carry null; plan failures and path failures are distinct.
+5. **Provider registration drift.** Register the concrete provider once and alias interfaces to it. Tests assert reference identity, canonical id uniqueness, option snapshot identity, and one cache.
+6. **Public contract clarity.** Fully document `Secret<T>`, provider contracts, options, result/metadata types, composition exception, audit behavior, defaults, unsupported shapes, cooperative timeout limits, and migration-unit constraints.
+7. **Audit compatibility.** Keep `ConfigAuditEntryState` append-only and map slot detail through existing child/source/diagnostic contracts. Snapshot the public JSON and text formats.
+
+No reflection-based tests may access private state. Internal test seams should expose plan summaries, fake providers, fake time, and call traces intentionally.
+
+### Section 3 — Test Review
+
+Framework detection: the repository uses xUnit with `Microsoft.NET.Test.Sdk` and coverlet. The feature changes no prompt or LLM files, so no eval suite applies.
+
+#### Codepath and User-Flow Coverage Diagram
+
+```text
+CODE PATHS                                                ADOPTER / OPERATOR FLOWS
+[+] opt-in detection                                      [+] staged root migration
+  +-- [EXISTING REGRESSION] legacy root                     +-- [PLAN ★★★] enumerate all mappings
+  +-- [PLAN ★★★] supported Config<T> graph                  +-- [PLAN ★★★] reject partial sibling migration
+  +-- [PLAN ★★★] ConfigStruct/unsupported/recursive          +-- [PLAN ★★★] disabled + environment rescue
+  +-- [PLAN ★★★] depth/node/slot boundaries                 +-- [PLAN ★★★] no-rescue Google proof
+                                                            +-- [PLAN ★★★] artifact rollback
+[+] direct environment root
+  +-- [EXISTING + PLAN] invalid candidate -> continue      [+] first-time package use [-> integration]
+  +-- [PLAN ★★★] valid root -> zero downstream calls         +-- [PLAN ★★★] clean pack/restore/build/run
+  +-- [PLAN ★★★] sensitive Secret<T> binding                 +-- [PLAN ★★★] expected safe diagnostics
+  +-- [EXISTING REGRESSION] final object validation          +-- [PLAN ★★★] docs links are valid
+
+[+] plan compilation                                      [+] effective audit
+  +-- [PLAN ★★★] structural metadata/naming                 +-- [PLAN ★★★] same semantic/call trace as runtime
+  +-- [PLAN ★★★] file success + load-failure history         +-- [PLAN ★★★] remote-read side effects documented
+  +-- [PLAN ★★★] duplicate member/path detection             +-- [PLAN ★★★] Secret<T> is opaque
+  +-- [PLAN ★★★] mapping/convention overlap                  +-- [PLAN ★★★] public JSON/text compatibility
+  +-- [PLAN ★★★] environment alias collision
+  +-- [PLAN ★★★] provider id/capability validation         [+] production incident diagnosis
+                                                            +-- [PLAN ★★★] multi-slot problem/cause/fix
+[+] base selection                                           +-- [PLAN ★★★] exact path and source location
+  +-- [EXISTING REGRESSION] provider priority/missing         +-- [PLAN ★★★] no raw key/version/payload by default
+  +-- [PLAN ★★★] file raw base
+  +-- [PLAN ★★★] LocalSecrets raw base
+  +-- [PLAN ★★★] Google mapped raw root
+  +-- [PLAN ★★★] typed-only provider compatibility
+
+[+] one Secret<T> slot
+  +-- [PLAN ★★★] absent declaration: lower/env/missing
+  +-- [PLAN ★★★] disabled: validate, zero inline Resolve
+  +-- [PLAN ★★★] explicit provider: every outcome
+  +-- [PLAN ★★★] providerless: zero/one/many/uncertain
+  +-- [PLAN ★★★] before/after-call budget exhaustion
+  +-- [PLAN ★★★] exact env rescue / invalid / sibling
+  +-- [PLAN ★★★] scalar conversion / null / empty text
+
+[+] final binding
+  +-- [PLAN ★★★] records/init/JsonPropertyName/annotations
+  +-- [PLAN ★★★] multiple independent slots and failures
+  +-- [PLAN ★★★] concurrent runtime/audit, distinct payloads
+  +-- [PLAN ★★★] nested binding and exception cleanup
+  +-- [PLAN ★★★] sentinel absent from every output surface
+
+[+] provider adapters
+  +-- [EXISTING REGRESSION] Google direct mapping behavior
+  +-- [PLAN ★★★] child cache key version/options isolation
+  +-- [PLAN ★★★] same resource -> two provider calls/one remote call
+  +-- [PLAN ★★★] fake time TTL and clamped timeout
+  +-- [EXISTING REGRESSION] LocalSecrets fail-closed behavior
+```
+
+Existing tests cover the legacy manager, environment patcher, file merge/origins, LocalSecrets, Google direct mappings, audit models, traversal bounds, and one-provider `ConfigurationResolutionException`. Every new branch above is a pre-implementation gap and has been accepted into the build plan. None is deferred.
+
+Required test families:
+
+1. Public API and snapshot tests for `Secret<T>`, provider contracts, options, source metadata, `ConfigurationCompositionException`, audit JSON/text, and enum stability.
+2. Compiler unit tests for serializer metadata, serialized member names, scalar gates, recursion, graph bounds, mappings, both collision domains, and direct-root bypass.
+3. File-provider tests for successful/failed event retention, atomic replacement, duplicates, unreadable files, deterministic order, and unchanged legacy merged snapshots.
+4. Shared runtime/audit contract tests using fake providers, fake environment, fake time, source snapshots, and exact provider/remote call traces.
+5. Concurrency and reentrancy tests proving no payload crosses invocation-owned binding contexts, including thrown converter/validation paths.
+6. Google adapter tests for validation, all statuses, timeout clamping, strict decoding, child cache identity, TTL, and legacy-cache separation.
+7. LocalSecrets and third-party capability compatibility tests for lower-base, typed-only, claim-inspector, and raw-capable providers.
+8. Skoolit-shaped two-sibling migration tests, clean packed-consumer smoke tests, cross-platform no-network matrices, and artifact rollback rehearsal.
+9. Full legacy regression suites, `dotnet format`, analyzer/doc-warning clean build, and `./scripts/coverage-solution.sh` when practical.
+
+Test plan artifact: `/Users/andrew/.gstack/projects/forge-trust-AppSurface/andrew-main-eng-review-test-plan-20260910-225321.md`.
+
+### Section 4 — Performance Review
+
+1. **Providerless complexity.** Worst-case calls are secret destinations × compatible providers. Slot count is bounded, ordering is deterministic, and one monotonic budget is shared. Built-ins must cap native timeouts; third-party conformance is documented and tested. Explicit `provider` remains the production-latency recommendation.
+2. **Metadata and serializer allocation.** Structural type metadata and value-free plans are cached. Context-bearing options/converters are short-lived per invocation by design; benchmark concurrent composition to ensure isolation cost remains below remote-access latency and does not retain slot payloads.
+3. **File snapshot memory.** Retaining layers and failures duplicates some JSON nodes. Snapshot ownership is immutable and generation-scoped; old snapshots become collectible. Benchmarks cover many files, maximum graph nodes, and repeated reload generations.
+4. **Cache correctness before hit rate.** The Google child cache includes provider/environment/canonical resource/version/options identity and is separate from legacy cache entries. A safe miss is preferred to a stale cross-version hit.
+5. **Startup validation.** Plan compilation is local-only and cached. It must not perform remote reads or eagerly construct application config values. Measure startup with maximum supported roots and slots.
+
+No database or request-path N+1 risk exists. The operational cost is startup/audit CPU plus bounded provider latency.
+
+### What Already Exists
+
+| Existing mechanism | Reuse |
+|---|---|
+| `DefaultConfigManager` direct-root environment precedence | Keep as the complete pre-composition short circuit |
+| `EnvironmentConfigProvider` candidate order and strict conversion | Extract/share rather than redefine |
+| `FileBasedConfigProvider` deterministic load order, merge, origins, and source maps | Extend with additive layer/load history |
+| `ConfigValueConverter` and `ConfigScalarTypes` | Keep as scalar type and conversion authority |
+| `Config<T>` presence, DataAnnotations, and custom validation | Run once after composition |
+| Audit entry/source/diagnostic/redaction models | Preserve append-only public shapes |
+| Google resource normalization, fake client, timeout, cache, and status mapping | Adapt through new capabilities |
+| LocalSecrets raw store and value-safe failures | Use as sensitive lower base |
+| Lazy wrapper registration in `StartupContext` | Preserve value laziness; add local-only plan validation |
+| xUnit, coverlet, package tests, and solution coverage script | Extend for the new matrices |
+
+The plan does not replace any of these with a parallel framework.
+
+### NOT in Scope
+
+- Dynamic or expression-based `enabled` values: static activation solves the stated provisioning case.
+- `$secret` wrapper syntax: `Secret<T>` is the discriminator.
+- Object, collection, dictionary, or collection-item secret payloads: merge and redaction semantics require a separate design.
+- `ConfigStruct<T>` secret composition: rejected in the first release.
+- Version-aware LocalSecrets inline references: the current store cannot truthfully satisfy pinned versions.
+- Async/cancellable configuration activation or parallel providerless fan-out: requires a broader API change.
+- Background refresh, rotation, or mutable `Secret<T>` values: providers retain current cache ownership.
+- Compile-only preflight command/API: the value-free compiler enables it later, but effective runtime/audit delivery does not depend on it.
+- Provider priority as the providerless winner: exhaustive uniqueness remains fail-closed.
+- Automatic migration or deletion of Skoolit infrastructure: framework work supplies proof and guidance; cross-repository mutation requires explicit scope.
+- Custom serializer options, generated contexts, custom root converters, and hidden polymorphic graphs in opted-in roots.
+
+All reusable deferred proposals are recorded in `TODOS.md` with context and prerequisites.
+
+### Failure Modes Registry
+
+| Production failure | Test | Handling | User-visible result |
+|---|---|---|---|
+| Shared converter reads another invocation's payload | Concurrent distinct-sentinel test | Invocation-owned converter/context with `finally` cleanup | Deterministic failure if binding fails; never leaked value |
+| Two destinations share one environment alias | Candidate collision matrix | Plan-global compile failure before provider I/O | Both canonical paths and safe variable name |
+| Higher malformed file disappears | Truncated/syntax/unreadable layer tests | Retained load event fails opted-in environment | Source path plus problem/cause/fix |
+| Recursive model loops discovery | Self/mutual recursion tests | Active-stack rejection and graph bounds | Unsupported-model diagnostic |
+| Repeated acyclic type is mistaken for recursion | Sibling-type test | Active stack instead of global visited set | Both paths compile |
+| One-property migration leaves mapped sibling | Two-sibling fixture | All descendant claims inspected; root-sized migration diagnostic | Exact sibling path and migration guidance |
+| Providerless provider blocks past budget | Late-return conformance test | Cooperative remaining budget, post-call rejection | Budget-exceeded; docs name provider contract |
+| Two providers resolve | Ambiguity matrix | Continue compatible candidates, reject multiple success | Ambiguous-provider diagnostic |
+| One resolves and another is denied/unavailable | Uncertainty matrix | Fail closed unless exact environment rescue | Uncertain-provider diagnostic |
+| One environment value rescues two failures | Alias plus two-failure test | Alias rejected at compile time; rescue remains exact | No silent double rescue |
+| Unsupported inner type triggers remote read | Shape/call-count test | Scalar gate before validation/resolution | Unsupported type, zero calls |
+| Multi-slot errors collapse to one provider | Exception/audit snapshots | Ordered `ConfigCompositionFailure` list | All unresolved paths shown safely |
+| Raw key/version leaks through metadata | Sentinel and metadata fuzz tests | Default omission, allowlisted opaque token only | Redacted/omitted metadata |
+| Changed descriptor reuses old cache value | Version/options cache matrix | Canonical child cache identity | Correct remote access/cache miss |
+| Separate capability instance splits cache | DI identity test | Concrete singleton aliases | Startup registration failure/test regression |
+| Direct root still contacts providers in audit | Shared call-sequence matrix | Same engine and pre-plan short circuit | Zero downstream calls |
+| File duplicate silently takes last value | Streaming duplicate-member tests | Failed load event | Duplicate-member diagnostic |
+| Case-only files differ by OS | Linux/macOS/Windows fixture | Ordinal-ignore-case collision failure | Deterministic cross-platform diagnostic |
+| Audit reflection invokes `Value` | Opaque getter-bomb test | Slot-aware leaf traversal before reflection | Redacted state only |
+| Old app cannot run with new package/model | Packed rollback rehearsal | Deploy previous artifact and matching package/config | Documented safe rollback |
+
+Critical gaps after amendments: **0**. Every failure has planned test coverage, explicit handling, and an actionable value-safe outcome.
+
+### Worktree Parallelization Strategy
+
+| Step | Modules touched | Depends on |
+|---|---|---|
+| A1. Public wrapper/results/options/path contracts | core Config models and tests | — |
+| A2. Structural compiler and invocation binder | core Config composition and tests | A1 |
+| A3. Runtime manager integration and startup validation | core Config manager/module and tests | A2 |
+| B1. File layer/load-event preservation | core file provider and tests | A1 path contract |
+| C1. Provider registry and capability contracts | core provider contracts and tests | A1 |
+| C2. Google adapter/cache/timeout | Google package and tests | C1 |
+| C3. LocalSecrets raw-base adapter | LocalSecrets package and tests | C1 |
+| D1. Audit integration/redaction | core audit and tests | A2, A3 |
+| E1. Example, packed consumer, migration docs | examples/docs/release scripts | A3, B1, C2, C3, D1 |
+| E2. Cross-platform/coverage/rollback gates | CI and package verification | all implementation lanes |
+
+Parallel lanes:
+
+- Lane A: A1 -> A2 -> A3.
+- Lane B: B1 after A1, parallel with A2.
+- Lane C: C1 -> C2 and C3 in parallel.
+- Lane D: D1 after the A2 result contract stabilizes.
+- Lane E: E1 -> E2 after all runtime lanes merge.
+
+Launch Lane A/A1 first. Then run B and C beside A2; start D once A2 lands. Google and LocalSecrets packages can use separate worktrees after the core provider contract is committed. Avoid parallel edits to the core `.csproj`, module registration, public API snapshots, and shared test helpers; assign those to Lane A and integrate adapters through narrow commits.
+
+### Deferred-Work Decisions
+
+| Proposal | Decision | Reason |
+|---|---|---|
+| Compile-only preflight | Add to `TODOS.md` | Valuable next use of the value-free compiler, but a separate product/reporting contract |
+| Conditional activation | Add to `TODOS.md` | Needs a real adopter and expression-ordering design |
+| Structured/collection secret payloads | Add to `TODOS.md` | Materially broader binding and redaction semantics |
+| Version-aware LocalSecrets resolver | Add to `TODOS.md` | Blocked on a truthful local version model |
+| Async/cancellation/parallel probing | Add to `TODOS.md` | Requires a broader configuration API and measured need |
+| Background refresh/rotation | Add to `TODOS.md` | Changes immutability and lifecycle; not required by #807 |
+
+### Engineering Decision Audit Trail
+
+| ID | Finding | Decision | Principle |
+|---|---|---|---|
+| ENG-D1 | Cached converter cannot hold invocation context safely | Cache structural policy only; create context-bearing binding options per invocation | P1/P4 correctness |
+| ENG-D2 | Environment normalization creates aliases | Compile and reject candidate collisions for opted-in secret roots | P1 exact rescue |
+| ENG-D3 | Malformed files currently disappear | Retain successful and failed load events | P1 atomicity |
+| ENG-D4 | Recursive types imply infinite secret paths | Reject secret-capable recursion and add graph limits | P2/P5 bounded scope |
+| ENG-D5 | One-property migration conflicts with mapped siblings | Define requested root as minimum migration unit | P1 executable migration |
+| ENG-D6 | Existing exception cannot represent many paths | Add a separate value-safe composition exception | P2 compatibility |
+| ENG-D7 | Capability aliases could create separate provider instances | Require concrete singleton aliases and identity tests | P4 one truth |
+| ENG-D8 | Synchronous deadline was overstated | Document cooperative budget and require provider conformance | P4 honest contract |
+| ENG-D9 | Child cache could cross versions/settings | Use provider/environment/resource/version/options identity | P1 safe cache |
+| ENG-D10 | Raw key/version metadata was presumed safe | Omit by default; allow only provider-approved opaque correlation | P1 least disclosure |
+| ENG-D11 | `ConfigStruct<T>` support was unstated | Reject for first release with stable no-I/O diagnostic | P5 explicit boundary |
+| ENG-D12 | Package pin is not binary rollback | Rehearse previous artifact plus matching package/config | P1 deployment safety |
+
+### Engineering Implementation Tasks
+
+Synthesized from this review's findings:
+
+- [ ] **ENG-T1 (P1, human: ~2d / CC: ~4h)** — Public contracts — Implement typed wrappers, bounded options, provider results, and multi-slot failures
+  - Surfaced by: Architecture — the legacy sealed exception and one-provider result cannot represent opted-in root composition.
+  - Files: core Config public models/contracts/options/exceptions and public API snapshot tests.
+  - Verify: XML docs, factory invariants, null/empty behavior, serialization/`ToString()` safety, and legacy/new snapshot compatibility.
+- [ ] **ENG-T2 (P1, human: ~3d / CC: ~6h)** — Composition metadata — Build the structural JSON contract and finite value-free compiler
+  - Surfaced by: Dual voices — cached context-bearing converters and recursive discovery were unsafe.
+  - Files: core composition metadata/compiler/path models and tests.
+  - Verify: records/init/`JsonPropertyName`, unsupported shapes, scalar gate, recursion, repeated siblings, and exact depth/node/slot boundaries.
+- [ ] **ENG-T3 (P1, human: ~2d / CC: ~4h)** — File provider — Preserve successful and failed load events
+  - Surfaced by: Codex finding 3 — malformed higher files currently disappear.
+  - Files: `FileBasedConfigProvider`, snapshot models, parser/ordering/source tests.
+  - Verify: atomic layer matrix, duplicate-member scan, unreadable/truncated files, case-only path collision, and unchanged legacy merged snapshots.
+- [ ] **ENG-T4 (P1, human: ~2d / CC: ~4h)** — Paths/environment — Centralize candidates and reject alias collisions
+  - Surfaced by: Codex finding 2 — one variable can target two canonical destinations.
+  - Files: environment candidate service, compiler/path integration, manager/audit tests.
+  - Verify: scoped/unscoped, flat/hierarchical, underscore/hyphen/separator/`JsonPropertyName`, exact rescue, and direct-root call suppression.
+- [ ] **ENG-T5 (P1, human: ~2d / CC: ~4h)** — Provider registry — Implement singleton capabilities and cooperative budgeting
+  - Surfaced by: Architecture/performance — identity, uniqueness, and synchronous timeout rules were underspecified.
+  - Files: core provider registry/contracts/options/startup validation and conformance tests.
+  - Verify: DI reference identity, duplicate ids, local-only startup compile, call order, remaining budget, late return, and zero-call failures.
+- [ ] **ENG-T6 (P1, human: ~3d / CC: ~6h)** — Composition execution — Implement base selection, slots, provider uniqueness, rescue, and invocation binding
+  - Surfaced by: Architecture — runtime needs one deterministic value-bearing execution frame over a value-free plan.
+  - Files: core engine/executor/manager integration and shared behavior tests.
+  - Verify: all base/declaration/provider/environment combinations, multi-slot failures, concurrent distinct payloads, nested binding, and exception cleanup.
+- [ ] **ENG-T7 (P1, human: ~3d / CC: ~6h)** — Built-in providers — Adapt Google and LocalSecrets without regressing legacy roots
+  - Surfaced by: Cache/compatibility review — capabilities must share provider state and preserve old behavior.
+  - Files: Google and LocalSecrets packages/tests.
+  - Verify: raw roots, status taxonomy, timeout clamp, strict decoding, child cache key/TTL/legacy separation, and existing direct suites.
+- [ ] **ENG-T8 (P1, human: ~2d / CC: ~4h)** — Audit/redaction — Consume the shared result and render opaque secret slots
+  - Surfaced by: Security/error review — audit must not re-run semantics or reflect into `Value`.
+  - Files: audit reporter/traverser/redactor/renderers and tests.
+  - Verify: runtime/audit semantic and call parity, effective-read documentation, getter-bomb, unique sentinel, and public report snapshots.
+- [ ] **ENG-T9 (P1, human: ~2d / CC: ~4h)** — Verification — Add migration, package, cross-platform, coverage, and rollback gates
+  - Surfaced by: Test/deployment review — repository-source happy paths do not prove shipped or reversible behavior.
+  - Files: test fixtures, package scripts, CI, coverage workflow.
+  - Verify: two-sibling partial rejection/root migration, local-feed consumer, Linux/macOS/Windows matrix, artifact rollback, formatting, and solution coverage.
+- [ ] **ENG-T10 (P2, human: ~1d / CC: ~2h)** — Documentation/example — Publish one root-sized golden path and provider contract guide
+  - Surfaced by: Code quality/DX — adopters need explicit supported shapes, budget, audit, diagnostics, and rollback behavior.
+  - Files: core/Google/LocalSecrets READMEs, canonical guide, example, release notes, `CHANGELOG.md`.
+  - Verify: clean under-five-minute walkthrough, canonical links, expected safe output, and no undocumented migration detour.
+
+### Engineering Completion Summary
+
+```text
++=====================================================================+
+|             ENGINEERING PLAN REVIEW — COMPLETION SUMMARY            |
++=====================================================================+
+| Step 0 Scope Challenge | scope accepted; staged investment gates     |
+| Architecture Review    | 7 issues found, all folded                  |
+| Code Quality Review    | 7 issues found, all folded                  |
+| Test Review            | diagram produced, 9 test families required |
+| Performance Review     | 5 issues found, all bounded/documented      |
+| NOT in scope           | written (11 items)                          |
+| What already exists    | written (10 mechanisms)                     |
+| TODOS.md updates       | 6 contextual follow-ups added               |
+| Failure modes          | 20 mapped, 0 critical gaps                  |
+| Outside voice          | ran (Codex + combo/sub)                     |
+| Parallelization        | 5 lanes; B/C parallel after A1              |
+| Lake Score             | 19/20 recommendations chose complete option |
+| Unresolved             | UC1 release scope; TD4 audit naming         |
++=====================================================================+
+```
+
+### Engineering Unresolved Decisions for Final Gate
+
+- **UC1 — Real consumer release evidence:** Both engineering voices agree a repository fixture cannot prove actual Skoolit bridge deletion. Recommendation: require one bounded prerelease Skoolit root migration and artifact rollback rehearsal before stable publication.
+- **TD4 — Effective audit naming:** The existing audit already resolves provider values, so changing the entry point would create avoidable compatibility cost. Recommendation: keep the existing entry point, document remote-read side effects prominently, and reserve a separately named compile-only mode for the recorded follow-up.
+- **Retired prior taste challenges:** TD1 (`Secret<T>` composition scope), TD2 (typed destination), and TD3 (optional provider with exhaustive uniqueness) remain as already approved by the user; both engineering voices explicitly said their findings do not require reopening them.
+
+## Cross-Phase Themes
+
+1. **One semantic authority.** CEO found runtime/audit drift, DX found contradictory observable outcomes, and Engineering found separate DI instances and context-bearing serializers could recreate the drift. The final plan has one singleton engine, one immutable registry/snapshot view, and one execution result consumed by runtime and audit.
+2. **Migration proof must delete real complexity.** CEO and DX both rejected a fixture as proof of consumer deletion; Engineering found that even the proposed one-property migration was invalid when mapped siblings remained. The framework fixture now proves root-sized migration, while UC1 asks whether stable publication also waits for one real Skoolit rehearsal.
+3. **Sensitive data safety is structural.** Every phase independently required `Secret<T>` to be opaque, payloads to remain invocation-local, diagnostics to be value-safe, and audit to avoid reflective getters. Engineering extended this to metadata default-deny and concurrent binding isolation.
+4. **Exact path identity is load-bearing.** CEO corrected logical path identity, DX required actionable exact-rescue diagnostics, and Engineering found a second collision domain after environment normalization. Both logical and generated-environment aliases are now compiled before I/O.
+5. **Provider omission is useful but operationally expensive.** All phases kept providerless exhaustive uniqueness while recommending explicit providers in production. Engineering made the 30-second limit honestly cooperative, bounded graph/slot work, and required built-in timeout conformance.
+6. **Shipped-package and rollback evidence matter.** DX required a packed consumer; Engineering showed package pinning alone cannot roll back a consumer compiled against `Secret<T>`. The release proof now includes a matching application/package/config artifact rollback.
+
+## Decision Audit Trail
+
+The detailed phase tables above are canonical. This consolidated trail records every automated disposition and every item deliberately held for the final gate.
+
+| # | Phase | Decision | Classification | Principle | Rationale | Rejected |
+|---:|---|---|---|---|---|---|
+| 1 | CEO | Use colon-delimited, ordinal-ignore-case logical identity | Auto-correct | P4 | Matches existing AppSurface identity while preserving opaque provider spelling | Dotted case-sensitive identity |
+| 2 | CEO | Require runtime/audit provider-call parity | Auto-accept | P1 | Equal final values can hide unsafe extra reads | Result-only parity |
+| 3 | CEO | Document `Enabled` versus `HasValue` startup validation | Auto-accept | P2 | Wrapper existence is not readiness | Implicit readiness |
+| 4 | CEO | Keep optional provider and recommend explicit production use | Auto-accept | P5 | Preserves approved neutrality while exposing registration coupling | Silent omission guidance |
+| 5 | CEO | Defer compile-only preflight | Auto-defer | P3 | Valuable but not required for effective runtime/audit delivery | Build now |
+| 6 | CEO | Defer conditional activation | Auto-defer | P3 | Static disablement solves the stated provisioning case | Expression engine |
+| 7 | CEO | Keep direct descriptors without `$secret` wrapper | Auto-reject | P4 | `Secret<T>` already supplies the discriminator | Wrapper syntax |
+| 8 | CEO | Keep exhaustive uniqueness, not provider priority | Auto-reject | P1 | Priority would hide ambiguous ownership | First provider wins |
+| 9 | CEO | Keep typed composition scope | Settled taste | P6 | User already approved it and later engineering reviews preserved it | Google-only child patch |
+| 10 | CEO | Hold real Skoolit rehearsal for final approval | User Challenge | User sovereignty | Both voices recommend a cross-repository stable-release gate | Silent scope expansion |
+| 11 | DX | Add a canonical runnable golden path | Auto-accept | P1 | No complete under-five-minute journey existed | Design-only documentation |
+| 12 | DX | Keep wrapper API and foreground state/validation guidance | Auto-accept | P5 | API remains small; docs prevent readiness misuse | New readiness wrapper |
+| 13 | DX | Publish stable diagnostics and docs anchors | Auto-accept | P1 | Codes without fixes and destinations are not actionable | Unlinked diagnostics |
+| 14 | DX | Link one canonical guide from existing entry points | Auto-accept | P5 | Reuses repository information architecture | Parallel docs hierarchy |
+| 15 | DX | Make requested root the migration unit | Auto-correct | P4 | Partial sibling migration violates overlap rules | One-property migration |
+| 16 | DX | Add fake real-path, packed, and multi-OS acceptance | Auto-accept | P1 | Source-only tests do not prove shipped cross-platform use | Repository happy path only |
+| 17 | DX | Document provider compatibility in current packages | Auto-accept | P2/P3 | Solves adoption without premature SDK packaging | New conformance package |
+| 18 | DX | Measure TTHW against under five minutes | Auto-accept | P1 | Adoption claims need evidence | Unmeasured DX claim |
+| 19 | DX | Reuse UC1 instead of silently adding Skoolit work | User Challenge | User sovereignty | Cross-repository mutation changes release scope | Automatic adoption work |
+| 20 | DX | Keep valid legacy `MapSecret(...)` use cases | Auto-reject | P4 | Whole-root and non-overlapping mappings remain supported | Global deprecation |
+| 21 | Eng | Separate cached structural metadata from invocation binding options | Auto-accept | P1/P4 | Shared context-bearing converters can leak payloads | Singleton converter context |
+| 22 | Eng | Reject environment alias collisions for secret destinations | Auto-accept | P1 | One variable must never rescue two paths | Legacy collision behavior on opted-in roots |
+| 23 | Eng | Retain malformed/unreadable file events | Auto-accept | P1 | Silent skip breaks atomic replacement | Treat malformed layer as absent |
+| 24 | Eng | Reject secret-capable recursion and bound graph discovery | Auto-accept | P2/P5 | Infinite destination paths have no first-release semantics | Recursive composition |
+| 25 | Eng | Add a separate multi-slot composition exception | Auto-accept | P2/P4 | The sealed legacy exception cannot represent ordered path failures | Lossy one-provider mapping |
+| 26 | Eng | Require one singleton provider instance across capabilities | Auto-accept | P4 | Separate aliases would split cache and observations | Per-interface construction |
+| 27 | Eng | State that synchronous budget enforcement is cooperative | Auto-correct | P4 | Core cannot preempt arbitrary blocking provider code | Hard-bound claim |
+| 28 | Eng | Key Google child cache by provider/environment/resource/version/options | Auto-accept | P1 | Logical path alone can return stale cross-version data | Legacy cache key reuse |
+| 29 | Eng | Default-deny raw key/version metadata | Auto-accept | P1 | Operational identifiers may contain sensitive data | Provider assertion alone |
+| 30 | Eng | Reject secret-containing `ConfigStruct<T>` roots initially | Auto-accept | P5 | Nullable struct activation needs separate semantics | Accidental support |
+| 31 | Eng | Require artifact-level rollback | Auto-accept | P1 | Older packages may not contain `Secret<T>` used by the binary | Package pin only |
+| 32 | Eng | Keep current effective audit entry point by default | Taste recommendation | P2/P5 | Preserves existing behavior; compile-only remains a distinct follow-up | Rename/break current entry point |
