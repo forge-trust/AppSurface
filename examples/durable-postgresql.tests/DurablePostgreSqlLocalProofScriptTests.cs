@@ -177,7 +177,11 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
 
             stopwatch.Stop();
             var standardError = await process.StandardError.ReadToEndAsync();
-            Assert.Equal(130, process.ExitCode);
+            // Bash may preserve the interrupt trap's explicit 130 or surface the watchdog's SIGTERM as 143.
+            // The deadline diagnostic and descendant-cleanup assertions below are the portable contract.
+            Assert.True(
+                process.ExitCode is 130 or 143,
+                $"Expected an interrupted exit (130 or 143), but received {process.ExitCode}.");
             Assert.Contains("exceeded its 2-second deadline", standardError, StringComparison.Ordinal);
             Assert.InRange(stopwatch.Elapsed, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(7));
 
