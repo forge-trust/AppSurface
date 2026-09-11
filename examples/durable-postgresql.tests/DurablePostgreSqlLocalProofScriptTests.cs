@@ -70,7 +70,7 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
             "durable-postgresql",
             "run-local-proof.sh");
         var temporaryRoot = Directory.CreateTempSubdirectory("appsurface-durable-proof-watchdog-").FullName;
-        var fakeBin = Directory.CreateDirectory(Path.Combine(temporaryRoot, "bin")).FullName;
+        var fakeBin = Directory.CreateDirectory(Path.Join(temporaryRoot, "bin")).FullName;
         var childPidFile = Path.Combine(temporaryRoot, "child.pid");
         var heartbeatFile = Path.Combine(temporaryRoot, "heartbeat");
         var cleanupHeartbeatFile = Path.Combine(temporaryRoot, "cleanup-heartbeat");
