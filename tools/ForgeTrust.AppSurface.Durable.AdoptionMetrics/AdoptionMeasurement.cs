@@ -439,7 +439,7 @@ internal static class AdoptionMeasurementWriter
 
             RejectSymbolicLink(normalizedOutputPath, "output file");
             var json = JsonSerializer.Serialize(result, SerializerOptions).ReplaceLineEndings("\n") + "\n";
-            var temporaryPath = Path.Combine(
+            var temporaryPath = Path.Join(
                 outputDirectory ?? Directory.GetCurrentDirectory(),
                 $".{Path.GetFileName(normalizedOutputPath)}.{Guid.NewGuid():N}.tmp");
             try
