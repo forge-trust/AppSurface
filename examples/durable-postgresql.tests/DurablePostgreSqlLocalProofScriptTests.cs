@@ -74,6 +74,7 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
         var childPidFile = Path.Combine(temporaryRoot, "child.pid");
         var heartbeatFile = Path.Combine(temporaryRoot, "heartbeat");
         var cleanupHeartbeatFile = Path.Combine(temporaryRoot, "cleanup-heartbeat");
+        await File.WriteAllTextAsync(cleanupHeartbeatFile, string.Empty);
 
         try
         {
