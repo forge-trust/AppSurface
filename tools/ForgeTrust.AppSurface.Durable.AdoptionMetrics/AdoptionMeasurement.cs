@@ -263,7 +263,7 @@ internal static class AdoptionMeasurementEngine
                          [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
                          StringSplitOptions.RemoveEmptyEntries))
             {
-                current = Path.Combine(current, segment);
+                current = Path.Join(current, segment);
                 var attributes = File.GetAttributes(current);
                 if ((attributes & FileAttributes.ReparsePoint) != 0)
                 {
