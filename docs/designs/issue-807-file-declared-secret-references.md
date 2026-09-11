@@ -172,7 +172,7 @@ The type deliberately separates activation from availability:
 | absent, exact environment value supplies a non-null value | environment | true | true |
 | absent, no source supplies a value | none | true | false |
 
-This permits a staged Skoolit migration: register the intended provider, check in a complete disabled reference, keep the current environment value temporarily, provision the remote resource, verify it through effective audit or a verification deployment, remove the environment value, then enable the reference.
+This permits a staged Skoolit migration: register the intended provider, change the destination type, replace the overlapping descendant `MapSecret(...)` claim with one complete disabled reference in the same reviewed change, keep the current environment value temporarily, and provision the remote resource. Then enable the reference, prove the provider lookup is healthy, and run a bounded verification deployment with the exact environment rescue removed so Google is the effective source before calling the migration complete. A disabled reference or an enabled reference whose effective source remains environment does not prove remote readiness.
 
 ### Supported destination object model
 
@@ -637,7 +637,7 @@ The trace never contains:
 
 Runtime and audit call the same plan compiler and executor. Remove or route around duplicated environment patch interpretation in `ConfigAuditReporter` for this path rather than reimplementing the new rules there.
 
-Effective-value audit performs the same enabled remote reads as runtime and therefore has the same IAM, timeout, and network side effects. It uses each provider's existing cache when available; the audit layer adds no cache and never persists a payload. Disabled and direct-environment-root paths perform no remote read. A future compile-only preflight is outside this issue.
+Effective-value audit performs the same enabled remote reads as runtime and therefore has the same IAM, timeout, and network side effects. It uses each provider's existing cache when available; the audit layer adds no cache and never persists a payload. Disabled and direct-environment-root paths perform no remote read for the inline reference. A disabled reference may still allow whole-root base-provider selection, as described in the composition table; audit must distinguish those base reads from inline-reference reads. A future compile-only preflight is outside this issue.
 
 Runtime and audit are separate observations. With the same immutable file, environment, registration, mapping, and fake-provider outcomes, they must emit the same semantic trace. They are not guaranteed to name the same winner or failure across two real executions when a remote secret, IAM policy, network, or provider cache changes between calls.
 
@@ -659,14 +659,14 @@ Each resolved payload remains reachable only inside the provider result and curr
 ### Skoolit migration sequence
 
 1. Register the intended secret-provider module; disabled means no resource access, not deferred provider-schema validation.
-2. Convert one typed secret destination from `string` to `Secret<string>`.
-3. Place its key and pinned version beside the surrounding configuration.
+2. Convert one typed secret destination from `string` to `Secret<string>`, update its typed consumer, and identify every mapping at, above, or below the containing root.
+3. In the same reviewed change, remove the overlapping descendant `MapSecret(...)`/manifest claim and place its key and pinned version beside the surrounding configuration. Leaving both declarations active is a compile-time overlap failure, even when the inline declaration is disabled.
 4. Set `enabled: false` while the current environment variable remains the effective value.
 5. Verify audit reports `Enabled=false`, `HasValue=true`, and environment as the winner without contacting Google for the inline reference.
 6. Provision the resource version and IAM.
-7. Enable the reference in an environment-specific file while retaining the environment override for one verification deployment.
-8. Remove the environment override so Google becomes the unique winner.
-9. Delete the corresponding custom manifest row and bridge logic.
+7. Enable the reference in an environment-specific file. The environment override may remain for an initial safety deployment, but that deployment is not proof that Google is the effective source.
+8. Run a bounded verification deployment with the exact environment override removed; require Google as the effective source and successful application validation.
+9. Delete the now-unused environment-bridge precedence branch for the migrated typed consumer.
 10. Repeat by bounded configuration area, then remove the application-owned manifest infrastructure when no rows remain.
 
 Rollback reverts the reviewed file declaration and, during migration, may restore the exact environment override. It never changes or deletes the remote secret version.
@@ -1032,8 +1032,8 @@ disabled declaration -> no Resolve call -> empty slot --+------------+
 | Explicit provider resolve | Unavailable/timeout | Exact environment only | Restore service/network or exact override | Retryable terminal if not rescued |
 | Provider implementation | Unexpected exception | Exact environment only | Fix provider; diagnostic omits message/stack | Generic value-safe terminal if not rescued |
 | Providerless resolve | Zero compatible provider | No | Register/specify compatible provider | Terminal |
-| Providerless resolve | Multiple successes | No | Specify provider or remove duplicate ownership | Ambiguous terminal; payloads discarded |
-| Providerless resolve | Success plus uncertain result | No | Fix uncertain provider or constrain provider | Terminal; no first-wins behavior |
+| Providerless resolve | Multiple successes | Exact environment only | Specify provider, remove duplicate ownership, or use the exact emergency override | Ambiguous terminal if not rescued; payloads discarded |
+| Providerless resolve | Success plus uncertain result | Exact environment only | Fix uncertain provider, constrain provider, or use the exact emergency override | Terminal if not rescued; no first-wins behavior |
 | Providerless budget | Deadline exhausted | Exact environment only | Lower provider latency, raise validated budget, or specify provider | Terminal if uniqueness not proven |
 | Payload conversion | Invalid or null value | Exact environment only | Correct secret payload or exact override | Terminal if not rescued |
 | Environment exact candidate | Invalid earlier candidate | Yes, by next parseable candidate | Correct candidate; existing safe diagnostic remains | First parseable candidate wins |
@@ -1223,8 +1223,8 @@ After this plan, AppSurface gains typed sensitivity, file-declared references, s
 | Path identity | Dotted/case variant bypasses overlap | No | Yes | Compile failure | Yes |
 | Explicit provider | Registration absent | No | Yes | Actionable startup failure | Yes |
 | Providerless | No compatible provider | No | Yes | Actionable terminal | Yes |
-| Providerless | Two providers resolve | No | Yes | Ambiguous terminal | Yes |
-| Providerless | Success plus denied/unavailable | No | Yes | Uncertain terminal | Yes |
+| Providerless | Two providers resolve | Exact environment | Yes | Ambiguous terminal unless rescued | Yes |
+| Providerless | Success plus denied/unavailable | Exact environment | Yes | Uncertain terminal unless rescued | Yes |
 | Providerless | Budget expires after one success | Exact environment | Yes | Budget terminal unless rescued | Yes |
 | Disabled declaration | Resolver is called | No | Yes | Test failure | Safe trace |
 | Remote provider | Missing/denied/unavailable/invalid | Exact environment | Yes | Actionable terminal unless rescued | Yes |
@@ -1347,3 +1347,501 @@ Synthesized from the CEO review findings:
 - **TD1 — Scope center:** Keep the complete typed composition plan or reduce #807 to a Google-specific child patcher.
 - **TD2 — Typed destination:** Keep required `Secret<T>` or defer it in favor of a mapping-only vertical.
 - **TD3 — Provider omission:** Ship optional provider with exhaustive uniqueness or require explicit provider in the first release.
+
+## Autoplan Phase 2.5 — Developer Experience Review
+
+### Step 0 — DX Scope Assessment
+
+Product type: developer-facing .NET library/SDK, provider integration, configuration file contract, audit surface, and migration guide.
+
+Mode: `DX POLISH`.
+
+#### Developer Persona Card
+
+| Attribute | Persona |
+|---|---|
+| Primary user | Experienced .NET application/platform maintainer |
+| Starting point | Existing AppSurface service using `Config<T>`, file configuration, and either `MapSecret(...)`, LocalSecrets, environment variables, or application-owned mapping glue |
+| Goal | Move one nested secret to a checked-in, typed, version-pinned reference without disclosing the payload or losing emergency override behavior |
+| Constraints | Existing production deployment, limited migration window, no appetite for a new sidecar manifest, must diagnose failure from startup/audit output |
+| Mental model | Strongly typed options plus deterministic provider precedence |
+| Trust test | “Can I prove which source won, know why a failure happened, and roll back without touching the remote secret?” |
+
+Prior DX reviews for this repository commonly moved developer packages from a 5–7/10 starting point to 8–9/10 with one golden path, copy-paste examples, and measured acceptance. The most recent comparable review scored 8.9/10 after review; this feature starts at 5/10 because its adopter path is not yet executable.
+
+#### Developer Empathy Narrative
+
+> I already have a working service and a working secret, so my risk is migration—not setup from scratch. I want to change one property to `Secret<string>`, put the resource reference in the same file as its siblings, and see a safe diagnostic that proves the environment rescue worked. Then I want one deliberate step that removes the old mapping and rescue, proves Google is the effective source, and leaves me with less application code than I started with. If the guide makes me infer module registration, file placement, wrapper activation, validation, or whether audit performs network I/O, I will preserve the bridge I already trust.
+
+#### Competitive DX Benchmark
+
+| Approach | First success | Strength | AppSurface opportunity |
+|---|---:|---|---|
+| Existing application manifest/bridge | Already working | Known behavior and local control | Win only by deleting code and duplicated paths |
+| Standard .NET Options/config binding | Familiar and fast | Ecosystem conventions and validation | Add typed secret intent and value-safe provenance without fighting the mental model |
+| Cloud/deployment environment injection | Fast consumption after provisioning | Application receives a normal scalar | Preserve application-visible key/version intent and staged activation |
+| `helmfile/vals`-style external references | Terse provider-qualified references | Mature “reference, do not commit payload” pattern | Add destination-aware C# typing, exact rescue, and startup validation |
+| This plan before DX amendments | 15–30 minutes estimated | Strong semantics | Missing one linked executable path |
+| Target after amendments | Under 5 minutes from stated prerequisites | Production-credible typed migration | Competitive |
+
+The target excludes cloud resource/IAM provisioning time because that is host-specific. It includes package/reference changes, model and file edits, environment rescue, startup activation, and safe audit verification in an existing AppSurface app.
+
+#### Magical Moment Specification
+
+Delivery vehicle: one runnable `examples/file-secret-references` project plus one canonical guide linked from the core Config README, Google provider README, package chooser, and start-here path.
+
+The first scenario is intentionally network-free:
+
+```text
+edit model + file
+  -> set exact environment migration value
+  -> run example/host
+  -> see:
+     Service:ApiKey  Enabled=false  HasValue=true
+     Effective source: EnvironmentConfigProvider
+     Inline secret-provider calls: 0
+     Value: [redacted]
+```
+
+The second scenario uses the existing fake Google client through the real composition path and proves:
+
+```text
+Enabled=true  HasValue=true
+Effective source: google-secret-manager
+Requested version: 4
+Value: [redacted]
+```
+
+Neither scenario prints, serializes, or snapshots the payload.
+
+#### Developer Journey Map
+
+| Stage | Developer action | Current friction | Planned resolution |
+|---|---|---|---|
+| 1. Discover | Find whether AppSurface supports file-declared secret references | Existing package docs teach `MapSecret(...)` and ordinary `Config<T>` | Link one canonical guide from all relevant entry points |
+| 2. Evaluate | Understand security, precedence, and limitations | Design is complete but too long for first contact | Start with a decision table and one production-shaped example |
+| 3. Install | Add the Google provider package | Package command exists; version/readiness context is separate | Reuse package chooser/release-hub pattern and state exact prerequisite |
+| 4. Model | Change scalar member to `Secret<T>` | `Enabled` versus `HasValue` is subtle | Put the state table and mandatory/optional validation examples beside the type |
+| 5. Configure | Add descriptor and remove overlapping mapping | Original migration order would fail overlap validation | Make removal and descriptor addition one reviewed change |
+| 6. First run | Prove disabled declaration plus environment rescue | No complete executable flow | Runnable network-free scenario with expected safe output |
+| 7. Verify remote | Enable and prove Google works | Environment rescue can mask effective source | Bounded no-rescue verification requiring Google provenance |
+| 8. Test/CI | Exercise states without network | Existing fake client exists but no composition fixture | Provide real-path fake-provider fixture and packed-consumer test |
+| 9. Operate/upgrade | Diagnose failures and know when legacy mapping remains appropriate | Codes/links and migration policy are scattered | Diagnostic catalog, compatibility table, changelog/release guidance |
+
+#### First-Time Developer Confusion Report
+
+1. “Does `required Secret<string>` mean a payload exists?” No; the guide must show validation for `HasValue`.
+2. “Does `enabled: false` disable my application feature?” No; it disables the declared reference lookup only.
+3. “Can I leave the old `MapSecret(...)` row during migration?” No; overlap fails before rescue.
+4. “Did the environment rescue prove Google works?” No; only a no-rescue run with Google as effective source proves that.
+5. “Does audit contact Google?” Effective audit can; compile-only preflight is deferred.
+6. “Why did adding another provider break a providerless declaration?” Omission means exhaustive uniqueness, not priority.
+7. “Can I put a plain secret scalar in the JSON file?” No; checked-in file values cannot masquerade as secret sources.
+8. “Will my custom converter or generated context work?” Not in the first release's opted-in path.
+9. “How do I unit test a populated `Secret<T>`?” Use the real composition path with fake providers; applications cannot forge a resolved wrapper.
+
+### Step 0.5 — DX Dual Voices
+
+#### CLAUDE SUBAGENT — DX Independent Review
+
+The independent `combo/sub` reviewer scored the plan 5/10 and raised eleven findings:
+
+1. No copy-paste first-success path.
+2. Stable publication is not gated on real consumer deletion.
+3. Typed-only third-party providers face an abrupt compatibility boundary.
+4. Providerless resolution is unsafe as an implicit production default.
+5. `Enabled`, `HasValue`, and `Value` are easy to misuse.
+6. Effective audit has surprising remote side effects.
+7. New diagnostics do not yet guarantee canonical documentation links.
+8. `MapSecret(...)` migration and deprecation guidance is incomplete.
+9. CI and cross-platform acceptance are too weak for path/environment behavior.
+10. The public synchronous provider seam limits future provider implementations.
+11. TTHW and consumer-deletion outcomes have no measured baseline or threshold.
+
+It recommended an executable quickstart, packed-consumer verification, mandatory diagnostic links, provider compatibility guidance, cross-platform CI, measurable TTHW, and a real Skoolit rehearsal.
+
+#### CODEX SAYS — DX Developer Experience Challenge
+
+Codex also scored adoption readiness 5/10 while recommending that all five approved product choices remain:
+
+1. The opening snippets are not a complete integration.
+2. Wrapper presence does not prove credential readiness.
+3. The CEO error registry contradicted the approved exact-rescue contract for ambiguity and uncertainty; the registry has been corrected.
+4. The original migration order left an overlapping `MapSecret(...)` claim active and would fail plan compilation; the sequence has been corrected.
+5. A disabled or environment-rescued deployment does not prove remote readiness.
+6. Consumer tests need a real composition path with a fake provider.
+7. Provider compatibility and standard .NET boundaries need a findable table.
+8. TTHW and real code deletion need measured evidence.
+
+Codex additionally clarified that disabled declarations suppress reads for that inline reference, not necessarily whole-root base-provider resolution; the audit wording has been corrected.
+
+#### DX Dual Voices — Consensus Table
+
+| Dimension | `combo/sub` | Codex | Consensus |
+|---|---|---|---|
+| 1. Getting started < 5 min? | No; 15–30 min estimated | No; incomplete integration | CONFIRMED gap |
+| 2. API/SDK naming guessable? | Partly; state semantics subtle | Mostly; readiness remains subtle | CONFIRMED concern |
+| 3. Error messages actionable? | Strong intent, links incomplete | Contradictory matrix and no concrete output | CONFIRMED gap |
+| 4. Docs findable and complete? | No canonical path | Fragmented adopter journey | CONFIRMED gap |
+| 5. Upgrade path safe? | No real release proof | Migration order was invalid | CONFIRMED gap |
+| 6. Dev environment friction-free? | No packed/cross-platform proof | No real-path fake fixture | CONFIRMED gap |
+
+Consensus: 6/6 dimensions confirmed. Both voices require adopter-facing release work; only the real cross-repository Skoolit rehearsal remains a user-authorized scope decision at the final gate.
+
+### Pass 1 — Getting Started Experience
+
+Initial score: **4/10**. Projected score after plan amendments: **9/10**.
+
+Ideal three-step path:
+
+1. **Install/register, 60 seconds.**
+
+   ```bash
+   dotnet add package ForgeTrust.AppSurface.Config.GoogleSecretManager
+   ```
+
+   The guide shows the exact module dependency/registration and states that the provider package brings in core Config.
+
+2. **Model/configure, 2 minutes.**
+
+   Copy a complete `ServiceOptions`, `ServiceConfig`, and `appsettings.Development.json`; replace the overlapping descendant mapping in the same change; set `enabled: false`; set the exact environment migration value.
+
+3. **Run/verify, under 2 minutes.**
+
+   Run the existing app's diagnostics entry point or the repository example and compare the displayed value-safe state with the documented output.
+
+Acceptance:
+
+- Under five minutes from existing-AppSurface prerequisites.
+- One terminal session; the canonical guide contains every code/file fragment.
+- First success requires no live Google access.
+- A separate remote-verification step states its credentials, IAM, and pinned-version prerequisites.
+- A packed-consumer smoke test proves commands and namespaces against produced packages.
+
+Decision DX-D1: accept the runnable golden path and packed-consumer smoke test as release-blocking documentation work under P1 completeness.
+
+### Pass 2 — API/SDK Design
+
+Initial score: **6.5/10**. Projected score: **8.5/10**.
+
+The names `Secret<T>`, `Enabled`, `HasValue`, `Value`, `TryGetValue`, and `ResolvedProvider` are individually guessable. The sharp edge is the state combination, not vocabulary.
+
+Required API guidance:
+
+- Lead with the full state table, not a single happy-path snippet.
+- Define `Enabled` as “the declared reference is active,” never “the feature is active.”
+- Show mandatory-secret validation and intentionally optional integration validation.
+- Explain that the outer `Config<T>.HasValue` proves only the containing object resolved.
+- Keep `Value` throwing when absent and `TryGetValue` non-throwing.
+- Keep direct descriptor fields; the model type is the discriminator.
+- Lead production examples with an explicit provider; explain omission and exhaustive uniqueness afterward.
+- State that registered-provider changes can change a providerless plan's validity.
+
+A new readiness property is not required for v1 because domain rules differ; a clear reusable custom-validation example is the simpler first release.
+
+Decision DX-D2: keep the approved public names and add validation/state guidance rather than expanding the API.
+
+### Pass 3 — Error Messages and Debugging
+
+Initial score: **7/10** after correcting the rescue matrix. Projected score: **9/10**.
+
+Three representative paths:
+
+1. **Malformed layered descriptor**
+
+   Current planned experience: terminal compilation failure with source location.
+
+   Required shape:
+
+   ```text
+   secret-descriptor-incomplete at Service:ApiKey
+   Problem: the winning declaration is missing a nonblank key.
+   Cause: appsettings.Production.json:18:7 replaced the complete lower descriptor.
+   Fix: repeat the complete key/version/provider/enabled declaration in this file.
+   Docs: https://appsurface.dev/config/secret-references#atomic-file-layers
+   ```
+
+2. **Provider access denied**
+
+   Current planned experience: value-safe terminal status, exact environment rescue permitted.
+
+   Required shape:
+
+   ```text
+   secret-provider-access-denied at Service:ApiKey
+   Problem: google-secret-manager could not access the requested version.
+   Cause: the runtime identity lacks access or the resource policy denied it.
+   Fix: grant secret-version access, correct the reference, or apply the exact emergency override.
+   Docs: https://appsurface.dev/config/secret-references#access-denied
+   Retryable: false
+   ```
+
+3. **Legacy mapping overlap during migration**
+
+   Current experience before amendment: the migration guide would create the error.
+
+   Required shape:
+
+   ```text
+   secret-claim-overlap at Service:ApiKey
+   Problem: the destination is declared by both file configuration and MapSecret(...).
+   Cause: both claims target the same canonical logical path.
+   Fix: remove the old descendant mapping in the same change that adds the file declaration.
+   Docs: https://appsurface.dev/config/secret-references#migrate-map-secret
+   ```
+
+Every new secret-reference diagnostic must carry a stable code and canonical docs anchor. Runtime, audit, logs, CLI rendering, and tests consume the same structured problem/cause/fix/docs fields. Existing unrelated diagnostics are not retroactively changed by #807.
+
+Decision DX-D3: add a feature diagnostic catalog and CI link/anchor validation; do not broaden this issue into a rewrite of all Config diagnostics.
+
+### Pass 4 — Documentation and Learning
+
+Initial score: **4.5/10**. Projected score: **9/10**.
+
+Canonical information architecture:
+
+```text
+start-here/first-success-path.md
+  -> Config README: typed secret references
+      -> file-secret-references guide (golden path)
+          -> state/validation reference
+          -> provider selection and ambiguity
+          -> atomic layers and path identity
+          -> effective audit and redaction
+          -> MapSecret migration
+          -> troubleshooting diagnostic catalog
+      -> Google README: provider-specific key/version/IAM details
+      -> LocalSecrets README: lower-base role and explicit non-support as versioned inline resolver
+```
+
+The runnable example is the learning vehicle. Every fragment is compiled, and expected output is asserted without payloads. The guide distinguishes:
+
+- tutorial: complete migration;
+- reference: descriptor, state, provider, and error tables;
+- decision guidance: when inline references versus whole-root `MapSecret(...)` versus deployment injection are appropriate;
+- pitfalls: overlap order, providerless registration coupling, live audit reads, atomic replacement, and unsupported serializer graphs.
+
+Decision DX-D4: make documentation part of the feature release, following the repository's existing package-guide and canonical-link conventions.
+
+### Pass 5 — Upgrade and Migration Path
+
+Initial score: **4/10**. Projected score: **9/10**.
+
+The corrected migration is one atomic source transition:
+
+```text
+BEFORE
+  string property
+  + application manifest row
+  + MapSecret descendant claim
+  + IConfiguration bridge branch
+  + exact environment value
+
+REVIEWED MIGRATION CHANGE
+  Secret<string> property
+  + direct disabled file descriptor
+  - overlapping manifest/MapSecret claim
+  + typed consumer
+  environment value retained
+
+REMOTE VERIFICATION
+  enable descriptor
+  remove exact environment rescue in bounded deployment
+  require Google effective source
+  validate application
+
+AFTER
+  remove migrated bridge branch
+  retain rollback instructions during rollout window
+```
+
+`MapSecret(...)` remains supported for whole-root and non-overlapping legacy uses. The guide labels descendant mapping-to-inline-reference as the preferred migration, but does not globally deprecate the API in this issue. Release notes and `CHANGELOG.md` call out the opt-in binding contract, unsupported model shapes, and provider compatibility boundary.
+
+Decision DX-D5: preserve backward compatibility and publish a before/after migration matrix; no codemod is justified for a semantic model change.
+
+### Pass 6 — Developer Environment and Tooling
+
+Initial score: **6/10**. Projected score: **8.5/10**.
+
+Required tooling:
+
+- network-free fake secret providers exercising the real compiler/executor;
+- existing `UseAppSurfaceGoogleSecretManagerClient(...)` for Google-specific status mapping;
+- a sample fixture for resolved, disabled, missing, ambiguous, and environment-rescued states;
+- explicit startup activation in the example so singleton registration is not mistaken for eager initialization;
+- packed NuGet consumer restore/build/run;
+- Linux, macOS, and Windows coverage for environment naming, case behavior, UTF-8 source locations, and file-layer replacement;
+- CI proof that disabled/direct-root paths make zero inline provider calls;
+- XML documentation and IntelliSense for every public type/member.
+
+Applications do not receive a public “forge resolved secret” constructor. Tests should prove behavior through the same resolution boundary production uses.
+
+Decision DX-D6: add deterministic no-network and cross-platform acceptance; keep live Google integration outside the required unit lane.
+
+### Pass 7 — Community and Ecosystem
+
+Initial score: **4.5/10**. Projected score: **8/10**.
+
+The repository is open and already has package, examples, release, and contribution structures. The new public provider seams need:
+
+- one minimal provider implementation in documentation;
+- a compatibility table for typed-only provider, raw-base provider, claim inspector, and secret-reference provider;
+- stable provider-id and validation rules;
+- a reusable in-repository contract test fixture for built-in and sample providers;
+- explicit standard .NET boundaries: no automatic `IConfiguration` projection, no Options source-generation integration, and one default System.Text.Json contract for opted-in roots;
+- synchronous-provider implementation guidance that forbids sync-over-async and explains timeout adaptation.
+
+A new provider SDK package is deferred. The first release proves the seam through built-in adapters and a documented sample.
+
+Decision DX-D7: include extension guidance and reusable tests in existing packages; defer a separate conformance package.
+
+### Pass 8 — DX Measurement and Feedback Loops
+
+Initial score: **4/10**. Projected score: **8/10**.
+
+Release evidence:
+
+- timed first-success walkthrough from stated existing-AppSurface prerequisites;
+- target: median under five minutes and no undocumented detours;
+- packed-consumer sample completes from clean restore;
+- first error, docs path used, and effective source are recorded;
+- no-rescue provider verification passes;
+- migration fixture removes one duplicate mapping/bridge branch;
+- value-free event names cover compile, disabled, resolved, rescued, missing, ambiguous, uncertain, and budget exhaustion;
+- metric dimensions are bounded enums/provider ids, never payloads or unbounded resource names.
+
+Real Skoolit deletion remains UC1 because it crosses repository scope and both outside voices recommend it as a stable-publication gate. If UC1 is rejected, the repository fixture still measures the framework contract and release language must avoid claiming proven consumer deletion.
+
+Decision DX-D8: add local TTHW and packed-consumer thresholds now; defer product telemetry or new feedback infrastructure.
+
+### DX Scorecard
+
+```text
++====================================================================+
+|              DX PLAN REVIEW — SCORECARD                            |
++====================================================================+
+| Dimension            | Score  | Prior comparable | Trend          |
+|----------------------|--------|------------------|----------------|
+| Getting Started      | 9/10   | 8.9/10 overall   | plan improves  |
+| API/CLI/SDK          | 8.5/10 | 8.9/10 overall   | competitive    |
+| Error Messages       | 9/10   | 8.9/10 overall   | stronger links |
+| Documentation        | 9/10   | 8.9/10 overall   | canonical path |
+| Upgrade Path         | 9/10   | 8.9/10 overall   | order corrected|
+| Dev Environment      | 8.5/10 | 8.9/10 overall   | packed + OS CI |
+| Community            | 8/10   | 8.9/10 overall   | seam documented|
+| DX Measurement       | 8/10   | 8.9/10 overall   | local evidence |
++--------------------------------------------------------------------+
+| TTHW                 | 15–30m estimated -> target <5m              |
+| Competitive Rank     | Competitive, evidence-gated                 |
+| Magical Moment       | designed via runnable migration example     |
+| Product Type         | .NET library/provider/config contract       |
+| Mode                 | DX POLISH                                   |
+| Overall DX           | 5/10 initial -> 8.6/10 projected            |
++====================================================================+
+| DX PRINCIPLE COVERAGE                                              |
+| Zero Friction      | covered by three-step golden path             |
+| Learn by Doing     | covered by compiled runnable example          |
+| Fight Uncertainty  | covered by diagnostic catalog + source proof  |
+| Opinionated + Escape Hatches | explicit provider first; omission   |
+| Code in Context    | covered by existing-service migration         |
+| Magical Moments    | disabled rescue then Google provenance        |
++====================================================================+
+```
+
+### DX Implementation Checklist
+
+- [ ] Time to first disabled/environment-rescued success is measured under five minutes.
+- [ ] Installation is one package command for an existing AppSurface app.
+- [ ] First run produces meaningful, payload-free source and state output.
+- [ ] The magical moment is delivered through a compiled runnable example.
+- [ ] Every new diagnostic has problem, cause, fix, canonical docs link, path, and source location when available.
+- [ ] API naming is backed by the complete `Enabled`/`HasValue` state table.
+- [ ] Defaults are explicit: `enabled=true`, `provider` omitted means exhaustive uniqueness, and production examples constrain the provider.
+- [ ] Examples are copy-paste complete and tested from packed packages.
+- [ ] Examples show disabled rollout, exact rescue, provider success, and safe failure.
+- [ ] Migration guide removes overlapping mappings in the same change as the descriptor.
+- [ ] Release notes explain the opt-in binding and third-party compatibility boundary.
+- [ ] Linux, macOS, and Windows normalization paths are covered.
+- [ ] CI requires no live cloud credentials for the deterministic suite.
+- [ ] The package chooser, start-here path, and relevant READMEs link the canonical guide.
+- [ ] Changelog and release hub entries are updated.
+- [ ] Provider extension guidance and a minimal implementation are documented.
+- [ ] Real-consumer release evidence follows the UC1 decision.
+
+Not applicable: free-tier/credit-card checks and TypeScript types; this is an open-source .NET package feature rather than a hosted service or TypeScript SDK.
+
+### DX What Already Exists
+
+- Core, Google, and LocalSecrets package READMEs with coordinated release guidance.
+- A package chooser, release hub, upgrade policy, start-here path, and examples index.
+- App-owned diagnostics command runners and safe text rendering.
+- Stable provider result taxonomies and value-safe diagnostics.
+- Google fake-client registration and deterministic provider tests.
+- LocalSecrets runnable example and migration guides.
+- Config validation example and structured validation failures.
+- Multi-platform patterns elsewhere in the build workflow that can be extended to this feature.
+
+The plan reuses these structures. It does not create a second documentation site, CLI framework, or testing convention.
+
+### DX NOT in Scope
+
+- Hosted playground or browser sandbox — requires credentials and adds little for a .NET library migration.
+- New Config CLI/preflight command — compile-only preflight remains a separate feature.
+- Automatic code migration/codemod — the type and consumption change requires domain judgment.
+- Global deprecation of `MapSecret(...)` — whole-root/non-overlapping use remains valid.
+- New provider SDK/conformance NuGet package — document and test the seam in existing packages first.
+- Async provider contract — document the synchronous limitation and adapter rules; revisit with provider evidence.
+- Automatic `IConfiguration` or `IOptions<T>` projection — migration moves the selected consumer to the typed AppSurface boundary.
+- Product analytics or network telemetry — use local timed walkthrough and test evidence.
+- A new community channel — reuse repository issue/discussion mechanisms.
+
+### DX Decision Audit Trail
+
+| ID | Finding | Decision | Principle |
+|---|---|---|---|
+| DX-D1 | No runnable under-five-minute path | Add canonical guide, example, expected output, and packed smoke test | P1 completeness |
+| DX-D2 | Wrapper state is subtle | Keep API; make state/validation guidance primary | P5 simple API |
+| DX-D3 | Error contract lacks guaranteed destinations | Add scoped diagnostic catalog and docs-anchor CI | P1 completeness |
+| DX-D4 | Docs are fragmented | Reuse existing package/start-here structure with one canonical guide | P5 consistency |
+| DX-D5 | Migration order violated overlap rules | Remove old claim in the same change as the descriptor | P4 correctness |
+| DX-D6 | No-network and OS proof incomplete | Add fake real-path, packed-consumer, and multi-OS acceptance | P1 completeness |
+| DX-D7 | Provider seam lacks adoption guidance | Add sample/compatibility table; defer a new SDK package | P2/P3 |
+| DX-D8 | TTHW unmeasured | Measure locally against <5-minute threshold | P1 evidence |
+| DX-D9 | Real Skoolit rehearsal recommended by both voices | Preserve UC1 for final approval because it expands cross-repository release scope | User sovereignty |
+| DX-D10 | Global MapSecret deprecation proposed by one voice | Reject for #807; document when each path is appropriate | P4 avoid unnecessary break |
+
+### DX Implementation Tasks
+
+- [ ] **DX-T1 (P1, human: ~2d / CC: ~4h)** — Example/docs — Build the three-step golden path
+  - Surfaced by: Pass 1 — no complete first-success flow exists.
+  - Files: `examples/file-secret-references`, core/Google READMEs, canonical guide, examples index.
+  - Verify: clean restore/run plus asserted payload-free output in under five minutes.
+- [ ] **DX-T2 (P1, human: ~1d / CC: ~2h)** — Package verification — Add a packed-consumer smoke test
+  - Surfaced by: Passes 1 and 6 — repository-source examples do not prove shipped package usability.
+  - Files: package/release test scripts and sample consumer fixture.
+  - Verify: pack, restore from local feed, build, run disabled rescue and fake-provider success.
+- [ ] **DX-T3 (P1, human: ~1d / CC: ~2h)** — Diagnostics — Publish the secret-reference diagnostic catalog
+  - Surfaced by: Pass 3 — stable codes do not yet guarantee problem/cause/fix/docs output.
+  - Files: diagnostic models/renderers, canonical troubleshooting guide, link tests.
+  - Verify: every new code maps to a valid documentation anchor and value-safe snapshot.
+- [ ] **DX-T4 (P1, human: ~1d / CC: ~2h)** — Migration — Publish the atomic mapping-to-descriptor guide
+  - Surfaced by: Pass 5 — the original order created an overlap failure and false remote verification.
+  - Files: Google/core docs, migration guide, release notes, `CHANGELOG.md`.
+  - Verify: before/after fixture removes the old claim and proves no-rescue Google provenance.
+- [ ] **DX-T5 (P2, human: ~1d / CC: ~2h)** — Provider ecosystem — Document and test capability compatibility
+  - Surfaced by: Pass 7 — typed-only providers need actionable migration guidance.
+  - Files: core provider docs, sample provider, reusable contract tests.
+  - Verify: typed-only, claim-inspector, raw-base, and secret-provider cases produce documented outcomes.
+- [ ] **DX-T6 (P1, human: ~1d / CC: ~2h)** — CI — Add deterministic cross-platform acceptance
+  - Surfaced by: Pass 6 — path, case, environment, and source-location rules vary by host.
+  - Files: Config tests and build workflow.
+  - Verify: Linux/macOS/Windows no-network matrix passes.
+- [ ] **DX-T7 (P2, human: ~4h / CC: ~1h)** — Measurement — Record TTHW and migration evidence
+  - Surfaced by: Pass 8 — adoption success has no baseline.
+  - Files: release evidence/checklist and example verification output.
+  - Verify: timed walkthrough, no undocumented detours, effective source recorded.
+
+### DX Unresolved Decisions for Final Gate
+
+- **UC1 (shared with CEO):** Require a bounded real Skoolit prerelease rehearsal before stable publication.
+- **TD4 — Effective audit naming:** Keep the existing audit entry point with explicit side-effect documentation, or introduce a separately named effective-resolution request while compile-only preflight remains deferred.
