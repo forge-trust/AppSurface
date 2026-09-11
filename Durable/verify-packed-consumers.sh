@@ -53,8 +53,14 @@ lowercase() {
 verify_restored_package() {
   local package_id="$1"
   local package_file="$FEED_DIR/$package_id.$PACKAGE_VERSION.nupkg"
-  local package_cache_directory="$NUGET_PACKAGES/$(lowercase "$package_id")/$(lowercase "$PACKAGE_VERSION")"
-  local restored_package_file="$package_cache_directory/$(lowercase "$package_id").$(lowercase "$PACKAGE_VERSION").nupkg"
+  local package_id_lower
+  local package_version_lower
+  local package_cache_directory
+  local restored_package_file
+  package_id_lower="$(lowercase "$package_id")"
+  package_version_lower="$(lowercase "$PACKAGE_VERSION")"
+  package_cache_directory="$NUGET_PACKAGES/$package_id_lower/$package_version_lower"
+  restored_package_file="$package_cache_directory/$package_id_lower.$package_version_lower.nupkg"
   local package_metadata_file="$package_cache_directory/.nupkg.metadata"
 
   [[ -f "$package_file" ]] || fail "the freshly packed package is missing: $package_file"

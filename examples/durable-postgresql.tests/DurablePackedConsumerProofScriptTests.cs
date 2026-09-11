@@ -19,8 +19,12 @@ public sealed class DurablePackedConsumerProofScriptTests
         Assert.Contains("<package pattern=\"ForgeTrust.*\" />", script, StringComparison.Ordinal);
         Assert.Contains("project.assets.json", script, StringComparison.Ordinal);
         Assert.Contains(".nupkg.metadata", script, StringComparison.Ordinal);
+        Assert.Contains("local package_id_lower", script, StringComparison.Ordinal);
+        Assert.Contains("local package_version_lower", script, StringComparison.Ordinal);
+        Assert.Contains("package_id_lower=\"$(lowercase \"$package_id\")\"", script, StringComparison.Ordinal);
+        Assert.Contains("package_version_lower=\"$(lowercase \"$PACKAGE_VERSION\")\"", script, StringComparison.Ordinal);
         Assert.Contains(
-            "$(lowercase \"$package_id\").$(lowercase \"$PACKAGE_VERSION\").nupkg",
+            "$package_id_lower.$package_version_lower.nupkg",
             script,
             StringComparison.Ordinal);
         Assert.Contains("\\\"source\\\": \\\"$FEED_DIR\\\"", script, StringComparison.Ordinal);

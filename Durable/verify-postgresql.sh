@@ -57,7 +57,8 @@ sha256_file() {
 
 count_discovered_tests() {
   local log_file="$1"
-  grep -Ec '^[[:space:]]+ForgeTrust\.AppSurface\.Durable\.PostgreSql\.Tests\.' "$log_file" | tr -d ' '
+  grep -Ec '^[[:space:]]+ForgeTrust\.AppSurface\.Durable\.PostgreSql\.Tests\.' "$log_file" \
+    | tr -d ' ' || true
 }
 
 count_exact_discovered_test() {

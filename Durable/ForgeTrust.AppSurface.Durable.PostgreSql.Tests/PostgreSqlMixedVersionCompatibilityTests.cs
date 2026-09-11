@@ -348,6 +348,7 @@ public sealed class PostgreSqlMixedVersionCompatibilityTests
         container.ExecAsync(
             [
                 "psql",
+                "-v", "ON_ERROR_STOP=1",
                 "-U", MigrationUser,
                 "-d", DatabaseName,
                 "-v", $"migration_owner_role={MigrationOwnerRole}",

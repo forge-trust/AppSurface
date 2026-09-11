@@ -77,8 +77,10 @@ internal readonly record struct PostgreSqlDurableFailureClassification(
 /// </summary>
 /// <remarks>
 /// The helper does not assign <see cref="NpgsqlCommand.CommandTimeout"/> or alter connection settings. It records
-/// typed deadline evidence against the original exception so callers can preserve its concrete type, token, SQLSTATE,
-/// and stack. It is used only for schema status, health observation, and pre-execution runtime admission.
+/// typed deadline evidence against the original exception before any boundary-specific translation. Non-query
+/// cancellation caused only by that package deadline becomes <see cref="TimeoutException"/>; caller cancellation and
+/// every other failure preserve their concrete type, token, SQLSTATE, and stack. The helper is used only for schema
+/// status, health observation, and pre-execution runtime admission.
 /// </remarks>
 internal static class PostgreSqlDurableControlPlaneCommand
 {
@@ -88,7 +90,37 @@ internal static class PostgreSqlDurableControlPlaneCommand
     internal static ValueTask<int> ExecuteNonQueryAsync(
         NpgsqlCommand command,
         CancellationToken cancellationToken) =>
-        ExecuteOperationAsync(command, cancellationToken, command.ExecuteNonQueryAsync);
+        ExecuteNonQueryAsync(command, cancellationToken, command.ExecuteNonQueryAsync);
+
+    /// <summary>Executes a non-query control-plane operation and maps only package-owned deadline cancellation.</summary>
+    /// <param name="command">The configured command whose positive timeout defines the package deadline.</param>
+    /// <param name="cancellationToken">The caller-owned cancellation token.</param>
+    /// <param name="operation">The operation to execute with the effective cancellation token.</param>
+    /// <returns>The number of rows affected by the operation.</returns>
+    /// <exception cref="TimeoutException">
+    /// Thrown when the package-owned command deadline expires before caller cancellation.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">
+    /// Propagates caller-owned cancellation without translating it.
+    /// </exception>
+    internal static async ValueTask<int> ExecuteNonQueryAsync(
+        NpgsqlCommand command,
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<int>> operation)
+    {
+        try
+        {
+            return await ExecuteOperationAsync(command, cancellationToken, operation).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException exception) when (
+            !cancellationToken.IsCancellationRequested
+            && GetTimeoutEvidence(exception) == PostgreSqlDurableTimeoutEvidence.ProviderDeadlineElapsed)
+        {
+            throw new TimeoutException(
+                $"The PostgreSQL control-plane command exceeded its configured {command.CommandTimeout}-second timeout.",
+                exception);
+        }
+    }
 
     /// <summary>Executes a scalar control-plane command.</summary>
     internal static ValueTask<object?> ExecuteScalarAsync(
@@ -135,11 +167,13 @@ internal static class PostgreSqlDurableControlPlaneCommand
             throw new ArgumentOutOfRangeException(nameof(evidence));
         }
 
-        TimeoutEvidence.Remove(exception);
-        if (evidence != PostgreSqlDurableTimeoutEvidence.None)
+        if (evidence == PostgreSqlDurableTimeoutEvidence.None)
         {
-            TimeoutEvidence.Add(exception, new TimeoutEvidenceHolder(evidence));
+            TimeoutEvidence.Remove(exception);
+            return;
         }
+
+        TimeoutEvidence.AddOrUpdate(exception, new TimeoutEvidenceHolder(evidence));
     }
 
     /// <summary>

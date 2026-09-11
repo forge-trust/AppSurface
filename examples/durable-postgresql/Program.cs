@@ -323,8 +323,14 @@ internal static class DurablePostgreSqlLocalExample
         }
     }
 
-    /// <summary>Confirms that the runtime health checkpoint authorizes both the schema and configured recovery epoch.</summary>
-    /// <exception cref="InvalidOperationException">Thrown when the durable schema or recovery epoch is incompatible.</exception>
+    /// <summary>Confirms that the runtime health checkpoint authorizes activation.</summary>
+    /// <remarks>
+    /// Activation requires an observed store that accepts this runtime. The checkpoint therefore refuses both an
+    /// unobserved store and an observed store with an incompatible schema or recovery epoch.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the store was not observed, or when the observed schema or recovery epoch rejects this runtime.
+    /// </exception>
     internal static void EnsureRuntimeHealthIsCompatible(DurableRuntimeHealthSnapshot health)
     {
         ArgumentNullException.ThrowIfNull(health);

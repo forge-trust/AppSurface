@@ -34,7 +34,10 @@ documented journey has a different target. A timed-out command and its process g
 - Docker Engine: 29.7.2.
 - PostgreSQL image:
   `postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877`.
-- Source base: `024e294f49a1b354411051680b51798d80512666` plus the uncommitted shared #794 working tree.
+- Source revision:
+  [`0710a18ea08efe631213185cd53ff816cfd1a1a9`](https://github.com/forge-trust/AppSurface/commit/0710a18ea08efe631213185cd53ff816cfd1a1a9),
+  the first immutable commit capturing the measured #794 implementation and this evidence; its parent is
+  `024e294f49a1b354411051680b51798d80512666`.
 - Cache state: the Docker image and NuGet/source build caches were present. Each local-proof run used a new container
   and empty database. Each packed-consumer run used a new temporary package feed and consumer package cache.
 

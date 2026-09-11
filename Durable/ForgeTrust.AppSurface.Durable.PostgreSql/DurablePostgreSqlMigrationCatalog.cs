@@ -5,7 +5,21 @@ using System.Text.RegularExpressions;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 
-internal sealed record DurablePostgreSqlMigration(int Version, string Name, string Sql, string Sha256);
+/// <summary>Describes one ordered, checksum-verified PostgreSQL migration and any client execution override it owns.</summary>
+/// <param name="Version">The contiguous, one-based schema version.</param>
+/// <param name="Name">The stable migration name parsed from the embedded resource.</param>
+/// <param name="Sql">The normalized migration SQL.</param>
+/// <param name="Sha256">The lowercase SHA-256 digest of <paramref name="Sql"/>.</param>
+/// <param name="CommandTimeoutSeconds">
+/// An optional positive client command timeout for migration SQL whose bounded server-side work exceeds the data
+/// source default. <see langword="null"/> preserves the configured data-source timeout.
+/// </param>
+internal sealed record DurablePostgreSqlMigration(
+    int Version,
+    string Name,
+    string Sql,
+    string Sha256,
+    int? CommandTimeoutSeconds = null);
 
 internal static partial class DurablePostgreSqlMigrationCatalog
 {
@@ -60,7 +74,16 @@ internal static partial class DurablePostgreSqlMigrationCatalog
         using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         var sql = reader.ReadToEnd().Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd() + "\n";
         var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(sql)));
-        return new DurablePostgreSqlMigration(version, match.Groups["name"].Value, sql, hash);
+        int? commandTimeoutSeconds =
+            version == PostgreSqlDurableRuntimeSchemaManager.ExtendedDeadlineMigrationVersion
+                ? PostgreSqlDurableRuntimeSchemaManager.ExtendedMigrationCommandTimeoutSeconds
+                : null;
+        return new DurablePostgreSqlMigration(
+            version,
+            match.Groups["name"].Value,
+            sql,
+            hash,
+            commandTimeoutSeconds);
     }
 
     [GeneratedRegex(@"^(?<version>\d{4})_(?<name>[a-z0-9_]+)\.sql$", RegexOptions.CultureInvariant)]

@@ -61,9 +61,11 @@ public sealed class DurableOperationalAssessmentDocumentationRegressionTests
     public async Task StandaloneHost_ShouldHarvestAndServeTheDurableOperationalAssessmentGuideFromTheReleaseNote()
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-        var appSettingsPath = Path.GetFullPath(
-            Path.Join("Web", "ForgeTrust.AppSurface.Docs.Standalone", "appsettings.json"),
-            repoRoot);
+        var appSettingsPath = TestPathUtils.PathUnder(
+            repoRoot,
+            "Web",
+            "ForgeTrust.AppSurface.Docs.Standalone",
+            "appsettings.json");
 
         using var document = JsonDocument.Parse(File.ReadAllText(appSettingsPath));
         var includeGlobs = document.RootElement

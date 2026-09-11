@@ -140,8 +140,7 @@ internal static class PostgreSqlDurablePumpFailureContext
     internal static void Mark(Exception exception, PostgreSqlDurablePumpPhase phase)
     {
         ArgumentNullException.ThrowIfNull(exception);
-        Phases.Remove(exception);
-        Phases.Add(exception, new PhaseHolder(phase));
+        Phases.AddOrUpdate(exception, new PhaseHolder(phase));
     }
 
     /// <summary>Gets whether terminal finalization, rather than the active pass token, produced this failure.</summary>
@@ -174,8 +173,7 @@ internal static class PostgreSqlDurableAdmissionFailureContext
     internal static void MarkIndeterminate(Exception exception)
     {
         ArgumentNullException.ThrowIfNull(exception);
-        IndeterminateFailures.Remove(exception);
-        IndeterminateFailures.Add(exception, Marker.Instance);
+        IndeterminateFailures.AddOrUpdate(exception, Marker.Instance);
     }
 
     /// <summary>

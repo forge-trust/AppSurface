@@ -658,6 +658,32 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
     }
 
     [Fact]
+    public async Task PumpFailureContext_ConcurrentPhaseReplacementDoesNotThrowOrLoseFinalPhase()
+    {
+        var exception = new TimeoutException("concurrent exception");
+        PostgreSqlDurablePumpFailureContext.Mark(exception, PostgreSqlDurablePumpPhase.Executing);
+
+        using var start = new Barrier(8);
+        var tasks = Enumerable.Range(0, 8).Select(index => Task.Run(() =>
+        {
+            start.SignalAndWait();
+            for (var iteration = 0; iteration < 100_000; iteration++)
+            {
+                PostgreSqlDurablePumpFailureContext.Mark(
+                    exception,
+                    (index + iteration) % 2 == 0
+                        ? PostgreSqlDurablePumpPhase.Executing
+                        : PostgreSqlDurablePumpPhase.Finalizing);
+            }
+        })).ToArray();
+
+        await Task.WhenAll(tasks);
+
+        Assert.True(PostgreSqlDurablePumpFailureContext.IsExecutionFailure(exception)
+            || PostgreSqlDurablePumpFailureContext.IsFinalizationFailure(exception));
+    }
+
+    [Fact]
     public async Task HostedStart_ClosesAdmissionAndPersistsDrainWhenSchemaValidationFails()
     {
         using var dispatcher = CreateDataSource();

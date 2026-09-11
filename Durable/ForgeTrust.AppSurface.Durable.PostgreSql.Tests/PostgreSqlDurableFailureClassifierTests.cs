@@ -208,6 +208,29 @@ public sealed class PostgreSqlDurableFailureClassifierTests
     }
 
     [Fact]
+    public async Task TimeoutEvidence_ConcurrentReplacementDoesNotThrowOrLoseEvidence()
+    {
+        var exception = new OperationCanceledException();
+        using var start = new Barrier(8);
+        var tasks = Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+        {
+            start.SignalAndWait();
+            for (var iteration = 0; iteration < 10_000; iteration++)
+            {
+                PostgreSqlDurableControlPlaneCommand.RecordTimeoutEvidence(
+                    exception,
+                    PostgreSqlDurableTimeoutEvidence.ProviderDeadlineElapsed);
+            }
+        })).ToArray();
+
+        await Task.WhenAll(tasks);
+
+        Assert.Equal(
+            PostgreSqlDurableTimeoutEvidence.ProviderDeadlineElapsed,
+            PostgreSqlDurableControlPlaneCommand.GetTimeoutEvidence(exception));
+    }
+
+    [Fact]
     public async Task ControlPlaneCommand_RecordsItsInheritedProviderDeadline()
     {
         await using var command = new NpgsqlCommand
@@ -273,6 +296,39 @@ public sealed class PostgreSqlDurableFailureClassifierTests
     }
 
     [Fact]
+    public async Task ControlPlaneNonQuery_MapsOnlyItsProviderDeadlineToTimeoutException()
+    {
+        await using var command = new NpgsqlCommand
+        {
+            CommandTimeout = 1,
+        };
+
+        var providerTimeout = await Assert.ThrowsAsync<TimeoutException>(
+            async () => await PostgreSqlDurableControlPlaneCommand.ExecuteNonQueryAsync(
+                command,
+                CancellationToken.None,
+                static async effectiveToken =>
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, effectiveToken);
+                    return 0;
+                }));
+
+        Assert.IsAssignableFrom<OperationCanceledException>(providerTimeout.InnerException);
+
+        using var callerCancellation = new CancellationTokenSource();
+        callerCancellation.Cancel();
+        var callerException = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await PostgreSqlDurableControlPlaneCommand.ExecuteNonQueryAsync(
+                command,
+                callerCancellation.Token,
+                static effectiveToken => Task.FromCanceled<int>(effectiveToken)));
+
+        Assert.Equal(
+            PostgreSqlDurableTimeoutEvidence.None,
+            PostgreSqlDurableControlPlaneCommand.GetTimeoutEvidence(callerException));
+    }
+
+    [Fact]
     public void AdmissionFailureContext_MarksOnlyTheOriginalIndeterminateFailure()
     {
         var indeterminate = new NpgsqlException("acknowledgement lost");
@@ -288,6 +344,26 @@ public sealed class PostgreSqlDurableFailureClassifierTests
             PostgreSqlDurableAdmissionFailureContext.MarkIndeterminate(null!));
         Assert.Throws<ArgumentNullException>(() =>
             PostgreSqlDurableAdmissionFailureContext.TakeIndeterminate(null!));
+    }
+
+    [Fact]
+    public async Task AdmissionFailureContext_ConcurrentMarkingRetainsMarkerAndTakeConsumesOnce()
+    {
+        var indeterminate = new NpgsqlException("concurrent acknowledgement lost");
+        using var start = new Barrier(8);
+        var tasks = Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+        {
+            start.SignalAndWait();
+            for (var iteration = 0; iteration < 10_000; iteration++)
+            {
+                PostgreSqlDurableAdmissionFailureContext.MarkIndeterminate(indeterminate);
+            }
+        })).ToArray();
+
+        await Task.WhenAll(tasks);
+
+        Assert.True(PostgreSqlDurableAdmissionFailureContext.TakeIndeterminate(indeterminate));
+        Assert.False(PostgreSqlDurableAdmissionFailureContext.TakeIndeterminate(indeterminate));
     }
 
     private static PostgreSqlDurableFailureClassification Classify(

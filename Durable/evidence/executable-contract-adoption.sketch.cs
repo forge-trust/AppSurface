@@ -54,7 +54,7 @@ internal static class BillingLifecycleExecutableContractSketch
     // PostgreSQL-sensitive claim, lease, fence, and effect tests remain provider tests.
     // appsurface-adoption:primary-lifecycle-test:start
     [Fact]
-    internal static async Task ColdActivationReachesTerminalWorkAndReadiness(IServiceProvider services)
+    internal static async Task ColdActivationCompletesPumpPassAndReachesReadiness(IServiceProvider services)
     {
         var scenario = DurableHostScenario
             .For(Definition)

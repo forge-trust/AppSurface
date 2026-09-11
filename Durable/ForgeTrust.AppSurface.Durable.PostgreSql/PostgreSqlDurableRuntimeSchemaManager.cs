@@ -646,12 +646,17 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         {
             await using (var command = new NpgsqlCommand(migration.Sql, connection, transaction))
             {
-                if (migration.Version == ExtendedDeadlineMigrationVersion)
+                if (migration.CommandTimeoutSeconds is { } commandTimeoutSeconds)
                 {
-                    // Migration 0010 owns a five-minute server-side statement deadline for its bounded index build.
-                    // Keep the client deadline longer so PostgreSQL reports the authoritative failure and leaves time
-                    // for the response to cross the wire. Explicit caller cancellation still wins.
-                    command.CommandTimeout = ExtendedMigrationCommandTimeoutSeconds;
+                    if (commandTimeoutSeconds <= 0)
+                    {
+                        throw new InvalidOperationException(
+                            $"Migration {migration.Version:D4} has a non-positive client command timeout.");
+                    }
+
+                    // The migration owns this override because its bounded server-side work exceeds the data-source
+                    // default. Keep the client alive long enough for PostgreSQL to report the authoritative failure.
+                    command.CommandTimeout = commandTimeoutSeconds;
                 }
 
                 await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);

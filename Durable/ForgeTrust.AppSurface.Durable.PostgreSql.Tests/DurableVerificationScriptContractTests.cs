@@ -11,6 +11,7 @@ public sealed class DurableVerificationScriptContractTests
 
         Assert.Contains("ci_all_list_log=", script, StringComparison.Ordinal);
         Assert.Contains("count_discovered_tests", script, StringComparison.Ordinal);
+        Assert.Contains("| tr -d ' ' || true", script, StringComparison.Ordinal);
         Assert.Contains("count_exact_discovered_test", script, StringComparison.Ordinal);
         Assert.Contains(
             "ci_remaining_test_filter=\"FullyQualifiedName!=$v2_release_test\"",
@@ -20,7 +21,9 @@ public sealed class DurableVerificationScriptContractTests
         Assert.Contains("ci_remaining_release_count=", script, StringComparison.Ordinal);
         Assert.Contains("ci_remaining_test_log=", script, StringComparison.Ordinal);
         Assert.Contains("tee \"$ci_remaining_test_log\"", script, StringComparison.Ordinal);
-        Assert.Contains("verify_test_summary \\\n      \"$ci_remaining_test_log\" \\\n      \"$ci_remaining_expected_test_count\"", script, StringComparison.Ordinal);
+        Assert.Matches(
+            "verify_test_summary\\s+\\\\\\s+\"\\$ci_remaining_test_log\"\\s+\\\\\\s+\"\\$ci_remaining_expected_test_count\"",
+            script);
         Assert.Contains(
             "Skipped:[[:space:]]+[1-9][0-9]*",
             script,

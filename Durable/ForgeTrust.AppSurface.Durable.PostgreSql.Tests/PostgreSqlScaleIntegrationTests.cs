@@ -232,6 +232,8 @@ public sealed class PostgreSqlScaleIntegrationTests
             surfaces: DurableRuntimeSurface.Work);
         var warmPump = await pump.TryRunOnceAsync(pumpRequest);
         Assert.Equal(DurableRuntimePumpAttemptKind.Completed, warmPump.Kind);
+        Assert.Equal(0, warmPump.Result!.Discovered);
+        Assert.Equal(0, warmPump.Result.Processed);
 
         var mixedWorkloadStart = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -301,6 +303,8 @@ public sealed class PostgreSqlScaleIntegrationTests
         Assert.Equal(1L, claimResult);
         Assert.Equal(1, heartbeatResult);
         Assert.Equal(DurableRuntimePumpAttemptKind.Completed, pumpResult.Kind);
+        Assert.Equal(0, pumpResult.Result!.Discovered);
+        Assert.Equal(0, pumpResult.Result.Processed);
         ReportMixedEvidence(
             mixedSnapshots,
             Drain(statusConnectionAcquisitions, MixedConcurrency),
