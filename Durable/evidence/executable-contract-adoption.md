@@ -69,9 +69,9 @@ discovery budget are distinct.
 ## Measured comparison
 
 The source regions and exact boundary tokens are recorded in
-[the measurement specification](executable-contract-adoption.measurements.json);
+[the measurement specification](https://github.com/forge-trust/AppSurface/blob/main/Durable/evidence/executable-contract-adoption.measurements.json);
 the deterministic output is checked in as
-[the result](executable-contract-adoption.results.json). Token lines are
+[the result](https://github.com/forge-trust/AppSurface/blob/main/Durable/evidence/executable-contract-adoption.results.json). Token lines are
 excluded and every nonblank physical line between them is counted, including
 comments and braces.
 

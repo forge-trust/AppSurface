@@ -15,6 +15,45 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 [Trait("Category", "Integration")]
 public sealed class DurableOperationalAssessmentDocumentationRegressionTests
 {
+    [Fact]
+    public void OperationalEvidenceLinks_ShouldKeepNonHarvestedArtifactsOutOfStaticExportRoutes()
+    {
+        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var guide = File.ReadAllText(
+            TestPathUtils.PathUnder(repoRoot, "Durable", "operational-assessments.md"));
+        var adoptionEvidence = File.ReadAllText(
+            TestPathUtils.PathUnder(
+                repoRoot,
+                "Durable",
+                "evidence",
+                "executable-contract-adoption.md"));
+
+        Assert.Contains(
+            "https://github.com/forge-trust/AppSurface/blob/main/Durable/evidence/measure-issue-794-adoption.sh",
+            guide,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "https://github.com/forge-trust/AppSurface/blob/main/Durable/evidence/executable-contract-adoption.measurements.json",
+            adoptionEvidence,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "https://github.com/forge-trust/AppSurface/blob/main/Durable/evidence/executable-contract-adoption.results.json",
+            adoptionEvidence,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "](evidence/measure-issue-794-adoption.sh)",
+            guide,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "](executable-contract-adoption.measurements.json)",
+            adoptionEvidence,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "](executable-contract-adoption.results.json)",
+            adoptionEvidence,
+            StringComparison.Ordinal);
+    }
+
     // Regression: ISSUE-001 — the release-note adoption-guide link rendered a 404.
     // Found by /qa on 2026-09-10.
     // Report: .gstack/qa-reports/qa-report-127-0-0-1-5055-2026-09-10.md

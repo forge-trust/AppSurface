@@ -314,6 +314,7 @@ It creates a disposable loopback PostgreSQL 16.5 container, applies the current 
 Work/Flow/Schedule example, resolves both pump interfaces to the same PostgreSQL singleton, calls authoritative
 admission directly, and checks that worker startup performs no DDL.
 
-The measurement harness is [`Durable/evidence/measure-issue-794-adoption.sh`](evidence/measure-issue-794-adoption.sh).
+The measurement harness is
+[`Durable/evidence/measure-issue-794-adoption.sh`](https://github.com/forge-trust/AppSurface/blob/main/Durable/evidence/measure-issue-794-adoption.sh).
 It records command boundaries and real elapsed times only when invoked. The checked-in evidence file deliberately
 marks unrun five-journey targets as `not-run`; it contains no fabricated timing measurements.
