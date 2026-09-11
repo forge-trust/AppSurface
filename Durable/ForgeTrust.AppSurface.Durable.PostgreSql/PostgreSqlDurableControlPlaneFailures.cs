@@ -207,7 +207,9 @@ internal static class PostgreSqlDurableControlPlaneCommand
         }
         catch (Exception exception) when (exception is not StackOverflowException and not OutOfMemoryException)
         {
-            if (providerDeadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            if (providerDeadline.IsCancellationRequested
+                && !cancellationToken.IsCancellationRequested
+                && IsCancellationShaped(exception))
             {
                 RecordTimeoutEvidence(
                     exception,
@@ -216,6 +218,20 @@ internal static class PostgreSqlDurableControlPlaneCommand
 
             throw;
         }
+    }
+
+    private static bool IsCancellationShaped(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is OperationCanceledException
+                || current is PostgresException { SqlState: PostgresErrorCodes.QueryCanceled })
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private sealed record TimeoutEvidenceHolder(PostgreSqlDurableTimeoutEvidence Value);
@@ -301,9 +317,9 @@ internal static class PostgreSqlDurableFailureClassifier
     private static bool IsTransportSqlState(string sqlState) =>
         sqlState.StartsWith("08", StringComparison.Ordinal)
         || string.Equals(sqlState, PostgresErrorCodes.TooManyConnections, StringComparison.Ordinal)
-        || string.Equals(sqlState, "57P01", StringComparison.Ordinal)
-        || string.Equals(sqlState, "57P02", StringComparison.Ordinal)
-        || string.Equals(sqlState, "57P03", StringComparison.Ordinal);
+        || string.Equals(sqlState, PostgresErrorCodes.AdminShutdown, StringComparison.Ordinal)
+        || string.Equals(sqlState, PostgresErrorCodes.CrashShutdown, StringComparison.Ordinal)
+        || string.Equals(sqlState, PostgresErrorCodes.CannotConnectNow, StringComparison.Ordinal);
 
     private static TException? Find<TException>(Exception exception)
         where TException : Exception

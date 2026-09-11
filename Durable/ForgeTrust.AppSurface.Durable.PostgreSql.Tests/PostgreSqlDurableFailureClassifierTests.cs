@@ -257,6 +257,64 @@ public sealed class PostgreSqlDurableFailureClassifierTests
     }
 
     [Fact]
+    public async Task ControlPlaneCommand_DoesNotRecordDeadlineForUnrelatedLateFailure()
+    {
+        await using var command = new NpgsqlCommand
+        {
+            CommandTimeout = 1,
+        };
+
+        var exception = await Assert.ThrowsAsync<NpgsqlException>(
+            async () => await PostgreSqlDurableControlPlaneCommand.ExecuteOperationAsync<int>(
+                command,
+                CancellationToken.None,
+                static async effectiveToken =>
+                {
+                    var deadlineElapsed = new TaskCompletionSource(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    using var registration = effectiveToken.Register(deadlineElapsed.SetResult);
+                    await deadlineElapsed.Task;
+                    throw new NpgsqlException("Unrelated provider failure after deadline.");
+                }));
+
+        Assert.Equal(
+            PostgreSqlDurableTimeoutEvidence.None,
+            PostgreSqlDurableControlPlaneCommand.GetTimeoutEvidence(exception));
+        Assert.Equal(
+            PostgreSqlDurableFailureDisposition.Propagate,
+            Classify(exception).Disposition);
+    }
+
+    [Fact]
+    public async Task ControlPlaneCommand_RecordsDeadlineForQueryCanceledFailure()
+    {
+        await using var command = new NpgsqlCommand
+        {
+            CommandTimeout = 1,
+        };
+
+        var exception = await Assert.ThrowsAsync<PostgresException>(
+            async () => await PostgreSqlDurableControlPlaneCommand.ExecuteOperationAsync<int>(
+                command,
+                CancellationToken.None,
+                static async effectiveToken =>
+                {
+                    var deadlineElapsed = new TaskCompletionSource(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    using var registration = effectiveToken.Register(deadlineElapsed.SetResult);
+                    await deadlineElapsed.Task;
+                    throw Postgres(PostgresErrorCodes.QueryCanceled);
+                }));
+
+        Assert.Equal(
+            PostgreSqlDurableTimeoutEvidence.ProviderDeadlineElapsed,
+            PostgreSqlDurableControlPlaneCommand.GetTimeoutEvidence(exception));
+        Assert.Equal(
+            PostgreSqlDurableUnavailableCause.ProviderDeadline,
+            Classify(exception).UnavailableCause);
+    }
+
+    [Fact]
     public async Task ControlPlaneCommand_PreservesCallerCancellationAndDisabledTimeouts()
     {
         await using var disabledTimeoutCommand = new NpgsqlCommand

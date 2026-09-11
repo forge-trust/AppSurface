@@ -582,10 +582,15 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
 
                 var next = Min(current.LeaseExpiresAtUtc, Min(nextHeartbeat, nextRenewal));
                 var delay = next - now;
-                if (delay > TimeSpan.Zero
-                    && await Task.WhenAny(running, Task.Delay(delay, cancellationToken)).ConfigureAwait(false) == running)
+                if (delay > TimeSpan.Zero)
                 {
-                    break;
+                    using var waitCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    var delayTask = Task.Delay(delay, waitCancellation.Token);
+                    if (await Task.WhenAny(running, delayTask).ConfigureAwait(false) == running)
+                    {
+                        await waitCancellation.CancelAsync().ConfigureAwait(false);
+                        break;
+                    }
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();

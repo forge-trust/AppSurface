@@ -344,15 +344,11 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         Assert.Equal([10], result.AppliedVersions);
         Assert.True(status.IsCompatible);
-        Assert.Equal(
-            10,
-            PostgreSqlDurableRuntimeSchemaManager.ExtendedDeadlineMigrationVersion);
-        Assert.Equal(
-            330,
-            PostgreSqlDurableRuntimeSchemaManager.ExtendedMigrationCommandTimeoutSeconds);
-        Assert.Equal(
-            PostgreSqlDurableRuntimeSchemaManager.ExtendedMigrationCommandTimeoutSeconds,
-            embedded[9].CommandTimeoutSeconds);
+        var extended = Assert.Single(
+            embedded,
+            migration => migration.CommandTimeoutSeconds is not null);
+        Assert.Equal(10, extended.Version);
+        Assert.Equal(330, extended.CommandTimeoutSeconds);
     }
 
     [Fact]

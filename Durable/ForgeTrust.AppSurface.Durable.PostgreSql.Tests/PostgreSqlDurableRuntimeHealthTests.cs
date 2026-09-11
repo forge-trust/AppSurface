@@ -321,7 +321,7 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
     public async Task GetAsync_MapsTransientRuntimeObservationToUnavailable()
     {
         using var dataSource = NpgsqlDataSource.Create(
-            "Host=localhost;Port=5432;Database=durable_health;Username=durable;Password=not-opened");
+            "Host=127.0.0.1;Port=1;Database=durable_health;Username=durable;Password=not-opened;Timeout=1");
         var schemaStatus = CreateStatus(DurableRuntimeSchemaCompatibility.Compatible);
         var health = new PostgreSqlDurableRuntimeHealth(
             CreateRegistration(

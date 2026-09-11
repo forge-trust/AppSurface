@@ -23,15 +23,6 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
     /// <summary>Controls the polling cadence used by programmatic non-blocking lock acquisition.</summary>
     internal const int MigrationLockRetryDelayMilliseconds = 100;
 
-    /// <summary>
-    /// Identifies the bounded index-build migration that requires an extended client deadline.
-    /// </summary>
-    internal const int ExtendedDeadlineMigrationVersion = 10;
-
-    /// <summary>
-    /// Keeps the client alive beyond migration 0010's five-minute server-side statement deadline.
-    /// </summary>
-    internal const int ExtendedMigrationCommandTimeoutSeconds = 330;
     private readonly NpgsqlDataSource _dataSource;
     private readonly IReadOnlyList<DurablePostgreSqlMigration> _migrations;
     private readonly TimeSpan _migrationLockAcquireTimeout;
