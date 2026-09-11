@@ -8,7 +8,7 @@ namespace ForgeTrust.AppSurface.Durable.AdoptionMetrics.Tests;
 public sealed class AdoptionMeasurementTests : IDisposable
 {
     private const string Commit = "1111111111111111111111111111111111111111";
-    private readonly string _root = Path.Combine(
+    private readonly string _root = Path.Join(
         Path.GetTempPath(),
         "AppSurfaceDurableAdoptionMetricsTests",
         Guid.NewGuid().ToString("N"));
@@ -86,7 +86,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
     [Fact]
     public async Task CountRegionLinesAsyncPreservesLoneCrCrLfTokensAndCountsOnlyBetweenTokens()
     {
-        var path = Path.Combine(_root, "mixed-line-endings.cs");
+        var path = Path.Join(_root, "mixed-line-endings.cs");
         await File.WriteAllTextAsync(path, " start \rone\r\n\r\ntwo \r end\r", CancellationToken.None);
         var region = new AdoptionMeasurementRegion(
             AdoptionVariant.Proposed,
@@ -110,7 +110,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
     [Fact]
     public async Task CountRegionLinesAsyncRejectsFilesOverTheMaximumSourceSize()
     {
-        var path = Path.Combine(_root, "oversized.cs");
+        var path = Path.Join(_root, "oversized.cs");
         await using (var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write))
         {
             stream.SetLength(AdoptionMeasurementEngine.MaxRegionSourceFileBytes + 1);
@@ -140,7 +140,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
     [Fact]
     public async Task CountRegionLinesAsyncHonorsCancellationBeforeScanning()
     {
-        var path = Path.Combine(_root, "canceled.cs");
+        var path = Path.Join(_root, "canceled.cs");
         await File.WriteAllTextAsync(path, "start\none\nend\n", CancellationToken.None);
         var region = new AdoptionMeasurementRegion(
             AdoptionVariant.Proposed,
@@ -172,7 +172,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
             fixture.RepositoryRoot,
             new RecordingRevisionVerifier(),
             CancellationToken.None);
-        var output = Path.Combine(_root, "nested", "result.json");
+        var output = Path.Join(_root, "nested", "result.json");
 
         await AdoptionMeasurementWriter.WriteAsync(output, result, CancellationToken.None);
         var bytes = await File.ReadAllBytesAsync(output, CancellationToken.None);
@@ -194,7 +194,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
     public async Task MeasureAsyncRejectsInvalidTokenTopology(string mutation, string expected)
     {
         var fixture = await CreateValidFixtureAsync();
-        var targetPath = Path.Combine(fixture.RepositoryRoot, "repository-registration.cs");
+        var targetPath = Path.Join(fixture.RepositoryRoot, "repository-registration.cs");
         var content = mutation switch
         {
             "missing-start" => "wrong-start\none\ntwo\nend",
@@ -232,7 +232,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
                 var region = GetRegions(root)[5]!.AsObject();
                 region["relativePath"] = mutation switch
                 {
-                    "absolute" => Path.Combine(_root, "outside.cs"),
+                    "absolute" => Path.Join(_root, "outside.cs"),
                     "escape" => "../outside.cs",
                     "invalid" => "invalid\0path.cs",
                     "missing" => "missing.cs",
@@ -261,8 +261,8 @@ public sealed class AdoptionMeasurementTests : IDisposable
         }
 
         var fixture = await CreateValidFixtureAsync();
-        var selectedPath = Path.Combine(fixture.RepositoryRoot, "repository-registration.cs");
-        var outsidePath = Path.Combine(_root, "outside.cs");
+        var selectedPath = Path.Join(fixture.RepositoryRoot, "repository-registration.cs");
+        var outsidePath = Path.Join(_root, "outside.cs");
         await File.WriteAllTextAsync(outsidePath, "start\none\ntwo\nend\n", CancellationToken.None);
         File.Delete(selectedPath);
         File.CreateSymbolicLink(selectedPath, outsidePath);
@@ -477,7 +477,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
         }
 
         var fixture = await CreateValidFixtureAsync();
-        var path = Path.Combine(fixture.RepositoryRoot, "repository-registration.cs");
+        var path = Path.Join(fixture.RepositoryRoot, "repository-registration.cs");
         var originalMode = File.GetUnixFileMode(path);
         File.SetUnixFileMode(path, UnixFileMode.UserWrite);
         try
@@ -536,13 +536,13 @@ public sealed class AdoptionMeasurementTests : IDisposable
     [Fact]
     public async Task GitVerifierAcceptsPinnedCleanFilesAndRejectsMismatchAndDrift()
     {
-        var repository = Path.Combine(_root, "git-consumer");
+        var repository = Path.Join(_root, "git-consumer");
         Directory.CreateDirectory(repository);
         await RunGitAsync(repository, "init");
         await RunGitAsync(repository, "config", "user.name", "AppSurface Test");
         await RunGitAsync(repository, "config", "user.email", "appsurface@example.invalid");
         await File.WriteAllTextAsync(
-            Path.Combine(repository, "selected.cs"),
+            Path.Join(repository, "selected.cs"),
             "baseline",
             CancellationToken.None);
         await RunGitAsync(repository, "add", "selected.cs");
@@ -564,7 +564,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
         Assert.Contains("expected baseline commit", mismatch.Message, StringComparison.Ordinal);
 
         await File.AppendAllTextAsync(
-            Path.Combine(repository, "selected.cs"),
+            Path.Join(repository, "selected.cs"),
             "\ndrift",
             CancellationToken.None);
         var drift = await Assert.ThrowsAsync<AdoptionMeasurementException>(
@@ -576,7 +576,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
         Assert.Contains("differs from pinned commit", drift.Message, StringComparison.Ordinal);
 
         await File.WriteAllTextAsync(
-            Path.Combine(repository, "untracked.cs"),
+            Path.Join(repository, "untracked.cs"),
             "not pinned",
             CancellationToken.None);
         var untracked = await Assert.ThrowsAsync<AdoptionMeasurementException>(
@@ -593,7 +593,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
     {
         var exception = await Assert.ThrowsAsync<AdoptionMeasurementException>(
             () => GitConsumerRevisionVerifier.Instance.VerifyAsync(
-                Path.Combine(_root, "missing-consumer"),
+                Path.Join(_root, "missing-consumer"),
                 Commit,
                 ["selected.cs"],
                 CancellationToken.None));
@@ -611,7 +611,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
         }
 
         var executable = await CreateUnixExecutableAsync(
-            Path.Combine(_root, "blocking-git"),
+            Path.Join(_root, "blocking-git"),
             "#!/bin/sh\nsleep 30\n");
 
         var timeoutVerifier = new GitConsumerRevisionVerifier(
@@ -647,9 +647,9 @@ public sealed class AdoptionMeasurementTests : IDisposable
                 "The deterministic process-group fixture uses Unix shell semantics.");
         }
 
-        var childProcessIdsPath = Path.Combine(_root, "cleanup-child-pids");
+        var childProcessIdsPath = Path.Join(_root, "cleanup-child-pids");
         var executable = await CreateUnixExecutableAsync(
-            Path.Combine(_root, "cleanup-git"),
+            Path.Join(_root, "cleanup-git"),
             $"#!/bin/sh\n(sleep 30) &\nprintf '%s\\n' \"$!\" >> \"$PWD/cleanup-child-pids\"\nsleep 30\n");
 
         var timeoutVerifier = new GitConsumerRevisionVerifier(
@@ -703,9 +703,9 @@ public sealed class AdoptionMeasurementTests : IDisposable
                 "The deterministic inherited-pipe fixture uses Unix shell semantics.");
         }
 
-        var childProcessIdsPath = Path.Combine(_root, "successful-probe-child-pids");
+        var childProcessIdsPath = Path.Join(_root, "successful-probe-child-pids");
         var executable = await CreateUnixExecutableAsync(
-            Path.Combine(_root, "successful-probe-git"),
+            Path.Join(_root, "successful-probe-git"),
             $"#!/bin/sh\n(sleep 30) &\nprintf '%s\\n' \"$!\" >> \"$PWD/successful-probe-child-pids\"\nprintf '%s\\n' '{Commit}'\n");
         var verifier = new GitConsumerRevisionVerifier(
             executable,
@@ -741,7 +741,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
     public async Task GitVerifierReportsWhenGitCannotStart()
     {
         var verifier = new GitConsumerRevisionVerifier(
-            Path.Combine(_root, "missing-git"),
+            Path.Join(_root, "missing-git"),
             TimeSpan.FromSeconds(1));
 
         var exception = await Assert.ThrowsAsync<AdoptionMeasurementException>(
@@ -765,7 +765,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
         }
 
         var executable = await CreateUnixExecutableAsync(
-            Path.Combine(_root, "ownership-failure-git"),
+            Path.Join(_root, "ownership-failure-git"),
             "#!/bin/sh\nsleep 30\n");
         var startedProcessId = 0;
         var ownershipFailure = new System.ComponentModel.Win32Exception(5);
@@ -803,7 +803,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
         }
 
         var executable = await CreateUnixExecutableAsync(
-            Path.Combine(_root, "failing-git"),
+            Path.Join(_root, "failing-git"),
             "#!/bin/sh\nprintf 'fatal: fixture failure\\n' >&2\nexit 1\n");
         var verifier = new GitConsumerRevisionVerifier(executable, TimeSpan.FromSeconds(1));
 
@@ -827,7 +827,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
         }
 
         var executable = await CreateUnixExecutableAsync(
-            Path.Combine(_root, "blocking-source-git"),
+            Path.Join(_root, "blocking-source-git"),
             $"#!/bin/sh\nif [ \"$1\" = \"rev-parse\" ]; then\n  printf '%s\\n' '{Commit}'\nelse\n  sleep 30\nfi\n");
 
         var timeoutVerifier = new GitConsumerRevisionVerifier(
@@ -864,7 +864,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
         }
 
         var executable = await CreateUnixExecutableAsync(
-            Path.Combine(_root, "noisy-source-git"),
+            Path.Join(_root, "noisy-source-git"),
             $"#!/bin/sh\nif [ \"$1\" = \"rev-parse\" ]; then\n  printf '%s\\n' '{Commit}'\nelse\n  i=0\n  while [ \"$i\" -lt 10000 ]; do\n    printf 'discarded source probe output\\n'\n    printf 'discarded source probe error\\n' >&2\n    i=$((i + 1))\n  done\nfi\n");
         var verifier = new GitConsumerRevisionVerifier(
             executable,
@@ -886,9 +886,9 @@ public sealed class AdoptionMeasurementTests : IDisposable
                 "The deterministic inherited-pipe fixture uses a Unix shell script.");
         }
 
-        var childProcessIdsPath = Path.Combine(_root, "inherited-pipe-child-pids");
+        var childProcessIdsPath = Path.Join(_root, "inherited-pipe-child-pids");
         var executable = await CreateUnixExecutableAsync(
-            Path.Combine(_root, "inherited-pipe-source-git"),
+            Path.Join(_root, "inherited-pipe-source-git"),
             $"#!/bin/sh\nif [ \"$1\" = \"rev-parse\" ]; then\n  printf '%s\\n' '{Commit}'\nelse\n  (sleep 3) &\n  printf '%s\\n' \"$!\" >> \"$PWD/inherited-pipe-child-pids\"\n  exit 0\nfi\n");
         var verifier = new GitConsumerRevisionVerifier(
             executable,
@@ -918,10 +918,10 @@ public sealed class AdoptionMeasurementTests : IDisposable
                 "The disappearing-working-directory fixture uses Unix process semantics.");
         }
 
-        var consumerRoot = Path.Combine(_root, "disappearing-consumer");
+        var consumerRoot = Path.Join(_root, "disappearing-consumer");
         Directory.CreateDirectory(consumerRoot);
         var executable = await CreateUnixExecutableAsync(
-            Path.Combine(_root, "disappearing-git"),
+            Path.Join(_root, "disappearing-git"),
             $"#!/bin/sh\nif [ \"$1\" = \"rev-parse\" ]; then\n  rmdir \"$PWD\"\n  printf '%s\\n' '{Commit}'\nfi\n");
 
         var verifier = new GitConsumerRevisionVerifier(executable, TimeSpan.FromSeconds(1));
@@ -1028,7 +1028,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
                 "--consumer-root",
                 fixture.ConsumerRoot,
                 "--output",
-                Path.Combine(_root, "result.json"),
+                Path.Join(_root, "result.json"),
             ],
             standardOut,
             standardError,
@@ -1046,7 +1046,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
         var fixture = await CreateValidFixtureAsync();
         var commit = await InitializeConsumerRepositoryAsync(fixture.ConsumerRoot);
         await RewriteSpecAsync(fixture.SpecPath, root => root["baselineCommit"] = commit);
-        var output = Path.Combine(_root, "program-result.json");
+        var output = Path.Join(_root, "program-result.json");
         using var standardOut = new StringWriter();
         using var standardError = new StringWriter();
 
@@ -1077,7 +1077,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
         var fixture = await CreateValidFixtureAsync();
         var commit = await InitializeConsumerRepositoryAsync(fixture.ConsumerRoot);
         await RewriteSpecAsync(fixture.SpecPath, root => root["baselineCommit"] = commit);
-        var output = Path.Combine(_root, "output-is-a-directory");
+        var output = Path.Join(_root, "output-is-a-directory");
         Directory.CreateDirectory(output);
         using var standardOut = new StringWriter();
         using var standardError = new StringWriter();
@@ -1110,7 +1110,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
         var fixture = await CreateValidFixtureAsync();
         var commit = await InitializeConsumerRepositoryAsync(fixture.ConsumerRoot);
         await File.WriteAllTextAsync(
-            Path.Combine(fixture.RepositoryRoot, "repository-registration.cs"),
+            Path.Join(fixture.RepositoryRoot, "repository-registration.cs"),
             "start\none\ntwo\nthree\nend\n",
             CancellationToken.None);
         await RewriteSpecAsync(
@@ -1122,7 +1122,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
                 GetRegions(root)[5]!["passed"] = false;
                 root["overallPassed"] = false;
             });
-        var output = Path.Combine(_root, "failed-result.json");
+        var output = Path.Join(_root, "failed-result.json");
         using var standardOut = new StringWriter();
         using var standardError = new StringWriter();
 
@@ -1162,8 +1162,8 @@ public sealed class AdoptionMeasurementTests : IDisposable
             fixture.RepositoryRoot,
             new RecordingRevisionVerifier(),
             CancellationToken.None);
-        var target = Path.Combine(_root, "writer-target.json");
-        var output = Path.Combine(_root, "writer-output.json");
+        var target = Path.Join(_root, "writer-target.json");
+        var output = Path.Join(_root, "writer-output.json");
         await File.WriteAllTextAsync(target, "sentinel", CancellationToken.None);
         File.CreateSymbolicLink(output, target);
 
@@ -1196,8 +1196,8 @@ public sealed class AdoptionMeasurementTests : IDisposable
 
     private async Task<Fixture> CreateValidFixtureAsync(bool reverseRegions = false)
     {
-        var consumerRoot = Path.Combine(_root, "consumer");
-        var repositoryRoot = Path.Combine(_root, "repository");
+        var consumerRoot = Path.Join(_root, "consumer");
+        var repositoryRoot = Path.Join(_root, "repository");
         Directory.CreateDirectory(consumerRoot);
         Directory.CreateDirectory(repositoryRoot);
 
@@ -1229,7 +1229,7 @@ public sealed class AdoptionMeasurementTests : IDisposable
             regions.Reverse();
         }
 
-        var specPath = Path.Combine(_root, "spec.json");
+        var specPath = Path.Join(_root, "spec.json");
         await File.WriteAllTextAsync(
             specPath,
             JsonSerializer.Serialize(
