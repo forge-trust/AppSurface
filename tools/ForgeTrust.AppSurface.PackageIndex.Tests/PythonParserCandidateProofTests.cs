@@ -215,6 +215,24 @@ public sealed class PythonParserCandidateProofTests : IDisposable
     }
 
     [Fact]
+    public async Task Workflow_RecordsCompressedPayloadInspectionExceptionAsStructuredRejection()
+    {
+        var candidatePackagePath = CreateCandidatePackage(
+            uncompressedPayload: new string('x', 4_096),
+            payloadCompressionLevel: CompressionLevel.Optimal);
+        await CorruptArchiveEntryCompressedPayloadAsync(candidatePackagePath, "content/payload.txt");
+        var workflow = new PythonParserCandidateProofWorkflow();
+
+        var report = await workflow.RunAsync(
+            new PythonParserCandidateProofRequest(_repositoryRoot, candidatePackagePath, ReportPath("compressed-payload-exception.json")),
+            CancellationToken.None);
+
+        Assert.Equal(["archive_inspection_failed"], report.RejectionReasons);
+        Assert.Contains("InvalidDataException", report.Archive.InspectionFailure, StringComparison.Ordinal);
+        Assert.Equal("not_evaluated", report.Archive.ProvenanceReview.Status);
+    }
+
+    [Fact]
     public async Task Workflow_RejectsArchiveEntriesWithForgedDeclaredPayloadLengths()
     {
         var candidatePackagePath = CreateCandidatePackage();
@@ -279,6 +297,25 @@ public sealed class PythonParserCandidateProofTests : IDisposable
 
         Assert.Equal(["archive_inspection_failed"], report.RejectionReasons);
         Assert.Contains("uncompressed static inspection limit", report.Archive.InspectionFailure, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Workflow_RejectsCompressedPayloadsWithUnderstatedDeclaredLengths()
+    {
+        var candidatePackagePath = CreateCandidatePackage(
+            uncompressedPayload: new string('x', 4_096),
+            payloadCompressionLevel: CompressionLevel.Fastest);
+        await SetArchiveEntryDeclaredUncompressedBytesAsync(candidatePackagePath, "content/payload.txt", 1);
+        var workflow = new PythonParserCandidateProofWorkflow();
+
+        var report = await workflow.RunAsync(
+            new PythonParserCandidateProofRequest(_repositoryRoot, candidatePackagePath, ReportPath("payload-uncompressed-limit.json")),
+            CancellationToken.None);
+
+        Assert.Equal(["archive_inspection_failed"], report.RejectionReasons);
+        // .NET bounds decompression by the declared entry length; the truncated data must still fail CRC validation.
+        Assert.Contains("CRC-32 checksum", report.Archive.InspectionFailure, StringComparison.Ordinal);
+        Assert.Equal("not_evaluated", report.Archive.ProvenanceReview.Status);
     }
 
     [Fact]
@@ -604,7 +641,8 @@ public sealed class PythonParserCandidateProofTests : IDisposable
         string? nuspecContent = null,
         int rootNuspecCount = 1,
         int extraEntryCount = 0,
-        string? uncompressedPayload = null)
+        string? uncompressedPayload = null,
+        CompressionLevel payloadCompressionLevel = CompressionLevel.NoCompression)
     {
         var packageDirectory = TestPathUtils.PathUnder(_repositoryRoot, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(packageDirectory);
@@ -634,7 +672,7 @@ public sealed class PythonParserCandidateProofTests : IDisposable
 
         if (uncompressedPayload is not null)
         {
-            WriteArchiveEntry(archive, "content/payload.txt", uncompressedPayload, CompressionLevel.NoCompression);
+            WriteArchiveEntry(archive, "content/payload.txt", uncompressedPayload, payloadCompressionLevel);
         }
 
         return packagePath;
@@ -713,6 +751,41 @@ public sealed class PythonParserCandidateProofTests : IDisposable
         }
 
         throw new InvalidOperationException($"Could not find ZIP central-directory entry '{entryPath}'.");
+    }
+
+    private static async Task CorruptArchiveEntryCompressedPayloadAsync(string archivePath, string entryPath)
+    {
+        const uint localFileHeaderSignature = 0x04034B50;
+        const int localFileHeaderLength = 30;
+        const int fileNameLengthOffset = 26;
+        const int extraFieldLengthOffset = 28;
+        var archiveBytes = await File.ReadAllBytesAsync(archivePath);
+        var entryNameBytes = Encoding.UTF8.GetBytes(entryPath);
+
+        for (var offset = 0; offset <= archiveBytes.Length - localFileHeaderLength; offset++)
+        {
+            if (BinaryPrimitives.ReadUInt32LittleEndian(archiveBytes.AsSpan(offset)) != localFileHeaderSignature)
+            {
+                continue;
+            }
+
+            var fileNameLength = BinaryPrimitives.ReadUInt16LittleEndian(archiveBytes.AsSpan(offset + fileNameLengthOffset));
+            var extraFieldLength = BinaryPrimitives.ReadUInt16LittleEndian(archiveBytes.AsSpan(offset + extraFieldLengthOffset));
+            var entryName = archiveBytes.AsSpan(offset + localFileHeaderLength, fileNameLength);
+            if (!entryName.SequenceEqual(entryNameBytes))
+            {
+                offset += localFileHeaderLength + fileNameLength + extraFieldLength - 1;
+                continue;
+            }
+
+            var payloadOffset = checked(offset + localFileHeaderLength + fileNameLength + extraFieldLength);
+            archiveBytes[payloadOffset] = 0xFF;
+            archiveBytes[payloadOffset + 1] = 0xFF;
+            await File.WriteAllBytesAsync(archivePath, archiveBytes);
+            return;
+        }
+
+        throw new InvalidOperationException($"Could not find ZIP local-file entry '{entryPath}'.");
     }
 
     private static long GetArchiveEntryUncompressedBytes(string archivePath, string entryPath)

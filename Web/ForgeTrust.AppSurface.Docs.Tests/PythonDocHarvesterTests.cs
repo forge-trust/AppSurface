@@ -127,8 +127,10 @@ public sealed class PythonDocHarvesterTests : IDisposable
             def run():
                 """second parser failure"""
             """");
-        var firstRun = harvester.HarvestAsync(
-            new DocHarvestContext(_testRoot, new ListedCandidatePathPolicy(firstPath)));
+        // A small source read may complete synchronously, so keep the deliberately blocked parser
+        // off the test's control flow to ensure the release in finally is always reachable.
+        var firstRun = Task.Run(() => harvester.HarvestAsync(
+            new DocHarvestContext(_testRoot, new ListedCandidatePathPolicy(firstPath))));
 
         try
         {
@@ -146,9 +148,8 @@ public sealed class PythonDocHarvesterTests : IDisposable
         finally
         {
             releaseFirstParse.TrySetResult();
+            await firstRun.WaitAsync(TimeSpan.FromSeconds(10));
         }
-
-        await firstRun;
 
         Assert.Contains(
             GetDiagnostics(harvester),
@@ -200,6 +201,12 @@ public sealed class PythonDocHarvesterTests : IDisposable
         Assert.Contains(docs, document => document.Path == "api/python/sidecar-worker#method-class-worker-internal-method");
         Assert.DoesNotContain(docs, document => document.Title.Contains("internal_helper", StringComparison.Ordinal));
         Assert.Equal("python", module.Metadata?.CodeLanguage);
+        Assert.Contains("<h2>sidecar.worker Python API</h2>", module.Content, StringComparison.Ordinal);
+        Assert.Contains("<h3>Worker</h3>", module.Content, StringComparison.Ordinal);
+        Assert.Contains("<h3>deliver</h3>", module.Content, StringComparison.Ordinal);
+        Assert.Contains("<h4>run</h4>", module.Content, StringComparison.Ordinal);
+        Assert.Equal(2, Assert.Single(module.Outline!, item => item.Id == "class-worker").Level);
+        Assert.Equal(3, Assert.Single(module.Outline!, item => item.Id == "async-method-class-worker-run").Level);
         Assert.Equal("sidecar/worker.py", Assert.Single(module.SymbolSourceProvenance!, source => source.AnchorId == "class-worker").SourcePath);
         Assert.Empty(GetDiagnostics(harvester));
     }
@@ -300,6 +307,58 @@ public sealed class PythonDocHarvesterTests : IDisposable
         Assert.Contains("Lowercase symbol.", module.Content, StringComparison.Ordinal);
         Assert.Contains("id=\"function-foo\"", module.Content, StringComparison.Ordinal);
         Assert.Contains("id=\"function-foo-666f6f\"", module.Content, StringComparison.Ordinal);
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_KeepsCollisionSuffixesUniqueAcrossSymbolsAndClassMembers()
+    {
+        await WriteAsync(
+            "worker.py",
+            """"
+            __all__ = ["foo_666f6f_2", "Foo", "foo", "foo_666f6f", "A_B", "A"]
+
+            def foo_666f6f_2():
+                """Reserves the first numeric suffix."""
+
+            def Foo():
+                """Uppercase symbol."""
+
+            def foo():
+                """Lowercase symbol."""
+
+            def foo_666f6f():
+                """Collides with the lowercase symbol suffix."""
+
+            class A_B:
+                def c(self):
+                    """First member."""
+
+            class A:
+                def b_c(self):
+                    """Second member with the same normalized qualified name."""
+            """");
+        var harvester = CreateHarvester(CreateEnabledOptions("worker.py"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+        var repeatedDocs = await harvester.HarvestAsync(_testRoot);
+
+        var module = Assert.Single(docs, document => document.Path == "api/python/worker");
+        var symbols = docs.Where(document => document.ParentPath == module.Path).ToArray();
+        Assert.Equal(8, symbols.Length);
+        Assert.Equal(symbols.Length, symbols.Select(document => document.Path).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(docs.Select(document => document.Path), repeatedDocs.Select(document => document.Path));
+        Assert.Equal(module.Content, Assert.Single(repeatedDocs, document => document.Path == module.Path).Content);
+        Assert.Equal("api/python/worker#function-foo-666f6f-3", Assert.Single(symbols, document => document.Title == "foo_666f6f").Path);
+        Assert.Equal("api/python/worker#method-class-a-b-c-2", Assert.Single(symbols, document => document.Title == "A.b_c").Path);
+        Assert.Equal(symbols.Length, module.Outline!.Select(item => item.Id).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(symbols.Length, module.SymbolSourceProvenance!.Select(item => item.AnchorId).Distinct(StringComparer.Ordinal).Count());
+        foreach (var symbol in symbols)
+        {
+            var anchor = symbol.Path[(symbol.Path.IndexOf('#') + 1)..];
+            Assert.Equal(2, module.Content.Split($"id=\"{anchor}\"", StringSplitOptions.None).Length);
+        }
+
         Assert.Empty(GetDiagnostics(harvester));
     }
 
@@ -736,6 +795,73 @@ public sealed class PythonDocHarvesterTests : IDisposable
         Assert.False(((IDocHarvesterHealthParticipation)disabled).ParticipatesInStrictHealth);
         Assert.True(((IDocHarvesterActivation)enabled).IsEnabled);
         Assert.True(((IDocHarvesterHealthParticipation)enabled).ParticipatesInStrictHealth);
+    }
+
+    [Theory]
+    [InlineData("", false)]
+    [InlineData("'Package docs.'", false)]
+    [InlineData("r'Package docs.'", true)]
+    [InlineData("b'Package docs.'", true)]
+    [InlineData("1 + 2", true)]
+    [InlineData("'Not', 'a docstring'", true)]
+    [InlineData("'Package docs.'\nvalue = 1", true)]
+    public async Task HarvestAsync_ValidatesRootPackageInitializerStatements(string source, bool requiresBoundary)
+    {
+        await WriteAsync("__init__.py", source);
+        var harvester = CreateHarvester(CreateEnabledOptions("__init__.py"));
+
+        Assert.Empty(await harvester.HarvestAsync(_testRoot));
+
+        var diagnostics = GetDiagnostics(harvester);
+        if (requiresBoundary)
+        {
+            Assert.Equal(DocHarvestDiagnosticCodes.PythonPublicBoundaryMissing, Assert.Single(diagnostics).Code);
+        }
+        else
+        {
+            Assert.Empty(diagnostics);
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void NormalizeOptions_RestoresNullPythonConfigurationWithoutBroadeningItsBoundary(bool missingPythonOptions)
+    {
+        var options = new AppSurfaceDocsOptions();
+        if (missingPythonOptions)
+        {
+            options.Harvest.Python = null!;
+        }
+        else
+        {
+            options.Harvest.Python.DefaultExclusions = null!;
+            options.Harvest.Python.IncludeGlobs = null!;
+            options.Harvest.Python.ExcludeGlobs = null!;
+        }
+
+        // The path-policy constructor also tolerates incomplete, not-yet-normalized settings.
+        var policy = new AppSurfaceDocsHarvestPathPolicy(options, NullLogger<AppSurfaceDocsHarvestPathPolicy>.Instance);
+        Assert.True(policy.ShouldIncludeFilePath("worker.py", AppSurfaceDocsHarvestSourceKind.Python));
+        AppSurfaceDocsServiceCollectionExtensions.NormalizeOptions(options);
+
+        Assert.NotNull(options.Harvest.Python);
+        Assert.NotNull(options.Harvest.Python.DefaultExclusions);
+        Assert.Empty(options.Harvest.Python.IncludeGlobs);
+        Assert.Empty(options.Harvest.Python.ExcludeGlobs);
+        Assert.False(((IDocHarvesterHealthParticipation)CreateHarvester(options)).ParticipatesInStrictHealth);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_UsesDefaultsWhenEntireHarvestConfigurationIsMissing()
+    {
+        var options = new AppSurfaceDocsOptions { Harvest = null! };
+        var harvester = CreateHarvester(options);
+
+        Assert.Empty(await harvester.HarvestAsync(_testRoot));
+        Assert.Equal(DocHarvestDiagnosticCodes.PythonMissingInclude, Assert.Single(GetDiagnostics(harvester)).Code);
+        Assert.False(((IDocHarvesterActivation)harvester).IsEnabled);
+        Assert.False(((IDocHarvesterHealthParticipation)harvester).ParticipatesInStrictHealth);
     }
 
     [Fact]

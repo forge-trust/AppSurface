@@ -646,6 +646,13 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
         };
         foreach (var path in paths)
         {
+            // Git check-ignore accepts paths that do not exist. Keep the escaped-star assertion
+            // on Windows too, where a literal '*' cannot be created in a file name.
+            if (path == "*.md")
+            {
+                continue;
+            }
+
             await WriteAsync(path, "# candidate");
         }
 

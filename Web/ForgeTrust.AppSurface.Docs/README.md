@@ -1973,6 +1973,8 @@ For this bounded slice, a module must declare one top-level literal `__all__` li
 
 Use `[AppSurfacePythonModule("sidecar/worker.py")]` on one documented top-level C# host type when readers need reciprocal navigation between that API type and an accepted Python module. The literal path is parsed from C# syntax and the link renders only when exactly one published Python module matches it. See the [Python harvesting spike design](../../docs/designs/python-docstring-harvesting-spike.md) for the parser payload trade-off, ownership contract, diagnostics, and RID evidence boundary.
 
+Use emitted Python fragment routes when linking to symbols. Anchors are unique within a module, including class members, and normalization collisions receive deterministic suffixes; deriving a fragment directly from a Python name can therefore point to a different symbol. Module pages render declarations beneath the module heading while retaining the compact two-level API outline used by JavaScript.
+
 ### JavaScript public API harvesting
 
 JavaScript harvesting is for intentional browser runtime contracts: custom events, globals, small public helpers, constants, typedefs, attributes, config fields, module mount contracts, CSS custom properties, and CSS hooks that application authors need to consume. It is enabled by default, but it is annotation-first: AppSurface Docs publishes only supported public doclets and ignores unannotated JavaScript.

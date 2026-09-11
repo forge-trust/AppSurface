@@ -790,6 +790,12 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("--color-sky-100: var(--docs-color-link);", tailwindEntryStylesheet);
         Assert.Contains(".docs-token-bg-accent-strong.text-white", tailwindEntryStylesheet);
         Assert.Contains(".docs-content--markdown a:visited", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content .doc-polyglot-link a {", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content .doc-polyglot-link a:visited {", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content .doc-polyglot-link a:hover {", tailwindEntryStylesheet);
+        Assert.Contains(
+            ".docs-content .doc-polyglot-link a:focus-visible {\n    outline: 2px solid var(--docs-color-accent);\n    outline-offset: 3px;\n}",
+            tailwindEntryStylesheet);
         Assert.Contains("color: var(--docs-color-link-visited);", tailwindEntryStylesheet);
         Assert.True(
             tailwindEntryStylesheet.IndexOf(".docs-content--markdown a:visited", StringComparison.Ordinal)

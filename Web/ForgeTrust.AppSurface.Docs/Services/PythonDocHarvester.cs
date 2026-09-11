@@ -602,22 +602,8 @@ public sealed class PythonDocHarvester : IDocHarvester, IDocHarvesterDiagnosticP
     private static string? GetDocstring(Node body)
     {
         var statement = body.NamedChildren.FirstOrDefault();
-        if (statement?.Type == "string")
-        {
-            return TryReadPlainString(statement.Text, out var directText)
-                ? NormalizeDocstring(directText)
-                : null;
-        }
-
-        if (statement?.Type != "expression_statement" || statement.NamedChildren.Count != 1)
-        {
-            return null;
-        }
-
-        var literal = statement.FirstNamedChild;
-        return literal?.Type == "string" && TryReadPlainString(literal.Text, out var text)
-            ? NormalizeDocstring(text)
-            : null;
+        var text = statement is null ? null : GetDocstringFromStatement(statement);
+        return text is null ? null : NormalizeDocstring(text);
     }
 
     private static bool TryReadPlainString(string literal, out string value)
@@ -853,7 +839,9 @@ public sealed class PythonDocHarvester : IDocHarvester, IDocHarvesterDiagnosticP
         var anchor = anchors[declaration];
         outline.Add(new DocOutlineItem { Id = anchor, Title = declaration.Name, Level = headingLevel });
         provenance.Add(new DocSymbolSourceProvenance { AnchorId = anchor, SourcePath = relativePath, StartLine = declaration.StartLine });
-        content.Append($"<section id=\"{WebUtility.HtmlEncode(anchor)}\" class=\"doc-method-group doc-python-item doc-python-{GetKindSlug(declaration.Kind)}\"><header class=\"doc-method-group-header\"><span class=\"doc-kind\">{GetKindLabel(declaration.Kind)}</span><h{headingLevel}>{WebUtility.HtmlEncode(declaration.Name)}</h{headingLevel}><span data-appsurfacedocs-symbol-source=\"{WebUtility.HtmlEncode(anchor)}\"></span></header><div class=\"doc-body\">");
+        // Like JavaScript API pages, keep the compact outline at levels 2/3 while nesting HTML below the module h2.
+        var renderedHeadingLevel = headingLevel + 1;
+        content.Append($"<section id=\"{WebUtility.HtmlEncode(anchor)}\" class=\"doc-method-group doc-python-item doc-python-{GetKindSlug(declaration.Kind)}\"><header class=\"doc-method-group-header\"><span class=\"doc-kind\">{GetKindLabel(declaration.Kind)}</span><h{renderedHeadingLevel}>{WebUtility.HtmlEncode(declaration.Name)}</h{renderedHeadingLevel}><span data-appsurfacedocs-symbol-source=\"{WebUtility.HtmlEncode(anchor)}\"></span></header><div class=\"doc-body\">");
         if (!string.IsNullOrWhiteSpace(declaration.Docstring))
         {
             AppendDocstring(content, declaration.Docstring!);
@@ -928,14 +916,15 @@ public sealed class PythonDocHarvester : IDocHarvester, IDocHarvesterDiagnosticP
         IReadOnlyList<PythonDeclaration> declarations)
     {
         var anchors = new Dictionary<PythonDeclaration, string>(ReferenceEqualityComparer.Instance);
-        AddAnchors(declarations, parentAnchor: null, anchors);
+        AddAnchors(declarations, parentAnchor: null, anchors, new HashSet<string>(StringComparer.Ordinal));
         return anchors;
     }
 
     private static void AddAnchors(
         IReadOnlyList<PythonDeclaration> declarations,
         string? parentAnchor,
-        IDictionary<PythonDeclaration, string> anchors)
+        IDictionary<PythonDeclaration, string> anchors,
+        ISet<string> usedAnchors)
     {
         foreach (var group in declarations
                      .Select(declaration => new AnchorCandidate(declaration, CreateAnchor(declaration, parentAnchor)))
@@ -948,17 +937,22 @@ public sealed class PythonDocHarvester : IDocHarvester, IDocHarvesterDiagnosticP
             for (var index = 0; index < candidates.Length; index++)
             {
                 var candidate = candidates[index];
-                anchors.Add(
-                    candidate.Declaration,
-                    index == 0
-                        ? candidate.Anchor
-                        : $"{candidate.Anchor}-{Convert.ToHexString(Encoding.UTF8.GetBytes(candidate.Declaration.Name)).ToLowerInvariant()}");
+                var anchor = index == 0
+                    ? candidate.Anchor
+                    : $"{candidate.Anchor}-{Convert.ToHexString(Encoding.UTF8.GetBytes(candidate.Declaration.Name)).ToLowerInvariant()}";
+                var uniqueAnchor = anchor;
+                for (var suffix = 2; !usedAnchors.Add(uniqueAnchor); suffix++)
+                {
+                    uniqueAnchor = $"{anchor}-{suffix.ToString(CultureInfo.InvariantCulture)}";
+                }
+
+                anchors.Add(candidate.Declaration, uniqueAnchor);
             }
         }
 
         foreach (var declaration in declarations)
         {
-            AddAnchors(declaration.Members, anchors[declaration], anchors);
+            AddAnchors(declaration.Members, anchors[declaration], anchors, usedAnchors);
         }
     }
 

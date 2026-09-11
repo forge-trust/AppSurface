@@ -29,7 +29,8 @@ public sealed class DocPolyglotOwnershipLinkerTests
     {
         var firstPython = CreatePythonModule(
             "api/python/first",
-            DocPolyglotOwnershipLinker.CreatePythonModuleMarker("sidecar/worker.py"));
+            DocPolyglotOwnershipLinker.CreatePythonModuleMarker("sidecar/worker.py")
+            + DocPolyglotOwnershipLinker.CreatePythonModuleMarker("sidecar/worker.py"));
         var secondPython = CreatePythonModule(
             "api/python/second",
             DocPolyglotOwnershipLinker.CreatePythonModuleMarker("sidecar/worker.py"));
@@ -65,6 +66,25 @@ public sealed class DocPolyglotOwnershipLinkerTests
     }
 
     [Fact]
+    public void Link_RejectsMultipleValidOwnersForTheSameModule()
+    {
+        var python = CreatePythonModule(
+            "api/python/sidecar-worker",
+            DocPolyglotOwnershipLinker.CreatePythonModuleMarker("sidecar/worker.py"));
+        var firstOwner = CreateCSharpOwner(
+            "Namespaces/Sample.Host",
+            DocPolyglotOwnershipLinker.CreateCSharpOwnerMarker("sidecar/worker.py", "Sample-Host-Worker", "Worker Host"));
+        var secondOwner = CreateCSharpOwner(
+            "Namespaces/Another.Host",
+            DocPolyglotOwnershipLinker.CreateCSharpOwnerMarker("sidecar/worker.py", "Another-Host-Worker", "Another Worker Host"));
+
+        var linked = DocPolyglotOwnershipLinker.Link([python, firstOwner, secondOwner], "/docs");
+
+        Assert.All(linked, node => Assert.DoesNotContain("data-appsurfacedocs-python-", node.Content, StringComparison.Ordinal));
+        Assert.All(linked, node => Assert.DoesNotContain("doc-polyglot-link", node.Content, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Link_RemovesMalformedOrMismatchedMarkersWhileRetainingTheOneValidatedRelationship()
     {
         var python = CreatePythonModule(
@@ -85,19 +105,42 @@ public sealed class DocPolyglotOwnershipLinkerTests
     }
 
     [Fact]
+    public void Link_RemovesValidMarkersWhosePathOrAnchorDoesNotMatchAnEstablishedLink()
+    {
+        var python = CreatePythonModule(
+            "api/python/sidecar-worker",
+            DocPolyglotOwnershipLinker.CreatePythonModuleMarker("sidecar/worker.py")
+            + DocPolyglotOwnershipLinker.CreatePythonModuleMarker("sidecar/unmatched.py"));
+        var csharp = CreateCSharpOwner(
+            "Namespaces/Sample.Host",
+            DocPolyglotOwnershipLinker.CreateCSharpOwnerMarker("sidecar/worker.py", "Sample-Host-Worker", "Worker Host")
+            + DocPolyglotOwnershipLinker.CreateCSharpOwnerMarker("sidecar/other.py", "Sample-Host-Worker", "Other Path")
+            + DocPolyglotOwnershipLinker.CreateCSharpOwnerMarker("sidecar/third.py", "Different-Anchor", "Different Anchor"));
+
+        var linked = DocPolyglotOwnershipLinker.Link([python, csharp], "/docs");
+
+        Assert.Contains("C# host:", linked[0].Content, StringComparison.Ordinal);
+        Assert.Contains("Python module:", linked[1].Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-appsurfacedocs-python-", linked[0].Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-appsurfacedocs-python-", linked[1].Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Link_RejectsEachIncompleteOwnershipPageShape()
     {
         var invalidPythonNodes = new[]
         {
             new DocNode("wrong language", "api/python/a", DocPolyglotOwnershipLinker.CreatePythonModuleMarker("a.py"), Metadata: new DocMetadata { CodeLanguage = "csharp", PageType = "python-module" }),
             new DocNode("wrong page", "api/python/b", DocPolyglotOwnershipLinker.CreatePythonModuleMarker("b.py"), Metadata: new DocMetadata { CodeLanguage = "python", PageType = "api-reference" }),
-            new DocNode("wrong route", "Guides/c", DocPolyglotOwnershipLinker.CreatePythonModuleMarker("c.py"), Metadata: new DocMetadata { CodeLanguage = "python", PageType = "python-module" })
+            new DocNode("wrong route", "Guides/c", DocPolyglotOwnershipLinker.CreatePythonModuleMarker("c.py"), Metadata: new DocMetadata { CodeLanguage = "python", PageType = "python-module" }),
+            new DocNode("null metadata", "api/python/null-metadata", DocPolyglotOwnershipLinker.CreatePythonModuleMarker("null-metadata.py"))
         };
         var invalidCsharpNodes = new[]
         {
             new DocNode("wrong language", "Namespaces/A", DocPolyglotOwnershipLinker.CreateCSharpOwnerMarker("a.py", "A", "A"), Metadata: new DocMetadata { CodeLanguage = "python", PageType = "api-reference" }),
             new DocNode("wrong page", "Namespaces/B", DocPolyglotOwnershipLinker.CreateCSharpOwnerMarker("b.py", "B", "B"), Metadata: new DocMetadata { CodeLanguage = "csharp", PageType = "python-module" }),
-            new DocNode("wrong route", "Guides/C", DocPolyglotOwnershipLinker.CreateCSharpOwnerMarker("c.py", "C", "C"), Metadata: new DocMetadata { CodeLanguage = "csharp", PageType = "api-reference" })
+            new DocNode("wrong route", "Guides/C", DocPolyglotOwnershipLinker.CreateCSharpOwnerMarker("c.py", "C", "C"), Metadata: new DocMetadata { CodeLanguage = "csharp", PageType = "api-reference" }),
+            new DocNode("null metadata", "Namespaces/NullMetadata", DocPolyglotOwnershipLinker.CreateCSharpOwnerMarker("null-metadata.py", "NullMetadata", "Null Metadata"))
         };
         var nodes = invalidPythonNodes.Concat(invalidCsharpNodes).ToArray();
 
@@ -114,6 +157,10 @@ public sealed class DocPolyglotOwnershipLinkerTests
             DocPolyglotOwnershipLinker.CreatePythonModuleMarker("sidecar/worker.py")
             + "<span data-appsurfacedocs-python-module=\"sidecar%2F..%2Fworker.py\"></span>"
             + "<span data-appsurfacedocs-python-module=\"sidecar%5Cworker.py\"></span>"
+            + "<span data-appsurfacedocs-python-module=\"%20\"></span>"
+            + "<span data-appsurfacedocs-python-module=\"%2Fworker.py\"></span>"
+            + "<span data-appsurfacedocs-python-module=\"sidecar%2F%2Fworker.py\"></span>"
+            + "<span data-appsurfacedocs-python-module=\"sidecar%2F.%2Fworker.py\"></span>"
             + "<span data-appsurfacedocs-python-module=\"sidecar%2Fworker.txt\"></span>");
         var csharp = CreateCSharpOwner(
             "Namespaces/Sample.Host",
@@ -126,6 +173,25 @@ public sealed class DocPolyglotOwnershipLinkerTests
         var linked = DocPolyglotOwnershipLinker.Link([python, csharp], "/docs");
 
         Assert.Contains("C# host:", linked[0].Content, StringComparison.Ordinal);
+        Assert.Contains("Python module:", linked[1].Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-appsurfacedocs-python-", linked[0].Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-appsurfacedocs-python-", linked[1].Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Link_AcceptsTheMaximumOwnerLabelLength()
+    {
+        var label = new string('x', 512);
+        var python = CreatePythonModule(
+            "api/python/sidecar-worker",
+            DocPolyglotOwnershipLinker.CreatePythonModuleMarker("sidecar/worker.py"));
+        var csharp = CreateCSharpOwner(
+            "Namespaces/Sample.Host",
+            DocPolyglotOwnershipLinker.CreateCSharpOwnerMarker("sidecar/worker.py", "Sample-Host-Worker", label));
+
+        var linked = DocPolyglotOwnershipLinker.Link([python, csharp], "/docs");
+
+        Assert.Contains($">{label}</a>", linked[0].Content, StringComparison.Ordinal);
         Assert.Contains("Python module:", linked[1].Content, StringComparison.Ordinal);
         Assert.DoesNotContain("data-appsurfacedocs-python-", linked[0].Content, StringComparison.Ordinal);
         Assert.DoesNotContain("data-appsurfacedocs-python-", linked[1].Content, StringComparison.Ordinal);

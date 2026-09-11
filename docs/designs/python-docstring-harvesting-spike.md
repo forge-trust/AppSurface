@@ -65,6 +65,9 @@ project signatures, annotations, default values, type metadata, imports, or a ca
 
 Accepted modules publish at `api/python/{module-slug}`. The slug comes from the policy-approved repository-relative
 source path; a collision yields `appsurfacedocs.python.slug_collision` and neither colliding page is published. Python
+symbol anchors are unique across the entire module, including class members. Case or punctuation normalization uses
+deterministic disambiguation, with numeric suffixes when another declaration already occupies a generated suffix.
+Readers should use the emitted fragment routes rather than derive anchors from symbol names. Python
 symbol fragments carry the same validated generated-API provenance checks used by JavaScript, so search can expose
 language, `Public API` lifecycle, and canonical fragment routes without granting custom harvesters a ranking bypass.
 
