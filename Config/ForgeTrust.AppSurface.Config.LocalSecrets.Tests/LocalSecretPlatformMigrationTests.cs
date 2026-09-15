@@ -225,6 +225,92 @@ public sealed class LocalSecretPlatformMigrationTests
     }
 
     [Theory]
+    [InlineData("linux")]
+    [InlineData("windows")]
+    [InlineData("mac")]
+    public void ExactKeyMigration_ExistingCaseVariantDestinationRetainsBothRecords(string platform)
+    {
+        var app = "App" + Guid.NewGuid().ToString("N");
+        var probe = new LeaseProbe(app);
+        var store = CreateCaseStore(platform, probe);
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        var source = normalizer.Normalize(app, "Development", null, "Legacy.Key").Identity!;
+        var variant = normalizer.Normalize(app, "Development", null, "payments:apikey").Identity!;
+        var destination = normalizer.Normalize(app, "Development", null, "Payments:ApiKey").Identity!;
+
+        using (PlatformLocalSecretMaintenanceLease.Acquire(PlatformLocalSecretStatePaths.DefaultDirectory, app, "Development", null, TimeSpan.FromSeconds(1), CancellationToken.None))
+        {
+            if (store is IndexedLocalSecretStore indexed)
+            {
+                Assert.Equal(LocalSecretResultStatus.Found, indexed.WriteRaw(source, "source-marker").Status);
+                Assert.Equal(LocalSecretResultStatus.Found, indexed.WriteRaw(variant, "existing-marker").Status);
+                Assert.Equal(LocalSecretResultStatus.Found,
+                    indexed.WriteIndexForMigration(app, "Development", null, [source.Key.Value, variant.Key.Value]).Status);
+            }
+            else
+            {
+                var mac = (MacOsV2CompatibilityLocalSecretStore)store;
+                source = source with { StorageName = $"appsurface:v2:{app}:Development::Legacy.Key" };
+                variant = variant with { StorageName = $"appsurface:v2:{app}:Development::payments:apikey" };
+                destination = destination with { StorageName = $"appsurface:v2:{app}:Development::Payments:ApiKey" };
+                Assert.Equal(LocalSecretResultStatus.Found, mac.WriteMigrationValue(source, "source-marker").Status);
+                Assert.Equal(LocalSecretResultStatus.Found, mac.WriteMigrationValue(variant, "existing-marker").Status);
+                Assert.Equal(LocalSecretResultStatus.Found,
+                    mac.WriteMigrationIndex(app, "Development", null, [source.Key.Value, variant.Key.Value]).Status);
+            }
+        }
+
+        var mutations = probe.Mutations;
+        var result = ((IAppSurfaceLocalSecretMigrationStore)store)
+            .MigrateKey(app, "Development", null, source.StorageName, destination.Key);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, result.Status);
+        Assert.Equal("config-key-collision", result.Diagnostic?.Code);
+        Assert.Equal(mutations, probe.Mutations);
+        Assert.Equal("source-marker", ReadCaseRaw(store, source).Value);
+        Assert.Equal("existing-marker", ReadCaseRaw(store, variant).Value);
+        Assert.Equal(LocalSecretResultStatus.Missing, ReadCaseRaw(store, destination).Status);
+    }
+
+    [Fact]
+    public void MacLegacyToV2Migration_ExistingV2CaseVariantRetainsBothIndexesAndRecords()
+    {
+        var app = "App" + Guid.NewGuid().ToString("N");
+        var probe = new LeaseProbe(app);
+        var raw = new NativeMemoryStore(probe);
+        var legacy = new IndexedFake(raw);
+        var mac = new MacOsV2CompatibilityLocalSecretStore(legacy, new MacInterop(probe));
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        var source = normalizer.Normalize(app, "Development", null, "Legacy.Key").Identity!;
+        var variant = normalizer.Normalize(app, "Development", null, "payments:apikey").Identity!
+            with
+        { StorageName = $"appsurface:v2:{app}:Development::payments:apikey" };
+        var destination = normalizer.Normalize(app, "Development", null, "Payments:ApiKey").Identity!
+            with
+        { StorageName = $"appsurface:v2:{app}:Development::Payments:ApiKey" };
+
+        using (PlatformLocalSecretMaintenanceLease.Acquire(PlatformLocalSecretStatePaths.DefaultDirectory, app, "Development", null, TimeSpan.FromSeconds(1), CancellationToken.None))
+        {
+            Assert.Equal(LocalSecretResultStatus.Found, legacy.WriteRaw(source, "source-marker").Status);
+            Assert.Equal(LocalSecretResultStatus.Found,
+                legacy.WriteIndexForMigration(app, "Development", null, [source.Key.Value]).Status);
+            Assert.Equal(LocalSecretResultStatus.Found, mac.WriteMigrationValue(variant, "existing-marker").Status);
+            Assert.Equal(LocalSecretResultStatus.Found,
+                mac.WriteMigrationIndex(app, "Development", null, [variant.Key.Value]).Status);
+        }
+
+        var mutations = probe.Mutations;
+        var result = mac.MigrateKey(app, "Development", null, source.StorageName, destination.Key);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, result.Status);
+        Assert.Equal("config-key-collision", result.Diagnostic?.Code);
+        Assert.Equal(mutations, probe.Mutations);
+        Assert.Equal("source-marker", legacy.ReadRaw(source).Value);
+        Assert.Equal("existing-marker", mac.ReadMigrationValue(variant, true).Value);
+        Assert.Equal(LocalSecretResultStatus.Missing, mac.ReadMigrationValue(destination, true).Status);
+    }
+
+    [Theory]
     [InlineData("v2", false)]
     [InlineData("v2", true)]
     [InlineData("legacy", false)]

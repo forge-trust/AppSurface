@@ -94,7 +94,7 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
             }
 
             return AppSurfaceLocalSecretMigrationCoordinator.Run(
-                CreateMigrationBackend(destination.Identity),
+                CreateMigrationBackend(destination.Identity, sourceStoredKey),
                 applicationName,
                 environment,
                 keyPrefix,
@@ -1157,15 +1157,17 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
         _path + ".maintenance.lock", AppSurfaceLocalSecretMigrationCoordinator.DefaultLeaseTimeout, CancellationToken.None);
 
     /// <summary>Exposes the production backend for deterministic transition fault injection while retaining real disk state.</summary>
-    internal IAppSurfaceLocalSecretMigrationBackend CreateMigrationBackend(AppSurfaceLocalSecretIdentity destination) =>
-        new FileMigrationBackend(this, destination.ApplicationName, destination.Environment, destination.KeyPrefix, destination);
+    internal IAppSurfaceLocalSecretMigrationBackend CreateMigrationBackend(
+        AppSurfaceLocalSecretIdentity destination, string? sourceStoredKey = null) =>
+        new FileMigrationBackend(this, destination.ApplicationName, destination.Environment, destination.KeyPrefix, destination, sourceStoredKey ?? string.Empty);
 
     private sealed class FileMigrationBackend(
         FileAppSurfaceLocalSecretStore owner,
         string applicationName,
         string environment,
         string? keyPrefix,
-        AppSurfaceLocalSecretIdentity destination)
+        AppSurfaceLocalSecretIdentity destination,
+        string sourceStoredKey)
         : IAppSurfaceLocalSecretMigrationBackend
     {
         private readonly string _journalPath = owner._path + ".migration-journal.json";
@@ -1206,6 +1208,21 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
             catch (JsonException exception)
             {
                 throw new IOException("The local secret migration journal is invalid.", exception);
+            }
+        }
+
+        public void ValidateDestination()
+        {
+            lock (owner._gate)
+            {
+                var data = ReadChecked();
+                if (data.Any(pair => InNamespace(pair.Value)
+                                     && !StringComparer.Ordinal.Equals(pair.Key, sourceStoredKey)
+                                     && !StringComparer.Ordinal.Equals(pair.Key, destination.StorageName)
+                                     && StringComparer.OrdinalIgnoreCase.Equals(pair.Value.Key, destination.Key.Value)))
+                {
+                    throw new AppSurfaceLocalSecretMigrationCollisionException();
+                }
             }
         }
 

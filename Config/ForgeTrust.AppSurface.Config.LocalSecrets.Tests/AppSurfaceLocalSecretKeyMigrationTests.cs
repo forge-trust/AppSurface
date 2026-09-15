@@ -18,11 +18,11 @@ public sealed class AppSurfaceLocalSecretKeyMigrationTests
         Assert.Equal(LocalSecretResultStatus.Found, result.Status);
         Assert.Equal(AppSurfaceLocalSecretMigrationState.Complete, result.State);
         Assert.Equal(
-            new[] { "lease", "read-journal", "journal:Prepared", "read:legacy.key", "read:appsurface:MyApp:Development:Payments:ApiKey",
+            new[] { "lease", "read-journal", "journal:Prepared", "read:legacy.key", "validate:Prepared", "read:appsurface:MyApp:Development:Payments:ApiKey",
                 "write:appsurface:MyApp:Development:Payments:ApiKey", "journal:DestinationWritten",
-                "read:appsurface:MyApp:Development:Payments:ApiKey", "read:legacy.key", "journal:DestinationVerified",
-                "publish-index", "journal:SourceDeletePending", "read:appsurface:MyApp:Development:Payments:ApiKey", "read:legacy.key",
-                "delete:legacy.key", "read:legacy.key", "publish-index", "journal:Complete" },
+                "validate:DestinationWritten", "read:appsurface:MyApp:Development:Payments:ApiKey", "read:legacy.key", "journal:DestinationVerified",
+                "validate:DestinationVerified", "publish-index", "journal:SourceDeletePending", "validate:SourceDeletePending",
+                "read:appsurface:MyApp:Development:Payments:ApiKey", "read:legacy.key", "delete:legacy.key", "read:legacy.key", "publish-index", "journal:Complete" },
             backend.Events);
         Assert.Equal("source-secret", backend.Values["appsurface:MyApp:Development:Payments:ApiKey"]);
         Assert.DoesNotContain("legacy.key", backend.Values.Keys);
@@ -352,6 +352,30 @@ public sealed class AppSurfaceLocalSecretKeyMigrationTests
         Assert.Equal(AppSurfaceLocalSecretMigrationState.DestinationVerified, backend.Journal?.State);
     }
 
+    [Theory]
+    [InlineData(AppSurfaceLocalSecretMigrationState.DestinationWritten)]
+    [InlineData(AppSurfaceLocalSecretMigrationState.DestinationVerified)]
+    [InlineData(AppSurfaceLocalSecretMigrationState.SourceDeletePending)]
+    public void Run_ShouldRejectDestinationCollisionOnEveryResumableStage(AppSurfaceLocalSecretMigrationState state)
+    {
+        var backend = new RecordingMigrationBackend("source-secret")
+        {
+            Journal = new AppSurfaceLocalSecretMigrationJournal(
+                "stable-id", "MyApp", "Development", null, "source", "destination", state),
+            CollisionState = state
+        };
+        backend.Values["destination"] = "source-secret";
+
+        var result = AppSurfaceLocalSecretMigrationCoordinator.Run(
+            backend, "MyApp", "Development", null, "source", "destination", AppSurfaceConfigKey.Parse("Payments:ApiKey"), "test-backend");
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, result.Status);
+        Assert.Equal(state, result.State);
+        Assert.Equal("config-key-collision", result.Diagnostic?.Code);
+        Assert.Contains("source", backend.Values.Keys);
+        Assert.DoesNotContain(backend.Events, eventName => eventName == "delete:source");
+    }
+
     [Fact]
     public void Run_ShouldRetainSourceWhenDeleteFails()
     {
@@ -403,6 +427,7 @@ public sealed class AppSurfaceLocalSecretKeyMigrationTests
         public int? FailDestinationReadNumber { get; init; }
         public bool FailDelete { get; init; }
         public int? FailPublishAt { get; init; }
+        public AppSurfaceLocalSecretMigrationState? CollisionState { get; init; }
         private int _sourceReads;
         private int _destinationReads;
         private int _publishCount;
@@ -474,6 +499,12 @@ public sealed class AppSurfaceLocalSecretKeyMigrationTests
         {
             Events.Add("publish-index");
             if (++_publishCount == FailPublishAt) throw new IOException("index publication failed");
+        }
+
+        public void ValidateDestination()
+        {
+            Events.Add($"validate:{Journal?.State}");
+            if (Journal?.State == CollisionState) throw new AppSurfaceLocalSecretMigrationCollisionException();
         }
 
         private sealed class Lease : IDisposable

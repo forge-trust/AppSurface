@@ -25,6 +25,22 @@ internal sealed class MacOsV2MigrationBackend(
     public AppSurfaceLocalSecretMigrationJournal? ReadJournal() => Journal.Read();
     public void CommitJournal(AppSurfaceLocalSecretMigrationJournal journal) => Journal.Commit(journal);
 
+    public void ValidateDestination()
+    {
+        var index = owner.ReadMigrationIndex(destination.ApplicationName, destination.Environment, destination.KeyPrefix);
+        if (index.Status != LocalSecretResultStatus.Found)
+        {
+            throw new IOException(index.Diagnostic?.Problem ?? "The v2 index could not be read.");
+        }
+
+        if (index.Keys.Any(key => (!sourceIsV2 || !StringComparer.Ordinal.Equals(key, source.StoredKey))
+                                  && !StringComparer.Ordinal.Equals(key, destination.Key.Value)
+                                  && StringComparer.OrdinalIgnoreCase.Equals(key, destination.Key.Value)))
+        {
+            throw new AppSurfaceLocalSecretMigrationCollisionException();
+        }
+    }
+
     public string? ReadExact(string storedKey)
     {
         var isDestination = string.Equals(storedKey, destination.StorageName, StringComparison.Ordinal);

@@ -127,6 +127,10 @@ returns `local-secret-migration-unsupported`.
 Native setters preserve a unique existing key's exact case spelling under the writer lease. Logical deletes resolve
 that same spelling before mutation; macOS checks both the v2 and legacy indexes before deleting either version.
 An index containing multiple case-only spellings returns `config-key-collision` before mutation, even when the stored values are equal.
+Exact-key migration applies the same guard to the destination: an existing case-only destination spelling is rejected before
+the destination write or source deletion, while the exact source record is excluded from that check so a deliberate
+case-only source rename can copy to the requested spelling. A collision leaves the durable journal at its last safe state;
+remove or reconcile the competing record and retry the same request.
 Retained macOS migration reads and deletes the exact native source through the indexed adapter's raw operations;
 logical lookup policy is never applied to a migration source. A legacy adapter without these exact operations is
 unsupported before journal preparation or value I/O.

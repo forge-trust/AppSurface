@@ -128,6 +128,22 @@ internal sealed class PlatformLocalSecretMigrationBackend(
 
     public void CommitJournal(AppSurfaceLocalSecretMigrationJournal journal) => Journal.Commit(journal);
 
+    public void ValidateDestination()
+    {
+        var index = owner.ReadIndexForMigration(destination.ApplicationName, destination.Environment, destination.KeyPrefix);
+        if (index.Status != LocalSecretResultStatus.Found)
+        {
+            throw new IOException(index.Diagnostic?.Problem ?? "The platform index could not be read.");
+        }
+
+        if (index.Keys.Any(key => !StringComparer.Ordinal.Equals(key, source.StoredKey)
+                                  && !StringComparer.Ordinal.Equals(key, destination.Key.Value)
+                                  && StringComparer.OrdinalIgnoreCase.Equals(key, destination.Key.Value)))
+        {
+            throw new AppSurfaceLocalSecretMigrationCollisionException();
+        }
+    }
+
     public string? ReadExact(string storedKey)
     {
         var identity = string.Equals(storedKey, source.StorageName, StringComparison.Ordinal) ? source : destination;

@@ -71,7 +71,12 @@ internal interface IAppSurfaceLocalSecretMigrationBackend
     void DeleteExact(string storedKey);
     /// <summary>Publishes destination membership before deletion and removes source membership after confirmed absence.</summary>
     void PublishIndex();
+    /// <summary>Rejects an existing logical destination collision while retaining the exact source as a valid rename input.</summary>
+    void ValidateDestination() { }
 }
+
+/// <summary>Signals a logical destination collision discovered before migration mutation.</summary>
+internal sealed class AppSurfaceLocalSecretMigrationCollisionException : Exception;
 
 /// <summary>Runs the roll-forward-only migration protocol.</summary>
 internal static class AppSurfaceLocalSecretMigrationCoordinator
@@ -188,6 +193,7 @@ internal static class AppSurfaceLocalSecretMigrationCoordinator
 
             if (journal.State == AppSurfaceLocalSecretMigrationState.Prepared)
             {
+                backend.ValidateDestination();
                 var destination = backend.ReadExact(destinationStoredKey);
                 if (destination is null)
                 {
@@ -209,6 +215,7 @@ internal static class AppSurfaceLocalSecretMigrationCoordinator
 
             if (journal.State == AppSurfaceLocalSecretMigrationState.DestinationWritten)
             {
+                backend.ValidateDestination();
                 var rereadDestination = backend.ReadExact(destinationStoredKey);
                 var rereadSource = backend.ReadExact(sourceStoredKey);
                 if (rereadDestination is null || rereadSource is null || !FixedEquals(source!, rereadDestination) || !FixedEquals(source!, rereadSource))
@@ -224,12 +231,14 @@ internal static class AppSurfaceLocalSecretMigrationCoordinator
 
             if (journal.State == AppSurfaceLocalSecretMigrationState.DestinationVerified)
             {
+                backend.ValidateDestination();
                 backend.PublishIndex();
                 journal = Commit(backend, journal, AppSurfaceLocalSecretMigrationState.SourceDeletePending);
             }
 
             if (journal.State == AppSurfaceLocalSecretMigrationState.SourceDeletePending)
             {
+                backend.ValidateDestination();
                 var currentDestination = backend.ReadExact(destinationStoredKey);
                 var currentSource = backend.ReadExact(sourceStoredKey);
                 if (currentDestination is null)
@@ -269,6 +278,16 @@ internal static class AppSurfaceLocalSecretMigrationCoordinator
         catch (OperationCanceledException)
         {
             throw;
+        }
+        catch (AppSurfaceLocalSecretMigrationCollisionException)
+        {
+            journal ??= new AppSurfaceLocalSecretMigrationJournal(
+                "unavailable", applicationName, environment, keyPrefix, sourceStoredKey, destinationStoredKey,
+                AppSurfaceLocalSecretMigrationState.Prepared);
+            return Failure(LocalSecretResultStatus.ProviderFailed, journal, destinationKey,
+                "config-key-collision", "The migration destination collides with another stored logical key.",
+                "A case-variant destination already exists in the same LocalSecrets namespace.",
+                "Remove or explicitly reconcile the existing case variant, then retry the same migration.", sourceName);
         }
         catch (Exception)
         {

@@ -137,6 +137,111 @@ public sealed class LocalSecretFileMigrationPersistenceTests
         Assert.Equal(0, files.Operations);
     }
 
+    [Fact]
+    public void ExistingCaseVariantDestination_ShouldStopBeforeWritingOrDeletingEitherRecord()
+    {
+        using var fixture = new Fixture();
+        var variant = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("App", "Development", null, "payments:apikey").Identity!;
+        var data = JsonSerializer.Deserialize<Dictionary<string, object>>(File.ReadAllText(fixture.Path))!;
+        data[variant.StorageName] = new
+        {
+            ApplicationName = "App",
+            Environment = "Development",
+            KeyPrefix = (string?)null,
+            Key = variant.Key.Value,
+            Value = "existing-marker"
+        };
+        Assert.NotEqual(FileSecretPostureKind.Unsupported,
+            DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance
+                .WriteAllTextWithPosture(fixture.Path, JsonSerializer.Serialize(data)).Kind);
+
+        var result = fixture.Store.MigrateKey("App", "Development", null, Source, Destination.Key);
+
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, result.Status);
+        Assert.Equal("config-key-collision", result.Diagnostic?.Code);
+        using var after = JsonDocument.Parse(File.ReadAllText(fixture.Path));
+        Assert.True(after.RootElement.TryGetProperty(Source, out _));
+        Assert.True(after.RootElement.TryGetProperty(variant.StorageName, out _));
+        Assert.False(after.RootElement.TryGetProperty(Destination.StorageName, out _));
+    }
+
+    [Fact]
+    public void CaseOnlySourceRename_ShouldWriteDesiredSpellingAndDeleteOnlyTheSource()
+    {
+        var directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "local-case-rename-" + Guid.NewGuid().ToString("N"));
+        var path = System.IO.Path.Combine(directory, "records.json");
+        const string source = "appsurface:App:Development:payments:apikey";
+        var data = new Dictionary<string, object>
+        {
+            [source] = new
+            {
+                ApplicationName = "App",
+                Environment = "Development",
+                KeyPrefix = (string?)null,
+                Key = "payments:apikey",
+                Value = "case-rename-marker"
+            }
+        };
+
+        try
+        {
+            Assert.NotEqual(FileSecretPostureKind.Unsupported,
+                DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance
+                    .WriteAllTextWithPosture(path, JsonSerializer.Serialize(data)).Kind);
+            var store = new FileAppSurfaceLocalSecretStore(path);
+
+            var result = store.MigrateKey("App", "Development", null, source, Destination.Key);
+
+            Assert.Equal(LocalSecretResultStatus.Found, result.Status);
+            Assert.Equal(AppSurfaceLocalSecretMigrationState.Complete, result.State);
+            Assert.Equal("case-rename-marker", store.Get(Destination).Value);
+            using var after = JsonDocument.Parse(File.ReadAllText(path));
+            Assert.False(after.RootElement.TryGetProperty(source, out _));
+            Assert.True(after.RootElement.TryGetProperty(Destination.StorageName, out _));
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public void CollisionRetry_ShouldReusePreparedJournalAfterConflictIsRemoved()
+    {
+        using var fixture = new Fixture();
+        var variant = new AppSurfaceLocalSecretIdentityNormalizer()
+            .Normalize("App", "Development", null, "payments:apikey").Identity!;
+        var data = JsonSerializer.Deserialize<Dictionary<string, object>>(File.ReadAllText(fixture.Path))!;
+        data[variant.StorageName] = new
+        {
+            ApplicationName = "App",
+            Environment = "Development",
+            KeyPrefix = (string?)null,
+            Key = variant.Key.Value,
+            Value = "existing-marker"
+        };
+        Assert.NotEqual(FileSecretPostureKind.Unsupported,
+            DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance
+                .WriteAllTextWithPosture(fixture.Path, JsonSerializer.Serialize(data)).Kind);
+
+        var first = fixture.Store.MigrateKey("App", "Development", null, Source, Destination.Key);
+        Assert.Equal("config-key-collision", first.Diagnostic?.Code);
+        Assert.Equal(AppSurfaceLocalSecretMigrationState.Prepared, first.State);
+
+        data.Remove(variant.StorageName);
+        Assert.NotEqual(FileSecretPostureKind.Unsupported,
+            DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance
+                .WriteAllTextWithPosture(fixture.Path, JsonSerializer.Serialize(data)).Kind);
+
+        var retry = new FileAppSurfaceLocalSecretStore(fixture.Path)
+            .MigrateKey("App", "Development", null, Source, Destination.Key);
+
+        Assert.Equal(LocalSecretResultStatus.Found, retry.Status);
+        Assert.Equal(AppSurfaceLocalSecretMigrationState.Complete, retry.State);
+        Assert.Equal("retained-marker", new FileAppSurfaceLocalSecretStore(fixture.Path).Get(Destination).Value);
+    }
+
     private static AppSurfaceLocalSecretKeyMigrationResult Run(IAppSurfaceLocalSecretMigrationBackend backend) =>
         AppSurfaceLocalSecretMigrationCoordinator.Run(backend, "App", "Development", null, Source, Destination.StorageName, Destination.Key, "file");
 
