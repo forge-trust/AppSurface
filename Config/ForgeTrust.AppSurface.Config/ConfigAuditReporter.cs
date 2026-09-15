@@ -23,6 +23,11 @@ public interface IConfigAuditReporter
     /// </summary>
     /// <param name="environment">The environment to audit.</param>
     /// <returns>The completed audit report.</returns>
+    /// <remarks>
+    /// For roots containing <see cref="Secret{T}"/>, this is an effective audit: it executes the shared composition
+    /// engine and therefore may perform the same file, network, IAM, provider, and latency-affecting reads as runtime
+    /// composition. Use a separately named compile-only preflight when those side effects are unacceptable.
+    /// </remarks>
     ConfigAuditReport GetReport(string environment);
 
     /// <summary>
@@ -88,6 +93,8 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
     private readonly ConfigAuditRedactor _redactor;
     private readonly ConfigAuditDictionaryKeyCorrelationOptions _correlationOptions;
     private readonly ConfigAuditValueTraverser _traverser;
+    private readonly ConfigCompositionEngine _composition;
+    private readonly IReadOnlySet<string> _typedSecretPaths;
 
     public ConfigAuditReporter(
         IEnvironmentConfigProvider environmentProvider,
@@ -95,7 +102,8 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         IEnumerable<ConfigAuditKnownEntry>? knownEntries,
         IServiceProvider serviceProvider,
         ConfigAuditRedactor redactor,
-        IOptions<ConfigAuditDictionaryKeyCorrelationOptions> correlationOptions)
+        IOptions<ConfigAuditDictionaryKeyCorrelationOptions> correlationOptions,
+        ConfigCompositionEngine? composition = null)
     {
         _environmentProvider = environmentProvider;
         _otherProviders = providers?
@@ -113,6 +121,18 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         _redactor = redactor;
         _correlationOptions = correlationOptions.Value;
         _traverser = new ConfigAuditValueTraverser(redactor);
+        _composition = composition
+            ?? serviceProvider.GetService<ConfigCompositionEngine>()
+            ?? new ConfigCompositionEngine(
+                environmentProvider,
+                _otherProviders,
+                _otherProviders.OfType<IConfigSecretProvider>(),
+                _otherProviders.OfType<IConfigSecretDeclarationSource>(),
+                new AppSurfaceConfigOptions(),
+                TimeProvider.System);
+        _typedSecretPaths = _knownEntries.Where(entry => _composition.ContainsSecrets(entry.ValueType))
+            .SelectMany(entry => _composition.GetSecretPaths(entry.Key, entry.ValueType))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     public ConfigAuditReport GetReport(string environment)
@@ -160,7 +180,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             });
         }
 
-        var discoveredKeys = BuildDiscoveredKeys(environment, diagnostics);
+        var discoveredKeys = BuildDiscoveredKeys(environment, diagnostics, _typedSecretPaths);
         return new ConfigAuditReport
         {
             Environment = environment,
@@ -176,7 +196,8 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
 
     private IReadOnlyList<ConfigAuditDiscoveredKey> BuildDiscoveredKeys(
         string environment,
-        List<ConfigAuditDiagnostic> reportDiagnostics)
+        List<ConfigAuditDiagnostic> reportDiagnostics,
+        IReadOnlySet<string> typedSecretPaths)
     {
         var discoveredKeys = new List<ConfigAuditDiscoveredKey>();
         foreach (var provider in new IConfigProvider[] { _environmentProvider }.Concat(_otherProviders))
@@ -237,7 +258,10 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             foreach (var providerKey in providerKeys)
             {
                 var classification = ClassifyDiscoveredKey(providerKey.Key);
-                var entrySensitivity = GetDiscoveredKeyEntrySensitivity(providerKey.Key);
+                var entrySensitivity = typedSecretPaths.Any(path =>
+                        IsTypedSecretPath(providerKey.Key, path))
+                    ? ConfigAuditSensitivity.Sensitive
+                    : GetDiscoveredKeyEntrySensitivity(providerKey.Key);
                 var redacted = _redactor.FormatValue(
                     providerKey.Key,
                     providerKey.RawValue,
@@ -261,6 +285,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             .OrderBy(key => key.Classification)
             .ThenBy(key => key.Key, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
     }
 
     private ConfigAuditSensitivity GetDiscoveredKeyEntrySensitivity(string key)
@@ -367,6 +392,14 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         key.Length > knownKey.Length
         && key[knownKey.Length] == '.'
         && key.StartsWith(knownKey, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsTypedSecretPath(string key, string secretPath)
+    {
+        var normalizedKey = key.Replace(':', '.');
+        var normalizedPath = secretPath.Replace(':', '.');
+        return string.Equals(normalizedKey, normalizedPath, StringComparison.OrdinalIgnoreCase)
+               || IsKnownDescendantKey(normalizedKey, normalizedPath);
+    }
 
     private static void RemoveEntryLevelDiagnostics(
         List<ConfigAuditDiagnostic> reportDiagnostics,
@@ -486,16 +519,24 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         ConfigAuditReportTraversalContext? traversalContext)
     {
         var resolution = Resolve(environment, knownEntry);
-        var inspection = InspectWrapper(knownEntry, resolution);
-        var rawValue = inspection.Value;
-        var state = inspection.State ?? resolution.State;
+        var compositionFailed = resolution.CompositionState == ConfigCompositionRootState.Failed;
+        var inspection = compositionFailed
+            ? new ConfigWrapperInspection(null, ConfigAuditEntryState.Invalid, null, [])
+            : InspectWrapper(knownEntry, resolution);
+        var rawValue = compositionFailed ? null : inspection.Value;
+        var state = compositionFailed ? ConfigAuditEntryState.Invalid : inspection.State ?? resolution.State;
         var sources = inspection.DefaultSource != null
             ? [inspection.DefaultSource]
             : resolution.Sources;
-        var traversalSources = inspection.DefaultSource != null || resolution.AuditSources.Count == 0
+        var slotSources = resolution.SecretSlots.SelectMany(slot => slot.Sources.Append(slot.DeclarationSource))
+            .Where(source => source != null).Cast<ConfigAuditSourceRecord>();
+        var effectiveAuditSources = resolution.AuditSources.Concat(slotSources).ToList();
+        var traversalSources = inspection.DefaultSource != null || effectiveAuditSources.Count == 0
             ? sources
-            : resolution.AuditSources;
+            : effectiveAuditSources;
         var options = GetEffectiveOptions(knownEntry, out var optionsDiagnostics);
+        if (_typedSecretPaths.Any(path => IsTypedSecretPath(knownEntry.Key, path)))
+            options = new ConfigAuditEntryOptions(options) { Sensitivity = ConfigAuditSensitivity.Sensitive };
         var rootSensitivity = options.Sensitivity;
         if (mode == ConfigAuditReportMode.ExpandKnownEntryCollections)
         {
@@ -513,8 +554,10 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         var correlation = options.DictionaryKeyCorrelationMode == ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac
             ? new ConfigAuditDictionaryKeyCorrelator(_correlationOptions).CreateContext(environment, knownEntry.Key)
             : ConfigAuditDictionaryKeyCorrelationContext.Unavailable("dictionary key correlation was not requested");
-        var traversal = _traverser.BuildChildren(
-            ConfigAuditPath.Root(knownEntry.Key),
+        var traverser = resolution.CompositionState is null ? _traverser
+            : new ConfigAuditValueTraverser(_redactor, resolution.SecretSlots);
+        var traversal = traverser.BuildChildren(
+            ConfigAuditPath.Root(resolution.CompositionState is null ? knownEntry.Key : knownEntry.Key.Replace(':', '.')),
             rawValue,
             traversalSources,
             resolution.AuditFacts,
@@ -558,6 +601,42 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
 
     private ConfigValueResolution Resolve(string environment, ConfigAuditKnownEntry knownEntry)
     {
+        if (_composition.ContainsSecrets(knownEntry.ValueType))
+        {
+            var result = _composition.Execute(environment, knownEntry.Key, knownEntry.ValueType);
+            var state = result.State switch
+            {
+                ConfigCompositionRootState.Missing => ConfigAuditEntryState.Missing,
+                ConfigCompositionRootState.Resolved => ConfigAuditEntryState.Resolved,
+                _ => ConfigAuditEntryState.Invalid
+            };
+            if (state == ConfigAuditEntryState.Resolved
+                && result.Sources.Any(source => source.Role == ConfigAuditSourceRole.Base)
+                && result.Slots.Any(slot => slot.Sources.Any(source =>
+                    source.Role is ConfigAuditSourceRole.Patch or ConfigAuditSourceRole.Override)))
+            {
+                state = ConfigAuditEntryState.PartiallyResolved;
+            }
+            var sources = result.Sources.Count == 0 && state == ConfigAuditEntryState.Missing
+                ? ConfigValueResolution.Missing(knownEntry.Key).Sources
+                : result.Sources;
+            var compositionDiagnostics = result.Diagnostics.Concat(result.Failures.Select(failure => new ConfigAuditDiagnostic
+            {
+                Severity = ConfigAuditDiagnosticSeverity.Error,
+                Code = failure.Code,
+                Key = knownEntry.Key,
+                ConfigPath = failure.Path,
+                Source = failure.Source,
+                Message = failure.ToString()
+            })).ToList();
+            return new ConfigValueResolution(knownEntry.Key, state, result.Value, sources, compositionDiagnostics)
+            {
+                AuditSources = sources,
+                CompositionState = result.State,
+                SecretSlots = result.Slots
+            };
+        }
+
         var envResolution = ResolveProvider(_environmentProvider, environment, knownEntry, ConfigAuditSourceRole.Override);
         if (envResolution.State == ConfigAuditEntryState.Resolved)
         {
@@ -1102,6 +1181,12 @@ internal sealed record ConfigValueResolution(
     /// Gets internal provenance facts used to attach proof-limited diagnostics while traversing child entries.
     /// </summary>
     public ConfigAuditFactContext AuditFacts { get; init; } = ConfigAuditFactContext.Empty;
+
+    /// <summary>Gets the composition outcome when this entry was executed by the shared engine.</summary>
+    public ConfigCompositionRootState? CompositionState { get; init; }
+
+    /// <summary>Gets the value-free secret slot trace produced by the shared engine.</summary>
+    public IReadOnlyList<ConfigSecretSlotTrace> SecretSlots { get; init; } = [];
 
     /// <summary>
     /// Creates a missing resolution with a synthetic missing source record for <paramref name="key"/>.

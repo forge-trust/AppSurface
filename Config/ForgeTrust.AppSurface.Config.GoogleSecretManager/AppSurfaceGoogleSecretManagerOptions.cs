@@ -108,4 +108,24 @@ public sealed class AppSurfaceGoogleSecretManagerOptions
         _conventions.Add(new AppSurfaceGoogleSecretConvention(logicalKeyPrefix, secretIdPrefix, version));
         return this;
     }
+
+    /// <summary>Copies host settings and registration collections for a single provider's lifetime.</summary>
+    /// <returns>An isolated options instance owned exclusively by the provider.</returns>
+    /// <remarks>Mappings and conventions contain only immutable strings. Copying their collections prevents
+    /// later additions or host-option changes from altering validation, access, or cache identity.</remarks>
+    internal AppSurfaceGoogleSecretManagerOptions CreateSnapshot()
+    {
+        var snapshot = new AppSurfaceGoogleSecretManagerOptions
+        {
+            ProjectId = ProjectId,
+            DefaultVersion = DefaultVersion,
+            AllowLatestVersion = AllowLatestVersion,
+            FailClosedOnProviderFailure = FailClosedOnProviderFailure,
+            LookupTimeout = LookupTimeout,
+            CacheTtl = CacheTtl
+        };
+        snapshot._mappings.AddRange(_mappings);
+        snapshot._conventions.AddRange(_conventions);
+        return snapshot;
+    }
 }

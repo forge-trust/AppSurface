@@ -87,6 +87,7 @@
     <Project Path="examples/aspire-apphost.Tests/AspireAppHostExample.Tests.csproj" />
     <Project Path="examples/aspire-deployment-apphost/AspireDeploymentAppHostExample.csproj" />
     <Project Path="examples/config-validation/ConfigValidationExample.csproj" />
+    <Project Path="examples/file-secret-references/FileSecretReferencesExample.csproj" />
     <Project Path="examples/console-app/ConsoleAppExample.csproj" />
     <Project Path="examples/local-secrets/LocalSecretsExample.csproj" />
     <Project Path="examples/flow-generated-authoring/FlowGeneratedAuthoringExample.csproj" />

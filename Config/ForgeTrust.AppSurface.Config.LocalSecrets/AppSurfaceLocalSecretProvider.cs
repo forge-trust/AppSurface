@@ -11,7 +11,11 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 /// The provider sits above file configuration and below environment variables. Only true missing secrets fall through;
 /// store, posture, identity, and conversion failures are terminal when fail-closed behavior is enabled.
 /// </remarks>
-public sealed class AppSurfaceLocalSecretProvider : IConfigProvider, IConfigProviderTerminalDiagnosticProvider
+public sealed class AppSurfaceLocalSecretProvider :
+    IConfigProvider,
+    IConfigProviderTerminalDiagnosticProvider,
+    IConfigCompositionValueProvider,
+    IConfigProviderClaimInspector
 {
     private readonly AppSurfaceLocalSecretsOptions _options;
     private readonly IAppSurfaceLocalSecretStore _store;
@@ -43,6 +47,66 @@ public sealed class AppSurfaceLocalSecretProvider : IConfigProvider, IConfigProv
 
     /// <inheritdoc />
     public string Name => nameof(AppSurfaceLocalSecretProvider);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// LocalSecrets claims every requested logical key. Posture and identity checks remain terminal resolution states,
+    /// so a claimed key cannot silently fall through when local access is disabled or invalid.
+    /// </remarks>
+    public ConfigProviderClaim InspectClaim(string environment, string logicalKey) => ConfigProviderClaim.MayClaim;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Resolves the stored text before typed conversion while preserving the legacy provider's posture, identity,
+    /// single-read, missing, and terminal behavior. A store result with a null value is represented as empty text,
+    /// matching the legacy conversion input.
+    /// </remarks>
+    public ConfigCompositionValueResolution ResolveRaw(string environment, string logicalKey)
+    {
+        _terminalDiagnostics.TryRemove(CacheKey(environment, logicalKey), out _);
+
+        if (!IsPostureAllowed(environment, out var postureDiagnostic))
+        {
+            return RawTerminal(environment, logicalKey, postureDiagnostic);
+        }
+
+        var identityResult = _normalizer.Normalize(_options.ApplicationName, environment, _options.KeyPrefix, logicalKey);
+        if (!identityResult.Succeeded)
+        {
+            return RawTerminal(environment, logicalKey, identityResult.Diagnostic!);
+        }
+
+        AppSurfaceLocalSecretResult result;
+        try
+        {
+            result = _store.Get(identityResult.Identity!);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            result = AppSurfaceLocalSecretResult.NotFound(
+                LocalSecretResultStatus.ProviderFailed,
+                new AppSurfaceLocalSecretDiagnostic(
+                    "local-secret-provider-threw",
+                    "Local secret provider failed unexpectedly.",
+                    $"The local secret store threw {ex.GetType().Name}.",
+                    "Run `appsurface secrets doctor` and inspect application logs; do not print raw secret values.",
+                    _options.DocsHint,
+                    retryable: true),
+                _store.Name);
+        }
+
+        if (result.Status == LocalSecretResultStatus.Missing)
+        {
+            return ConfigCompositionValueResolution.Missing(Name, Priority, isSensitive: true);
+        }
+
+        if (result.Status == LocalSecretResultStatus.Found)
+        {
+            return ConfigCompositionValueResolution.Resolved(result.Value ?? string.Empty, Name, Priority, isSensitive: true);
+        }
+
+        return RawTerminal(environment, logicalKey, result.Diagnostic!);
+    }
 
     /// <inheritdoc />
     public T? GetValue<T>(string environment, string key)
@@ -216,4 +280,17 @@ public sealed class AppSurfaceLocalSecretProvider : IConfigProvider, IConfigProv
     }
 
     private static string CacheKey(string environment, string key) => $"{environment}\0{key}";
+
+    private ConfigCompositionValueResolution RawTerminal(
+        string environment,
+        string key,
+        AppSurfaceLocalSecretDiagnostic diagnostic)
+    {
+        RememberTerminal(environment, key, diagnostic);
+        return ConfigCompositionValueResolution.TerminalFailure(
+            Name,
+            Priority,
+            isSensitive: true,
+            retryable: diagnostic.Retryable);
+    }
 }

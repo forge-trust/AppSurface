@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Collections.Immutable;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Hosting;
@@ -9,10 +10,13 @@ namespace ForgeTrust.AppSurface.Config;
 /// <summary>
 /// A configuration provider that reads settings from JSON files (e.g., appsettings.json, config_*.json).
 /// </summary>
-public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvider, IConfigAuditKeyEnumerator
+public class FileBasedConfigProvider : IConfigProvider, IConfigCompositionValueProvider, IConfigDiagnosticProvider, IConfigAuditKeyEnumerator
 {
     private readonly IConfigFileLocationProvider _configFileLocationProvider;
     private readonly ILogger<FileBasedConfigProvider> _logger;
+    private readonly Func<string, bool> _directoryExists = Directory.Exists;
+    private readonly Func<string, string, SearchOption, IEnumerable<string>> _enumerateFiles = Directory.EnumerateFiles;
+    private readonly Func<string, byte[]> _readAllBytes = File.ReadAllBytes;
 
     private readonly Lazy<ConfigFileProviderSnapshot> _snapshotLazy;
 
@@ -30,9 +34,36 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
     public FileBasedConfigProvider(
         IConfigFileLocationProvider configFileLocationProvider,
         ILogger<FileBasedConfigProvider> logger)
+        : this(configFileLocationProvider, logger, Directory.Exists, Directory.EnumerateFiles, File.ReadAllBytes)
     {
+    }
+
+    /// <summary>Initializes the production snapshot pipeline with deterministic file I/O operations.</summary>
+    /// <param name="configFileLocationProvider">The provider for configuration file locations.</param>
+    /// <param name="logger">The logger for sanitized file-operation diagnostics.</param>
+    /// <param name="directoryExists">Tests directory existence, with the same semantics as Directory.Exists.</param>
+    /// <param name="enumerateFiles">Enumerates paths for the given directory, search pattern and search option.
+    /// Enumeration may throw immediately or while advancing the returned sequence.</param>
+    /// <param name="readAllBytes">Reads one enumerated path, or throws an I/O/access exception.</param>
+    /// <remarks>This internal seam substitutes only filesystem access. Lazy snapshot creation, ordering,
+    /// collision detection, parsing, merging, source locations and load events use the same code as the public
+    /// constructor. Tests can model case-sensitive paths and access failures without relying on host filesystem
+    /// behavior or supplying prebuilt events. No operations run until the snapshot is first requested.</remarks>
+    internal FileBasedConfigProvider(
+        IConfigFileLocationProvider configFileLocationProvider,
+        ILogger<FileBasedConfigProvider> logger,
+        Func<string, bool> directoryExists,
+        Func<string, string, SearchOption, IEnumerable<string>> enumerateFiles,
+        Func<string, byte[]> readAllBytes)
+    {
+        ArgumentNullException.ThrowIfNull(directoryExists);
+        ArgumentNullException.ThrowIfNull(enumerateFiles);
+        ArgumentNullException.ThrowIfNull(readAllBytes);
         _configFileLocationProvider = configFileLocationProvider;
         _logger = logger;
+        _directoryExists = directoryExists;
+        _enumerateFiles = enumerateFiles;
+        _readAllBytes = readAllBytes;
 
         _snapshotLazy = new Lazy<ConfigFileProviderSnapshot>(InitializeSnapshot, true);
     }
@@ -50,6 +81,16 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
         _snapshotLazy = new Lazy<ConfigFileProviderSnapshot>(() => snapshot, true);
     }
 
+    /// <summary>
+    /// Gets the provider snapshot for the type-aware composition compiler.
+    /// </summary>
+    /// <remarks>
+    /// Existing merged members remain authoritative for ordinary reads and audit enumeration.
+    /// Composition code uses <see cref="ConfigFileProviderSnapshot.Layers"/> and
+    /// <see cref="ConfigFileProviderSnapshot.LoadEvents"/> to inspect file declarations.
+    /// </remarks>
+    internal ConfigFileProviderSnapshot Snapshot => _snapshotLazy.Value;
+
     /// <inheritdoc />
     public T? GetValue<T>(string environment, string key)
     {
@@ -59,6 +100,38 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
         }
 
         return default;
+    }
+
+    /// <summary>
+    /// Resolves a legacy file root as raw JSON for type-aware composition.
+    /// </summary>
+    /// <remarks>
+    /// The returned payload is the existing merged file view. It is deliberately marked non-sensitive because
+    /// file configuration is not a secret-capable source. A present JSON <see langword="null"/> is serialized as
+    /// the raw JSON token <c>null</c> and remains a resolved contribution; only an absent path is missing.
+    /// </remarks>
+    /// <param name="environment">The environment whose merged file view should be queried.</param>
+    /// <param name="logicalKey">The root or logical path within the merged view. Dot and colon separators
+    /// and ordinal case-insensitive segments are supported, including flattened JSON member paths.</param>
+    /// <returns>A value-safe raw resolution with the provider's existing priority and identity.</returns>
+    ConfigCompositionValueResolution IConfigCompositionValueProvider.ResolveRaw(string environment, string logicalKey)
+    {
+        var snapshot = _snapshotLazy.Value;
+        if (!snapshot.Environments.TryGetValue(environment, out var environmentConfig))
+        {
+            return ConfigCompositionValueResolution.Missing(Name, Priority, isSensitive: false);
+        }
+
+        if (!TryGetNodeIncludingNull(environmentConfig, logicalKey, out var node))
+        {
+            return ConfigCompositionValueResolution.Missing(Name, Priority, isSensitive: false);
+        }
+
+        return ConfigCompositionValueResolution.Resolved(
+            node?.ToJsonString() ?? "null",
+            Name,
+            Priority,
+            isSensitive: false);
     }
 
     ConfigValueResolution IConfigDiagnosticProvider.Resolve(
@@ -184,43 +257,127 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
         var origins = new Dictionary<string, Dictionary<string, ConfigAuditSourceRecord>>(StringComparer.OrdinalIgnoreCase);
         var diagnostics = new List<ConfigFileProviderDiagnostic>();
         var sourceLocationMaps = new Dictionary<string, Lazy<ConfigFileSourceLocationMap>>(StringComparer.OrdinalIgnoreCase);
+        var layers = new List<ConfigFileLayer>();
+        var loadEvents = new List<ConfigFileLoadEvent>();
 
         var directory = _configFileLocationProvider.Directory;
-        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        if (string.IsNullOrWhiteSpace(directory) || !_directoryExists(directory))
         {
-            return new ConfigFileProviderSnapshot(environments, origins, diagnostics, sourceLocationMaps);
+            return new ConfigFileProviderSnapshot(
+                environments,
+                origins,
+                diagnostics,
+                sourceLocationMaps,
+                layers.ToImmutableArray(),
+                loadEvents.ToImmutableArray());
         }
 
         // Collect matching files
-        string[] files =
-        [
-            ..Directory.EnumerateFiles(directory, "appsettings*.json", SearchOption.TopDirectoryOnly),
-            ..Directory.EnumerateFiles(directory, "config_*.json", SearchOption.TopDirectoryOnly)
-        ];
+        string[] files;
+        try
+        {
+            files =
+            [
+                .._enumerateFiles(directory, "appsettings*.json", SearchOption.TopDirectoryOnly),
+                .._enumerateFiles(directory, "config_*.json", SearchOption.TopDirectoryOnly)
+            ];
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            var displayDirectory = SanitizeDisplayPath(Path.GetFileName(Path.TrimEndingDirectorySeparator(directory)));
+            if (string.IsNullOrEmpty(displayDirectory))
+            {
+                displayDirectory = "configuration-directory";
+            }
+
+            const string code = "config-file-directory-unreadable";
+            _logger.LogWarning("Skipping unreadable configuration directory {DirectoryName}", displayDirectory);
+            loadEvents.Add(new ConfigFileLoadFailure(
+                code,
+                "*",
+                displayDirectory,
+                0,
+                ConfigFileLoadFailureClassification.Read));
+            diagnostics.Add(new ConfigFileProviderDiagnostic(
+                Environments.Production,
+                new ConfigAuditDiagnostic
+                {
+                    Severity = ConfigAuditDiagnosticSeverity.Warning,
+                    Code = code,
+                    Message = $"Skipping unreadable configuration directory {displayDirectory}."
+                }));
+
+            return new ConfigFileProviderSnapshot(
+                environments,
+                origins,
+                diagnostics,
+                sourceLocationMaps,
+                layers.ToImmutableArray(),
+                loadEvents.ToImmutableArray());
+        }
 
         // Deterministic order so merges are predictable; later files override earlier ones when keys collide
-        foreach (var file in files.OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+        var seenFullPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var order = 0;
+        foreach (var file in files
+                     .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(f => f, StringComparer.Ordinal))
         {
+            var eventOrder = order++;
             var fileName = Path.GetFileNameWithoutExtension(file);
             var environment = ExtractEnvironment(fileName);
-            var displayFileName = Path.GetFileName(file);
+            var displayFileName = SanitizeDisplayPath(Path.GetFileName(file));
+            var fullPath = Path.GetFullPath(file);
+            if (seenFullPaths.ContainsKey(fullPath))
+            {
+                loadEvents.Add(new ConfigFileLoadFailure(
+                    "config-file-path-collision",
+                    environment,
+                    displayFileName,
+                    eventOrder,
+                    ConfigFileLoadFailureClassification.PathCollision));
+                diagnostics.Add(new ConfigFileProviderDiagnostic(environment, new ConfigAuditDiagnostic
+                {
+                    Severity = ConfigAuditDiagnosticSeverity.Warning,
+                    Code = "config-file-path-collision",
+                    Message = $"Skipping config file {displayFileName} because it collides with another file path."
+                }));
+                continue;
+            }
+
+            seenFullPaths[fullPath] = file;
             JsonNode? root;
             try
             {
-                var bytes = File.ReadAllBytes(file);
+                var bytes = _readAllBytes(file);
                 var text = ReadFileText(bytes);
                 if (string.IsNullOrWhiteSpace(text))
                 {
+                    loadEvents.Add(new ConfigFileLoadFailure("config-file-empty", environment, displayFileName, eventOrder, ConfigFileLoadFailureClassification.Parse));
+                    continue;
+                }
+
+                if (FindDuplicateMember(bytes) != null)
+                {
+                    loadEvents.Add(new ConfigFileLoadFailure("config-file-duplicate-member", environment, displayFileName, eventOrder, ConfigFileLoadFailureClassification.Parse));
+                    diagnostics.Add(new ConfigFileProviderDiagnostic(environment, new ConfigAuditDiagnostic
+                    {
+                        Severity = ConfigAuditDiagnosticSeverity.Warning,
+                        Code = "config-file-duplicate-member",
+                        Message = $"Skipping config file {displayFileName} because it contains duplicate JSON members."
+                    }));
                     continue;
                 }
 
                 root = JsonNode.Parse(text);
-                sourceLocationMaps[file] = new Lazy<ConfigFileSourceLocationMap>(
+                var sourceLocationMap = new Lazy<ConfigFileSourceLocationMap>(
                     () => ConfigFileSourceLocationMap.Create(bytes),
                     isThreadSafe: true);
+                sourceLocationMaps[file] = sourceLocationMap;
 
                 if (root is not JsonObject obj)
                 {
+                    loadEvents.Add(new ConfigFileLoadFailure("config-file-non-object-root", environment, displayFileName, eventOrder, ConfigFileLoadFailureClassification.Parse));
                     diagnostics.Add(new ConfigFileProviderDiagnostic(
                         environment,
                         new ConfigAuditDiagnostic
@@ -231,6 +388,10 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
                         }));
                     continue; // Only merge JSON objects at the root
                 }
+
+                var layer = new ConfigFileLayer(environment, fullPath, eventOrder, (JsonObject)obj.DeepClone(), sourceLocationMap);
+                layers.Add(layer);
+                loadEvents.Add(layer);
 
                 if (!environments.TryGetValue(environment, out var existing))
                 {
@@ -246,21 +407,99 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Skipping malformed config file {FileName}", displayFileName);
+                var classification = ex is UnauthorizedAccessException or IOException
+                    ? ConfigFileLoadFailureClassification.Read
+                    : ConfigFileLoadFailureClassification.Parse;
+                var code = classification == ConfigFileLoadFailureClassification.Read ? "config-file-unreadable" : "config-file-malformed";
+                _logger.LogWarning(
+                    "Skipping {Classification} config file {FileName}",
+                    classification,
+                    displayFileName);
+                loadEvents.Add(new ConfigFileLoadFailure(code, environment, displayFileName, eventOrder, classification));
                 diagnostics.Add(new ConfigFileProviderDiagnostic(
                     environment,
                     new ConfigAuditDiagnostic
                     {
                         Severity = ConfigAuditDiagnosticSeverity.Warning,
-                        Code = "config-file-malformed",
-                        Message = $"Skipping malformed config file {displayFileName}."
+                        Code = code,
+                        Message = classification == ConfigFileLoadFailureClassification.Read
+                            ? $"Skipping unreadable config file {displayFileName}."
+                            : $"Skipping malformed config file {displayFileName}."
                     }));
 
                 continue;
             }
         }
 
-        return new ConfigFileProviderSnapshot(environments, origins, diagnostics, sourceLocationMaps);
+        return new ConfigFileProviderSnapshot(
+            environments,
+            origins,
+            diagnostics,
+            sourceLocationMaps,
+            layers.ToImmutableArray(),
+            loadEvents.ToImmutableArray());
+    }
+
+    private static string? FindDuplicateMember(ReadOnlySpan<byte> bytes)
+    {
+        var jsonBytes = bytes.StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }) ? bytes[3..] : bytes;
+        var reader = new Utf8JsonReader(jsonBytes, isFinalBlock: true, state: default);
+        return reader.Read() ? ScanValue(ref reader, null) : null;
+    }
+
+    private static string? ScanValue(ref Utf8JsonReader reader, string? parentPath)
+    {
+        if (reader.TokenType == JsonTokenType.StartObject)
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+            {
+                if (reader.TokenType != JsonTokenType.PropertyName)
+                {
+                    throw new JsonException("Expected a JSON property name.");
+                }
+
+                var name = reader.GetString()!;
+                if (!names.Add(name))
+                {
+                    return string.IsNullOrEmpty(parentPath) ? name : $"{parentPath}.{name}";
+                }
+
+                if (!reader.Read())
+                {
+                    throw new JsonException("Incomplete JSON value.");
+                }
+
+                var duplicate = ScanValue(ref reader, string.IsNullOrEmpty(parentPath) ? name : $"{parentPath}.{name}");
+                if (duplicate != null)
+                {
+                    return duplicate;
+                }
+            }
+
+            if (reader.TokenType != JsonTokenType.EndObject)
+            {
+                throw new JsonException("Incomplete JSON object.");
+            }
+        }
+        else if (reader.TokenType == JsonTokenType.StartArray)
+        {
+            while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+            {
+                var duplicate = ScanValue(ref reader, parentPath);
+                if (duplicate != null)
+                {
+                    return duplicate;
+                }
+            }
+
+            if (reader.TokenType != JsonTokenType.EndArray)
+            {
+                throw new JsonException("Incomplete JSON array.");
+            }
+        }
+
+        return null;
     }
 
     private static string ReadFileText(byte[] bytes)
@@ -268,6 +507,16 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
         using var stream = new MemoryStream(bytes, writable: false);
         using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         return reader.ReadToEnd();
+    }
+
+    private static string SanitizeDisplayPath(string? path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return string.Empty;
+        }
+
+        return string.Concat(path.Where(character => !char.IsControl(character)));
     }
 
     private static string ExtractEnvironment(string fileName)
@@ -327,6 +576,72 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
         }
 
         return true;
+    }
+
+    /// <summary>Finds the first canonical raw-root match, preserving a present JSON null as a contribution.</summary>
+    /// <remarks>Uses the compiler's dot/colon segment model for both requested and serialized file paths.
+    /// Empty keys retain the whole-document behavior. Canonical collisions are rejected by the compiler before
+    /// composition; this lookup does not merge competing matches or change legacy typed traversal.</remarks>
+    private static bool TryGetNodeIncludingNull(JsonNode node, string key, out JsonNode? currentNode)
+    {
+        currentNode = node;
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return true;
+        }
+
+        ConfigLogicalPath requestedPath;
+        try
+        {
+            requestedPath = ConfigLogicalPath.Parse(key);
+        }
+        catch (ArgumentException)
+        {
+            currentNode = null;
+            return false;
+        }
+
+        return TryGetLogicalNode(node, requestedPath, parentPath: null, out currentNode);
+    }
+
+    /// <summary>Traverses matching object ancestors in insertion order, interpreting flattened member names as paths.</summary>
+    /// <remarks>Arrays and scalar nodes cannot be traversed. Invalid member paths are skipped here; the compiler
+    /// reports their diagnostics before execution. A complete match returns its original subtree without rewriting names.</remarks>
+    private static bool TryGetLogicalNode(
+        JsonNode? node, ConfigLogicalPath requestedPath, ConfigLogicalPath? parentPath, out JsonNode? currentNode)
+    {
+        if (node is JsonObject obj)
+        {
+            foreach (var member in obj)
+            {
+                ConfigLogicalPath memberPath;
+                try
+                {
+                    memberPath = ConfigLogicalPath.Parse(parentPath is null
+                        ? member.Key
+                        : $"{parentPath.Canonical}:{member.Key}");
+                }
+                catch (ArgumentException)
+                {
+                    continue;
+                }
+
+                if (memberPath.Equals(requestedPath))
+                {
+                    currentNode = member.Value;
+                    return true;
+                }
+
+                if (memberPath.IsAncestorOrEqual(requestedPath)
+                    && TryGetLogicalNode(member.Value, requestedPath, memberPath, out currentNode))
+                {
+                    return true;
+                }
+            }
+        }
+
+        currentNode = null;
+        return false;
     }
 
     private void EnumerateObject(
@@ -902,11 +1217,77 @@ internal sealed class ConfigFileSourceLocationMap
     }
 }
 
+/// <summary>
+/// The immutable ordered JSON layer captured from one successfully parsed configuration file.
+/// </summary>
+internal sealed record ConfigFileLayer : ConfigFileLoadEvent
+{
+    private readonly JsonObject _document;
+
+    internal ConfigFileLayer(
+        string environment,
+        string filePath,
+        int order,
+        JsonObject document,
+        Lazy<ConfigFileSourceLocationMap> sourceLocationMap)
+        : base(order, environment, filePath)
+    {
+        _document = (JsonObject)document.DeepClone();
+        SourceLocationMap = sourceLocationMap;
+    }
+
+    public Lazy<ConfigFileSourceLocationMap> SourceLocationMap { get; }
+
+    /// <summary>
+    /// Gets an isolated copy of the parsed JSON document for compiler traversal.
+    /// </summary>
+    /// <remarks>
+    /// The layer owns its captured document. Returning a copy keeps compiler and test mutations from changing
+    /// the snapshot, while retaining the existing <c>layer.Document</c> access used by the compiler.
+    /// </remarks>
+    public JsonObject Document => (JsonObject)_document.DeepClone();
+
+    /// <inheritdoc />
+    public override string ToString() => nameof(ConfigFileLayer);
+}
+
+/// <summary>
+/// Classifies a file load failure without retaining exception text or configuration values.
+/// </summary>
+internal enum ConfigFileLoadFailureClassification
+{
+    Parse,
+    Read,
+    PathCollision
+}
+
+/// <summary>
+/// An immutable, value-free record of a file that could not contribute a JSON layer.
+/// </summary>
+/// <param name="Code">The stable diagnostic code.</param>
+/// <param name="Environment">The environment inferred from the file name.</param>
+/// <param name="DisplayPath">The file name safe for diagnostics.</param>
+/// <param name="Order">The deterministic discovery order of the file.</param>
+/// <param name="Classification">The sanitized read or parse classification.</param>
+internal sealed record ConfigFileLoadFailure(
+    string Code,
+    string Environment,
+    string DisplayPath,
+    int Order,
+    ConfigFileLoadFailureClassification Classification) : ConfigFileLoadEvent(Order, Environment, DisplayPath);
+
+/// <summary>
+/// Base type for the ordered file load history consumed by the type-aware compiler.
+/// </summary>
+internal abstract record ConfigFileLoadEvent(int Order, string Environment, string FilePath);
+
 internal sealed record ConfigFileProviderSnapshot(
     Dictionary<string, JsonNode> Environments,
     Dictionary<string, Dictionary<string, ConfigAuditSourceRecord>> Origins,
     IReadOnlyList<ConfigFileProviderDiagnostic> Diagnostics,
-    IReadOnlyDictionary<string, Lazy<ConfigFileSourceLocationMap>> SourceLocationMaps)
+    IReadOnlyDictionary<string, Lazy<ConfigFileSourceLocationMap>> SourceLocationMaps,
+    ImmutableArray<ConfigFileLayer> Layers,
+    ImmutableArray<ConfigFileLoadEvent> LoadEvents)
 {
     public ConfigFileProviderSnapshot(
         Dictionary<string, JsonNode> environments,
@@ -916,7 +1297,18 @@ internal sealed record ConfigFileProviderSnapshot(
             environments,
             origins,
             diagnostics,
-            new Dictionary<string, Lazy<ConfigFileSourceLocationMap>>(StringComparer.OrdinalIgnoreCase))
+            new Dictionary<string, Lazy<ConfigFileSourceLocationMap>>(StringComparer.OrdinalIgnoreCase),
+            [],
+            [])
+    {
+    }
+
+    public ConfigFileProviderSnapshot(
+        Dictionary<string, JsonNode> environments,
+        Dictionary<string, Dictionary<string, ConfigAuditSourceRecord>> origins,
+        IReadOnlyList<ConfigFileProviderDiagnostic> diagnostics,
+        IReadOnlyDictionary<string, Lazy<ConfigFileSourceLocationMap>> sourceLocationMaps)
+        : this(environments, origins, diagnostics, sourceLocationMaps, [], [])
     {
     }
 }

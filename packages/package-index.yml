@@ -34,8 +34,8 @@ packages:
     commercial_status: commercial_ready
     release_track: coordinated
     order: 20
-    use_when: Add this when your AppSurface modules need strongly typed configuration primitives, source-aware audit reports, or sanitized config-diff support instead of ad hoc configuration lookups.
-    includes: AppSurfaceConfigModule, typed config objects, configuration providers, source-aware audit reports, sanitized audit diff helpers, and explicit configuration access patterns.
+    use_when: Add this when your AppSurface modules need strongly typed configuration, [file declared scalar secret references](../Config/ForgeTrust.AppSurface.Config/docs/file-secret-references.md), source-aware audit reports, or sanitized config-diff support.
+    includes: AppSurfaceConfigModule, typed config objects, Secret<T> scalar destinations with atomic file descriptors and exact environment rescue, bounded provider resolution, source-aware audit reports, sanitized audit diff helpers, and explicit configuration access patterns.
     does_not_include: Web hosting, UI docs, caching, LocalSecrets local machine posture, or a remote/team vault system.
     start_here_path: Config/ForgeTrust.AppSurface.Config/README.md
     expected_dependency_package_ids:
@@ -72,7 +72,7 @@ packages:
     includes: AppSurfaceGoogleSecretManagerModule, explicit logical-key to Secret Manager mappings, optional scoped convention resolver, fail-closed terminal diagnostics for claimed keys, Google client and transfer test seams, source-aware config audit integration, UTF-8 text conversion through AppSurface Config, and CLI-assisted declared LocalSecrets or Google transfer to existing Google secrets or a named local test namespace.
     does_not_include: Secret creation, deletion, disable/destroy operations, rotation, IAM provisioning, Terraform or gcloud workflows, generic multi-cloud vault abstraction, background refresh, or runtime credential minting.
     start_here_path: Config/ForgeTrust.AppSurface.Config.GoogleSecretManager/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Config.GoogleSecretManager` after Config when production-like Google Cloud hosts should read mapped AppSurface config secrets from Secret Manager with fail-closed diagnostics.
+    recipe_summary: Add `ForgeTrust.AppSurface.Config.GoogleSecretManager` after Config when production-like Google Cloud hosts should read mapped secrets or [file declared scalar references](../Config/ForgeTrust.AppSurface.Config/docs/file-secret-references.md) from Secret Manager with fail-closed diagnostics.
     depends_on:
       - ForgeTrust.AppSurface.Config
     expected_dependency_package_ids:

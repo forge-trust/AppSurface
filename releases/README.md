@@ -20,6 +20,7 @@ It also acts as a concrete AppSurface Docs example for teams that want stronger 
 - [Release authoring checklist](./release-authoring-checklist.md) is the maintainer workflow for turning the unreleased page into a tagged release.
 - [Coordinated release links](./coordinated-release-links.md) explains when package rows use the frozen tree-local current pointer, an explicit historical note, a held release, or a proof-host note.
 - The [Durable discovery and reconciliation guide](../Durable/README.md#slice-7-discovery-and-reconciliation) explains the public-preview release gate, schema ownership, and explicit worker-host boundary.
+- The [file secret reference guide](../Config/ForgeTrust.AppSurface.Config/docs/file-secret-references.md#migrate-map-secret) explains root-sized migration and the real-adopter rehearsal required before stable publication.
 
 Older preview routes redirect to their canonical release notes so each release line has one live package-facing story.
 
