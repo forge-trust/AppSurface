@@ -63,49 +63,18 @@ public sealed class AppSurfaceLocalSecretProvider :
     /// </remarks>
     public ConfigCompositionValueResolution ResolveRaw(string environment, string logicalKey)
     {
-        _terminalDiagnostics.TryRemove(CacheKey(environment, logicalKey), out _);
-
-        if (!IsPostureAllowed(environment, out var postureDiagnostic))
+        // String conversion preserves the original store text. Reuse the legacy acquisition/status pipeline
+        // so posture, identity, store exceptions and terminal diagnostics have one implementation.
+        var resolution = ResolveValue<string>(environment, logicalKey);
+        return resolution.Status switch
         {
-            return RawTerminal(environment, logicalKey, postureDiagnostic);
-        }
-
-        var identityResult = _normalizer.Normalize(_options.ApplicationName, environment, _options.KeyPrefix, logicalKey);
-        if (!identityResult.Succeeded)
-        {
-            return RawTerminal(environment, logicalKey, identityResult.Diagnostic!);
-        }
-
-        AppSurfaceLocalSecretResult result;
-        try
-        {
-            result = _store.Get(identityResult.Identity!);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
-        {
-            result = AppSurfaceLocalSecretResult.NotFound(
-                LocalSecretResultStatus.ProviderFailed,
-                new AppSurfaceLocalSecretDiagnostic(
-                    "local-secret-provider-threw",
-                    "Local secret provider failed unexpectedly.",
-                    $"The local secret store threw {ex.GetType().Name}.",
-                    "Run `appsurface secrets doctor` and inspect application logs; do not print raw secret values.",
-                    _options.DocsHint,
-                    retryable: true),
-                _store.Name);
-        }
-
-        if (result.Status == LocalSecretResultStatus.Missing)
-        {
-            return ConfigCompositionValueResolution.Missing(Name, Priority, isSensitive: true);
-        }
-
-        if (result.Status == LocalSecretResultStatus.Found)
-        {
-            return ConfigCompositionValueResolution.Resolved(result.Value ?? string.Empty, Name, Priority, isSensitive: true);
-        }
-
-        return RawTerminal(environment, logicalKey, result.Diagnostic!);
+            LocalSecretResultStatus.Found => ConfigCompositionValueResolution.Resolved(
+                resolution.Value!, Name, Priority, isSensitive: true),
+            LocalSecretResultStatus.Missing => ConfigCompositionValueResolution.Missing(Name, Priority, isSensitive: true),
+            _ when !_options.FailClosedOnStoreFailure => ConfigCompositionValueResolution.Missing(Name, Priority, isSensitive: true),
+            _ => ConfigCompositionValueResolution.TerminalFailure(Name, Priority, isSensitive: true,
+                retryable: resolution.Diagnostic?.Retryable ?? false)
+        };
     }
 
     /// <inheritdoc />
@@ -280,17 +249,4 @@ public sealed class AppSurfaceLocalSecretProvider :
     }
 
     private static string CacheKey(string environment, string key) => $"{environment}\0{key}";
-
-    private ConfigCompositionValueResolution RawTerminal(
-        string environment,
-        string key,
-        AppSurfaceLocalSecretDiagnostic diagnostic)
-    {
-        RememberTerminal(environment, key, diagnostic);
-        return ConfigCompositionValueResolution.TerminalFailure(
-            Name,
-            Priority,
-            isSensitive: true,
-            retryable: diagnostic.Retryable);
-    }
 }

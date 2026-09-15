@@ -60,6 +60,26 @@ public sealed class ConfigCompositionStartupTests
         await host.StopAsync();
     }
 
+    /// <summary>An earlier hosted service may stop a fast host before ordinary startup services receive their turn.</summary>
+    [Fact]
+    public async Task StartAsync_EarlierHostedServiceStoppingDuringStartStillValidatesKnownPlan()
+    {
+        using var files = new FileFixture(EnabledDeclaration);
+        var provider = new CountingSecretProvider();
+        using var host = CreateHost(files.Location, [provider], services =>
+        {
+            RegisterKnownConfig(services);
+            services.Insert(0, ServiceDescriptor.Singleton<IHostedService, StopApplicationOnStartService>());
+        });
+
+        await host.StartAsync();
+
+        Assert.True(host.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.IsCancellationRequested);
+        Assert.Equal(1, provider.ValidateCalls);
+        Assert.Equal(0, provider.ResolveCalls);
+        await host.StopAsync();
+    }
+
     /// <summary>Every nonpositive host limit is rejected even when no application config is activated.</summary>
     [Theory]
     [InlineData(nameof(AppSurfaceConfigOptions.ProviderlessResolutionBudget), 0)]
@@ -362,6 +382,17 @@ public sealed class ConfigCompositionStartupTests
     private sealed class ConstructionTracker
     {
         public int Count { get; set; }
+    }
+
+    private sealed class StopApplicationOnStartService(IHostApplicationLifetime lifetime) : IHostedService
+    {
+        public Task StartAsync(CancellationToken cancellationToken)
+        {
+            lifetime.StopApplication();
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     // Keep this generic definition undiscoverable by unrelated tests that scan the entire test assembly.

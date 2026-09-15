@@ -813,6 +813,8 @@ public sealed class ConfigCompositionEngineTests
     [InlineData("null")]
     [InlineData("[]")]
     [InlineData("{invalid-json")]
+    [InlineData("{}")]
+    [InlineData("""{"Endpoint":"partial-root"}""")]
     [InlineData("""{"ApiKey":{"key":"not-a-scalar"}}""")]
     public void Execute_InvalidDirectRootWarningsSurviveNormalFileComposition(string invalidRoot)
     {
@@ -827,6 +829,48 @@ public sealed class ConfigCompositionEngineTests
         Assert.False(result.DirectRoot);
         Assert.Equal("PRODUCTION_SERVICE", Assert.Single(result.Diagnostics).Source!.EnvironmentVariableName);
         Assert.Single(alpha.Resolutions);
+    }
+
+    [Fact]
+    public void Execute_IncompleteDirectRootAllowsLaterCompleteCandidateWithoutProviderReads()
+    {
+        using var files = new FileFixture("{invalid-json");
+        var alpha = new SecretProvider("alpha");
+        var environment = new TestEnvironmentProvider(new()
+        {
+            ["PRODUCTION_SERVICE"] = """{"ApiKey":"partial"}""",
+            ["SERVICE"] = """{"ApiKey":"complete-api","SigningKey":"complete-signing"}"""
+        });
+
+        var result = CreateEngine(bases: [files.Provider], secrets: [alpha], environment: environment)
+            .Execute(EnvironmentName, "Service", typeof(TwoSecrets));
+
+        var value = Resolved<TwoSecrets>(result);
+        Assert.True(result.DirectRoot);
+        AssertSecret(value.ApiKey, true, "complete-api", EnvironmentSource);
+        AssertSecret(value.SigningKey, true, "complete-signing", EnvironmentSource);
+        Assert.Equal("PRODUCTION_SERVICE", Assert.Single(result.Diagnostics).Source!.EnvironmentVariableName);
+        Assert.Empty(alpha.Validations);
+        Assert.Empty(alpha.Resolutions);
+    }
+
+    [Fact]
+    public void Execute_ExplicitNullDirectSecretDeliberatelySuppliesEmptyDestination()
+    {
+        using var files = new FileFixture("{invalid-json");
+        var alpha = new SecretProvider("alpha");
+        var environment = new TestEnvironmentProvider(new() { ["SERVICE"] = """{"ApiKey":null}""" });
+
+        var result = CreateEngine(bases: [files.Provider], secrets: [alpha], environment: environment)
+            .Execute(EnvironmentName, "Service", typeof(OneSecret));
+
+        Assert.True(result.DirectRoot);
+        Assert.True(Resolved<OneSecret>(result).ApiKey.Enabled);
+        Assert.False(Resolved<OneSecret>(result).ApiKey.HasValue);
+        Assert.Null(Resolved<OneSecret>(result).ApiKey.ResolvedProvider);
+        Assert.Empty(result.Diagnostics);
+        Assert.Empty(alpha.Validations);
+        Assert.Empty(alpha.Resolutions);
     }
 
     [Fact]
@@ -1116,6 +1160,29 @@ public sealed class ConfigCompositionEngineTests
         Assert.Equal("direct", value.Label);
         AssertSecret(value.ApiKey, true, "root", nameof(EnvironmentConfigProvider));
         AssertSecret(value.Record.Token, true, "nested", nameof(EnvironmentConfigProvider));
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("42")]
+    [InlineData("[]")]
+    public void Execute_ResolvedNestedSecretReplacesNonObjectAncestorFromSensitiveBase(string lowerAncestor)
+    {
+        using var files = new FileFixture("""
+            {"Service":{"record":{"record_token":{"key":"nested"}},"api_key":{"key":"root"}}}
+            """);
+        var lower = new RawProvider($$"""{"Label":"ordinary","RECORD":{{lowerAncestor}}}""");
+        var alpha = new SecretProvider("alpha") { Resolve = (reference, _) => Success("alpha", reference.Key) };
+
+        var result = CreateEngine(bases: [lower, files.Provider], secrets: [alpha])
+            .Execute(EnvironmentName, "Service", typeof(AnnotatedOptions));
+
+        var value = Resolved<AnnotatedOptions>(result);
+        Assert.Equal("ordinary", value.Label);
+        AssertSecret(value.Record.Token, true, "nested", "alpha");
+        AssertSecret(value.ApiKey, true, "root", "alpha");
+        Assert.Equal(2, alpha.Resolutions.Count);
+        Assert.Single(lower.Reads);
     }
 
     private static ConfigCompositionEngine CreateEngine(

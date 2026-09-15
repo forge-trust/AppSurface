@@ -109,8 +109,11 @@ internal sealed class ConfigCompositionExecutor(IEnvironmentConfigProvider envir
                 foreach (var destination in shape.Secrets)
                 {
                     object? value = null;
-                    if (ConfigCompositionTree.TryGet(buffer, destination.Members, out var node) && node is not null
-                        && !TryScalar(node, destination.InnerType, out value)) { invalid = true; break; }
+                    // A partial object must not silently erase an omitted secret declaration. Explicit null
+                    // deliberately supplies an empty destination; every destination must still be present.
+                    if (!ConfigCompositionTree.TryGet(buffer, destination.Members, out var node)
+                        || (node is not null && !TryScalar(node, destination.InnerType, out value)))
+                    { invalid = true; break; }
                     var path = ConfigCompositionPlanCompiler.Join(root, destination.Members).Canonical;
                     var secret = ConfigCompositionJsonContract.CreateSecret(destination.InnerType, true, value, environment.Name);
                     ConfigCompositionTree.Set(buffer, destination.Members, JsonValue.Create(wrappers.Count));
@@ -177,8 +180,11 @@ internal sealed class ConfigCompositionExecutor(IEnvironmentConfigProvider envir
                 sources.Add(new()
                 {
                     Kind = provider is FileBasedConfigProvider ? ConfigAuditSourceKind.File : ConfigAuditSourceKind.Provider,
-                    ProviderName = raw.ProviderName, ProviderPriority = raw.Priority, ConfigPath = root.Canonical,
-                    AppliedToPath = root.Canonical, Role = ConfigAuditSourceRole.Base,
+                    ProviderName = raw.ProviderName,
+                    ProviderPriority = raw.Priority,
+                    ConfigPath = root.Canonical,
+                    AppliedToPath = root.Canonical,
+                    Role = ConfigAuditSourceRole.Base,
                     Sensitivity = raw.IsSensitive ? ConfigAuditSensitivity.Sensitive : ConfigAuditSensitivity.NonSensitive
                 });
                 break;
@@ -211,9 +217,15 @@ internal sealed class ConfigCompositionExecutor(IEnvironmentConfigProvider envir
                     if (winner is not null)
                     {
                         code = "secret-resolved";
-                        slotSources.Add(new() { Kind = ConfigAuditSourceKind.Provider, ProviderName = winner,
-                            ConfigPath = slot.Path.Canonical, AppliedToPath = slot.Path.Canonical,
-                            Role = ConfigAuditSourceRole.Patch, Sensitivity = ConfigAuditSensitivity.Sensitive });
+                        slotSources.Add(new()
+                        {
+                            Kind = ConfigAuditSourceKind.Provider,
+                            ProviderName = winner,
+                            ConfigPath = slot.Path.Canonical,
+                            AppliedToPath = slot.Path.Canonical,
+                            Role = ConfigAuditSourceRole.Patch,
+                            Sensitivity = ConfigAuditSensitivity.Sensitive
+                        });
                     }
                 }
                 if (TryEnvironmentScalar(plan.Environment, slot.Path, slot.Destination.InnerType, diagnostics, out var envValue, out var candidate))
@@ -392,15 +404,22 @@ internal sealed class ConfigCompositionExecutor(IEnvironmentConfigProvider envir
 
     private ConfigAuditSourceRecord EnvironmentSource(string candidate, string path) => new()
     {
-        Kind = ConfigAuditSourceKind.EnvironmentVariable, ProviderName = environment.Name,
-        EnvironmentVariableName = candidate, ConfigPath = path, AppliedToPath = path,
-        Role = ConfigAuditSourceRole.Override, Sensitivity = ConfigAuditSensitivity.Sensitive
+        Kind = ConfigAuditSourceKind.EnvironmentVariable,
+        ProviderName = environment.Name,
+        EnvironmentVariableName = candidate,
+        ConfigPath = path,
+        AppliedToPath = path,
+        Role = ConfigAuditSourceRole.Override,
+        Sensitivity = ConfigAuditSensitivity.Sensitive
     };
 
     private ConfigAuditDiagnostic ConversionDiagnostic(string path, string candidate) => new()
     {
-        Severity = ConfigAuditDiagnosticSeverity.Warning, Code = "config-environment-conversion-failed",
-        Key = path, ConfigPath = path, Message = "An environment candidate could not be converted; trying the next candidate.",
+        Severity = ConfigAuditDiagnosticSeverity.Warning,
+        Code = "config-environment-conversion-failed",
+        Key = path,
+        ConfigPath = path,
+        Message = "An environment candidate could not be converted; trying the next candidate.",
         Source = EnvironmentSource(candidate, path)
     };
 }

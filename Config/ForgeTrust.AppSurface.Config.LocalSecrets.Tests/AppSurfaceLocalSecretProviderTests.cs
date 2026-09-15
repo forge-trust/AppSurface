@@ -68,6 +68,20 @@ public sealed class AppSurfaceLocalSecretProviderTests
     }
 
     [Fact]
+    public void ResolveRaw_Should_FailClosedWhenCustomStoreOmitsFailureDiagnostic()
+    {
+        var store = new CountingStore(new AppSurfaceLocalSecretResult(
+            LocalSecretResultStatus.ProviderFailed, null, null, "Custom"));
+
+        var result = CreateProvider(store).ResolveRaw("Development", "Payload");
+
+        Assert.Equal(ConfigCompositionValueResolutionStatus.TerminalFailure, result.Status);
+        Assert.False(result.Retryable);
+        Assert.True(result.IsSensitive);
+        Assert.Equal(1, store.ReadCount);
+    }
+
+    [Fact]
     public void ResolveRaw_Should_RejectInvalidIdentityWithoutReadingStore()
     {
         var store = new CountingStore(AppSurfaceLocalSecretResult.Found("secret", "Fixed"));
@@ -79,6 +93,37 @@ public sealed class AppSurfaceLocalSecretProviderTests
         Assert.Equal(0, store.ReadCount);
         Assert.True(provider.TryGetTerminalDiagnostic("Development", "bad\nkey", out var diagnostic));
         Assert.Equal("local-secret-key-invalid-character", diagnostic.Code);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ResolveRaw_Should_ApplySameConfiguredFailClosedPolicyAsLegacy(bool failClosed)
+    {
+        var provider = CreateProvider(new ThrowingStore(), options => options.FailClosedOnStoreFailure = failClosed);
+
+        var raw = provider.ResolveRaw("Development", "Payload");
+
+        Assert.Equal(failClosed ? ConfigCompositionValueResolutionStatus.TerminalFailure
+            : ConfigCompositionValueResolutionStatus.Missing, raw.Status);
+        Assert.Equal(failClosed, provider.TryGetTerminalDiagnostic("Development", "Payload", out _));
+        Assert.Null(provider.GetValue<string>("Development", "Payload"));
+        Assert.Equal(failClosed, provider.TryGetTerminalDiagnostic("Development", "Payload", out _));
+    }
+
+    [Fact]
+    public void ResolveRaw_Should_PreserveDisabledPostureFallbackWhenFailClosedIsDisabled()
+    {
+        var store = new CountingStore(AppSurfaceLocalSecretResult.Found("unused", "Fixed"));
+        var provider = CreateProvider(store, options =>
+        {
+            options.Posture = LocalSecretsPostureMode.Disabled;
+            options.FailClosedOnStoreFailure = false;
+        });
+
+        Assert.Equal(ConfigCompositionValueResolutionStatus.Missing, provider.ResolveRaw("Development", "Payload").Status);
+        Assert.False(provider.TryGetTerminalDiagnostic("Development", "Payload", out _));
+        Assert.Equal(0, store.ReadCount);
     }
 
     [Fact]

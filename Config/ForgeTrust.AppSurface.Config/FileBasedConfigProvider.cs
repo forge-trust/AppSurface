@@ -19,6 +19,7 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigCompositionValueP
     private readonly Func<string, byte[]> _readAllBytes = File.ReadAllBytes;
 
     private readonly Lazy<ConfigFileProviderSnapshot> _snapshotLazy;
+    private readonly Lazy<IReadOnlyDictionary<string, JsonNode>> _compositionEnvironmentsLazy;
 
     /// <inheritdoc />
     public int Priority { get; } = 1;
@@ -66,6 +67,8 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigCompositionValueP
         _readAllBytes = readAllBytes;
 
         _snapshotLazy = new Lazy<ConfigFileProviderSnapshot>(InitializeSnapshot, true);
+        _compositionEnvironmentsLazy = new Lazy<IReadOnlyDictionary<string, JsonNode>>(
+            () => BuildCompositionEnvironments(_snapshotLazy.Value), true);
     }
 
     /// <summary>
@@ -79,6 +82,8 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigCompositionValueP
         _configFileLocationProvider = null!;
         _logger = null!;
         _snapshotLazy = new Lazy<ConfigFileProviderSnapshot>(() => snapshot, true);
+        _compositionEnvironmentsLazy = new Lazy<IReadOnlyDictionary<string, JsonNode>>(
+            () => BuildCompositionEnvironments(_snapshotLazy.Value), true);
     }
 
     /// <summary>
@@ -106,9 +111,10 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigCompositionValueP
     /// Resolves a legacy file root as raw JSON for type-aware composition.
     /// </summary>
     /// <remarks>
-    /// The returned payload is the existing merged file view. It is deliberately marked non-sensitive because
-    /// file configuration is not a secret-capable source. A present JSON <see langword="null"/> is serialized as
-    /// the raw JSON token <c>null</c> and remains a resolved contribution; only an absent path is missing.
+    /// The returned payload is the composition canonical view built from the immutable file layers. It is deliberately
+    /// marked non-sensitive because file configuration is not a secret-capable source. A present JSON <see langword="null"/>
+    /// in the injected no-layer snapshot seam is serialized as the raw JSON token <c>null</c> and remains resolved;
+    /// only an absent path is missing.
     /// </remarks>
     /// <param name="environment">The environment whose merged file view should be queried.</param>
     /// <param name="logicalKey">The root or logical path within the merged view. Dot and colon separators
@@ -116,8 +122,7 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigCompositionValueP
     /// <returns>A value-safe raw resolution with the provider's existing priority and identity.</returns>
     ConfigCompositionValueResolution IConfigCompositionValueProvider.ResolveRaw(string environment, string logicalKey)
     {
-        var snapshot = _snapshotLazy.Value;
-        if (!snapshot.Environments.TryGetValue(environment, out var environmentConfig))
+        if (!_compositionEnvironmentsLazy.Value.TryGetValue(environment, out var environmentConfig))
         {
             return ConfigCompositionValueResolution.Missing(Name, Priority, isSensitive: false);
         }
@@ -132,6 +137,65 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigCompositionValueP
             Name,
             Priority,
             isSensitive: false);
+    }
+
+    /// <summary>
+    /// Builds the immutable host-scoped raw view used only by typed composition.
+    /// </summary>
+    /// <remarks>
+    /// This view preserves legacy null-skipping semantics and merges logical JSON members case-insensitively so a
+    /// higher layer can override a lower layer whose member casing differs. The type-aware compiler remains the
+    /// authority for secret declaration precedence and complete descriptor replacement. The legacy
+    /// <see cref="InitializeSnapshot"/> merge remains unchanged for ordinary file reads and audit enumeration.
+    /// </remarks>
+    private static IReadOnlyDictionary<string, JsonNode> BuildCompositionEnvironments(ConfigFileProviderSnapshot snapshot)
+    {
+        // Tests and focused callers may inject the legacy three-argument snapshot seam without layers. Keep its
+        // explicitly supplied environment view authoritative so found JSON null remains a resolved raw value.
+        if (snapshot.Layers.IsDefaultOrEmpty)
+            return snapshot.Environments;
+
+        var environments = new Dictionary<string, JsonNode>(StringComparer.OrdinalIgnoreCase);
+        foreach (var layer in snapshot.Layers.OrderBy(layer => layer.Order))
+        {
+            if (!environments.TryGetValue(layer.Environment, out var existing))
+            {
+                existing = new JsonObject();
+                environments[layer.Environment] = existing;
+            }
+
+            MergeCompositionJsonObjects((JsonObject)existing, layer.Document);
+        }
+
+        return environments;
+    }
+
+    private static void MergeCompositionJsonObjects(JsonObject target, JsonObject source)
+    {
+        var existingNames = target.Select(item => item.Key)
+            .ToDictionary(key => key, StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in source)
+        {
+            // Composition follows the established file merge rule: null source members do not erase lower values.
+            if (pair.Value is null)
+                continue;
+
+            if (!existingNames.TryGetValue(pair.Key, out var existingName))
+            {
+                target[pair.Key] = pair.Value.DeepClone();
+                existingNames[pair.Key] = pair.Key;
+                continue;
+            }
+
+            if (target[existingName] is JsonObject targetObject && pair.Value is JsonObject sourceObject)
+            {
+                MergeCompositionJsonObjects(targetObject, sourceObject);
+                continue;
+            }
+
+            // Keep the first layer's spelling while applying the higher layer's value.
+            target[existingName] = pair.Value.DeepClone();
+        }
     }
 
     ConfigValueResolution IConfigDiagnosticProvider.Resolve(
@@ -389,7 +453,7 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigCompositionValueP
                     continue; // Only merge JSON objects at the root
                 }
 
-                var layer = new ConfigFileLayer(environment, fullPath, eventOrder, (JsonObject)obj.DeepClone(), sourceLocationMap);
+                var layer = new ConfigFileLayer(environment, fullPath, eventOrder, obj, sourceLocationMap);
                 layers.Add(layer);
                 loadEvents.Add(layer);
 

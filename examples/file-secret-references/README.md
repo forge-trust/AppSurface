@@ -14,9 +14,11 @@ DOTNET_ENVIRONMENT=Development dotnet run --no-build --project examples/file-sec
 DOTNET_ENVIRONMENT=Failure dotnet run --no-build --project examples/file-secret-references -- failure
 ```
 
-The reload setting disables the default host's file watcher for these one-shot processes, including consumers copied to a
-temporary directory. It does not change file selection or secret resolution. The processes assert outcomes and stop; they
-do not demonstrate live configuration reload. PowerShell users can set the same variables with `$env:NAME = 'value'`.
+The example builds the AppSurface host directly and runs its assertions after startup, so it does not invoke the ConsoleApp
+command/help lifecycle. The reload setting disables the default host's file watcher for these one-shot processes, including
+consumers copied to a temporary directory. It does not change file selection or secret resolution. The processes assert
+outcomes and stop; they do not demonstrate live configuration reload. PowerShell users can set the same variables with
+`$env:NAME = 'value'`.
 
 The first case proves `enabled: false` performs no provider read. The second proves an exact environment value rescues
 the same destination without a Google read. The third proves the enabled descriptor reaches the fake Google client and

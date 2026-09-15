@@ -128,7 +128,8 @@ public sealed class FileSecretReferencesMigrationTests
     {
         var variables = rescue ? new Dictionary<string, string?>
         {
-            ["SERVICE__APIKEY"] = "api-rescue", ["SERVICE__SIGNINGKEY"] = "signing-rescue"
+            ["SERVICE__APIKEY"] = "api-rescue",
+            ["SERVICE__SIGNINGKEY"] = "signing-rescue"
         } : [];
         using var files = FileFixture.Create(TwoSiblingDocument(enabled: false), variables);
         var client = new RecordingClient(_ => throw new InvalidOperationException("Disabled references must not read."));

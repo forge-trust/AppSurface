@@ -359,13 +359,6 @@
           "Microsoft.Extensions.Options": "[10.0.8, )"
         }
       },
-      "forgetrust.appsurface.console": {
-        "type": "Project",
-        "dependencies": {
-          "CliFx": "[3.0.0, )",
-          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
-        }
-      },
       "forgetrust.appsurface.core": {
         "type": "Project",
         "dependencies": {
@@ -373,12 +366,6 @@
           "Microsoft.Extensions.Hosting": "[10.0.8, )",
           "Microsoft.Extensions.Logging.Console": "[10.0.8, )"
         }
-      },
-      "CliFx": {
-        "type": "CentralTransitive",
-        "requested": "[3.0.0, )",
-        "resolved": "3.0.0",
-        "contentHash": "pdwqGjsOnD/aHgbFGJJOk1U5JOEsFwVhVMb2LqHUQmPEVSZf2YgyGeZvCtP2SHndBEHxgUVNlNXX37o9uz62bw=="
       },
       "CliWrap": {
         "type": "CentralTransitive",

@@ -121,6 +121,9 @@ A custom options or converter pipeline is not accepted by this release.
 Resolution first tries the ordered direct-root environment candidates. A parseable complete root bypasses file policy,
 base providers, inline providers, and descendant environment values. Invalid earlier candidates retain safe conversion
 diagnostics while later candidates are tried.
+Complete means every declared `Secret<T>` destination is present in the environment object. Each supplied value must
+convert to its scalar type; explicit JSON `null` deliberately supplies an empty destination. An omitted secret member
+rejects that root candidate and lets later candidates or normal composition supply the root.
 
 Without that bypass, the engine validates the plan, selects the first resolved raw whole-root base by existing provider
 priority, resolves each declared secret, applies exact environment overrides, and binds the root once. A sensitive base
@@ -196,15 +199,21 @@ and truthful sensitivity through `ConfigCompositionValueResolution`. A typed-onl
 which roots a convention claims. Alias all implemented capabilities to the same concrete singleton; avoid registering
 separate provider objects through each interface. Google and LocalSecrets already provide these registrations.
 
-Known opted-in roots compile before readiness without constructing wrappers or reading enabled references. Runtime and
-live audit share that compiler, immutable registration snapshot, and execution logic. Caches retain structural metadata
-and plans, while payloads and binding converters belong to one invocation. Provider payload caches, when present, remain
+Known opted-in roots compile in the host's pre-start lifecycle, before ordinary hosted services start, without constructing
+wrappers or reading enabled references. This ordering also validates fast console hosts before a command can request
+shutdown. Runtime and live audit share that compiler, immutable registration snapshot, and execution logic. Caches retain structural metadata
+and up to 1,024 root plans per host. Additional root identities compile without being retained; their resolution semantics
+are unchanged. Payloads and binding converters belong to one invocation. Provider payload caches, when present, remain
 provider-owned; Google keeps its raw-root and declared-reference caches separate.
 
 ## Atomic file layers
 
 A higher file layer repeats and replaces the complete descriptor. Omitted optional members reset to their defaults;
 `key` cannot be inherited from a lower descriptor. Every layer is locally validated, including shadowed declarations.
+For composition, member paths are compared case-insensitively across layers, so `Service.ApiKey` and `service.apikey`
+refer to one logical destination and the higher layer wins while ordinary sibling members remain merged. Complete
+secret descriptor replacement, including omitted optional fields, is enforced by the type-aware compiler after this
+ordinary raw merge; objects at non-secret destinations keep normal deep-merge behavior.
 Malformed, unreadable, empty, non-object, duplicate-member, or case-colliding applicable files remain failure events for
 opted-in roots. The loader skips duplicate JSON members, including case-only duplicates, with a safe diagnostic for
 legacy roots; other accepted files retain the established merged view. File locations accompany

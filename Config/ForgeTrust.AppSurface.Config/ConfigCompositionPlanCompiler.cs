@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text.Json.Nodes;
 
 namespace ForgeTrust.AppSurface.Config;
@@ -41,7 +40,10 @@ internal sealed class ConfigCompositionPlanCompiler
     private readonly ConfigSecretProviderRegistry _registry;
     private readonly IReadOnlyList<IConfigProvider> _bases;
     private readonly IReadOnlyList<IConfigSecretDeclarationSource> _claims;
-    private readonly ConcurrentDictionary<(string Environment, string Key, Type Type), ConfigCompositionPlan> _plans = new();
+    /// <summary>Caps retained root plans; additional requests compile with identical semantics without retention.</summary>
+    internal const int MaximumCachedPlans = 1024;
+    private readonly Dictionary<(string Environment, string Key, Type Type), ConfigCompositionPlan> _plans = new();
+    private readonly object _planCacheLock = new();
 
     /// <summary>Captures one host's structural contract, registration instances, mappings and file snapshot sources.</summary>
     internal ConfigCompositionPlanCompiler(ConfigCompositionJsonContract json, ConfigSecretProviderRegistry registry,
@@ -54,8 +56,20 @@ internal sealed class ConfigCompositionPlanCompiler
     }
 
     /// <summary>Gets a cached plan. New source/registration/options generations belong to a new host compiler.</summary>
-    internal ConfigCompositionPlan Compile(string environment, string key, Type type) =>
-        _plans.GetOrAdd((environment, key, type), k => Build(k.Environment, k.Key, k.Type));
+    internal ConfigCompositionPlan Compile(string environment, string key, Type type)
+    {
+        var identity = (environment, key, type);
+        lock (_planCacheLock)
+            if (_plans.TryGetValue(identity, out var cached)) return cached;
+        // Provider validation can reenter composition, so callbacks must run outside the cache lock.
+        var plan = Build(environment, key, type);
+        lock (_planCacheLock)
+        {
+            if (_plans.TryGetValue(identity, out var cached)) return cached;
+            if (_plans.Count < MaximumCachedPlans) _plans.Add(identity, plan);
+        }
+        return plan;
+    }
 
     private ConfigCompositionPlan Build(string environment, string key, Type type)
     {
@@ -71,6 +85,7 @@ internal sealed class ConfigCompositionPlanCompiler
             failures.Add(new(Join(root, error.Members).Canonical, error.Code));
         failures.AddRange(_registry.Errors.Select(code => new ConfigCompositionFailure(root.Canonical, code)));
         var slots = shape.Secrets.Select(s => new ConfigSecretPlanSlot(s, Join(root, s.Members), null, true, null, [], null)).ToList();
+        var secretPaths = slots.Select(slot => slot.Path).ToHashSet();
         var declarationHistory = new List<ConfigSecretPlanSlot>();
         if (failures.Count > 0) return Result();
 
@@ -165,9 +180,15 @@ internal sealed class ConfigCompositionPlanCompiler
                 {
                     Reference = new(environment, path.Canonical, claim.Key, claim.Version),
                     ProviderConstraint = claim.ProviderId,
-                    Source = new() { Kind = ConfigAuditSourceKind.Provider, ProviderName = claim.ProviderId,
-                        ConfigPath = path.Canonical, AppliedToPath = path.Canonical, Role = ConfigAuditSourceRole.Base,
-                        Sensitivity = ConfigAuditSensitivity.Sensitive }
+                    Source = new()
+                    {
+                        Kind = ConfigAuditSourceKind.Provider,
+                        ProviderName = claim.ProviderId,
+                        ConfigPath = path.Canonical,
+                        AppliedToPath = path.Canonical,
+                        Role = ConfigAuditSourceRole.Base,
+                        Sensitivity = ConfigAuditSensitivity.Sensitive
+                    }
                 };
             }
             else if (slots.Any(s => s.Reference is not null && s.Path.Overlaps(path)) || root.IsAncestorOrEqual(path) && !root.Equals(path))
@@ -219,7 +240,7 @@ internal sealed class ConfigCompositionPlanCompiler
                 catch (ArgumentException) { failures.Add(new(root.Canonical, "secret-path-invalid")); continue; }
                 if (!path.Overlaps(root)) continue;
                 if (!nodes.TryAdd(path, pair.Value)) failures.Add(new(path.Canonical, "secret-path-collision", source: FileSource(layer.FilePath, path, null)));
-                if (pair.Value is JsonObject child && !slots.Any(s => s.Path.Equals(path))) ReadNodes(child, path, nodes, layer);
+                if (pair.Value is JsonObject child && !secretPaths.Contains(path)) ReadNodes(child, path, nodes, layer);
             }
         }
     }
@@ -233,9 +254,15 @@ internal sealed class ConfigCompositionPlanCompiler
 
     private static ConfigAuditSourceRecord FileSource(string file, ConfigLogicalPath path, ConfigAuditSourceLocation? location) => new()
     {
-        Kind = ConfigAuditSourceKind.File, ProviderName = nameof(FileBasedConfigProvider), ProviderPriority = 1,
-        FilePath = file, ConfigPath = path.Canonical, AppliedToPath = path.Canonical, Location = location,
-        Role = ConfigAuditSourceRole.Base, Sensitivity = ConfigAuditSensitivity.Sensitive
+        Kind = ConfigAuditSourceKind.File,
+        ProviderName = nameof(FileBasedConfigProvider),
+        ProviderPriority = 1,
+        FilePath = file,
+        ConfigPath = path.Canonical,
+        AppliedToPath = path.Canonical,
+        Location = location,
+        Role = ConfigAuditSourceRole.Base,
+        Sensitivity = ConfigAuditSensitivity.Sensitive
     };
 
     private static bool TryDescriptor(JsonNode? node, out Descriptor? descriptor, out string code)

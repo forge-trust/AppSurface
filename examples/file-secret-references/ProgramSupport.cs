@@ -38,7 +38,6 @@ public sealed class FileSecretReferencesModule : IAppSurfaceHostModule
         var demoClient = new DemoGoogleSecretClient();
         services.AddSingleton(demoClient);
         services.UseAppSurfaceGoogleSecretManagerClient(demoClient);
-        services.AddHostedService<DemoOutputService>();
     }
 
     public void RegisterDependentModules(ModuleDependencyBuilder builder)
@@ -56,12 +55,17 @@ public sealed class FileSecretReferencesModule : IAppSurfaceHostModule
         && exception.Failures.Any(failure => failure.Code == "secret-not-found");
 }
 
-internal sealed class DemoOutputService(
-    FileSecretReferencesConfig config,
-    DemoGoogleSecretClient client,
-    IHostApplicationLifetime applicationLifetime) : IHostedService
+/// <summary>Uses the standard AppSurface host builder without command or hosted-service behavior.</summary>
+public sealed class FileSecretReferencesStartup : AppSurfaceStartup<FileSecretReferencesModule>
 {
-    public Task StartAsync(CancellationToken cancellationToken)
+    protected override void ConfigureServicesForAppType(StartupContext context, IServiceCollection services)
+    {
+    }
+}
+
+internal static class DemoOutput
+{
+    public static void Verify(FileSecretReferencesConfig config, DemoGoogleSecretClient client)
     {
         var mode = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production";
         var environmentKey = Environment.GetEnvironmentVariable("FILESECRETREFERENCES__APIKEY");
@@ -88,11 +92,7 @@ internal sealed class DemoOutputService(
         }
 
         Console.WriteLine($"PASS mode={mode} hasValue={hasValue} provider={provider} googleCalls={client.CallCount}");
-        applicationLifetime.StopApplication();
-        return Task.CompletedTask;
     }
-
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     private static void Assert(bool condition, string assertion)
     {

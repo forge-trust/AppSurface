@@ -567,8 +567,13 @@ internal sealed class ConfigAuditValueTraverser
             else
             {
                 var nested = BuildUnresolvedSecretChildren(childPath, ref budget, reportContext);
-                entries.Add(new ConfigAuditEntry { Key = childPath.DisplayPath, State = ConfigAuditEntryState.Invalid,
-                    Children = nested.Children, Diagnostics = nested.Diagnostics });
+                entries.Add(new ConfigAuditEntry
+                {
+                    Key = childPath.DisplayPath,
+                    State = ConfigAuditEntryState.Invalid,
+                    Children = nested.Children,
+                    Diagnostics = nested.Diagnostics
+                });
             }
         }
         return new(entries, diagnostics);
@@ -582,8 +587,11 @@ internal sealed class ConfigAuditValueTraverser
             : ConfigAuditEntryState.Invalid;
         return new ConfigAuditEntry
         {
-            Key = slot.Path.Replace(':', '.'), DeclaredType = declaredType, State = state,
-            DisplayValue = slot.HasValue ? ConfigAuditRedactor.Placeholder : null, IsRedacted = true,
+            Key = slot.Path.Replace(':', '.'),
+            DeclaredType = declaredType,
+            State = state,
+            DisplayValue = slot.HasValue ? ConfigAuditRedactor.Placeholder : null,
+            IsRedacted = true,
             Sources = slot.Sources,
             Diagnostics = [new ConfigAuditDiagnostic
             {

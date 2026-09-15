@@ -1,6 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
-using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Config.Tests;
 
@@ -13,8 +13,8 @@ public sealed class ConfigCompositionDocumentationTests
     [Fact]
     public void DiagnosticCatalog_EveryGeneratedDocsFragmentTargetsARealGuideAnchor()
     {
-        var root = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
-        var anchors = GetAnchors(File.ReadAllText(Path.Combine(root, GuideRelativePath)));
+        var root = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var anchors = GetAnchors(File.ReadAllText(RepositoryPath(root, GuideRelativePath)));
         // Read emitted code literals as well as catalog cases, so adding a new failure need not update a test allowlist.
         // This exercises the intentionally internal diagnostic seam; it never inspects private members.
         var codes = ReadCoreSources(root)
@@ -41,8 +41,8 @@ public sealed class ConfigCompositionDocumentationTests
     [Fact]
     public void CompositionApiLinks_TargetTheSameGuideAnchorsAsTheFailureCatalog()
     {
-        var root = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
-        var anchors = GetAnchors(File.ReadAllText(Path.Combine(root, GuideRelativePath)));
+        var root = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var anchors = GetAnchors(File.ReadAllText(RepositoryPath(root, GuideRelativePath)));
         var urls = ReadCoreSources(root)
             .SelectMany(source => Matches(source, Regex.Escape(CanonicalUrl) + "#[a-z0-9-]+"))
             .Select(match => match.Value)
@@ -60,8 +60,8 @@ public sealed class ConfigCompositionDocumentationTests
     [Fact]
     public void GuideSidecar_UsesTheDiagnosticCanonicalSlugAndExistingRelatedPages()
     {
-        var root = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
-        var sidecar = File.ReadAllText(Path.Combine(root, GuideRelativePath + ".yml"));
+        var root = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var sidecar = File.ReadAllText(RepositoryPath(root, GuideRelativePath + ".yml"));
         var canonicalSlug = Scalar(sidecar, "canonical_slug") ?? Scalar(sidecar, "slug");
         Assert.Equal(new Uri(CanonicalUrl).AbsolutePath.Trim('/'), canonicalSlug);
         Assert.False(string.IsNullOrWhiteSpace(Scalar(sidecar, "title")));
@@ -75,7 +75,7 @@ public sealed class ConfigCompositionDocumentationTests
             .ToArray();
         Assert.NotEmpty(relatedPages);
         foreach (var page in relatedPages)
-            Assert.True(File.Exists(Path.Combine(root, page)), $"The guide sidecar names a missing related page: {page}");
+            Assert.True(File.Exists(RepositoryPath(root, page)), $"The guide sidecar names a missing related page: {page}");
     }
 
     [Theory]
@@ -86,8 +86,8 @@ public sealed class ConfigCompositionDocumentationTests
     [InlineData("examples/file-secret-references/README.md")]
     public void CompositionDocumentation_RelativeLinksResolveToFilesAndActualFragments(string relativeDocument)
     {
-        var root = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
-        var document = Path.Combine(root, relativeDocument);
+        var root = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var document = RepositoryPath(root, relativeDocument);
         Assert.True(File.Exists(document), $"Missing composition document: {relativeDocument}");
         var markdown = WithoutFencedCode(File.ReadAllText(document));
         var targets = Matches(markdown, @"\[[^\]\r\n]+\]\((?<target><[^>\r\n]+>|[^\s)]+)(?:\s+""[^""]*"")?\)")
@@ -104,7 +104,9 @@ public sealed class ConfigCompositionDocumentationTests
             if (target.StartsWith('/') || Uri.TryCreate(target, UriKind.Absolute, out _)) continue;
             var parts = target.Split('#', 2);
             var relativePath = Uri.UnescapeDataString(parts[0].Split('?', 2)[0]);
-            var destination = relativePath.Length == 0 ? document : Path.GetFullPath(Path.Combine(Path.GetDirectoryName(document)!, relativePath));
+            var destination = relativePath.Length == 0
+                ? document
+                : RepositoryPathFromDocument(root, document, relativePath);
             Assert.True(File.Exists(destination) || Directory.Exists(destination),
                 $"{relativeDocument} links to missing relative destination '{target}'.");
             if (parts.Length < 2 || !destination.EndsWith(".md", StringComparison.OrdinalIgnoreCase)) continue;
@@ -115,9 +117,22 @@ public sealed class ConfigCompositionDocumentationTests
     }
 
     private static IEnumerable<string> ReadCoreSources(string root) => Directory
-        .EnumerateFiles(Path.Combine(root, "Config", "ForgeTrust.AppSurface.Config"), "*.cs", SearchOption.TopDirectoryOnly)
+        .EnumerateFiles(TestPathUtils.PathUnder(root, "Config", "ForgeTrust.AppSurface.Config"), "*.cs", SearchOption.TopDirectoryOnly)
         .Order(StringComparer.Ordinal)
         .Select(File.ReadAllText);
+
+    private static string RepositoryPath(string repositoryRoot, string relativePath) =>
+        TestPathUtils.PathUnder(repositoryRoot, relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries));
+
+    private static string RepositoryPathFromDocument(string repositoryRoot, string document, string relativePath)
+    {
+        var normalizedDestination = Path.GetFullPath(relativePath, Path.GetDirectoryName(document)!);
+        var relativeRepoPath = Path.GetRelativePath(repositoryRoot, normalizedDestination);
+        var segments = relativeRepoPath.Split(
+            new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
+            StringSplitOptions.RemoveEmptyEntries);
+        return TestPathUtils.PathUnder(repositoryRoot, segments);
+    }
 
     private static string? Scalar(string yaml, string key)
     {
