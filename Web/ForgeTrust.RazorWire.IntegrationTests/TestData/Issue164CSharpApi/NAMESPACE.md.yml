@@ -1,0 +1,13 @@
+namespace: Issue164.Api
+title: Issue164.Api
+summary: Issue 164 integration namespace.
+entry_points:
+  - label: Process fixture
+    summary: Open the generated Process method group.
+    target: Issue164-Api-FixtureService-1-Process-method-group
+  - label: Child namespace
+    summary: Open the child namespace archive page.
+    href: /docs/namespaces/Issue164.Api.Child
+  - label: Fixture type
+    summary: Jump to the generated fixture type.
+    href: "#Issue164-Api-FixtureService-1"

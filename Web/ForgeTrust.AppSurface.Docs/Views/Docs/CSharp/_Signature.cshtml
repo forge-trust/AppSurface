@@ -1,0 +1,41 @@
+@using ForgeTrust.AppSurface.Docs.Models
+@model CSharpSignature
+
+<code class="doc-signature">
+    @if (!string.IsNullOrWhiteSpace(Model.AccessorSignature))
+    {
+        <span class="sig-type">@Model.Type</span><span class="sig-operator"> </span><span class="sig-parameter">@Model.Name</span><span class="sig-operator"> @Model.AccessorSignature</span>
+    }
+    else
+    {
+        <span class="sig-return">@Model.Type</span><span class="sig-operator"> </span>
+        @if (!string.IsNullOrWhiteSpace(Model.ExplicitInterface))
+        {
+            <span class="sig-type">@Model.ExplicitInterface</span>
+        }
+        <span class="sig-method">@Model.Name</span>
+        @if (Model.TypeParameters.Count > 0)
+        {
+            <span class="sig-generic">&lt;@string.Join(", ", Model.TypeParameters)&gt;</span>
+        }
+        <span class="sig-operator">(</span>
+        @for (var parameterIndex = 0; parameterIndex < Model.Parameters.Count; parameterIndex++)
+        {
+            var parameter = Model.Parameters[parameterIndex];
+            if (parameterIndex > 0)
+            {
+                <span class="sig-operator">, </span>
+            }
+            @if (!string.IsNullOrWhiteSpace(parameter.Modifier))
+            {
+                <span class="sig-modifier">@parameter.Modifier</span><span class="sig-operator"> </span>
+            }
+            <span class="sig-type">@parameter.Type</span><span class="sig-operator"> </span><span class="sig-parameter">@parameter.Name</span>
+            @if (!string.IsNullOrWhiteSpace(parameter.DefaultValue))
+            {
+                <span class="sig-operator"> = </span><span class="sig-literal">@parameter.DefaultValue</span>
+            }
+        }
+        <span class="sig-operator">)</span>
+    }
+</code>

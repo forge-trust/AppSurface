@@ -1,0 +1,6 @@
+namespace Issue164.Api.Child;
+
+/// <summary>A child namespace fixture used to prove mounted internal links.</summary>
+public sealed class ChildFixture
+{
+}

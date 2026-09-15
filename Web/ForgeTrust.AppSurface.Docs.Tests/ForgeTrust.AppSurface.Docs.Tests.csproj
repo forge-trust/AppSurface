@@ -34,8 +34,16 @@
     <ProjectReference Include="..\..\Auth\ForgeTrust.AppSurface.Auth\ForgeTrust.AppSurface.Auth.csproj" />
     <ProjectReference Include="..\..\Config\ForgeTrust.AppSurface.Config\ForgeTrust.AppSurface.Config.csproj" />
     <ProjectReference Include="..\..\tests\ForgeTrust.AppSurface.Testing\ForgeTrust.AppSurface.Testing.csproj" />
+    <ProjectReference Include="..\..\tools\ForgeTrust.AppSurface.ReleaseContracts\ForgeTrust.AppSurface.ReleaseContracts.csproj" />
     <ProjectReference Include="..\ForgeTrust.AppSurface.Docs\ForgeTrust.AppSurface.Docs.csproj" />
     <ProjectReference Include="..\ForgeTrust.AppSurface.Docs.Standalone\ForgeTrust.AppSurface.Docs.Standalone.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="TestData/Issue164CSharpApi/**/*.cs" />
+    <Content Include="TestData/Issue164CSharpApi/**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>

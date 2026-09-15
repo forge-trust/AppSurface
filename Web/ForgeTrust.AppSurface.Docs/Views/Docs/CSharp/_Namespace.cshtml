@@ -1,0 +1,113 @@
+@using ForgeTrust.AppSurface.Docs.Models
+@using ForgeTrust.AppSurface.Docs.Services
+@using ForgeTrust.RazorWire
+@model DocDetailsViewModel
+@inject ForgeTrust.AppSurface.Docs.IAppSurfaceDocsRequestRuntimeAccessor RuntimeAccessor
+@{
+    var runtime = RuntimeAccessor.GetRequiredRuntime();
+    var document = Model.Document.CSharpNamespaceDocument!;
+    var outlineIds = document.Outline
+        .Where(item => !string.IsNullOrWhiteSpace(item.Id))
+        .Select(item => item.Id)
+        .ToHashSet(StringComparer.Ordinal);
+    var entryPoints = (document.EntryPoints ?? [])
+        .Where(entry => !string.IsNullOrWhiteSpace(entry.Label))
+        .OrderBy(entry => entry.Order ?? int.MaxValue)
+        .ThenBy(entry => entry.SourceIndex)
+        .ToArray();
+    var entryPointsHeadingId = "common-entry-points-" + StringUtils.ToSafeId(document.FullNamespace, appendHash: true);
+    var introHtml = string.IsNullOrWhiteSpace(document.IntroHtml)
+        ? null
+        : DocContentLinkRewriter.PrefixPathBaseForDocsUrls(
+            document.IntroHtml,
+            runtime.DocsUrlBuilder.CurrentDocsRootPath,
+            Context.Request.PathBase.Value,
+            runtime.DocsUrlBuilder.RouteRootPath);
+}
+
+@if (document.ChildNamespaces.Count > 0)
+{
+    <section class="doc-namespace-groups" aria-labelledby="child-namespaces-heading">
+        <h2 id="child-namespaces-heading">Namespaces</h2>
+        <ul>
+            @foreach (var childNamespace in document.ChildNamespaces)
+            {
+                <li>
+                    <a href="@Url.PathBaseAware(runtime.DocsUrlBuilder.BuildDocUrl(childNamespace.Path))"
+                       data-turbo-frame="doc-content"
+                       data-turbo-action="advance">@childNamespace.Title</a>
+                </li>
+            }
+        </ul>
+    </section>
+}
+
+@if (introHtml is not null)
+{
+    @* Safe: the namespace intro passed through the standard Markdown sanitizer before it was attached to this projection. *@
+    @Html.Raw(introHtml)
+}
+
+@if (entryPoints.Length > 0)
+{
+    <section class="doc-namespace-entry-points" aria-labelledby="@entryPointsHeadingId">
+        <h2 id="@entryPointsHeadingId">Common entry points</h2>
+        <ul>
+            @foreach (var entryPoint in entryPoints)
+            {
+                var target = entryPoint.Target?.Trim();
+                var href = !string.IsNullOrWhiteSpace(target) && outlineIds.Contains(target)
+                    ? $"#{target}"
+                    : string.IsNullOrWhiteSpace(target) && !string.IsNullOrWhiteSpace(entryPoint.Href)
+                        ? entryPoint.Href.Trim()
+                        : null;
+                var unresolvedTarget = !string.IsNullOrWhiteSpace(target) && !outlineIds.Contains(target);
+                <li class="doc-namespace-entry-point">
+                    @if (href is not null)
+                    {
+                        <a href="@Url.PathBaseAware(href)"
+                           data-turbo-frame="doc-content"
+                           data-turbo-action="advance">
+                            <span class="doc-namespace-entry-point-label"><code>@entryPoint.Label</code></span>
+                            @if (!string.IsNullOrWhiteSpace(entryPoint.Summary))
+                            {
+                                <span class="doc-namespace-entry-point-summary">@entryPoint.Summary</span>
+                            }
+                        </a>
+                    }
+                    else if (unresolvedTarget)
+                    {
+                        <div class="doc-namespace-entry-point--unresolved">
+                            <span class="doc-namespace-entry-point-label"><code>@entryPoint.Label</code></span>
+                            @if (!string.IsNullOrWhiteSpace(entryPoint.Summary))
+                            {
+                                <span class="doc-namespace-entry-point-summary">@entryPoint.Summary</span>
+                            }
+                            <span class="doc-namespace-entry-point-status">Target unavailable</span>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="doc-namespace-entry-point--text">
+                            <span class="doc-namespace-entry-point-label"><code>@entryPoint.Label</code></span>
+                            @if (!string.IsNullOrWhiteSpace(entryPoint.Summary))
+                            {
+                                <span class="doc-namespace-entry-point-summary">@entryPoint.Summary</span>
+                            }
+                        </div>
+                    }
+                </li>
+            }
+        </ul>
+    </section>
+}
+
+@foreach (var type in document.Types)
+{
+    @await Html.PartialAsync("/Views/Docs/CSharp/_Type.cshtml", type)
+}
+
+@foreach (var enumDocument in document.Enums)
+{
+    @await Html.PartialAsync("/Views/Docs/CSharp/_Enum.cshtml", enumDocument)
+}

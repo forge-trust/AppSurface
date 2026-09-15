@@ -1033,7 +1033,10 @@ public class DocAggregator
                            }
 
                            var nodesWithSymbolSourceLinks = allNodes
-                               .Select(n => n with { Content = ReplaceSymbolSourcePlaceholders(n) })
+                               .Select(
+                                   node => node.CSharpNamespaceDocument is null
+                                       ? node with { Content = ReplaceSymbolSourcePlaceholders(node) }
+                                       : node with { CSharpNamespaceDocument = ResolveTypedNamespaceSourceHrefs(node) })
                                .ToList();
 
                            var sanitizedNodes = nodesWithSymbolSourceLinks
@@ -1044,21 +1047,7 @@ public class DocAggregator
                                            ? string.Empty
                                            : sanitizer.Sanitize(n.Content) ?? string.Empty;
 
-                                       return new DocNode(
-                                           n.Title,
-                                           n.Path,
-                                           sanitizedContent,
-                                           n.ParentPath,
-                                           n.IsDirectory,
-                                           null,
-                                           n.Metadata,
-                                           n.Outline,
-                                       n.SymbolSourceProvenance)
-                                       {
-                                           RichAuthoringTabsTokens = n.RichAuthoringTabsTokens,
-                                           GeneratedApiSymbol = n.GeneratedApiSymbol,
-                                           HasJavaScriptApiLifecycleProvenance = n.HasJavaScriptApiLifecycleProvenance
-                                       };
+                                       return n with { Content = sanitizedContent, CanonicalPath = null };
                                    })
                                .ToList();
 
@@ -1072,26 +1061,16 @@ public class DocAggregator
                                .Select(
                                    (n, index) =>
                                    {
-                                       var rewrittenNode = new DocNode(
-                                           n.Title,
-                                           n.Path,
-                                           DocContentLinkRewriter.RewriteInternalDocLinks(
+                                       var rewrittenNode = n with
+                                       {
+                                           Content = DocContentLinkRewriter.RewriteInternalDocLinks(
                                                n.Path,
                                                n.Content,
                                                _docsUrlBuilder.CurrentDocsRootPath,
                                                routeIdentityCatalog),
-                                           n.ParentPath,
-                                           n.IsDirectory,
-                                           routeIdentityCatalog.TryGetPublicRoutePath(n.Path, out var publicRoutePath)
+                                           CanonicalPath = routeIdentityCatalog.TryGetPublicRoutePath(n.Path, out var publicRoutePath)
                                                ? publicRoutePath
-                                               : null,
-                                           n.Metadata,
-                                           n.Outline,
-                                           n.SymbolSourceProvenance)
-                                       {
-                                           RichAuthoringTabsTokens = n.RichAuthoringTabsTokens,
-                                           GeneratedApiSymbol = n.GeneratedApiSymbol,
-                                           HasJavaScriptApiLifecycleProvenance = n.HasJavaScriptApiLifecycleProvenance
+                                               : null
                                        };
                                        if (markdownSourceOwnerIndexes.Contains(index))
                                        {
@@ -1128,6 +1107,7 @@ public class DocAggregator
                                .Select(node => node.Path)
                                .ToHashSet(StringComparer.Ordinal);
                            var finalRouteIdentityCatalog = DocRouteIdentityCatalog.Create(docsByPath.Values, _docsUrlBuilder);
+                           docsByPath = ResolveTypedNamespaceEntryPointHrefs(docsByPath, finalRouteIdentityCatalog);
                            var (markdownDownloadSources, markdownDownloadDiagnostic) = BuildMarkdownDownloadSources(
                                harvesterResults,
                                docsByPath,
@@ -1553,6 +1533,11 @@ public class DocAggregator
         IDocHarvester harvester,
         IReadOnlyList<DocHarvestDiagnostic> diagnostics)
     {
+        if (harvester.GetType() == typeof(CSharpDocHarvester))
+        {
+            return diagnostics.FirstOrDefault(static diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.CSharpParseFailed);
+        }
+
         if (harvester is not JavaScriptDocHarvester)
         {
             return null;
@@ -1904,6 +1889,146 @@ public class DocAggregator
         return hrefsByAnchor;
     }
 
+    private CSharpNamespaceDocument ResolveTypedNamespaceSourceHrefs(DocNode doc)
+    {
+        var document = doc.CSharpNamespaceDocument!;
+        if (document.SymbolSourceProvenance.Count == 0)
+        {
+            // This is the normal path for a typed tree supplied by a direct test fixture or a source set with no
+            // contributor links. Keep the immutable semantic document intact instead of allocating a value-equal
+            // clone merely to resolve an empty set of placeholders.
+            return document;
+        }
+
+        var provenanceCounts = document.SymbolSourceProvenance
+            .GroupBy(provenance => provenance.AnchorId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var hrefsByAnchor = BuildSymbolSourceHrefsByAnchor(doc, provenanceCounts);
+
+        return document with
+        {
+            Types = document.Types
+                .Select(
+                    type => type with
+                    {
+                        SourceHref = hrefsByAnchor.GetValueOrDefault(type.AnchorId),
+                        MethodGroups = type.MethodGroups
+                            .Select(
+                                group => group with
+                                {
+                                    Overloads = group.Overloads
+                                        .Select(
+                                            overload => overload with
+                                            {
+                                                SourceHref = hrefsByAnchor.GetValueOrDefault(overload.AnchorId)
+                                            })
+                                        .ToArray()
+                                })
+                            .ToArray(),
+                        Properties = type.Properties
+                            .Select(
+                                property => property with
+                                {
+                                    SourceHref = hrefsByAnchor.GetValueOrDefault(property.AnchorId)
+                                })
+                            .ToArray()
+                    })
+                .ToArray(),
+            Enums = document.Enums
+                .Select(
+                    enumDocument => enumDocument with
+                    {
+                        SourceHref = hrefsByAnchor.GetValueOrDefault(enumDocument.AnchorId)
+                    })
+                .ToArray()
+        };
+    }
+
+    /// <summary>
+    /// Resolves docs-local namespace entry-point hrefs in the built-in typed C# projection against the final route
+    /// identity catalog.
+    /// </summary>
+    /// <remarks>
+    /// Namespace README metadata is authored before route identity is available and can therefore use a source-shaped
+    /// generated C# path. The typed renderer must receive a canonical browser URL directly: unlike legacy HTML, its
+    /// Razor output is never passed through <see cref="DocContentLinkRewriter"/>. Fragment entry points stay local to
+    /// the page; app-relative destinations must resolve to a known route beneath the active Docs root before Razor sees
+    /// them. This prevents trusted metadata from turning the internal typed rendering path into a same-origin navigation
+    /// escape hatch.
+    /// </remarks>
+    private Dictionary<string, DocNode> ResolveTypedNamespaceEntryPointHrefs(
+        IReadOnlyDictionary<string, DocNode> docsByPath,
+        DocRouteIdentityCatalog routeIdentityCatalog)
+    {
+        ArgumentNullException.ThrowIfNull(docsByPath);
+        ArgumentNullException.ThrowIfNull(routeIdentityCatalog);
+
+        return docsByPath.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Value.CSharpNamespaceDocument is { } typedNamespace
+                ? pair.Value with
+                {
+                    CSharpNamespaceDocument = ResolveTypedNamespaceEntryPointHrefs(typedNamespace, routeIdentityCatalog)
+                }
+                : pair.Value,
+            StringComparer.Ordinal);
+    }
+
+    private CSharpNamespaceDocument ResolveTypedNamespaceEntryPointHrefs(
+        CSharpNamespaceDocument document,
+        DocRouteIdentityCatalog routeIdentityCatalog)
+    {
+        if ((document.EntryPoints?.Count ?? 0) == 0)
+        {
+            return document;
+        }
+
+        return document with
+        {
+            EntryPoints = document.EntryPoints!
+                .Select(
+                    entry => !string.IsNullOrWhiteSpace(entry.Target)
+                        ? entry
+                        : entry with { Href = ResolveTypedNamespaceEntryPointHref(entry.Href, routeIdentityCatalog) })
+                .ToArray()
+        };
+    }
+
+    private string? ResolveTypedNamespaceEntryPointHref(
+        string? href,
+        DocRouteIdentityCatalog routeIdentityCatalog)
+    {
+        var normalizedHref = NormalizeMetadataText(href);
+        if (normalizedHref is null || normalizedHref.StartsWith("#", StringComparison.Ordinal))
+        {
+            return normalizedHref;
+        }
+
+        var fragmentIndex = normalizedHref.IndexOf('#');
+        var pathAndQuery = fragmentIndex < 0 ? normalizedHref : normalizedHref[..fragmentIndex];
+        var fragment = fragmentIndex < 0 ? string.Empty : normalizedHref[fragmentIndex..];
+        var queryIndex = pathAndQuery.IndexOf('?');
+        var routePath = queryIndex < 0 ? pathAndQuery : pathAndQuery[..queryIndex];
+        var query = queryIndex < 0 ? string.Empty : pathAndQuery[queryIndex..];
+        var docsRootPath = _docsUrlBuilder.CurrentDocsRootPath;
+        if (!DocsUrlBuilder.IsUnderRoot(routePath, docsRootPath))
+        {
+            return null;
+        }
+
+        if (string.Equals(routePath, docsRootPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return _docsUrlBuilder.BuildHomeUrl() + query + fragment;
+        }
+
+        var docsRelativePath = string.Equals(docsRootPath, "/", StringComparison.Ordinal)
+            ? routePath.TrimStart('/')
+            : routePath[(docsRootPath.Length + 1)..];
+        return routeIdentityCatalog.TryGetPublicRoutePath(docsRelativePath, out var publicRoutePath)
+            ? _docsUrlBuilder.BuildDocUrl(publicRoutePath) + query + fragment
+            : null;
+    }
+
     private async Task<DocContributorProvenanceViewModel?> ResolveContributorProvenanceAsync(
         DocNode doc,
         IDictionary<string, DateTimeOffset?> gitFreshnessBySourcePath,
@@ -2078,6 +2203,13 @@ public class DocAggregator
     {
         var normalized = NormalizeMetadataText(href);
         if (normalized is null)
+        {
+            return null;
+        }
+
+        // Browsers can canonicalize a rooted path containing a backslash into a network-path reference. Reject it
+        // before accepting root-relative contributor overrides so untrusted front matter cannot change link origin.
+        if (normalized.Contains('\\'))
         {
             return null;
         }
@@ -2387,8 +2519,9 @@ public class DocAggregator
                         return null;
                     }
 
-                    var content = d.Content ?? string.Empty;
-                    var searchableContent = SymbolSourceLinkRegex.Replace(content, " ");
+                    var searchableContent = d.CSharpNamespaceDocument is { } typedNamespace
+                        ? typedNamespace.ReaderText
+                        : SymbolSourceLinkRegex.Replace(d.Content, " ");
                     var entryPoints = BuildSearchIndexEntryPoints(d.Metadata?.EntryPoints);
                     var entryPointSearchText = NormalizeSearchText(
                         string.Join(
@@ -2402,17 +2535,20 @@ public class DocAggregator
                                         entry.Href
                                     }
                                     .Concat(entry.Keywords))));
-                    var bodyText = NormalizeSearchText(
-                        TagRegex.Replace(
+                    var renderedSearchText = d.CSharpNamespaceDocument is null
+                        ? TagRegex.Replace(
                             ScriptOrStyleRegex.Replace(
                                 RichAuthoringGeneratedChromeRegex.Replace(searchableContent, string.Empty),
                                 string.Empty),
                             " ")
+                        : searchableContent;
+                    var bodyText = NormalizeSearchText(
+                        renderedSearchText
                         + " "
                         + entryPointSearchText);
                     var snippet = TruncateSnippetAtWordBoundary(bodyText, SearchSnippetMaxLength);
                     var title = ResolveSearchIndexTitle(d);
-                    var summary = ShouldUseSearchSnippetForRichAuthoringSummary(content, d.Metadata?.Summary)
+                    var summary = ShouldUseSearchSnippetForRichAuthoringSummary(d.Content, d.Metadata?.Summary)
                         ? snippet
                         : d.Metadata?.Summary ?? snippet;
                     var summaryPresentation = DocsSearchSummaryPresentationProjector.Project(summary);
@@ -2712,7 +2848,7 @@ public class DocAggregator
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(doc.Content))
+        if (!doc.HasReaderContent)
         {
             return false;
         }
@@ -2919,12 +3055,72 @@ public class DocAggregator
                     };
                 }
 
+                var mergedOutline = CombineOutlines(readmeNode.Outline, namespaceNode.Outline);
+                if (namespaceNode.CSharpNamespaceDocument is { } typedNamespace)
+                {
+                    var effectiveEntryPoints = mergedMetadata?.EntryPoints ?? typedNamespace.EntryPoints;
+                    var introHtml = string.IsNullOrWhiteSpace(readmeNode.Content)
+                        ? typedNamespace.IntroHtml
+                        : MergeNamespaceIntroIntoContent(string.Empty, readmeNode.Content);
+                    if (renderEntryPointPanel)
+                    {
+                        var entryPointDiagnostics = ValidateTypedNamespaceEntryPoints(
+                            namespaceName,
+                            mergedOutline ?? [],
+                            effectiveEntryPoints);
+                        diagnostics.AddRange(entryPointDiagnostics);
+                        foreach (var diagnostic in entryPointDiagnostics)
+                        {
+                            logger.LogWarning(
+                                "AppSurface Docs namespace README warning {Code}: {Problem} Cause: {Cause} Fix: {Fix}",
+                                diagnostic.Code,
+                                diagnostic.Problem,
+                                diagnostic.Cause,
+                                diagnostic.Fix);
+                        }
+                    }
+
+                    var mergedTypedNamespace = typedNamespace with
+                    {
+                        Title = mergedMetadata?.Title ?? namespaceNode.Title,
+                        IntroHtml = introHtml,
+                        EntryPoints = effectiveEntryPoints,
+                        Outline = mergedOutline ?? [],
+                        ReaderText = renderEntryPointPanel
+                            ? BuildTypedNamespaceReaderText(
+                                typedNamespace.ReaderText,
+                                introHtml,
+                                effectiveEntryPoints)
+                            : typedNamespace.ReaderText
+                    };
+                    var mergedTypedNode = namespaceNode with
+                    {
+                        Title = mergedMetadata?.Title ?? namespaceNode.Title,
+                        Metadata = mergedMetadata,
+                        Outline = mergedOutline,
+                        CSharpNamespaceDocument = mergedTypedNamespace,
+                        RichAuthoringTabsTokens = (namespaceNode.RichAuthoringTabsTokens ?? [])
+                            .Concat(readmeNode.RichAuthoringTabsTokens ?? [])
+                            .Distinct(StringComparer.Ordinal)
+                            .ToArray()
+                    };
+
+                    var typedNamespaceIndex = nodes.FindIndex(n => string.Equals(n.Path, namespaceNode.Path, StringComparison.OrdinalIgnoreCase));
+                    if (typedNamespaceIndex >= 0)
+                    {
+                        nodes[typedNamespaceIndex] = mergedTypedNode;
+                        namespaceNodes[namespaceName] = mergedTypedNode;
+                    }
+
+                    continue;
+                }
+
                 if (renderEntryPointPanel)
                 {
                     var panelResult = NamespaceEntryPointPanelRenderer.Render(
                         namespaceName,
                         mergedContent,
-                        CombineOutlines(readmeNode.Outline, namespaceNode.Outline),
+                        mergedOutline,
                         mergedMetadata?.EntryPoints);
                     mergedContent = panelResult.Content;
                     diagnostics.AddRange(panelResult.Diagnostics);
@@ -2939,23 +3135,16 @@ public class DocAggregator
                     }
                 }
 
-                var mergedNamespaceNode = new DocNode(
-                    mergedMetadata?.Title ?? namespaceNode.Title,
-                    namespaceNode.Path,
-                    mergedContent,
-                    namespaceNode.ParentPath,
-                    namespaceNode.IsDirectory,
-                    namespaceNode.CanonicalPath,
-                    mergedMetadata,
-                    CombineOutlines(readmeNode.Outline, namespaceNode.Outline),
-                    namespaceNode.SymbolSourceProvenance)
+                var mergedNamespaceNode = namespaceNode with
                 {
+                    Title = mergedMetadata?.Title ?? namespaceNode.Title,
+                    Content = mergedContent,
+                    Metadata = mergedMetadata,
+                    Outline = mergedOutline,
                     RichAuthoringTabsTokens = (namespaceNode.RichAuthoringTabsTokens ?? [])
                         .Concat(readmeNode.RichAuthoringTabsTokens ?? [])
                         .Distinct(StringComparer.Ordinal)
-                        .ToArray(),
-                    GeneratedApiSymbol = namespaceNode.GeneratedApiSymbol,
-                    HasJavaScriptApiLifecycleProvenance = namespaceNode.HasJavaScriptApiLifecycleProvenance
+                        .ToArray()
                 };
 
                 var namespaceIndex = nodes.FindIndex(n => string.Equals(n.Path, namespaceNode.Path, StringComparison.OrdinalIgnoreCase));
@@ -2969,6 +3158,56 @@ public class DocAggregator
         }
 
         return diagnostics;
+    }
+
+    private static string BuildTypedNamespaceReaderText(
+        string generatedReaderText,
+        string? introHtml,
+        IReadOnlyList<DocNamespaceEntryPoint>? entryPoints)
+    {
+        var introText = string.IsNullOrWhiteSpace(introHtml)
+            ? string.Empty
+            : TagRegex.Replace(ScriptOrStyleRegex.Replace(introHtml, string.Empty), " ");
+        var entryPointText = string.Join(
+            " ",
+            (entryPoints ?? [])
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.Label))
+            .SelectMany(
+                entry => new[]
+                {
+                    entry.Label,
+                    entry.Summary
+                }
+                .Concat(entry.Keywords ?? [])));
+        return NormalizeSearchText(string.Join("\n", new[] { generatedReaderText, introText, entryPointText }));
+    }
+
+    private static IReadOnlyList<DocHarvestDiagnostic> ValidateTypedNamespaceEntryPoints(
+        string namespaceName,
+        IReadOnlyList<DocOutlineItem> outline,
+        IReadOnlyList<DocNamespaceEntryPoint>? entryPoints)
+    {
+        if ((entryPoints?.Count ?? 0) == 0)
+        {
+            return [];
+        }
+
+        var anchors = outline
+            .Where(item => !string.IsNullOrWhiteSpace(item.Id))
+            .Select(item => WebUtility.HtmlDecode(item.Id.Trim()))
+            .ToHashSet(StringComparer.Ordinal);
+        return entryPoints!
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.Label) && !string.IsNullOrWhiteSpace(entry.Target))
+            .Where(entry => !anchors.Contains(entry.Target!.Trim()))
+            .Select(
+                entry => new DocHarvestDiagnostic(
+                    DocHarvestDiagnosticCodes.NamespaceEntryPointTargetUnresolved,
+                    DocHarvestDiagnosticSeverity.Warning,
+                    HarvesterType: null,
+                    $"Namespace entry point '{entry.Label}' could not resolve target '{entry.Target!.Trim()}'.",
+                    $"The namespace README for '{namespaceName}' references a generated anchor that is not present on the merged namespace page.",
+                    "Update the entry_points target to a generated namespace-page anchor, or remove the target until the API exists."))
+            .ToArray();
     }
 
     private sealed record NamespaceIntroTargetResolution(
