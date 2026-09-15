@@ -146,7 +146,7 @@ merging `origin/main` at `e0618ac8dcc3b5903517e9a711f42959534b7fb5`. All 2,379
 tracked/input hashes remained unchanged through the source, package, CLI,
 compatibility, and full-solution checks. This ledger update records evidence only.
 
-The unchanged [solution coverage script](../../scripts/coverage-solution.sh) and
+The unchanged [solution coverage script](https://github.com/forge-trust/AppSurface/blob/codex/config-logical-key-contract/scripts/coverage-solution.sh) and
 its committed patch gate both exited 0. The exact invocation was:
 
 ```sh
