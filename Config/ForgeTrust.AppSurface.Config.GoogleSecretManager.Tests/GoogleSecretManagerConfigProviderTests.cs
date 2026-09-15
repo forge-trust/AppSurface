@@ -125,14 +125,13 @@ public sealed class GoogleSecretManagerConfigProviderTests
     }
 
     [Fact]
-    public void TryGetTerminalDiagnostic_Should_ReturnFalseWhenFailClosedIsDisabled()
+    public void Resolve_Should_ReturnTerminalWhenClaimedSecretIsUnavailable()
     {
         var provider = CreateProvider(
             new ThrowingSecretManagerClient(new RpcException(new Status(StatusCode.Unavailable, "raw-secret should not leak"))),
             options =>
             {
                 options.ProjectId = "project";
-                options.FailClosedOnProviderFailure = false;
                 options.MapSecret("Stripe:ApiKey", "api-key", version: "5");
             });
 
@@ -294,7 +293,7 @@ public sealed class GoogleSecretManagerConfigProviderTests
             ProjectId = "project",
             DefaultVersion = "5"
         };
-        options.EnableConventionResolver((string)null!, version: "5");
+        options.EnableConventionResolver((string)null!, secretIdPrefix: "", version: "5");
         options.EnableConventionResolver("Billing", secretIdPrefix: "billing-", version: "5");
 
         var result = new AppSurfaceGoogleSecretManagerOptionsValidator().Validate(null, options);
@@ -317,7 +316,7 @@ public sealed class GoogleSecretManagerConfigProviderTests
         options.MapSecret("Stripe:ApiKey", "stripe-api-key-duplicate", version: "5");
         options.MapSecret("", "", version: "5");
         options.MapSecret("Full:WithVersion", "projects/prod/secrets/full/versions/5", version: "6");
-        options.EnableConventionResolver((string)"", version: null);
+        options.EnableConventionResolver((string)"", secretIdPrefix: "", version: null);
         options.EnableConventionResolver("Duplicate", secretIdPrefix: "duplicate-", version: "5");
         options.EnableConventionResolver("Duplicate", secretIdPrefix: "duplicate-", version: "5");
 

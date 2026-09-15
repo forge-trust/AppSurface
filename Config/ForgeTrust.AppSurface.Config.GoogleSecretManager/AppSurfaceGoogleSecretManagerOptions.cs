@@ -41,11 +41,6 @@ public sealed class AppSurfaceGoogleSecretManagerOptions
     public bool AllowLatestVersion { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether claimed-key failures should stop lower-priority providers.
-    /// </summary>
-    public bool FailClosedOnProviderFailure { get; set; } = true;
-
-    /// <summary>
     /// Gets or sets the bounded timeout for one Secret Manager lookup.
     /// </summary>
     public TimeSpan LookupTimeout { get; set; } = TimeSpan.FromSeconds(5);
@@ -82,7 +77,6 @@ public sealed class AppSurfaceGoogleSecretManagerOptions
             ProjectId = ProjectId,
             DefaultVersion = DefaultVersion,
             AllowLatestVersion = AllowLatestVersion,
-            FailClosedOnProviderFailure = FailClosedOnProviderFailure,
             LookupTimeout = LookupTimeout,
             CacheTtl = CacheTtl,
             CacheCapacity = CacheCapacity,
@@ -135,7 +129,7 @@ public sealed class AppSurfaceGoogleSecretManagerOptions
     /// <returns>The same options instance.</returns>
     public AppSurfaceGoogleSecretManagerOptions EnableConventionResolver(
         string logicalKeyPrefix,
-        string secretIdPrefix = "",
+        string secretIdPrefix,
         string? version = null)
     {
         _conventions.Add(new AppSurfaceGoogleSecretConvention(logicalKeyPrefix, secretIdPrefix, version));
@@ -143,9 +137,13 @@ public sealed class AppSurfaceGoogleSecretManagerOptions
     }
 
     /// <summary>Enables a convention resolver under a parsed logical-key prefix.</summary>
+    /// <param name="logicalKeyPrefix">The required logical-key prefix that the convention may claim.</param>
+    /// <param name="secretIdPrefix">The required non-empty exact prefix prepended to encoded secret ids.</param>
+    /// <param name="version">The version or alias used by claimed convention keys.</param>
+    /// <returns>The same options instance.</returns>
     public AppSurfaceGoogleSecretManagerOptions EnableConventionResolver(
         AppSurfaceConfigKey logicalKeyPrefix,
-        string secretIdPrefix = "",
+        string secretIdPrefix,
         string? version = null) =>
         EnableConventionResolver(logicalKeyPrefix?.Value ?? throw new ArgumentNullException(nameof(logicalKeyPrefix)), secretIdPrefix, version);
 }

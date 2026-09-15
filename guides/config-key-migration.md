@@ -119,6 +119,11 @@ transformations apply only to the migration aliases allowed by request origin.
 
 ## Google convention migration
 
+Remove `FailClosedOnProviderFailure` assignments when upgrading. The option is removed:
+claimed Google failures are terminal and suppress lower-priority providers. An environment
+override remains available for recovery. Both `EnableConventionResolver` overloads also
+require a non-empty `secretIdPrefix` argument; an omitted prefix no longer compiles.
+
 The old convention was lossy and used a suffix normalization. The new convention
 encodes the full key with injective segment boundaries: `Payments:ApiKey` becomes
 `payments--apikey`, before the configured exact prefix is added. It does not probe

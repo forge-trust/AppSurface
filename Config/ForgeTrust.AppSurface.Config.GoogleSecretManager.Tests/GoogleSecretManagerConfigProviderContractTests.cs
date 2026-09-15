@@ -139,7 +139,6 @@ public sealed class GoogleSecretManagerConfigProviderContractTests
             {
                 configured.ProjectId = options.ProjectId;
                 configured.DefaultVersion = options.DefaultVersion;
-                configured.FailClosedOnProviderFailure = options.FailClosedOnProviderFailure;
                 foreach (var mapping in options.Mappings)
                 {
                     configured.MapSecret(mapping.LogicalKey, mapping.SecretIdOrResourceName, mapping.Version);

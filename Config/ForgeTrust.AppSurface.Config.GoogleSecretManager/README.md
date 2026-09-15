@@ -49,7 +49,9 @@ appsettings defaults < LocalSecrets < Google Secret Manager < environment variab
 Environment variables stay above Google Secret Manager so an operator can override a broken remote secret without
 changing code or mutating Secret Manager. File configuration and LocalSecrets stay below the remote provider. A claimed
 Google Secret Manager key stops lower-priority providers when the remote lookup is unavailable, denied, invalid, or
-cannot be converted, unless `FailClosedOnProviderFailure` is set to `false`.
+cannot be converted. The logical-key contract removes `FailClosedOnProviderFailure`; claimed-key failures always
+remain terminal. Remove assignments to that former option when following the
+[coordinated upgrade guide](../../guides/config-key-migration.md#google-convention-migration).
 
 Unmapped keys are not claimed and continue through the normal provider chain.
 
@@ -99,6 +101,7 @@ services.ConfigureAppSurfaceGoogleSecretManager(options =>
 
 Only strict descendants of the exact logical prefix are claimed. The provider encodes the complete logical key by
 lowercasing each valid segment and joining segments with `--`, then prepends the exact non-empty `secretIdPrefix`.
+Both `EnableConventionResolver` overloads require this prefix explicitly; an empty prefix fails startup validation.
 For example, `Payments:Api-Key` becomes `prefix-payments--api-key`. Every convention in one provider instance must use
 the same ordinal-exact prefix. Dots, Unicode, empty segments, leading or trailing hyphens, and `--` inside a segment
 are unrepresentable; use an explicit typed mapping for those keys.
