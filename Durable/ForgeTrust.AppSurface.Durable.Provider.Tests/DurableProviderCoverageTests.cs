@@ -326,6 +326,62 @@ public sealed class DurableProviderCoverageTests
     }
 
     [Fact]
+    public void Runtime_pump_attempt_contract_enforces_closed_algebra()
+    {
+        var emptyResult = new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero);
+
+        var completed = new DurableRuntimePumpAttempt(DurableRuntimePumpAttemptKind.Completed, emptyResult, null);
+        var refused = new DurableRuntimePumpAttempt(DurableRuntimePumpAttemptKind.Refused, null, null);
+        var unavailable = new DurableRuntimePumpAttempt(
+            DurableRuntimePumpAttemptKind.Unavailable,
+            null,
+            DurableProblemCodes.StoreUnavailable);
+
+        Assert.Equal(DurableRuntimePumpAttemptKind.Completed, completed.Kind);
+        Assert.Same(emptyResult, completed.Result);
+        Assert.Null(completed.ProblemCode);
+        Assert.Equal(DurableRuntimePumpAttemptKind.Refused, refused.Kind);
+        Assert.Null(refused.Result);
+        Assert.Null(refused.ProblemCode);
+        Assert.Equal(DurableRuntimePumpAttemptKind.Unavailable, unavailable.Kind);
+        Assert.Null(unavailable.Result);
+        Assert.Equal(DurableProblemCodes.StoreUnavailable, unavailable.ProblemCode);
+
+        foreach (var problemCode in new[]
+                 {
+                     DurableProblemCodes.RecoveryEpochRequired,
+                     DurableProblemCodes.SchemaMissing,
+                     DurableProblemCodes.SchemaUpgradeRequired,
+                     DurableProblemCodes.SchemaVersionUnsupported,
+                     DurableProblemCodes.SchemaInconsistent,
+                 })
+        {
+            var incompatible = new DurableRuntimePumpAttempt(
+                DurableRuntimePumpAttemptKind.Incompatible,
+                null,
+                problemCode);
+
+            Assert.Equal(DurableRuntimePumpAttemptKind.Incompatible, incompatible.Kind);
+            Assert.Null(incompatible.Result);
+            Assert.Equal(problemCode, incompatible.ProblemCode);
+        }
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new DurableRuntimePumpAttempt((DurableRuntimePumpAttemptKind)999, null, null));
+        AssertAttemptRejected(DurableRuntimePumpAttemptKind.Completed, null, null, "result");
+        AssertAttemptRejected(DurableRuntimePumpAttemptKind.Completed, emptyResult, DurableProblemCodes.StoreUnavailable, "problemCode");
+        AssertAttemptRejected(DurableRuntimePumpAttemptKind.Refused, emptyResult, null, "result");
+        AssertAttemptRejected(DurableRuntimePumpAttemptKind.Refused, null, DurableProblemCodes.StoreUnavailable, "problemCode");
+        AssertAttemptRejected(DurableRuntimePumpAttemptKind.Unavailable, emptyResult, DurableProblemCodes.StoreUnavailable, "result");
+        AssertAttemptRejected(DurableRuntimePumpAttemptKind.Unavailable, null, null, "problemCode");
+        AssertAttemptRejected(DurableRuntimePumpAttemptKind.Unavailable, null, DurableProblemCodes.SchemaMissing, "problemCode");
+        AssertAttemptRejected(DurableRuntimePumpAttemptKind.Incompatible, emptyResult, DurableProblemCodes.SchemaMissing, "result");
+        AssertAttemptRejected(DurableRuntimePumpAttemptKind.Incompatible, null, null, "problemCode");
+        AssertAttemptRejected(DurableRuntimePumpAttemptKind.Incompatible, null, DurableProblemCodes.StoreUnavailable, "problemCode");
+        AssertAttemptRejected(DurableRuntimePumpAttemptKind.Incompatible, null, DurableProblemCodes.WorkerIdentityConflict, "problemCode");
+    }
+
+    [Fact]
     public void Runtime_health_contract_preserves_values_and_rejects_every_bound()
     {
         var epoch = Guid.NewGuid();
@@ -370,6 +426,40 @@ public sealed class DurableProviderCoverageTests
     }
 
     [Fact]
+    public void Runtime_health_predicates_cover_every_state_and_compatibility_combination()
+    {
+        foreach (var state in Enum.GetValues<DurableRuntimeHealthState>())
+        {
+            foreach (var schemaCompatible in new[] { false, true })
+            {
+                foreach (var epochCompatible in new[] { false, true })
+                {
+                    var snapshot = CreateHealth(
+                        Guid.NewGuid(),
+                        Guid.NewGuid(),
+                        state,
+                        schemaCompatible: schemaCompatible,
+                        epochCompatible: epochCompatible);
+                    var expectedObserved = state != DurableRuntimeHealthState.Unavailable;
+                    var expectedActivation = expectedObserved
+                        && state != DurableRuntimeHealthState.Incompatible
+                        && schemaCompatible
+                        && epochCompatible;
+
+                    Assert.Equal(expectedObserved, snapshot.WasStoreObserved);
+                    Assert.Equal(expectedActivation, snapshot.CanEnableActivation);
+                    Assert.Equal(
+                        expectedActivation && state != DurableRuntimeHealthState.Draining,
+                        snapshot.CanAttemptPump);
+                    Assert.Equal(
+                        state == DurableRuntimeHealthState.Healthy && expectedActivation,
+                        snapshot.IsReady);
+                }
+            }
+        }
+    }
+
+    [Fact]
     public async Task Provider_adapter_prepares_invokes_and_reconciles_without_provider_io()
     {
         var inputCodec = new StringCodec<TestInput>("test.input", value => value.Value, value => new TestInput(value));
@@ -407,6 +497,60 @@ public sealed class DurableProviderCoverageTests
             await DurableProviderWorkAdapter.ReconcileAsync(registration, null!, claim));
         await Assert.ThrowsAsync<ArgumentNullException>(async () =>
             await DurableProviderWorkAdapter.ReconcileAsync(registration, services, null!));
+    }
+
+    [Fact]
+    public async Task Provider_adapter_invokes_an_explicit_work_exit()
+    {
+        var inputCodec = new StringCodec<TestInput>("test.exit.input", value => value.Value, value => new TestInput(value));
+        var resultCodec = new StringCodec<TestResult>("test.exit.result", value => value.Value, value => new TestResult(value));
+        var registration = new DurableWorkExitRegistration<TestInput, TestResult, RetryExitExecutor>(
+            "test.exit.work",
+            "v2",
+            inputCodec,
+            resultCodec);
+        await using var services = new ServiceCollection().AddSingleton<RetryExitExecutor>().BuildServiceProvider();
+        var claim = new DurableClaimedWork(
+            Scope,
+            Work,
+            "activity",
+            "test.exit.work",
+            "v2",
+            inputCodec.Encode(new TestInput("input")),
+            DurableProviderSafety.ProviderKeyed,
+            2,
+            3,
+            4,
+            "epoch");
+
+        var exit = await DurableProviderWorkAdapter.Prepare(registration, services, claim).InvokeExitAsync();
+
+        Assert.Equal(DurableWorkExitKind.RetryBeforeEffect, exit.Kind);
+        Assert.Equal("app.gmail.sender_list_transient", exit.Code);
+        Assert.Null(exit.Result);
+    }
+
+    [Fact]
+    public async Task Provider_adapter_adapts_legacy_work_to_a_success_exit()
+    {
+        var inputCodec = new StringCodec<TestInput>("test.input", value => value.Value, value => new TestInput(value));
+        var resultCodec = new StringCodec<TestResult>("test.result", value => value.Value, value => new TestResult(value));
+        var registration = new DurableWorkRegistration<TestInput, TestResult, TestExecutor>(
+            "test.work",
+            "v1",
+            DurableProviderSafety.ProviderKeyed,
+            inputCodec,
+            resultCodec);
+        await using var services = new ServiceCollection().AddSingleton<TestExecutor>().BuildServiceProvider();
+
+        var exit = await DurableProviderWorkAdapter.Prepare(
+            registration,
+            services,
+            CreateClaim(inputCodec.Encode(new TestInput("input")))).InvokeExitAsync();
+
+        Assert.Equal(DurableWorkExitKind.Succeeded, exit.Kind);
+        Assert.Null(exit.Code);
+        Assert.Equal(new TestResult("executed:input"), resultCodec.Decode(exit.Result!));
     }
 
     [Fact]
@@ -533,6 +677,16 @@ public sealed class DurableProviderCoverageTests
             null,
             TimeSpan.Zero));
 
+    private static void AssertAttemptRejected(
+        DurableRuntimePumpAttemptKind kind,
+        DurableRuntimePumpResult? result,
+        string? problemCode,
+        string parameterName)
+    {
+        var exception = Assert.Throws<ArgumentException>(() => new DurableRuntimePumpAttempt(kind, result, problemCode));
+        Assert.Equal(parameterName, exception.ParamName);
+    }
+
     private static DurableRuntimeHealthSnapshot CreateHealth(
         Guid configuredRuntimeEpoch,
         Guid? workerInstanceId,
@@ -543,12 +697,14 @@ public sealed class DurableProviderCoverageTests
         DurableRuntimeSurface hostedSurfaces = DurableRuntimeSurface.All,
         long dueDispatchCount = 4,
         TimeSpan? oldestDueAge = null,
-        string? problemCode = "ASDUR501") =>
+        string? problemCode = "ASDUR501",
+        bool schemaCompatible = true,
+        bool epochCompatible = true) =>
         new(
             state,
             problemCode,
-            true,
-            true,
+            schemaCompatible,
+            epochCompatible,
             installedSchemaVersion,
             requiredSchemaVersion,
             configuredRuntimeEpoch,
@@ -644,6 +800,14 @@ public sealed class DurableProviderCoverageTests
             CancellationToken cancellationToken = default) =>
             ValueTask.FromResult(DurableEffectReconciliation<TestResult>.Applied(
                 new TestResult($"reconciled:{work.Payload!.Value}")));
+    }
+
+    private sealed class RetryExitExecutor : IDurableWorkExitExecutor<TestInput, TestResult>
+    {
+        public ValueTask<DurableWorkExit<TestResult>> ExecuteAsync(
+            DurableWorkerEnvelope<TestInput> work,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(DurableWorkExit<TestResult>.RetryBeforeEffect("app.gmail.sender_list_transient"));
     }
 
     private sealed class StringCodec<T>(

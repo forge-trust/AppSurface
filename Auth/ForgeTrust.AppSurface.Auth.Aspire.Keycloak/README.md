@@ -13,7 +13,7 @@ Do not use this package for production Keycloak administration, tenant authority
 The focused repository proof uses a Keycloak AppHost and a paired web app:
 
 ```bash
-aspire run --apphost examples/auth-aspire-keycloak-apphost/AuthAspireKeycloakAppHost.csproj -- local
+AUTH_ASPIRE_KEYCLOAK_ENABLE_LOCAL_SEEDS=true aspire run --project examples/auth-aspire-keycloak-apphost/AuthAspireKeycloakAppHost.csproj -- local
 ```
 
 The web proof listens on `http://localhost:5059`. Sign in with one of the local-only seeded users:
@@ -30,7 +30,7 @@ complete a profile. These fields exist only in the disposable local realm and ar
 Run the noninteractive proof when a local container runtime is available:
 
 ```bash
-aspire run --non-interactive --apphost examples/auth-aspire-keycloak-apphost/AuthAspireKeycloakAppHost.csproj -- verify
+AUTH_ASPIRE_KEYCLOAK_ENABLE_LOCAL_SEEDS=true aspire run --project examples/auth-aspire-keycloak-apphost/AuthAspireKeycloakAppHost.csproj -- verify
 ```
 
 ## AppHost Shape
@@ -47,6 +47,95 @@ keycloak.Configuration.ApplyTo(web)
 ```
 
 `AddAppSurfaceKeycloak(...)` generates a deterministic realm import, calls the official Aspire `AddKeycloak(...)` API, mounts the realm import directory with `WithRealmImport(...)`, and returns an `AppSurfaceKeycloakResource` wrapper whose `Resource` property exposes the underlying `IResourceBuilder<KeycloakResource>` for normal Aspire APIs.
+
+## Ordered Local Seed Projects
+
+Use `RealmReady()` and `WithLocalSeed(...)` when a local AppHost needs a small number of finite, consumer-owned
+startup stages after the generated Keycloak baseline is genuinely usable. Typical stages create a local identity
+provider alias, write an application-owned identity map, or load an application fixture. The package establishes only
+the completion graph and safe bindings; each consumer project owns its Keycloak client, administration calls, retries,
+mutations, idempotence, state store, output hygiene, timeout, and exit code.
+
+```csharp
+var adminUsername = builder.AddParameter("keycloak-admin-username", "admin", secret: false);
+var adminPassword = builder.AddParameter("keycloak-admin-password", secret: true);
+
+var keycloak = builder.AddAppSurfaceKeycloak("auth", adminUsername, adminPassword, options =>
+{
+    options.UsePersistentDataVolume = true;
+});
+
+var identity = keycloak.WithLocalSeed(
+    "identity-bootstrap",
+    seed => builder.AddProject<Projects.IdentityBootstrap>(seed.ResourceName)
+        .WithEnvironment("LOCAL_SEED_ADMIN_USERNAME", adminUsername)
+        .WithEnvironment("LOCAL_SEED_STORE_PATH", ".appsurface/local-identity.json"),
+    options => options.WithRequiredSecretParameter("LOCAL_SEED_ADMIN_PASSWORD", adminPassword));
+
+var fixture = keycloak.WithLocalSeed(
+    "candidate-fixture",
+    seed => builder.AddProject<Projects.CandidateFixture>(seed.ResourceName)
+        .WithEnvironment("LOCAL_SEED_STORE_PATH", ".appsurface/local-identity.json"),
+    options => options.After(identity));
+
+var web = builder.AddProject<Projects.Web>("web")
+    .WaitForCompletion(fixture.Resource);
+```
+
+`RealmReady()` is lazy and cached per `AppSurfaceKeycloakResource`. It adds one finite package-owned executable that
+waits for Keycloak health, then verifies metadata, the generated realm baseline, and the public authorization
+challenge. The worker receives only safe expected values, never administrator credentials or seeded-user passwords.
+Every first seed waits for that handle; every later seed must call `After(...)` with the immediately previous seed from
+the same wrapper. The resulting graph is intentionally linear:
+
+```text
+Keycloak healthy -> RealmReady -> identity-bootstrap -> candidate-fixture -> web
+```
+
+### Local-only policy and opt-out
+
+Seed registration is fail-closed. It is legal only for Aspire `Run` in `Development`, `Test`, or `Testing` by default,
+matched case-insensitively. `Publish` and every other operation are denied before the factory, realm-ready resource, or
+consumer project is materialized—even if an allowed-environment list contains a deployment-looking value. An explicit
+local host may extend `AllowedEnvironmentNames`, but that never permits publish.
+
+Do not model an optional integration as an optional secret. Instead, use an explicit nonsecret local option and call
+`WithLocalSeed` only when the integration should exist. When it is off, no seed is registered, no consumer mutation is
+attempted, and the application should wait on the last required predecessor rather than a missing stage.
+
+The factory must return the one `ProjectResource` named by `seed.ResourceName`; returning `null`, a project from another
+AppHost, or a differently named resource fails registration. The project must be finite: exit `0` only after it has
+completed its own idempotent work, and exit nonzero for capability, validation, or mutation failure. A hung project has
+no completion signal, so dependent resources stay blocked until the AppHost is canceled.
+
+### Safe context and required secrets
+
+`AppSurfaceKeycloakLocalSeedContext` contains only `ResourceName`, `Authority`, `RealmName`, and `PublicClientId`.
+It deliberately excludes external subjects, claims, tokens, provider responses, user passwords, administrator
+credentials, and application records. A seed can bind a required credential only with
+`WithRequiredSecretParameter(environmentVariableName, parameter)`. The parameter must be a secret `ParameterResource`
+from the same AppHost; binding names and parameters cannot be duplicated or reused by another seed in that wrapper.
+AppSurface validates metadata and applies Aspire's typed environment reference to that returned project only. It never
+calls `Value`, `GetValueAsync`, logs, serializes, or otherwise resolves the secret value.
+
+Generated manifests can contain the framework-required parameter name/reference, but never its value. AppSurface's
+projection, diagnostics, and evidence likewise contain no seed secret. Consumer projects are still responsible for
+their own stdout, stderr, dashboard logs, and provider-client logs; never print credentials, tokens, or remote response
+bodies from a seed worker.
+
+The original `AddAppSurfaceKeycloak(name, configure)` overload remains the smallest option for the five-minute login
+proof and intentionally has no administrator parameter resources. Choose the explicit-parameter overload only when a
+consumer-owned local seed genuinely needs the Keycloak Admin API. Its password parameter must be typed as
+`secret: true`; a non-secret password parameter is rejected with `ASKEYC001` before the Keycloak resource is added.
+
+### Do not confuse this with DevAuth personas
+
+Local seeds run once during AppHost startup and gate resource launch. They are for finite convergence work against a
+real local provider and application-owned state. They are not request-time authentication, persona selection, or a
+replacement for browser sign-in. For visible fake personas selected while handling local requests, use
+[`ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth`](../ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md) instead.
+For real web authentication, continue to configure
+[`ForgeTrust.AppSurface.Auth.AspNetCore.Oidc`](../ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md) in the web host.
 
 ## Theme Quickstart
 
@@ -212,6 +301,9 @@ Diagnostics use `ASKEYC001+` codes and follow Problem/Cause/Fix/Docs wording. Co
 | `ASKEYC019` | The Linux/amd64 runtime proof was unavailable or timed out. | Run the named CI job; `not-run` is not release success. |
 | `ASKEYC020` | Disposable-realm readback did not select the expected login theme. | Reset only disposable proof data and rerun the matching tuple. |
 | `ASKEYC021` | A required login resource was missing, cross-origin, redirected, oversized, or hash-mismatched. | Repair the declared same-origin resource and rebuild the image. |
+| `ASKEYC022` | The finite package-owned realm-ready worker could not be resolved. | Restore the AppHost package and use the supported .NET SDK. |
+| `ASKEYC023` | Local seed registration was attempted outside permitted local execution. | Use Aspire `Run` in an explicitly allowed local environment; publish is always denied. |
+| `ASKEYC024` | A local seed name, predecessor, project factory, or typed secret binding is invalid. | Use one correctly named finite project, name the immediate predecessor, and bind each required secret parameter once. |
 
 If the Aspire CLI is missing, install it before running the AppHost. If local development certificates block startup, run `aspire certs trust` or `dotnet dev-certs https --trust` from an interactive shell.
 

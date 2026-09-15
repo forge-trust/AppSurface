@@ -144,28 +144,14 @@
         "type": "Project",
         "dependencies": {
           "CliWrap": "[3.10.1, )",
-          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64": "[0.1.0, )"
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
       },
-      "forgetrust.appsurface.web.tailwind.runtime.linux-arm64": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.linux-x64": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.osx-arm64": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.osx-x64": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.win-x64": {
-        "type": "Project"
+      "forgetrust.appsurface.web.tailwind.cachetesthost": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Web.Tailwind": "[0.1.0, )"
+        }
       },
       "forgetrust.appsurface.web.tailwind.tasks": {
         "type": "Project",

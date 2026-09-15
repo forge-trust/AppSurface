@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-ForgeTrust.AppSurface.Web.Tailwind and ForgeTrust.AppSurface.Web.Tailwind.Runtime.* packages include the following third-party payloads in addition to the repository license.
+ForgeTrust.AppSurface.Web.Tailwind and its retained direct companion packages include the following third-party attribution in addition to the repository license.
 
 ## Tailwind CSS Standalone CLI
 
@@ -8,9 +8,14 @@ ForgeTrust.AppSurface.Web.Tailwind and ForgeTrust.AppSurface.Web.Tailwind.Runtim
 - Version: `4.1.18`
 - License: MIT
 - Project: https://github.com/tailwindlabs/tailwindcss
-- Packaged payload path: `runtimes/<rid>/native/tailwindcss-*`
+- Main package release metadata: `build/tailwind.release.json`
+- Direct companion payload path: `runtimes/<rid>/native/tailwindcss-*`
 
-The runtime packages download the Tailwind CSS standalone CLI from the pinned Tailwind release URL declared in `Tailwind.Common.props`. Package validation requires `TailwindRuntimeBinaryResolutionEnabled=true`, and the runtime target validates the downloaded binary against the upstream SHA-256 sums before the native payload is packed.
+The main package records five package-pinned standalone-CLI digests in
+`tailwind.release.json`; normal consumers acquire and verify one build-host binary in a
+local cache and do not receive a native application payload. Direct companion packages
+remain separately packable compatibility artifacts. Their runtime target validates a
+downloaded binary before packing its intentional native payload.
 
 ## CliWrap
 

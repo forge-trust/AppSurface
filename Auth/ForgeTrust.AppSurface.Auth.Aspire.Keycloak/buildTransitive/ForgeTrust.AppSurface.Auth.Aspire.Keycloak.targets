@@ -1,0 +1,15 @@
+<Project>
+
+  <Target Name="CopyAppSurfaceKeycloakRealmReadyWorker" AfterTargets="CopyFilesToOutputDirectory">
+    <ItemGroup>
+      <_AppSurfaceKeycloakRealmReadyWorker Include="$(MSBuildThisFileDirectory)..\tools\net10.0\any\realm-ready\*" />
+    </ItemGroup>
+
+    <Copy
+      SourceFiles="@(_AppSurfaceKeycloakRealmReadyWorker)"
+      DestinationFolder="$(OutDir)appsurface-keycloak-realm-ready\"
+      SkipUnchangedFiles="true"
+      Condition="'@(_AppSurfaceKeycloakRealmReadyWorker)' != ''" />
+  </Target>
+
+</Project>

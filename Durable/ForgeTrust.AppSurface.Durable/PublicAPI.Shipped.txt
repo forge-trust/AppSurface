@@ -123,6 +123,10 @@ type public sealed class ForgeTrust.AppSurface.Durable.DurableEncodedPayload : S
   property public System.String ContractVersion { get: public; }
   property public System.String RetentionPolicyId { get: public; }
   property public System.String Sha256 { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableEncodedWorkExit
+  property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload? Result { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkExitKind Kind { get: public; }
+  property public System.String? Code { get: public; }
 type public sealed class ForgeTrust.AppSurface.Durable.DurableEverySchedule : ForgeTrust.AppSurface.Durable.DurableSchedule, System.IEquatable<ForgeTrust.AppSurface.Durable.DurableEverySchedule>, System.IEquatable<ForgeTrust.AppSurface.Durable.DurableSchedule>
   constructor public ForgeTrust.AppSurface.Durable.DurableEverySchedule(System.TimeSpan interval, System.Nullable<System.DateTimeOffset> anchor = null)
   method protected System.Boolean PrintMembers(System.Text.StringBuilder builder)
@@ -475,6 +479,7 @@ type public sealed class ForgeTrust.AppSurface.Durable.DurablePayloadCodecRegist
 type public abstract class ForgeTrust.AppSurface.Durable.DurablePreparedWork
   constructor protected ForgeTrust.AppSurface.Durable.DurablePreparedWork()
   method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableEncodedPayload> InvokeAsync(System.Threading.CancellationToken cancellationToken = default)
+  method public virtual System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableEncodedWorkExit> InvokeExitAsync(System.Threading.CancellationToken cancellationToken = default)
 type public sealed class ForgeTrust.AppSurface.Durable.DurableProblem : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableProblem>
   constructor public ForgeTrust.AppSurface.Durable.DurableProblem(System.String code, System.String problem, System.String cause, System.String fix, System.Uri documentationUrl, System.String correlationId)
   method public ForgeTrust.AppSurface.Durable.DurableProblem <Clone>$()
@@ -817,6 +822,7 @@ type public readonly struct ForgeTrust.AppSurface.Durable.DurableScopeId : Syste
 type public static class ForgeTrust.AppSurface.Durable.DurableServiceCollectionExtensions
   method public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddDurableFlow<TContext>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, ForgeTrust.AppSurface.Flow.FlowDefinition<TContext> definition, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TContext> contextCodec, System.String implementationVersion, System.Collections.Generic.IEnumerable<ForgeTrust.AppSurface.Durable.DurableFlowActivityBinding<TContext>>? activityBindings = null, System.Collections.Generic.IEnumerable<ForgeTrust.AppSurface.Durable.DurableFlowEventBinding>? eventBindings = null, ForgeTrust.AppSurface.Flow.IFlowTransitionEvaluator<TContext>? evaluator = null)
   method public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddDurableWork<TWork, TResult, TExecutor>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.String workName, System.String workVersion, ForgeTrust.AppSurface.Durable.DurableProviderSafety providerSafety, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TWork> workCodec, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TResult> resultCodec) where TExecutor : class, ForgeTrust.AppSurface.Workers.IDurableWorkerExecutor<TWork, TResult>
+  method public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddDurableWorkExit<TWork, TResult, TExecutor>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.String workName, System.String workVersion, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TWork> workCodec, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TResult> resultCodec) where TExecutor : class, ForgeTrust.AppSurface.Durable.IDurableWorkExitExecutor<TWork, TResult>
   method public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddDurableWorkWithReconciler<TWork, TResult, TExecutor, TReconciler>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.String workName, System.String workVersion, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TWork> workCodec, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TResult> resultCodec) where TExecutor : class, ForgeTrust.AppSurface.Workers.IDurableWorkerExecutor<TWork, TResult> where TReconciler : class, ForgeTrust.AppSurface.Durable.IDurableEffectReconciler<TWork, TResult>
 type public sealed class ForgeTrust.AppSurface.Durable.DurableWorkAcceptance : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableWorkAcceptance>
   constructor public ForgeTrust.AppSurface.Durable.DurableWorkAcceptance(ForgeTrust.AppSurface.Durable.DurableWorkId workId, ForgeTrust.AppSurface.Durable.DurableCommandId commandId, ForgeTrust.AppSurface.Durable.DurableWorkAcceptanceKind kind, System.Int64 revision, System.DateTimeOffset acceptedAtUtc)
@@ -862,6 +868,26 @@ type public sealed class ForgeTrust.AppSurface.Durable.DurableWorkExecutionConte
   property public ForgeTrust.AppSurface.Workers.DurableWorkerExecutionIdentity ExecutionIdentity { get: public; }
   property public System.String WorkName { get: public; }
   property public System.String WorkVersion { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableWorkExit<TResult>
+  method public static ForgeTrust.AppSurface.Durable.DurableWorkExit<TResult> AmbiguousExternalOutcome(System.String code)
+  method public static ForgeTrust.AppSurface.Durable.DurableWorkExit<TResult> FailedTerminal(System.String code)
+  method public static ForgeTrust.AppSurface.Durable.DurableWorkExit<TResult> RetryBeforeEffect(System.String code)
+  method public static ForgeTrust.AppSurface.Durable.DurableWorkExit<TResult> Succeeded(TResult result)
+  property public ForgeTrust.AppSurface.Durable.DurableWorkExitKind Kind { get: public; }
+  property public System.String? Code { get: public; }
+  property public TResult? Result { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.DurableWorkExitCompatibilityException : System.InvalidOperationException, System.Runtime.Serialization.ISerializable
+type public enum ForgeTrust.AppSurface.Durable.DurableWorkExitKind : System.Int32
+  enum-member AmbiguousExternalOutcome = 3
+  enum-member FailedTerminal = 2
+  enum-member RetryBeforeEffect = 1
+  enum-member Succeeded = 0
+type public sealed class ForgeTrust.AppSurface.Durable.DurableWorkExitRegistration<TWork, TResult, TExecutor> : ForgeTrust.AppSurface.Durable.DurableWorkRegistration where TExecutor : class, ForgeTrust.AppSurface.Durable.IDurableWorkExitExecutor<TWork, TResult>
+  constructor public ForgeTrust.AppSurface.Durable.DurableWorkExitRegistration<TWork, TResult, TExecutor>(System.String workName, System.String workVersion, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TWork> workCodec, ForgeTrust.AppSurface.Durable.IDurablePayloadCodec<TResult> resultCodec)
+  method public ForgeTrust.AppSurface.Durable.DurablePreparedWork Prepare(System.IServiceProvider services, ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext work)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableEncodedEffectReconciliation> ReconcileAsync(System.IServiceProvider services, ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext work, System.Threading.CancellationToken cancellationToken = default)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableEncodedPayload> InvokeAsync(System.IServiceProvider services, ForgeTrust.AppSurface.Durable.DurableWorkExecutionContext work, System.Threading.CancellationToken cancellationToken = default)
+  property public System.Boolean CanReconcile { get: public; }
 type public readonly struct ForgeTrust.AppSurface.Durable.DurableWorkId : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableWorkId>
   constructor public ForgeTrust.AppSurface.Durable.DurableWorkId(System.String value)
   method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableWorkId other)
@@ -996,6 +1022,8 @@ type public interface ForgeTrust.AppSurface.Durable.IDurableScheduleClient
   method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableScheduleSnapshot>> GetAsync(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableScheduleId scheduleId, System.Threading.CancellationToken cancellationToken = default)
 type public interface ForgeTrust.AppSurface.Durable.IDurableWorkClient
   method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.DurableWorkAcceptance>> EnqueueAsync(ForgeTrust.AppSurface.Durable.DurableWorkRequest request, System.Threading.CancellationToken cancellationToken = default)
+type public interface ForgeTrust.AppSurface.Durable.IDurableWorkExitExecutor<TWork, TResult>
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableWorkExit<TResult>> ExecuteAsync(ForgeTrust.AppSurface.Workers.DurableWorkerEnvelope<TWork> work, System.Threading.CancellationToken cancellationToken = default)
 type public interface ForgeTrust.AppSurface.Durable.IDurableWorkRegistry
   method public abstract ForgeTrust.AppSurface.Durable.DurableWorkRegistration GetRequired(System.String workName, System.String workVersion)
   property public virtual System.Collections.Generic.IReadOnlyList<ForgeTrust.AppSurface.Durable.DurableWorkContractIdentity> RegisteredContracts { get: public; }

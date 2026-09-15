@@ -25,6 +25,11 @@ one-way package dependency Provider to Durable and replaces the original interna
 - `DurableCommandFingerprint` and `DurableCommandFingerprintMatch` add versioned semantic command identity.
 - `DurableWorkExecutionContext` and `DurablePreparedWork` expose the adopter side of provider-neutral Work execution.
 - `DurableProviderWorkAdapter` exposes the provider side of the Work identity transition without friend access.
+- `DurableWorkExitKind`, `DurableWorkExit<T>`, `DurableEncodedWorkExit`,
+  `IDurableWorkExitExecutor<TWork,TResult>`, and `DurableWorkExitCompatibilityException` add one opt-in, closed
+  executor-fact contract. `DurableWorkExitRegistration<TWork,TResult,TExecutor>` and
+  `AddDurableWorkExit<TWork,TResult,TExecutor>` are fixed to `ProviderKeyed` in V1, while the legacy worker executor
+  and registration APIs remain additive and unchanged.
 
 ## Internalized or removed implementation seams
 
@@ -103,3 +108,11 @@ Slice 6 adds the explicit PostgreSQL composition surface rather than widening th
 The runtime pump, health, and drain interfaces remain owned by `ForgeTrust.AppSurface.Durable.Provider`. PostgreSQL
 claim stores, heartbeat generation operations, listener state, execution wrapper, and hosted service stay internal so
 Issue #685 can instrument the execution wrapper without duplicating trace context or broadening the public API.
+
+## Typed Work-exit provider boundary
+
+`DurablePreparedWork.InvokeExitAsync` and `DurablePreparedWorkInvocation.InvokeExitAsync` are additive compatibility
+bridges, not a general completion-model replacement. The default bridge wraps legacy success; an exit-aware Work's
+legacy invocation accepts success only and otherwise raises the public, payload-free
+`DurableWorkExitCompatibilityException`. PostgreSQL keeps its encoded-exit execution boundary and completion
+translator internal, preserving the existing store, SQL, migrations, and provider-owned retry policy.

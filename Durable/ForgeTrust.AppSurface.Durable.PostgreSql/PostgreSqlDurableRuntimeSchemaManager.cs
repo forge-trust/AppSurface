@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using ForgeTrust.AppSurface.Durable;
@@ -6,11 +7,29 @@ using Npgsql;
 namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 
 /// <summary>Implements explicit package-owned durable schema operations for PostgreSQL.</summary>
+/// <remarks>
+/// Migration and epoch mutations hold one session advisory lock across their individual transactions. The
+/// session scope is required to prevent another migration owner from interleaving between migrations; lock
+/// acquisition is nevertheless bounded and cancellation-aware, and the owning connection is always disposed
+/// after the mutation so PostgreSQL releases the lock even when explicit cleanup cannot run.
+/// </remarks>
 public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchemaManager
 {
     internal const long MigrationAdvisoryLock = 0x415344555241424C;
+
+    /// <summary>Bounds programmatic and generated-script waits for the migration session lock.</summary>
+    internal const int MigrationLockAcquireTimeoutSeconds = 30;
+
+    /// <summary>Controls the polling cadence used by programmatic non-blocking lock acquisition.</summary>
+    internal const int MigrationLockRetryDelayMilliseconds = 100;
+
     private readonly NpgsqlDataSource _dataSource;
     private readonly IReadOnlyList<DurablePostgreSqlMigration> _migrations;
+    private readonly TimeSpan _migrationLockAcquireTimeout;
+    private readonly TimeSpan _migrationLockRetryDelay;
+    private readonly Action<bool>? _observeMigrationLockAttempt;
+    private readonly Action? _observeStatusConnectionOpenStarted;
+    private readonly Action<TimeSpan>? _observeStatusConnectionAcquisition;
 
     /// <summary>Initializes a schema manager using a migration-owner data source.</summary>
     public PostgreSqlDurableRuntimeSchemaManager(NpgsqlDataSource dataSource)
@@ -18,17 +37,45 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
     {
     }
 
-    /// <summary>Initializes a schema manager with an explicit migration catalog for transaction-boundary verification.</summary>
+    /// <summary>Initializes a schema manager with an explicit migration catalog and lock timings for transaction-boundary verification.</summary>
     /// <param name="dataSource">Migration-owner data source.</param>
     /// <param name="migrations">Ordered, contiguous migration definitions.</param>
+    /// <param name="migrationLockAcquireTimeout">Maximum time to wait for the session migration lock; <see langword="null"/> uses the 30-second production default.</param>
+    /// <param name="migrationLockRetryDelay">Delay between non-blocking lock attempts; <see langword="null"/> uses the 100-millisecond production default.</param>
+    /// <param name="observeMigrationLockAttempt">
+    /// Optional observer invoked with each non-blocking migration-lock result.
+    /// Production composition leaves this null; concurrency tests use it instead of timing guesses.
+    /// </param>
+    /// <param name="observeStatusConnectionOpenStarted">
+    /// Optional observer invoked after the schema-status connection acquisition has started.
+    /// Production composition leaves this null; constrained-pool evidence uses it as a synchronization seam.
+    /// </param>
+    /// <param name="observeStatusConnectionAcquisition">
+    /// Optional observer for the schema-status connection acquisition inside <see cref="GetStatusAsync(CancellationToken)"/>.
+    /// Production composition leaves this null; scale evidence uses it to measure the public health path.
+    /// </param>
     /// <remarks>This test seam is internal so production callers always use the embedded, checksum-verified catalog.</remarks>
     internal PostgreSqlDurableRuntimeSchemaManager(
         NpgsqlDataSource dataSource,
-        IReadOnlyList<DurablePostgreSqlMigration> migrations)
+        IReadOnlyList<DurablePostgreSqlMigration> migrations,
+        TimeSpan? migrationLockAcquireTimeout = null,
+        TimeSpan? migrationLockRetryDelay = null,
+        Action<bool>? observeMigrationLockAttempt = null,
+        Action? observeStatusConnectionOpenStarted = null,
+        Action<TimeSpan>? observeStatusConnectionAcquisition = null)
     {
         _dataSource = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
         ArgumentNullException.ThrowIfNull(migrations);
         _migrations = migrations.ToArray();
+        _migrationLockAcquireTimeout = RequirePositiveDuration(
+            migrationLockAcquireTimeout ?? TimeSpan.FromSeconds(MigrationLockAcquireTimeoutSeconds),
+            nameof(migrationLockAcquireTimeout));
+        _migrationLockRetryDelay = RequirePositiveDuration(
+            migrationLockRetryDelay ?? TimeSpan.FromMilliseconds(MigrationLockRetryDelayMilliseconds),
+            nameof(migrationLockRetryDelay));
+        _observeMigrationLockAttempt = observeMigrationLockAttempt;
+        _observeStatusConnectionOpenStarted = observeStatusConnectionOpenStarted;
+        _observeStatusConnectionAcquisition = observeStatusConnectionAcquisition;
     }
 
     /// <summary>Gets the schema version required by this package.</summary>
@@ -37,11 +84,84 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
     /// <inheritdoc />
     public async ValueTask<DurableRuntimeSchemaStatus> GetStatusAsync(CancellationToken cancellationToken = default)
     {
-        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        return await ReadStatusAsync(connection, cancellationToken).ConfigureAwait(false);
+        await using var connection = await OpenStatusConnectionAsync(cancellationToken).ConfigureAwait(false);
+        return await GetStatusAsync(connection, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Returns whether a runtime operation may safely reuse this manager's status connection.
+    /// </summary>
+    /// <param name="dataSource">The runtime data source that would reuse the connection.</param>
+    /// <returns>
+    /// <see langword="true"/> only when both operations use the same data-source instance and therefore the same
+    /// credentials, pool, and connection policy.
+    /// </returns>
+    internal bool CanShareStatusConnectionWith(NpgsqlDataSource dataSource) =>
+        ReferenceEquals(_dataSource, dataSource);
+
+    /// <summary>
+    /// Opens a schema-status connection while preserving the status-acquisition observation seams.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the pending pool or connection acquisition.</param>
+    /// <returns>An open connection owned by the caller.</returns>
+    internal async ValueTask<NpgsqlConnection> OpenStatusConnectionAsync(
+        CancellationToken cancellationToken)
+    {
+        var connectionStarted = _observeStatusConnectionAcquisition is null
+            ? 0
+            : Stopwatch.GetTimestamp();
+        var connectionOpen = _dataSource.OpenConnectionAsync(cancellationToken);
+        _observeStatusConnectionOpenStarted?.Invoke();
+        var connection = await connectionOpen.ConfigureAwait(false);
+        try
+        {
+            if (_observeStatusConnectionAcquisition is { } observer)
+            {
+                observer(Stopwatch.GetElapsedTime(connectionStarted));
+            }
+
+            return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Reads schema status through an existing connection so a compatible runtime observation can reuse one pool
+    /// acquisition without changing the migration-fence transaction boundary.
+    /// </summary>
+    /// <param name="connection">An open connection whose credentials are valid for schema status.</param>
+    /// <param name="cancellationToken">Cancels the status transaction and commands.</param>
+    /// <returns>The installed schema compatibility status.</returns>
+    internal async ValueTask<DurableRuntimeSchemaStatus> GetStatusAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await AcquireStatusFenceAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+            var status = await ReadStatusAsync(connection, cancellationToken, transaction).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return status;
+        }
+        catch
+        {
+            await TryRollbackAsync(transaction).ConfigureAwait(false);
+            throw;
+        }
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The generated script keeps a session-scoped lock because each migration has its own transaction. Lock
+    /// acquisition is bounded inside a short transaction, and callers must stop on errors and close the session
+    /// if a migration fails before the final explicit unlock.
+    /// </remarks>
     public string GenerateScript(int fromVersion = 0)
     {
         if (fromVersion < 0 || fromVersion > _migrations.Count)
@@ -52,8 +172,35 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         var builder = new StringBuilder();
         builder.AppendLine("-- Generated by ForgeTrust.AppSurface.Durable.PostgreSql.");
         builder.AppendLine("-- Apply with the migration owner. Runtime roles must not execute this script.");
-        builder.AppendLine("-- Stop on the first error; psql callers must pass -v ON_ERROR_STOP=1.");
-        builder.Append("SELECT pg_advisory_lock(").Append(MigrationAdvisoryLock.ToString(CultureInfo.InvariantCulture)).AppendLine(");");
+        var lockTimeoutSeconds = _migrationLockAcquireTimeout.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
+        var lockRetryDelaySeconds = _migrationLockRetryDelay.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
+        builder.Append("-- Lock acquisition is bounded to ").Append(lockTimeoutSeconds).AppendLine(" seconds and fails before migration SQL runs if another owner holds it.");
+        builder.AppendLine("-- Keep this script in one session. psql callers must pass -v ON_ERROR_STOP=1; closing that session after an error releases the session lock.");
+        builder.AppendLine("DO $appsurface_durable$");
+        builder.AppendLine("DECLARE");
+        builder.Append("    lock_deadline timestamp with time zone := pg_catalog.clock_timestamp() + interval '")
+            .Append(lockTimeoutSeconds)
+            .AppendLine(" seconds';");
+        builder.AppendLine("BEGIN");
+        builder.AppendLine("    LOOP");
+        builder.Append("        EXIT WHEN pg_catalog.pg_try_advisory_lock(")
+            .Append(MigrationAdvisoryLock.ToString(CultureInfo.InvariantCulture))
+            .AppendLine(");");
+        builder.AppendLine("        IF pg_catalog.clock_timestamp() >= lock_deadline THEN");
+        builder.AppendLine("            RAISE EXCEPTION USING");
+        builder.AppendLine("                ERRCODE = '55P03',");
+        builder.Append("                MESSAGE = 'Timed out after ")
+            .Append(lockTimeoutSeconds)
+            .Append(" seconds waiting for AppSurface Durable migration advisory lock ")
+            .Append(MigrationAdvisoryLock.ToString(CultureInfo.InvariantCulture))
+            .AppendLine(". Retry after the active migration owner completes.';");
+        builder.AppendLine("        END IF;");
+        builder.Append("        PERFORM pg_catalog.pg_sleep(")
+            .Append(lockRetryDelaySeconds)
+            .AppendLine(");");
+        builder.AppendLine("    END LOOP;");
+        builder.AppendLine("END");
+        builder.AppendLine("$appsurface_durable$;");
         foreach (var migration in _migrations.Where(migration => migration.Version > fromVersion))
         {
             AppendMigrationScript(builder, migration);
@@ -64,6 +211,12 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Programmatic lock acquisition uses non-blocking polling with a 30-second deadline by default. Cancellation
+    /// remains distinct from lock contention; a deadline failure is reported as a <see cref="TimeoutException"/>
+    /// with the lock identifier and operator guidance. The lock is released explicitly on every acquired path and
+    /// by disposing the owning connection as a final safety net.
+    /// </remarks>
     public async ValueTask<DurableRuntimeSchemaApplyResult> ApplyAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
@@ -235,9 +388,38 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         }
     }
 
-    private async ValueTask ValidateConnectionAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    private ValueTask ValidateConnectionAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken) =>
+        ValidateConnectionCoreAsync(connection, transaction: null, cancellationToken);
+
+    /// <summary>
+    /// Validates schema compatibility on the connection and transaction that already hold runtime admission's
+    /// migration fence.
+    /// </summary>
+    internal ValueTask ValidateConnectionAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        CancellationToken cancellationToken)
     {
-        var status = await ReadStatusAsync(connection, cancellationToken).ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(transaction);
+        if (!ReferenceEquals(transaction.Connection, connection))
+        {
+            throw new ArgumentException(
+                "The schema-validation transaction must belong to the supplied connection.",
+                nameof(transaction));
+        }
+
+        return ValidateConnectionCoreAsync(connection, transaction, cancellationToken);
+    }
+
+    private async ValueTask ValidateConnectionCoreAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        var status = await ReadStatusAsync(connection, cancellationToken, transaction).ConfigureAwait(false);
         if (!status.IsCompatible)
         {
             throw new DurableRuntimeSchemaException(status);
@@ -273,7 +455,10 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         return (reader.GetGuid(0), reader.GetFieldValue<DateTimeOffset>(1));
     }
 
-    private async ValueTask<DurableRuntimeSchemaStatus> ReadStatusAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    private async ValueTask<DurableRuntimeSchemaStatus> ReadStatusAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken,
+        NpgsqlTransaction? transaction = null)
     {
         await using var existence = new NpgsqlCommand(
             """
@@ -281,13 +466,27 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
                    to_regclass('appsurface_durable.schema_migration') IS NOT NULL,
                    to_regclass('appsurface_durable.store_metadata') IS NOT NULL;
             """,
-            connection);
-        await using var existenceReader = await existence.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        await existenceReader.ReadAsync(cancellationToken).ConfigureAwait(false);
-        var schemaExists = existenceReader.GetBoolean(0);
-        var historyExists = existenceReader.GetBoolean(1);
-        var metadataExists = existenceReader.GetBoolean(2);
-        await existenceReader.CloseAsync().ConfigureAwait(false);
+            connection,
+            transaction);
+        var (schemaExists, historyExists, metadataExists) =
+            await PostgreSqlDurableControlPlaneCommand.ExecuteReaderAsync(
+                existence,
+                static async (reader, effectiveToken) =>
+                {
+                    if (!await reader.ReadAsync(effectiveToken).ConfigureAwait(false))
+                    {
+                        throw new InvalidDataException("The durable schema existence query returned no row.");
+                    }
+
+                    var result = (reader.GetBoolean(0), reader.GetBoolean(1), reader.GetBoolean(2));
+                    if (await reader.ReadAsync(effectiveToken).ConfigureAwait(false))
+                    {
+                        throw new InvalidDataException("The durable schema existence query returned more than one row.");
+                    }
+
+                    return result;
+                },
+                cancellationToken).ConfigureAwait(false);
         if (!schemaExists && !historyExists && !metadataExists)
         {
             return CreateStatus(DurableRuntimeSchemaCompatibility.Missing, 0, [], "The durable schema is not installed.");
@@ -301,13 +500,21 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         var applied = new List<AppliedMigration>();
         await using (var command = new NpgsqlCommand(
             "SELECT version, name, sha256 FROM appsurface_durable.schema_migration ORDER BY version;",
-            connection))
-        await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+            connection,
+            transaction))
         {
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                applied.Add(new AppliedMigration(reader.GetInt32(0), reader.GetString(1), reader.GetString(2)));
-            }
+            _ = await PostgreSqlDurableControlPlaneCommand.ExecuteReaderAsync(
+                command,
+                async (reader, effectiveToken) =>
+                {
+                    while (await reader.ReadAsync(effectiveToken).ConfigureAwait(false))
+                    {
+                        applied.Add(new AppliedMigration(reader.GetInt32(0), reader.GetString(1), reader.GetString(2)));
+                    }
+
+                    return true;
+                },
+                cancellationToken).ConfigureAwait(false);
         }
 
         var installed = applied.Count == 0 ? 0 : applied[^1].Version;
@@ -323,18 +530,41 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
                    minimum_writer_version, maximum_writer_version
             FROM appsurface_durable.store_metadata WHERE singleton;
             """;
-        await using var metadata = new NpgsqlCommand(metadataSql, connection);
-        await using var metadataReader = await metadata.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        if (!await metadataReader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        await using var metadata = new NpgsqlCommand(metadataSql, connection, transaction);
+        var metadataObservation = await PostgreSqlDurableControlPlaneCommand.ExecuteReaderAsync(
+            metadata,
+            static async (reader, effectiveToken) =>
+            {
+                if (!await reader.ReadAsync(effectiveToken).ConfigureAwait(false))
+                {
+                    return null;
+                }
+
+                var result = new MetadataObservation(
+                    reader.GetGuid(0),
+                    reader.IsDBNull(1) ? null : reader.GetGuid(1),
+                    new StoreCompatibilityRange(
+                        reader.GetInt32(2),
+                        reader.GetInt32(3),
+                        reader.GetInt32(4),
+                        reader.GetInt32(5),
+                        reader.GetInt32(6)));
+                if (await reader.ReadAsync(effectiveToken).ConfigureAwait(false))
+                {
+                    throw new InvalidDataException("The durable store metadata query returned more than one row.");
+                }
+
+                return result;
+            },
+            cancellationToken).ConfigureAwait(false);
+        if (metadataObservation is null)
         {
             return CreateStatus(DurableRuntimeSchemaCompatibility.Inconsistent, installed, applied.Select(item => item.Version).ToArray(), "Store metadata is missing.");
         }
 
-        var storeId = metadataReader.GetGuid(0);
-        var activeEpoch = metadataReader.IsDBNull(1) ? (Guid?)null : metadataReader.GetGuid(1);
-        var range = new StoreCompatibilityRange(
-            metadataReader.GetInt32(2), metadataReader.GetInt32(3), metadataReader.GetInt32(4),
-            metadataReader.GetInt32(5), metadataReader.GetInt32(6));
+        var storeId = metadataObservation.StoreId;
+        var activeEpoch = metadataObservation.ActiveRuntimeEpoch;
+        var range = metadataObservation.Range;
         if (storeId == Guid.Empty || range.SchemaVersion != installed || !range.IsValid)
         {
             return CreateStatus(DurableRuntimeSchemaCompatibility.Inconsistent, installed, applied.Select(item => item.Version).ToArray(), "Store identity or compatibility metadata is invalid.", storeId, activeEpoch, range);
@@ -407,6 +637,19 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         {
             await using (var command = new NpgsqlCommand(migration.Sql, connection, transaction))
             {
+                if (migration.CommandTimeoutSeconds is { } commandTimeoutSeconds)
+                {
+                    if (commandTimeoutSeconds <= 0)
+                    {
+                        throw new InvalidOperationException(
+                            $"Migration {migration.Version:D4} has a non-positive client command timeout.");
+                    }
+
+                    // The migration owns this override because its bounded server-side work exceeds the data-source
+                    // default. Keep the client alive long enough for PostgreSQL to report the authoritative failure.
+                    command.CommandTimeout = commandTimeoutSeconds;
+                }
+
                 await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
 
@@ -456,11 +699,73 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         return value;
     }
 
-    private static async ValueTask AcquireMigrationLockAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    private async ValueTask AcquireMigrationLockAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
     {
-        await using var command = new NpgsqlCommand("SELECT pg_advisory_lock(@lock_id);", connection);
+        using var deadlineCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadlineCancellation.CancelAfter(_migrationLockAcquireTimeout);
+        var lockCancellationToken = deadlineCancellation.Token;
+        var started = Stopwatch.GetTimestamp();
+
+        await using var command = new NpgsqlCommand("SELECT pg_try_advisory_lock(@lock_id);", connection)
+        {
+            CommandTimeout = Math.Max(1, (int)Math.Ceiling(_migrationLockAcquireTimeout.TotalSeconds)),
+        };
         command.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            while (true)
+            {
+                var acquired = await command.ExecuteScalarAsync(lockCancellationToken).ConfigureAwait(false) is true;
+                _observeMigrationLockAttempt?.Invoke(acquired);
+                if (acquired)
+                {
+                    return;
+                }
+
+                var remaining = _migrationLockAcquireTimeout - Stopwatch.GetElapsedTime(started);
+                if (remaining <= TimeSpan.Zero)
+                {
+                    throw CreateMigrationLockTimeoutException();
+                }
+
+                await Task.Delay(
+                    remaining < _migrationLockRetryDelay ? remaining : _migrationLockRetryDelay,
+                    lockCancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && deadlineCancellation.IsCancellationRequested)
+        {
+            throw CreateMigrationLockTimeoutException();
+        }
+    }
+
+    private TimeoutException CreateMigrationLockTimeoutException() => new(
+        $"Timed out after {_migrationLockAcquireTimeout.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)} seconds acquiring PostgreSQL migration advisory lock "
+        + $"{MigrationAdvisoryLock.ToString(CultureInfo.InvariantCulture)}. Another migration owner may still be applying the schema; retry after it completes or inspect pg_stat_activity for the blocking session.");
+
+    private static TimeSpan RequirePositiveDuration(TimeSpan value, string parameterName)
+    {
+        if (value <= TimeSpan.Zero || value == Timeout.InfiniteTimeSpan || value > TimeSpan.FromMilliseconds(int.MaxValue))
+        {
+            throw new ArgumentOutOfRangeException(parameterName, value, "The duration must be positive and no longer than the cancellation-token deadline range.");
+        }
+
+        return value;
+    }
+
+    private static async ValueTask AcquireStatusFenceAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(
+            "SELECT pg_advisory_xact_lock_shared(@lock_id);",
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+        _ = await PostgreSqlDurableControlPlaneCommand.ExecuteNonQueryAsync(
+            command,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private static async ValueTask ReleaseMigrationLockAsync(NpgsqlConnection connection)
@@ -496,6 +801,11 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
     private static string EscapeSqlLiteral(string value) => value.Replace("'", "''", StringComparison.Ordinal);
 
     private sealed record AppliedMigration(int Version, string Name, string Sha256);
+
+    private sealed record MetadataObservation(
+        Guid StoreId,
+        Guid? ActiveRuntimeEpoch,
+        StoreCompatibilityRange Range);
 
     private sealed record StoreCompatibilityRange(
         int SchemaVersion,

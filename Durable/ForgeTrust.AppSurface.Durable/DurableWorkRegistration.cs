@@ -87,6 +87,19 @@ public abstract class DurablePreparedWork
     /// <returns>The registered codec's encoded terminal result.</returns>
     /// <remarks>Call only after the matching external-effect permit commits.</remarks>
     public abstract ValueTask<DurableEncodedPayload> InvokeAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Executes prepared work and returns its encoded exit fact.</summary>
+    /// <param name="cancellationToken">Token that cancels executor invocation.</param>
+    /// <returns>The registered codec's encoded success result wrapped as an exit fact.</returns>
+    /// <remarks>
+    /// This compatibility implementation preserves legacy prepared Work behavior by calling
+    /// <see cref="InvokeAsync(CancellationToken)"/> and wrapping its result as
+    /// <see cref="DurableWorkExitKind.Succeeded"/>. Exit-aware registrations override it to return their explicit
+    /// fact. Call only after the matching external-effect permit commits.
+    /// </remarks>
+    public virtual async ValueTask<DurableEncodedWorkExit> InvokeExitAsync(
+        CancellationToken cancellationToken = default) =>
+        DurableEncodedWorkExit.Succeeded(await InvokeAsync(cancellationToken).ConfigureAwait(false));
 }
 
 /// <summary>
@@ -170,6 +183,45 @@ public abstract class DurableWorkRegistration
         IServiceProvider services,
         DurableWorkExecutionContext work,
         CancellationToken cancellationToken = default);
+
+}
+
+internal static class DurableWorkRegistrationEnvelopeFactory
+{
+    internal static DurableWorkerEnvelope<TWork> Create<TWork>(
+        DurableWorkRegistration registration,
+        DurableWorkExecutionContext work,
+        IDurablePayloadCodec<TWork> workCodec)
+    {
+        ArgumentNullException.ThrowIfNull(registration);
+        ArgumentNullException.ThrowIfNull(work);
+        ArgumentNullException.ThrowIfNull(workCodec);
+        if (!string.Equals(work.WorkName, registration.WorkName, StringComparison.Ordinal)
+            || !string.Equals(work.WorkVersion, registration.WorkVersion, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Claimed work does not match the selected durable work registration.");
+        }
+
+        if (work.ProviderSafety != registration.ProviderSafety)
+        {
+            throw new InvalidOperationException("Claimed work provider-safety snapshot does not match its registration.");
+        }
+
+        var payload = workCodec.Decode(work.Payload);
+        var executionIdentity = work.ExecutionIdentity;
+        var correlation = new DurableWorkerCorrelation(
+            registration.WorkName,
+            work.WorkId.Value,
+            executionIdentity.ActivityId,
+            $"{executionIdentity.AttemptNumber}:{executionIdentity.LeaseGeneration}");
+        return DurableWorkerEnvelope<TWork>.CreateNative(
+            DurableWorkerProjectionOutcome.Claimed,
+            "durable.claimed",
+            DurableWorkerRetryability.Retryable,
+            correlation,
+            executionIdentity,
+            payload);
+    }
 }
 
 /// <summary>
@@ -233,7 +285,7 @@ public sealed class DurableWorkRegistration<TWork, TResult, TExecutor> : Durable
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(work);
-        var envelope = CreateEnvelope(work);
+        var envelope = DurableWorkRegistrationEnvelopeFactory.Create(this, work, _workCodec);
         var executor = services.GetRequiredService<TExecutor>();
         return new PreparedInvocation(executor, envelope, _resultCodec);
     }
@@ -249,42 +301,13 @@ public sealed class DurableWorkRegistration<TWork, TResult, TExecutor> : Durable
         var reconcilerFactory = _reconcilerFactory
             ?? throw new InvalidOperationException("This durable work registration has no provider reconciler.");
         var outcome = await reconcilerFactory(services)
-            .ReconcileAsync(CreateEnvelope(work), cancellationToken)
+            .ReconcileAsync(DurableWorkRegistrationEnvelopeFactory.Create(this, work, _workCodec), cancellationToken)
             .ConfigureAwait(false);
         ArgumentNullException.ThrowIfNull(outcome);
         var encoded = outcome.Kind == DurableEffectReconciliationKind.Applied
             ? _resultCodec.Encode(outcome.Result!)
             : null;
         return new DurableEncodedEffectReconciliation(outcome.Kind, encoded);
-    }
-
-    private DurableWorkerEnvelope<TWork> CreateEnvelope(DurableWorkExecutionContext work)
-    {
-        if (!string.Equals(work.WorkName, WorkName, StringComparison.Ordinal)
-            || !string.Equals(work.WorkVersion, WorkVersion, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("Claimed work does not match the selected durable work registration.");
-        }
-
-        if (work.ProviderSafety != ProviderSafety)
-        {
-            throw new InvalidOperationException("Claimed work provider-safety snapshot does not match its registration.");
-        }
-
-        var payload = _workCodec.Decode(work.Payload);
-        var executionIdentity = work.ExecutionIdentity;
-        var correlation = new DurableWorkerCorrelation(
-            WorkName,
-            work.WorkId.Value,
-            executionIdentity.ActivityId,
-            $"{executionIdentity.AttemptNumber}:{executionIdentity.LeaseGeneration}");
-        return DurableWorkerEnvelope<TWork>.CreateNative(
-            DurableWorkerProjectionOutcome.Claimed,
-            "durable.claimed",
-            DurableWorkerRetryability.Retryable,
-            correlation,
-            executionIdentity,
-            payload);
     }
 
     private sealed class PreparedInvocation(
@@ -298,6 +321,110 @@ public sealed class DurableWorkRegistration<TWork, TResult, TExecutor> : Durable
             var result = await executor.ExecuteAsync(envelope, cancellationToken).ConfigureAwait(false);
             ArgumentNullException.ThrowIfNull(result);
             return resultCodec.Encode(result);
+        }
+    }
+}
+
+/// <summary>
+/// Reflection-free registration for one typed executor that returns an explicit durable Work exit.
+/// </summary>
+/// <typeparam name="TWork">Executor Work type.</typeparam>
+/// <typeparam name="TResult">Executor successful result type.</typeparam>
+/// <typeparam name="TExecutor">Registered executor implementation.</typeparam>
+public sealed class DurableWorkExitRegistration<TWork, TResult, TExecutor> : DurableWorkRegistration
+    where TExecutor : class, IDurableWorkExitExecutor<TWork, TResult>
+{
+    private readonly IDurablePayloadCodec<TWork> _workCodec;
+    private readonly IDurablePayloadCodec<TResult> _resultCodec;
+
+    /// <summary>Initializes an exit-aware registration with the fixed V1 provider-safety class.</summary>
+    /// <param name="workName">Stable registered Work name.</param>
+    /// <param name="workVersion">Immutable registered Work version.</param>
+    /// <param name="workCodec">Allowlisted Work input codec.</param>
+    /// <param name="resultCodec">Allowlisted terminal result codec.</param>
+    /// <exception cref="ArgumentNullException">Thrown when a codec is null.</exception>
+    public DurableWorkExitRegistration(
+        string workName,
+        string workVersion,
+        IDurablePayloadCodec<TWork> workCodec,
+        IDurablePayloadCodec<TResult> resultCodec)
+        : base(workName, workVersion, DurableProviderSafety.ProviderKeyed, workCodec, resultCodec)
+    {
+        _workCodec = workCodec;
+        _resultCodec = resultCodec;
+    }
+
+    /// <inheritdoc />
+    public override bool CanReconcile => false;
+
+    /// <summary>
+    /// Invokes the exit-aware executor through the legacy success-only provider boundary.
+    /// </summary>
+    /// <remarks>
+    /// Providers that support typed exits must invoke <see cref="DurablePreparedWork.InvokeExitAsync(CancellationToken)"/>
+    /// through the provider invocation boundary instead. This compatibility member returns an encoded result only for
+    /// <see cref="DurableWorkExitKind.Succeeded"/>; every non-success exit throws
+    /// <see cref="DurableWorkExitCompatibilityException"/> so a legacy provider follows its conservative ambiguous
+    /// external-outcome path after the effect permit.
+    /// </remarks>
+    /// <exception cref="DurableWorkExitCompatibilityException">Thrown when the exit-aware executor returns a non-success exit.</exception>
+    public override async ValueTask<DurableEncodedPayload> InvokeAsync(
+        IServiceProvider services,
+        DurableWorkExecutionContext work,
+        CancellationToken cancellationToken = default) =>
+        await Prepare(services, work).InvokeAsync(cancellationToken).ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public override DurablePreparedWork Prepare(IServiceProvider services, DurableWorkExecutionContext work)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(work);
+        var envelope = DurableWorkRegistrationEnvelopeFactory.Create(this, work, _workCodec);
+        var executor = services.GetRequiredService<TExecutor>();
+        return new PreparedInvocation(executor, envelope, _resultCodec);
+    }
+
+    /// <inheritdoc />
+    public override ValueTask<DurableEncodedEffectReconciliation> ReconcileAsync(
+        IServiceProvider services,
+        DurableWorkExecutionContext work,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(work);
+        throw new InvalidOperationException("This durable work registration has no provider reconciler.");
+    }
+
+    private sealed class PreparedInvocation(
+        TExecutor executor,
+        DurableWorkerEnvelope<TWork> envelope,
+        IDurablePayloadCodec<TResult> resultCodec) : DurablePreparedWork
+    {
+        public override async ValueTask<DurableEncodedPayload> InvokeAsync(
+            CancellationToken cancellationToken = default)
+        {
+            var exit = await InvokeExitAsync(cancellationToken).ConfigureAwait(false);
+            if (exit.Kind != DurableWorkExitKind.Succeeded)
+            {
+                throw new DurableWorkExitCompatibilityException();
+            }
+
+            return exit.Result!;
+        }
+
+        public override async ValueTask<DurableEncodedWorkExit> InvokeExitAsync(
+            CancellationToken cancellationToken = default)
+        {
+            var exit = await executor.ExecuteAsync(envelope, cancellationToken).ConfigureAwait(false);
+            ArgumentNullException.ThrowIfNull(exit);
+            return exit.Kind switch
+            {
+                DurableWorkExitKind.Succeeded => DurableEncodedWorkExit.Succeeded(resultCodec.Encode(exit.Result!)),
+                DurableWorkExitKind.RetryBeforeEffect => DurableEncodedWorkExit.RetryBeforeEffect(exit.Code!),
+                DurableWorkExitKind.FailedTerminal => DurableEncodedWorkExit.FailedTerminal(exit.Code!),
+                // Ambiguous and unknown facts are never treated as completed or safe to retry.
+                _ => DurableEncodedWorkExit.AmbiguousExternalOutcome(exit.Code!),
+            };
         }
     }
 }
@@ -389,6 +516,22 @@ public sealed class DurableWorkRegistry : IDurableWorkRegistry
 /// </summary>
 public static class DurableServiceCollectionExtensions
 {
+    private static IServiceCollection AddWorkRegistration<TExecutor>(
+        IServiceCollection services,
+        DurableWorkRegistration registration,
+        IDurablePayloadCodec workCodec,
+        IDurablePayloadCodec resultCodec)
+        where TExecutor : class
+    {
+        services.AddSingleton<IDurablePayloadCodec>(workCodec);
+        services.AddSingleton<IDurablePayloadCodec>(resultCodec);
+        services.AddSingleton<DurableWorkRegistration>(registration);
+        services.AddTransient<TExecutor>();
+        services.TryAddSingleton<IDurablePayloadCodecRegistry, DurablePayloadCodecRegistry>();
+        services.TryAddSingleton<IDurableWorkRegistry, DurableWorkRegistry>();
+        return services;
+    }
+
     /// <summary>
     /// Registers one versioned work contract, its allowlisted codecs, and its transient executor.
     /// </summary>
@@ -417,13 +560,45 @@ public static class DurableServiceCollectionExtensions
             providerSafety,
             workCodec,
             resultCodec);
-        services.AddSingleton<IDurablePayloadCodec>(workCodec);
-        services.AddSingleton<IDurablePayloadCodec>(resultCodec);
-        services.AddSingleton<DurableWorkRegistration>(registration);
-        services.AddTransient<TExecutor>();
-        services.TryAddSingleton<IDurablePayloadCodecRegistry, DurablePayloadCodecRegistry>();
-        services.TryAddSingleton<IDurableWorkRegistry, DurableWorkRegistry>();
-        return services;
+        return AddWorkRegistration<TExecutor>(services, registration, workCodec, resultCodec);
+    }
+
+    /// <summary>
+    /// Registers one immutable Work contract whose executor returns an explicit provider-effect exit.
+    /// </summary>
+    /// <typeparam name="TWork">Executor Work type.</typeparam>
+    /// <typeparam name="TResult">Executor successful result type.</typeparam>
+    /// <typeparam name="TExecutor">Exit-aware executor implementation.</typeparam>
+    /// <param name="services">Service collection to configure.</param>
+    /// <param name="workName">Stable Work name.</param>
+    /// <param name="workVersion">Immutable Work version.</param>
+    /// <param name="workCodec">Allowlisted Work input codec.</param>
+    /// <param name="resultCodec">Allowlisted terminal result codec.</param>
+    /// <returns>The same service collection.</returns>
+    /// <remarks>
+    /// V1 intentionally fixes this registration to <see cref="DurableProviderSafety.ProviderKeyed"/>. Register a
+    /// new immutable Work version only after every eligible worker uses a provider that calls
+    /// <see cref="DurablePreparedWork.InvokeExitAsync(CancellationToken)"/>; do not convert an accepted Work
+    /// version in place. Keep the legacy <see cref="AddDurableWork{TWork,TResult,TExecutor}"/> contract when an
+    /// executor cannot prove one of the four exit facts.
+    /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when the registration is invalid.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when services or a codec is null.</exception>
+    public static IServiceCollection AddDurableWorkExit<TWork, TResult, TExecutor>(
+        this IServiceCollection services,
+        string workName,
+        string workVersion,
+        IDurablePayloadCodec<TWork> workCodec,
+        IDurablePayloadCodec<TResult> resultCodec)
+        where TExecutor : class, IDurableWorkExitExecutor<TWork, TResult>
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        var registration = new DurableWorkExitRegistration<TWork, TResult, TExecutor>(
+            workName,
+            workVersion,
+            workCodec,
+            resultCodec);
+        return AddWorkRegistration<TExecutor>(services, registration, workCodec, resultCodec);
     }
 
     /// <summary>
@@ -455,13 +630,8 @@ public static class DurableServiceCollectionExtensions
             workCodec,
             resultCodec,
             provider => provider.GetRequiredService<TReconciler>());
-        services.AddSingleton<IDurablePayloadCodec>(workCodec);
-        services.AddSingleton<IDurablePayloadCodec>(resultCodec);
-        services.AddSingleton<DurableWorkRegistration>(registration);
-        services.AddTransient<TExecutor>();
+        AddWorkRegistration<TExecutor>(services, registration, workCodec, resultCodec);
         services.AddTransient<TReconciler>();
-        services.TryAddSingleton<IDurablePayloadCodecRegistry, DurablePayloadCodecRegistry>();
-        services.TryAddSingleton<IDurableWorkRegistry, DurableWorkRegistry>();
         return services;
     }
 

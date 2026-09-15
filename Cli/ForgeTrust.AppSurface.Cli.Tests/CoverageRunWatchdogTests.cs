@@ -97,6 +97,7 @@ public sealed class CoverageRunWatchdogTests
         using var console = new FakeInMemoryConsole();
         using var staged = new ManualResetEventSlim();
         using var release = new ManualResetEventSlim();
+        using var bindStarted = new ManualResetEventSlim();
         await using var supervisor = new CoverageRunWatchdogSupervisor(
             CoverageRunWatchdogMode.Warn,
             TimeSpan.Zero,
@@ -108,14 +109,22 @@ public sealed class CoverageRunWatchdogTests
             {
                 staged.Set();
                 release.Wait();
-            });
+            },
+            artifactCommitWaitStarted: bindStarted.Set);
         using var operation = supervisor.Start("project", "tests/Bootstrap.Tests/Bootstrap.Tests.csproj");
         Assert.True(staged.Wait(TimeSpan.FromSeconds(5)));
 
         var bind = Task.Run(() => supervisor.BindOutputDirectory(output.Path));
-        await Task.Delay(25);
-        Assert.False(bind.IsCompleted);
-        release.Set();
+        try
+        {
+            Assert.True(bindStarted.Wait(TimeSpan.FromSeconds(5)));
+            Assert.False(bind.IsCompleted);
+        }
+        finally
+        {
+            release.Set();
+        }
+
         await bind.WaitAsync(TimeSpan.FromSeconds(5));
 
         var artifact = Path.Join(output.Path, "coverage-watchdog.json");

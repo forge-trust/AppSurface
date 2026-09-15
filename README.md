@@ -67,7 +67,7 @@ This approach aims to:
 - [**ForgeTrust.AppSurface.Auth.AspNetCore**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md) – ASP.NET Core adapter that maps existing host request auth context and named policies into AppSurface auth results without owning schemes, middleware, challenges, forbids, redirects, or identity-provider setup. Run the [Auth Web/RazorWire proof](./examples/auth-web-razorwire-proof/README.md) to see one host policy drive both API and rendered UI state.
 - [**ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md) – Development-by-default selectable persona auth for local/proof AppSurface policy proofs, with a visible control page, an embeddable marker that stays fixed on desktop and flows with narrow layouts, a named fake scheme, a startup guard, explicit environment opt-in, and no production identity-provider behavior.
 - [**ForgeTrust.AppSurface.Auth.AspNetCore.Oidc**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md) – ASP.NET Core cookie + OIDC convenience registration with explicit AppSurface scheme names, conservative token defaults, passive prompt helpers, and safe diagnostics without silent default-scheme takeover or identity-provider ownership.
-- [**ForgeTrust.AppSurface.Auth.Aspire.Keycloak**](./Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md) – AppHost-only local Keycloak proof for real AppSurface OIDC sign-in, with deterministic realm import, secret-safe web projection, readiness probes, fixed-port diagnostics, and no runtime web dependency on Keycloak packages.
+- [**ForgeTrust.AppSurface.Auth.Aspire.Keycloak**](./Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md) – AppHost-only local Keycloak proof for real AppSurface OIDC sign-in, with deterministic realm import, a cached finite `RealmReady` gate, ordered consumer-owned local seed projects with scoped typed-secret bindings, secret-safe web projection, fixed-port diagnostics, and no runtime web dependency on Keycloak packages.
 - [**ForgeTrust.AppSurface.Auth.Testing**](./Auth/ForgeTrust.AppSurface.Auth.Testing/README.md) – Test-only ASP.NET Core harness for deterministic AppSurface auth personas, WebApplicationFactory integration tests, canonical auth result assertions, and ProblemDetails checks without becoming production authentication or Dev Auth.
 
 ### [Intelligence](./Intelligence/ForgeTrust.AppSurface.Intelligence/README.md)
@@ -89,7 +89,7 @@ This approach aims to:
 - [**ForgeTrust.AppSurface.Durable.Provider**](./Durable/ForgeTrust.AppSurface.Durable.Provider/README.md) – Public runtime-provider and operator SPI for claims, bounded activation, health, drain, recovery, controlled repair, and verified Flow-retention lifecycle contracts.
 - [**ForgeTrust.AppSurface.Durable.PostgreSql**](./Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) – Public-preview PostgreSQL provider for passive storage registration, explicit schema management, atomic Work acceptance, manually driven Flow persistence, [Work-first Schedule storage](./Durable/schedule-protocol-v1.md), and verified per-Flow retention; hosted processing requires an explicit `AddWorkerHost()` opt-in.
 
-The Durable packages are coordinated public previews. The [Slice 7 discovery and reconciliation guide](./Durable/README.md#slice-7-discovery-and-reconciliation) documents schema ownership, the `durable schema` command family, and the local proof boundary; production support remains outside the preview contract.
+The Durable packages are coordinated public previews. The [Durable operational-assessment adoption guide](./Durable/operational-assessments.md) is the task-oriented entry point for existing-host upgrades, the four-kind admission contract, schema/role rollout, diagnostics, and rollback. The [Slice 7 discovery and reconciliation guide](./Durable/README.md#slice-7-discovery-and-reconciliation) documents schema ownership, the `durable schema` command family, and the local proof boundary; production support remains outside the preview contract.
 
 ### [Console](./Console/README.md)
 
@@ -403,7 +403,7 @@ how to use this project.
   descriptors.
 - [Aspire AppHost example](examples/aspire-apphost/README.md) – shows local Aspire AppHost
   composition with AppSurface profiles and reusable Aspire components.
-- [Auth Aspire Keycloak AppHost proof](examples/auth-aspire-keycloak-apphost/README.md) – starts local Keycloak, imports a deterministic AppSurface realm, runs the OIDC web proof, and provides a noninteractive verifier for the real-provider flow.
+- [Auth Aspire Keycloak AppHost proof](examples/auth-aspire-keycloak-apphost/README.md) – starts local Keycloak, proves its finite baseline-readiness gate before the OIDC web proof, and provides a noninteractive verifier for the real-provider flow without adding a runtime Keycloak dependency.
 - [Web app example](examples/web-app/README.md) – shows a minimal ASP.NET Core app that
   composes middleware and endpoints from modules.
 - [Web error-page proof](examples/web-error-pages/README.md) – runs a one-command verifier

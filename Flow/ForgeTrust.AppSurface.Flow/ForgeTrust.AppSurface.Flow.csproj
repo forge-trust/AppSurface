@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <FlowAuthoringGeneratorPackageAsset>../ForgeTrust.AppSurface.Flow.Generators/bin/$(Configuration)/netstandard2.0/ForgeTrust.AppSurface.Flow.Generators.dll</FlowAuthoringGeneratorPackageAsset>
+    <FlowAuthoringGeneratorPackageAsset Condition="'$(ArtifactsPath)' != ''">$([System.IO.Path]::Combine('$(ArtifactsPath)', 'bin/ForgeTrust.AppSurface.Flow.Generators/$(Configuration.ToLowerInvariant())/ForgeTrust.AppSurface.Flow.Generators.dll'))</FlowAuthoringGeneratorPackageAsset>
   </PropertyGroup>
 
   <ItemGroup>

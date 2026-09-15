@@ -1,6 +1,8 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Net;
 using System.Text.Json;
+using AuthAspireKeycloakLocalSeedStore;
 
 namespace AuthAspireKeycloakVerifier;
 
@@ -24,11 +26,16 @@ public static class Program
     /// </summary>
     /// <param name="args">Command-line arguments.</param>
     /// <returns>Zero when verification succeeds; otherwise non-zero.</returns>
+    [ExcludeFromCodeCoverage(
+        Justification = "The process entry point only owns HttpClient lifetime and composes the separately covered verifier and local-store seams.")]
     public static async Task<int> Main(string[] args)
     {
         using var handler = new HttpClientHandler { AllowAutoRedirect = false };
         using var httpClient = new HttpClient(handler);
-        return await RunAsync(args, Console.Out, Console.Error, httpClient);
+        var exitCode = await RunAsync(args, Console.Out, Console.Error, httpClient);
+        return exitCode == 0
+            ? await VerifyLocalSeedStoreAsync(Environment.GetEnvironmentVariable, Console.Out, Console.Error)
+            : exitCode;
     }
 
     /// <summary>
@@ -71,6 +78,63 @@ public static class Program
 
         await output.WriteLineAsync("AppSurface Auth Aspire Keycloak verification passed.");
         await output.WriteLineAsync("Public status, protected challenge, and generated realm evidence are proven locally.");
+        return 0;
+    }
+
+    /// <summary>
+    /// Verifies the consumer-owned result left by the two finite local seed projects.
+    /// </summary>
+    /// <param name="environment">Environment accessor used to read the consumer-owned store path.</param>
+    /// <param name="output">Output writer for safe success evidence.</param>
+    /// <param name="error">Error writer for safe failure evidence.</param>
+    /// <returns>Zero when the ordered consumer results are present exactly once; otherwise non-zero.</returns>
+    internal static async Task<int> VerifyLocalSeedStoreAsync(
+        Func<string, string?> environment,
+        TextWriter output,
+        TextWriter error)
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(error);
+
+        var storePath = environment("LOCAL_SEED_STORE_PATH");
+        var authority = environment("APPSURFACE_KEYCLOAK_LOCAL_SEED_AUTHORITY");
+        var publicClientId = environment("APPSURFACE_KEYCLOAK_LOCAL_SEED_PUBLIC_CLIENT_ID");
+        if (string.IsNullOrWhiteSpace(storePath)
+            || string.IsNullOrWhiteSpace(authority)
+            || string.IsNullOrWhiteSpace(publicClientId))
+        {
+            await error.WriteLineAsync("AppSurface Auth Aspire Keycloak verification failed: local seed verification input is missing.");
+            return 1;
+        }
+
+        try
+        {
+            var snapshot = new LocalSeedStore(storePath).ReadSnapshot();
+            var hasExpectedRecords = snapshot.BrokerAliases.Count == 1
+                && snapshot.BrokerAliases[0].Alias == "local-broker"
+                && string.Equals(
+                    snapshot.BrokerAliases[0].Issuer.TrimEnd('/'),
+                    authority.TrimEnd('/'),
+                    StringComparison.Ordinal)
+                && snapshot.BrokerAliases[0].ClientId == publicClientId
+                && snapshot.IdentitySubjectMaps.Count == 1
+                && snapshot.IdentitySubjectMaps[0] == new IdentitySubjectMapRecord("founder", "subject-founder-001")
+                && snapshot.CandidateFixtures.Count == 1
+                && snapshot.CandidateFixtures[0] == new CandidateFixtureRecord("candidate:founder", "subject-founder-001");
+            if (!hasExpectedRecords)
+            {
+                await error.WriteLineAsync("AppSurface Auth Aspire Keycloak verification failed: ordered local seed records are missing or invalid.");
+                return 1;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or JsonException)
+        {
+            await error.WriteLineAsync($"AppSurface Auth Aspire Keycloak verification failed: local seed store could not be read ({exception.GetType().Name}).");
+            return 1;
+        }
+
+        await output.WriteLineAsync("Ordered consumer-local seed records are present exactly once.");
         return 0;
     }
 

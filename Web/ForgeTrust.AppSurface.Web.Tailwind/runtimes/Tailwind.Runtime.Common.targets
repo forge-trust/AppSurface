@@ -44,7 +44,7 @@
     BeforeTargets="Build;Pack">
     <Error
       Code="ASTW009"
-      Text="ASTW009 Tailwind runtime binary resolution has an invalid value. Problem: TailwindRuntimeBinaryResolutionEnabled is '$(TailwindRuntimeBinaryResolutionEnabled)'. Cause: runtime binary resolution accepts only true, false, or an unset value that defaults to true. Fix: set /p:TailwindRuntimeBinaryResolutionEnabled=true for package validation, runtime package creation, and solution builds that compile Tailwind-consuming projects; use false only for fast non-package paths that do not compile Tailwind-consuming projects. Docs: Web/ForgeTrust.AppSurface.Web.Tailwind/README.md#tailwind-diagnostics."
+      Text="ASTW009 Tailwind runtime binary resolution has an invalid value. Problem: TailwindRuntimeBinaryResolutionEnabled is '$(TailwindRuntimeBinaryResolutionEnabled)'. Cause: runtime binary resolution accepts only true, false, or an unset value that defaults to true. Fix: set /p:TailwindRuntimeBinaryResolutionEnabled=true for package validation, runtime package creation, and solution builds that compile Tailwind-consuming projects; use false only for fast non-package paths that do not compile Tailwind-consuming projects. Docs: Web/ForgeTrust.AppSurface.Web.Tailwind/README.md#diagnostics."
       Condition="'$(_TailwindRuntimeBinaryResolutionEnabledNormalized)' != 'true' and '$(_TailwindRuntimeBinaryResolutionEnabledNormalized)' != 'false'" />
   </Target>
 
@@ -115,7 +115,7 @@
     BeforeTargets="AddTailwindRuntimeBinaryToPackage">
     <Error
       Code="ASTW010"
-      Text="ASTW010 Tailwind runtime binary resolution is disabled during runtime package creation. Problem: this runtime package cannot be packed without its native Tailwind binary. Cause: TailwindRuntimeBinaryResolutionEnabled=false was passed to pack. Fix: rerun restore, build, and pack package-validation paths with /p:TailwindRuntimeBinaryResolutionEnabled=true. Docs: Web/ForgeTrust.AppSurface.Web.Tailwind/README.md#tailwind-diagnostics."
+      Text="ASTW010 Tailwind runtime binary resolution is disabled during runtime package creation. Problem: this runtime package cannot be packed without its native Tailwind binary. Cause: TailwindRuntimeBinaryResolutionEnabled=false was passed to pack. Fix: rerun restore, build, and pack package-validation paths with /p:TailwindRuntimeBinaryResolutionEnabled=true. Docs: Web/ForgeTrust.AppSurface.Web.Tailwind/README.md#diagnostics."
       Condition="'$(_TailwindRuntimeBinaryResolutionEnabledNormalized)' == 'false'" />
   </Target>
 
@@ -124,7 +124,7 @@
     DependsOnTargets="ValidateTailwindRuntimeBinaryResolutionEnabled;ErrorIfTailwindRuntimePackageCreatedWithoutBinaryResolution;ResolveTailwindBinary">
     <Error
       Code="ASTW011"
-      Text="ASTW011 Resolved Tailwind runtime binary is missing. Problem: the runtime package payload file does not exist at '$(_TailwindBinaryPath)'. Cause: binary resolution did not produce the expected file or a stale intermediate output was removed before packing. Fix: rerun package validation with /p:TailwindRuntimeBinaryResolutionEnabled=true, delete stale obj output if needed, and check TailwindBaseUrl/TailwindSumsUrl download settings. Docs: Web/ForgeTrust.AppSurface.Web.Tailwind/README.md#tailwind-diagnostics."
+      Text="ASTW011 Resolved Tailwind runtime binary is missing. Problem: the runtime package payload file does not exist at '$(_TailwindBinaryPath)'. Cause: binary resolution did not produce the expected file or a stale intermediate output was removed before packing. Fix: rerun package validation with /p:TailwindRuntimeBinaryResolutionEnabled=true, delete stale obj output if needed, and check TailwindBaseUrl/TailwindSumsUrl download settings. Docs: Web/ForgeTrust.AppSurface.Web.Tailwind/README.md#diagnostics."
       Condition="!Exists('$(_TailwindBinaryPath)')" />
     <ItemGroup>
       <TfmSpecificPackageFile Include="$(_TailwindBinaryPath)" PackagePath="runtimes/$(TailwindRid)/native" />

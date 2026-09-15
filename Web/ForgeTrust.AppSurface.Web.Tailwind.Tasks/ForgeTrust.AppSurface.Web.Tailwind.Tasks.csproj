@@ -13,6 +13,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Web.Tailwind.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="CliWrap" />
   </ItemGroup>
 

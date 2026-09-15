@@ -74,6 +74,33 @@ Concurrent first use creates one active generation-1 scope. A disabled scope is 
 
 No unknown post-permit outcome becomes `FailedTerminal`. Cancellation after permit does not change this matrix.
 
+## Typed executor exits
+
+An exit-aware `IDurableWorkExitExecutor<TWork,TResult>` can return only an executor fact. It cannot select a Work
+state, set retry delay, bypass a fence, attach arbitrary metadata, or classify exceptions. V1 registration is fixed to
+`ProviderKeyed`; legacy `IDurableWorkerExecutor<TWork,TResult>` registrations preserve their exact behavior. The
+adopter [exit-aware Work guide](./ForgeTrust.AppSurface.Durable/README.md#exit-aware-work-for-a-proven-pre-effect-retry)
+defines the public factories and application-code boundary.
+
+| Returned executor fact | Completion fact after a committed permit | Required PostgreSQL behavior |
+|---|---|---|
+| `Succeeded(result)` | `Succeeded` | Persist the encoded result under the existing success/cancellation rules. |
+| `RetryBeforeEffect(code)` | `ProvenNoEffect` | The executor proved it did not begin a provider mutation; read-only provider I/O is allowed. Apply the normal retry/deadline/cancellation/fence rules and record `proven_no_effect`; do not infer this fact from a read success, exception type, cancellation, or absence of a permit. |
+| `FailedTerminal(code)` | `FailedTerminal` | This is a local terminal fact, not proof that a permitted provider effect was absent. Apply the existing post-permit provider-safety matrix. |
+| `AmbiguousExternalOutcome(code)` | `AmbiguousExternalOutcome` | Preserve ambiguity and apply the existing reconciliation/manual-resolution behavior. |
+| Exception, cancellation, lease loss, codec failure, or legacy-boundary compatibility failure | `AmbiguousExternalOutcome` with `ASDUR106` | Treat the post-permit outcome as unknown. |
+
+Application codes are bounded, identifier-safe, application-owned facts (for example,
+`app.gmail.sender_list_transient`) and cannot use the reserved `ASDUR` prefix, case-insensitively. The provider must
+not put raw response data, payload bytes, provider diagnostics, or exception text in an application exit code.
+
+Exit-aware Work requires a provider that calls `InvokeExitAsync`. An old success-only provider can preserve a success,
+but a non-success exit throws `DurableWorkExitCompatibilityException` and follows the `ASDUR106` path. Rolling
+deployment is therefore ordered: deploy capable provider/runtime binaries, restart every worker that can discover the
+contract, register and accept a new immutable exit-aware Work version, then observe it. To roll back, stop accepting
+that version but retain capable workers until it drains or is intentionally suspended; never return to an old-only
+fleet that could claim an accepted exit-aware version.
+
 ## Retry v1
 
 Only `exponential-v1` is supported. After failed attempt `n >= 1`:

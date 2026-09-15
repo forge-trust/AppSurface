@@ -9,7 +9,20 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 public sealed class DurableSchemaContractTests
 {
     [Fact]
-    public void MigrationCatalog_IsExactlyNineOrderedChecksummedResources()
+    public void SchemaStatusConnectionSharing_RequiresTheSameDataSourceInstance()
+    {
+        using var runtimeDataSource = NpgsqlDataSource.Create(
+            "Host=localhost;Database=appsurface;Username=appsurface;Password=unused");
+        using var otherDataSource = NpgsqlDataSource.Create(
+            "Host=localhost;Database=appsurface;Username=appsurface;Password=unused");
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(runtimeDataSource);
+
+        Assert.True(manager.CanShareStatusConnectionWith(runtimeDataSource));
+        Assert.False(manager.CanShareStatusConnectionWith(otherDataSource));
+    }
+
+    [Fact]
+    public void MigrationCatalog_IsExactlyTenOrderedChecksummedResources()
     {
         var migrations = DurablePostgreSqlMigrationCatalog.Load();
 
@@ -161,6 +174,46 @@ public sealed class DurableSchemaContractTests
                     "REVOKE ALL ON FUNCTION appsurface_durable.discover_work_dispatch(text[], text[], integer) FROM PUBLIC;",
                     ninth.Sql,
                     StringComparison.Ordinal);
+            },
+            tenth =>
+            {
+                Assert.Equal(10, tenth.Version);
+                Assert.Equal("runtime_health_observation", tenth.Name);
+                Assert.Equal(64, tenth.Sha256.Length);
+                Assert.Contains("CREATE OR REPLACE FUNCTION appsurface_durable.runtime_due_dispatch_health(p_surfaces integer)", tenth.Sql, StringComparison.Ordinal);
+                Assert.Contains("LANGUAGE plpgsql\nSTABLE\nSECURITY DEFINER", tenth.Sql, StringComparison.Ordinal);
+                Assert.Contains("SET search_path = pg_catalog, appsurface_durable, pg_temp", tenth.Sql, StringComparison.Ordinal);
+                Assert.Contains("pg_catalog.statement_timestamp()", tenth.Sql, StringComparison.Ordinal);
+                Assert.Equal(1, CountOccurrences(tenth.Sql, "pg_catalog.statement_timestamp()"));
+                Assert.DoesNotContain("clock_timestamp()", tenth.Sql, StringComparison.Ordinal);
+                Assert.Contains("function_owner <> CURRENT_USER", tenth.Sql, StringComparison.Ordinal);
+                Assert.Contains("Durable/configure-postgresql-roles.sql", tenth.Sql, StringComparison.Ordinal);
+                Assert.True(
+                    tenth.Sql.IndexOf("function_owner <> CURRENT_USER", StringComparison.Ordinal)
+                    < tenth.Sql.IndexOf("CREATE INDEX ix_schedule_dispatch_lease_expiry_due", StringComparison.Ordinal));
+                Assert.Contains("SET LOCAL statement_timeout = '5min'", tenth.Sql, StringComparison.Ordinal);
+                Assert.Contains(
+                    "LOCK TABLE appsurface_durable.schedule_dispatch IN SHARE MODE NOWAIT",
+                    tenth.Sql,
+                    StringComparison.Ordinal);
+                Assert.True(
+                    tenth.Sql.IndexOf(
+                        "LOCK TABLE appsurface_durable.schedule_dispatch IN SHARE MODE NOWAIT",
+                        StringComparison.Ordinal)
+                    < tenth.Sql.IndexOf(
+                        "CREATE INDEX ix_schedule_dispatch_lease_expiry_due",
+                        StringComparison.Ordinal));
+                Assert.Contains("dispatch.state = 'available'", tenth.Sql, StringComparison.Ordinal);
+                Assert.Contains("dispatch.state = 'leased'", tenth.Sql, StringComparison.Ordinal);
+                Assert.Contains("dispatch.lease_expires_at <= observed_at_utc", tenth.Sql, StringComparison.Ordinal);
+                Assert.Contains("CREATE INDEX ix_schedule_dispatch_lease_expiry_due", tenth.Sql, StringComparison.Ordinal);
+                Assert.Contains("(lease_expires_at)", tenth.Sql, StringComparison.Ordinal);
+                Assert.Contains("WHERE state = 'leased'", tenth.Sql, StringComparison.Ordinal);
+                Assert.DoesNotContain("DROP FUNCTION", tenth.Sql, StringComparison.Ordinal);
+                Assert.Contains(
+                    "REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM PUBLIC;",
+                    tenth.Sql,
+                    StringComparison.Ordinal);
             });
         Assert.Equal(migrations.Count, DurablePostgreSqlMigrationCatalog.RequiredVersion);
         Assert.Equal(migrations.Count, PostgreSqlDurableRuntimeSchemaManager.RequiredVersion);
@@ -242,7 +295,40 @@ public sealed class DurableSchemaContractTests
         Assert.True(
             script.IndexOf("0008_flow_repair", StringComparison.Ordinal)
             < script.IndexOf("0009_work_contract_discovery", StringComparison.Ordinal));
-        Assert.Contains("pg_advisory_lock", script, StringComparison.Ordinal);
+        Assert.True(
+            script.IndexOf("0009_work_contract_discovery", StringComparison.Ordinal)
+            < script.IndexOf("0010_runtime_health_observation", StringComparison.Ordinal));
+        Assert.Contains(
+            """
+            DO $appsurface_durable$
+            DECLARE
+                lock_deadline timestamp with time zone := pg_catalog.clock_timestamp() + interval '30 seconds';
+            BEGIN
+                LOOP
+                    EXIT WHEN pg_catalog.pg_try_advisory_lock(4707181168775217740);
+                    IF pg_catalog.clock_timestamp() >= lock_deadline THEN
+                        RAISE EXCEPTION USING
+                            ERRCODE = '55P03',
+                            MESSAGE = 'Timed out after 30 seconds waiting for AppSurface Durable migration advisory lock 4707181168775217740. Retry after the active migration owner completes.';
+                    END IF;
+                    PERFORM pg_catalog.pg_sleep(0.1);
+                END LOOP;
+            END
+            $appsurface_durable$;
+            """,
+            script,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("SELECT pg_advisory_lock(", script, StringComparison.Ordinal);
+        Assert.Contains("closing that session after an error releases the session lock", script, StringComparison.Ordinal);
+        var tenthMarker = script.IndexOf("-- Migration 0010_runtime_health_observation", StringComparison.Ordinal);
+        var tenthTransaction = script.IndexOf("BEGIN;", tenthMarker, StringComparison.Ordinal);
+        var tenthDeadline = script.IndexOf("SET LOCAL statement_timeout = '5min'", tenthMarker, StringComparison.Ordinal);
+        var tenthCommit = script.IndexOf("COMMIT;", tenthMarker, StringComparison.Ordinal);
+        Assert.True(tenthMarker >= 0);
+        Assert.True(tenthTransaction > tenthMarker);
+        Assert.True(tenthDeadline > tenthTransaction);
+        Assert.True(tenthCommit > tenthDeadline);
+        Assert.True(script.LastIndexOf("SELECT pg_advisory_unlock(4707181168775217740);", StringComparison.Ordinal) > tenthCommit);
         Assert.DoesNotContain("0001_work_shared", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0002_forced_rls", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0003_flow_protocol", pendingOnly, StringComparison.Ordinal);
@@ -252,9 +338,27 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("0007_flow_retention", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0008_flow_repair", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0009_work_contract_discovery", pendingOnly, StringComparison.Ordinal);
+        Assert.Contains("0010_runtime_health_observation", pendingOnly, StringComparison.Ordinal);
         Assert.DoesNotContain("-- Migration", current, StringComparison.Ordinal);
         Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(-1));
-        Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(10));
+        Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(11));
+    }
+
+    [Fact]
+    public async Task SchemaManager_RejectsUnboundedOrInvalidLockTimingSeams()
+    {
+        await using var dataSource = NpgsqlDataSource.Create(
+            "Host=localhost;Database=not-opened;Username=not-opened;Password=not-opened");
+        var migrations = DurablePostgreSqlMigrationCatalog.Load();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableRuntimeSchemaManager(
+            dataSource,
+            migrations,
+            migrationLockAcquireTimeout: TimeSpan.Zero));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableRuntimeSchemaManager(
+            dataSource,
+            migrations,
+            migrationLockRetryDelay: TimeSpan.Zero));
     }
 
     [Theory]
@@ -484,6 +588,21 @@ public sealed class DurableSchemaContractTests
             "runtime_due_dispatch_health(integer)'::pg_catalog.regprocedure",
             recipe,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM PUBLIC;",
+            recipe,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM %I",
+            recipe,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO %I",
+            recipe,
+            StringComparison.Ordinal);
+        Assert.Contains("pg_catalog.aclexplode(routine.proacl)", recipe, StringComparison.Ordinal);
+        Assert.Contains("EXECUTE WITH GRANT OPTION", recipe, StringComparison.Ordinal);
+        Assert.Contains("AS runtime_due_dispatch_health_acl_is_exact", recipe, StringComparison.Ordinal);
         Assert.Contains("appsurface_durable.scope_history", recipe, StringComparison.Ordinal);
         Assert.Contains("appsurface_durable.work_operator_command", recipe, StringComparison.Ordinal);
         Assert.Contains(
