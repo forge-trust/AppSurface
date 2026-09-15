@@ -78,9 +78,8 @@ copy_current_package_source() {
 
 pack_current() {
   copy_current_package_source
-  local project project_name
+  local project
   for project in "${PACK_PROJECTS[@]}"; do
-    project_name="$(basename "$project" .csproj)"
     run_logged "current-pack-$(basename "$project" .csproj)" 300 \
       dotnet pack "$CURRENT_SOURCE/$project" --configuration Release --output "$CURRENT_FEED" \
       -p:Version="$CURRENT_VERSION" -p:PackageVersion="$CURRENT_VERSION" \
@@ -90,7 +89,7 @@ pack_current() {
 
 pack_baseline() {
   git -C "$ROOT_DIR" archive "$BASELINE_COMMIT" | tar -x -C "$PREVIOUS_SOURCE"
-  local before after project project_name
+  local before after project
   before="$(python3 - "$PREVIOUS_SOURCE" <<'PY'
 import hashlib
 from pathlib import Path
@@ -100,7 +99,6 @@ print('\n'.join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(r
 PY
 )"
   for project in "${PACK_PROJECTS[@]}"; do
-    project_name="$(basename "$project" .csproj)"
     if ! run_logged "baseline-pack-$(basename "$project" .csproj)" 300 \
       dotnet pack "$PREVIOUS_SOURCE/$project" --configuration Release --output "$BASELINE_FEED" \
       -p:Version="$BASELINE_VERSION" -p:PackageVersion="$BASELINE_VERSION" \
