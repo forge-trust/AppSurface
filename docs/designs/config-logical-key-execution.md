@@ -137,3 +137,90 @@ reach 100% branches and changed provider orchestration exceeds 95%. All scoped r
 findings are closed and affected gates have been rerun. No threshold or tolerance was
 changed. The local implementation commit is followed by the committed patch gate
 against the same collected coverage before the task is reported complete.
+
+## MakeItSo validation after merging main — September 15
+
+This section supersedes the 52-project implementation baseline above. The final
+collection validated clean commit `980ada8b74030f112cfe1ee1d060c3b7663b0b3c` after
+merging `origin/main` at `e0618ac8dcc3b5903517e9a711f42959534b7fb5`. All 2,379
+tracked/input hashes remained unchanged through the source, package, CLI,
+compatibility, and full-solution checks. This ledger update records evidence only.
+
+The unchanged [solution coverage script](../../scripts/coverage-solution.sh) and
+its committed patch gate both exited 0. The exact invocation was:
+
+```sh
+MSBUILDDISABLENODEREUSE=1 DOTNET_CLI_USE_MSBUILD_SERVER=0 UseSharedCompilation=false BUILD_CONFIGURATION=Debug BUILD_NO_RESTORE=true COVERAGE_PARALLELISM=1 COVERAGE_GATE_DIFF_BASE=origin/main python3 /tmp/config-validation-lock.py bash scripts/coverage-solution.sh
+```
+
+The run discovered 53 test projects and recorded **13,081 total tests: 13,080
+passed, zero failures or errors, and one skipped**. Compiler/analyzer warnings and
+errors were zero. The skipped
+`PostgreSqlMixedVersionCompatibilityTests.ExactV020Preview8Package_OperatesAfterSchema10AndSupportsBinaryRollback`
+is unchanged upstream and belongs to the explicit PostgreSQL release-proof lane
+enabled by `APPSURFACE_REQUIRE_V020_RELEASE_PROOF=true`; this run did not opt in.
+The solution build took 42.10 seconds, collection took 720 seconds, and the complete
+evidence wrapper and gate took 761.6 seconds.
+
+| Coverage | Covered / measurable | Observed |
+| --- | --- | --- |
+| Aggregate lines | 126,309 / 133,405 | 94.6809% |
+| Aggregate branches | 40,414 / 45,660 | 88.5107% |
+| Committed patch lines | 3,759 / 3,877 | 96.9564% |
+| Committed patch branches | 3,690 / 3,816 | 96.6981% |
+
+Both aggregate and patch gates retain configured 95% line / 85% branch thresholds,
+the existing 0.5-percentage-point tolerance, and effective 94.5% / 84.5% thresholds.
+Patch mode is Codecov against `origin/main`. No thresholds, exclusions, or test
+selection were relaxed.
+
+The key, parser, projection, provider result, environment snapshot, declaration
+registry, manager, environment codec, claims, and file-token projection each reach
+100% line and branch coverage. Provider branch coverage is Environment 261/266
+(98.1203%), File 290/300 (96.6667%), Google 123/128 (96.0938%), and Local 58/58
+(100%). `ConfigResolutionScope` remains separately measured at 23/24 branches
+(95.8333%); `EnvironmentObjectClone` is 70/72 (97.2222%). These results do not imply
+100% coverage for every configuration class.
+
+Fresh public proofs passed: source 10/10; two isolated packed-consumer runs, each
+with conformance 2/2 and `IConfiguration` coexistence; five isolated file-store CLI
+flows; and ten compatibility scenarios using four freshly built candidate packages.
+Current builds were warning-free. The packed consumers intentionally emitted two
+provider notices in total. Historical compatibility packages produced one MSB3277
+warning family and four missing-README advisories; these are distinct from current
+candidate build diagnostics.
+
+Release-page Playwright baseline regeneration and normal verification each passed
+2/2; the full browser integration suite also passed. Strict CDN documentation
+export exited 0 with 815 manifest entries and no RWEXPORT004 warnings. Four
+source-only documentation links were repaired. Documentation health returned
+HTTP 200 with the existing lossy-slug-normalization runtime warning.
+
+Enhance completed in two cycles. Specialist, adversarial, red-team, and independent
+fix review left no actionable scoped P1/P2 findings. Local migration now rejects
+case-colliding destinations without deleting source data. Google convention
+prefixes are explicit, and the ignored fail-open option was removed with migration
+guidance. The plan audit verified all 47 matrix rows and 176 method references. A
+separate bounded assertion audit traced 30 representative flows to 106 test methods
+with no demonstrated gap; that source assessment is not instrumented coverage.
+
+Final local artifacts:
+
+- `/tmp/config-make-it-so-final-report.json` and `.md`, with preserved evidence in
+  `/tmp/config-make-it-so-final-evidence`.
+- `/tmp/config-make-it-so-full.log` and `/tmp/config-make-it-so-full-report.json`.
+- `/tmp/config-make-it-so-independent-verification.json`: independent JUnit counts,
+  sole-skip identity, coverage counters, hashes, and clean-tree verification.
+- `/tmp/config-make-it-so-qa-report.json` and
+  `/tmp/config-make-it-so-kernel-providers.json`.
+- `/tmp/config-make-it-so-evidence-check.log`: exact-command freshness check passed.
+- Merged coverage SHA-256:
+  `8cf5e130ef2c63d39efb70bed38d05d4b7f354f418d3554b2b79ad6f45fa1a92`.
+- Canonical source-map SHA-256:
+  `71dc9a1d4e30726f6dc7807e0d54a8d4d3c4defceb35262b08627e9acd96654d`.
+
+The original 52-project coverage remains preserved in
+`/tmp/config-baseline-work/testresults-before.tar`. The final evidence-only commit
+is followed by a committed-gate-only check against the same coverage. Package
+publication, PR merge, credentialed Google service proof, and the separately
+planned dotted-key analyzer remain outside this draft-PR workflow.
