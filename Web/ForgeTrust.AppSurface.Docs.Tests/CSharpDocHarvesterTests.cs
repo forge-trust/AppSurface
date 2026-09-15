@@ -624,6 +624,87 @@ public class CSharpDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_WithBuiltInContextShouldRetainDeeplyNestedXmlDeclarationShell_AndReportWarning()
+    {
+        var nestedXml = CreateNestedXmlDocumentation("Too deep.", CSharpDocHarvester.MaximumXmlCommentNestingDepth);
+        await File.WriteAllTextAsync(
+            CombineUnder(_testRoot, "DeeplyNestedDocumentation.cs"),
+            $$"""
+            namespace Product.Api;
+
+            /// <summary>{{nestedXml}}</summary>
+            public sealed class DeeplyNestedDocumentation { }
+            """);
+
+        var results = await _harvester.HarvestAsync(CreateContextWithDefaultPolicy());
+        var namespaceNode = Assert.Single(results, node => node.Path == "Namespaces/Product.Api");
+        var document = Assert.IsType<CSharpNamespaceDocument>(namespaceNode.CSharpNamespaceDocument);
+        var type = Assert.Single(document.Types);
+        var diagnostic = Assert.Single(GetDiagnostics(_harvester));
+
+        Assert.Equal("DeeplyNestedDocumentation", type.DisplayName);
+        Assert.Null(type.Documentation);
+        Assert.Contains(document.Outline, item => item.Id == type.AnchorId && item.Level == 2);
+        Assert.Equal(DocHarvestDiagnosticCodes.CSharpXmlCommentDepthExceeded, diagnostic.Code);
+        Assert.Equal(DocHarvestDiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Contains("DeeplyNestedDocumentation.cs", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.DoesNotContain(_testRoot, diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains(CSharpDocHarvester.MaximumXmlCommentNestingDepth.ToString(), diagnostic.Cause, StringComparison.Ordinal);
+        Assert.Contains("Reduce", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldAcceptMaximumXmlNestingDepthThroughTypedAndLegacyContracts()
+    {
+        var nestedXml = CreateNestedXmlDocumentation("Within limit.", CSharpDocHarvester.MaximumXmlCommentNestingDepth - 1);
+        await File.WriteAllTextAsync(
+            CombineUnder(_testRoot, "MaximumNestedDocumentation.cs"),
+            $$"""
+            namespace Product.Api;
+
+            /// <summary>{{nestedXml}}</summary>
+            public sealed class MaximumNestedDocumentation { }
+            """);
+
+        var typedResults = await _harvester.HarvestAsync(CreateContextWithDefaultPolicy());
+        var typedNamespace = Assert.Single(typedResults, node => node.Path == "Namespaces/Product.Api");
+        var typedDocument = Assert.IsType<CSharpNamespaceDocument>(typedNamespace.CSharpNamespaceDocument);
+        var typedType = Assert.Single(typedDocument.Types);
+        Assert.Contains(
+            typedType.Documentation!.Sections.Single().Content,
+            node => node.Kind == CSharpXmlNodeKind.Text && node.Text == "Within limit.");
+
+        var legacyResults = await _harvester.HarvestAsync(_testRoot);
+        var legacyNamespace = Assert.Single(legacyResults, node => node.Path == "Namespaces/Product.Api");
+        Assert.Contains("Within limit.", legacyNamespace.Content, StringComparison.Ordinal);
+        Assert.Empty(GetDiagnostics(_harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSkipDeeplyNestedXmlDocumentationThroughLegacyPublicContract_AndReportWarning()
+    {
+        var nestedXml = CreateNestedXmlDocumentation("Too deep.", CSharpDocHarvester.MaximumXmlCommentNestingDepth);
+        await File.WriteAllTextAsync(
+            CombineUnder(_testRoot, "DeeplyNestedLegacyDocumentation.cs"),
+            $$"""
+            namespace Product.Api;
+
+            /// <summary>{{nestedXml}}</summary>
+            public sealed class DeeplyNestedLegacyDocumentation { }
+            """);
+
+        var results = await _harvester.HarvestAsync(_testRoot);
+        var diagnostic = Assert.Single(GetDiagnostics(_harvester));
+
+        Assert.DoesNotContain(results, node => node.Path == "Namespaces/Product.Api");
+        Assert.Equal(DocHarvestDiagnosticCodes.CSharpXmlCommentDepthExceeded, diagnostic.Code);
+        Assert.Equal(DocHarvestDiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Contains("DeeplyNestedLegacyDocumentation.cs", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.DoesNotContain(_testRoot, diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains(CSharpDocHarvester.MaximumXmlCommentNestingDepth.ToString(), diagnostic.Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task HarvestAsync_WithContextOnDerivedHarvesterUsesPublicHarvesterContract()
     {
         var harvester = new DerivedCSharpDocHarvester(A.Fake<ILogger<CSharpDocHarvester>>());
@@ -1597,6 +1678,13 @@ public class GlobalType {}
         /// <summary>{{summary}}</summary>
         public sealed class {{className}} { }
         """;
+    }
+
+    private static string CreateNestedXmlDocumentation(string text, int nestedElementCount)
+    {
+        return string.Concat(Enumerable.Repeat("<nested>", nestedElementCount))
+               + text
+               + string.Concat(Enumerable.Repeat("</nested>", nestedElementCount));
     }
 
     private DocHarvestContext CreateContextWithDefaultPolicy()

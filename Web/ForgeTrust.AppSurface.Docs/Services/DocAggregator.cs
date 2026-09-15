@@ -2005,8 +2005,11 @@ public class DocAggregator
         }
 
         var fragmentIndex = normalizedHref.IndexOf('#');
-        var routePath = fragmentIndex < 0 ? normalizedHref : normalizedHref[..fragmentIndex];
+        var pathAndQuery = fragmentIndex < 0 ? normalizedHref : normalizedHref[..fragmentIndex];
         var fragment = fragmentIndex < 0 ? string.Empty : normalizedHref[fragmentIndex..];
+        var queryIndex = pathAndQuery.IndexOf('?');
+        var routePath = queryIndex < 0 ? pathAndQuery : pathAndQuery[..queryIndex];
+        var query = queryIndex < 0 ? string.Empty : pathAndQuery[queryIndex..];
         var docsRootPath = _docsUrlBuilder.CurrentDocsRootPath;
         if (!DocsUrlBuilder.IsUnderRoot(routePath, docsRootPath))
         {
@@ -2015,14 +2018,14 @@ public class DocAggregator
 
         if (string.Equals(routePath, docsRootPath, StringComparison.OrdinalIgnoreCase))
         {
-            return _docsUrlBuilder.BuildHomeUrl() + fragment;
+            return _docsUrlBuilder.BuildHomeUrl() + query + fragment;
         }
 
         var docsRelativePath = string.Equals(docsRootPath, "/", StringComparison.Ordinal)
             ? routePath.TrimStart('/')
             : routePath[(docsRootPath.Length + 1)..];
         return routeIdentityCatalog.TryGetPublicRoutePath(docsRelativePath, out var publicRoutePath)
-            ? _docsUrlBuilder.BuildDocUrl(publicRoutePath) + fragment
+            ? _docsUrlBuilder.BuildDocUrl(publicRoutePath) + query + fragment
             : null;
     }
 

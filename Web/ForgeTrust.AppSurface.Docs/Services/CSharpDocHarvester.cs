@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Xml;
 using System.Xml.Linq;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.RazorWire;
@@ -19,6 +20,17 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
 {
     private const string HarvesterType = nameof(CSharpDocHarvester);
     private const string MaxFileSizeConfigurationKey = "AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes";
+
+    /// <summary>
+    /// The greatest supported XML element depth in one C# documentation comment, including a top-level documentation section.
+    /// </summary>
+    /// <remarks>
+    /// The bound lets the typed and legacy compatibility projections safely flatten arbitrary custom XML elements without
+    /// unbounded recursion.
+    /// It is intentionally internal so regression tests can exercise the published diagnostic behavior without making this
+    /// implementation limit part of the application configuration surface.
+    /// </remarks>
+    internal const int MaximumXmlCommentNestingDepth = 32;
 
     private readonly AppSurfaceDocsOptions _options;
     private readonly ILogger<CSharpDocHarvester> _logger;
@@ -476,7 +488,14 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         try
         {
             var cleanXml = NormalizeDocumentationCommentXml(xml);
-            var root = XDocument.Parse($"<doc>{cleanXml}</doc>", LoadOptions.PreserveWhitespace).Root!;
+            var wrappedXml = $"<doc>{cleanXml}</doc>";
+            if (!IsXmlCommentNestingDepthWithinLimit(wrappedXml))
+            {
+                diagnostics.Add(CreateXmlCommentDepthExceededDiagnostic(relativePath, node));
+                return new TypedDocumentationResult(null, HasComment: true);
+            }
+
+            var root = XDocument.Parse(wrappedXml, LoadOptions.PreserveWhitespace).Root!;
             var excludedParameterNames = node is MethodDeclarationSyntax method
                 ? GetCompilerGeneratedCallerParameterNames(method)
                 : null;
@@ -503,6 +522,28 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
             _logger.LogWarning(ex, "Failed to parse C# XML documentation in {File}.", relativePath);
             return new TypedDocumentationResult(null, HasComment: true);
         }
+    }
+
+    private static bool IsXmlCommentNestingDepthWithinLimit(string wrappedXml)
+    {
+        using var reader = XmlReader.Create(
+            new StringReader(wrappedXml),
+            new XmlReaderSettings
+            {
+                DtdProcessing = DtdProcessing.Prohibit,
+                IgnoreComments = true,
+                IgnoreProcessingInstructions = true
+            });
+        while (reader.Read())
+        {
+            // The synthetic doc root is at depth zero, so its direct XML documentation sections count as level one.
+            if (reader.NodeType == XmlNodeType.Element && reader.Depth > MaximumXmlCommentNestingDepth)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static void AddTypedDocumentationSection(
@@ -763,6 +804,18 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
             $"C# XML documentation in '{relativePath}' at line {location.Line + 1}, column {location.Character + 1} is malformed.",
             "The documentation comment could not be parsed safely, so its documentation fields were omitted while the declaration anchor remains available.",
             "Repair the XML documentation comment and refresh the Docs harvest.");
+    }
+
+    private static DocHarvestDiagnostic CreateXmlCommentDepthExceededDiagnostic(string relativePath, SyntaxNode node)
+    {
+        var location = node.SyntaxTree.GetLineSpan(node.Span).StartLinePosition;
+        return new DocHarvestDiagnostic(
+            DocHarvestDiagnosticCodes.CSharpXmlCommentDepthExceeded,
+            DocHarvestDiagnosticSeverity.Warning,
+            HarvesterType,
+            $"C# XML documentation in '{relativePath}' at line {location.Line + 1}, column {location.Character + 1} exceeds the supported nesting depth.",
+            $"The documentation comment contains more than {MaximumXmlCommentNestingDepth} XML element levels, so its documentation fields were omitted to preserve harvest availability.",
+            $"Reduce the XML documentation nesting to no more than {MaximumXmlCommentNestingDepth} element levels and refresh the Docs harvest.");
     }
 
     private void LogDiagnostics(IEnumerable<DocHarvestDiagnostic> diagnostics)
@@ -1080,13 +1133,13 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                     var typeDeclarations = root.DescendantNodes().OfType<TypeDeclarationSyntax>().ToList();
                     foreach (var typeDecl in typeDeclarations)
                     {
-                        var doc = ExtractDoc(typeDecl);
+                        var doc = ExtractDoc(typeDecl, relativePath, diagnostics);
                         var documentedMethods = typeDecl.Members
                             .OfType<MethodDeclarationSyntax>()
                             .Select(method => new
                             {
                                 Method = method,
-                                Doc = ExtractDoc(method)
+                                Doc = ExtractDoc(method, relativePath, diagnostics)
                             })
                             .Where(x => x.Doc != null)
                             .ToList();
@@ -1095,7 +1148,7 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                             .Select(property => new
                             {
                                 Property = property,
-                                Doc = ExtractDoc(property)
+                                Doc = ExtractDoc(property, relativePath, diagnostics)
                             })
                             .Where(x => x.Doc != null)
                             .ToList();
@@ -1220,7 +1273,7 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                     var enumDeclarations = root.DescendantNodes().OfType<EnumDeclarationSyntax>().ToList();
                     foreach (var enumDecl in enumDeclarations)
                     {
-                        var doc = ExtractDoc(enumDecl);
+                        var doc = ExtractDoc(enumDecl, relativePath, diagnostics);
                         if (doc != null)
                         {
                             var namespacePage = GetOrCreateNamespacePage(namespacePages, GetNamespaceName(enumDecl));
@@ -1569,8 +1622,13 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     /// Extracts XML documentation from the leading trivia of a syntax node and converts it into HTML fragments.
     /// </summary>
     /// <param name="node">The syntax node whose leading XML documentation comments will be parsed.</param>
+    /// <param name="relativePath">The repository-relative path used by structured documentation diagnostics.</param>
+    /// <param name="diagnostics">The harvest diagnostics that receive local XML depth-limit warnings.</param>
     /// <returns>The HTML string containing structured documentation sections, or <c>null</c> if no documentation is present or parsing fails.</returns>
-    private string? ExtractDoc(SyntaxNode node)
+    private string? ExtractDoc(
+        SyntaxNode node,
+        string relativePath,
+        ICollection<DocHarvestDiagnostic> diagnostics)
     {
         var xml = node.GetLeadingTrivia()
             .Select(i => i.GetStructure())
@@ -1583,6 +1641,12 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         {
             var cleanXml = NormalizeDocumentationCommentXml(xml);
             var wrappedXml = $"<doc>{cleanXml}</doc>";
+            if (!IsXmlCommentNestingDepthWithinLimit(wrappedXml))
+            {
+                diagnostics.Add(CreateXmlCommentDepthExceededDiagnostic(relativePath, node));
+                return null;
+            }
+
             var xdoc = XDocument.Parse(wrappedXml, LoadOptions.PreserveWhitespace);
             var root = xdoc.Root!;
             var excludedParameterNames = node is MethodDeclarationSyntax method

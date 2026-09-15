@@ -5334,7 +5334,7 @@ public class DocAggregatorTests : IDisposable
                         new DocNamespaceEntryPoint
                         {
                             Label = " API guide ",
-                            Href = " /docs/guides/api ",
+                            Href = " /docs/guides/api?tab=api#intro ",
                             Order = 0,
                             SourceIndex = 1
                         },
@@ -5364,7 +5364,7 @@ public class DocAggregatorTests : IDisposable
                 Assert.Equal("API guide", first.Label);
                 Assert.Null(first.Summary);
                 Assert.Null(first.Target);
-                Assert.Equal("/docs/guides/api", first.Href);
+                Assert.Equal("/docs/guides/api?tab=api#intro", first.Href);
                 Assert.Empty(first.Keywords);
             },
             second =>

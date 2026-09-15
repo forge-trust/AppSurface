@@ -3055,6 +3055,7 @@ public class AppSurfaceDocsViewsTests
         var groupAnchor = "Test-Calculator-Process-method-group";
         var overloadAnchor = "Test-Calculator-Process-Int32";
         var propertyAnchor = "Test-Calculator-String-Name-get";
+        var enumAnchor = "Test-Mode";
         var typedDocument = new CSharpNamespaceDocument(
             "Test",
             "Test",
@@ -3076,7 +3077,19 @@ public class AppSurfaceDocsViewsTests
                             null,
                             null,
                             null,
-                            [new CSharpXmlNode(CSharpXmlNodeKind.Text, "Direct type documentation.")])
+                            [new CSharpXmlNode(CSharpXmlNodeKind.Text, "Direct type documentation.")]),
+                        new CSharpDocumentationSection(
+                            CSharpDocumentationSectionKind.Returns,
+                            null,
+                            null,
+                            null,
+                            [new CSharpXmlNode(CSharpXmlNodeKind.CodeBlock, "return value")]),
+                        new CSharpDocumentationSection(
+                            CSharpDocumentationSectionKind.Example,
+                            null,
+                            null,
+                            null,
+                            [new CSharpXmlNode(CSharpXmlNodeKind.Text, "Call Process before reading Name.")])
                     ]),
                     [
                         new CSharpMethodGroupDocument(
@@ -3085,7 +3098,12 @@ public class AppSurfaceDocsViewsTests
                             [
                                 new CSharpMethodDocument(
                                     overloadAnchor,
-                                    new CSharpSignature("string", "Process", [new CSharpSignatureParameter(null, "int", "count")], []),
+                                    new CSharpSignature(
+                                        "string",
+                                        "Process",
+                                        [new CSharpSignatureParameter("ref", "int", "count", "0")],
+                                        ["T"],
+                                        ExplicitInterface: "IProcessor"),
                                     new CSharpDocumentation(
                                     [
                                         new CSharpDocumentationSection(
@@ -3103,15 +3121,31 @@ public class AppSurfaceDocsViewsTests
                             propertyAnchor,
                             "Name",
                             new CSharpSignature("string", "Name", [], [], AccessorSignature: "get;"),
-                            new CSharpDocumentation([]))
-                    ]
-                )
+                            new CSharpDocumentation([]),
+                            "/source/Calculator.cs#L20")
+                    ],
+                    "/source/Calculator.cs#L5")
             ],
-            [],
+            [
+                new CSharpEnumDocument(
+                    enumAnchor,
+                    "Mode",
+                    new CSharpDocumentation(
+                    [
+                        new CSharpDocumentationSection(
+                            CSharpDocumentationSectionKind.Summary,
+                            null,
+                            null,
+                            null,
+                            [new CSharpXmlNode(CSharpXmlNodeKind.Text, "Selects the processing mode.")])
+                    ]),
+                    "/source/Mode.cs#L4")
+            ],
             [
                 new DocOutlineItem { Id = typeAnchor, Title = "Calculator", Level = 2 },
                 new DocOutlineItem { Id = groupAnchor, Title = "Process", Level = 3 },
-                new DocOutlineItem { Id = propertyAnchor, Title = "Name", Level = 3 }
+                new DocOutlineItem { Id = propertyAnchor, Title = "Name", Level = 3 },
+                new DocOutlineItem { Id = enumAnchor, Title = "Mode", Level = 2 }
             ],
             [],
             "Calculator Process Name",
@@ -3119,7 +3153,8 @@ public class AppSurfaceDocsViewsTests
             EntryPoints:
             [
                 new DocNamespaceEntryPoint { Label = "Process", Target = groupAnchor },
-                new DocNamespaceEntryPoint { Label = "Missing", Target = "not-present" },
+                new DocNamespaceEntryPoint { Label = "Guide", Summary = "Open the API guide.", Href = "/docs/guides/api?tab=api#intro" },
+                new DocNamespaceEntryPoint { Label = "Missing", Summary = "This target no longer exists.", Target = "not-present" },
                 new DocNamespaceEntryPoint { Label = "Read", Summary = "Plain orientation." }
             ]);
         var doc = new DocNode(
@@ -3142,8 +3177,10 @@ public class AppSurfaceDocsViewsTests
         Assert.Equal("Calculator <unsafe>", document.QuerySelector($"#{typeAnchor} h2")?.TextContent.Trim());
         Assert.Contains("Adds &lt;safe&gt; values.", html, StringComparison.Ordinal);
         Assert.DoesNotContain("Adds <safe> values.", html, StringComparison.Ordinal);
+        var childNamespaceLink = document.QuerySelector(".doc-namespace-groups a");
         Assert.Equal("h2", document.QuerySelector(".doc-namespace-groups > h2")?.LocalName);
-        Assert.Equal("/mounted/docs/Namespaces/Test.Advanced.html", document.QuerySelector(".doc-namespace-groups a")?.GetAttribute("href"));
+        Assert.Equal("/mounted/docs/Namespaces/Test.Advanced.html", childNamespaceLink?.GetAttribute("href"));
+        Assert.Equal("advance", childNamespaceLink?.GetAttribute("data-turbo-action"));
         Assert.True(
             html.IndexOf("doc-namespace-groups", StringComparison.Ordinal)
             < html.IndexOf("doc-namespace-intro", StringComparison.Ordinal));
@@ -3156,13 +3193,28 @@ public class AppSurfaceDocsViewsTests
             < html.IndexOf("doc-type", StringComparison.Ordinal));
         Assert.Equal("#" + groupAnchor, document.QuerySelector(".doc-namespace-entry-points a")?.GetAttribute("href"));
         Assert.Contains("Target unavailable", html, StringComparison.Ordinal);
+        Assert.Contains("Open the API guide.", html, StringComparison.Ordinal);
+        Assert.Contains("This target no longer exists.", html, StringComparison.Ordinal);
         Assert.Contains("Plain orientation.", html, StringComparison.Ordinal);
-        Assert.Equal("/mounted/source/Calculator.cs#L12", document.QuerySelector($"#{overloadAnchor} .doc-symbol-source-link")?.GetAttribute("href"));
+        var guideEntryPoint = document.QuerySelectorAll(".doc-namespace-entry-points a")
+            .Single(anchor => anchor.TextContent.Contains("Guide", StringComparison.Ordinal));
+        Assert.Equal("/mounted/docs/guides/api?tab=api#intro", guideEntryPoint.GetAttribute("href"));
+        Assert.Equal("/mounted/source/Calculator.cs#L5", document.QuerySelector($"#{typeAnchor} .doc-symbol-source-link")?.GetAttribute("href"));
+        var sourceLink = document.QuerySelector($"#{overloadAnchor} .doc-symbol-source-link");
+        Assert.Equal("/mounted/source/Calculator.cs#L12", sourceLink?.GetAttribute("href"));
+        Assert.Equal("View source for Process", sourceLink?.GetAttribute("aria-label"));
+        Assert.Equal("/mounted/source/Calculator.cs#L20", document.QuerySelector($"#{propertyAnchor} .doc-symbol-source-link")?.GetAttribute("href"));
+        Assert.Equal("/mounted/source/Mode.cs#L4", document.QuerySelector($"#{enumAnchor} .doc-symbol-source-link")?.GetAttribute("href"));
         Assert.Equal("details", document.QuerySelector($"#{overloadAnchor}")?.LocalName);
         Assert.True(document.QuerySelector($"#{overloadAnchor}")!.HasAttribute("open"));
         Assert.Empty(document.QuerySelectorAll($"#{overloadAnchor} summary a"));
         Assert.Equal("h3", document.QuerySelector($"#{typeAnchor} .doc-remarks > h3")?.LocalName);
         Assert.Equal("h4", document.QuerySelector($"#{overloadAnchor} .doc-params > h4")?.LocalName);
+        Assert.Equal("return value", document.QuerySelector($"#{typeAnchor} .doc-returns pre code")?.TextContent.Trim());
+        Assert.Equal("Call Process before reading Name.", document.QuerySelector($"#{typeAnchor} .doc-example p")?.TextContent.Trim());
+        Assert.Contains("IProcessor", document.QuerySelector($"#{overloadAnchor} .doc-signature")?.TextContent);
+        Assert.Contains("ref", document.QuerySelector($"#{overloadAnchor} .doc-signature")?.TextContent);
+        Assert.Contains("= 0", document.QuerySelector($"#{overloadAnchor} .doc-signature")?.TextContent);
         Assert.Equal("Method", document.QuerySelector($"#{groupAnchor} .doc-kind")?.TextContent.Trim());
         Assert.Equal("article", document.QuerySelector($"#{propertyAnchor} .doc-property")?.LocalName);
         Assert.Equal("Property", document.QuerySelector($"#{propertyAnchor} .doc-kind")?.TextContent.Trim());

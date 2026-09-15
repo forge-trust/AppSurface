@@ -1116,6 +1116,11 @@ public static class DocHarvestDiagnosticCodes
     public const string CSharpXmlCommentMalformed = "appsurfacedocs.csharp.xml_comment_malformed";
 
     /// <summary>
+    /// A C# XML documentation comment exceeded the safe projection nesting limit and its documentation fields were omitted.
+    /// </summary>
+    public const string CSharpXmlCommentDepthExceeded = "appsurfacedocs.csharp.xml_comment_depth_exceeded";
+
+    /// <summary>
     /// A JavaScript source file could not be parsed and was skipped while other files continued harvesting.
     /// </summary>
     public const string JavaScriptParseFailed = "appsurfacedocs.javascript.parse_failed";

@@ -1834,6 +1834,8 @@ body {
     display: inline-flex;
     align-items: center;
     flex: 0 0 auto;
+    min-height: 44px;
+    box-sizing: border-box;
     border: 1px solid var(--docs-color-border-default);
     border-radius: 9999px;
     padding: 0.18rem 0.55rem;
@@ -1848,6 +1850,11 @@ body {
 .docs-content .doc-symbol-source-link:hover {
     border-color: var(--docs-color-border-accent-strong);
     color: var(--docs-color-accent-soft);
+}
+
+.docs-content .doc-symbol-source-link:focus-visible {
+    outline: 2px solid var(--docs-color-accent);
+    outline-offset: 3px;
 }
 
 .docs-content .doc-overload {
@@ -1967,11 +1974,19 @@ body {
 }
 
 .docs-content .doc-namespace-groups a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
     color: var(--docs-color-link);
 }
 
 .docs-content .doc-namespace-groups a:hover {
     color: var(--docs-color-accent);
+}
+
+.docs-content .doc-namespace-groups a:focus-visible {
+    outline: 2px solid var(--docs-color-accent);
+    outline-offset: 3px;
 }
 
 .docs-content .doc-namespace-entry-points {
