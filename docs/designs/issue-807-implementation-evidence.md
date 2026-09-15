@@ -1,8 +1,9 @@
 # Issue #807 implementation evidence
 
 This document records the migration, rollback, lifetime, and performance evidence for the file declared secret reference
-implementation. The final repository and packed-consumer gates below ran against code commit
-`db45ecf5857b2903d50749a596810ad73385c8ff` on September 15, 2026. Later evidence-only documentation changes
+implementation. The initial passing repository and packed-consumer gates below ran against code commit
+`db45ecf5857b2903d50749a596810ad73385c8ff` on September 15, 2026. The post-cleanup confirmation records the
+final passing run at `d1561e396eb0c1cadfc1023ebff17c621dd02040`. Later evidence-only documentation changes
 do not change the code that was tested.
 
 ## Approved design and public guide
@@ -53,7 +54,7 @@ The example and generated baseline use the standard [AppSurface startup API](../
 with explicit host construction, startup, DI resolution and assertions, then stop and disposal. The expected failure
 case catches the typed composition exception; unexpected startup or assertion failures produce a nonzero exit.
 
-## Final repository gates
+## Reviewed implementation gates
 
 The unchanged [solution coverage command](../../scripts/coverage-solution.sh), `./scripts/coverage-solution.sh`,
 completed with exit code `0` between `07:17:49` and `07:30:46` UTC. All 52 test projects passed, and the working tree
@@ -95,6 +96,33 @@ read policy, and a duplicate PostgreSQL namespace documentation path; none made 
 The enhancement review completed clean after three cycles, including testing, security, maintainability, performance,
 API-contract, simplification, adversarial, and red-team passes. Browser QA does not apply to this configuration library;
 the real packed consumer and rollback exercise above is its user-facing validation.
+
+## Post-cleanup confirmation
+
+Commit `d1561e396eb0c1cadfc1023ebff17c621dd02040` added the Google file-reference capability to the package chooser,
+removed two unused smoke-script assignments, and recorded the initial evidence. It changed no C# source or tests.
+The unchanged solution coverage command passed again with exit code `0` between `08:01:09` and `08:13:18` UTC on
+September 15, 2026. All 52 projects passed; the working tree was clean before and after. All four coverage percentages
+and thresholds match the table above. Final run metadata and logs are in `/private/tmp/issue807-coverage-attempt4`.
+
+An intervening full run passed 51 projects but timed out waiting for the second user to appear in the existing
+RazorWire two-user registration test. Both registration POSTs had succeeded. That test and the example application
+were unchanged by this branch. The unchanged test then passed three focused runs in 3.627, 2.018, and 2.019 seconds,
+and the final full integration suite passed in 210 seconds. The observer timeout's exact cause remains unproven.
+The failed run is retained in `/private/tmp/issue807-coverage-attempt3`; its test failure prevented the subsequent
+coverage gate command from running, so it is not counted as a passing gate.
+
+The first isolated reproduction stalled in Playwright's browser installer before executing the test. That owned
+diagnostic process was stopped. The successful focused runs and final coverage run used a task-local copy of the
+already installed browser binaries via `PLAYWRIGHT_BROWSERS_PATH=/private/tmp/issue807-playwright-cache`. No test
+assertion, timeout, filter in the full gate, or coverage policy was changed.
+
+The post-cleanup packed smoke also passed all four modes with zero build warnings or errors. Disabled plus rescue
+took 1.079 seconds. The before and after baseline manifests matched SHA256
+`a0c27a5aa42ecb215c0dfe6078469bfc90fe7df29457ef2dc23e314236f25082`; evidence is in
+`/private/tmp/issue807-ship-smoke-20260915T033956-66715`. Package-index verification passed after regenerating the
+Google catalog row. The plan audit found all 31 in-scope items complete, and the final cleanup review found no
+remaining actionable issue.
 
 ## Existing lifetime and performance evidence
 
