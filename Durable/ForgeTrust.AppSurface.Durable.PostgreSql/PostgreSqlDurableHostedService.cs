@@ -136,17 +136,37 @@ internal sealed partial class PostgreSqlDurableHostedService : BackgroundService
                 {
                     result = await _pump.RunOnceAsync(request, passCancellation.Token).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException) when (passCancellation.IsCancellationRequested)
+                catch (OperationCanceledException exception) when (
+                    passCancellation.IsCancellationRequested
+                    && !PostgreSqlDurablePumpFailureContext.IsExecutionFailure(exception)
+                    && !PostgreSqlDurablePumpFailureContext.IsFinalizationFailure(exception))
                 {
                     break;
                 }
-                catch (NpgsqlException exception) when (exception.IsTransient && !stoppingToken.IsCancellationRequested)
+                catch (OperationCanceledException exception) when (
+                    !stoppingToken.IsCancellationRequested
+                    && HasProviderDeadlineEvidence(exception)
+                    && !PostgreSqlDurablePumpFailureContext.IsExecutionFailure(exception)
+                    && !PostgreSqlDurablePumpFailureContext.IsFinalizationFailure(exception))
                 {
                     LogTransientStoreFailure(_registration.Options.TransientFailureDelay);
                     await Task.Delay(_registration.Options.TransientFailureDelay, stoppingToken).ConfigureAwait(false);
                     continue;
                 }
-                catch (TimeoutException) when (!stoppingToken.IsCancellationRequested)
+                catch (NpgsqlException exception) when (
+                    (exception.IsTransient || HasProviderDeadlineEvidence(exception))
+                    && !stoppingToken.IsCancellationRequested
+                    && !PostgreSqlDurablePumpFailureContext.IsExecutionFailure(exception)
+                    && !PostgreSqlDurablePumpFailureContext.IsFinalizationFailure(exception))
+                {
+                    LogTransientStoreFailure(_registration.Options.TransientFailureDelay);
+                    await Task.Delay(_registration.Options.TransientFailureDelay, stoppingToken).ConfigureAwait(false);
+                    continue;
+                }
+                catch (TimeoutException exception) when (
+                    !stoppingToken.IsCancellationRequested
+                    && !PostgreSqlDurablePumpFailureContext.IsExecutionFailure(exception)
+                    && !PostgreSqlDurablePumpFailureContext.IsFinalizationFailure(exception))
                 {
                     LogTransientStoreFailure(_registration.Options.TransientFailureDelay);
                     await Task.Delay(_registration.Options.TransientFailureDelay, stoppingToken).ConfigureAwait(false);
@@ -310,7 +330,7 @@ internal sealed partial class PostgreSqlDurableHostedService : BackgroundService
         _listenerCancellation.Cancel();
         lock (_shutdownSync)
         {
-            _shutdownDeadlineUtc ??= DateTimeOffset.UtcNow + (_hostOptions.ShutdownTimeout - _registration.Options.ShutdownReserve);
+            _shutdownDeadlineUtc ??= DateTimeOffset.UtcNow + CalculatePassShutdownWindow();
             _activePassCancellation?.CancelAfter(RemainingUntil(_shutdownDeadlineUtc.Value));
             _drainTask ??= PersistDrainAsync();
         }
@@ -351,16 +371,41 @@ internal sealed partial class PostgreSqlDurableHostedService : BackgroundService
 
     private void ValidateHostedShutdownBudget()
     {
-        var availablePassTime = _hostOptions.ShutdownTimeout - _registration.Options.ShutdownReserve;
-        if (availablePassTime <= TimeSpan.Zero
+        TimeSpan availablePassTime;
+        try
+        {
+            availablePassTime = CalculatePassShutdownWindow();
+        }
+        catch (OverflowException exception)
+        {
+            throw CreateInvalidShutdownBudgetException(availablePassTime: null, exception);
+        }
+
+        if (availablePassTime < TimeSpan.Zero
             || _registration.Options.TimeBudgetPerPass > availablePassTime)
         {
-            throw new InvalidOperationException(
-                $"The durable hosted pass budget plus ShutdownReserve must fit inside HostOptions.ShutdownTimeout. " +
-                $"ShutdownTimeout={_hostOptions.ShutdownTimeout}; TimeBudgetPerPass={_registration.Options.TimeBudgetPerPass}; " +
-                $"ShutdownReserve={_registration.Options.ShutdownReserve}; AvailablePassTime={availablePassTime}.");
+            throw CreateInvalidShutdownBudgetException(availablePassTime);
         }
     }
+
+    /// <summary>Calculates the execution window left after finalization and cleanup reserves are protected.</summary>
+    private TimeSpan CalculatePassShutdownWindow()
+    {
+        var reservedTicks = checked(_registration.Options.ShutdownReserve.Ticks * 2);
+        return _hostOptions.ShutdownTimeout - TimeSpan.FromTicks(reservedTicks);
+    }
+
+    private InvalidOperationException CreateInvalidShutdownBudgetException(
+        TimeSpan? availablePassTime,
+        Exception? innerException = null) =>
+        new(
+            "The durable hosted TimeBudgetPerPass plus two ShutdownReserve windows must fit inside " +
+            "HostOptions.ShutdownTimeout. " +
+            $"ShutdownTimeout={_hostOptions.ShutdownTimeout}; " +
+            $"TimeBudgetPerPass={_registration.Options.TimeBudgetPerPass}; " +
+            $"ShutdownReserve={_registration.Options.ShutdownReserve}; " +
+            $"AvailablePassTime={availablePassTime?.ToString() ?? "overflow"}.",
+            innerException);
 
     internal static TimeSpan CalculateIdleDelay(DateTimeOffset? nextDueAtUtc, TimeSpan maximumDelay)
     {
@@ -380,6 +425,11 @@ internal sealed partial class PostgreSqlDurableHostedService : BackgroundService
     }
 
     private static TimeSpan Min(TimeSpan left, TimeSpan right) => left < right ? left : right;
+
+    /// <summary>Reports whether package-owned evidence proves that the provider command deadline elapsed.</summary>
+    private static bool HasProviderDeadlineEvidence(Exception exception) =>
+        PostgreSqlDurableControlPlaneCommand.GetTimeoutEvidence(exception)
+        == PostgreSqlDurableTimeoutEvidence.ProviderDeadlineElapsed;
 
     private static async Task WaitWithoutReplacingFailureAsync(Task task, CancellationToken cancellationToken)
     {
