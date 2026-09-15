@@ -30,6 +30,10 @@ public sealed class DurableFlowCodecCompatibilityTests
         Assert.Throws<ArgumentException>(() => new DurableFlowActivityBinding<FlowContext, FlowWork, FlowResult>(
             callsite, registration, unrelated, resultSource));
 
+        var unrelatedResult = new CountingCodec<FlowResult>("flow.result", "v1");
+        Assert.Throws<ArgumentException>(() => new DurableFlowActivityBinding<FlowContext, FlowWork, FlowResult>(
+            callsite, registration, workSource, unrelatedResult));
+
         var differentSnapshotSource = new CountingCodec<FlowWork>("flow.work", "v1")
         {
             RetentionPolicyId = "different-retention",
@@ -281,6 +285,26 @@ public sealed class DurableFlowCodecCompatibilityTests
             {
                 RetentionPolicyId = "unrelated",
             })));
+    }
+
+    [Theory]
+    [InlineData("metadata.context.other", "v1")]
+    [InlineData("metadata.context", "v2")]
+    public async Task Context_evaluation_rejects_same_type_codec_with_mismatched_contract_metadata(
+        string selectedContractName, string selectedContractVersion)
+    {
+        var source = new CountingCodec<FlowContext>("metadata.context", "v1");
+        var selected = new CountingCodec<FlowContext>(selectedContractName, selectedContractVersion);
+        var registration = CreateRegistration(source);
+        var input = new DurableFlowEvaluationInput("start", source.Encode(new FlowContext(1)));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(async () => await registration.EvaluateAsync(
+            input, new FixedRegistry(selected)));
+
+        Assert.Contains("resolved a codec with mismatched payload metadata", error.Message,
+            StringComparison.Ordinal);
+        Assert.Equal(0, selected.DecodeObjectCalls);
+        Assert.Equal(0, selected.DecodeCalls);
     }
 
     [Theory]
