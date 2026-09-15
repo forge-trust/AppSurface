@@ -1995,7 +1995,7 @@ plus the LocalSecrets platform matrix.
   while displaying `[redacted]`.
 - The [config-validation example](../../examples/config-validation/README.md) already provides a one-command,
   value-safe failure example.
-- [`scripts/verify-tailwind-package-consumer.sh`](../../scripts/verify-tailwind-package-consumer.sh) is the pattern for
+- [`scripts/verify-tailwind-package-consumer.sh`](https://github.com/forge-trust/AppSurface/blob/codex/config-logical-key-contract/scripts/verify-tailwind-package-consumer.sh) is the pattern for
   isolated packed-package consumption and cache isolation.
 - `ForgeTrust.AppSurface.Auth.Testing` is the framework-neutral package precedent for Config provider conformance.
 - The package index, release hub, changelog policy, append-only release entries, and package gates already provide the

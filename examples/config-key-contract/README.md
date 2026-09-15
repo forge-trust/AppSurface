@@ -36,5 +36,5 @@ No OS credential store or real Google secret is accessed.
 Read the [logical-key reference](../../guides/config-logical-keys.md),
 [migration guide](../../guides/config-key-migration.md), and
 [provider-author guide](../../guides/config-provider-authors.md). The separate
-[clean packed-consumer verifier](../../tests/config-package-consumer/README.md)
+[clean packed-consumer verifier](https://github.com/forge-trust/AppSurface/blob/codex/config-logical-key-contract/tests/config-package-consumer/README.md)
 proves NuGet adoption without project references.

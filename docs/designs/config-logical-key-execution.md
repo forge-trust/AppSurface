@@ -6,17 +6,19 @@ Execution branch: `codex/config-logical-key-contract`.
 The final approval governs the complete train-1 provider implementation, coordinated
 binary break, terminal collisions, automatic dot translation, terminal fallback
 suppression with transactional child rescue, explicit Google legacy mappings,
-`GetValue<T>`, and one LocalSecrets maintenance lease. No push, pull request, package
-publication, or other remote mutation is authorized.
+`GetValue<T>`, and one LocalSecrets maintenance lease. The subsequent MakeItSo
+invocation authorizes completing review, validation, and a draft pull request for
+this scope. Package publication and merging the pull request remain outside this
+execution.
 
-## Current state — September 15
+## Implementation baseline — September 15
 
 This evidence was captured immediately before the local implementation commit.
 Implementation and scoped review are complete. The final solution run and the
 working-implementation coverage gate both passed; the committed patch is checked
 after the commit using the same coverage artifact. Historical focused passes below
 identify their exact scope and are supplemented by the all-green final solution run. The
-[normative matrix](../../tests/config-key-contract-matrix.json)
+[normative matrix](https://github.com/forge-trust/AppSurface/blob/codex/config-logical-key-contract/tests/config-key-contract-matrix.json)
 records exact test methods and distinguishes complete assertion evidence from gaps.
 Its latest bounded source review found all 47 rows covered, with 176 exact named-method
 references verified. Source assertions
@@ -128,7 +130,7 @@ diagnostic trust/redaction, and previous/candidate package compatibility.
 
 Validation includes the focused Config, LocalSecrets, Google and Config.Testing suites; the
 [source proof](../../examples/config-key-contract/README.md); the
-[clean packed consumer](../../tests/config-package-consumer/README.md); compatibility
+[clean packed consumer](https://github.com/forge-trust/AppSurface/blob/codex/config-logical-key-contract/tests/config-package-consumer/README.md); compatibility
 fixtures; solution build and formatting; documentation checks; and
 `./scripts/coverage-solution.sh`. The required kernel/parser/projection/index/codecs
 reach 100% branches and changed provider orchestration exceeds 95%. All scoped review
