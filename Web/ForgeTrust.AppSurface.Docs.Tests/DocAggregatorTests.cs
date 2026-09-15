@@ -923,7 +923,9 @@ public class DocAggregatorTests : IDisposable
             localEnv,
             _memo,
             new AppSurfaceDocsHtmlSanitizer(),
-            _loggerFake);
+            _loggerFake,
+            resolveGitLastUpdatedUtcAsync: null,
+            harvesterTimeout: TimeSpan.FromMinutes(2));
 
         var chooser = await aggregator.GetDocByPathAsync("packages/README.md");
 
