@@ -11,7 +11,6 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 
 ## Unreleased
 
-- Add opt-in [file declared secret references](./Config/ForgeTrust.AppSurface.Config/docs/file-secret-references.md) through `Secret<T>`, with Google resolution, exact environment rescue, and opaque audit state. Migrate overlapping mappings one root at a time; see the [release entry](./releases/unreleased.entries/2026-09-15-file-secret-references.md).
 - Narrative release note: [Upcoming release note](./releases/unreleased.md)
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
