@@ -495,9 +495,6 @@ public sealed class StructuralLineClassifierTests
         var classifier = new StructuralLineClassifier();
 
         _ = classifier.Classify(analysis, context.Compilation, context.Manifest);
-        GC.Collect();
-        GC.WaitForPendingFinalizers();
-        GC.Collect();
 
         var evidenceTraversalControlSamples = new List<long>();
         var samples = new List<long>();
