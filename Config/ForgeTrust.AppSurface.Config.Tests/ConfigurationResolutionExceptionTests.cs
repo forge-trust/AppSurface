@@ -8,7 +8,7 @@ public sealed class ConfigurationResolutionExceptionTests
         var diagnostic = CreateDiagnostic();
 
         var error = Assert.Throws<ArgumentNullException>(() =>
-            new ConfigurationResolutionException("Development", "Stripe:ApiKey", null!, diagnostic));
+            new ConfigurationResolutionException("Development", AppSurfaceConfigKey.Parse("Stripe:ApiKey"), null!, diagnostic));
 
         Assert.Equal("providerName", error.ParamName);
     }
@@ -17,7 +17,7 @@ public sealed class ConfigurationResolutionExceptionTests
     public void Constructor_Should_ThrowArgumentNullException_WhenDiagnosticIsNull()
     {
         var error = Assert.Throws<ArgumentNullException>(() =>
-            new ConfigurationResolutionException("Development", "Stripe:ApiKey", "LocalSecrets", null!));
+            new ConfigurationResolutionException("Development", AppSurfaceConfigKey.Parse("Stripe:ApiKey"), "LocalSecrets", null!));
 
         Assert.Equal("diagnostic", error.ParamName);
     }
@@ -27,7 +27,7 @@ public sealed class ConfigurationResolutionExceptionTests
     {
         var exception = new ConfigurationResolutionException(
             "Development",
-            "Stripe:ApiKey",
+            AppSurfaceConfigKey.Parse("Stripe:ApiKey"),
             "LocalSecrets",
             CreateDiagnostic());
 

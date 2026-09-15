@@ -99,6 +99,36 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                     "local-secrets-macos-migration"),
                 Name);
 
+    /// <inheritdoc />
+    public AppSurfaceLocalSecretIdentityResult GetKeyMigrationDestinationIdentity(
+        string applicationName, string environment, string? keyPrefix, AppSurfaceConfigKey destinationKey) =>
+        _inner is IAppSurfaceLocalSecretMigrationStore migrationStore
+            ? migrationStore.GetKeyMigrationDestinationIdentity(applicationName, environment, keyPrefix, destinationKey)
+            : LocalSecretMigrationIdentity.UnsupportedDestination();
+
+    /// <inheritdoc />
+    public AppSurfaceLocalSecretKeyMigrationResult MigrateKey(
+        string applicationName,
+        string environment,
+        string? keyPrefix,
+        string sourceStoredKey,
+        ForgeTrust.AppSurface.Config.AppSurfaceConfigKey destinationKey) =>
+        _inner is IAppSurfaceLocalSecretMigrationStore migrationStore
+            ? migrationStore.MigrateKey(applicationName, environment, keyPrefix, sourceStoredKey, destinationKey)
+            : AppSurfaceLocalSecretKeyMigrationResult.Failed(
+                LocalSecretResultStatus.UnsupportedPlatform,
+                "unsupported",
+                AppSurfaceLocalSecretMigrationState.Prepared,
+                sourceStoredKey,
+                destinationKey,
+                new AppSurfaceLocalSecretDiagnostic(
+                    "local-secret-migration-unsupported",
+                    "Exact-key migration is unavailable for this platform store.",
+                    "The store does not prove the required shared lease, journal, verification, and index ordering.",
+                    "Use a store with complete exact-key migration support and retry.",
+                    "local-secrets-migration"),
+                Name);
+
     private static IAppSurfaceLocalSecretStore CreateInnerStore(
         AppSurfaceLocalSecretsOptions options,
         LinuxSecretToolResolver linuxSecretToolResolver,
@@ -230,7 +260,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
     private static string SerializeLocalSecretIndex(IEnumerable<string> keys) =>
         JsonSerializer.Serialize(keys.OrderBy(static key => key, StringComparer.OrdinalIgnoreCase).ThenBy(static key => key, StringComparer.Ordinal).ToArray());
 
-    private sealed record LocalSecretIndexReadResult(
+    internal sealed record LocalSecretIndexReadResult(
         LocalSecretResultStatus Status,
         IReadOnlyCollection<string> Keys,
         bool NeedsRepair,
@@ -683,7 +713,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             $"AppSurface.LocalSecrets.{identity.ApplicationName}.{identity.Environment}";
 
         internal static string Account(AppSurfaceLocalSecretIdentity identity) =>
-            string.IsNullOrWhiteSpace(identity.KeyPrefix) ? identity.Key : $"{identity.KeyPrefix}:{identity.Key}";
+            string.IsNullOrWhiteSpace(identity.KeyPrefix) ? identity.StoredKey : $"{identity.KeyPrefix}:{identity.StoredKey}";
 
         internal static KeychainNameBytes BuildKeychainName(AppSurfaceLocalSecretIdentity identity) =>
             new(Encode(Service(identity)), Encode(Account(identity)));
@@ -839,7 +869,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
         protected override AppSurfaceLocalSecretResult WriteStoredValue(AppSurfaceLocalSecretIdentity identity, string value)
         {
-            var label = $"AppSurface {identity.ApplicationName} {identity.Environment} {identity.Key}";
+            var label = $"AppSurface {identity.ApplicationName} {identity.Environment} {identity.StoredKey}";
             var result = Run(
                 _secretToolPath,
                 ["store", "--label", label, .. BuildArguments(identity)],
@@ -904,13 +934,15 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 "prefix",
                 identity.KeyPrefix ?? string.Empty,
                 "key",
-                identity.Key
+                identity.StoredKey
             ];
     }
 
-    [SupportedOSPlatform("windows")]
-    private sealed partial class WindowsCredentialManagerLocalSecretStore : IndexedLocalSecretStore
+    internal sealed partial class WindowsCredentialManagerLocalSecretStore : IndexedLocalSecretStore
     {
+        private readonly IAppSurfaceLocalSecretStore? _testNativeStore;
+        internal WindowsCredentialManagerLocalSecretStore(IAppSurfaceLocalSecretStore? testNativeStore = null) => _testNativeStore = testNativeStore;
+
         private const int ErrorNotFound = 1168;
         private const int CredentialTypeGeneric = 1;
         private const int CredentialPersistLocalMachine = 2;
@@ -919,6 +951,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
         protected override AppSurfaceLocalSecretResult ReadStoredValue(AppSurfaceLocalSecretIdentity identity)
         {
+            if (_testNativeStore is not null) return _testNativeStore.Get(identity);
             if (!CredReadW(TargetName(identity), CredentialTypeGeneric, 0, out var credentialPointer))
             {
                 return Marshal.GetLastPInvokeError() == ErrorNotFound
@@ -946,6 +979,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
         protected override AppSurfaceLocalSecretResult WriteStoredValue(AppSurfaceLocalSecretIdentity identity, string value)
         {
+            if (_testNativeStore is not null) return _testNativeStore.Set(identity, value);
             var targetName = TargetName(identity);
             var blob = Encoding.Unicode.GetBytes(value);
             var blobHandle = GCHandle.Alloc(blob, GCHandleType.Pinned);
@@ -986,6 +1020,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
 
         protected override AppSurfaceLocalSecretResult DeleteStoredValue(AppSurfaceLocalSecretIdentity identity)
         {
+            if (_testNativeStore is not null) return _testNativeStore.Delete(identity);
             if (!CredDeleteW(TargetName(identity), CredentialTypeGeneric, 0))
             {
                 return Marshal.GetLastPInvokeError() == ErrorNotFound
@@ -996,13 +1031,15 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
             return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
         }
 
+        internal override bool NativeIdentifiersEqual(string left, string right) => StringComparer.OrdinalIgnoreCase.Equals(left, right);
+
         protected override AppSurfaceLocalSecretResult DoctorStore(string applicationName, string environment, string? keyPrefix)
         {
             var probeIdentity = new AppSurfaceLocalSecretIdentity(
                 applicationName,
                 environment,
                 keyPrefix,
-                "__appsurface_doctor__",
+                ForgeTrust.AppSurface.Config.AppSurfaceConfigKey.Parse("__appsurface_doctor__"),
                 $"appsurface:{applicationName}:{environment}:{keyPrefix}:__appsurface_doctor__");
             var write = WriteStoredValue(probeIdentity, "ready");
             if (write.Status != LocalSecretResultStatus.Found)
@@ -1072,15 +1109,106 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
         }
     }
 
-    internal abstract class IndexedLocalSecretStore : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore
+    internal abstract class IndexedLocalSecretStore : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore, IAppSurfaceLocalSecretMigrationStore
     {
         protected const string IndexKey = "__appsurface_index__";
 
         public abstract string Name { get; }
 
-        public AppSurfaceLocalSecretResult Get(AppSurfaceLocalSecretIdentity identity) => ReadStoredValue(identity);
+        /// <inheritdoc />
+        public AppSurfaceLocalSecretMigrationResult Migrate(string applicationName, string environment, string? keyPrefix) =>
+            AppSurfaceLocalSecretMigrationResult.FailedToStart(
+                LocalSecretResultStatus.UnsupportedPlatform,
+                new AppSurfaceLocalSecretDiagnostic(
+                    "local-secret-migration-unsupported",
+                    "Legacy LocalSecrets migration is unavailable for this platform store.",
+                    "The platform adapter has no retained legacy namespace for the namespace migration command.",
+                    "Use `secrets migrate-key` with an exact stored identifier.",
+                    "local-secrets-migration"),
+                Name);
 
-        public AppSurfaceLocalSecretResult Set(AppSurfaceLocalSecretIdentity identity, string value)
+        /// <inheritdoc />
+        public AppSurfaceLocalSecretIdentityResult GetKeyMigrationDestinationIdentity(
+            string applicationName, string environment, string? keyPrefix, AppSurfaceConfigKey destinationKey)
+        {
+            ArgumentNullException.ThrowIfNull(destinationKey);
+            return new AppSurfaceLocalSecretIdentityNormalizer().Normalize(applicationName, environment, keyPrefix, destinationKey.Value);
+        }
+
+        /// <inheritdoc />
+        public AppSurfaceLocalSecretKeyMigrationResult MigrateKey(
+            string applicationName,
+            string environment,
+            string? keyPrefix,
+            string sourceStoredKey,
+            ForgeTrust.AppSurface.Config.AppSurfaceConfigKey destinationKey)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(applicationName);
+            ArgumentException.ThrowIfNullOrWhiteSpace(environment);
+            ArgumentException.ThrowIfNullOrWhiteSpace(sourceStoredKey);
+            ArgumentNullException.ThrowIfNull(destinationKey);
+
+            var normalized = GetKeyMigrationDestinationIdentity(applicationName, environment, keyPrefix, destinationKey);
+            if (!normalized.Succeeded || normalized.Identity is null)
+            {
+                return AppSurfaceLocalSecretKeyMigrationResult.Failed(
+                    LocalSecretResultStatus.InvalidIdentity, "invalid", AppSurfaceLocalSecretMigrationState.Prepared,
+                    sourceStoredKey, destinationKey, normalized.Diagnostic!, Name);
+            }
+
+            if (!TryResolveStoredIdentity(applicationName, environment, keyPrefix, sourceStoredKey, out var sourceIdentity))
+            {
+                return AppSurfaceLocalSecretKeyMigrationResult.Failed(
+                    LocalSecretResultStatus.InvalidIdentity, "invalid-source", AppSurfaceLocalSecretMigrationState.Prepared,
+                    sourceStoredKey, destinationKey,
+                    new AppSurfaceLocalSecretDiagnostic(
+                        "local-secret-migration-source-invalid", "The exact source identifier is invalid.",
+                        "The source identifier does not belong to the requested LocalSecrets namespace.",
+                        "Use the exact stored identifier reported by `appsurface secrets doctor`.", "local-secrets-migration"), Name);
+            }
+
+            var destinationStoredKey = NativeIdentifiersEqual(sourceStoredKey, normalized.Identity.StorageName)
+                ? sourceStoredKey : normalized.Identity.StorageName;
+            return AppSurfaceLocalSecretMigrationCoordinator.Run(
+                new PlatformLocalSecretMigrationBackend(this, sourceIdentity!, normalized.Identity),
+                applicationName, environment, keyPrefix, sourceStoredKey, destinationStoredKey,
+                destinationKey, Name);
+        }
+
+        /// <summary>Native equality for destructive same-record rejection.</summary>
+        internal virtual bool NativeIdentifiersEqual(string left, string right) => StringComparer.Ordinal.Equals(left, right);
+
+        internal virtual string MigrationStateDirectory => PlatformLocalSecretStatePaths.DefaultDirectory;
+
+        internal AppSurfaceLocalSecretResult ReadRaw(AppSurfaceLocalSecretIdentity identity) => ReadStoredValue(identity);
+        internal AppSurfaceLocalSecretResult WriteRaw(AppSurfaceLocalSecretIdentity identity, string value) => WriteStoredValue(identity, value);
+        internal AppSurfaceLocalSecretResult DeleteRaw(AppSurfaceLocalSecretIdentity identity) => DeleteStoredValue(identity);
+        internal LocalSecretIndexReadResult ReadIndexForMigration(string applicationName, string environment, string? keyPrefix) => ReadIndex(applicationName, environment, keyPrefix);
+        internal AppSurfaceLocalSecretResult WriteIndexForMigration(string applicationName, string environment, string? keyPrefix, IEnumerable<string> keys) => WriteIndex(applicationName, environment, keyPrefix, keys);
+
+        private static bool TryResolveStoredIdentity(string applicationName, string environment, string? keyPrefix, string storedKey, out AppSurfaceLocalSecretIdentity? identity)
+        {
+            identity = LocalSecretMigrationIdentity.Resolve(applicationName, environment, keyPrefix, storedKey, v2: false);
+            return identity is not null;
+        }
+
+        public AppSurfaceLocalSecretResult Get(AppSurfaceLocalSecretIdentity identity)
+        {
+            var index = ReadIndex(identity.ApplicationName, identity.Environment, identity.KeyPrefix);
+            if (index.Status != LocalSecretResultStatus.Found) return AppSurfaceLocalSecretResult.NotFound(index.Status, index.Diagnostic!, Name);
+            var matches = index.Keys.Where(key => StringComparer.OrdinalIgnoreCase.Equals(key, identity.Key.Value)).ToArray();
+            if (matches.Length > 1) return AppSurfaceLocalSecretResult.NotFound(LocalSecretResultStatus.ProviderFailed,
+                new AppSurfaceLocalSecretDiagnostic("config-key-collision", "Local secret identities collide.",
+                    "The native index contains case-only spellings of one logical key.", "Migrate or remove duplicate exact records.", "local-secrets-migration"), Name);
+            return ReadStoredValue(matches.Length == 1 ? KeyIdentity(identity.ApplicationName, identity.Environment, identity.KeyPrefix, matches[0]).Identity! : identity);
+        }
+
+        public AppSurfaceLocalSecretResult Set(AppSurfaceLocalSecretIdentity identity, string value) =>
+            PlatformLocalSecretMaintenanceLease.Run(
+                () => PlatformLocalSecretMaintenanceLease.Acquire(MigrationStateDirectory, identity.ApplicationName, identity.Environment, identity.KeyPrefix, AppSurfaceLocalSecretMigrationCoordinator.DefaultLeaseTimeout, CancellationToken.None),
+                () => SetUnderLease(identity, value), diagnostic => AppSurfaceLocalSecretResult.NotFound(LocalSecretResultStatus.Unavailable, diagnostic, Name));
+
+        private AppSurfaceLocalSecretResult SetUnderLease(AppSurfaceLocalSecretIdentity identity, string value)
         {
             if (IsIndexIdentity(identity))
             {
@@ -1093,8 +1221,20 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 return AppSurfaceLocalSecretResult.NotFound(index.Status, index.Diagnostic!, Name);
             }
 
+            var matches = index.Keys.Where(key => StringComparer.OrdinalIgnoreCase.Equals(key, identity.Key.Value)).ToArray();
+            if (matches.Length > 1)
+            {
+                return AppSurfaceLocalSecretResult.NotFound(LocalSecretResultStatus.ProviderFailed,
+                    new AppSurfaceLocalSecretDiagnostic("config-key-collision", "Local secret identities collide.",
+                        "The native index contains case-only spellings of one logical key.",
+                        "Migrate or remove duplicate exact records.", "local-secrets-migration"), Name);
+            }
+
+            // Preserve the unique physical spelling while holding the same lease as index publication and value write.
+            if (matches.Length == 1)
+                identity = KeyIdentity(identity.ApplicationName, identity.Environment, identity.KeyPrefix, matches[0]).Identity!;
             var keys = index.Keys.ToHashSet(StringComparer.Ordinal);
-            var added = keys.Add(identity.Key);
+            var added = keys.Add(identity.StoredKey);
             if (added)
             {
                 var indexWrite = WriteIndex(identity.ApplicationName, identity.Environment, identity.KeyPrefix, keys);
@@ -1110,22 +1250,21 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 return valueWrite;
             }
 
-            keys.Remove(identity.Key);
+            keys.Remove(identity.StoredKey);
             var rollback = WriteIndex(identity.ApplicationName, identity.Environment, identity.KeyPrefix, keys);
             return rollback.Status == LocalSecretResultStatus.Found ? valueWrite : rollback;
         }
 
-        public AppSurfaceLocalSecretResult Delete(AppSurfaceLocalSecretIdentity identity)
+        public AppSurfaceLocalSecretResult Delete(AppSurfaceLocalSecretIdentity identity) =>
+            PlatformLocalSecretMaintenanceLease.Run(
+                () => PlatformLocalSecretMaintenanceLease.Acquire(MigrationStateDirectory, identity.ApplicationName, identity.Environment, identity.KeyPrefix, AppSurfaceLocalSecretMigrationCoordinator.DefaultLeaseTimeout, CancellationToken.None),
+                () => DeleteUnderLease(identity), diagnostic => AppSurfaceLocalSecretResult.NotFound(LocalSecretResultStatus.Unavailable, diagnostic, Name));
+
+        private AppSurfaceLocalSecretResult DeleteUnderLease(AppSurfaceLocalSecretIdentity identity)
         {
             if (IsIndexIdentity(identity))
             {
                 return DeleteStoredValue(identity);
-            }
-
-            var delete = DeleteStoredValue(identity);
-            if (delete.Status != LocalSecretResultStatus.Found && delete.Status != LocalSecretResultStatus.Missing)
-            {
-                return delete;
             }
 
             var index = ReadIndex(identity.ApplicationName, identity.Environment, identity.KeyPrefix);
@@ -1134,8 +1273,25 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 return AppSurfaceLocalSecretResult.NotFound(index.Status, index.Diagnostic!, Name);
             }
 
+            var matches = index.Keys.Where(key => StringComparer.OrdinalIgnoreCase.Equals(key, identity.Key.Value)).ToArray();
+            if (matches.Length > 1)
+            {
+                return AppSurfaceLocalSecretResult.NotFound(LocalSecretResultStatus.ProviderFailed,
+                    new AppSurfaceLocalSecretDiagnostic("config-key-collision", "Local secret identities collide.",
+                        "The native index contains case-only spellings of one logical key.",
+                        "Migrate or remove duplicate exact records.", "local-secrets-migration"), Name);
+            }
+            if (matches.Length == 1)
+                identity = KeyIdentity(identity.ApplicationName, identity.Environment, identity.KeyPrefix, matches[0]).Identity!;
+
+            var delete = DeleteStoredValue(identity);
+            if (delete.Status != LocalSecretResultStatus.Found && delete.Status != LocalSecretResultStatus.Missing)
+            {
+                return delete;
+            }
+
             var keys = index.Keys.ToHashSet(StringComparer.Ordinal);
-            var wasIndexed = keys.Remove(identity.Key);
+            var wasIndexed = keys.Remove(identity.StoredKey);
             if (!wasIndexed)
             {
                 return delete.Status == LocalSecretResultStatus.Found
@@ -1149,7 +1305,12 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 : write;
         }
 
-        public AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix)
+        public AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix) =>
+            PlatformLocalSecretMaintenanceLease.Run(
+                () => PlatformLocalSecretMaintenanceLease.Acquire(MigrationStateDirectory, applicationName, environment, keyPrefix, AppSurfaceLocalSecretMigrationCoordinator.DefaultLeaseTimeout, CancellationToken.None),
+                () => ListUnderLease(applicationName, environment, keyPrefix), diagnostic => AppSurfaceLocalSecretListResult.Failed(LocalSecretResultStatus.Unavailable, diagnostic, Name));
+
+        private AppSurfaceLocalSecretListResult ListUnderLease(string applicationName, string environment, string? keyPrefix)
         {
             var index = ReadIndex(applicationName, environment, keyPrefix);
             if (index.Status != LocalSecretResultStatus.Found)
@@ -1209,13 +1370,16 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 return AppSurfaceLocalSecretResult.NotFound(index.Status, index.Diagnostic!, Name);
             }
 
-            return index.Keys.Contains(identity.Key, StringComparer.Ordinal)
+            return index.Keys.Contains(identity.StoredKey, StringComparer.Ordinal)
                 ? AppSurfaceLocalSecretResult.Found(string.Empty, Name)
                 : AppSurfaceLocalSecretResult.Missing(Name);
         }
 
         public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) =>
-            DoctorStore(applicationName, environment, keyPrefix);
+            PlatformLocalSecretMaintenanceLease.Run(
+                () => PlatformLocalSecretMaintenanceLease.Acquire(MigrationStateDirectory, applicationName, environment, keyPrefix, AppSurfaceLocalSecretMigrationCoordinator.DefaultLeaseTimeout, CancellationToken.None),
+                () => DoctorStore(applicationName, environment, keyPrefix),
+                diagnostic => AppSurfaceLocalSecretResult.NotFound(LocalSecretResultStatus.Unavailable, diagnostic, Name));
 
         /// <summary>
         /// Reads one raw platform-stored value without applying indexed-store policy.
@@ -1269,7 +1433,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
         protected abstract AppSurfaceLocalSecretResult DoctorStore(string applicationName, string environment, string? keyPrefix);
 
         private static bool IsIndexIdentity(AppSurfaceLocalSecretIdentity identity) =>
-            string.Equals(identity.Key, IndexKey, StringComparison.Ordinal);
+            string.Equals(identity.StoredKey, IndexKey, StringComparison.Ordinal);
 
         private AppSurfaceLocalSecretResult WriteIndex(
             string applicationName,
@@ -1292,7 +1456,7 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
                 "The platform store index entry could not be parsed.");
 
         private static AppSurfaceLocalSecretIdentity IndexIdentity(string applicationName, string environment, string? keyPrefix) =>
-            new(applicationName, environment, keyPrefix, IndexKey, $"appsurface:{applicationName}:{environment}:{keyPrefix}:{IndexKey}");
+            new(applicationName, environment, keyPrefix, ForgeTrust.AppSurface.Config.AppSurfaceConfigKey.Parse(IndexKey), $"appsurface:{applicationName}:{environment}:{keyPrefix}:{IndexKey}");
 
         private static AppSurfaceLocalSecretIdentityResult KeyIdentity(string applicationName, string environment, string? keyPrefix, string key) =>
             new AppSurfaceLocalSecretIdentityNormalizer().Normalize(applicationName, environment, keyPrefix, key);

@@ -19,6 +19,10 @@ ForgeTrust.AppSurface is a collection of .NET libraries designed to provide a li
 If you are deciding which package to install first, start with the [AppSurface package chooser](./packages/README.md). If you are choosing among Auth packages, use the [AppSurface Auth adoption ladder](./start-here/auth-adoption-ladder.md) before installing optional auth adapters.
 If your CI gate should distinguish an explicit low-risk change from an incomplete test run, start with the [EvidenceHost guide](./start-here/evidencehost.md).
 
+For portable configuration, start with the [logical-key quickstart](Config/ForgeTrust.AppSurface.Config/README.md#logical-key-quickstart),
+[runnable provider proof](examples/config-key-contract/README.md), and
+[coordinated upgrade guide](guides/config-key-migration.md).
+
 ## Vision
 
 The primary vision of AppSurface is to simplify application bootstrapping by encouraging **composition through small, focused modules**. Instead of monolithic startup classes or scattered configuration logic, AppSurface allows developers to encapsulate features into reusable modules that handle:

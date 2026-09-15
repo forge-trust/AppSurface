@@ -6,29 +6,40 @@ namespace ForgeTrust.AppSurface.Config;
 /// <summary>
 /// Keeps report display paths separate from provider source paths while child entries are built.
 /// </summary>
+/// <param name="DisplayPath">The dotted/bracketed user-facing label; never a provider lookup key.</param>
+/// <param name="SourcePath">The typed identity of the deepest display-safe source ancestor.</param>
+/// <param name="Element">Collection identity metadata, with dictionary labels already redacted when necessary.</param>
+/// <param name="CollectionDepth">The number of collection boundaries traversed from the root.</param>
+/// <param name="RequiresInheritedSource">Whether an unsafe dictionary ancestor prevents publishing an exact source identity.</param>
 internal sealed record ConfigAuditPath(
     string DisplayPath,
-    string SourcePath,
+    AppSurfaceConfigKey SourcePath,
     ConfigAuditElementIdentity? Element = null,
     int CollectionDepth = 0,
     bool RequiresInheritedSource = false)
 {
     private const int MaxDictionaryKeyLabelLength = 128;
 
-    public static ConfigAuditPath Root(string key) => new(key, key);
+    /// <summary>Starts a traversal from a strict colon-delimited source path.</summary>
+    public static ConfigAuditPath Root(string key) => Root(AppSurfaceConfigKey.Parse(key));
 
+    /// <summary>Starts traversal with the original typed identity; presentation is never reparsed as hierarchy.</summary>
+    public static ConfigAuditPath Root(AppSurfaceConfigKey key) => new(key.Value, key);
+
+    /// <summary>Appends one member segment while retaining dotted display and inherited privacy state.</summary>
     public ConfigAuditPath AppendMember(string name) =>
         new(
             $"{DisplayPath}.{name}",
-            $"{SourcePath}.{name}",
+            AppSurfaceConfigKey.FromSegments([.. SourcePath.Segments, name]),
             Element: null,
             CollectionDepth,
             RequiresInheritedSource);
 
+    /// <summary>Appends an invariant numeric source segment and a bracketed display index.</summary>
     public ConfigAuditPath AppendIndex(int index, ConfigAuditElementKind kind) =>
         new(
             $"{DisplayPath}[{index.ToString(CultureInfo.InvariantCulture)}]",
-            $"{SourcePath}.{index.ToString(CultureInfo.InvariantCulture)}",
+            AppSurfaceConfigKey.FromSegments([.. SourcePath.Segments, index.ToString(CultureInfo.InvariantCulture)]),
             new ConfigAuditElementIdentity
             {
                 Kind = kind,
@@ -37,6 +48,8 @@ internal sealed record ConfigAuditPath(
             CollectionDepth + 1,
             RequiresInheritedSource);
 
+    /// <summary>Builds a bounded display label and retains exact provenance only for a visible valid segment.</summary>
+    /// <remarks>Literal dots, slashes, and brackets remain part of one segment. Hidden or invalid keys never enter public source paths.</remarks>
     public ConfigAuditPath AppendDictionaryKey(
         object? key,
         ConfigAuditEntryOptions options,
@@ -51,7 +64,7 @@ internal sealed record ConfigAuditPath(
         var keyIsSensitive = ConfigAuditRedactor.ContainsSensitiveFragment(rawLabel);
         var normalizedSensitivity = ConfigAuditEntryOptions.NormalizeSensitivity(options.Sensitivity);
         var entryIsSensitive = normalizedSensitivity == ConfigAuditSensitivity.Sensitive;
-        var parentIsSensitive = ConfigAuditRedactor.ContainsSensitiveFragment(SourcePath)
+        var parentIsSensitive = ConfigAuditRedactor.ContainsSensitiveFragment(SourcePath.Value)
                                 || HasRedactedDictionaryLabel(Element);
         var suppressLabel = !options.DisplayDictionaryKeys;
         var redactLabel = keyIsSensitive || entryIsSensitive || parentIsSensitive;
@@ -67,7 +80,7 @@ internal sealed record ConfigAuditPath(
 
         return new ConfigAuditPath(
             displayKey,
-            canUseExactSource ? $"{SourcePath}.{rawLabel}" : SourcePath,
+            canUseExactSource ? AppSurfaceConfigKey.FromSegments([.. SourcePath.Segments, rawLabel]) : SourcePath,
             new ConfigAuditElementIdentity
             {
                 Kind = ConfigAuditElementKind.DictionaryItem,
@@ -177,8 +190,7 @@ internal sealed record ConfigAuditPath(
     }
 
     private static bool IsPlainSourceSegment(string value) =>
-        value.Length > 0
-        && value.All(c => char.IsLetterOrDigit(c) || c is '_' or '-');
+        AppSurfaceConfigKey.TryParse(value, out var key) && key.Segments.Length == 1;
 }
 
 internal sealed class ConfigAuditDictionaryLabelSet

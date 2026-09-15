@@ -40,6 +40,23 @@ packages:
     start_here_path: Config/ForgeTrust.AppSurface.Config/README.md
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
+  - project: Config/ForgeTrust.AppSurface.Config.Testing/ForgeTrust.AppSurface.Config.Testing.csproj
+    release_guidance_variant: default
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_track: coordinated
+    order: 21
+    use_when: Add this to provider test projects to verify the AppSurface logical-key contract through public APIs with any test framework.
+    includes: Canonical provider scenarios, an isolated source harness contract, value-safe assertions, and concurrent repeatability checks.
+    does_not_include: A test framework, credentials, live remote inventory, or production configuration sources.
+    start_here_path: Config/ForgeTrust.AppSurface.Config.Testing/README.md
+    depends_on:
+      - ForgeTrust.AppSurface.Config
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Config
   - project: Config/ForgeTrust.AppSurface.Config.LocalSecrets/ForgeTrust.AppSurface.Config.LocalSecrets.csproj
     release_guidance_variant: default
     classification: public

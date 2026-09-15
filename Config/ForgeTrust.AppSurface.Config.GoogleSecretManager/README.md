@@ -26,7 +26,7 @@ Register `AppSurfaceGoogleSecretManagerModule` beside your app modules. It bring
 services.ConfigureAppSurfaceGoogleSecretManager(options =>
 {
     options.ProjectId = "my-production-project";
-    options.MapSecret("Stripe:ApiKey", "stripe-api-key", version: "7");
+    options.MapSecret(AppSurfaceConfigKey.Parse("Stripe:ApiKey"), "stripe-api-key", version: "7");
     options.MapSecret("OpenAI:ApiKey", "projects/shared-secrets/secrets/openai-api-key/versions/3");
 });
 ```
@@ -93,13 +93,24 @@ secret names follow the same pattern.
 services.ConfigureAppSurfaceGoogleSecretManager(options =>
 {
     options.ProjectId = "my-production-project";
-    options.EnableConventionResolver("TenantA:", secretIdPrefix: "tenanta-", version: "5");
+    options.EnableConventionResolver("TenantA", secretIdPrefix: "tenanta-", version: "5");
 });
 ```
 
-Only keys under the exact logical prefix are claimed. The provider normalizes the key suffix by replacing `:`, `.`, and
-`_` with `-`, lowercasing invariantly, and prepending `secretIdPrefix`. Broad conventions can claim more keys than
-intended, so production apps should prefer explicit mappings for high-value secrets.
+Only strict descendants of the exact logical prefix are claimed. The provider encodes the complete logical key by
+lowercasing each valid segment and joining segments with `--`, then prepends the exact non-empty `secretIdPrefix`.
+For example, `Payments:Api-Key` becomes `prefix-payments--api-key`. Every convention in one provider instance must use
+the same ordinal-exact prefix. Dots, Unicode, empty segments, leading or trailing hyphens, and `--` inside a segment
+are unrepresentable; use an explicit typed mapping for those keys.
+
+The convention codec is injective and does not probe historical generated names. Before upgrading, inventory known
+convention declarations with `AppSurfaceGoogleSecretMigrationInventory.Inventory(options, knownKeys)`. For each result,
+add its `MapSecretSnippet` so the existing legacy secret id remains selected without a network probe. Unknown ad-hoc
+keys cannot be inventoried because the provider never enumerates Secret Manager.
+
+Typed overloads are the primary API. The retained string overloads parse strict colon-delimited keys and are convenient
+for source migration; the obsolete provider `GetValue` and `ResolveValue` helpers throw terminal failures and should be
+replaced with `Resolve(new ConfigProviderRequest(...))` by provider integrations.
 
 ## Typed Values
 
@@ -122,21 +133,29 @@ without printing secret values, payload bytes, credentials, or raw exception mes
 
 | Diagnostic code | Meaning |
 | --- | --- |
-| `google-secret-manager-secret-missing` | The claimed secret or version was not found. |
-| `google-secret-manager-access-denied` | The runtime identity cannot access the secret version. |
-| `google-secret-manager-invalid-secret-resource` | The mapping, project, version, or Secret Manager resource name is invalid. |
-| `google-secret-manager-unavailable` | Secret Manager or the client was unavailable within the bounded lookup. |
-| `google-secret-manager-cancelled` | The lookup was cancelled. |
-| `google-secret-manager-invalid-secret-payload` | The payload was not valid UTF-8 text. |
-| `google-secret-manager-conversion-failed` | The payload could not be converted to the requested config type. |
+| `config-provider-failed` | A claimed lookup, payload decode, or typed conversion failed. The diagnostic is value-safe. |
+| `config-key-collision` | Two logical identities claimed one exact full Google resource, or a projection was ambiguous. |
+| `config-key-unrepresentable` | A convention key cannot produce a valid Google secret id; add an explicit mapping. |
+| `config-key-prefix-overlap` | Convention prefixes overlap by complete logical-key segments. |
 
 `IConfigAuditReporter` records Google Secret Manager as a provider source and marks returned values sensitive. Audit
-reports show source evidence and redaction state, not raw secrets.
+reports show source evidence and redaction state, not raw secrets. An audit scope owns a 30-second deadline, up to
+256 uncached remote lookups, and four concurrent remote lookup leases; a rejected lease is a terminal, value-safe
+incomplete-audit diagnostic.
+
+Google's [version access API](https://docs.cloud.google.com/secret-manager/docs/reference/rest/v1/projects.secrets.versions/access)
+can resolve `latest` or an app-owned alias to a numeric version. Audit provenance retains the exact returned version
+name with its payload, including a returned project number for a requested project ID. Secret and location identifiers
+remain ordinal-exact, and a pinned numeric version cannot resolve to another version. Project ID/number equivalence is
+accepted from the configured client response; it is not inferred by lowercasing or merging identifiers.
 
 ## Cache Behavior
 
 By default every lookup reads through the client. Set `CacheTtl` only when the app can tolerate delayed visibility after
-rotation:
+rotation. The successful payload cache is bounded to `CacheCapacity` entries, which defaults to 1,024; expired and
+failed entries are evicted. Cache keys are exact full version resources, and payload bytes are copied at every package
+boundary. A cached alias lookup retains the resolved version name alongside the bytes, so audit does not refetch a
+possibly newer version to identify an older cached value.
 
 ```csharp
 services.ConfigureAppSurfaceGoogleSecretManager(options =>
@@ -145,7 +164,18 @@ services.ConfigureAppSurfaceGoogleSecretManager(options =>
 });
 ```
 
-Only successful payload reads are cached. Failures are not cached, and the provider does not run a background refresh.
+Only successful payload reads are cached. Failures are evicted after the shared fetch completes, so a later caller can
+retry. Invalid UTF-8, failed typed conversion, and null conversion results evict their exact cached payload generation;
+a slow failed conversion cannot remove a newer successful entry. Concurrent misses for one exact resource share a
+side-effect-free `Lazy` fetch. Cancelling one request stops its waiter while the shared fetch continues for other callers.
+Already-cancelled callers throw before native claims, cached reads or client access; an expired audit deadline instead
+records `config-audit-deadline` as incomplete coverage. Ad-hoc claims are checked and bounded before network access.
+Resolved names also participate in ordinal resource claims. If two distinct logical keys resolve to one concrete name,
+both claims become terminal, including cached values and pending resolutions. Additional resolved names consume the
+`MaxAdHocClaims` budget (default 1,024); a long-lived provider following many alias rotations can exhaust it and returns
+`config-provider-failed` rather than retaining an unbounded history. Recreate the provider to reset its claim lifetime.
+Audit work shares the operation scope's aggregate limit of 30 seconds, 256 remote lookups, and four concurrent leases;
+exhausted limits produce incomplete audit coverage rather than unbounded remote work.
 
 ## Testing
 

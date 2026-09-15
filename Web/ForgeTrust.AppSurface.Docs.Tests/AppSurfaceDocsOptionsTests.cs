@@ -1,13 +1,17 @@
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using FakeItEasy;
 using ForgeTrust.AppSurface.Config;
+using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Core.Defaults;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Intelligence;
 using ForgeTrust.AppSurface.Theming;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
@@ -949,22 +953,41 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Contains(ex.Failures, failure => failure.Contains(key, StringComparison.OrdinalIgnoreCase));
     }
 
-    [Fact]
-    public void AddAppSurfaceDocs_ShouldRegisterIdentityConfigAuditKeys()
+    [Theory]
+    [InlineData(LegacyDotPathBehavior.Strict)]
+    [InlineData(LegacyDotPathBehavior.TranslateDotOnlyWithDiagnostic)]
+    public void AddAppSurfaceDocs_ShouldRegisterIdentityConfigAuditKeys(LegacyDotPathBehavior inputBehavior)
     {
         var services = new ServiceCollection();
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.Configure<AppSurfaceConfigKeyOptions>(options => options.LegacyDotPathBehavior = inputBehavior);
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.Environment).Returns("Production");
+        A.CallTo(() => environment.CaptureEnvironmentVariables()).Returns(new Dictionary<string, string>());
+        services.AddSingleton(environment);
+        new AppSurfaceConfigModule().ConfigureServices(
+            new StartupContext([], new NoHostModule(), EnvironmentProvider: environment), services);
+        services.RemoveAll<IConfigProvider>();
 
         services.AddAppSurfaceDocs();
 
         using var provider = services.BuildServiceProvider();
-        var entries = provider.GetServices<ConfigAuditKnownEntry>().ToArray();
+        var entries = provider.GetRequiredService<IConfigAuditReporter>().GetReport("Production").Entries;
 
-        Assert.Contains(entries, entry => entry.Key == "AppSurfaceDocs" && entry.ValueType == typeof(AppSurfaceDocsOptions));
-        Assert.Contains(entries, entry => entry.Key == "AppSurfaceDocs.Identity" && entry.ValueType == typeof(AppSurfaceDocsIdentityOptions));
-        Assert.Contains(entries, entry => entry.Key == "AppSurfaceDocs.Theme" && entry.ValueType == typeof(AppSurfaceDocsThemeOptions));
-        Assert.Contains(entries, entry => entry.Key == "AppSurfaceDocs.Theme.Colors" && entry.ValueType == typeof(AppSurfaceDocsThemeColorOptions));
-        Assert.Contains(entries, entry => entry.Key == "AppSurfaceDocs.Theme.Layout" && entry.ValueType == typeof(AppSurfaceDocsThemeLayoutOptions));
+        Assert.Collection(entries,
+            entry => AssertDeclaration(entry, "AppSurfaceDocs", typeof(AppSurfaceDocsOptions)),
+            entry => AssertDeclaration(entry, "AppSurfaceDocs:Identity", typeof(AppSurfaceDocsIdentityOptions)),
+            entry => AssertDeclaration(entry, "AppSurfaceDocs:Theme", typeof(AppSurfaceDocsThemeOptions)),
+            entry => AssertDeclaration(entry, "AppSurfaceDocs:Theme:Colors", typeof(AppSurfaceDocsThemeColorOptions)),
+            entry => AssertDeclaration(entry, "AppSurfaceDocs:Theme:Layout", typeof(AppSurfaceDocsThemeLayoutOptions)));
+
+        static void AssertDeclaration(ConfigAuditEntry entry, string key, Type valueType)
+        {
+            Assert.Equal(key, entry.Key);
+            Assert.Equal(key, entry.ConfigPath);
+            Assert.Equal(valueType.FullName, entry.DeclaredType);
+            Assert.Equal(ConfigAuditEntryState.Missing, entry.State);
+        }
     }
 
     [Fact]

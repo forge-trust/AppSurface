@@ -78,15 +78,15 @@ public sealed class ConfigProviderTerminalDiagnostic
     {
         var lines = new List<string>
         {
-            $"Code: {Code}",
-            $"Problem: {Problem}",
-            $"Cause: {Cause}",
-            $"Fix: {Fix}"
+            $"Code: {ConfigDiagnosticText.Identifier(Code)}",
+            $"Problem: {ConfigDiagnosticText.Prose(Problem)}",
+            $"Cause: {ConfigDiagnosticText.Prose(Cause)}",
+            $"Fix: {ConfigDiagnosticText.Prose(Fix)}"
         };
 
         if (!string.IsNullOrWhiteSpace(Docs))
         {
-            lines.Add($"Docs: {Docs}");
+            lines.Add($"Docs: {ConfigDiagnosticText.Identifier(Docs)}");
         }
 
         lines.Add($"Retryable: {Retryable.ToString().ToLowerInvariant()}");

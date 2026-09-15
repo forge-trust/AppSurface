@@ -308,6 +308,8 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
 
     private sealed class DevelopmentEnvironmentProvider : IEnvironmentProvider
     {
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() => new Dictionary<string, string>(StringComparer.Ordinal);
+
         public static readonly DevelopmentEnvironmentProvider Instance = new();
 
         private DevelopmentEnvironmentProvider()

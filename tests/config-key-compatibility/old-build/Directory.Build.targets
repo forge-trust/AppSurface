@@ -1,0 +1,8 @@
+<Project>
+  <!-- The 540b59f7 Config project omitted framework package references used by its source.
+       This build-only overlay preserves that historical source while making the old package reproducible. -->
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Config'">
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" />
+  </ItemGroup>
+</Project>

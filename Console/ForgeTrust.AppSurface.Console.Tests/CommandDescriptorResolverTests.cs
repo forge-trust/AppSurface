@@ -189,6 +189,8 @@ public class CommandDescriptorResolverTests
 
     private sealed class TestEnvironmentProvider : IEnvironmentProvider
     {
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() => new Dictionary<string, string>(StringComparer.Ordinal);
+
         public string Environment => "Test";
         public bool IsDevelopment => false;
         public string? GetEnvironmentVariable(string name, string? defaultValue = null) => defaultValue;

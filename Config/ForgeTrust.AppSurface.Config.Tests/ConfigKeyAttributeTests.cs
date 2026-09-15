@@ -21,29 +21,72 @@ public class ConfigKeyAttributeTests
         public class RootChild { }
     }
 
-    [Fact]
-    public void GetKeyPath_ReturnsClassNameWhenNoAttribute()
+    [ConfigKey("Literal.Parent", root: true)]
+    private class LiteralParent
     {
-        Assert.Equal("ConfigKeyAttributeTests.NoAttribute", ConfigKeyAttribute.GetKeyPath(typeof(NoAttribute)));
+        [ConfigKey("Child.Part:Leaf")]
+        public class Child { }
     }
 
     [Fact]
-    public void GetKeyPath_ReturnsCustomKeyFromAttribute()
+    public void GetLogicalKey_PublicHelperIsStrictForEachNestedFragment()
     {
-        Assert.Equal("ConfigKeyAttributeTests.Custom", ConfigKeyAttribute.GetKeyPath(typeof(SimpleAttribute)));
+        var key = ConfigKeyAttribute.GetLogicalKey(typeof(LiteralParent.Child));
+
+        Assert.Equal<string>(["Literal.Parent", "Child.Part", "Leaf"], key.Segments);
+        Assert.Equal(ConfigKeyInputOrigin.Typed, key.InputOrigin);
+        Assert.Null(key.OriginalInput);
     }
 
     [Fact]
-    public void GetKeyPath_HandlesNestedClasses()
+    public void GetLogicalKey_RejectsNullTypeAndParser()
     {
-        Assert.Equal("ConfigKeyAttributeTests.Parent.Child", ConfigKeyAttribute.GetKeyPath(typeof(Parent.Child)));
-        Assert.Equal("ConfigKeyAttributeTests.Parent.CustomChild", ConfigKeyAttribute.GetKeyPath(typeof(Parent.CustomChild)));
+        Assert.Throws<ArgumentNullException>(() => ConfigKeyAttribute.GetLogicalKey(null!));
+        Assert.Throws<ArgumentNullException>(() => ConfigKeyAttribute.GetLogicalKey(typeof(Parent), null!));
+        Assert.Throws<ArgumentNullException>(() => new ConfigKeyAttribute((Type)null!));
     }
 
     [Fact]
-    public void GetKeyPath_HandlesRootOverrideInNestedClass()
+    public void GetKeyPath_DeprecatedAliasRendersStrictColonIdentity()
     {
-        Assert.Equal("RootChild", ConfigKeyAttribute.GetKeyPath(typeof(Parent.RootChild)));
+#pragma warning disable CS0618 // Exercise the deprecated alias intentionally; normal callers use GetLogicalKey.
+        var rendered = ConfigKeyAttribute.GetKeyPath(typeof(LiteralParent.Child));
+#pragma warning restore CS0618
+        Assert.Equal("Literal.Parent:Child.Part:Leaf", rendered);
+    }
+
+    [Fact]
+    public void GetLogicalKey_ReturnsClassNameWhenNoAttribute()
+    {
+        Assert.Equal("ConfigKeyAttributeTests:NoAttribute", ConfigKeyAttribute.GetLogicalKey(typeof(NoAttribute)).Value);
+    }
+
+    [Fact]
+    public void GetLogicalKey_ReturnsCustomKeyFromAttribute()
+    {
+        Assert.Equal("ConfigKeyAttributeTests:Custom", ConfigKeyAttribute.GetLogicalKey(typeof(SimpleAttribute)).Value);
+    }
+
+    [Fact]
+    public void GetLogicalKey_HandlesNestedClasses()
+    {
+        Assert.Equal("ConfigKeyAttributeTests:Parent:Child", ConfigKeyAttribute.GetLogicalKey(typeof(Parent.Child)).Value);
+        Assert.Equal("ConfigKeyAttributeTests:Parent:CustomChild", ConfigKeyAttribute.GetLogicalKey(typeof(Parent.CustomChild)).Value);
+    }
+
+    [Fact]
+    public void GetLogicalKey_HandlesRootOverrideInNestedClass()
+    {
+        Assert.Equal("RootChild", ConfigKeyAttribute.GetLogicalKey(typeof(Parent.RootChild)).Value);
+    }
+
+    [Fact]
+    public void GetLogicalKey_ReturnsTypedColonSegments()
+    {
+        var key = ConfigKeyAttribute.GetLogicalKey(typeof(Parent.CustomChild));
+
+        Assert.Equal("ConfigKeyAttributeTests:Parent:CustomChild", key.Value);
+        Assert.Equal<string>(["ConfigKeyAttributeTests", "Parent", "CustomChild"], key.Segments);
     }
 
     [Fact]
@@ -71,6 +114,6 @@ public class ConfigKeyAttributeTests
     {
         var attr = new ConfigKeyAttribute(typeof(NoAttribute));
         Assert.False(attr.Root);
-        Assert.Equal("ConfigKeyAttributeTests.NoAttribute", attr.Key);
+        Assert.Equal("ConfigKeyAttributeTests:NoAttribute", attr.Key);
     }
 }

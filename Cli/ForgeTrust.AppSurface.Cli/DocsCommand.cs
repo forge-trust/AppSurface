@@ -2312,6 +2312,23 @@ internal sealed class AppSurfaceDocsStandaloneHealthHostStarter : IAppSurfaceDoc
     /// </summary>
     private sealed class FixedEnvironmentProvider : IEnvironmentProvider
     {
+        /// <inheritdoc />
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables()
+        {
+            var values = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (System.Collections.DictionaryEntry entry in System.Environment.GetEnvironmentVariables())
+            {
+                var name = (string)entry.Key;
+                values.Add(name, string.Equals(name, "ASPNETCORE_ENVIRONMENT", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(name, "DOTNET_ENVIRONMENT", StringComparison.OrdinalIgnoreCase)
+                    ? _environmentName : (string)entry.Value!);
+            }
+
+            values["ASPNETCORE_ENVIRONMENT"] = _environmentName;
+            values["DOTNET_ENVIRONMENT"] = _environmentName;
+            return new System.Collections.ObjectModel.ReadOnlyDictionary<string, string>(values);
+        }
+
         private readonly string _environmentName;
 
         /// <summary>
@@ -2690,6 +2707,23 @@ internal sealed class AppSurfaceDocsStandaloneExportHostStarter : IAppSurfaceDoc
     /// </summary>
     private sealed class FixedEnvironmentProvider : IEnvironmentProvider
     {
+        /// <inheritdoc />
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables()
+        {
+            var values = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (System.Collections.DictionaryEntry entry in System.Environment.GetEnvironmentVariables())
+            {
+                var name = (string)entry.Key;
+                values.Add(name, string.Equals(name, "ASPNETCORE_ENVIRONMENT", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(name, "DOTNET_ENVIRONMENT", StringComparison.OrdinalIgnoreCase)
+                    ? _environmentName : (string)entry.Value!);
+            }
+
+            values["ASPNETCORE_ENVIRONMENT"] = _environmentName;
+            values["DOTNET_ENVIRONMENT"] = _environmentName;
+            return new System.Collections.ObjectModel.ReadOnlyDictionary<string, string>(values);
+        }
+
         private readonly string _environmentName;
 
         /// <summary>

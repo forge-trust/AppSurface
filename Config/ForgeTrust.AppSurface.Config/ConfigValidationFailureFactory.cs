@@ -25,7 +25,7 @@ internal static class ConfigValidationFailureFactory
     /// </param>
     /// <returns>A normalized <see cref="ConfigurationValidationFailure"/>.</returns>
     public static ConfigurationValidationFailure FromValidationResult(
-        string key,
+        AppSurfaceConfigKey key,
         Type configType,
         Type valueType,
         string? path,
@@ -49,7 +49,7 @@ internal static class ConfigValidationFailureFactory
         }
 
         return new ConfigurationValidationFailure(
-            key,
+            key.Value,
             configType,
             valueType,
             memberNames,

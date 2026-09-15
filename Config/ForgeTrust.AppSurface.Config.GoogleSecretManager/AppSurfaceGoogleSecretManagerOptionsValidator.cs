@@ -23,10 +23,22 @@ public sealed class AppSurfaceGoogleSecretManagerOptionsValidator : IValidateOpt
             errors.Add("CacheTtl must be greater than zero when set.");
         }
 
+        if (options.CacheCapacity <= 0)
+        {
+            errors.Add("CacheCapacity must be greater than zero.");
+        }
+
+        if (options.MaxAdHocClaims <= 0)
+        {
+            errors.Add("MaxAdHocClaims must be greater than zero.");
+        }
+
         var duplicateKeys = options.Mappings
-            .GroupBy(mapping => mapping.LogicalKey, StringComparer.Ordinal)
+            .Select(mapping => (Mapping: mapping, Key: AppSurfaceConfigKey.TryParse(mapping.LogicalKey, out var key) ? key : null))
+            .Where(item => item.Key != null)
+            .GroupBy(item => item.Key!, EqualityComparer<AppSurfaceConfigKey>.Default)
             .Where(group => group.Count() > 1)
-            .Select(group => group.Key);
+            .Select(group => group.First().Mapping.LogicalKey);
         foreach (var duplicateKey in duplicateKeys)
         {
             errors.Add($"Logical key '{duplicateKey}' is mapped more than once.");
@@ -34,7 +46,7 @@ public sealed class AppSurfaceGoogleSecretManagerOptionsValidator : IValidateOpt
 
         foreach (var mapping in options.Mappings)
         {
-            ValidateLogicalKey(mapping.LogicalKey, errors);
+            ValidateLogicalKey(mapping.LogicalKey, errors, requireConventionEncoding: false);
             ValidateSecretReference(
                 options,
                 mapping.SecretIdOrResourceName,
@@ -44,9 +56,11 @@ public sealed class AppSurfaceGoogleSecretManagerOptionsValidator : IValidateOpt
         }
 
         var duplicateConventionPrefixes = options.Conventions
-            .GroupBy(convention => convention.LogicalKeyPrefix, StringComparer.Ordinal)
+            .Select(convention => (Convention: convention, Key: AppSurfaceConfigKey.TryParse(convention.LogicalKeyPrefix, out var key) ? key : null))
+            .Where(item => item.Key != null)
+            .GroupBy(item => item.Key!, EqualityComparer<AppSurfaceConfigKey>.Default)
             .Where(group => group.Count() > 1)
-            .Select(group => group.Key);
+            .Select(group => group.First().Convention.LogicalKeyPrefix);
         foreach (var duplicateConventionPrefix in duplicateConventionPrefixes)
         {
             errors.Add($"Convention prefix '{duplicateConventionPrefix}' is configured more than once.");
@@ -58,10 +72,9 @@ public sealed class AppSurfaceGoogleSecretManagerOptionsValidator : IValidateOpt
             {
                 var left = options.Conventions[i].LogicalKeyPrefix;
                 var right = options.Conventions[j].LogicalKeyPrefix;
-                if (!string.IsNullOrWhiteSpace(left)
-                    && !string.IsNullOrWhiteSpace(right)
-                    && (left.StartsWith(right, StringComparison.Ordinal)
-                        || right.StartsWith(left, StringComparison.Ordinal)))
+                if (AppSurfaceConfigKey.TryParse(left, out var leftKey)
+                    && AppSurfaceConfigKey.TryParse(right, out var rightKey)
+                    && (leftKey.IsSameOrDescendantOf(rightKey) || rightKey.IsSameOrDescendantOf(leftKey)))
                 {
                     errors.Add($"Convention prefixes '{left}' and '{right}' overlap and could claim the same key.");
                 }
@@ -70,7 +83,21 @@ public sealed class AppSurfaceGoogleSecretManagerOptionsValidator : IValidateOpt
 
         foreach (var convention in options.Conventions)
         {
-            ValidateLogicalKey(convention.LogicalKeyPrefix, errors, fieldName: "convention prefix");
+            ValidateLogicalKey(convention.LogicalKeyPrefix, errors, fieldName: "convention prefix", requireConventionEncoding: true);
+            if (string.IsNullOrWhiteSpace(convention.SecretIdPrefix))
+            {
+                errors.Add($"Convention '{convention.LogicalKeyPrefix}' requires a non-empty SecretIdPrefix.");
+            }
+            else if (!string.Equals(convention.SecretIdPrefix, options.Conventions[0].SecretIdPrefix, StringComparison.Ordinal))
+            {
+                errors.Add($"Convention '{convention.LogicalKeyPrefix}' must use the provider's exact shared SecretIdPrefix.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(convention.SecretIdPrefix)
+                && !GoogleSecretManagerSecretReference.IsValidSecretId(convention.SecretIdPrefix))
+            {
+                errors.Add($"Convention '{convention.LogicalKeyPrefix}' has an invalid SecretIdPrefix.");
+            }
             if (string.IsNullOrWhiteSpace(options.ProjectId))
             {
                 errors.Add($"Convention '{convention.LogicalKeyPrefix}' uses short secret ids and requires ProjectId.");
@@ -82,11 +109,21 @@ public sealed class AppSurfaceGoogleSecretManagerOptionsValidator : IValidateOpt
         return errors.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(errors);
     }
 
-    private static void ValidateLogicalKey(string logicalKey, List<string> errors, string fieldName = "logical key")
+    private static void ValidateLogicalKey(
+        string logicalKey,
+        List<string> errors,
+        string fieldName = "logical key",
+        bool requireConventionEncoding = true)
     {
-        if (string.IsNullOrWhiteSpace(logicalKey))
+        if (!AppSurfaceConfigKey.TryParse(logicalKey, out var key))
         {
-            errors.Add($"Google Secret Manager {fieldName} must not be empty.");
+            errors.Add($"Google Secret Manager {fieldName} is not a valid logical key.");
+            return;
+        }
+
+        if (requireConventionEncoding && !GoogleSecretManagerSecretReference.TryEncodeKey(key, out _))
+        {
+            errors.Add($"Google Secret Manager {fieldName} cannot be represented by the convention encoding.");
         }
     }
 

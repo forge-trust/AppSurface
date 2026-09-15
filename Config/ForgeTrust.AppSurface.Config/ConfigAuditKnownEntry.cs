@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Config;
 
@@ -15,7 +17,7 @@ public sealed class ConfigAuditKnownEntry
     /// <param name="key">The configuration key.</param>
     /// <param name="configType">The config wrapper type, when one exists.</param>
     /// <param name="valueType">The declared value type.</param>
-    public ConfigAuditKnownEntry(string key, Type? configType, Type valueType)
+    public ConfigAuditKnownEntry(AppSurfaceConfigKey key, Type? configType, Type valueType)
         : this(key, configType, valueType, options: null)
     {
     }
@@ -27,16 +29,41 @@ public sealed class ConfigAuditKnownEntry
     /// <param name="configType">The config wrapper type, when one exists.</param>
     /// <param name="valueType">The declared value type.</param>
     /// <param name="options">The entry-specific audit options. The entry snapshots these values.</param>
-    public ConfigAuditKnownEntry(string key, Type? configType, Type valueType, ConfigAuditEntryOptions? options)
+    public ConfigAuditKnownEntry(
+        AppSurfaceConfigKey key,
+        Type? configType,
+        Type valueType,
+        ConfigAuditEntryOptions? options = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentNullException.ThrowIfNull(key);
         ArgumentNullException.ThrowIfNull(valueType);
 
-        Key = key;
+        LogicalKey = key;
+        Key = key.Value;
         ConfigType = configType;
         ValueType = valueType;
         _options = new ConfigAuditEntryOptions(options);
     }
+
+    /// <summary>
+    /// Initializes a strict compatibility entry from a colon-delimited string.
+    /// </summary>
+    /// <param name="key">The strict colon-delimited configuration key.</param>
+    /// <param name="configType">The config wrapper type, when one exists.</param>
+    /// <param name="valueType">The declared value type.</param>
+    /// <param name="options">The entry-specific audit options.</param>
+    [Obsolete("Pass AppSurfaceConfigKey. String construction uses strict colon semantics.")]
+    public ConfigAuditKnownEntry(
+        string key,
+        Type? configType,
+        Type valueType,
+        ConfigAuditEntryOptions? options = null)
+        : this(AppSurfaceConfigKey.Parse(key).WithInput(ConfigKeyInputOrigin.StrictString, key), configType, valueType, options)
+    {
+    }
+
+    /// <summary>Gets the typed logical identity represented by this entry.</summary>
+    public AppSurfaceConfigKey LogicalKey { get; }
 
     /// <summary>
     /// Gets the configuration key.
@@ -66,7 +93,7 @@ public sealed class ConfigAuditKnownEntry
     internal ConfigAuditEntryOptions OptionsSnapshot => _options;
 
     internal ConfigAuditKnownEntry WithOptions(ConfigAuditEntryOptions options) =>
-        new(Key, ConfigType, ValueType, options);
+        new(LogicalKey, ConfigType, ValueType, options);
 }
 
 /// <summary>
@@ -700,6 +727,41 @@ public static class ConfigAuditServiceCollectionExtensions
         return AddConfigAuditKey<T>(services, key, configure: null);
     }
 
+    /// <summary>Registers a typed logical key for audit reports.</summary>
+    /// <remarks>
+    /// This is the primary manual declaration API. It preserves the supplied immutable key and snapshots callback
+    /// options immediately. The final registry merges exact canonical duplicates and validates collisions at host
+    /// startup, including when this extension is used without <see cref="AppSurfaceConfigModule"/>. Configure
+    /// host options before building the service provider. See the
+    /// <see href="https://appsurface.dev/guides/config-logical-keys">logical-key contract</see>.
+    /// </remarks>
+    /// <typeparam name="T">The expected resolved value type.</typeparam>
+    /// <param name="services">The host service collection.</param>
+    /// <param name="key">The immutable logical key, used without string parsing.</param>
+    /// <param name="configure">An optional callback configuring this declaration's audit options.</param>
+    /// <returns>The original service collection.</returns>
+    public static IServiceCollection AddConfigAuditKey<T>(
+        this IServiceCollection services,
+        AppSurfaceConfigKey key,
+        Action<ConfigAuditEntryOptionsBuilder>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(key);
+
+        EnsureDeclarationInfrastructure(services);
+
+        var options = new ConfigAuditEntryOptionsBuilder();
+        configure?.Invoke(options);
+        services.AddSingleton(new ConfigAuditRawDeclaration(
+            RawKey: null,
+            ConfigType: null,
+            ValueType: typeof(T),
+            Options: options.ToOptions(),
+            IsAttributeDeclaration: false,
+            TypedKey: key));
+        return services;
+    }
+
     /// <summary>
     /// Registers an additional configuration key for audit reports with entry-specific options.
     /// </summary>
@@ -711,6 +773,9 @@ public static class ConfigAuditServiceCollectionExtensions
     /// the wrapper supplies metadata and validation while explicitly assigned manual options override wrapper audit
     /// options per property. Sensitivity merges monotonically, so <see cref="ConfigAuditSensitivity.NonSensitive"/>
     /// never downgrades an effective sensitive entry.
+    /// String grammar is resolved only after host options are finalized; the train-1 default translates dot-only
+    /// strings with provenance. Prefer the typed overload for strict identity. Startup validation is registered even
+    /// without the config module, so malformed deferred declarations and ambiguous spellings fail before traversal.
     /// </remarks>
     /// <typeparam name="T">The expected value type.</typeparam>
     /// <param name="services">The service collection.</param>
@@ -725,10 +790,36 @@ public static class ConfigAuditServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
 
+        EnsureDeclarationInfrastructure(services);
+
         var options = new ConfigAuditEntryOptionsBuilder();
         configure?.Invoke(options);
 
-        services.AddSingleton(new ConfigAuditKnownEntry(key, configType: null, typeof(T), options.ToOptions()));
+        var snapshot = options.ToOptions();
+        services.AddSingleton(
+            new ConfigAuditRawDeclaration(
+                RawKey: key,
+                ConfigType: null,
+                ValueType: typeof(T),
+                Options: snapshot,
+                IsAttributeDeclaration: false));
         return services;
+    }
+
+    /// <summary>
+    /// Registers one host registry and an independent startup marker. Parser option validation must not depend
+    /// on the registry, since registry construction itself consumes those options through the parser.
+    /// </summary>
+    internal static void EnsureDeclarationInfrastructure(IServiceCollection services)
+    {
+        services.AddOptions<AppSurfaceConfigKeyOptions>()
+            .Validate(options => Enum.IsDefined(options.LegacyDotPathBehavior),
+                "LegacyDotPathBehavior must name a supported mode.")
+            .ValidateOnStart();
+        services.TryAddSingleton<IConfigKeyInputParser, ConfigKeyInputParser>();
+        services.TryAddSingleton<ConfigDeclarationRegistry>();
+        services.AddOptions<ConfigDeclarationStartupOptions>().ValidateOnStart();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IValidateOptions<ConfigDeclarationStartupOptions>, ConfigDeclarationStartupValidator>());
     }
 }

@@ -808,7 +808,7 @@ public sealed class ProgramEntryPointTests
             ["secrets", "get", "Stripe\nApiKey", "--store-file", storePath]);
 
         Assert.NotEqual(0, result.ExitCode);
-        Assert.Contains("local-secret-key-invalid-character", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("local-secret-key-invalid", result.AllText, StringComparison.Ordinal);
     }
 
     [Fact]

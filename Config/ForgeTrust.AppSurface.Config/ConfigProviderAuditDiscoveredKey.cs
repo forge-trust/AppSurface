@@ -9,25 +9,25 @@ namespace ForgeTrust.AppSurface.Config;
 /// <param name="Sources">Source records associated with the key.</param>
 /// <param name="Diagnostics">Display-safe diagnostics specific to this key.</param>
 public sealed record ConfigProviderAuditDiscoveredKey(
-    string Key,
+    AppSurfaceConfigKey Key,
     object? RawValue,
     ConfigAuditDiscoveredValueKind ValueKind,
     IReadOnlyList<ConfigAuditSourceRecord> Sources,
     IReadOnlyList<ConfigAuditDiagnostic> Diagnostics)
 {
-    private readonly string _key = ValidateKey(Key);
+    private readonly AppSurfaceConfigKey _logicalKey = ValidateKey(Key);
     private readonly IReadOnlyList<ConfigAuditSourceRecord> _sources =
         Sources ?? throw new ArgumentNullException(nameof(Sources));
     private readonly IReadOnlyList<ConfigAuditDiagnostic> _diagnostics =
         Diagnostics ?? throw new ArgumentNullException(nameof(Diagnostics));
 
     /// <summary>
-    /// Gets the discovered configuration key.
+    /// Gets the typed logical configuration key, including its input-origin metadata.
     /// </summary>
-    public string Key
+    public AppSurfaceConfigKey Key
     {
-        get => _key;
-        init => _key = ValidateKey(value);
+        get => _logicalKey;
+        init => _logicalKey = ValidateKey(value);
     }
 
     /// <summary>
@@ -48,9 +48,9 @@ public sealed record ConfigProviderAuditDiscoveredKey(
         init => _diagnostics = value ?? throw new ArgumentNullException(nameof(Diagnostics));
     }
 
-    private static string ValidateKey(string key)
+    private static AppSurfaceConfigKey ValidateKey(AppSurfaceConfigKey key)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentNullException.ThrowIfNull(key);
         return key;
     }
 }
