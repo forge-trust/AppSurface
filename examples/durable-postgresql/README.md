@@ -1,6 +1,6 @@
 # Durable PostgreSQL local tutorial
 
-This public-preview tutorial proves the current [`ForgeTrust.AppSurface.Durable.PostgreSql`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) adoption path on a disposable PostgreSQL 16+ database. It is a local composition reference, not production operations guidance. Application startup never applies DDL.
+This public-preview tutorial proves the current [`ForgeTrust.AppSurface.Durable.PostgreSql`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) adoption path on a disposable PostgreSQL 16+ database. Read the [operational-assessment adoption guide](../../Durable/operational-assessments.md) first for the existing-host recipe, health predicate meanings, exhaustive admission switch, diagnostics, migration `9 -> 10`, role reconciliation, and rollback boundary. This example is a local composition reference, not production operations guidance. Application startup never applies DDL.
 
 The [AppSurface CLI](../../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands) owns migration status, reviewed scripts, preflight, and guarded apply. This example owns only two local-proof commands:
 
@@ -9,7 +9,29 @@ Application startup never applies DDL. Generate, review, and apply migrations th
 :::
 
 - `schema-bootstrap-dev` initializes one active epoch only with `DOTNET_ENVIRONMENT=Development`, `APPSURFACE_DURABLE_LOCAL_PROOF=1`, a loopback migration-owner connection, and the tutorial's migration-owner role; it does not apply migrations.
-- `verify-local` uses the separate loopback runtime and dispatcher identities to register Work, Flow, Schedule, health, drain, and the bounded pump; it starts the explicitly composed `AddWorkerHost()` until it completes a hosted pass, verifies the durable catalog and migration metadata are unchanged, then stops it without doing DDL.
+- `verify-local` uses the separate loopback runtime and dispatcher identities to register Work, Flow, Schedule, health,
+  drain, and both pump interfaces; it asserts the legacy and admission-aware interfaces share one singleton, calls
+  `IDurableRuntimePumpAdmission.TryRunOnceAsync` directly, starts the explicitly composed `AddWorkerHost()` until it
+  completes a hosted pass, verifies the durable catalog and migration metadata are unchanged, then stops it without
+  doing DDL.
+
+## One-command local proof
+
+From the repository root:
+
+```bash
+bash examples/durable-postgresql/run-local-proof.sh
+```
+
+The script checks .NET 10 and Docker, asks Docker to atomically allocate a free loopback port, starts the pinned
+PostgreSQL 16.5 image with local container-only trust authentication, creates the four restricted roles, builds with
+one MSBuild node and shared compilation disabled, explicitly applies schema 10, reruns the canonical role recipe, and
+runs both example commands. Set `APPSURFACE_DURABLE_LOCAL_PORT` only when you need a specific reviewed port; the
+preflight then fails closed if it is occupied. The whole proof defaults to a 420-second deadline and accepts an
+`APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS` override from 1 through 86,400 seconds. Its trap bounds Docker
+cleanup independently and removes the uniquely named container on success, failure, interruption, or termination.
+It is destructive only to that disposable container and database. Use the manual transcript below when you need to
+review each credential or migration step separately.
 
 ## Prerequisites
 
@@ -17,7 +39,8 @@ Install all of the following before starting:
 
 - .NET 10 SDK.
 - Docker Engine or Docker Desktop with Linux containers.
-- A free local TCP port. The transcript defaults to `54329` but uses one shell variable so a different free loopback port stays consistent.
+- A free local TCP port for the manual transcript. It defaults to `54329` but uses one shell variable so a different
+  free loopback port stays consistent. The one-command proof asks Docker to allocate its port.
 - A repository checkout. The transcript creates its four separate local PostgreSQL roles: migration owner,
   payload-free dispatcher, scoped runtime, and dedicated retention operator.
 
@@ -149,7 +172,7 @@ the temporary passfile, never a password; `--connection-env` names a variable an
 export APPSURFACE_DURABLE_MIGRATION_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE_DURABLE_LOCAL_PORT;Database=appsurface_durable_example;Username=appsurface_durable_owner;Passfile=$APPSURFACE_DURABLE_PASSFILE"
   dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
   durable schema apply --connection-env APPSURFACE_DURABLE_MIGRATION_CONNECTION --apply
-# Expected: Durable schema: 0 -> 9; applied: 0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008, 0009.
+# Expected: Durable schema: 0 -> 10; applied: 0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0010.
 ```
 
 Apply the reviewed role recipe after migrations with the disposable container's bootstrap administrator, then configure
@@ -183,8 +206,13 @@ Finally, run the bounded proof. It requires the same Development and explicit lo
 DOTNET_ENVIRONMENT=Development APPSURFACE_DURABLE_LOCAL_PROOF=1 \
   dotnet run --project examples/durable-postgresql -- verify-local
 # Expected named checkpoints include: Work accepted; Flow accepted with W3C trace context;
-# Schedule accepted; bounded host pass completed; health and drain checkpoints completed.
+# Schedule accepted; admission-aware pass: Completed; runtime assessment; health and drain checkpoints completed.
 ```
+
+The output includes the authoritative PostgreSQL attempt. A `Completed` empty result is distinct from `Refused`,
+`Unavailable`, and `Incompatible`; the latter three carry no result and certify that this invocation did not enter
+`RunPassAsync`. Caller cancellation and failures after execution begins remain exceptions. The local proof never turns
+`CanAttemptPump` into a check-then-act gate.
 
 ## Roles and boundaries
 
