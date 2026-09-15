@@ -42,6 +42,7 @@
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
     <PackageReference Include="TextMateSharp" />
     <PackageReference Include="TextMateSharp.Grammars" />
+    <PackageReference Include="TreeSitter.DotNet" />
     <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 

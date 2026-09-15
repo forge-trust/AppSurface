@@ -13,6 +13,30 @@ Acornima is used by AppSurface Docs to parse configured JavaScript source files 
 
 No endorsement is implied by AppSurface or AppSurface Docs release notes, marketing copy, package metadata, or generated documentation.
 
+## TreeSitter.DotNet
+
+- Package: `TreeSitter.DotNet`
+- Version: `1.3.0`
+- License declaration: MIT
+- Project: https://github.com/mariusgreuel/tree-sitter-dotnet-bindings
+- Pinned source revision: `8cae484bc033dac6e492ed15166877f3d784850f`
+
+TreeSitter.DotNet provides the static parser binding and bundled native grammar assets used by the opt-in Python
+docstring harvester. AppSurface Docs initializes the Python grammar only to parse policy-approved source text; it never
+imports or executes Python modules. The selected nupkg bundles multiple language grammars and native runtime assets, so
+updating this dependency requires the archive/RID and redistribution-notice review described in the
+[candidate record](https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Docs.Tests/TestData/PythonParserDecision/README.md).
+
+### MIT License Text — TreeSitter.DotNet
+
+Copyright 2025 Marius Greuel
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 ## MiniSearch
 
 - Package: `minisearch`

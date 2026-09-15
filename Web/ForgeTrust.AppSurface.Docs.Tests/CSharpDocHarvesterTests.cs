@@ -727,6 +727,81 @@ public class CSharpDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldRejectInvalidPythonModuleOwnershipWithoutSuppressingCSharpDocs()
+    {
+        await File.WriteAllTextAsync(
+            Path.Join(_testRoot, "InvalidOwnership.cs"),
+            """
+            namespace Test;
+
+            /// <summary>Host docs remain available.</summary>
+            [AppSurfacePythonModule("../sidecar/worker.py")]
+            public sealed class InvalidOwnership;
+            """);
+
+        var results = await _harvester.HarvestAsync(_testRoot);
+
+        var namespacePage = Assert.Single(results, node => node.Path == "Namespaces/Test");
+        Assert.Contains("InvalidOwnership", namespacePage.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-appsurfacedocs-python-owner", namespacePage.Content, StringComparison.Ordinal);
+        var diagnostic = Assert.Single(GetDiagnostics(_harvester));
+        Assert.Equal(DocHarvestDiagnosticCodes.PythonOwnershipInvalid, diagnostic.Code);
+        Assert.Equal(nameof(CSharpDocHarvester), diagnostic.HarvesterType);
+        Assert.Contains("AppSurfacePythonModule", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldValidateEveryPythonOwnershipAttributeShape()
+    {
+        await File.WriteAllTextAsync(
+            Path.Join(_testRoot, "PythonOwnership.cs"),
+            """
+            namespace Test;
+
+            /// <summary>Valid host docs.</summary>
+            [ForgeTrust.AppSurface.Docs.AppSurfacePythonModuleAttribute("sidecar/worker.py")]
+            public sealed class ValidHost;
+
+            /// <summary>Multiple hosts are ambiguous.</summary>
+            [AppSurfacePythonModule("first.py")]
+            [AppSurfacePythonModule("second.py")]
+            public sealed class MultipleHost;
+
+            /// <summary>Named arguments are not allowed.</summary>
+            [AppSurfacePythonModule(modulePath: "sidecar/worker.py")]
+            public sealed class NamedArgumentHost;
+
+            /// <summary>Expressions are not allowed.</summary>
+            [AppSurfacePythonModule(nameof(ValidHost))]
+            public sealed class ExpressionHost;
+
+            /// <summary>Rooted paths are not allowed.</summary>
+            [AppSurfacePythonModule("/sidecar/worker.py")]
+            public sealed class RootedHost;
+
+            /// <summary>Backslash paths are not allowed.</summary>
+            [AppSurfacePythonModule("sidecar\\worker.py")]
+            public sealed class BackslashHost;
+
+            /// <summary>Dot segments are not allowed.</summary>
+            [AppSurfacePythonModule("sidecar/../worker.py")]
+            public sealed class DotSegmentHost;
+
+            /// <summary>Non-Python paths are not allowed.</summary>
+            [AppSurfacePythonModule("sidecar/worker.txt")]
+            public sealed class WrongExtensionHost;
+            """);
+
+        var results = await _harvester.HarvestAsync(_testRoot);
+
+        var namespacePage = Assert.Single(results, node => node.Path == "Namespaces/Test");
+        Assert.Contains("data-appsurfacedocs-python-owner", namespacePage.Content, StringComparison.Ordinal);
+        Assert.Equal(
+            7,
+            GetDiagnostics(_harvester).Count(diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.PythonOwnershipInvalid));
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldHandleMalformedXmlGracefully()
     {
         // Arrange

@@ -790,7 +790,7 @@ public record DocNode(
     /// </summary>
     /// <remarks>
     /// This non-positional property preserves the public constructor and deconstructor shape of <see cref="DocNode"/>.
-    /// The built-in search index validates its value and projects it only for canonical JavaScript API fragments.
+    /// The built-in search index validates its value and projects it only for canonical built-in generated API fragments.
     /// </remarks>
     public DocGeneratedApiSymbol? GeneratedApiSymbol { get; init; }
 
@@ -802,6 +802,16 @@ public record DocNode(
     /// canonical fragment shape before projecting <see cref="GeneratedApiSymbol"/>.
     /// </remarks>
     internal bool HasJavaScriptApiLifecycleProvenance { get; init; }
+
+    /// <summary>
+    /// Gets whether a built-in language harvester validated this node as a canonical generated API symbol.
+    /// </summary>
+    /// <remarks>
+    /// This internal provenance marker permits first-class search treatment for built-in language harvesters without
+    /// granting custom <see cref="DocNode"/> producers a search-ranking bypass. Each language still has to satisfy the
+    /// route, metadata, parent-fragment, and canonical lifecycle checks in the aggregator.
+    /// </remarks>
+    internal bool HasGeneratedApiSymbolProvenance { get; init; }
 }
 
 /// <summary>
@@ -810,9 +820,9 @@ public record DocNode(
 /// <remarks>
 /// This metadata is intentionally symbol-scoped. It must not be attached to aggregate API group pages or reused as a
 /// page-level <see cref="DocMetadata.Status"/> value, because an API group can contain symbols at different lifecycle
-/// stages. Built-in search validates and projects these optional values only for canonical generated JavaScript API
-/// symbol records with built-in-harvester provenance; custom harvesters retain the public model shape without gaining
-/// a search-ranking bypass.
+/// stages. Built-in search validates and projects these optional values only for canonical generated API symbol records
+/// with built-in language-harvester provenance; custom harvesters retain the public model shape without gaining a
+/// search-ranking bypass.
 /// </remarks>
 /// <param name="ApiLifecycle">Normalized lifecycle token: <c>public</c>, <c>alpha</c>, or <c>beta</c>.</param>
 /// <param name="ApiLifecycleLabel">Reader-facing lifecycle label such as <c>Public API</c>, <c>Alpha</c>, or <c>Beta</c>.</param>
@@ -1077,6 +1087,57 @@ public static class DocHarvestDiagnosticCodes
     /// A C# source file matched the configured include set but exceeded the configured parse size limit.
     /// </summary>
     public const string CSharpFileTooLarge = "appsurfacedocs.csharp.file_too_large";
+
+    /// <summary>
+    /// A Python source file matched the configured include set but exceeded the configured parse size limit.
+    /// </summary>
+    public const string PythonFileTooLarge = "appsurfacedocs.python.file_too_large";
+
+    /// <summary>
+    /// Python harvesting is enabled but does not have a usable explicit source boundary.
+    /// </summary>
+    public const string PythonMissingInclude = "appsurfacedocs.python.missing_include";
+
+    /// <summary>
+    /// The Tree-sitter Python parser could not be initialized for the current runtime.
+    /// </summary>
+    public const string PythonParserUnavailable = "appsurfacedocs.python.parser_unavailable";
+
+    /// <summary>
+    /// A Python source file was parsed with recoverable syntax errors and was skipped.
+    /// </summary>
+    public const string PythonParseFailed = "appsurfacedocs.python.parse_failed";
+
+    /// <summary>
+    /// A Python module lacks the explicit literal public boundary required by this spike.
+    /// </summary>
+    public const string PythonPublicBoundaryMissing = "appsurfacedocs.python.public_boundary_missing";
+
+    /// <summary>
+    /// A Python module's explicit public boundary is dynamic, malformed, or otherwise outside the spike contract.
+    /// </summary>
+    public const string PythonPublicBoundaryInvalid = "appsurfacedocs.python.public_boundary_invalid";
+
+    /// <summary>
+    /// A name in a Python public boundary resolves to a source form outside this spike's class and function contract.
+    /// </summary>
+    public const string PythonExportNotSupported = "appsurfacedocs.python.export_not_supported";
+
+    /// <summary>
+    /// A name in a Python public boundary does not resolve to an in-module source declaration.
+    /// </summary>
+    public const string PythonExportNotFound = "appsurfacedocs.python.export_not_found";
+
+    /// <summary>
+    /// Two Python module paths resolved to the same generated API route and neither page was published.
+    /// </summary>
+    public const string PythonSlugCollision = "appsurfacedocs.python.slug_collision";
+
+    /// <summary>
+    /// A C# <see cref="AppSurfacePythonModuleAttribute"/> declaration was not a single literal repository-relative
+    /// Python module path.
+    /// </summary>
+    public const string PythonOwnershipInvalid = "appsurfacedocs.python.ownership_invalid";
 
     /// <summary>
     /// A JavaScript source file could not be parsed and was skipped while other files continued harvesting.

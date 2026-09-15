@@ -67,6 +67,12 @@
           "TextMateSharp": "2.0.3"
         }
       },
+      "TreeSitter.DotNet": {
+        "type": "Direct",
+        "requested": "[1.3.0, )",
+        "resolved": "1.3.0",
+        "contentHash": "VFl5j5UguKI3BvdQ/bbHDrDP1FG7lkEjv9LZCQ01bPe4NuAiXQVnEfuFRWdJ8TA9NmY/D7qqGkj8CuD3ptiDDw=="
+      },
       "YamlDotNet": {
         "type": "Direct",
         "requested": "[18.0.0, )",

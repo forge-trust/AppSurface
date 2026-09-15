@@ -448,6 +448,11 @@ internal sealed class AppSurfaceDocsHarvestVcsIgnorePolicy
         {
             if (escaping)
             {
+                if (character is '*' or '?' or '[' or ']' or '\\')
+                {
+                    builder.Append('\\');
+                }
+
                 builder.Append(character);
                 escaping = false;
                 continue;
@@ -599,12 +604,26 @@ internal sealed record AppSurfaceDocsHarvestVcsIgnoreRule(
         for (var index = 0; index < pattern.Length; index++)
         {
             var character = pattern[index];
+            if (character == '\\' && index + 1 < pattern.Length)
+            {
+                builder.Append(Regex.Escape(pattern[++index].ToString()));
+                continue;
+            }
+
             if (character == '*')
             {
                 if (index + 1 < pattern.Length && pattern[index + 1] == '*')
                 {
-                    builder.Append(".*");
-                    index++;
+                    if (index + 2 < pattern.Length && pattern[index + 2] == '/')
+                    {
+                        builder.Append("(?:.*/)?");
+                        index += 2;
+                    }
+                    else
+                    {
+                        builder.Append(".*");
+                        index++;
+                    }
                 }
                 else
                 {
