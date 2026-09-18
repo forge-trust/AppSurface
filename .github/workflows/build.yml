@@ -19,6 +19,39 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  config-package-contract:
+    name: Config package contract (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Run source provider proof
+        run: dotnet run --project examples/config-key-contract --configuration Release
+      - name: Run framework-neutral conformance package tests
+        run: dotnet test Config/ForgeTrust.AppSurface.Config.Testing.Tests --configuration Release
+      - name: Verify isolated packed consumer
+        run: python scripts/verify_config_package_consumer.py --work-directory "${{ runner.temp }}/config-package-contract"
+      - name: Upload contract evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: config-package-contract-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/config-package-contract/evidence.json
+            ${{ runner.temp }}/config-package-contract/*.log
+          if-no-files-found: warn
+
   coverage-security-platform:
     name: Coverage security contracts (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

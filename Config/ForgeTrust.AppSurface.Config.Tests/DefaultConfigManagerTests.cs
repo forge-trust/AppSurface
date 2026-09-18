@@ -12,15 +12,15 @@ public class DefaultConfigManagerTests
         var logger = A.Fake<ILogger<DefaultConfigManager>>();
         var otherProvider = A.Fake<IConfigProvider>();
 
-        A.CallTo(() => environmentProvider.GetValue<string>("Production", "App.Key"))
-            .Returns("from-environment");
+        A.CallTo(() => environmentProvider.Resolve<string>(A<ConfigProviderRequest>.That.Matches(r => r.Environment == "Production" && r.Key.Equals(AppSurfaceConfigKey.Parse("App.Key".Replace('.', ':'))))))
+            .Returns(ConfigProviderValueResult<string>.Found("from-environment"));
 
         var manager = new DefaultConfigManager(environmentProvider, [otherProvider], logger);
 
         var value = manager.GetValue<string>("Production", "App.Key");
 
         Assert.Equal("from-environment", value);
-        A.CallTo(() => otherProvider.GetValue<string>(A<string>._, A<string>._))
+        A.CallTo(() => otherProvider.Resolve<string>(A<ConfigProviderRequest>._))
             .MustNotHaveHappened();
     }
 
@@ -31,24 +31,22 @@ public class DefaultConfigManagerTests
         var logger = A.Fake<ILogger<DefaultConfigManager>>();
         var highPriorityProvider = A.Fake<IConfigProvider>();
         var lowPriorityProvider = A.Fake<IConfigProvider>();
-        var anotherConfigManager = A.Fake<IConfigManager>();
 
-        A.CallTo(() => environmentProvider.GetValue<string>(A<string>._, A<string>._))
-            .Returns(null);
+        A.CallTo(() => environmentProvider.Resolve<string>(A<ConfigProviderRequest>._))
+            .Returns(ConfigProviderValueResult<string>.Missing());
         A.CallTo(() => highPriorityProvider.Priority).Returns(10);
-        A.CallTo(() => highPriorityProvider.GetValue<string>("Production", "Feature.Flag"))
-            .Returns(null);
+        A.CallTo(() => highPriorityProvider.Resolve<string>(A<ConfigProviderRequest>.That.Matches(r => r.Environment == "Production" && r.Key.Equals(AppSurfaceConfigKey.Parse("Feature.Flag".Replace('.', ':'))))))
+            .Returns(ConfigProviderValueResult<string>.Missing());
         A.CallTo(() => lowPriorityProvider.Priority).Returns(1);
-        A.CallTo(() => lowPriorityProvider.GetValue<string>("Production", "Feature.Flag"))
-            .Returns("from-low");
+        A.CallTo(() => lowPriorityProvider.Resolve<string>(A<ConfigProviderRequest>.That.Matches(r => r.Environment == "Production" && r.Key.Equals(AppSurfaceConfigKey.Parse("Feature.Flag".Replace('.', ':'))))))
+            .Returns(ConfigProviderValueResult<string>.Found("from-low"));
 
         var manager = new DefaultConfigManager(
             environmentProvider,
             [
                 highPriorityProvider,
                 lowPriorityProvider,
-                environmentProvider, // should be filtered out
-                anotherConfigManager // should be filtered out
+                environmentProvider // should be filtered out
             ],
             logger);
 
@@ -56,11 +54,11 @@ public class DefaultConfigManagerTests
 
         Assert.Equal("from-low", value);
 
-        A.CallTo(() => highPriorityProvider.GetValue<string>("Production", "Feature.Flag"))
+        A.CallTo(() => highPriorityProvider.Resolve<string>(A<ConfigProviderRequest>.That.Matches(r => r.Environment == "Production" && r.Key.Equals(AppSurfaceConfigKey.Parse("Feature.Flag".Replace('.', ':'))))))
             .MustHaveHappenedOnceExactly();
-        A.CallTo(() => lowPriorityProvider.GetValue<string>("Production", "Feature.Flag"))
+        A.CallTo(() => lowPriorityProvider.Resolve<string>(A<ConfigProviderRequest>.That.Matches(r => r.Environment == "Production" && r.Key.Equals(AppSurfaceConfigKey.Parse("Feature.Flag".Replace('.', ':'))))))
             .MustHaveHappenedOnceExactly();
-        A.CallTo(() => environmentProvider.GetValue<string>("Production", "Feature.Flag"))
+        A.CallTo(() => environmentProvider.Resolve<string>(A<ConfigProviderRequest>.That.Matches(r => r.Environment == "Production" && r.Key.Equals(AppSurfaceConfigKey.Parse("Feature.Flag".Replace('.', ':'))))))
             .MustHaveHappenedOnceExactly();
     }
 
@@ -71,17 +69,17 @@ public class DefaultConfigManagerTests
         var logger = A.Fake<ILogger<DefaultConfigManager>>();
         var otherProvider = A.Fake<IConfigProvider>();
 
-        A.CallTo(() => environmentProvider.GetValue<string>(A<string>._, A<string>._)).Returns(null);
-        A.CallTo(() => otherProvider.GetValue<string>(A<string>._, A<string>._)).Returns(null);
+        A.CallTo(() => environmentProvider.Resolve<string>(A<ConfigProviderRequest>._)).Returns(ConfigProviderValueResult<string>.Missing());
+        A.CallTo(() => otherProvider.Resolve<string>(A<ConfigProviderRequest>._)).Returns(ConfigProviderValueResult<string>.Missing());
 
         var manager = new DefaultConfigManager(environmentProvider, [otherProvider], logger);
 
         var value = manager.GetValue<string>("Any", "Missing.Key");
 
         Assert.Null(value);
-        A.CallTo(() => environmentProvider.GetValue<string>("Any", "Missing.Key"))
+        A.CallTo(() => environmentProvider.Resolve<string>(A<ConfigProviderRequest>.That.Matches(r => r.Environment == "Any" && r.Key.Equals(AppSurfaceConfigKey.Parse("Missing.Key".Replace('.', ':'))))))
             .MustHaveHappenedOnceExactly();
-        A.CallTo(() => otherProvider.GetValue<string>("Any", "Missing.Key"))
+        A.CallTo(() => otherProvider.Resolve<string>(A<ConfigProviderRequest>.That.Matches(r => r.Environment == "Any" && r.Key.Equals(AppSurfaceConfigKey.Parse("Missing.Key".Replace('.', ':'))))))
             .MustHaveHappenedOnceExactly();
     }
 
@@ -90,8 +88,8 @@ public class DefaultConfigManagerTests
     {
         var environmentProvider = A.Fake<IEnvironmentConfigProvider>();
         var logger = A.Fake<ILogger<DefaultConfigManager>>();
-        A.CallTo(() => environmentProvider.GetValue<string>("Production", "Key"))
-            .Returns("env-val");
+        A.CallTo(() => environmentProvider.Resolve<string>(A<ConfigProviderRequest>.That.Matches(r => r.Environment == "Production" && r.Key.Equals(AppSurfaceConfigKey.Parse("Key".Replace('.', ':'))))))
+            .Returns(ConfigProviderValueResult<string>.Found("env-val"));
 
         var manager = new DefaultConfigManager(environmentProvider, null, logger);
 
@@ -105,8 +103,8 @@ public class DefaultConfigManagerTests
         var logger = A.Fake<ILogger<DefaultConfigManager>>();
 
         // Setup environment to return null
-        A.CallTo(() => environmentProvider.GetValue<string>(A<string>._, A<string>._))
-            .Returns(null);
+        A.CallTo(() => environmentProvider.Resolve<string>(A<ConfigProviderRequest>._))
+            .Returns(ConfigProviderValueResult<string>.Missing());
 
         // No other providers
         var manager = new DefaultConfigManager(environmentProvider, [], logger);
@@ -124,11 +122,11 @@ public class DefaultConfigManagerTests
         var provider1 = A.Fake<IConfigProvider>();
         var provider2 = A.Fake<IConfigProvider>();
 
-        A.CallTo(() => environmentProvider.GetValue<string>(A<string>._, A<string>._)).Returns(null);
+        A.CallTo(() => environmentProvider.Resolve<string>(A<ConfigProviderRequest>._)).Returns(ConfigProviderValueResult<string>.Missing());
         A.CallTo(() => provider1.Priority).Returns(5);
-        A.CallTo(() => provider1.GetValue<string>("Production", "Key")).Returns("val1");
+        A.CallTo(() => provider1.Resolve<string>(A<ConfigProviderRequest>.That.Matches(r => r.Environment == "Production" && r.Key.Equals(AppSurfaceConfigKey.Parse("Key".Replace('.', ':')))))).Returns(ConfigProviderValueResult<string>.Found("val1"));
         A.CallTo(() => provider2.Priority).Returns(5);
-        A.CallTo(() => provider2.GetValue<string>("Production", "Key")).Returns("val2");
+        A.CallTo(() => provider2.Resolve<string>(A<ConfigProviderRequest>.That.Matches(r => r.Environment == "Production" && r.Key.Equals(AppSurfaceConfigKey.Parse("Key".Replace('.', ':')))))).Returns(ConfigProviderValueResult<string>.Found("val2"));
 
         // When priorities are equal, the order in the list should be preserved by OrderByDescending (stable sort)
         var manager = new DefaultConfigManager(environmentProvider, [provider1, provider2], logger);
@@ -145,7 +143,7 @@ public class DefaultConfigManagerTests
         var logger = A.Fake<ILogger<DefaultConfigManager>>();
 
         A.CallTo(() => logger.IsEnabled(LogLevel.Debug)).Returns(true);
-        A.CallTo(() => environmentProvider.GetValue<string>(A<string>._, A<string>._)).Returns("val");
+        A.CallTo(() => environmentProvider.Resolve<string>(A<ConfigProviderRequest>._)).Returns(ConfigProviderValueResult<string>.Found("val"));
 
         var manager = new DefaultConfigManager(environmentProvider, [], logger);
         manager.GetValue<string>("Env", "Key");
@@ -160,7 +158,7 @@ public class DefaultConfigManagerTests
         var logger = A.Fake<ILogger<DefaultConfigManager>>();
 
         A.CallTo(() => logger.IsEnabled(LogLevel.Debug)).Returns(true);
-        A.CallTo(() => environmentProvider.GetValue<string>(A<string>._, A<string>._)).Returns(null);
+        A.CallTo(() => environmentProvider.Resolve<string>(A<ConfigProviderRequest>._)).Returns(ConfigProviderValueResult<string>.Missing());
 
         var manager = new DefaultConfigManager(environmentProvider, [], logger);
         manager.GetValue<string>("Env", "Missing");
@@ -172,6 +170,9 @@ public class DefaultConfigManagerTests
     public void GetValue_PatchesProviderObjectWithNestedEnvironmentVariable()
     {
         var innerEnvironment = A.Fake<ForgeTrust.AppSurface.Core.IEnvironmentProvider>();
+        var variables = new Dictionary<string, string>(StringComparer.Ordinal);
+        A.CallTo(() => innerEnvironment.CaptureEnvironmentVariables()).ReturnsLazily(() =>
+            new Dictionary<string, string>(variables, StringComparer.Ordinal));
         var fileProvider = A.Fake<IConfigProvider>();
         var logger = A.Fake<ILogger<DefaultConfigManager>>();
         var fileValue = new AppSettings
@@ -184,19 +185,17 @@ public class DefaultConfigManagerTests
             }
         };
 
-        A.CallTo(() => innerEnvironment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerEnvironment.GetEnvironmentVariable("MYAPP__SETTINGS__DATABASE__PORT", A<string?>._))
-            .Returns("6543");
+        variables["MYAPP__SETTINGS__DATABASE__PORT"] = "6543";
         A.CallTo(() => fileProvider.Priority).Returns(1);
         A.CallTo(() => fileProvider.Name).Returns("File");
-        A.CallTo(() => fileProvider.GetValue<AppSettings>("Production", "MyApp.Settings")).Returns(fileValue);
+        A.CallTo(() => fileProvider.Resolve<AppSettings>(A<ConfigProviderRequest>.That.Matches(r => r.Environment == "Production" && r.Key.Equals(AppSurfaceConfigKey.Parse("MyApp.Settings".Replace('.', ':')))))).Returns(ConfigProviderValueResult<AppSettings>.Found(fileValue));
 
         var environmentProvider = new EnvironmentConfigProvider(innerEnvironment);
         var manager = new DefaultConfigManager(environmentProvider, [fileProvider], logger);
 
         var value = manager.GetValue<AppSettings>("Production", "MyApp.Settings");
 
-        Assert.Same(fileValue, value);
+        Assert.NotSame(fileValue, value);
         Assert.NotNull(value);
         Assert.Equal("file", value.Mode);
         Assert.Equal("db.from.file", value.Database.Host);
@@ -207,6 +206,9 @@ public class DefaultConfigManagerTests
     public void GetValue_ReturnsDirectEnvironmentObjectBeforePatchingProviderValue()
     {
         var innerEnvironment = A.Fake<ForgeTrust.AppSurface.Core.IEnvironmentProvider>();
+        var variables = new Dictionary<string, string>(StringComparer.Ordinal);
+        A.CallTo(() => innerEnvironment.CaptureEnvironmentVariables()).ReturnsLazily(() =>
+            new Dictionary<string, string>(variables, StringComparer.Ordinal));
         var fileProvider = A.Fake<IConfigProvider>();
         var logger = A.Fake<ILogger<DefaultConfigManager>>();
         var directJson = """
@@ -219,9 +221,7 @@ public class DefaultConfigManagerTests
             }
             """;
 
-        A.CallTo(() => innerEnvironment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerEnvironment.GetEnvironmentVariable("MYAPP__SETTINGS", A<string?>._))
-            .Returns(directJson);
+        variables["MYAPP__SETTINGS"] = directJson;
 
         var environmentProvider = new EnvironmentConfigProvider(innerEnvironment);
         var manager = new DefaultConfigManager(environmentProvider, [fileProvider], logger);
@@ -232,7 +232,7 @@ public class DefaultConfigManagerTests
         Assert.Equal("environment", value.Mode);
         Assert.Equal("db.from.env", value.Database.Host);
         Assert.Equal(7000, value.Database.Port);
-        A.CallTo(() => fileProvider.GetValue<AppSettings>(A<string>._, A<string>._))
+        A.CallTo(() => fileProvider.Resolve<AppSettings>(A<ConfigProviderRequest>._))
             .MustNotHaveHappened();
     }
 
@@ -240,11 +240,13 @@ public class DefaultConfigManagerTests
     public void GetValue_CreatesObjectFromNestedEnvironmentVariableWhenProvidersAreMissing()
     {
         var innerEnvironment = A.Fake<ForgeTrust.AppSurface.Core.IEnvironmentProvider>();
+        var variables = new Dictionary<string, string>(StringComparer.Ordinal);
+        A.CallTo(() => innerEnvironment.CaptureEnvironmentVariables()).ReturnsLazily(() =>
+            new Dictionary<string, string>(variables, StringComparer.Ordinal));
         var logger = A.Fake<ILogger<DefaultConfigManager>>();
 
         A.CallTo(() => innerEnvironment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerEnvironment.GetEnvironmentVariable("MYAPP__SETTINGS__MODE", A<string?>._))
-            .Returns("environment");
+        variables["MYAPP__SETTINGS__MODE"] = "environment";
 
         var environmentProvider = new EnvironmentConfigProvider(innerEnvironment);
         var manager = new DefaultConfigManager(environmentProvider, [], logger);
@@ -259,16 +261,17 @@ public class DefaultConfigManagerTests
     public void GetValue_AppliesNestedEnvironmentPatchBeforeThrowingTerminalProviderDiagnostic()
     {
         var innerEnvironment = A.Fake<ForgeTrust.AppSurface.Core.IEnvironmentProvider>();
+        var variables = new Dictionary<string, string>(StringComparer.Ordinal);
+        A.CallTo(() => innerEnvironment.CaptureEnvironmentVariables()).ReturnsLazily(() =>
+            new Dictionary<string, string>(variables, StringComparer.Ordinal));
         var lowerProvider = A.Fake<IConfigProvider>();
         var logger = A.Fake<ILogger<DefaultConfigManager>>();
         var terminalProvider = new TerminalProvider();
 
-        A.CallTo(() => innerEnvironment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerEnvironment.GetEnvironmentVariable("MYAPP__SETTINGS__MODE", A<string?>._))
-            .Returns("environment");
+        variables["MYAPP__SETTINGS__MODE"] = "environment";
         A.CallTo(() => lowerProvider.Priority).Returns(1);
-        A.CallTo(() => lowerProvider.GetValue<AppSettings>(A<string>._, A<string>._))
-            .Returns(new AppSettings { Mode = "lower" });
+        A.CallTo(() => lowerProvider.Resolve<AppSettings>(A<ConfigProviderRequest>._))
+            .Returns(ConfigProviderValueResult<AppSettings>.Found(new AppSettings { Mode = "lower" }));
 
         var environmentProvider = new EnvironmentConfigProvider(innerEnvironment);
         var manager = new DefaultConfigManager(environmentProvider, [lowerProvider, terminalProvider], logger);
@@ -278,7 +281,7 @@ public class DefaultConfigManagerTests
         Assert.NotNull(value);
         Assert.Equal("environment", value.Mode);
         Assert.True(terminalProvider.WasCalled);
-        A.CallTo(() => lowerProvider.GetValue<AppSettings>(A<string>._, A<string>._))
+        A.CallTo(() => lowerProvider.Resolve<AppSettings>(A<ConfigProviderRequest>._))
             .MustNotHaveHappened();
     }
 
@@ -286,6 +289,9 @@ public class DefaultConfigManagerTests
     public void GetValue_PatchesProviderObjectWithGetterOnlyNestedObject()
     {
         var innerEnvironment = A.Fake<ForgeTrust.AppSurface.Core.IEnvironmentProvider>();
+        var variables = new Dictionary<string, string>(StringComparer.Ordinal);
+        A.CallTo(() => innerEnvironment.CaptureEnvironmentVariables()).ReturnsLazily(() =>
+            new Dictionary<string, string>(variables, StringComparer.Ordinal));
         var fileProvider = A.Fake<IConfigProvider>();
         var logger = A.Fake<ILogger<DefaultConfigManager>>();
         var fileValue = new GetterOnlyAppSettings
@@ -296,18 +302,17 @@ public class DefaultConfigManagerTests
         fileValue.Database.Port = 5432;
 
         A.CallTo(() => innerEnvironment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerEnvironment.GetEnvironmentVariable("MYAPP__SETTINGS__DATABASE__PORT", A<string?>._))
-            .Returns("6543");
+        variables["MYAPP__SETTINGS__DATABASE__PORT"] = "6543";
         A.CallTo(() => fileProvider.Priority).Returns(1);
-        A.CallTo(() => fileProvider.GetValue<GetterOnlyAppSettings>("Production", "MyApp.Settings"))
-            .Returns(fileValue);
+        A.CallTo(() => fileProvider.Resolve<GetterOnlyAppSettings>(A<ConfigProviderRequest>.That.Matches(r => r.Environment == "Production" && r.Key.Equals(AppSurfaceConfigKey.Parse("MyApp.Settings".Replace('.', ':'))))))
+            .Returns(ConfigProviderValueResult<GetterOnlyAppSettings>.Found(fileValue));
 
         var environmentProvider = new EnvironmentConfigProvider(innerEnvironment);
         var manager = new DefaultConfigManager(environmentProvider, [fileProvider], logger);
 
         var value = manager.GetValue<GetterOnlyAppSettings>("Production", "MyApp.Settings");
 
-        Assert.Same(fileValue, value);
+        Assert.NotSame(fileValue, value);
         Assert.NotNull(value);
         Assert.Equal("file", value.Mode);
         Assert.Equal("db.from.file", value.Database.Host);
@@ -318,26 +323,26 @@ public class DefaultConfigManagerTests
     public void GetValue_PatchesProviderObjectWithGetterOnlyCollection()
     {
         var innerEnvironment = A.Fake<ForgeTrust.AppSurface.Core.IEnvironmentProvider>();
+        var variables = new Dictionary<string, string>(StringComparer.Ordinal);
+        A.CallTo(() => innerEnvironment.CaptureEnvironmentVariables()).ReturnsLazily(() =>
+            new Dictionary<string, string>(variables, StringComparer.Ordinal));
         var fileProvider = A.Fake<IConfigProvider>();
         var logger = A.Fake<ILogger<DefaultConfigManager>>();
         var fileValue = new GetterOnlyAppSettings();
         fileValue.Endpoints.Add("https://file.example");
 
-        A.CallTo(() => innerEnvironment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerEnvironment.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
-            .Returns("https://one.example");
-        A.CallTo(() => innerEnvironment.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
-            .Returns("https://two.example");
+        variables["MYAPP__SETTINGS__ENDPOINTS__0"] = "https://one.example";
+        variables["MYAPP__SETTINGS__ENDPOINTS__1"] = "https://two.example";
         A.CallTo(() => fileProvider.Priority).Returns(1);
-        A.CallTo(() => fileProvider.GetValue<GetterOnlyAppSettings>("Production", "MyApp.Settings"))
-            .Returns(fileValue);
+        A.CallTo(() => fileProvider.Resolve<GetterOnlyAppSettings>(A<ConfigProviderRequest>.That.Matches(r => r.Environment == "Production" && r.Key.Equals(AppSurfaceConfigKey.Parse("MyApp.Settings".Replace('.', ':'))))))
+            .Returns(ConfigProviderValueResult<GetterOnlyAppSettings>.Found(fileValue));
 
         var environmentProvider = new EnvironmentConfigProvider(innerEnvironment);
         var manager = new DefaultConfigManager(environmentProvider, [fileProvider], logger);
 
         var value = manager.GetValue<GetterOnlyAppSettings>("Production", "MyApp.Settings");
 
-        Assert.Same(fileValue, value);
+        Assert.NotSame(fileValue, value);
         Assert.NotNull(value);
         Assert.Equal(["https://one.example", "https://two.example"], value.Endpoints);
     }
@@ -365,7 +370,7 @@ public class DefaultConfigManagerTests
         public int Port { get; set; }
     }
 
-    private sealed class TerminalProvider : IConfigProvider, IConfigProviderTerminalDiagnosticProvider
+    private sealed class TerminalProvider : IConfigProvider
     {
         private readonly ConfigProviderTerminalDiagnostic _diagnostic = new(
             "provider-terminal",
@@ -381,19 +386,10 @@ public class DefaultConfigManagerTests
 
         public bool WasCalled { get; private set; }
 
-        public T? GetValue<T>(string environment, string key)
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request)
         {
             WasCalled = true;
-            return default;
-        }
-
-        public bool TryGetTerminalDiagnostic(
-            string environment,
-            string key,
-            out ConfigProviderTerminalDiagnostic diagnostic)
-        {
-            diagnostic = _diagnostic;
-            return true;
+            return ConfigProviderValueResult<T>.Terminal(_diagnostic);
         }
     }
 }

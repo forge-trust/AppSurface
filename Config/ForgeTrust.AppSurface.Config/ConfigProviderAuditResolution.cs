@@ -19,17 +19,17 @@ public sealed class ConfigProviderAuditResolution
     /// <param name="sources">Source records that contributed to the value.</param>
     /// <param name="diagnostics">Display-safe diagnostics for this key.</param>
     public ConfigProviderAuditResolution(
-        string key,
+        AppSurfaceConfigKey key,
         ConfigAuditEntryState state,
         object? value,
         IReadOnlyList<ConfigAuditSourceRecord> sources,
         IReadOnlyList<ConfigAuditDiagnostic> diagnostics)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentNullException.ThrowIfNull(key);
         ArgumentNullException.ThrowIfNull(sources);
         ArgumentNullException.ThrowIfNull(diagnostics);
 
-        Key = key;
+        LogicalKey = key;
         State = state;
         Value = value;
         Sources = sources;
@@ -39,7 +39,10 @@ public sealed class ConfigProviderAuditResolution
     /// <summary>
     /// Gets the logical AppSurface configuration key.
     /// </summary>
-    public string Key { get; }
+    public AppSurfaceConfigKey LogicalKey { get; }
+
+    /// <summary>Gets the colon-delimited display rendering of <see cref="LogicalKey"/>.</summary>
+    public string Key => LogicalKey.Value;
 
     /// <summary>
     /// Gets the audit state.
@@ -66,6 +69,6 @@ public sealed class ConfigProviderAuditResolution
     /// </summary>
     /// <param name="key">The logical AppSurface configuration key.</param>
     /// <returns>A missing audit resolution.</returns>
-    public static ConfigProviderAuditResolution Missing(string key) =>
+    public static ConfigProviderAuditResolution Missing(AppSurfaceConfigKey key) =>
         new(key, ConfigAuditEntryState.Missing, null, [], []);
 }

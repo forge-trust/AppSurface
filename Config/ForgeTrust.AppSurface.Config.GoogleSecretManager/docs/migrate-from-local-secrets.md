@@ -92,7 +92,7 @@ exceptions.
   redaction, and diagnostics continue to work.
 - Transfer jobs targeting production require an explicit numeric Google source version; they never accept `latest`.
   Separately, runtime provider mappings may opt into a mutable alias with `AllowLatest()` when that behavior is intentional.
-- Do not leave a production fallback secret in `appsettings.*.json`. Claimed remote failures fail closed by default so
+- Do not leave a production fallback secret in `appsettings.*.json`. Claimed remote failures fail closed so
   a missing IAM grant or outage does not silently read a stale file value.
 - Keep environment variables for emergency overrides, CI injection, and short-lived operational recovery.
 - Do not use transfer as a rotation system. `--replace` adds a new enabled version to an existing secret and leaves

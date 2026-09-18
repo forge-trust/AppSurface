@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text.Json;
 
@@ -12,7 +14,7 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 /// store and should not be used as a production vault. The file contains secret values and must stay outside source
 /// control.
 /// </remarks>
-public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore
+public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore, IAppSurfaceLocalSecretMigrationStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
@@ -42,6 +44,81 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
 
     /// <inheritdoc />
     public string Name => nameof(FileAppSurfaceLocalSecretStore);
+
+    /// <inheritdoc />
+    public AppSurfaceLocalSecretMigrationResult Migrate(string applicationName, string environment, string? keyPrefix) =>
+        AppSurfaceLocalSecretMigrationResult.FailedToStart(
+            LocalSecretResultStatus.UnsupportedPlatform,
+            new AppSurfaceLocalSecretDiagnostic(
+                "local-secret-migration-unsupported",
+                "Legacy LocalSecrets migration is unavailable for the file store.",
+                "The explicit file store has no retained legacy platform namespace to migrate.",
+                "Use `secrets migrate-key` for an exact file identifier or set the intended logical key explicitly.",
+                "local-secrets-migration"),
+            Name);
+
+    /// <inheritdoc />
+    public AppSurfaceLocalSecretIdentityResult GetKeyMigrationDestinationIdentity(
+        string applicationName, string environment, string? keyPrefix, AppSurfaceConfigKey destinationKey)
+    {
+        ArgumentNullException.ThrowIfNull(destinationKey);
+        return new AppSurfaceLocalSecretIdentityNormalizer().Normalize(applicationName, environment, keyPrefix, destinationKey.Value);
+    }
+
+    /// <inheritdoc />
+    public AppSurfaceLocalSecretKeyMigrationResult MigrateKey(
+        string applicationName,
+        string environment,
+        string? keyPrefix,
+        string sourceStoredKey,
+        ForgeTrust.AppSurface.Config.AppSurfaceConfigKey destinationKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(applicationName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(environment);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceStoredKey);
+        ArgumentNullException.ThrowIfNull(destinationKey);
+
+        try
+        {
+            var destination = GetKeyMigrationDestinationIdentity(applicationName, environment, keyPrefix, destinationKey);
+            if (!destination.Succeeded || destination.Identity is null)
+            {
+                return AppSurfaceLocalSecretKeyMigrationResult.Failed(
+                    LocalSecretResultStatus.InvalidIdentity,
+                    "invalid",
+                    AppSurfaceLocalSecretMigrationState.Prepared,
+                    sourceStoredKey,
+                    destinationKey,
+                    destination.Diagnostic!,
+                    Name);
+            }
+
+            return AppSurfaceLocalSecretMigrationCoordinator.Run(
+                CreateMigrationBackend(destination.Identity, sourceStoredKey),
+                applicationName,
+                environment,
+                keyPrefix,
+                sourceStoredKey,
+                destination.Identity.StorageName,
+                destinationKey,
+                Name);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (IOException)
+        {
+            return AppSurfaceLocalSecretKeyMigrationResult.Failed(
+                LocalSecretResultStatus.Unavailable,
+                "io-failure",
+                AppSurfaceLocalSecretMigrationState.Prepared,
+                sourceStoredKey,
+                destinationKey,
+                new AppSurfaceLocalSecretDiagnostic("local-secret-migration-unavailable", "Exact-key migration could not access the file store.", "The durable file store could not be read or written.", "Fix file permissions or close competing processes and retry.", "local-secrets-migration", true),
+                Name);
+        }
+    }
 
     /// <summary>
     /// Gets the default per-user AppSurface local secret file path.
@@ -82,8 +159,14 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
                 return PostureFailure(posture);
             }
 
-            return data.TryGetValue(identity.StorageName, out var entry)
-                ? AppSurfaceLocalSecretResult.Found(entry.Value, Name)
+            var matches = FindEntries(data, identity);
+            if (matches.Count > 1)
+            {
+                return CollisionFailure(identity.Key.Value);
+            }
+
+            return matches.Count == 1
+                ? AppSurfaceLocalSecretResult.Found(matches[0].Value.Value, Name)
                 : AppSurfaceLocalSecretResult.Missing(Name);
         }
     }
@@ -92,26 +175,34 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
     public AppSurfaceLocalSecretResult Set(AppSurfaceLocalSecretIdentity identity, string value)
     {
         ArgumentNullException.ThrowIfNull(identity);
+        if (!TryPrepareWrite(out var preflight, out var failure)) return failure;
+        if (preflight.Kind == FileSecretPostureKind.Unsupported) return PostureFailure(preflight);
+        return PlatformLocalSecretMaintenanceLease.Run(AcquireMaintenanceLease,
+            () => SetUnderLease(identity, value),
+            diagnostic => AppSurfaceLocalSecretResult.NotFound(LocalSecretResultStatus.Unavailable, diagnostic, Name));
+    }
+
+    private AppSurfaceLocalSecretResult SetUnderLease(AppSurfaceLocalSecretIdentity identity, string value)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(value);
 
         lock (_gate)
         {
-            if (!TryPrepareWrite(out var preflight, out var failure))
+            if (!TryRead(out var data, out var failure))
             {
                 return failure;
             }
 
-            if (preflight.Kind == FileSecretPostureKind.Unsupported)
+            var existing = FindEntries(data, identity);
+            if (existing.Count > 1)
             {
-                return PostureFailure(preflight);
+                return CollisionFailure(identity.Key.Value);
             }
 
-            if (!TryRead(out var data, out failure))
-            {
-                return failure;
-            }
-
-            data[identity.StorageName] = new FileSecretEntry(identity.ApplicationName, identity.Environment, identity.KeyPrefix, identity.Key, value);
+            var storageName = existing.Count == 1 ? existing[0].Key : identity.StorageName;
+            var storedKey = existing.Count == 1 ? existing[0].Value.Key : identity.Key.Value;
+            data[storageName] = new FileSecretEntry(identity.ApplicationName, identity.Environment, identity.KeyPrefix, storedKey, value);
             var writeFailure = TryWrite(data);
             if (writeFailure != null)
             {
@@ -126,25 +217,31 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
     public AppSurfaceLocalSecretResult Delete(AppSurfaceLocalSecretIdentity identity)
     {
         ArgumentNullException.ThrowIfNull(identity);
+        if (!TryPrepareWrite(out var preflight, out var failure)) return failure;
+        if (preflight.Kind == FileSecretPostureKind.Unsupported) return PostureFailure(preflight);
+        return PlatformLocalSecretMaintenanceLease.Run(AcquireMaintenanceLease,
+            () => DeleteUnderLease(identity),
+            diagnostic => AppSurfaceLocalSecretResult.NotFound(LocalSecretResultStatus.Unavailable, diagnostic, Name));
+    }
+
+    private AppSurfaceLocalSecretResult DeleteUnderLease(AppSurfaceLocalSecretIdentity identity)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
 
         lock (_gate)
         {
-            if (!TryPrepareWrite(out var preflight, out var failure))
+            if (!TryRead(out var data, out var failure))
             {
                 return failure;
             }
 
-            if (preflight.Kind == FileSecretPostureKind.Unsupported)
+            var existing = FindEntries(data, identity);
+            if (existing.Count > 1)
             {
-                return PostureFailure(preflight);
+                return CollisionFailure(identity.Key.Value);
             }
 
-            if (!TryRead(out var data, out failure))
-            {
-                return failure;
-            }
-
-            if (!data.Remove(identity.StorageName))
+            if (existing.Count == 0 || !data.Remove(existing[0].Key))
             {
                 return AppSurfaceLocalSecretResult.Missing(Name);
             }
@@ -223,13 +320,22 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
                 return AppSurfaceLocalSecretListResult.Failed(postureFailure.Status, postureFailure.Diagnostic!, Name);
             }
 
-            var keys = data.Values
+            var scoped = data.Values
                 .Where(entry => string.Equals(entry.ApplicationName, applicationName, StringComparison.Ordinal)
                                 && string.Equals(entry.Environment, environment, StringComparison.Ordinal)
                                 && string.Equals(entry.KeyPrefix, keyPrefix, StringComparison.Ordinal))
-                .Select(entry => entry.Key);
+                .ToArray();
+            var collision = scoped.GroupBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault(group => group.Select(entry => entry.Key).Distinct(StringComparer.Ordinal).Skip(1).Any());
+            if (collision is not null)
+            {
+                return AppSurfaceLocalSecretListResult.Failed(
+                    LocalSecretResultStatus.ProviderFailed,
+                    CollisionDiagnostic(collision.Key),
+                    Name);
+            }
 
-            return AppSurfaceLocalSecretListResult.Found(keys, Name);
+            return AppSurfaceLocalSecretListResult.Found(scoped.Select(entry => entry.Key), Name);
         }
     }
 
@@ -238,13 +344,45 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
     {
         try
         {
+            var preparation = _fileSystem.PrepareWrite(_path);
+            if (preparation.Kind == FileSecretPostureKind.Unsupported)
+            {
+                return PostureFailure(preparation);
+            }
+
+            using var maintenanceLease = AcquireMaintenanceLease();
             var posture = _fileSystem.Doctor(_path);
-            return posture.Kind == FileSecretPostureKind.Unsupported
-                ? PostureFailure(posture)
-                : AppSurfaceLocalSecretResult.NotFound(
-                    LocalSecretResultStatus.Missing,
-                    posture.ToDiagnostic(),
-                    Name);
+            if (posture.Kind == FileSecretPostureKind.Unsupported)
+            {
+                return PostureFailure(posture);
+            }
+
+            lock (_gate)
+            {
+                if (!TryRead(out var data, out var readFailure))
+                {
+                    return readFailure;
+                }
+
+                var scoped = data.Values.Where(entry =>
+                    string.Equals(entry.ApplicationName, applicationName, StringComparison.Ordinal) &&
+                    string.Equals(entry.Environment, environment, StringComparison.Ordinal) &&
+                    string.Equals(entry.KeyPrefix, keyPrefix, StringComparison.Ordinal)).ToArray();
+                var collision = scoped.GroupBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase)
+                    .FirstOrDefault(group => group.Select(entry => entry.Key).Distinct(StringComparer.Ordinal).Skip(1).Any());
+                if (collision is not null)
+                {
+                    return AppSurfaceLocalSecretResult.NotFound(
+                        LocalSecretResultStatus.ProviderFailed,
+                        CollisionDiagnostic(collision.Key),
+                        Name);
+                }
+            }
+
+            var finalPosture = preparation.Kind == FileSecretPostureKind.Repaired || posture.Kind == FileSecretPostureKind.Repaired
+                ? FileSecretPostureResult.Repaired()
+                : posture;
+            return AppSurfaceLocalSecretResult.NotFound(LocalSecretResultStatus.Missing, finalPosture.ToDiagnostic(), Name);
         }
         catch (UnauthorizedAccessException)
         {
@@ -1015,6 +1153,135 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
             "Close other processes using the file and retry.",
             retryable: true);
 
+    private IDisposable AcquireMaintenanceLease() => PlatformLocalSecretMaintenanceLease.AcquireFile(
+        _path + ".maintenance.lock", AppSurfaceLocalSecretMigrationCoordinator.DefaultLeaseTimeout, CancellationToken.None);
+
+    /// <summary>Exposes the production backend for deterministic transition fault injection while retaining real disk state.</summary>
+    internal IAppSurfaceLocalSecretMigrationBackend CreateMigrationBackend(
+        AppSurfaceLocalSecretIdentity destination, string? sourceStoredKey = null) =>
+        new FileMigrationBackend(this, destination.ApplicationName, destination.Environment, destination.KeyPrefix, destination, sourceStoredKey ?? string.Empty);
+
+    private sealed class FileMigrationBackend(
+        FileAppSurfaceLocalSecretStore owner,
+        string applicationName,
+        string environment,
+        string? keyPrefix,
+        AppSurfaceLocalSecretIdentity destination,
+        string sourceStoredKey)
+        : IAppSurfaceLocalSecretMigrationBackend
+    {
+        private readonly string _journalPath = owner._path + ".migration-journal.json";
+
+        public bool SupportsDurableMigration => owner._fileSystem.SupportsDurableMigration;
+
+        public IDisposable AcquireMaintenanceLease(TimeSpan timeout, CancellationToken cancellationToken)
+        {
+            if (owner._fileSystem.PrepareWrite(owner._path).Kind == FileSecretPostureKind.Unsupported)
+                throw new IOException("The file store cannot provide private durable state.");
+            return PlatformLocalSecretMaintenanceLease.AcquireFile(owner._path + ".maintenance.lock", timeout, cancellationToken);
+        }
+
+        public void CommitJournal(AppSurfaceLocalSecretMigrationJournal journal)
+        {
+            var posture = owner._fileSystem.WriteAllTextWithPosture(_journalPath, JsonSerializer.Serialize(journal, JsonOptions));
+            if (posture.Kind == FileSecretPostureKind.Unsupported)
+            {
+                throw new IOException("The migration journal cannot be written with the required file posture.");
+            }
+        }
+
+        public AppSurfaceLocalSecretMigrationJournal? ReadJournal()
+        {
+            if (owner._fileSystem.InspectExistingFilePosture(_journalPath).Kind == FileSecretPostureKind.Unsupported)
+                throw new IOException("The migration journal read path is unsafe.");
+            if (!owner._fileSystem.FileExists(_journalPath))
+            {
+                return null;
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize<AppSurfaceLocalSecretMigrationJournal>(
+                    owner._fileSystem.ReadAllText(_journalPath), JsonOptions)
+                    ?? throw new IOException("The local secret migration journal is empty.");
+            }
+            catch (JsonException exception)
+            {
+                throw new IOException("The local secret migration journal is invalid.", exception);
+            }
+        }
+
+        public void ValidateDestination()
+        {
+            lock (owner._gate)
+            {
+                var data = ReadChecked();
+                if (data.Any(pair => InNamespace(pair.Value)
+                                     && !StringComparer.Ordinal.Equals(pair.Key, sourceStoredKey)
+                                     && !StringComparer.Ordinal.Equals(pair.Key, destination.StorageName)
+                                     && StringComparer.OrdinalIgnoreCase.Equals(pair.Value.Key, destination.Key.Value)))
+                {
+                    throw new AppSurfaceLocalSecretMigrationCollisionException();
+                }
+            }
+        }
+
+        public string? ReadExact(string storedKey)
+        {
+            lock (owner._gate)
+            {
+                var data = ReadChecked();
+                return data.TryGetValue(storedKey, out var entry) && InNamespace(entry) ? entry.Value : null;
+            }
+        }
+
+        public void WriteExact(string storedKey, string value)
+        {
+            lock (owner._gate)
+            {
+                var data = ReadChecked();
+                data[destination.StorageName] = new FileSecretEntry(applicationName, environment, keyPrefix, destination.Key.Value, value);
+                var posture = owner.Write(data);
+                if (posture.Kind == FileSecretPostureKind.Unsupported)
+                {
+                    throw new IOException("The destination could not be written with the required file posture.");
+                }
+            }
+        }
+
+        public void DeleteExact(string storedKey)
+        {
+            lock (owner._gate)
+            {
+                var data = ReadChecked();
+                if (!data.TryGetValue(storedKey, out var entry) || !InNamespace(entry)) return;
+                data.Remove(storedKey);
+                var posture = owner.Write(data);
+                if (posture.Kind == FileSecretPostureKind.Unsupported)
+                {
+                    throw new IOException("The source could not be deleted with the required file posture.");
+                }
+            }
+        }
+
+        public void PublishIndex()
+        {
+            // The file's JSON object is the durable index and every data write publishes it atomically.
+        }
+
+        private bool InNamespace(FileSecretEntry entry) =>
+            StringComparer.Ordinal.Equals(entry.ApplicationName, applicationName) &&
+            StringComparer.Ordinal.Equals(entry.Environment, environment) &&
+            StringComparer.Ordinal.Equals(entry.KeyPrefix, keyPrefix);
+
+        private Dictionary<string, FileSecretEntry> ReadChecked()
+        {
+            if (owner._fileSystem.InspectExistingFilePosture(owner._path).Kind == FileSecretPostureKind.Unsupported)
+                throw new IOException("The file store read path is unsafe.");
+            return owner.Read();
+        }
+    }
+
     private AppSurfaceLocalSecretResult Failure(
         LocalSecretResultStatus status,
         string code,
@@ -1033,6 +1300,30 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
             posture.ToDiagnostic(),
             Name);
 
+    private static List<KeyValuePair<string, FileSecretEntry>> FindEntries(
+        Dictionary<string, FileSecretEntry> data,
+        AppSurfaceLocalSecretIdentity identity) =>
+        data.Where(pair =>
+                string.Equals(pair.Value.ApplicationName, identity.ApplicationName, StringComparison.Ordinal) &&
+                string.Equals(pair.Value.Environment, identity.Environment, StringComparison.Ordinal) &&
+                string.Equals(pair.Value.KeyPrefix, identity.KeyPrefix, StringComparison.Ordinal) &&
+                string.Equals(pair.Value.Key, identity.Key.Value, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+    private AppSurfaceLocalSecretResult CollisionFailure(string key) =>
+        AppSurfaceLocalSecretResult.NotFound(
+            LocalSecretResultStatus.ProviderFailed,
+            CollisionDiagnostic(key),
+            Name);
+
+    private static AppSurfaceLocalSecretDiagnostic CollisionDiagnostic(string key) =>
+        new(
+            "config-key-collision",
+            "Multiple local secret spellings match the same logical key.",
+            "Case-insensitive or legacy aliases would make the selected value ambiguous.",
+            "Remove the duplicate stored spellings for the requested identifier, then retry.",
+            "local-secrets-migration");
+
     private sealed record FileSecretEntry(
         string ApplicationName,
         string Environment,
@@ -1050,6 +1341,8 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
 /// </remarks>
 internal interface IFileAppSurfaceLocalSecretStoreFileSystem
 {
+    /// <summary>Opt-in proof of durable atomic writes and the real shared file lease; arbitrary fakes default to unsupported.</summary>
+    bool SupportsDurableMigration => false;
     /// <summary>
     /// Returns whether the configured fallback file exists.
     /// </summary>
@@ -1117,6 +1410,7 @@ internal interface IFileAppSurfaceLocalSecretStoreFileSystem
 /// </remarks>
 internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileAppSurfaceLocalSecretStoreFileSystem
 {
+    public bool SupportsDurableMigration => true;
     private const UnixFileMode SecretDirectoryMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
     private const UnixFileMode SecretFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 
@@ -1281,7 +1575,7 @@ internal sealed class DefaultFileAppSurfaceLocalSecretStoreFileSystem : IFileApp
                 return shape;
             }
 
-            File.Move(tempPath, path, overwrite: true);
+            LocalSecretDurableFile.Replace(tempPath, path);
             if (!IsUnix())
             {
                 return FileSecretPostureResult.Degraded();

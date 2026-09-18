@@ -19,7 +19,7 @@ public sealed class ConfigurationResolutionException : Exception
     /// <param name="diagnostic">The display-safe terminal diagnostic.</param>
     public ConfigurationResolutionException(
         string environment,
-        string key,
+        AppSurfaceConfigKey key,
         string providerName,
         ConfigProviderTerminalDiagnostic diagnostic)
         : base(CreateMessage(
@@ -31,7 +31,7 @@ public sealed class ConfigurationResolutionException : Exception
         ArgumentException.ThrowIfNullOrWhiteSpace(providerName);
 
         EnvironmentName = environment;
-        Key = key;
+        LogicalKey = key;
         ProviderName = providerName;
         Diagnostic = diagnostic;
     }
@@ -44,7 +44,10 @@ public sealed class ConfigurationResolutionException : Exception
     /// <summary>
     /// Gets the configuration key being resolved.
     /// </summary>
-    public string Key { get; }
+    public string Key => LogicalKey.Value;
+
+    /// <summary>Gets the parsed identity that failed resolution.</summary>
+    public AppSurfaceConfigKey LogicalKey { get; }
 
     /// <summary>
     /// Gets the provider that stopped lower-priority resolution.
@@ -58,8 +61,8 @@ public sealed class ConfigurationResolutionException : Exception
 
     /// <inheritdoc />
     public override string ToString() =>
-        $"{base.ToString()}{Environment.NewLine}Environment: {EnvironmentName}{Environment.NewLine}Key: {Key}";
+        $"{base.ToString()}{Environment.NewLine}Environment: {ConfigDiagnosticText.Identifier(EnvironmentName)}{Environment.NewLine}Key: {ConfigDiagnosticText.Identifier(Key)}";
 
     private static string CreateMessage(string providerName, ConfigProviderTerminalDiagnostic diagnostic) =>
-        $"Configuration provider {providerName} stopped resolution. {diagnostic.ToDisplayString()}";
+        $"Configuration provider {ConfigDiagnosticText.Identifier(providerName)} stopped resolution. {diagnostic.ToDisplayString()}";
 }

@@ -40,6 +40,8 @@
     <Project Path="Config/ForgeTrust.AppSurface.Config.LocalSecrets/ForgeTrust.AppSurface.Config.LocalSecrets.csproj" />
     <Project Path="Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests.csproj" />
     <Project Path="Config/ForgeTrust.AppSurface.Config.GoogleSecretManager/ForgeTrust.AppSurface.Config.GoogleSecretManager.csproj" />
+    <Project Path="Config/ForgeTrust.AppSurface.Config.Testing.Tests/ForgeTrust.AppSurface.Config.Testing.Tests.csproj" />
+    <Project Path="Config/ForgeTrust.AppSurface.Config.Testing/ForgeTrust.AppSurface.Config.Testing.csproj" />
     <Project Path="Config/ForgeTrust.AppSurface.Config.Tests/ForgeTrust.AppSurface.Config.Tests.csproj" />
     <Project Path="Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj" />
   </Folder>
@@ -132,6 +134,9 @@
   <Folder Name="/Observability/">
     <Project Path="Observability/ForgeTrust.AppSurface.Observability/ForgeTrust.AppSurface.Observability.csproj" />
     <Project Path="Observability/ForgeTrust.AppSurface.Observability.Tests/ForgeTrust.AppSurface.Observability.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Examples/config-key-contract/">
+    <Project Path="examples/config-key-contract/ConfigKeyContract.csproj" />
   </Folder>
   <Folder Name="/Examples/razorwire-mvc/">
     <Project Path="examples/razorwire-mvc/RazorWireWebExample.csproj" />

@@ -208,7 +208,7 @@ internal sealed class SecretPromotionWorkflow(
         ValidateJob(loaded.Configuration.Version, job, endpoints);
 
         var draftRows = job.Rows.Select((row, index) => CreatePlanRow(loaded.Configuration.Version, row, index + 1, endpoints, request.Context)).ToArray();
-        if (draftRows.GroupBy(row => row.LocalStorageName, StringComparer.Ordinal).Any(group => group.Count() > 1))
+        if (draftRows.GroupBy(row => LegacyCollisionIdentity(row.Key), StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
         {
             throw SecretPromotionCommandExtensions.Usage("Promotion job contains duplicate normalized LocalSecrets keys.");
         }
@@ -247,6 +247,9 @@ internal sealed class SecretPromotionWorkflow(
         return new SecretPromotionPlanResult(new SecretPromotionSummary(
             "plan", job.Name, false, succeeded, summaryRows, request.OutputPlanPath, null));
     }
+
+    private static string LegacyCollisionIdentity(string key) =>
+        key.Replace("__", ":", StringComparison.Ordinal).Replace('\\', '/');
 
     public SecretPromotionSummary Apply(SecretPromotionApplyRequest request)
     {

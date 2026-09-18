@@ -38,4 +38,9 @@ public interface IEnvironmentProvider
     /// <param name="defaultValue">The value to return when the variable is unset.</param>
     /// <returns>The variable value, an empty string when explicitly set empty, or <paramref name="defaultValue"/> when unset.</returns>
     string? GetEnvironmentVariable(string name, string? defaultValue = null);
+
+    /// <summary>Captures a fresh name/value snapshot preserving distinct native spellings with ordinal comparison.</summary>
+    /// <returns>An independently owned snapshot. Values are sensitive and must never be logged.</returns>
+    /// <remarks>Implementations must preserve empty values and must not fold names or combine separate captures.</remarks>
+    IReadOnlyDictionary<string, string> CaptureEnvironmentVariables();
 }

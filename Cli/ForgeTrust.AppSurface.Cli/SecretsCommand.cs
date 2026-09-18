@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using CliFx;
 using CliFx.Binding;
 using CliFx.Infrastructure;
+using ForgeTrust.AppSurface.Config;
 using ForgeTrust.AppSurface.Config.LocalSecrets;
 using Microsoft.Extensions.Options;
 
@@ -21,7 +22,7 @@ internal sealed partial class SecretsCommand : ICommand
     [ExcludeFromCodeCoverage(Justification = "CliFx command discovery covers root help; subcommands carry behavior tests.")]
     public async ValueTask ExecuteAsync(IConsole console)
     {
-        await console.Output.WriteLineAsync("Use 'appsurface secrets init', 'set', 'get', 'list', 'migrate', 'delete', and 'doctor' to manage local development secrets, or 'appsurface secrets transfer plan' and 'appsurface secrets transfer apply' for explicit remote transfer.");
+        await console.Output.WriteLineAsync("Use 'appsurface secrets init', 'set', 'get', 'list', 'migrate', 'migrate-key', 'delete', and 'doctor' to manage local development secrets, or 'appsurface secrets transfer plan' and 'appsurface secrets transfer apply' for explicit remote transfer.");
     }
 }
 
@@ -189,9 +190,108 @@ internal partial class SecretsMigrateCommand : SecretsCommandBase
         new(
             "local-secret-migration-unsupported",
             "Local secret migration is unavailable for this store.",
-            "Only the macOS platform store can retain and migrate the legacy Keychain records affected by this compatibility transition.",
-            "Use the macOS OS-backed store for this namespace, or set the intended value explicitly with `appsurface secrets set`.",
-            "local-secrets-macos-migration");
+            "The selected backend cannot prove the shared lease, durable journal, confirmed operations, and index ordering required for safe migration.",
+            "Use a backend with the complete migration capability, or set the intended value explicitly with `appsurface secrets set`.",
+            "local-secrets-migration");
+}
+
+/// <summary>Migrates one exact stored LocalSecrets identifier to a strict logical destination key.</summary>
+/// <remarks>
+/// The default invocation previews identifiers and parsed destination segments without reading values.
+/// After inspecting the preview, repeat it with <c>--apply</c> to confirm the journaled migration.
+/// Display identifiers are escaped and bounded. Executable command output is omitted when an argument needs
+/// display transformation, while the original source and destination remain unchanged for backend operations.
+/// The inherited platform-store factory is the test seam for exercising this command without OS credentials.
+/// </remarks>
+[Command("secrets migrate-key", Description = "Copy, verify, and safely migrate one exact LocalSecrets identifier without printing values.")]
+internal partial class SecretsMigrateKeyCommand : SecretsCommandBase
+{
+    /// <summary>Gets or sets the exact source identifier as stored by the selected backend.</summary>
+    [CommandOption("from-stored-key", Description = "Exact source backend identifier; bypasses key parsing.")]
+    public required string SourceStoredKey { get; set; }
+
+    /// <summary>Gets or sets the strict destination logical key.</summary>
+    [CommandOption("to", Description = "Strict colon path destination logical key.")]
+    public required string DestinationKey { get; set; }
+
+    /// <summary>Gets or sets whether to confirm the migration after reviewing its identifiers.</summary>
+    [CommandOption("apply", Description = "Confirm the previewed exact-key migration. Omit to preview without reading or changing values.")]
+    public bool Apply { get; set; }
+
+    /// <inheritdoc />
+    public override async ValueTask ExecuteAsync(IConsole console)
+    {
+        if (!AppSurfaceConfigKey.TryParse(DestinationKey, out var destination))
+        {
+            throw new CommandException(new AppSurfaceLocalSecretDiagnostic(
+                "config-key-invalid",
+                "The migration destination is not a valid logical key.",
+                "The destination must contain nonempty literal segments separated by colons.",
+                "Correct --to; dots remain literal and no legacy translation is performed.",
+                "https://appsurface.dev/guides/config-key-migration").ToDisplayString());
+        }
+
+        if (string.IsNullOrWhiteSpace(SourceStoredKey))
+        {
+            throw new CommandException("Supply --from-stored-key with the exact nonempty identifier reported by doctor.");
+        }
+
+        var context = BuildContext();
+        if (context.Store is not IAppSurfaceLocalSecretMigrationStore migrationStore)
+        {
+            throw new CommandException(new AppSurfaceLocalSecretDiagnostic(
+                "local-secret-migration-unsupported",
+                "Exact-key migration is unsupported by the selected backend.",
+                "The store does not implement the migration capability; no values were read.",
+                "Choose a store with shared maintenance leases and durable migration support.",
+                "https://appsurface.dev/guides/config-key-migration").ToDisplayString());
+        }
+
+        var destinationIdentity = migrationStore.GetKeyMigrationDestinationIdentity(
+            context.ApplicationName, context.Environment, context.KeyPrefix, destination);
+        if (!destinationIdentity.Succeeded || destinationIdentity.Identity is null)
+        {
+            throw new CommandException(destinationIdentity.Diagnostic!.ToDisplayString());
+        }
+
+        await console.Output.WriteLineAsync($"Source stored identifier: {DisplayIdentifier(SourceStoredKey)}");
+        await console.Output.WriteLineAsync($"Destination logical key: {DisplayIdentifier(destination.Value)}");
+        await console.Output.WriteLineAsync($"Destination segments: {ConfigDiagnosticText.Identifier($"[{string.Join(", ", destination.Segments.Select(ShellQuote))}]")}");
+        await console.Output.WriteLineAsync($"Destination storage identity: {DisplayIdentifier(destinationIdentity.Identity.StorageName)}");
+        string?[] commandArguments = [context.ApplicationName, context.Environment, context.KeyPrefix, StoreFile, SecretToolPath, SourceStoredKey, destination.Value];
+        if (commandArguments.All(value => value is null || ConfigDiagnosticText.Identifier(value) == value))
+        {
+            await console.Output.WriteLineAsync($"Command: appsurface secrets migrate-key --app {ShellQuote(context.ApplicationName)} --environment {ShellQuote(context.Environment)}{FormatOptional("--prefix", context.KeyPrefix)}{FormatOptional("--store-file", StoreFile)}{FormatOptional("--secret-tool-path", SecretToolPath)} --from-stored-key {ShellQuote(SourceStoredKey)} --to {ShellQuote(destination.Value)}");
+        }
+        else
+        {
+            await console.Output.WriteLineAsync("Command preview omitted because an argument requires escaping or truncation. Repeat your original invocation with --apply; the displayed identifiers are for inspection only.");
+        }
+
+        if (!Apply)
+        {
+            await console.Output.WriteLineAsync("Preview only. Inspect the source, destination segments, and storage identity, then repeat with --apply to confirm migration.");
+            return;
+        }
+
+        var result = migrationStore.MigrateKey(
+            context.ApplicationName, context.Environment, context.KeyPrefix, SourceStoredKey, destination);
+        if (result.Status != LocalSecretResultStatus.Found)
+        {
+            throw new CommandException(result.Diagnostic?.ToDisplayString() ?? "Exact-key migration failed.");
+        }
+
+        await console.Output.WriteLineAsync($"Migration state: {result.State}");
+        await console.Output.WriteLineAsync($"Migration id: {DisplayIdentifier(result.MigrationId)}");
+    }
+
+    private static string FormatOptional(string option, string? value) =>
+        string.IsNullOrWhiteSpace(value) ? string.Empty : $" {option} {ShellQuote(value)}";
+
+    private static string ShellQuote(string value) => $"'{value.Replace("'", "'\\''", StringComparison.Ordinal)}'";
+
+    /// <summary>Uses the shared value-free renderer; displayed truncation is never reused as an executable argument.</summary>
+    private static string DisplayIdentifier(string value) => ShellQuote(ConfigDiagnosticText.Identifier(value));
 }
 
 /// <summary>

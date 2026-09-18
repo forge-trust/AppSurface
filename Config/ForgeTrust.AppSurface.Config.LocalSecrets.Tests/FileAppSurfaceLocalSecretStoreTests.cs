@@ -616,7 +616,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     public void Doctor_Should_ReturnLockedDiagnostic_WhenFileSystemDoctorIsUnauthorized()
     {
         var store = new FileAppSurfaceLocalSecretStore(
-            "secrets.json",
+            Path.Combine(Path.GetTempPath(), $"file-store-fake-{Guid.NewGuid():N}", "secrets.json"),
             new ThrowingFileSystem(doctor: () => throw new UnauthorizedAccessException()));
 
         var result = store.Doctor("MyApp", "Development", null);
@@ -629,7 +629,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     public void Doctor_Should_ReturnUnavailableDiagnostic_WhenFileSystemDoctorFailsWithIoException()
     {
         var store = new FileAppSurfaceLocalSecretStore(
-            "secrets.json",
+            Path.Combine(Path.GetTempPath(), $"file-store-fake-{Guid.NewGuid():N}", "secrets.json"),
             new ThrowingFileSystem(doctor: () => throw new IOException()));
 
         var result = store.Doctor("MyApp", "Development", null);
@@ -900,7 +900,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     {
         var readCalled = false;
         var store = new FileAppSurfaceLocalSecretStore(
-            "secrets.json",
+            Path.Combine(Path.GetTempPath(), $"file-store-fake-{Guid.NewGuid():N}", "secrets.json"),
             new ThrowingFileSystem(
                 read: () =>
                 {
@@ -928,7 +928,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     {
         var readCalled = false;
         var store = new FileAppSurfaceLocalSecretStore(
-            "secrets.json",
+            Path.Combine(Path.GetTempPath(), $"file-store-fake-{Guid.NewGuid():N}", "secrets.json"),
             new ThrowingFileSystem(
                 read: () =>
                 {
@@ -954,7 +954,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     {
         var readCalled = false;
         var store = new FileAppSurfaceLocalSecretStore(
-            "secrets.json",
+            Path.Combine(Path.GetTempPath(), $"file-store-fake-{Guid.NewGuid():N}", "secrets.json"),
             new ThrowingFileSystem(
                 read: () =>
                 {
@@ -982,7 +982,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     {
         var readCalled = false;
         var store = new FileAppSurfaceLocalSecretStore(
-            "secrets.json",
+            Path.Combine(Path.GetTempPath(), $"file-store-fake-{Guid.NewGuid():N}", "secrets.json"),
             new ThrowingFileSystem(
                 read: () =>
                 {
@@ -1011,7 +1011,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     {
         var postureChecks = 0;
         var store = new FileAppSurfaceLocalSecretStore(
-            "secrets.json",
+            Path.Combine(Path.GetTempPath(), $"file-store-fake-{Guid.NewGuid():N}", "secrets.json"),
             new ThrowingFileSystem(
                 read: () => ToSecretJson("sk_test_secret"),
                 existingFilePosture: () => ++postureChecks == 1
@@ -1039,7 +1039,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     {
         var postureChecks = 0;
         var store = new FileAppSurfaceLocalSecretStore(
-            "secrets.json",
+            Path.Combine(Path.GetTempPath(), $"file-store-fake-{Guid.NewGuid():N}", "secrets.json"),
             new ThrowingFileSystem(
                 existingFilePosture: () => ++postureChecks == 1
                     ? FileSecretPostureResult.Ready()
@@ -1064,7 +1064,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     {
         var postureChecks = 0;
         var store = new FileAppSurfaceLocalSecretStore(
-            "secrets.json",
+            Path.Combine(Path.GetTempPath(), $"file-store-fake-{Guid.NewGuid():N}", "secrets.json"),
             new ThrowingFileSystem(
                 read: () => ToSecretJson("sk_test_secret"),
                 existingFilePosture: () =>
@@ -1094,7 +1094,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     {
         var postureChecks = 0;
         var store = new FileAppSurfaceLocalSecretStore(
-            "secrets.json",
+            Path.Combine(Path.GetTempPath(), $"file-store-fake-{Guid.NewGuid():N}", "secrets.json"),
             new ThrowingFileSystem(
                 read: () => ToSecretJson("sk_test_secret"),
                 existingFilePosture: () => ++postureChecks == 1
@@ -1118,7 +1118,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     {
         var postureChecks = 0;
         var store = new FileAppSurfaceLocalSecretStore(
-            "secrets.json",
+            Path.Combine(Path.GetTempPath(), $"file-store-fake-{Guid.NewGuid():N}", "secrets.json"),
             new ThrowingFileSystem(
                 read: () => ToSecretJson("sk_test_secret"),
                 existingFilePosture: () =>
@@ -1145,7 +1145,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     {
         var writeCalled = false;
         var store = new FileAppSurfaceLocalSecretStore(
-            "secrets.json",
+            Path.Combine(Path.GetTempPath(), $"file-store-fake-{Guid.NewGuid():N}", "secrets.json"),
             new ThrowingFileSystem(
                 write: _ => writeCalled = true,
                 writePosture: () => FileSecretPostureResult.Unsupported(
@@ -1169,7 +1169,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     public void Set_Should_ReturnLockedDiagnostic_WhenWriteIsUnauthorized()
     {
         var store = new FileAppSurfaceLocalSecretStore(
-            "secrets.json",
+            Path.Combine(Path.GetTempPath(), $"file-store-fake-{Guid.NewGuid():N}", "secrets.json"),
             new ThrowingFileSystem(write: _ => throw new UnauthorizedAccessException()));
         var identity = new AppSurfaceLocalSecretIdentityNormalizer()
             .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
@@ -1186,7 +1186,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     public void Set_Should_ReturnLockedDiagnostic_WhenWritePreflightIsUnauthorized()
     {
         var store = new FileAppSurfaceLocalSecretStore(
-            "secrets.json",
+            Path.Combine(Path.GetTempPath(), $"file-store-fake-{Guid.NewGuid():N}", "secrets.json"),
             new ThrowingFileSystem(prepareWrite: () => throw new UnauthorizedAccessException()));
         var identity = new AppSurfaceLocalSecretIdentityNormalizer()
             .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
@@ -1240,7 +1240,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     public void Get_Should_ReturnLockedDiagnostic_WhenReadIsUnauthorized()
     {
         var store = new FileAppSurfaceLocalSecretStore(
-            "secrets.json",
+            Path.Combine(Path.GetTempPath(), $"file-store-fake-{Guid.NewGuid():N}", "secrets.json"),
             new ThrowingFileSystem(read: () => throw new UnauthorizedAccessException()));
         var identity = new AppSurfaceLocalSecretIdentityNormalizer()
             .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
@@ -1256,7 +1256,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     public void List_Should_ReturnUnavailableDiagnostic_WhenReadFailsWithIoException()
     {
         var store = new FileAppSurfaceLocalSecretStore(
-            "secrets.json",
+            Path.Combine(Path.GetTempPath(), $"file-store-fake-{Guid.NewGuid():N}", "secrets.json"),
             new ThrowingFileSystem(read: () => throw new IOException()));
 
         var result = store.List("MyApp", "Development", null);
@@ -1270,7 +1270,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     public void Set_Should_ReturnLockedDiagnostic_WhenReadIsUnauthorized()
     {
         var store = new FileAppSurfaceLocalSecretStore(
-            "secrets.json",
+            Path.Combine(Path.GetTempPath(), $"file-store-fake-{Guid.NewGuid():N}", "secrets.json"),
             new ThrowingFileSystem(read: () => throw new UnauthorizedAccessException()));
         var identity = new AppSurfaceLocalSecretIdentityNormalizer()
             .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
@@ -1287,7 +1287,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     public void Delete_Should_ReturnUnavailableDiagnostic_WhenReadFailsWithIoException()
     {
         var store = new FileAppSurfaceLocalSecretStore(
-            "secrets.json",
+            Path.Combine(Path.GetTempPath(), $"file-store-fake-{Guid.NewGuid():N}", "secrets.json"),
             new ThrowingFileSystem(read: () => throw new IOException()));
         var identity = new AppSurfaceLocalSecretIdentityNormalizer()
             .Normalize("MyApp", "Development", null, "Stripe:ApiKey")
@@ -1318,7 +1318,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
             }
             """;
         var store = new FileAppSurfaceLocalSecretStore(
-            "secrets.json",
+            Path.Combine(Path.GetTempPath(), $"file-store-fake-{Guid.NewGuid():N}", "secrets.json"),
             new ThrowingFileSystem(read: () => entry, write: _ => throw new IOException()));
 
         var result = store.Delete(identity);
@@ -1332,7 +1332,7 @@ public sealed class FileAppSurfaceLocalSecretStoreTests
     public void Delete_Should_ReturnUnavailableDiagnostic_WhenWritePreflightFailsWithIoException()
     {
         var store = new FileAppSurfaceLocalSecretStore(
-            "secrets.json",
+            Path.Combine(Path.GetTempPath(), $"file-store-fake-{Guid.NewGuid():N}", "secrets.json"),
             new ThrowingFileSystem(prepareWrite: () => throw new IOException()));
         var identity = new AppSurfaceLocalSecretIdentityNormalizer()
             .Normalize("MyApp", "Development", null, "Stripe:ApiKey")

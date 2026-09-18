@@ -103,6 +103,52 @@ The command prints `Problem`, `Cause`, `Fix`, `Docs`, and `Retryable` without pr
 `local-secret-file-posture-unsupported` is a fail-closed result that stops reads and writes until the path is moved or
 repaired. Prefer the OS-backed store for normal local development.
 
+### Exact-key migration capability
+
+`appsurface secrets migrate-key` previews the exact source, parsed destination segments,
+and destination storage identity. Repeat with `--apply` to confirm the
+[journaled migration](../../guides/config-key-migration.md#localsecrets-journaled-migration).
+The migration is complete only when the selected backend implements
+`IAppSurfaceLocalSecretMigrationStore.MigrateKey`. The file fallback and the indexed OS-backed adapters use one
+exclusive cross-process maintenance lease, write a durable journal, copy and reread the exact source and destination
+identifiers, publish the index before source deletion, and record each roll-forward state. A backend that cannot prove
+those guarantees returns `local-secret-migration-unsupported` before either value is read or changed. The macOS
+v1-to-v2 namespace migration remains a distinct bulk migration; its exact-key command uses the same journal protocol
+when moving a retained legacy record into the v2 namespace.
+
+For a programmatic preview, call
+[`IAppSurfaceLocalSecretMigrationStore.GetKeyMigrationDestinationIdentity`](IAppSurfaceLocalSecretMigrationStore.cs)
+with the application, environment, optional prefix, and strict destination key. The returned identity normalizes the
+namespace and exposes the selected store's exact destination in `Identity.StorageName`. `MigrateKey` uses this same
+preparation; macOS returns its v2 locator rather than the generic file/native locator. Preparation performs no value,
+journal, or lease I/O and does not promise that the later migration can complete. An adapter without a known encoding
+returns `local-secret-migration-unsupported`.
+
+Native setters preserve a unique existing key's exact case spelling under the writer lease. Logical deletes resolve
+that same spelling before mutation; macOS checks both the v2 and legacy indexes before deleting either version.
+An index containing multiple case-only spellings returns `config-key-collision` before mutation, even when the stored values are equal.
+Exact-key migration applies the same guard to the destination: an existing case-only destination spelling is rejected before
+the destination write or source deletion, while the exact source record is excluded from that check so a deliberate
+case-only source rename can copy to the requested spelling. A collision leaves the durable journal at its last safe state;
+remove or reconcile the competing record and retry the same request.
+Retained macOS migration reads and deletes the exact native source through the indexed adapter's raw operations;
+logical lookup policy is never applied to a migration source. A legacy adapter without these exact operations is
+unsupported before journal preparation or value I/O.
+
+Platform journals and leases live under the current user's `.appsurface/local-secrets-state` directory; changing
+`TMPDIR` or the working directory cannot split writer coordination. Platform mutations share a lease for the
+application and environment, including all prefixes, index repair, namespace migration, and doctor writes. The file
+backend locks the exact file path for every namespace. Acquisition has a ten-second deadline; failures return
+`local-secret-maintenance-unavailable` (or the migration's structured I/O result). Internal coordinator calls also
+honor cancellation. Migration capabilities are checked before `Prepared`, reads, or mutation.
+
+Every journal replacement flushes the file and its directory entry before the next transition. Journals contain only
+identifiers, operation id, and state. On retry, the coordinator reacquires the writer lease and rereads both exact
+records. A still-present source is deleted only when its current value equals the current destination. A missing
+source after durable verification finishes index publication and `Complete`; absence before verification is an
+unrecoverable diagnostic. Failed or uncertain commits retain the last acknowledged state in the result; reopening
+the persisted journal determines the actual resume point. The destination is never removed as rollback.
+
 ### Linux Nonstandard `secret-tool`
 
 Use this only when your trusted Linux `secret-tool` install lives outside `/usr/bin` or `/bin`, such as a Nix,
@@ -207,12 +253,12 @@ provider should fall through to lower-priority configuration.
 
 ## Platform Matrix
 
-| Platform | Adapter | Notes |
+| Platform | Adapter | Exact-key migration |
 | --- | --- | --- |
-| macOS | Entitlement-free file-based `SecItem` v2 Keychain records, with retained v1 recovery reads | Requires an interactive user session when Keychain prompts. See the [v2 migration guide](docs/macos-keychain-v2-migration.md) for explicit migration and cross-process smoke. |
-| Linux | Secret Service through trusted `secret-tool` paths | Uses `/usr/bin/secret-tool`, then `/bin/secret-tool`, or an explicit absolute `LinuxSecretToolPath`/`--secret-tool-path`. Requires DBus/session secret service availability. |
-| Windows | Credential Manager generic credentials for the current user | Requires an interactive user profile; use environment variables/key-per-file for services, CI, and containers. |
-| Explicit file fallback | JSON file at `--store-file <path>` | Unix mode-bit hardening only; Windows and unknown filesystem ACL posture is reported as degraded. |
+| macOS | Entitlement-free file-based `SecItem` v2 Keychain records, with retained v1 recovery reads | Exact-key migration is supported through the durable v1-to-v2 backend; requires an interactive user session. |
+| Linux | Secret Service through trusted `secret-tool` paths | Exact-key migration is supported through the shared lease/journal backend; requires DBus/session Secret Service availability. |
+| Windows | Credential Manager generic credentials for the current user | Exact-key migration is supported through the shared lease/journal backend; requires an interactive user profile. |
+| Explicit file fallback | JSON file at `--store-file <path>` | Exact-key migration is supported when file posture passes; Unix mode-bit hardening is required and Windows/unknown ACL posture remains degraded. |
 
 ## Escape Hatches, Safest First
 

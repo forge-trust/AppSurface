@@ -6,9 +6,9 @@ Strongly typed configuration primitives for AppSurface applications.
 
 This package provides the configuration layer for AppSurface modules. It combines file-based configuration, environment-aware providers, and strongly typed configuration objects so modules can consume configuration without hard-coding access patterns throughout the codebase.
 
-`ForgeTrust.AppSurface.Config` does not store secrets by itself. Use `ForgeTrust.AppSurface.Config.LocalSecrets` only
+`ForgeTrust.AppSurface.Config` does not store secrets by itself. Use [LocalSecrets](../ForgeTrust.AppSurface.Config.LocalSecrets/README.md) only
 when a solo or hobbyist app needs local, single-machine, pre-vault secret posture with source-aware diagnostics. Use
-`ForgeTrust.AppSurface.Config.GoogleSecretManager` when a Google Cloud host should read explicitly mapped secrets from
+[Google Secret Manager](../ForgeTrust.AppSurface.Config.GoogleSecretManager/README.md) when a Google Cloud host should read explicitly mapped secrets from
 Google Secret Manager. Environment variables remain the top emergency override. The migration ladder is:
 
 ```text
@@ -22,6 +22,47 @@ AppSurface ships as a coordinated package family. Before installing this package
 from a prerelease feed, check the [package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md)
 for current release risk, migration guidance, and readiness.
 <!-- appsurface-release-guidance: end -->
+## Logical key quickstart
+
+Declare `Payments:ApiKey` once for every provider. Key identity is ordinal ignore-case;
+only `:` separates hierarchy. Dots and hyphens remain literal segment content.
+The [logical-key reference](../../guides/config-logical-keys.md) defines grammar,
+provider encodings, collision domains, and resource defaults. The
+[migration guide](../../guides/config-key-migration.md) covers the coordinated binary
+break and release-train-1 dot-string translation.
+
+```csharp
+[ConfigKey("Payments:ApiKey")]
+public sealed class PaymentsApiKey : Config<string> { }
+
+// In an existing AppSurface host with AppSurfaceConfigModule:
+var key = AppSurfaceConfigKey.Parse("payments:apikey");
+var value = configManager.GetValue<string>("Production", key);
+```
+
+```json
+{ "Payments": { "ApiKey": "file demo" } }
+```
+
+`PAYMENTS__APIKEY` overrides that file value; `PRODUCTION__PAYMENTS__APIKEY` overrides
+its unscoped environment counterpart. These are deliberately non-secret demo values.
+Do not print resolved secrets. A terminal collision, conversion, or representability
+failure suppresses lower providers; valid environment child patches get one
+transactional rescue attempt. A missing key alone permits fallback.
+
+Run the [nine-stage provider proof](../../examples/config-key-contract/README.md):
+
+```bash
+dotnet run --project examples/config-key-contract
+```
+
+Provider authors implement `IConfigProvider.Resolve<T>(ConfigProviderRequest)` and
+return `Missing`, non-null `Found`, or `Terminal`. Read the
+[provider-author guide](../../guides/config-provider-authors.md) and use the
+test-framework-neutral [conformance package](../ForgeTrust.AppSurface.Config.Testing/README.md)
+to verify the contract. Upgrade all AppSurface packages and rebuild third-party
+providers and wrappers together before adopting this SPI.
+
 ## Key Types
 
 - **`AppSurfaceConfigModule`**: Registers the configuration services for an AppSurface application.
@@ -155,9 +196,9 @@ back to a property token in the same file content used to initialize the file pr
 ```csharp
 var report = auditReporter.GetReport("Staging");
 var source = report.Entries
-    .Single(entry => entry.Key == "MyApp.Settings")
+    .Single(entry => entry.Key == "MyApp:Settings")
     .Sources
-    .Single(source => source.Kind == ConfigAuditSourceKind.File);
+    .First(source => source.Kind == ConfigAuditSourceKind.File);
 
 var coordinate = source.Location is { } location
     ? $"{source.FilePath}:{location.LineNumber}:{location.ByteColumnNumber}"
@@ -172,7 +213,7 @@ The structured model keeps the coordinate separate from the path:
 {
   "Kind": "File",
   "FilePath": "/app/appsettings.Staging.json",
-  "ConfigPath": "MyApp.Settings.Database.Host",
+  "ConfigPath": "MyApp:Settings:Database:Host",
   "Location": {
     "LineNumber": 9,
     "ByteColumnNumber": 9
@@ -186,18 +227,25 @@ you want the enum names shown above in exported support data.
 The text renderer includes the coordinate when it is present and preserves the previous shape when it is absent:
 
 ```text
-Source: FileBasedConfigProvider appsettings.Staging.json:9:9 :: MyApp.Settings.Database.Host
+Source: FileBasedConfigProvider appsettings.Staging.json:9:9 :: MyApp:Settings:Database:Host
 Source: FileBasedConfigProvider appsettings.Staging.json :: Legacy.Unlocated
 ```
 
 `ByteColumnNumber` is one-based and counts UTF-8 bytes from the start of the physical line, not Unicode characters or
 editor display cells. A property after `é`, emoji, or other non-ASCII text can have a byte column larger than the
-column shown by an editor.
+column shown by an editor. Coordinates identify the opening quote of a property name, or the value token of an
+array item. A UTF-8 BOM is excluded from the first-line column; CR, LF, and CRLF each start a new physical line.
 
-`Location` can be `null` even for a file source. AppSurface omits coordinates when it cannot prove that the coordinate
-would point at the same value the existing JSON parse and merge produced. Common causes include ambiguous
-case-insensitive path collisions, unsupported dotted property paths, parser mismatch, collection element descendants,
-or source metadata from a provider that is not file-backed. No location is better than a misleading location.
+The file provider derives values, duplicate detection, and coordinates from one captured UTF-8 token stream.
+A duplicate or case collision makes the affected key and its aggregates terminal; unrelated siblings remain available.
+No selected value or exact coordinate is published for an ambiguous key. Dots, slashes, and brackets inside a valid
+property segment retain exact locations. Inherited parent sources and providers without file coordinates can still
+have `Location: null`.
+
+Ordered files retain all participating root sources, with the winning file first. Objects merge recursively; arrays
+replace as a unit; scalar/object replacements discard obsolete descendant origins. Null members do not replace an
+existing value, while empty objects and arrays remain present values. Exceeding the file count or byte limit makes
+that environment terminal, so neither runtime resolution nor discovery can expose a partial file snapshot.
 
 File paths and line/byte coordinates are operational metadata. Treat rendered audit reports as support-bundle material:
 review them before sharing outside the operational trust boundary, especially when deployment paths reveal tenant names,
@@ -453,6 +501,16 @@ if (!result.Succeeded)
 }
 ```
 
+Current captures keep logical identity in `ConfigAuditEntry.ConfigPath` independently of dotted or bracketed display
+labels. When ordinary children under the same root mix captures with and without that metadata, the differ marks
+those child paths `Uncomparable` with `config-diff-logical-path-evidence-missing`; it cannot prove additions, removals,
+or value changes from display text alone. This includes object members inside visible dictionaries. Recapture both
+reports with the current reporter before using that subtree to assess drift. Root entries and unrelated roots remain
+comparable. A direct-root dictionary retains its safe-label or HMAC comparison protocol, but a dictionary beneath an
+uncertain ordinary ancestor also remains uncomparable: matching its item cannot establish the ancestor's identity.
+The [logical-key contract](../../guides/config-logical-keys.md) defines segment semantics; dictionary comparison
+identity is described below.
+
 Web hosts can use the opt-in authenticated HTTP mapper from `ForgeTrust.AppSurface.Web` to capture the same sanitized
 report from a deployed host:
 [Config Audit HTTP Diagnostics](../../Web/ForgeTrust.AppSurface.Web/README.md#config-audit-http-diagnostics). Treat those
@@ -522,11 +580,13 @@ MyApp.Settings
 The report is observational. Environment patch diagnostics trace patches against a cloned value so asking for an audit
 report does not mutate the provider object being inspected.
 
-Collection element provenance is opt-in per entry. Arrays and lists use zero-based numeric element paths such as
-`Services.0`. Dictionary items use display labels such as `Routes["primary"]` when the key is non-sensitive and safe to
-display. Dotted, quoted, bracketed, hidden, or sensitive dictionary keys use inherited parent provenance instead of
-exposing a raw key path; for example, keys such as `user.name`, `items[0]`, or `"first name"` inherit the parent source
-because they cannot form an unambiguous raw config path.
+Collection element provenance is opt-in per entry. Arrays and lists use zero-based numeric source paths such as
+`Services:0` and display labels such as `Services[0]`. Dictionary items use labels such as `Routes["primary"]`.
+Dots, slashes, and brackets within a valid dictionary key are literal segment characters and retain exact provenance.
+The optional public `ConfigAuditEntry.ConfigPath` carries the colon-delimited logical identity independently of `Key`,
+which keeps dotted member and bracketed collection labels for display. Hidden, sensitive, truncated, or unrepresentable
+dictionary keys use inherited parent provenance; their `ConfigPath` and every descendant's `ConfigPath` remain null.
+See the [logical-key contract](../../guides/config-logical-keys.md) for valid segment grammar.
 
 When environment variables create or replace indexed collection elements, traversed child entries keep the exact
 environment source and add proof-limited diagnostics. `config-audit-environment-created-element` means the audit could
@@ -682,7 +742,7 @@ needs it.
 | null element | Emits an element child with a `null` display value and no grandchildren. |
 | object element | Emits the element and then ordinary public property/field children below it. |
 | non-string dictionary key | Uses the invariant string label for convertible keys when non-sensitive and display is enabled; arbitrary object keys are hidden. |
-| dotted or bracketed dictionary key | Uses a display label but inherits parent provenance because no safe exact source path is available. |
+| dotted, slashed, or bracketed dictionary key | Retains its literal segment identity and exact provenance when valid and display-safe; hidden keys inherit parent provenance. |
 | unsupported enumerable | Emits a traversal diagnostic instead of enumerating. |
 | multidimensional array | Emits a traversal diagnostic; only one-dimensional arrays are expanded. |
 

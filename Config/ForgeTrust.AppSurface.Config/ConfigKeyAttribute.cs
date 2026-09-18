@@ -34,7 +34,8 @@ public class ConfigKeyAttribute : Attribute
     /// <param name="t">The type to derive the key from.</param>
     public ConfigKeyAttribute(Type t)
     {
-        Key = GetKeyPath(t);
+        ArgumentNullException.ThrowIfNull(t);
+        Key = GetLogicalKey(t).Value;
         var foundAttr = GetAttribute(t);
         Root = foundAttr?.Root ?? false;
     }
@@ -68,21 +69,63 @@ public class ConfigKeyAttribute : Attribute
     /// <summary>
     /// Computes the full configuration key path for a type, recursively including declaring types unless <see cref="Root"/> is true.
     /// </summary>
+    /// <remarks>
+    /// This public helper always uses strict colon grammar: literal dots remain inside segments. Host discovery uses
+    /// the finalized input parser instead, as described by the
+    /// <see href="https://appsurface.dev/guides/config-logical-keys">logical-key contract</see>.
+    /// </remarks>
     /// <param name="type">The type to compute the path for.</param>
     /// <returns>The computed configuration key path.</returns>
-    public static string GetKeyPath(
-        Type type)
+    public static AppSurfaceConfigKey GetLogicalKey(Type type)
+    {
+        ArgumentNullException.ThrowIfNull(type);
+        var fragments = GetFragments(type);
+        return AppSurfaceConfigKey.FromSegments(
+            fragments.SelectMany(fragment => AppSurfaceConfigKey.Parse(fragment).Segments).ToArray());
+    }
+
+    /// <summary>
+    /// Computes a logical key using the finalized application input parser for compatibility declarations.
+    /// </summary>
+    /// <param name="type">The type to compute.</param>
+    /// <param name="parser">The finalized application string parser.</param>
+    /// <returns>The parsed logical key, including immutable input provenance.</returns>
+    /// <remarks>
+    /// Each attribute fragment is parsed exactly once. If any fragment is translated, the composed key retains
+    /// translated origin and the original dot-joined declaring-type spelling for provider aliases and diagnostics.
+    /// </remarks>
+    internal static AppSurfaceConfigKey GetLogicalKey(Type type, IConfigKeyInputParser parser)
+    {
+        ArgumentNullException.ThrowIfNull(type);
+        ArgumentNullException.ThrowIfNull(parser);
+
+        var fragments = GetFragments(type);
+        var parsed = fragments.Select(parser.Parse).ToArray();
+        var segments = parsed.SelectMany(key => key.Segments).ToArray();
+        var translated = parsed.Any(key => key.InputOrigin == ConfigKeyInputOrigin.TranslatedDot);
+        var originalInput = string.Join('.', fragments);
+        var result = AppSurfaceConfigKey.FromSegments(segments);
+        return result.WithInput(
+            translated ? ConfigKeyInputOrigin.TranslatedDot : ConfigKeyInputOrigin.StrictString,
+            originalInput);
+    }
+
+    /// <summary>Returns the colon-delimited compatibility rendering of <see cref="GetLogicalKey(Type)"/>.</summary>
+    /// <param name="type">The type to compute.</param>
+    /// <returns>The rendered logical key.</returns>
+    [Obsolete("Use GetLogicalKey(Type).Value.")]
+    public static string GetKeyPath(Type type) => GetLogicalKey(type).Value;
+
+    private static IReadOnlyList<string> GetFragments(Type type)
     {
         var attribute = GetAttribute(type);
         var isRoot = attribute?.Root ?? false;
         var thisMember = attribute?.Key ?? type.Name;
         if (isRoot || type.DeclaringType == null)
         {
-            return thisMember;
+            return [thisMember];
         }
 
-        var parentPath = GetKeyPath(type.DeclaringType);
-
-        return $"{parentPath}.{thisMember}";
+        return [.. GetFragments(type.DeclaringType), thisMember];
     }
 }
