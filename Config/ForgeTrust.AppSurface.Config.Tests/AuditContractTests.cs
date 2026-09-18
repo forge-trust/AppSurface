@@ -1,5 +1,5 @@
-using ForgeTrust.AppSurface.Core;
 using FakeItEasy;
+using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;

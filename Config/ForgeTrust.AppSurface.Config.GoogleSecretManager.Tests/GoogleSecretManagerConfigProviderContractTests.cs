@@ -193,7 +193,11 @@ public sealed class GoogleSecretManagerConfigProviderContractTests
     private sealed class RecordingClient : IAppSurfaceGoogleSecretManagerClient
     {
         private readonly IReadOnlyDictionary<string, string> _resources;
-        public RecordingClient(IReadOnlyDictionary<string, string>? resources = null) => _resources = resources ?? new Dictionary<string, string>();
+        public RecordingClient(IReadOnlyDictionary<string, string>? resources = null)
+        {
+            _resources = resources ?? new Dictionary<string, string>();
+        }
+
         public ConcurrentQueue<string> Requested { get; } = new();
         public AppSurfaceGoogleSecretPayload AccessSecretVersion(string resourceName, TimeSpan timeout)
         {

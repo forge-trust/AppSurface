@@ -1,4 +1,4 @@
-<!-- /autoplan restore point: /Users/andrew/.gstack/projects/forge-trust-Runnable/main-autoplan-restore-20260910-215750.md -->
+<!-- /autoplan local restore artifact: main-autoplan-restore-20260910-215750.md -->
 
 # Design: AppSurface Logical Configuration Key Contract
 
@@ -114,7 +114,7 @@ included below. A richer `config explain` experience is deliberately deferred.
 - Preserve exact-key overrides across documented file layers and across providers. A case-only spelling change across
   file layers is an error, not a silent override.
 - Ship the migration in three release trains: compatibility default, strict default, then removal.
-- Build the conformance matrix and runnable `examples/config-key-contract` proof in the contract slice. Publish a
+- Build the conformance matrix and executable `examples/config-key-contract` proof in the contract slice. Publish a
   framework-neutral `ForgeTrust.AppSurface.Config.Testing` package only after the built-in contract has stabilized.
 
 ## Logical-Key Kernel
@@ -991,7 +991,7 @@ This design is one complete rail, not one pull request.
 
 Ship the kernel, input parser, normative matrix, typed provider SPI, manager state machine, and repository-local
 conformance harness. Convert built-ins only far enough for direct scalar lookup, terminal diagnostics, precedence, and
-minimum provenance to pass. Add the runnable consumer proof. This is the smallest mergeable slice and does not publish a
+minimum provenance to pass. Add the executable consumer proof. This is the smallest mergeable slice and does not publish a
 new testing package.
 
 ### Slice 2: provider depth and persisted migration
@@ -1149,7 +1149,7 @@ should not be used to distinguish application configuration keys consumed by cas
 
 ## Success Criteria
 
-1. Every built-in provider passes the same conformance suite and the runnable example exits successfully.
+1. Every built-in provider passes the same conformance suite and the executable example exits successfully.
 2. `Payments:ApiKey` resolves identically for all casing variants through direct, attributed, audit, and provider-mapped
    paths.
 3. Dots and hyphens remain literal segment content; only `:` creates logical hierarchy.
@@ -1169,7 +1169,7 @@ should not be used to distinguish application configuration keys consumed by cas
 - Ship the kernel and provider changes in the coordinated AppSurface NuGet package family.
 - Publish the new `ForgeTrust.AppSurface.Config.Testing` package through the existing package/release workflow.
 - Check the package into `packages/README.md`, the repository package index, release hub, and configuration README.
-- Ship the runnable proof in the repository rather than as a binary artifact.
+- Ship the executable proof in the repository rather than as a binary artifact.
 - Publish each migration train with explicit release notes and one canonical migration guide; do not rely only on
   `[Obsolete]` messages.
 - Use the existing CI package validation and release provenance pipeline. Add conformance and example smoke runs to the
@@ -1179,7 +1179,7 @@ should not be used to distinguish application configuration keys consumed by cas
 
 1. Write the kernel and provider contract tests first, including malformed input, equality/hash behavior, segment-aware
    prefixes, and deterministic rendering.
-2. Add the runnable consumer proof and make it fail against every current built-in provider.
+2. Add the executable consumer proof and make it fail against every current built-in provider.
 3. Introduce the coordinated pre-1.0 typed provider API and projection index, then migrate manager, terminal
    diagnostics, audits, and caches.
 4. Migrate file and environment providers, preserving precedence while adding collision and representability outcomes.
@@ -1264,7 +1264,7 @@ receive a safer, explainable configuration experience.
 | LocalSecrets locking and recovery patterns | macOS v2 mutex plus `LocalSecretsTransferCoordinator` lock and value-free journal | Reuse patterns, but keep durable state inside the store capability |
 | Google deterministic tests | Fake Google client and options/provider test seams | Use for codec, resource-claim, concurrency, and migration tests |
 | Public testing package pattern | `ForgeTrust.AppSurface.Auth.Testing` | Reuse framework-neutral package shape and assertion model |
-| Runnable config examples | `examples/config-validation` and `examples/local-secrets` | Add a focused contract proof and smoke test using the same conventions |
+| Executable config examples | `examples/config-validation` and `examples/local-secrets` | Add a focused contract proof and smoke test using the same conventions |
 | Package and release integration | `packages/package-index.yml`, package README embedding, coordinated release manifests | Extend existing release tooling; do not invent a separate publishing path |
 
 The plan does not need a parallel configuration-audit stack, a new test framework, or a new release mechanism.
@@ -1769,7 +1769,7 @@ lands.
   - Surfaced by: Section 8.
   - Files: Config diagnostics/metrics, package docs.
   - Verify: stable-code counts with no key/value labels.
-- [ ] **CEO-T9 (P1, human: ~1d / CC: ~1-2h)** - Consumer proof - Ship the provider matrix, runnable example, and packed upgrade proof.
+- [ ] **CEO-T9 (P1, human: ~1d / CC: ~1-2h)** - Consumer proof - Ship the provider matrix, executable example, and packed upgrade proof.
   - Surfaced by: Sections 6 and 9.
   - Files: Config tests, example, solution, package/release verification.
   - Verify: focused tests, example exit code, packed consumer, solution build, coverage.
@@ -1825,7 +1825,7 @@ lands.
    suppress a value from an unrelated lower provider.
 
 CEO scope companion:
-`~/.gstack/projects/forge-trust-Runnable/ceo-plans/2026-09-10-config-logical-key-contract.md`. Its remaining reviewer
+local artifact `2026-09-10-config-logical-key-contract.md`. Its remaining reviewer
 concerns are exactly the five queued User Challenges, so it is intentionally not implementation-approved yet.
 
 <!-- AUTONOMOUS DECISION LOG -->
@@ -1926,7 +1926,7 @@ value-safe provenance than the baseline framework.
 
 ### Magical moment specification
 
-The lowest-effort vehicle is the runnable `examples/config-key-contract` source proof:
+The lowest-effort vehicle is the executable `examples/config-key-contract` source proof:
 
 ```bash
 dotnet run --project examples/config-key-contract
@@ -2498,7 +2498,7 @@ The most important additions are:
 - precompiled previous/candidate package tests for every changed interface and persisted provider combination.
 
 Test-plan artifact:
-`~/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20260910-230624.md`.
+local artifact `andrew-main-eng-review-test-plan-20260910-230624.md`.
 
 No LLM or prompt patterns are affected, so no eval suite is required. The quality gate remains focused tests, the
 no-credential example, clean packed consumer, solution build/format, and `./scripts/coverage-solution.sh`.

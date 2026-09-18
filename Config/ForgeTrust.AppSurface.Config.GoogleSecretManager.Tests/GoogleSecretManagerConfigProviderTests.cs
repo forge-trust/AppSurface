@@ -552,7 +552,7 @@ public sealed class GoogleSecretManagerConfigProviderTests
     [Fact]
     public async Task Resolve_Should_SingleflightConcurrentRequestsWhenCacheIsDisabled()
     {
-        var client = new BlockingCountingSecretManagerClient("from-gcp");
+        using var client = new BlockingCountingSecretManagerClient("from-gcp");
         var provider = CreateProvider(client, options =>
         {
             options.ProjectId = "project";
@@ -560,24 +560,40 @@ public sealed class GoogleSecretManagerConfigProviderTests
             options.MapSecret("Stripe:ApiKey", "api-key", version: "5");
         });
 
+        using var start = new ManualResetEventSlim(false);
         var pending = Enumerable.Range(0, 32)
-            .Select(_ => Task.Run(() =>
-            {
-                return provider.Resolve<string>(new ConfigProviderRequest(
-                    "Production", AppSurfaceConfigKey.Parse("Stripe:ApiKey")));
-            }))
+            .Select(_ => new PendingResolution(() => provider.Resolve<string>(new ConfigProviderRequest(
+                "Production", AppSurfaceConfigKey.Parse("Stripe:ApiKey"))), start))
             .ToArray();
-        await client.Started.Task;
-        await Task.Delay(25);
-        client.Release.Set();
-        var results = await Task.WhenAll(pending);
-
-        Assert.All(results, result =>
+        try
         {
-            Assert.Equal(ConfigProviderValueStatus.Found, result.Status);
-            Assert.Equal("from-gcp", result.Value);
-        });
-        Assert.Equal(1, client.Calls);
+            start.Set();
+            await client.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            foreach (var worker in pending) worker.WaitUntilBlocked();
+            Assert.Equal(1, client.Calls);
+
+            client.Release.Set();
+            var results = await Task.WhenAll(pending.Select(worker => worker.Result)).WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.All(results, result =>
+            {
+                Assert.Equal(ConfigProviderValueStatus.Found, result.Status);
+                Assert.Equal("from-gcp", result.Value);
+            });
+            Assert.Equal(1, client.Calls);
+
+            var subsequent = provider.Resolve<string>(new ConfigProviderRequest(
+                "Production", AppSurfaceConfigKey.Parse("Stripe:ApiKey")));
+            Assert.Equal(ConfigProviderValueStatus.Found, subsequent.Status);
+            Assert.Equal("from-gcp", subsequent.Value);
+            Assert.Equal(2, client.Calls);
+        }
+        finally
+        {
+            start.Set();
+            client.Release.Set();
+            await Task.WhenAll(pending.Select(worker => worker.Result)).WaitAsync(TimeSpan.FromSeconds(5));
+        }
     }
 
     [Fact]
@@ -727,7 +743,7 @@ public sealed class GoogleSecretManagerConfigProviderTests
     [Fact]
     public async Task Resolve_Should_ReturnAuditDeadlineAndReleaseSharedFetch()
     {
-        var client = new BlockingCountingSecretManagerClient("from-gcp");
+        using var client = new BlockingCountingSecretManagerClient("from-gcp");
         var provider = CreateProvider(client, options =>
         {
             options.ProjectId = "project";
@@ -756,6 +772,7 @@ public sealed class GoogleSecretManagerConfigProviderTests
         finally
         {
             client.Release.Set();
+            await client.Finished.Task.WaitAsync(TimeSpan.FromSeconds(5));
         }
     }
 
@@ -941,6 +958,46 @@ public sealed class GoogleSecretManagerConfigProviderTests
         return new GoogleSecretManagerConfigProvider(Options.Create(options), client);
     }
 
+    // Dedicated threads avoid thread-pool starvation from the synchronous provider contract. The
+    // start gate makes every caller enter Resolve, and WaitUntilBlocked observes each caller
+    // blocked before the client gate is released, proving all waiters overlap the shared fetch.
+    private sealed class PendingResolution
+    {
+        private readonly Thread _thread;
+        private int _enteredResolution;
+        private readonly TaskCompletionSource<ConfigProviderValueResult<string>> _completion =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal PendingResolution(
+            Func<ConfigProviderValueResult<string>> resolve,
+            ManualResetEventSlim start)
+        {
+            _thread = new Thread(() =>
+            {
+                try
+                {
+                    Assert.True(start.Wait(TimeSpan.FromSeconds(5)));
+                    Volatile.Write(ref _enteredResolution, 1);
+                    _completion.TrySetResult(resolve());
+                }
+                catch (Exception exception) { _completion.TrySetException(exception); }
+            })
+            { IsBackground = true };
+            _thread.Start();
+        }
+
+        internal Task<ConfigProviderValueResult<string>> Result => _completion.Task;
+
+        internal void WaitUntilBlocked()
+        {
+            Assert.True(SpinWait.SpinUntil(() => Result.IsCompleted
+                || (Volatile.Read(ref _enteredResolution) != 0
+                    && (_thread.ThreadState & ThreadState.WaitSleepJoin) != 0), TimeSpan.FromSeconds(5)),
+                "Resolution did not reach its bounded wait.");
+            Assert.False(Result.IsCompleted);
+        }
+    }
+
     private sealed class FakeSecretManagerClient : IAppSurfaceGoogleSecretManagerClient
     {
         private readonly Dictionary<string, byte[]> _payloads = new(StringComparer.Ordinal);
@@ -978,20 +1035,28 @@ public sealed class GoogleSecretManagerConfigProviderTests
             new(Encoding.UTF8.GetBytes("from-wrong-resource"), resolvedResourceName);
     }
 
-    private sealed class BlockingCountingSecretManagerClient(string payload) : IAppSurfaceGoogleSecretManagerClient
+    private sealed class BlockingCountingSecretManagerClient(string payload) : IAppSurfaceGoogleSecretManagerClient, IDisposable
     {
         private readonly byte[] _payload = Encoding.UTF8.GetBytes(payload);
         public int Calls;
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Finished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ManualResetEventSlim Release { get; } = new(false);
 
         public AppSurfaceGoogleSecretPayload AccessSecretVersion(string resourceName, TimeSpan timeout)
         {
             Interlocked.Increment(ref Calls);
             Started.TrySetResult();
-            Release.Wait();
-            return new AppSurfaceGoogleSecretPayload(_payload, resourceName);
+            try
+            {
+                if (!Release.Wait(TimeSpan.FromSeconds(5)))
+                    throw new TimeoutException("The test did not release its client gate.");
+                return new AppSurfaceGoogleSecretPayload(_payload, resourceName);
+            }
+            finally { Finished.TrySetResult(); }
         }
+
+        public void Dispose() => Release.Dispose();
     }
 
     private sealed class FailOnceSecretManagerClient(string payload) : IAppSurfaceGoogleSecretManagerClient

@@ -958,7 +958,10 @@ internal sealed class ConfigFileSourceLocationMap
 {
     private readonly Dictionary<string, ConfigAuditSourceLocation?> _locations;
 
-    internal ConfigFileSourceLocationMap(Dictionary<string, ConfigAuditSourceLocation?> locations) => _locations = locations;
+    internal ConfigFileSourceLocationMap(Dictionary<string, ConfigAuditSourceLocation?> locations)
+    {
+        _locations = locations;
+    }
 
     /// <summary>Gets an empty map used when source coordinates are unavailable.</summary>
     public static ConfigFileSourceLocationMap Empty { get; } = new(

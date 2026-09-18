@@ -477,7 +477,15 @@ public class EnvironmentConfigTransactionTests
         public Dictionary<string, Child> Dictionary { get; set; } = [];
     }
     private sealed class Child { public string? Name { get; set; } public int Port { get; set; } }
-    private sealed class Cycle { public Cycle Child { get; set; } public Cycle() => Child = this; }
+    private sealed class Cycle
+    {
+        public Cycle Child { get; set; }
+
+        public Cycle()
+        {
+            Child = this;
+        }
+    }
 }
 
 internal sealed class EnvironmentFixture(IEnumerable<(string Name, string Value)> values) : IEnvironmentProvider

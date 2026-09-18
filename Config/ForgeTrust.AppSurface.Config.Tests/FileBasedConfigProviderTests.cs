@@ -1,6 +1,6 @@
 using System.Text;
-using System.Text.Json.Nodes;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using FakeItEasy;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;

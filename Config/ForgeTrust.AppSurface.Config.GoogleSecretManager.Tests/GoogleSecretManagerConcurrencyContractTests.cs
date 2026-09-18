@@ -1,9 +1,9 @@
 using System.Collections.Concurrent;
 using System.Text;
+using ForgeTrust.AppSurface.Core;
 using Google.Api.Gax.Grpc;
 using Google.Cloud.SecretManager.V1;
 using Google.Protobuf;
-using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -855,7 +855,10 @@ public sealed class GoogleSecretManagerConcurrencyContractTests
     private sealed class ConvertingValue
     {
         internal static Action? OnConstruct { get; set; }
-        public ConvertingValue() => OnConstruct?.Invoke();
+        public ConvertingValue()
+        {
+            OnConstruct?.Invoke();
+        }
     }
 
     private sealed class TestHostModule : IAppSurfaceHostModule

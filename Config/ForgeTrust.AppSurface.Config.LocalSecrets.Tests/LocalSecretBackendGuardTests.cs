@@ -162,7 +162,11 @@ public sealed class LocalSecretBackendGuardTests
         public AppSurfaceLocalSecretIdentity Source { get; } = new AppSurfaceLocalSecretIdentityNormalizer().Normalize("App", "Development", null, "Source").Identity!;
         public AppSurfaceLocalSecretIdentity Destination { get; } = new AppSurfaceLocalSecretIdentityNormalizer().Normalize("App", "Development", null, "Destination").Identity!;
         public AppSurfaceLocalSecretMigrationJournal Journal => new("id", "App", "Development", null, Source.StorageName, Destination.StorageName, AppSurfaceLocalSecretMigrationState.DestinationVerified);
-        public Fixture() => Seed("App", "Development", null);
+        public Fixture()
+        {
+            Seed("App", "Development", null);
+        }
+
         public void Seed(string app, string environment, string? prefix) => DefaultFileAppSurfaceLocalSecretStoreFileSystem.Instance.WriteAllTextWithPosture(Path,
             JsonSerializer.Serialize(new Dictionary<string, object> { [Source.StorageName] = new { ApplicationName = app, Environment = environment, KeyPrefix = prefix, Key = "Source", Value = "marker" } }));
         public void Dispose() => System.IO.Directory.Delete(Directory, true);

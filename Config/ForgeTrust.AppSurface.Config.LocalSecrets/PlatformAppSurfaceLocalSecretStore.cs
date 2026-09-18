@@ -941,7 +941,10 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore : IAppSurfaceLoca
     internal sealed partial class WindowsCredentialManagerLocalSecretStore : IndexedLocalSecretStore
     {
         private readonly IAppSurfaceLocalSecretStore? _testNativeStore;
-        internal WindowsCredentialManagerLocalSecretStore(IAppSurfaceLocalSecretStore? testNativeStore = null) => _testNativeStore = testNativeStore;
+        internal WindowsCredentialManagerLocalSecretStore(IAppSurfaceLocalSecretStore? testNativeStore = null)
+        {
+            _testNativeStore = testNativeStore;
+        }
 
         private const int ErrorNotFound = 1168;
         private const int CredentialTypeGeneric = 1;

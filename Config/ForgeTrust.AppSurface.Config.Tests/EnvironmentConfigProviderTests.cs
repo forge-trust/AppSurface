@@ -1,6 +1,6 @@
+using System.Runtime.CompilerServices;
 using FakeItEasy;
 using ForgeTrust.AppSurface.Core;
-using System.Runtime.CompilerServices;
 
 namespace ForgeTrust.AppSurface.Config.Tests;
 

@@ -403,7 +403,10 @@ public sealed class ConfigDeclarationRegistryTests
     {
         private readonly Action _onStart;
 
-        public ProviderTraversalProbe(Action onStart) => _onStart = onStart;
+        public ProviderTraversalProbe(Action onStart)
+        {
+            _onStart = onStart;
+        }
 
         public Task StartAsync(CancellationToken cancellationToken)
         {

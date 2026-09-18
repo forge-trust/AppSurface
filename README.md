@@ -20,7 +20,7 @@ If you are deciding which package to install first, start with the [AppSurface p
 If your CI gate should distinguish an explicit low-risk change from an incomplete test run, start with the [EvidenceHost guide](./start-here/evidencehost.md).
 
 For portable configuration, start with the [logical-key quickstart](Config/ForgeTrust.AppSurface.Config/README.md#logical-key-quickstart),
-[runnable provider proof](examples/config-key-contract/README.md), and
+[executable provider proof](examples/config-key-contract/README.md), and
 [coordinated upgrade guide](guides/config-key-migration.md).
 
 ## Vision
