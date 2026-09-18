@@ -13,7 +13,7 @@ synchronous deadline and decodes payloads as strict UTF-8 text. Missing resource
 calls, invalid references, and provider failures remain distinct provider-neutral outcomes for the composition engine.
 
 See the [canonical file declared secret reference guide](../ForgeTrust.AppSurface.Config/docs/file-secret-references.md) and
-the [runnable golden path](../../examples/file-secret-references/README.md) for the complete descriptor, no-rescue Google
+the [executable golden path](../../examples/file-secret-references/README.md) for the complete descriptor, no-rescue Google
 proof, exact environment rescue, and value-safe failure contract.
 
 ## Typed file-declared references

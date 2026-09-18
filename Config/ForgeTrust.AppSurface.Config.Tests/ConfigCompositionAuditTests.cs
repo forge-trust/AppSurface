@@ -437,7 +437,6 @@ public sealed class ConfigCompositionAuditTests
                 Reads++;
                 throw new InvalidOperationException("The secret destination getter must not run during audit.");
             }
-            set { }
         }
     }
 

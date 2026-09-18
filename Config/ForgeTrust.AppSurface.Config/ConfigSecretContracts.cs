@@ -103,7 +103,11 @@ public enum ConfigSecretReferenceValidationStatus
 /// <summary>A local-only validation result. It carries no resource identity or arbitrary provider message.</summary>
 public sealed class ConfigSecretReferenceValidation
 {
-    private ConfigSecretReferenceValidation(ConfigSecretReferenceValidationStatus status) => Status = status;
+    private ConfigSecretReferenceValidation(ConfigSecretReferenceValidationStatus status)
+    {
+        Status = status;
+    }
+
     /// <summary>Gets the ownership/syntax outcome.</summary>
     public ConfigSecretReferenceValidationStatus Status { get; }
     /// <summary>A stable framework-owned code safe for diagnostics.</summary>

@@ -1,6 +1,6 @@
 # File declared secret references
 
-This is the runnable golden path for [the canonical file secret reference guide](../../Config/ForgeTrust.AppSurface.Config/docs/file-secret-references.md).
+This is the executable golden path for [the canonical file secret reference guide](../../Config/ForgeTrust.AppSurface.Config/docs/file-secret-references.md).
 It uses the real Google Secret Manager module with a fake client, so no network, credentials, or Google project are needed.
 
 Run the four proof cases from the repository root:

@@ -4,7 +4,7 @@
 Configuration models can use `Secret<T>` to declare a sensitive scalar destination. Its checked-in JSON descriptor
 selects a resource, version, provider, and static activation state while keeping the payload outside the file. Start with
 the [reference guide](../../Config/ForgeTrust.AppSurface.Config/docs/file-secret-references.md) and
-[network-free runnable example](../../examples/file-secret-references/README.md).
+[network-free executable example](../../examples/file-secret-references/README.md).
 
 The [Google provider](../../Config/ForgeTrust.AppSurface.Config.GoogleSecretManager/README.md) resolves enabled references;
 [LocalSecrets](../../Config/ForgeTrust.AppSurface.Config.LocalSecrets/README.md) can supply a sensitive whole-root base.

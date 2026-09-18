@@ -2,7 +2,7 @@
 
 Use a typed `Secret<T>` member when a configuration model needs a sensitive scalar whose resource, version, and activation
 belong in checked-in configuration. The JSON object declares the reference; the provider supplies its payload. Ordinary
-models keep the existing configuration behavior. Start with the [runnable example](../../../examples/file-secret-references/README.md)
+models keep the existing configuration behavior. Start with the [executable example](../../../examples/file-secret-references/README.md)
 for a network-free proof through the real Google module.
 
 ## First success

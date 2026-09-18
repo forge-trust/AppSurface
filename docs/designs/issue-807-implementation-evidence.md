@@ -154,3 +154,52 @@ Source: `/private/tmp/issue807-composition-performance.md`, recorded September 1
 Stable publication still requires the separately scoped real Skoolit root migration, measured glue deletion, Google
 verification without environment rescue, and previous-artifact rollback rehearsal. That external work remains deferred
 and unchanged.
+
+## PR feedback and Release validation
+
+The follow-up to [PR #812](https://github.com/forge-trust/AppSurface/pull/812) corrected two `IDE0021` constructor
+formatting violations, wording rejected by the package branding gate, an unused audit-test setter, and an unnecessarily
+broad catch around framework-only JSON parsing. The real historical review-artifact path is preserved through the
+existing [dated file-and-term allowlist](../../rebrand/stale-brand-allowlist.txt). Application-provider, serializer,
+and binding callbacks retain value-safe exception boundaries. The GC-based lifetime assertions are also retained:
+different object identities alone would not prove that overflow plans become collectible.
+
+The [core boundary tests](../../Config/ForgeTrust.AppSurface.Config.Tests/ConfigCompositionBoundaryTests.cs) add 22 cases
+for basic environment-provider fallback, invalid paths and binding slots, and opaque custom-callback failures. The
+[Google failure tests](../../Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerFailureCoverageTests.cs)
+add 11 failure, retryability, redaction, and declaration-validation cases. No coverage thresholds or test assertions were
+relaxed. Two enhancement review cycles completed; the second found no further actionable issues.
+
+CI uses Release configuration, while the earlier local measurements above used Debug. The standard script was therefore
+rerun in Release on September 16, 2026, against the local edits based on `185ba1bc`:
+
+```sh
+BUILD_CONFIGURATION=Release BUILD_NO_RESTORE=true COVERAGE_PARALLELISM=2 \
+  COVERAGE_GATE_DIFF_BASE=origin/main ./scripts/coverage-solution.sh
+```
+
+The successful run executed all 52 projects: 12,619 tests passed, one was skipped, and none failed. The build had zero
+warnings and errors. It used the same task-local NuGet and installed Playwright browser caches and disabled build-server
+reuse, shared compilation, and configuration reload as the earlier local runner. Full logs and run metadata are under
+`/private/tmp/issue807-enhance-feedback/attempt2`.
+
+Because `--diff-base` compares committed `HEAD`, a second invocation of the existing `coverage gate` command used
+`--diff-file` with the complete current working-tree patch, including the new test files. It retained `--min-line 95`,
+`--min-branch 85`, `--min-patch-line 95`, `--min-patch-branch 85`, and `--patch-line-mode codecov`. Both gates passed.
+
+| Release metric | Current working-tree result |
+| --- | ---: |
+| Overall lines | 95.75% |
+| Overall branches | 88.00% |
+| Changed lines | 95.73% |
+| Changed branches | 95.36% |
+
+The first Release run had one failure in the unchanged Durable documentation integration test: both HTTP requests
+returned 200, but the release page lacked the expected `.docs-content` container. Two isolated Release reruns and the
+subsequent complete run passed without changing that test. The original cause remains unproven. The failed run is
+preserved under `/private/tmp/issue807-enhance-feedback/attempt1`; its coverage gate was evaluated separately because
+the failed test prevented the script from reaching that step.
+
+The full solution formatter, package gate (56 manifest entries and 2965 source files), release-preparation diff check,
+relative documentation links, and `git diff --check` also passed. These local results were recorded at the end of the
+enhancement; subsequent remote checks and review-thread resolution are tracked on [PR #812](https://github.com/forge-trust/AppSurface/pull/812).

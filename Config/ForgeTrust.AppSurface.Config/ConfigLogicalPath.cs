@@ -9,7 +9,11 @@ internal sealed class ConfigLogicalPath : IEquatable<ConfigLogicalPath>
     internal string Canonical => string.Join(':', Segments);
     /// <summary>Gets dotted spelling for legacy file origins and environment normalization.</summary>
     internal string Dotted => string.Join('.', Segments);
-    private ConfigLogicalPath(string[] segments) => Segments = Array.AsReadOnly(segments);
+    private ConfigLogicalPath(string[] segments)
+    {
+        Segments = Array.AsReadOnly(segments);
+    }
+
     /// <summary>Parses either supported separator without changing external provider keys.</summary>
     internal static ConfigLogicalPath Parse(string path)
     {

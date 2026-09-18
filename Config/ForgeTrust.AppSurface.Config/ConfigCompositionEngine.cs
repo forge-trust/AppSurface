@@ -176,7 +176,7 @@ internal sealed class ConfigCompositionExecutor(IEnvironmentConfigProvider envir
                     if (parsed is not JsonObject rawObject) throw new JsonException();
                     buffer = rawObject;
                 }
-                catch { failures.Add(new(root.Canonical, "config-composition-bind-failed")); return Result(); }
+                catch (JsonException) { failures.Add(new(root.Canonical, "config-composition-bind-failed")); return Result(); }
                 sources.Add(new()
                 {
                     Kind = provider is FileBasedConfigProvider ? ConfigAuditSourceKind.File : ConfigAuditSourceKind.Provider,

@@ -1426,7 +1426,7 @@ The target excludes cloud resource/IAM provisioning time because that is host-sp
 
 #### Magical Moment Specification
 
-Delivery vehicle: one runnable `examples/file-secret-references` project plus one canonical guide linked from the core Config README, Google provider README, package chooser, and start-here path.
+Delivery vehicle: one executable `examples/file-secret-references` project plus one canonical guide linked from the core Config README, Google provider README, package chooser, and start-here path.
 
 The first scenario is intentionally network-free:
 
@@ -1461,7 +1461,7 @@ Neither scenario prints, serializes, or snapshots the payload.
 | 3. Install | Add the Google provider package | Package command exists; version/readiness context is separate | Reuse package chooser/release-hub pattern and state exact prerequisite |
 | 4. Model | Change scalar member to `Secret<T>` | `Enabled` versus `HasValue` is subtle | Put the state table and mandatory/optional validation examples beside the type |
 | 5. Configure | Add descriptor and remove overlapping mapping | Original migration order would fail overlap validation | Make removal and descriptor addition one reviewed change |
-| 6. First run | Prove disabled declaration plus environment rescue | No complete executable flow | Runnable network-free scenario with expected safe output |
+| 6. First run | Prove disabled declaration plus environment rescue | No complete executable flow | Executable network-free scenario with expected safe output |
 | 7. Verify remote | Enable and prove Google works | Environment rescue can mask effective source | Bounded no-rescue verification requiring Google provenance |
 | 8. Test/CI | Exercise states without network | Existing fake client exists but no composition fixture | Provide real-path fake-provider fixture and packed-consumer test |
 | 9. Operate/upgrade | Diagnose failures and know when legacy mapping remains appropriate | Codes/links and migration policy are scattered | Diagnostic catalog, compatibility table, changelog/release guidance |
@@ -1556,7 +1556,7 @@ Acceptance:
 - A separate remote-verification step states its credentials, IAM, and pinned-version prerequisites.
 - A packed-consumer smoke test proves commands and namespaces against produced packages.
 
-Decision DX-D1: accept the runnable golden path and packed-consumer smoke test as release-blocking documentation work under P1 completeness.
+Decision DX-D1: accept the executable golden path and packed-consumer smoke test as release-blocking documentation work under P1 completeness.
 
 ### Pass 2 — API/SDK Design
 
@@ -1652,7 +1652,7 @@ start-here/first-success-path.md
       -> LocalSecrets README: lower-base role and explicit non-support as versioned inline resolver
 ```
 
-The runnable example is the learning vehicle. Every fragment is compiled, and expected output is asserted without payloads. The guide distinguishes:
+The executable example is the learning vehicle. Every fragment is compiled, and expected output is asserted without payloads. The guide distinguishes:
 
 - tutorial: complete migration;
 - reference: descriptor, state, provider, and error tables;
@@ -1771,14 +1771,14 @@ Decision DX-D8: add local TTHW and packed-consumer thresholds now; defer product
 +--------------------------------------------------------------------+
 | TTHW                 | 15–30m estimated -> target <5m              |
 | Competitive Rank     | Competitive, evidence-gated                 |
-| Magical Moment       | designed via runnable migration example     |
+| Magical Moment       | designed via executable migration example   |
 | Product Type         | .NET library/provider/config contract       |
 | Mode                 | DX POLISH                                   |
 | Overall DX           | 5/10 initial -> 8.6/10 projected            |
 +====================================================================+
 | DX PRINCIPLE COVERAGE                                              |
 | Zero Friction      | covered by three-step golden path             |
-| Learn by Doing     | covered by compiled runnable example          |
+| Learn by Doing     | covered by compiled executable example        |
 | Fight Uncertainty  | covered by diagnostic catalog + source proof  |
 | Opinionated + Escape Hatches | explicit provider first; omission   |
 | Code in Context    | covered by existing-service migration         |
@@ -1791,7 +1791,7 @@ Decision DX-D8: add local TTHW and packed-consumer thresholds now; defer product
 - [ ] Time to first disabled/environment-rescued success is measured under five minutes.
 - [ ] Installation is one package command for an existing AppSurface app.
 - [ ] First run produces meaningful, payload-free source and state output.
-- [ ] The magical moment is delivered through a compiled runnable example.
+- [ ] The magical moment is delivered through a compiled executable example.
 - [ ] Every new diagnostic has problem, cause, fix, canonical docs link, path, and source location when available.
 - [ ] API naming is backed by the complete `Enabled`/`HasValue` state table.
 - [ ] Defaults are explicit: `enabled=true`, `provider` omitted means exhaustive uniqueness, and production examples constrain the provider.
@@ -1815,7 +1815,7 @@ Not applicable: free-tier/credit-card checks and TypeScript types; this is an op
 - App-owned diagnostics command runners and safe text rendering.
 - Stable provider result taxonomies and value-safe diagnostics.
 - Google fake-client registration and deterministic provider tests.
-- LocalSecrets runnable example and migration guides.
+- LocalSecrets executable example and migration guides.
 - Config validation example and structured validation failures.
 - Multi-platform patterns elsewhere in the build workflow that can be extended to this feature.
 
@@ -1837,7 +1837,7 @@ The plan reuses these structures. It does not create a second documentation site
 
 | ID | Finding | Decision | Principle |
 |---|---|---|---|
-| DX-D1 | No runnable under-five-minute path | Add canonical guide, example, expected output, and packed smoke test | P1 completeness |
+| DX-D1 | No executable under-five-minute path | Add canonical guide, example, expected output, and packed smoke test | P1 completeness |
 | DX-D2 | Wrapper state is subtle | Keep API; make state/validation guidance primary | P5 simple API |
 | DX-D3 | Error contract lacks guaranteed destinations | Add scoped diagnostic catalog and docs-anchor CI | P1 completeness |
 | DX-D4 | Docs are fragmented | Reuse existing package/start-here structure with one canonical guide | P5 consistency |
@@ -2323,7 +2323,7 @@ The detailed phase tables above are canonical. This consolidated trail records e
 | 8 | CEO | Keep exhaustive uniqueness, not provider priority | Auto-reject | P1 | Priority would hide ambiguous ownership | First provider wins |
 | 9 | CEO | Keep typed composition scope | Settled taste | P6 | User already approved it and later engineering reviews preserved it | Google-only child patch |
 | 10 | CEO | Require real Skoolit rehearsal before stable publication | User-approved challenge | User sovereignty | Both voices recommend a cross-repository stable-release gate; accepted 2026-09-11 | Publish with fixture-only evidence |
-| 11 | DX | Add a canonical runnable golden path | Auto-accept | P1 | No complete under-five-minute journey existed | Design-only documentation |
+| 11 | DX | Add a canonical executable golden path | Auto-accept | P1 | No complete under-five-minute journey existed | Design-only documentation |
 | 12 | DX | Keep wrapper API and foreground state/validation guidance | Auto-accept | P5 | API remains small; docs prevent readiness misuse | New readiness wrapper |
 | 13 | DX | Publish stable diagnostics and docs anchors | Auto-accept | P1 | Codes without fixes and destinations are not actionable | Unlinked diagnostics |
 | 14 | DX | Link one canonical guide from existing entry points | Auto-accept | P5 | Reuses repository information architecture | Parallel docs hierarchy |

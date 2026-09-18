@@ -101,7 +101,7 @@ internal static class DemoOutput
     }
 }
 
-/// <summary>Network-free Google client used by the runnable proof.</summary>
+/// <summary>Network-free Google client used by the executable proof.</summary>
 public sealed class DemoGoogleSecretClient : IAppSurfaceGoogleSecretManagerClient
 {
     /// <summary>Number of fake Google reads attempted by this process.</summary>
