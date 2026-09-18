@@ -1,7 +1,8 @@
 <!-- /autoplan restore point: /Users/andrew/.gstack/projects/forge-trust-Runnable/HEAD-autoplan-restore-20260915-052948.md -->
 # Implementation Plan: #798 Tailwind Artifact Provenance
 
-Status: REVIEW COMPLETE — AWAITING APPROVAL
+Status: APPROVED
+Approved: 2026-09-18 — user selected A (approve as-is)
 Review date: 2026-09-15
 Source: [approved design](../designs/issue-798-tailwind-artifact-provenance.md)
 Reviewed source base: `e0618ac8dcc3b5903517e9a711f42959534b7fb5` (`origin/main`).
@@ -63,6 +64,8 @@ The approved design remains the requirement contract. This plan adds implementat
 
 | 40 | Eng | Use distinct fresh aggregate, preflight and publisher report directories | Mechanical | P1 | Reusing the same path conflicts with create-new output safety | Examples that collide across stages |
 | 41 | Eng | Serialize bound summaries before their containing receipt and publish self-digests separately | Mechanical | P5 | A summary containing its own parent digest creates a hash cycle | Circular receipt/report hash inventory |
+
+| 42 | Final gate | Approve as-is; retain full scope and both recommended choices | User decision | User sovereignty | User selected A on 2026-09-18 | Reduce recovery scope or override the recommended interfaces/limits |
 
 ## Review basis and requirement trace
 
@@ -481,6 +484,9 @@ CLI's reference to old consumer packaging wording came from the older checkout;
 that statement is excluded from review conclusions.
 
 ### User Challenge 1: stage the launch guarantee
+
+**Resolution, 2026-09-18:** Approval A retains the original full guarantee.
+The proposed scope reduction is not adopted.
 
 **What the user said:** Approve one pack, all five restored-byte proofs, and safe
 original-candidate recovery before publishing.
@@ -1698,28 +1704,42 @@ with eleven current-run tasks; no required output is missing.
 
 Two durable source-backed learnings were retained: .NET 10 can reject duplicate
 JSON properties directly, and a PackageReference cache can retain the actual
-NuGet archive alongside expanded files. Approval metadata is intentionally not
-recorded as clean until the final user decision. The original office-hours
-design remains approved and unchanged; this additional implementation plan is
-awaiting its own autoplan approval.
+NuGet archive alongside expanded files. The user approved this implementation
+plan as-is on 2026-09-18. The original office-hours design remains approved and
+unchanged. Clean review metadata applies to plan completeness and approval;
+product implementation, tests and native acceptance remain outstanding.
+
+## Approval record
+
+The user selected **A — Approve as-is** on 2026-09-18. The full same-byte,
+five-host and original-candidate recovery scope is retained. Choice 1 accepts
+the documented processing/history limits; Choice 2 accepts explicit identity
+flags with help and examples. The reviewers' proposed recovery-scope reduction
+is not adopted. No further decision is required for this reviewed plan.
+
+| Phase | Host | Outside provider/status | Native completion | Findings disposition |
+|---|---|---|---|---|
+| CEO | Codex | Codex CLI / completed | Completed | Six-dimension concordance; full scope retained by user |
+| Design | Codex | None / skipped | Skipped | No UI scope |
+| DX | Codex | Codex CLI / completed | Completed | Six-dimension concordance; eight passes specified |
+| Engineering | Codex | Codex CLI / completed | Completed | Seven native/six CLI observations addressed or corrected; five independent overlapping dimensions, qualified performance follow-up |
+
+All reviewer calls used the requested `combo/sub` routing; underlying model
+families remain unknown. Approval does not imply empirical validation.
 
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |
 |---|---|---|---:|---|---|
-| CEO | autoplan / plan-ceo-review | Strategy and scope | 1 | Reviewed; user challenge pending | Five adjacent proposals evaluated; full guarantee retained |
+| CEO | autoplan / plan-ceo-review | Strategy and scope | 1 | CLEAR — plan approved | Five adjacent proposals evaluated; full guarantee retained |
 | Visual design | Conditional design review | Product UI | 0 | Skipped | No UI scope |
-| DX | autoplan / plan-devex-review | Maintainer workflow | 1 | Reviewed; approval pending | Eight dimensions specified; 7/10 initial, delivered DX unmeasured |
-| Engineering | autoplan / plan-eng-review | Architecture, failure paths and tests | 1 | Reviewed; approval pending | 58 acceptance groups; final contracts resolve actionable review findings |
+| DX | autoplan / plan-devex-review | Maintainer workflow | 1 | CLEAR — plan approved | Eight dimensions specified; 7/10 initial, delivered DX unmeasured |
+| Engineering | autoplan / plan-eng-review | Architecture, failure paths and tests | 1 | CLEAR — plan approved | 58 acceptance groups; final contracts resolve actionable review findings |
 | Independent voices | autoplan native + Codex CLI | Fresh-context challenge | 3 pairs | Completed | CEO 6/6 and DX 6/6 concordance; Eng 5/6 independent overlap, performance follow-up qualified |
 
-**VERDICT:** CEO, DX and engineering review work complete. The full approved
-byte/host/recovery guarantee is preserved. This plan is ready for the final
-approval decision; implementation, tests and native acceptance have not run.
-No clean autoplan review log or implementation approval is implied yet.
+**VERDICT:** CEO + DX + ENG CLEARED at the plan tier. User approved as-is on
+2026-09-18. The full byte/host/recovery guarantee and recommended choices are
+accepted. Ready for implementation from the reviewed source base; product tests,
+five-host acceptance and publishing have not run.
 
-**UNRESOLVED DECISIONS:**
-- User Challenge 1: both strategy voices propose deferring some recovery scope; the original full guarantee stands unless the user explicitly changes it.
-- Choice 1: use the documented bounded parsing/capture/history limits (recommended), or derive package-specific ceilings from measured fixtures before freezing constants.
-- Choice 2: retain explicit identity flags and command help (recommended), or introduce a separate human recovery context-file interface; the five-host transport map is not that human interface.
-- Final gate: approve this implementation plan, approve with overrides/challenge responses, interrogate, revise, or reject.
+NO UNRESOLVED DECISIONS
