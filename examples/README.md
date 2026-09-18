@@ -11,6 +11,7 @@ This directory contains sample applications that use **ForgeTrust.AppSurface**.
 - [Native Aspire deployment example](aspire-deployment-apphost/README.md) – publishes deterministic GCP migration-job artifacts and exposes read-only parity through native Aspire pipeline commands.
 - [Console app example](console-app/README.md) – shows how to build a simple console application using [CliFx](https://github.com/Tyrrrz/CliFx) for command definitions.
 - [LocalSecrets example](local-secrets/README.md) – shows how to set one local development secret, resolve it through AppSurface Config, and inspect diagnostics without printing the value.
+- [File declared secret references](file-secret-references/README.md) – runs the typed `Secret<T>` golden path through disabled, exact environment rescue, enabled Google success, and fail-closed missing-secret scenarios without network access.
 - [Remote-to-local secret materialization guide](../Config/ForgeTrust.AppSurface.Config.LocalSecrets/docs/materialize-remote-secrets-for-local-testing.md) – shows how an IAM-authorized developer can clone one pinned Google Secret Manager version into a named local namespace for integration testing without exposing it to the terminal.
 - [Web app example](web-app/README.md) – demonstrates starting a minimal ASP.NET Core web application.
 - [Web error-page proof](web-error-pages/README.md) – verifies AppSurface Web browser status pages, production exception pages, and API-friendly non-HTML behavior.

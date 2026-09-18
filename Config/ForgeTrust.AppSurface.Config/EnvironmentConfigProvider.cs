@@ -38,11 +38,10 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
     /// <inheritdoc />
     public T? GetValue<T>(string environment, string key)
     {
-        var envPrefix = NormalizeSegment(environment);
-        var legacyKey = NormalizeSegment(key);
-        var hierarchicalKey = NormalizeHierarchicalKey(key);
+        var envPrefix = ConfigEnvironmentCandidates.NormalizeSegment(environment);
+        var hierarchicalKey = ConfigEnvironmentCandidates.NormalizeHierarchicalKey(key);
 
-        var directCandidates = BuildDirectCandidates(envPrefix, legacyKey, hierarchicalKey);
+        var directCandidates = ConfigEnvironmentCandidates.GetDirectCandidates(environment, key);
 
         foreach (var candidate in directCandidates)
         {
@@ -80,12 +79,11 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
         Type valueType,
         ConfigAuditSourceRole role)
     {
-        var envPrefix = NormalizeSegment(environment);
-        var legacyKey = NormalizeSegment(key);
-        var hierarchicalKey = NormalizeHierarchicalKey(key);
+        var envPrefix = ConfigEnvironmentCandidates.NormalizeSegment(environment);
+        var hierarchicalKey = ConfigEnvironmentCandidates.NormalizeHierarchicalKey(key);
         var diagnostics = new List<ConfigAuditDiagnostic>();
 
-        foreach (var candidate in BuildDirectCandidates(envPrefix, legacyKey, hierarchicalKey))
+        foreach (var candidate in ConfigEnvironmentCandidates.GetDirectCandidates(environment, key))
         {
             var rawValue = _environmentProvider.GetEnvironmentVariable(candidate);
             if (rawValue == null)
@@ -170,8 +168,8 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
             return false;
         }
 
-        var envPrefix = NormalizeSegment(environment);
-        var hierarchicalKey = NormalizeHierarchicalKey(key);
+        var envPrefix = ConfigEnvironmentCandidates.NormalizeSegment(environment);
+        var hierarchicalKey = ConfigEnvironmentCandidates.NormalizeHierarchicalKey(key);
         var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
 
         if (!TryPatchObject(target!, runtimeType, envPrefix, hierarchicalKey, visited))
@@ -224,8 +222,8 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
             return new ConfigPatchDiagnosticResult(false, null, sources, diagnostics);
         }
 
-        var envPrefix = NormalizeSegment(environment);
-        var hierarchicalKey = NormalizeHierarchicalKey(key);
+        var envPrefix = ConfigEnvironmentCandidates.NormalizeSegment(environment);
+        var hierarchicalKey = ConfigEnvironmentCandidates.NormalizeHierarchicalKey(key);
         var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
         var patched = TryPatchObjectDiagnostic(
             target!,
@@ -243,50 +241,6 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
         {
             Facts = facts
         };
-    }
-
-    /// <summary>
-    /// Converts a key/environment segment to uppercase (via <see cref="string.ToUpperInvariant"/>)
-    /// and flattens separators by replacing '.' and '-' with a single '_'.
-    /// Used for legacy flat environment-variable lookup.
-    /// </summary>
-    private static string NormalizeSegment(string value) =>
-        value.ToUpperInvariant()
-            .Replace('.', '_')
-            .Replace('-', '_');
-
-    /// <summary>
-    /// Converts a key to uppercase (via <see cref="string.ToUpperInvariant"/>), splits on '.' and '-'
-    /// as hierarchical delimiters, removes empty segments, and joins segments using "__".
-    /// Used for hierarchical environment-variable lookup while preserving path boundaries.
-    /// </summary>
-    private static string NormalizeHierarchicalKey(string value)
-    {
-        var segments = value.Split(['.', '-'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return string.Join("__", segments.Select(s => s.ToUpperInvariant()));
-    }
-
-    private static IReadOnlyList<string> BuildDirectCandidates(string envPrefix, string legacyKey, string hierarchicalKey)
-    {
-        var ordered = new[]
-        {
-            $"{envPrefix}_{legacyKey}",
-            legacyKey,
-            $"{envPrefix}__{hierarchicalKey}",
-            hierarchicalKey
-        };
-
-        var distinct = new List<string>(ordered.Length);
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var candidate in ordered)
-        {
-            if (seen.Add(candidate))
-            {
-                distinct.Add(candidate);
-            }
-        }
-
-        return distinct;
     }
 
     private static bool TryConvertStringValue<T>(string value, out T? parsed)
@@ -440,7 +394,14 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
         return null;
     }
 
-    private static bool TryConvertStringToType(string value, Type targetType, out object? parsed)
+    /// <summary>
+    /// Converts an environment string using the provider's existing scalar and JSON rules.
+    /// </summary>
+    /// <param name="value">The environment string to convert.</param>
+    /// <param name="targetType">The requested destination type.</param>
+    /// <param name="parsed">The converted value when conversion succeeds.</param>
+    /// <returns><see langword="true"/> when the value can be converted; otherwise, <see langword="false"/>.</returns>
+    internal static bool TryConvertStringToType(string value, Type targetType, out object? parsed)
     {
         var nullableUnderlying = Nullable.GetUnderlyingType(targetType);
         if (nullableUnderlying != null)
@@ -650,8 +611,10 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
 
     private bool TryReadMemberValue(Type targetType, string envPrefix, string hierarchicalKey, out object? parsed)
     {
-        var legacyKey = hierarchicalKey.Replace("__", "_", StringComparison.Ordinal);
-        foreach (var candidate in BuildDirectCandidates(envPrefix, legacyKey, hierarchicalKey))
+        foreach (var candidate in ConfigEnvironmentCandidates.BuildDirectCandidates(
+                     envPrefix,
+                     hierarchicalKey.Replace("__", "_", StringComparison.Ordinal),
+                     hierarchicalKey))
         {
             var value = _environmentProvider.GetEnvironmentVariable(candidate);
             if (value == null)
@@ -689,8 +652,10 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
         out IReadOnlyList<ConfigAuditSourceRecord> sources)
     {
         sources = [];
-        var legacyKey = hierarchicalKey.Replace("__", "_", StringComparison.Ordinal);
-        foreach (var candidate in BuildDirectCandidates(envPrefix, legacyKey, hierarchicalKey))
+        foreach (var candidate in ConfigEnvironmentCandidates.BuildDirectCandidates(
+                     envPrefix,
+                     hierarchicalKey.Replace("__", "_", StringComparison.Ordinal),
+                     hierarchicalKey))
         {
             var value = _environmentProvider.GetEnvironmentVariable(candidate);
             if (value == null)
@@ -976,7 +941,7 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
 
     private static string CombineHierarchicalKey(string parentKey, string memberName)
     {
-        var memberKey = NormalizeHierarchicalKey(memberName);
+        var memberKey = ConfigEnvironmentCandidates.NormalizeHierarchicalKey(memberName);
         return string.IsNullOrEmpty(parentKey) ? memberKey : $"{parentKey}__{memberKey}";
     }
 

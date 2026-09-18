@@ -650,7 +650,7 @@ public class FileBasedConfigProviderTests
     }
 
     [Fact]
-    public void Resolve_SuppressesLocationForCaseInsensitivePathCollisions()
+    public void Resolve_SkipsCaseInsensitiveDuplicateMembersAndReportsLoadFailure()
     {
         var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
@@ -671,9 +671,22 @@ public class FileBasedConfigProviderTests
 
             var provider = CreateProvider(tempDir);
 
-            var source = AssertFileSource(Resolve(provider, "feature.Enabled", typeof(bool)));
+            var resolution = Resolve(provider, "feature.Enabled", typeof(bool));
 
-            Assert.Null(source.Location);
+            // Case-only duplicate members are intentionally invalid input. The loader retains a failed
+            // load event and skips the file instead of choosing a legacy value or attaching an origin.
+            Assert.Equal(ConfigAuditEntryState.Missing, resolution.State);
+            Assert.Null(resolution.Value);
+            Assert.DoesNotContain(resolution.Sources, source => source.Kind == ConfigAuditSourceKind.File);
+            Assert.Empty(provider.Snapshot.Layers);
+            var failure = Assert.IsType<ConfigFileLoadFailure>(Assert.Single(provider.Snapshot.LoadEvents));
+            Assert.Equal("config-file-duplicate-member", failure.Code);
+            Assert.Equal(ConfigFileLoadFailureClassification.Parse, failure.Classification);
+            Assert.Equal(Environments.Production, failure.Environment);
+            Assert.Equal("appsettings.json", failure.DisplayPath);
+            var reportDiagnostics = ((IConfigDiagnosticProvider)provider).GetReportDiagnostics(Environments.Production);
+            Assert.Contains(reportDiagnostics, diagnostic => diagnostic.Code == failure.Code);
+            Assert.Null(provider.GetValue<bool?>(Environments.Production, "feature.Enabled"));
         }
         finally
         {

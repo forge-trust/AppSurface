@@ -22,6 +22,7 @@ internal partial class DefaultConfigManager : IConfigManager
     private readonly IEnvironmentConfigProvider _environmentProvider;
     private readonly IReadOnlyList<IConfigProvider> _otherProviders;
     private readonly ILogger<DefaultConfigManager> _logger;
+    private readonly ConfigCompositionEngine _composition;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DefaultConfigManager"/> class.
@@ -29,10 +30,12 @@ internal partial class DefaultConfigManager : IConfigManager
     /// <param name="environmentProvider">The environment configuration provider.</param>
     /// <param name="otherProviders">The collection of other configuration providers.</param>
     /// <param name="logger">The logger for configuration events.</param>
+    /// <param name="composition">The shared host composition authority; omitted only by legacy manual construction.</param>
     public DefaultConfigManager(
         IEnvironmentConfigProvider environmentProvider,
         IEnumerable<IConfigProvider>? otherProviders,
-        ILogger<DefaultConfigManager> logger)
+        ILogger<DefaultConfigManager> logger,
+        ConfigCompositionEngine? composition = null)
     {
         _environmentProvider = environmentProvider;
         // we don't want to include ourselves or the environment provider in the list of other providers
@@ -41,11 +44,22 @@ internal partial class DefaultConfigManager : IConfigManager
                               .ToList()
                           ?? [];
         _logger = logger;
+        _composition = composition ?? new ConfigCompositionEngine(environmentProvider, _otherProviders,
+            _otherProviders.OfType<IConfigSecretProvider>(), _otherProviders.OfType<IConfigSecretDeclarationSource>(),
+            new AppSurfaceConfigOptions(), TimeProvider.System);
     }
 
     /// <inheritdoc />
     public T? GetValue<T>(string environment, string key)
     {
+        if (_composition.ContainsSecrets(typeof(T)))
+        {
+            var result = _composition.Execute(environment, key, typeof(T));
+            if (result.State == ConfigCompositionRootState.Failed)
+                throw new ConfigurationCompositionException(environment, key, result.Failures);
+            return result.Value is null ? default : (T)result.Value;
+        }
+
         var envValue = _environmentProvider.GetValue<T>(environment, key);
         if (envValue != null)
         {

@@ -15,6 +15,10 @@ Google Secret Manager. Environment variables remain the top emergency override. 
 appsettings defaults < LocalSecrets < Google Secret Manager < environment variables
 ```
 
+For the typed file declaration contract, supported scalar destinations, atomic descriptor layers, exact environment rescue,
+safe diagnostics, and migration from `MapSecret(...)`, start with the [canonical file declared secret references guide](docs/file-secret-references.md)
+and its [network-free executable golden path](../../examples/file-secret-references/README.md).
+
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 

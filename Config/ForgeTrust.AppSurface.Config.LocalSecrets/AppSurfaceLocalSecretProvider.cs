@@ -11,7 +11,11 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 /// The provider sits above file configuration and below environment variables. Only true missing secrets fall through;
 /// store, posture, identity, and conversion failures are terminal when fail-closed behavior is enabled.
 /// </remarks>
-public sealed class AppSurfaceLocalSecretProvider : IConfigProvider, IConfigProviderTerminalDiagnosticProvider
+public sealed class AppSurfaceLocalSecretProvider :
+    IConfigProvider,
+    IConfigProviderTerminalDiagnosticProvider,
+    IConfigCompositionValueProvider,
+    IConfigProviderClaimInspector
 {
     private readonly AppSurfaceLocalSecretsOptions _options;
     private readonly IAppSurfaceLocalSecretStore _store;
@@ -43,6 +47,35 @@ public sealed class AppSurfaceLocalSecretProvider : IConfigProvider, IConfigProv
 
     /// <inheritdoc />
     public string Name => nameof(AppSurfaceLocalSecretProvider);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// LocalSecrets claims every requested logical key. Posture and identity checks remain terminal resolution states,
+    /// so a claimed key cannot silently fall through when local access is disabled or invalid.
+    /// </remarks>
+    public ConfigProviderClaim InspectClaim(string environment, string logicalKey) => ConfigProviderClaim.MayClaim;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Resolves the stored text before typed conversion while preserving the legacy provider's posture, identity,
+    /// single-read, missing, and terminal behavior. A store result with a null value is represented as empty text,
+    /// matching the legacy conversion input.
+    /// </remarks>
+    public ConfigCompositionValueResolution ResolveRaw(string environment, string logicalKey)
+    {
+        // String conversion preserves the original store text. Reuse the legacy acquisition/status pipeline
+        // so posture, identity, store exceptions and terminal diagnostics have one implementation.
+        var resolution = ResolveValue<string>(environment, logicalKey);
+        return resolution.Status switch
+        {
+            LocalSecretResultStatus.Found => ConfigCompositionValueResolution.Resolved(
+                resolution.Value!, Name, Priority, isSensitive: true),
+            LocalSecretResultStatus.Missing => ConfigCompositionValueResolution.Missing(Name, Priority, isSensitive: true),
+            _ when !_options.FailClosedOnStoreFailure => ConfigCompositionValueResolution.Missing(Name, Priority, isSensitive: true),
+            _ => ConfigCompositionValueResolution.TerminalFailure(Name, Priority, isSensitive: true,
+                retryable: resolution.Diagnostic?.Retryable ?? false)
+        };
+    }
 
     /// <inheritdoc />
     public T? GetValue<T>(string environment, string key)

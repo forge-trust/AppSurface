@@ -77,6 +77,10 @@ Hello from AppSurface!
 
 That proves the package-consumer path: a fresh ASP.NET Core app can install `ForgeTrust.AppSurface.Web`, start through `WebApp<TModule>`, and map a first endpoint without cloning this repository.
 
+For the first configuration secret proof, run the [file declared secret references golden path](../examples/file-secret-references/README.md).
+It shows the typed `Secret<T>` destination, a disabled declaration with no provider read, exact environment rescue, and an
+enabled network-free Google provider result before you adopt provider-specific configuration in an application.
+
 ## Theme Pairs: Five-Minute Path
 
 After the package-first path runs, add package-owned light/dark support without restyling the application UI. The Web package carries the neutral theming dependency.

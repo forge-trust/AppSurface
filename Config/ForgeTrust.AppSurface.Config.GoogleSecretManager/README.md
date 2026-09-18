@@ -6,6 +6,33 @@ Use this package when an AppSurface app running on Google Cloud needs production
 logical config keys used by `ForgeTrust.AppSurface.Config`. The provider is read-only, source-aware, fail-closed for
 claimed keys by default, and keeps environment variables as the top emergency override.
 
+The package also implements the typed file-declared secret contracts. Its canonical provider id is
+`google-secret-manager`. For a `Secret<T>` destination, the provider validates the declared key, version, project, full
+resource name, and `latest` policy locally before any Secret Manager call. Resolution caps `LookupTimeout` to the shared
+synchronous deadline and decodes payloads as strict UTF-8 text. Missing resources, denied access, unavailable service
+calls, invalid references, and provider failures remain distinct provider-neutral outcomes for the composition engine.
+
+See the [canonical file declared secret reference guide](../ForgeTrust.AppSurface.Config/docs/file-secret-references.md) and
+the [executable golden path](../../examples/file-secret-references/README.md) for the complete descriptor, no-rescue Google
+proof, exact environment rescue, and value-safe failure contract.
+
+## Typed file-declared references
+
+The inline descriptor uses the provider id `google-secret-manager` and a complete `key`, optional `version`, and static
+`enabled` value. Local validation happens before any Secret Manager call. A disabled descriptor validates its shape but never
+calls `IAppSurfaceGoogleSecretManagerClient`; an enabled missing or denied reference remains terminal unless the exact
+destination receives a valid environment value.
+
+The module registers one singleton and aliases that same instance to the legacy provider, raw-root, claim inspection,
+declaration inspection, and child-reference interfaces. Child-reference cache entries are separate from legacy mapping
+entries and include the environment, canonical version resource, and validation-affecting options. An optional
+`TimeProvider` constructor argument makes TTL behavior deterministic in tests while the existing two-argument
+constructor remains source-compatible.
+
+Existing `MapSecret(...)` mappings and conventions remain the compatibility path for whole roots. Declaration inspection
+reports explicit mappings at, above, or below a requested root, including mappings for ordinary destinations. Conventions
+are inspected only when the convention already claims the requested root; descendant convention discovery is not widened.
+
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 

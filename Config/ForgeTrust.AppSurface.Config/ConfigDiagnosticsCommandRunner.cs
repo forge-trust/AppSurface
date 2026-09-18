@@ -14,7 +14,10 @@ namespace ForgeTrust.AppSurface.Config;
 ///
 /// V1 audits only <see cref="IEnvironmentProvider.Environment"/> from the already-built app host. It does not provide a
 /// command-level environment override, does not enumerate raw unknown environment variables, and cannot rescue apps that
-/// fail before the host and command service can run.
+/// fail before the host and command service can run. Effective audits of roots containing <see cref="Secret{T}"/>
+/// execute the shared composition engine and can therefore perform the same file, network, IAM, provider, and latency-
+/// affecting reads as runtime composition; callers requiring zero I/O should use a separately named compile-only
+/// preflight.
 /// </remarks>
 public sealed class ConfigDiagnosticsCommandRunner
 {

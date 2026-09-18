@@ -1,6 +1,9 @@
 ﻿using System.Reflection;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Config;
 
@@ -36,6 +39,14 @@ public class AppSurfaceConfigModule : IAppSurfaceModule
     public void ConfigureServices(StartupContext context, IServiceCollection services)
     {
         services.AddSingleton<IConfigManager, DefaultConfigManager>();
+        services.AddOptions<AppSurfaceConfigOptions>().ValidateOnStart();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<AppSurfaceConfigOptions>, AppSurfaceConfigOptionsValidator>());
+        services.TryAddSingleton<TimeProvider>(TimeProvider.System);
+        services.AddSingleton(sp => new ConfigCompositionEngine(
+            sp.GetRequiredService<IEnvironmentConfigProvider>(), sp.GetServices<IConfigProvider>(),
+            sp.GetServices<IConfigSecretProvider>(), sp.GetServices<IConfigSecretDeclarationSource>(),
+            sp.GetRequiredService<IOptions<AppSurfaceConfigOptions>>().Value, sp.GetRequiredService<TimeProvider>()));
+        services.AddSingleton<IHostedService, ConfigCompositionStartupValidator>();
         services.AddSingleton<IConfigAuditReporter, ConfigAuditReporter>();
         services.AddOptions<ConfigAuditDictionaryKeyCorrelationOptions>();
         services.AddSingleton<ConfigDiagnosticsCommandRunner>();
@@ -46,7 +57,9 @@ public class AppSurfaceConfigModule : IAppSurfaceModule
         services.AddSingleton<ConfigAuditDiffTextRenderer>();
         services.AddSingleton<IEnvironmentConfigProvider, EnvironmentConfigProvider>();
         services.AddSingleton<IConfigFileLocationProvider, DefaultConfigFileLocationProvider>();
-        services.AddSingleton<IConfigProvider, FileBasedConfigProvider>();
+        services.AddSingleton<FileBasedConfigProvider>();
+        services.AddSingleton<IConfigProvider>(sp => sp.GetRequiredService<FileBasedConfigProvider>());
+        services.AddSingleton<IConfigCompositionValueProvider>(sp => sp.GetRequiredService<FileBasedConfigProvider>());
 
         // Execute the config registration log from the CustomRegistrations
         // because it needs to be done after all modules have been registered
