@@ -5,6 +5,8 @@ using ForgeTrust.AppSurface.Workers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
+ForgeTrust.AppSurface.Durable.Examples.TypedWorkDefinitionProof.Run();
+
 var services = new ServiceCollection();
 new AppSurfaceDurableModule().ConfigureServices(
     new StartupContext([], new PassiveHostModule()),
