@@ -78,7 +78,7 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-The runtime also includes ICU-derived Unicode headers. Their [upstream license](https://github.com/tree-sitter/tree-sitter/blob/cd4b6e2ef996d4baca12caadb78dffc8b55bc869/lib/src/unicode/LICENSE) is reproduced verbatim in the packaged [Unicode license notice](THIRD-PARTY-TREE-SITTER-UNICODE-LICENSE.txt).
+The runtime also includes ICU-derived Unicode headers. Their [pinned upstream license](https://github.com/tree-sitter/tree-sitter/blob/cd4b6e2ef996d4baca12caadb78dffc8b55bc869/lib/src/unicode/LICENSE) is reproduced verbatim in the package as `THIRD-PARTY-TREE-SITTER-UNICODE-LICENSE.txt`.
 
 The bundled `tree-sitter-swift` submodule declares `MIT` in its [pinned package.json](https://github.com/tree-sitter/tree-sitter-swift/blob/db675450dcc1478ee128c96ecc61c13272431aab/package.json) and names Rob Rix as author. The MIT permission text above is included for it too, but that revision has no root `LICENSE` file and no copyright notice was found for its bundled parser. Verify its redistribution attribution separately before treating this dependency's notice review as complete.
 
