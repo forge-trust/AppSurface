@@ -165,6 +165,41 @@ public sealed class TailwindPublishingTests
     }
 
     [Fact]
+    public async Task TailwindPublisher_RecordsPreparedArchiveReadFailureBeforeSecondPush()
+    {
+        using var fixture = await PublishFixture.CreateAsync("ForgeTrust.AppSurface.Web.Tailwind", includeWebPackage: true);
+        var evidence = fixture.CreateEvidence();
+        var credential = new RecordingCredentialProvider();
+        var validator = new RecordingEvidenceValidator((entries, _) => CopyPrepared(evidence, entries));
+        FileStream? exclusiveReadLock = null;
+        var runner = new RecordingPushRunner(count =>
+        {
+            if (count == 1)
+            {
+                var tailwind = Directory.GetFiles(evidence.PublicationDirectory, "*Tailwind*.nupkg").Single();
+                exclusiveReadLock = new FileStream(tailwind, FileMode.Open, FileAccess.Read, FileShare.None);
+            }
+        });
+
+        PackagePublishLedger ledger;
+        try
+        {
+            ledger = await fixture.CreateWorkflow(runner, credential, validator).RunAsync(
+                fixture.Request with { TailwindEvidence = evidence }, CancellationToken.None);
+        }
+        finally
+        {
+            exclusiveReadLock?.Dispose();
+        }
+
+        Assert.Equal(1, credential.Reads);
+        Assert.Single(runner.Requests);
+        Assert.Equal([PackagePublishStatus.Pushed, PackagePublishStatus.Failed],
+            ledger.Entries.Select(entry => entry.Status).ToArray());
+        Assert.Contains("archive changed before the push boundary", ledger.Entries[1].Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task TailwindPublisher_RecordsMissingPreparedPackageBeforeItsPush()
     {
         using var fixture = await PublishFixture.CreateAsync("ForgeTrust.AppSurface.Web.Tailwind", includeWebPackage: true);

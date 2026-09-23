@@ -211,7 +211,9 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
 
     [Theory]
     [InlineData("missing-checks", "native host receipt does not match the frozen")]
+    [InlineData("invalid-checks-object", "is missing checks")]
     [InlineData("failed-css-check", "did not prove 'generatedCss'")]
+    [InlineData("missing-check-entry", "did not prove 'hostCacheBinary'")]
     [InlineData("missing-package-evidence", "native host receipt does not match the frozen")]
     [InlineData("empty-package-evidence", "closure count differs")]
     [InlineData("wrong-package-id", "omits or duplicates package")]
@@ -225,16 +227,22 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
     [InlineData("wrong-host-os", "hostOs")]
     [InlineData("wrong-process-architecture", "processArchitecture")]
     [InlineData("noncanonical-native-run-id", "native run ID")]
+    [InlineData("changed-downloaded-archive", "consumed archive")]
+    [InlineData("duplicate-payload-path", "duplicate/case-colliding path")]
+    [InlineData("stale-payload-bytes", "payload evidence bytes changed")]
     public async Task Aggregate_RejectsUntrustedHostReceiptClaims(string mutation, string expectedDiagnostic)
     {
         using var fixture = await Fixture.CreateAsync(_root);
         var receiptPath = TestPathUtils.PathUnder(fixture.Evidence, Rids[0], "tailwind-native-host-proof.json");
         var receipt = JsonNode.Parse(await File.ReadAllTextAsync(receiptPath))!.AsObject();
         var firstPackage = ((JsonArray)receipt["firstPartyPackages"]!)[0]!.AsObject();
+        var hostDirectory = Path.GetDirectoryName(receiptPath)!;
         switch (mutation)
         {
             case "missing-checks": receipt.Remove("checks"); break;
+            case "invalid-checks-object": receipt["checks"] = null; break;
             case "failed-css-check": receipt["checks"]!["generatedCss"] = false; break;
+            case "missing-check-entry": ((JsonObject)receipt["checks"]!).Remove("hostCacheBinary"); break;
             case "missing-package-evidence": receipt.Remove("firstPartyPackages"); break;
             case "empty-package-evidence": receipt["firstPartyPackages"] = new JsonArray(); break;
             case "wrong-package-id": firstPackage["packageId"] = "ForgeTrust.Other"; break;
@@ -248,6 +256,24 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
             case "wrong-host-os": receipt["hostOs"] = "FreeBSD"; break;
             case "wrong-process-architecture": receipt["processArchitecture"] = "Arm64"; break;
             case "noncanonical-native-run-id": receipt["nativeRunId"] = "01"; break;
+            case "changed-downloaded-archive":
+                await File.WriteAllBytesAsync(
+                    TestPathUtils.PathUnder(hostDirectory, "packages", PackageId + "." + Version + ".nupkg"),
+                    Encoding.UTF8.GetBytes("changed host-downloaded archive"));
+                receipt["files"] = JsonSerializer.SerializeToNode(Inventory(hostDirectory, "tailwind-native-host-proof.json"));
+                break;
+            case "duplicate-payload-path":
+                var payloadFiles = (JsonArray)firstPackage["payloadFiles"]!;
+                var duplicate = payloadFiles.Single(item => item!["packageRelativePath"]!.GetValue<string>() == "native/codec.bin")!.DeepClone();
+                duplicate["packageRelativePath"] = "NATIVE/codec.bin";
+                payloadFiles.Add(duplicate);
+                break;
+            case "stale-payload-bytes":
+                await File.WriteAllBytesAsync(
+                    TestPathUtils.PathUnder(hostDirectory, "payload", "native", "codec.bin"),
+                    Encoding.UTF8.GetBytes("changed extracted bytes with stale receipt hash"));
+                receipt["files"] = JsonSerializer.SerializeToNode(Inventory(hostDirectory, "tailwind-native-host-proof.json"));
+                break;
             default: throw new ArgumentOutOfRangeException(nameof(mutation), mutation, "Unknown host-receipt mutation.");
         }
         await File.WriteAllTextAsync(receiptPath, receipt.ToJsonString());
@@ -260,6 +286,24 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(diagnosticsPath));
         Assert.Contains(expectedDiagnostic,
             diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Aggregate_AcceptsWindowsArm64EmulationWithX64ProcessArchitecture()
+    {
+        using var fixture = await Fixture.CreateAsync(_root);
+        var receiptPath = TestPathUtils.PathUnder(fixture.Evidence, "win-x64", "tailwind-native-host-proof.json");
+        var receipt = JsonNode.Parse(await File.ReadAllTextAsync(receiptPath))!.AsObject();
+        receipt["osArchitecture"] = "Arm64";
+        receipt["processArchitecture"] = "X64";
+        await File.WriteAllTextAsync(receiptPath, receipt.ToJsonString());
+
+        var aggregate = await fixture.AggregateAsync("aggregate-windows-arm64-emulation");
+
+        Assert.True(aggregate.Succeeded,
+            await File.ReadAllTextAsync(TestPathUtils.PathUnder(Path.GetDirectoryName(aggregate.ReportPath)!, "diagnostics.json")));
+        using var document = JsonDocument.Parse(await File.ReadAllBytesAsync(aggregate.ReportPath));
+        Assert.Equal(5, document.RootElement.GetProperty("hosts").GetArrayLength());
     }
 
     public void Dispose()

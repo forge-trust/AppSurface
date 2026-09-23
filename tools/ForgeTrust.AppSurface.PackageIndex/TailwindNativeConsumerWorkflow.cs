@@ -330,7 +330,12 @@ internal static class TailwindNativeConsumerWorkflow
         => _ = await runner.RunAsync(new CommandRunRequest("dotnet", args, cwd, $"dotnet {stage}", "Tailwind native consumer",
             stage, $"running {stage}", CommandTimeout, environment), token);
 
-    private sealed class TailwindBoundedCommandRunner(IExternalCommandRunner inner) : ICommandRunner
+    /// <summary>
+    /// Adapts non-throwing external command results to the native proof runner contract while enforcing bounded capture.
+    /// Internal visibility provides a focused test seam for verifying that proof commands retain the release capture
+    /// policy and that unsuccessful child processes are rejected before their output is treated as successful evidence.
+    /// </summary>
+    internal sealed class TailwindBoundedCommandRunner(IExternalCommandRunner inner) : ICommandRunner
     {
         public async Task<CommandRunResult> RunAsync(CommandRunRequest request, CancellationToken cancellationToken)
         {
@@ -452,11 +457,5 @@ internal static class TailwindNativeConsumerWorkflow
         var bytes = new byte[checked((int)stream.Length)];
         await stream.ReadExactlyAsync(bytes, token);
         return bytes;
-    }
-    private static async Task WriteJsonCreateNewAsync<T>(string path, T value, CancellationToken token)
-    {
-        await using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-        await JsonSerializer.SerializeAsync(stream, value, PackageArtifactJson.Options, token);
-        await stream.WriteAsync(Encoding.UTF8.GetBytes(Environment.NewLine), token);
     }
 }

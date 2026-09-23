@@ -46,6 +46,48 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
     }
 
     [Fact]
+    public async Task BoundedCommandRunner_ForwardsReleaseCaptureAndSuccessfulOutput()
+    {
+        var inner = new RecordingExternalCommandRunner(new ExternalCommandResult(0, "stdout", "stderr"));
+        var runner = new TailwindNativeConsumerWorkflow.TailwindBoundedCommandRunner(inner);
+        var environment = new Dictionary<string, string?> { ["NUGET_PACKAGES"] = "/private/cache" };
+        using var cancellation = new CancellationTokenSource();
+        var request = new CommandRunRequest("dotnet", ["restore", "proof.csproj"], "/work", "dotnet restore",
+            "Tailwind native consumer", "restore", "restoring the proof project", 30_000, environment);
+
+        var result = await runner.RunAsync(request, cancellation.Token);
+
+        Assert.Equal(new CommandRunResult("stdout", "stderr"), result);
+        var forwarded = Assert.IsType<ExternalCommandRequest>(inner.Request);
+        Assert.Equal(request.FileName, forwarded.FileName);
+        Assert.Equal(request.Arguments, forwarded.Arguments);
+        Assert.Equal(request.WorkingDirectory, forwarded.WorkingDirectory);
+        Assert.Equal(request.OperationName, forwarded.OperationName);
+        Assert.Equal(request.TimeoutDescription, forwarded.TimeoutDescription);
+        Assert.Equal(request.TimeoutMilliseconds, forwarded.TimeoutMilliseconds);
+        Assert.Same(environment, forwarded.Environment);
+        Assert.Same(ExternalCapturePolicy.ReleaseProof, forwarded.CapturePolicy);
+        Assert.Equal(cancellation.Token, inner.CancellationToken);
+    }
+
+    [Fact]
+    public async Task BoundedCommandRunner_RejectsNonzeroExitAndKeepsBoundedCapture()
+    {
+        var inner = new RecordingExternalCommandRunner(new ExternalCommandResult(17, "partial stdout", "failed stderr"));
+        var runner = new TailwindNativeConsumerWorkflow.TailwindBoundedCommandRunner(inner);
+        var request = new CommandRunRequest("dotnet", ["build", "proof.csproj"], "/work", "dotnet build",
+            "Tailwind native consumer", "build", "building the proof project", 45_000);
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => runner.RunAsync(request, CancellationToken.None));
+
+        Assert.Contains("dotnet build failed", error.Message, StringComparison.Ordinal);
+        Assert.Contains("exit 17", error.Message, StringComparison.Ordinal);
+        Assert.Contains("failed stderr", error.Message, StringComparison.Ordinal);
+        Assert.Contains("partial stdout", error.Message, StringComparison.Ordinal);
+        Assert.Same(ExternalCapturePolicy.ReleaseProof, inner.Request!.CapturePolicy);
+    }
+
+    [Fact]
     public async Task UnknownMode_FailsBeforeRunningConsumer()
     {
         var manifest = await WriteManifestAsync();
@@ -129,7 +171,22 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
         Assert.Equal("appsurface-tailwind-native-host-proof-v2", receipt.RootElement.GetProperty("schema").GetString());
         Assert.Equal("succeeded", receipt.RootElement.GetProperty("status").GetString());
         Assert.Equal(CurrentRid(), receipt.RootElement.GetProperty("observedRid").GetString());
+        Assert.Equal("native-test-release-success", receipt.RootElement.GetProperty("nativeInvocationId").GetString());
+        Assert.Equal(Environment.GetEnvironmentVariable("GITHUB_RUN_ID") is { Length: > 0 } runId ? runId : "901",
+            receipt.RootElement.GetProperty("nativeRunId").GetString());
+        Assert.Equal(Environment.GetEnvironmentVariable("GITHUB_RUN_ATTEMPT") is { Length: > 0 } attempt ? attempt : "1",
+            receipt.RootElement.GetProperty("nativeAttempt").GetString());
         Assert.True(receipt.RootElement.GetProperty("checks").GetProperty("postBuildPayloadUnchanged").GetBoolean());
+        Assert.True(receipt.RootElement.GetProperty("checks").GetProperty("generatedCss").GetBoolean());
+        Assert.True(receipt.RootElement.GetProperty("checks").GetProperty("hostCacheBinary").GetBoolean());
+        Assert.True(receipt.RootElement.GetProperty("checks").GetProperty("noRuntimeCompanionDependency").GetBoolean());
+        Assert.True(receipt.RootElement.GetProperty("checks").GetProperty("noNativeConsumerOutput").GetBoolean());
+        Assert.Equal("10.0.100", receipt.RootElement.GetProperty("sdkVersion").GetString());
+        Assert.Equal(BinaryName(CurrentRid()), receipt.RootElement.GetProperty("binaryName").GetString());
+        Assert.False(string.IsNullOrEmpty(receipt.RootElement.GetProperty("binarySha256").GetString()));
+        Assert.Single(receipt.RootElement.GetProperty("firstPartyPackages").EnumerateArray());
+        Assert.Contains(receipt.RootElement.GetProperty("files").EnumerateArray(), file =>
+            file.GetProperty("path").GetString() == "consumer/wwwroot/css/site.gen.css");
         Assert.True(File.Exists(TestPathUtils.PathUnder(runner.ConsumerDirectory!, "wwwroot", "css", "site.gen.css")));
         Assert.True(File.Exists(TestPathUtils.PathUnder(report, "diagnostics.json")));
     }
@@ -158,7 +215,9 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
     [InlineData("empty-sdk", "sdk-version", "Native host .NET SDK version is empty")]
     [InlineData("missing-lock", "restored-graph-and-payload", "did not produce packages.lock.json")]
     [InlineData("missing-css", "native-build", "did not generate fresh nonempty")]
+    [InlineData("empty-css", "native-build", "did not generate fresh nonempty")]
     [InlineData("missing-binary", "native-build", "did not acquire the expected host cache binary")]
+    [InlineData("missing-output-root", "native-build", "did not produce both bin and obj directories")]
     public async Task ReleaseMode_ReportsFailureAtTheStageWhoseRequiredOutputIsMissing(
         string failure, string expectedStage, string expectedMessage)
     {
@@ -369,6 +428,19 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
         if (process.ExitCode != 0) throw new InvalidOperationException($"git clone failed: {error}{output}");
     }
 
+    private sealed class RecordingExternalCommandRunner(ExternalCommandResult result) : IExternalCommandRunner
+    {
+        public ExternalCommandRequest? Request { get; private set; }
+        public CancellationToken CancellationToken { get; private set; }
+
+        public Task<ExternalCommandResult> RunAsync(ExternalCommandRequest request, CancellationToken cancellationToken)
+        {
+            Request = request;
+            CancellationToken = cancellationToken;
+            return Task.FromResult(result);
+        }
+    }
+
     private sealed record ProducerBundle(string Repository, string Bundle, string ManifestPath, string SourceCommit, string SubjectSha256);
 
     private sealed class NativeReleaseRunner(ProducerBundle producer, string rid, bool mutateProtectedPayloadAfterBuild = false,
@@ -401,9 +473,10 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
             }
             Assert.Equal("build", request.FailureVerb);
             if (failure != "missing-css")
-                await File.WriteAllTextAsync(TestPathUtils.PathUnder(request.WorkingDirectory, "wwwroot", "css", "site.gen.css"), ".generated{color:red}", cancellationToken);
+                await File.WriteAllTextAsync(TestPathUtils.PathUnder(request.WorkingDirectory, "wwwroot", "css", "site.gen.css"),
+                    failure == "empty-css" ? string.Empty : ".generated{color:red}", cancellationToken);
             var outputDirectory = TestPathUtils.PathUnder(request.WorkingDirectory, "bin", "Release", "net10.0");
-            Directory.CreateDirectory(outputDirectory);
+            if (failure != "missing-output-root") Directory.CreateDirectory(outputDirectory);
             var work = Directory.GetParent(request.WorkingDirectory)!.FullName;
             if (failure != "missing-binary")
             {

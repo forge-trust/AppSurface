@@ -106,6 +106,56 @@ public sealed class TailwindEvidenceWorkflowTests : IDisposable
     }
 
     [Theory]
+    [InlineData("out-of-order", "five ordered supported RIDs")]
+    [InlineData("wrong-directory", "unsupported RID or directory")]
+    [InlineData("blank-rid", "must be a non-empty string")]
+    [InlineData("blank-directory", "must be a non-empty string")]
+    [InlineData("leading-zero-id", "canonical decimal string")]
+    [InlineData("alphabetic-id", "canonical decimal string")]
+    [InlineData("overlong-id", "canonical decimal string")]
+    public async Task ReadHostArtifactMap_RejectsInvalidIdentityFields(string mutation, string expectedDiagnostic)
+    {
+        var hosts = new List<(string Rid, string ArtifactId, string Directory)>
+        {
+            ("linux-x64", "101", "linux-x64"),
+            ("linux-arm64", "102", "linux-arm64"),
+            ("osx-x64", "103", "osx-x64"),
+            ("osx-arm64", "104", "osx-arm64"),
+            ("win-x64", "105", "win-x64")
+        };
+
+        switch (mutation)
+        {
+            case "out-of-order": (hosts[0], hosts[1]) = (hosts[1], hosts[0]); break;
+            case "wrong-directory": hosts[0] = ("linux-x64", "101", "linux-arm64"); break;
+            case "blank-rid": hosts[0] = (" ", "101", "linux-x64"); break;
+            case "blank-directory": hosts[0] = ("linux-x64", "101", " "); break;
+            case "leading-zero-id": hosts[0] = ("linux-x64", "0101", "linux-x64"); break;
+            case "alphabetic-id": hosts[0] = ("linux-x64", "a101", "linux-x64"); break;
+            case "overlong-id": hosts[0] = ("linux-x64", new string('1', 21), "linux-x64"); break;
+            default: throw new ArgumentOutOfRangeException(nameof(mutation), mutation, "Unknown map mutation.");
+        }
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
+            TailwindEvidenceWorkflow.ReadHostArtifactMapAsync(WriteMap(hosts), CancellationToken.None));
+
+        Assert.Contains(expectedDiagnostic, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadHostArtifactMap_RejectsAnOversizedDocumentBeforeParsing()
+    {
+        Directory.CreateDirectory(_root);
+        var path = TestPathUtils.PathUnder(_root, "oversized-host-artifacts.json");
+        await File.WriteAllTextAsync(path, new string(' ', TailwindProofSubjectService.MaximumDocumentBytes + 1));
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
+            TailwindEvidenceWorkflow.ReadHostArtifactMapAsync(path, CancellationToken.None));
+
+        Assert.Contains("16 MiB limit", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("not-json")]
     [InlineData("duplicate-field")]
     [InlineData("unknown-field")]

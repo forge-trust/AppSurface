@@ -110,6 +110,102 @@ public sealed class TailwindCliDispatchTests : IDisposable
         Assert.Equal(manifest, dispatched.ArtifactManifestPath);
     }
 
+    [Theory]
+    [InlineData("publish-preflight")]
+    [InlineData("validate-publication-start")]
+    public async Task PublicationEvidenceCli_ResolvesPackagePlanBeforeRejectingUnstampedSource(string mode)
+    {
+        Directory.CreateDirectory(_root);
+        var (manifestPath, artifacts, artifactManifestPath) = await CreatePublicationPlanAsync();
+        var report = TestPathUtils.PathUnder(_root, $"{mode}-report");
+        var publication = TestPathUtils.PathUnder(_root, $"{mode}-prepared");
+        var aggregate = TestPathUtils.PathUnder(_root, "aggregate");
+        var startReceipt = TestPathUtils.PathUnder(_root, "uploaded-start", "publication-start-receipt.json");
+        var arguments = new List<string>
+        {
+            "verify-tailwind-evidence", "--repo-root", _root, "--manifest", manifestPath,
+            "--artifacts-input", artifacts, "--artifact-manifest", artifactManifestPath,
+            "--mode", mode, "--producer-subject", TestPathUtils.PathUnder(artifacts, "tailwind-proof-subject.json"),
+            "--producer-artifact-id", "123", "--expected-subject-sha256", new string('a', 64),
+            "--repository-id", "456", "--producer-run-id", "789", "--source-commit", new string('c', 40),
+            "--aggregate-input", aggregate, "--aggregate-artifact-id", "321",
+            "--expected-aggregate-sha256", new string('b', 64), "--publication-directory", publication,
+            "--report-directory", report
+        };
+        if (mode == "validate-publication-start")
+            arguments.AddRange(["--publication-start-receipt", startReceipt, "--publication-start-artifact-id", "654"]);
+
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        var exit = await Program.RunAsync(arguments.ToArray(), stdout, stderr, _root);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("Exact-source", stderr.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("succeeded", stdout.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(publication));
+    }
+
+    private async Task<(string ManifestPath, string ArtifactsPath, string ArtifactManifestPath)> CreatePublicationPlanAsync()
+    {
+        const string webProjectRelativePath = "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj";
+        const string projectRelativePath = "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj";
+        var webProjectPath = TestPathUtils.PathUnder(_root, "Web", "ForgeTrust.AppSurface.Web", "ForgeTrust.AppSurface.Web.csproj");
+        Directory.CreateDirectory(Path.GetDirectoryName(webProjectPath)!);
+        await File.WriteAllTextAsync(webProjectPath,
+            "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><PackageId>ForgeTrust.AppSurface.Web</PackageId><IsPackable>true</IsPackable></PropertyGroup></Project>");
+        await File.WriteAllTextAsync(TestPathUtils.PathUnder(_root, "Web", "ForgeTrust.AppSurface.Web", "README.md"), "# Web fixture\n");
+        var projectPath = TestPathUtils.PathUnder(_root, "Web", "ForgeTrust.AppSurface.Web.Tailwind", "ForgeTrust.AppSurface.Web.Tailwind.csproj");
+        Directory.CreateDirectory(Path.GetDirectoryName(projectPath)!);
+        await File.WriteAllTextAsync(projectPath,
+            "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><PackageId>ForgeTrust.AppSurface.Web.Tailwind</PackageId><IsPackable>true</IsPackable></PropertyGroup></Project>");
+        await File.WriteAllTextAsync(TestPathUtils.PathUnder(_root, "Web", "ForgeTrust.AppSurface.Web.Tailwind", "README.md"), "# Tailwind fixture\n");
+
+        var manifestPath = TestPathUtils.PathUnder(_root, "packages", "package-index.yml");
+        Directory.CreateDirectory(Path.GetDirectoryName(manifestPath)!);
+        await File.WriteAllTextAsync(manifestPath,
+            $$"""
+            packages:
+              - project: {{webProjectRelativePath}}
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                order: 1
+                use_when: Validate publication command dispatch.
+                includes: Web fixture package.
+                does_not_include: Other packages.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+              - project: {{projectRelativePath}}
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                order: 10
+                use_when: Validate publication command dispatch.
+                includes: Tailwind fixture package.
+                does_not_include: Other packages.
+                start_here_path: Web/ForgeTrust.AppSurface.Web.Tailwind/README.md
+            """);
+
+        var artifacts = TestPathUtils.PathUnder(_root, "candidate-artifacts");
+        Directory.CreateDirectory(artifacts);
+        var webArchive = TestPathUtils.PathUnder(artifacts, "ForgeTrust.AppSurface.Web.1.2.3-preview.798.nupkg");
+        await File.WriteAllTextAsync(webArchive, "test Web package bytes");
+        var archive = TestPathUtils.PathUnder(artifacts, "ForgeTrust.AppSurface.Web.Tailwind.1.2.3-preview.798.nupkg");
+        await File.WriteAllTextAsync(archive, "test package bytes");
+        var artifactManifest = TestPathUtils.PathUnder(_root, "candidate-artifact-manifest.json");
+        await new PackageArtifactManifestWriter().WriteAsync(
+            new PackageArtifactValidationReport("1.2.3-preview.798",
+            [
+                new PackageArtifactValidationReportEntry(
+                    "ForgeTrust.AppSurface.Web", webProjectRelativePath, PackagePublishDecision.Publish, [], webArchive),
+                new PackageArtifactValidationReportEntry(
+                    "ForgeTrust.AppSurface.Web.Tailwind", projectRelativePath, PackagePublishDecision.Publish, [], archive)
+            ]),
+            artifacts,
+            artifactManifest,
+            CancellationToken.None);
+        return (manifestPath, artifacts, artifactManifest);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
