@@ -52,8 +52,8 @@ public sealed class OriginalCandidatePublicationReplayTests
                 foreach (var entry in manifest.Entries)
                 {
                     File.Copy(
-                        Path.Combine(preparedDirectory, entry.ArtifactFileName),
-                        Path.Combine(publicationDirectory, entry.ArtifactFileName));
+                        TestPathUtils.PathUnder(preparedDirectory, entry.ArtifactFileName),
+                        TestPathUtils.PathUnder(publicationDirectory, entry.ArtifactFileName));
                 }
 
                 var evidence = originalIdentity with
