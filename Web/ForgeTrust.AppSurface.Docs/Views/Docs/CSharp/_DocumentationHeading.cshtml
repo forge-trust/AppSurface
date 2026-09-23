@@ -1,0 +1,13 @@
+@model string
+@{
+    var headingLevel = ViewData["CSharpDocumentationHeadingLevel"] as int? ?? 3;
+}
+
+@if (headingLevel == 4)
+{
+    <h4 class="doc-documentation-heading">@Model</h4>
+}
+else
+{
+    <h3 class="doc-documentation-heading">@Model</h3>
+}

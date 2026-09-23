@@ -1,0 +1,29 @@
+@using ForgeTrust.AppSurface.Docs.Models
+@model CSharpTypeDocument
+
+<section id="@Model.AnchorId" class="doc-type">
+    <header class="doc-type-header">
+        <span class="doc-kind">Type</span>
+        <h2>@Model.DisplayName</h2>
+        @if (!string.IsNullOrWhiteSpace(Model.SourceHref))
+        {
+            <a href="@Url.PathBaseAware(Model.SourceHref)" class="doc-symbol-source-link" aria-label="View source for @Model.DisplayName">Source</a>
+        }
+    </header>
+    @if (Model.Documentation is not null)
+    {
+        <div class="doc-body">
+            @await Html.PartialAsync("/Views/Docs/CSharp/_Documentation.cshtml", Model.Documentation)
+        </div>
+    }
+
+    @foreach (var methodGroup in Model.MethodGroups)
+    {
+        @await Html.PartialAsync("/Views/Docs/CSharp/_MethodGroup.cshtml", methodGroup)
+    }
+
+    @foreach (var property in Model.Properties)
+    {
+        @await Html.PartialAsync("/Views/Docs/CSharp/_Property.cshtml", property)
+    }
+</section>
