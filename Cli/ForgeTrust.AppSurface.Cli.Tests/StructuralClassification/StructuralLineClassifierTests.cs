@@ -14,6 +14,14 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 [Collection(ProgramEntryPointCollection.Name)]
 public sealed class StructuralLineClassifierTests
 {
+    private const string ValidSource = """
+        namespace Fixture;
+        public sealed class Example
+        {
+            public int Value { get; set; }
+        }
+        """;
+
     private static readonly IReadOnlyList<MetadataReference> PlatformReferences =
         ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")
             ?? throw new InvalidOperationException("The trusted platform assembly list is unavailable."))
@@ -108,7 +116,10 @@ public sealed class StructuralLineClassifierTests
     [InlineData("public int Value { get; set; } = 7;", false, "property-initializer")]
     [InlineData("public int Value => 7;", false, "accessor-expression-body")]
     [InlineData("public static int Value { get; set; }", false, "property-modifiers")]
+    [InlineData("public required int Value { get; set; }", false, "property-modifiers")]
+    [InlineData("public virtual int Value { get; set; }", false, "property-modifiers")]
     [InlineData("public int Value { private get; set; }", false, "accessor-modifiers")]
+    [InlineData("public int Value { get; protected init; }", false, "accessor-modifiers")]
     [InlineData("public int Value { get { return 7; } set; }", false, "accessor-body")]
     [InlineData("public int Value { get => 7; set; }", false, "accessor-expression-body")]
     [InlineData("public int Value { get; }", false, "unsupported-property-shape")]
@@ -119,7 +130,7 @@ public sealed class StructuralLineClassifierTests
     {
         var source = $$"""
             namespace Fixture;
-            public sealed class Example
+            public class Example
             {
                 {{declaration}}
             }
@@ -150,10 +161,128 @@ public sealed class StructuralLineClassifierTests
             """;
         var context = CreateContext(source);
 
-        var entry = ClassifySingle(context, LineOf(source, "public int Value") + 1);
+        var openingBrace = ClassifySingle(context, LineOf(source, "public int Value") + 1);
+        var closingBrace = ClassifySingle(context, LineOf(source, "set;") + 1);
+
+        Assert.Equal(StructuralLineDisposition.Rejected, openingBrace.Disposition);
+        Assert.Equal("location-unmatched", openingBrace.ReasonCode);
+        Assert.Equal(StructuralLineDisposition.Rejected, closingBrace.Disposition);
+        Assert.Equal("location-unmatched", closingBrace.ReasonCode);
+    }
+
+    [Fact]
+    public void Classify_AcceptsMultilineInitAndSameLinePropertyClosingBrace()
+    {
+        const string source = """
+            namespace Fixture;
+            public sealed class Example
+            {
+                public int Value
+                {
+                    get;
+                    init; }
+            }
+            """;
+        var context = CreateContext(source);
+
+        foreach (var line in new[] { LineOf(source, "public int Value"), LineOf(source, "get;"), LineOf(source, "init; }") })
+        {
+            var entry = ClassifySingle(context, line);
+            Assert.Equal(StructuralLineDisposition.Accepted, entry.Disposition);
+            Assert.Equal("structural-auto-property", entry.ReasonCode);
+        }
+    }
+
+    [Fact]
+    public void Classify_AcceptsSameLineSetAndPropertyClosingBrace()
+    {
+        const string source = """
+            namespace Fixture;
+            public sealed class Example
+            {
+                public int Value
+                {
+                    get;
+                    set; }
+            }
+            """;
+        var context = CreateContext(source);
+
+        var entry = ClassifySingle(context, LineOf(source, "set; }"));
+
+        Assert.Equal(StructuralLineDisposition.Accepted, entry.Disposition);
+        Assert.Equal("structural-auto-property", entry.ReasonCode);
+    }
+
+    [Theory]
+    [InlineData("public int Value { get; set; } public int Other = 7;")]
+    [InlineData("public int Value { get; set; } public int Other() => 7;")]
+    public void Classify_RejectsPropertyLineSharedWithAnotherMember(string members)
+    {
+        var source = $$"""
+            namespace Fixture;
+            public sealed class Example
+            {
+                {{members}}
+            }
+            """;
+        var context = CreateContext(source);
+
+        Assert.DoesNotContain(context.Compilation.GetDiagnostics(), diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        var entry = ClassifySingle(context, LineOf(source, "public int Value"));
 
         Assert.Equal(StructuralLineDisposition.Rejected, entry.Disposition);
         Assert.Equal("location-unmatched", entry.ReasonCode);
+    }
+
+    [Fact]
+    public void Classify_RejectsPropertyLineSharedWithContainingTypeAndBaseCall()
+    {
+        const string source = """
+            namespace Fixture;
+            public class Base(int value);
+            public sealed class Example(int value) : Base(value) { public int Value { get; set; } }
+            """;
+        var context = CreateContext(source);
+
+        Assert.DoesNotContain(context.Compilation.GetDiagnostics(), diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        var entry = ClassifySingle(context, LineOf(source, "public int Value"));
+
+        Assert.Equal(StructuralLineDisposition.Rejected, entry.Disposition);
+        Assert.Equal("location-unmatched", entry.ReasonCode);
+    }
+
+    [Fact]
+    public void Classify_RejectsAbstractIndexerAndRecordPositionalProperties()
+    {
+        const string abstractSource = """
+            namespace Fixture;
+            public abstract class Example
+            {
+                public abstract int Value { get; set; }
+            }
+            """;
+        const string indexerSource = """
+            namespace Fixture;
+            public sealed class Example
+            {
+                public int this[int index] { get; set; }
+            }
+            """;
+        const string recordSource = """
+            namespace Fixture;
+            public sealed record Example(int Value);
+            """;
+
+        Assert.Equal(
+            "property-modifiers",
+            ClassifySingle(CreateContext(abstractSource), LineOf(abstractSource, "public abstract int Value")).ReasonCode);
+        Assert.Equal(
+            "location-unmatched",
+            ClassifySingle(CreateContext(indexerSource), LineOf(indexerSource, "public int this")).ReasonCode);
+        Assert.Equal(
+            "location-unmatched",
+            ClassifySingle(CreateContext(recordSource), LineOf(recordSource, "record Example")).ReasonCode);
     }
 
     [Theory]
@@ -172,7 +301,15 @@ public sealed class StructuralLineClassifierTests
             """;
         var context = CreateContext(source);
 
-        var entry = ClassifySingle(context, LineOf(source, changedText));
+        var changedLine = changedText.Length == 0
+            ? LineOf(source, "public int Value") - 1
+            : LineOf(source, changedText);
+        if (changedText.Length == 0)
+        {
+            Assert.True(string.IsNullOrWhiteSpace(source.Split('\n')[changedLine - 1]));
+        }
+
+        var entry = ClassifySingle(context, changedLine);
 
         Assert.Equal(StructuralLineDisposition.Rejected, entry.Disposition);
         Assert.Equal("location-unmatched", entry.ReasonCode);
@@ -264,6 +401,10 @@ public sealed class StructuralLineClassifierTests
             [alternateTree],
             PlatformReferences,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var languageVersionDocument = context.Document with
+        {
+            ParseOptions = context.Document.ParseOptions.WithLanguageVersion(LanguageVersion.CSharp12),
+        };
 
         var treeMismatch = ClassifySingle(context, 1, compilation: wrongCompilation);
         var conditionalMismatch = ClassifySingle(
@@ -271,9 +412,14 @@ public sealed class StructuralLineClassifierTests
             1,
             new StructuralSourceManifest([alternateDocument]),
             alternateCompilation);
+        var parseOptionsMismatch = ClassifySingle(
+            context,
+            1,
+            new StructuralSourceManifest([languageVersionDocument]));
 
         Assert.Equal("compilation-mismatch", treeMismatch.ReasonCode);
         Assert.Equal("conditional-compilation-mismatch", conditionalMismatch.ReasonCode);
+        Assert.Equal("compilation-mismatch", parseOptionsMismatch.ReasonCode);
     }
 
     [Theory]
@@ -418,10 +564,9 @@ public sealed class StructuralLineClassifierTests
     [Fact]
     public void Classify_RechecksCachedSourceIdentityForEveryClassificationRun()
     {
-        const string source = "namespace Fixture; public sealed class Example { public int Value { get; set; } }";
-        var context = CreateContext(source);
+        var context = CreateContext(ValidSource);
         var classifier = new StructuralLineClassifier();
-        var analysis = CreateAnalysis(new PatchCoverageLine("src/Fixture.cs", 1, true, false, 0, 1));
+        var analysis = CreateAnalysis(new PatchCoverageLine("src/Fixture.cs", LineOf(ValidSource, "public int Value"), true, false, 0, 1));
 
         var beforeMutation = classifier.Classify(analysis, context.Compilation, context.Manifest);
         context.Document.Bytes[0] = (byte)'X';
@@ -434,10 +579,9 @@ public sealed class StructuralLineClassifierTests
     [Fact]
     public void Classify_NormalizesWindowsFixturePathsAndRecordsBoundEvidence()
     {
-        const string source = "namespace Fixture; public sealed class Example { public int Value { get; set; } }";
-        var context = CreateContext(source);
+        var context = CreateContext(ValidSource);
         var audit = new StructuralLineClassifier().Classify(
-            CreateAnalysis(new PatchCoverageLine("src\\Fixture.cs", 1, true, false, 0, 1)),
+            CreateAnalysis(new PatchCoverageLine("src\\Fixture.cs", LineOf(ValidSource, "public int Value"), true, false, 0, 1)),
             context.Compilation,
             context.Manifest);
 
@@ -455,8 +599,20 @@ public sealed class StructuralLineClassifierTests
     [Fact]
     public void Classify_OrdersEntriesAndSerializesTheAuditDeterministically()
     {
-        const string sourceA = "namespace Fixture; public sealed class A { public int Value { get; set; } }";
-        const string sourceB = "namespace Fixture; public sealed class B { public int Value { get; set; } }";
+        const string sourceA = """
+            namespace Fixture;
+            public sealed class A
+            {
+                public int Value { get; set; }
+            }
+            """;
+        const string sourceB = """
+            namespace Fixture;
+            public sealed class B
+            {
+                public int Value { get; set; }
+            }
+            """;
         var options = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
         var documentA = StructuralSourceDocument.Create("src/A.cs", Encoding.UTF8.GetBytes(sourceA), options);
         var documentB = StructuralSourceDocument.Create("src/B.cs", Encoding.UTF8.GetBytes(sourceB), options);
@@ -466,8 +622,8 @@ public sealed class StructuralLineClassifierTests
             PlatformReferences,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         var analysis = CreateAnalysis(
-            new PatchCoverageLine("src/B.cs", 1, true, true, null, null),
-            new PatchCoverageLine("src/A.cs", 1, true, false, 0, 1),
+            new PatchCoverageLine("src/B.cs", LineOf(sourceB, "public int Value"), true, true, null, null),
+            new PatchCoverageLine("src/A.cs", LineOf(sourceA, "public int Value"), true, false, 0, 1),
             new PatchCoverageLine("docs/Readme.md", 4, false, null, null, null));
 
         var audit = new StructuralLineClassifier().Classify(

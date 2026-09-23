@@ -334,6 +334,11 @@ internal sealed class StructuralLineClassifier
                 return Reject(line, normalizedPath, propertyShapeReason, source, propertySymbol);
             }
 
+            if (HasForeignTokenOnLine(evidence.Root, property, lineSpan))
+            {
+                return Reject(line, normalizedPath, "location-unmatched", source, propertySymbol);
+            }
+
             return Accept(line, normalizedPath, source, boundPropertySymbol);
         }
         catch (Exception exception)
@@ -353,6 +358,26 @@ internal sealed class StructuralLineClassifier
         return property.DescendantTokens(descendIntoTrivia: false)
             .Where(token => token.Span.OverlapsWith(lineSpan))
             .Any(token => !IsAccessorListDelimiter(property, token));
+    }
+
+    private static bool HasForeignTokenOnLine(
+        SyntaxNode root,
+        PropertyDeclarationSyntax property,
+        TextSpan lineSpan)
+    {
+        for (var token = root.FindToken(lineSpan.Start);
+            token.RawKind != 0 && token.SpanStart < lineSpan.End;
+            token = token.GetNextToken())
+        {
+            if (token.Span.OverlapsWith(lineSpan)
+                && !token.IsKind(SyntaxKind.EndOfFileToken)
+                && !property.Span.Contains(token.Span))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsAccessorListDelimiter(PropertyDeclarationSyntax property, SyntaxToken token)
@@ -550,7 +575,8 @@ internal sealed class StructuralLineClassifier
         {
             this.source = source;
             SourceText = source.SyntaxTree.GetText();
-            Properties = source.SyntaxTree.GetRoot()
+            Root = source.SyntaxTree.GetRoot();
+            Properties = Root
                 .DescendantNodes()
                 .OfType<PropertyDeclarationSyntax>()
                 .ToArray();
@@ -568,6 +594,8 @@ internal sealed class StructuralLineClassifier
         }
 
         internal SourceText SourceText { get; }
+
+        internal SyntaxNode Root { get; }
 
         internal IReadOnlyList<PropertyDeclarationSyntax> Properties { get; }
 
