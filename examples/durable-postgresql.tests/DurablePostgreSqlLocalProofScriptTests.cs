@@ -35,6 +35,9 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
         Assert.Contains("PASSWORD '$RETENTION_PASSWORD'", script, StringComparison.Ordinal);
         Assert.Contains("printf '%s\\n' \"$ROLE_SQL\" > \"$ROLE_SQL_FILE\"", script, StringComparison.Ordinal);
         Assert.Contains("docker exec -i", script, StringComparison.Ordinal);
+        Assert.Contains("PGPASSWORD=\"$POSTGRES_PASSWORD\" exec psql", script, StringComparison.Ordinal);
+        Assert.Contains("-h 127.0.0.1 -U postgres -d \"$1\"", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("pg_isready -U postgres -d \"$DATABASE_NAME\"", script, StringComparison.Ordinal);
         Assert.Contains("unset ROLE_SQL", script, StringComparison.Ordinal);
         Assert.DoesNotContain("-c \"$ROLE_SQL\"", script, StringComparison.Ordinal);
         Assert.Contains("APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS=420", script, StringComparison.Ordinal);
@@ -52,6 +55,132 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
         Assert.Contains("trap interrupt INT TERM", script, StringComparison.Ordinal);
         Assert.DoesNotContain("POSTGRES_HOST_AUTH_METHOD=trust", script, StringComparison.Ordinal);
         Assert.DoesNotContain("set -x", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Script_waits_for_the_target_database_after_server_readiness_is_reported()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "The local proof script is a Unix Bash entry point.");
+        }
+
+        var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var scriptPath = TestPathUtils.PathUnder(
+            repositoryRoot,
+            "examples",
+            "durable-postgresql",
+            "run-local-proof.sh");
+        var temporaryRoot = Directory.CreateTempSubdirectory("appsurface-durable-proof-readiness-").FullName;
+        var fakeBin = Directory.CreateDirectory(Path.Join(temporaryRoot, "bin")).FullName;
+        var readinessAttemptsFile = Path.Join(temporaryRoot, "readiness-attempts");
+        var socketReadinessFile = Path.Join(temporaryRoot, "socket-readiness");
+
+        try
+        {
+            WriteExecutable(
+                fakeBin,
+                "bash",
+                """
+                #!/bin/sh
+                case "${1:-}" in
+                  */examples/durable-postgresql/check-prerequisites.sh)
+                    exit 0
+                    ;;
+                esac
+                exec /bin/bash "$@"
+                """);
+            WriteExecutable(
+                fakeBin,
+                "docker",
+                """
+                #!/bin/sh
+                case "${1:-}" in
+                  info|run|rm)
+                    exit 0
+                    ;;
+                  exec)
+                    case "$*" in
+                      *"psql"*"-h 127.0.0.1"*"SELECT 1;"*)
+                        attempts=0
+                        if [ -f "$APPSURFACE_TEST_READINESS_ATTEMPTS_FILE" ]; then
+                          attempts=$(cat "$APPSURFACE_TEST_READINESS_ATTEMPTS_FILE")
+                        fi
+                        attempts=$((attempts + 1))
+                        printf '%s\n' "$attempts" > "$APPSURFACE_TEST_READINESS_ATTEMPTS_FILE"
+                        if [ "$attempts" -eq 1 ]; then
+                          exit 2
+                        fi
+                        ;;
+                      *"psql"*"SELECT 1;"*)
+                        printf '%s\n' socket > "$APPSURFACE_TEST_SOCKET_READINESS_FILE"
+                        exit 0
+                        ;;
+                      *gen_random_uuid*)
+                        printf '%s\n' '00000000-0000-0000-0000-000000000001'
+                        ;;
+                    esac
+                    exit 0
+                    ;;
+                esac
+                exit 0
+                """);
+            WriteExecutable(
+                fakeBin,
+                "dotnet",
+                """
+                #!/bin/sh
+                if [ "${1:-}" = "--version" ]; then
+                  printf '%s\n' '10.0.0'
+                fi
+                exit 0
+                """);
+
+            var startInfo = new ProcessStartInfo("/bin/bash")
+            {
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                WorkingDirectory = repositoryRoot,
+            };
+            startInfo.ArgumentList.Add(scriptPath);
+            startInfo.Environment["PATH"] = string.Join(
+                Path.PathSeparator,
+                fakeBin,
+                Environment.GetEnvironmentVariable("PATH") ?? string.Empty);
+            startInfo.Environment["APPSURFACE_DURABLE_LOCAL_PORT"] = "54349";
+            startInfo.Environment["APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS"] = "30";
+            startInfo.Environment["APPSURFACE_TEST_READINESS_ATTEMPTS_FILE"] = readinessAttemptsFile;
+            startInfo.Environment["APPSURFACE_TEST_SOCKET_READINESS_FILE"] = socketReadinessFile;
+
+            using var process = Process.Start(startInfo)!;
+            try
+            {
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(8));
+            }
+            catch
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync();
+                }
+
+                throw;
+            }
+            var standardError = await process.StandardError.ReadToEndAsync();
+            var standardOutput = await process.StandardOutput.ReadToEndAsync();
+
+            Assert.True(process.ExitCode == 0, standardError);
+            Assert.Equal("2\n", await File.ReadAllTextAsync(readinessAttemptsFile));
+            Assert.False(File.Exists(socketReadinessFile));
+            Assert.Contains("[ok] local operational-assessment proof completed", standardOutput, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(temporaryRoot, recursive: true);
+        }
     }
 
     [Fact]

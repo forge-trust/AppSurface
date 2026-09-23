@@ -345,7 +345,10 @@ internal sealed class ConfigCompositionExecutor(IEnvironmentConfigProvider envir
                 result = registration.Provider.Resolve(slot.Reference!, context);
                 if (!string.Equals(result.ProviderId, registration.Id, StringComparison.Ordinal)) throw new InvalidOperationException();
             }
-            catch { result = ConfigSecretProviderResolution.ProviderFailed(registration.Id); }
+            catch (Exception exception) when (!IsFatalProviderException(exception))
+            {
+                result = ConfigSecretProviderResolution.ProviderFailed(registration.Id);
+            }
             observations.Add(new(registration.Id, result.Status, result.Retryable));
             if (slot.ProviderConstraint is null && budget.Remaining <= TimeSpan.Zero)
                 return Failed("secret-providerless-resolution-budget-exceeded", retryable: true);
@@ -373,6 +376,10 @@ internal sealed class ConfigCompositionExecutor(IEnvironmentConfigProvider envir
         (object?, string?, ConfigCompositionFailure) Failed(string code, string? provider = null, bool retryable = false) =>
             (null, null, new(slot.Path.Canonical, code, provider, retryable, slot.Source));
     }
+
+    /// <summary>Identifies process-level failures that must escape the provider redaction boundary.</summary>
+    private static bool IsFatalProviderException(Exception exception) =>
+        exception is OutOfMemoryException or StackOverflowException or AccessViolationException;
 
     private bool TryEnvironmentScalar(string environmentName, ConfigLogicalPath path, Type type,
         List<ConfigAuditDiagnostic> diagnostics, out object? value, out string? candidateName)

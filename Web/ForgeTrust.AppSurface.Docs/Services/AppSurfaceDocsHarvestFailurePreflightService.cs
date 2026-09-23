@@ -8,29 +8,33 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// </summary>
 /// <remarks>
 /// The service is always registered by <c>AddAppSurfaceDocs()</c>. By default it starts the same memoized harvest used by
-/// docs requests in the background so the first reader does not pay the full cold-start cost. Strict mode reads
-/// <see cref="DocAggregator.GetHarvestHealthAsync(CancellationToken)"/> and fails startup only when the aggregate
-/// snapshot is failed.
+/// docs requests through their shared <see cref="AppSurfaceDocsHarvestCoordinator"/>. Blocking and strict startup
+/// await that same task, so completed warmup is immediately visible to requests even with a zero request-wait budget.
+/// Strict mode fails startup only when the aggregate snapshot is failed.
 /// </remarks>
 internal sealed class AppSurfaceDocsHarvestFailurePreflightService : IHostedService
 {
     private readonly AppSurfaceDocsOptions _options;
     private readonly DocAggregator _aggregator;
+    private readonly AppSurfaceDocsHarvestCoordinator? _coordinator;
     private readonly ILogger<AppSurfaceDocsHarvestFailurePreflightService> _logger;
 
     /// <summary>
     /// Initializes a new instance of the strict harvest preflight service.
     /// </summary>
     /// <param name="options">The normalized AppSurface Docs options that contain the strict harvest policy.</param>
-    /// <param name="aggregator">The docs aggregator used to read cached harvest health.</param>
+    /// <param name="aggregator">The docs aggregator used when the optional request coordinator is absent.</param>
     /// <param name="logger">The logger that records strict startup failures for operators.</param>
+    /// <param name="coordinator">The shared startup and request coordinator, when installed by the host.</param>
     public AppSurfaceDocsHarvestFailurePreflightService(
         AppSurfaceDocsOptions options,
         DocAggregator aggregator,
-        ILogger<AppSurfaceDocsHarvestFailurePreflightService> logger)
+        ILogger<AppSurfaceDocsHarvestFailurePreflightService> logger,
+        AppSurfaceDocsHarvestCoordinator? coordinator = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _aggregator = aggregator ?? throw new ArgumentNullException(nameof(aggregator));
+        _coordinator = coordinator;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -65,7 +69,7 @@ internal sealed class AppSurfaceDocsHarvestFailurePreflightService : IHostedServ
                 {
                     try
                     {
-                        await _aggregator.GetHarvestHealthAsync(CancellationToken.None);
+                        await EnsureHarvestStarted();
                     }
                     catch (Exception ex) when (!IsFatalException(ex))
                     {
@@ -76,7 +80,7 @@ internal sealed class AppSurfaceDocsHarvestFailurePreflightService : IHostedServ
             return;
         }
 
-        var health = await _aggregator.GetHarvestHealthAsync(cancellationToken);
+        var health = await EnsureHarvestStarted().WaitAsync(cancellationToken);
         if (!harvestOptions.FailOnFailure || health.Status != DocHarvestHealthStatus.Failed)
         {
             return;
@@ -100,6 +104,10 @@ internal sealed class AppSurfaceDocsHarvestFailurePreflightService : IHostedServ
     {
         return Task.CompletedTask;
     }
+
+    /// <summary>Shares request readiness when available, preserving hosts that remove the optional coordinator.</summary>
+    private Task<DocHarvestHealthSnapshot> EnsureHarvestStarted() =>
+        _coordinator?.EnsureStarted() ?? _aggregator.GetHarvestHealthAsync();
 
     private static bool IsFatalException(Exception exception)
     {

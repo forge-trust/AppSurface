@@ -155,6 +155,56 @@ public sealed class ConfigCompositionEngineTests
             Assert.Single(Assert.Single(result.Slots).Providers).Status);
     }
 
+    [Fact]
+    public void Execute_CustomProviderExceptionIsAValueSafeFailure()
+    {
+        using var files = new FileFixture(OneDeclaration);
+        var alpha = new SecretProvider("alpha")
+        {
+            Resolve = (_, _) => throw new CustomProviderException("custom-provider-secret-sentinel")
+        };
+
+        var result = CreateEngine(bases: [files.Provider], secrets: [alpha])
+            .Execute(EnvironmentName, "Service", typeof(OneSecret));
+
+        var failure = Failed(result, "secret-provider-failed");
+        Assert.Equal("alpha", failure.ProviderId);
+        Assert.DoesNotContain("custom-provider-secret-sentinel", JsonSerializer.Serialize(result.Failures));
+        Assert.Equal(ConfigSecretProviderResolutionStatus.ProviderFailed,
+            Assert.Single(Assert.Single(result.Slots).Providers).Status);
+    }
+
+    [Theory]
+    [InlineData(FatalProviderExceptionKind.OutOfMemory)]
+    [InlineData(FatalProviderExceptionKind.StackOverflow)]
+    [InlineData(FatalProviderExceptionKind.AccessViolation)]
+    public void Execute_FatalProviderExceptionsEscapeResolutionBoundary(FatalProviderExceptionKind kind)
+    {
+        using var files = new FileFixture(OneDeclaration);
+        var alpha = new SecretProvider("alpha")
+        {
+            Resolve = (_, _) => throw CreateFatalProviderException(kind)
+        };
+
+        Action execute = () => CreateEngine(bases: [files.Provider], secrets: [alpha])
+            .Execute(EnvironmentName, "Service", typeof(OneSecret));
+
+        switch (kind)
+        {
+            case FatalProviderExceptionKind.OutOfMemory:
+                Assert.Throws<OutOfMemoryException>(execute);
+                break;
+            case FatalProviderExceptionKind.StackOverflow:
+                Assert.Throws<StackOverflowException>(execute);
+                break;
+            case FatalProviderExceptionKind.AccessViolation:
+                Assert.Throws<AccessViolationException>(execute);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(kind), kind, null);
+        }
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData(" ")]
@@ -1280,6 +1330,24 @@ public sealed class ConfigCompositionEngineTests
             return Resolve?.Invoke(reference, context) ?? Success(Id, reference.Key);
         }
     }
+
+    private sealed class CustomProviderException(string message) : Exception(message);
+
+    public enum FatalProviderExceptionKind
+    {
+        OutOfMemory,
+        StackOverflow,
+        AccessViolation
+    }
+
+    private static Exception CreateFatalProviderException(FatalProviderExceptionKind kind) =>
+        kind switch
+        {
+            FatalProviderExceptionKind.OutOfMemory => new OutOfMemoryException("fatal provider failure"),
+            FatalProviderExceptionKind.StackOverflow => new StackOverflowException("fatal provider failure"),
+            FatalProviderExceptionKind.AccessViolation => new AccessViolationException("fatal provider failure"),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null)
+        };
 
     private sealed class RawProvider(string body, string name = "raw-base", int priority = 5, bool sensitive = true)
         : IConfigProvider, IConfigCompositionValueProvider

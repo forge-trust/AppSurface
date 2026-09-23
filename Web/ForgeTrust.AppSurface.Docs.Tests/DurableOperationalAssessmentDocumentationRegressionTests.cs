@@ -105,6 +105,7 @@ public sealed class DurableOperationalAssessmentDocumentationRegressionTests
                         {
                             ["AppSurfaceDocs:Source:RepositoryRoot"] = sourceRoot,
                             ["AppSurfaceDocs:Harvest:StartupMode"] = nameof(AppSurfaceDocsHarvestStartupMode.Blocking),
+                            ["AppSurfaceDocs:Harvest:InitialRequestWaitBudgetMilliseconds"] = "0",
                         }));
             builder.ConfigureWebHost(webHost => webHost.UseUrls("http://127.0.0.1:0"));
 

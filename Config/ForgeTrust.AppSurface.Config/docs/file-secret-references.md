@@ -192,6 +192,12 @@ classifications and retryability, never arbitrary provider exception text. Sourc
 `remote`, `local`, or `custom` kind, and an optional explicitly approved opaque correlation token. Keys and versions are
 excluded from default reference formatting and serialization. Providers must not log them or their payloads.
 
+If `Resolve` throws an ordinary non-fatal exception, the composition engine converts it to `ProviderFailed` and retains only
+the safe provider observation and framework-owned failure details; it does not retain or render the exception message, stack,
+or arbitrary provider text. `OutOfMemoryException`, `StackOverflowException`, and `AccessViolationException` are treated as
+process-fatal and escape this redaction boundary. Providers should return the documented result factories for expected
+operational outcomes and reserve exceptions for failures that the host should handle at its outer boundary.
+
 Whole-root providers also implement `IConfigCompositionValueProvider.ResolveRaw`, returning the legacy whole-root JSON
 and truthful sensitivity through `ConfigCompositionValueResolution`. A typed-only provider must implement the local
 `IConfigProviderClaimInspector` and return `Unclaimed` for the requested root, or the opted-in root fails before reads.
