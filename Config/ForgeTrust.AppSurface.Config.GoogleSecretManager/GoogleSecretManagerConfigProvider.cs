@@ -383,7 +383,7 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
         var cache = useChildCache ? _childCache : _cache;
         if (_options.CacheTtl is { } cacheTtl && cache.TryGetValue(cacheKey, out var cached))
         {
-            if (_timeProvider.GetUtcNow() - cached.CachedAt <= cacheTtl)
+            if (_timeProvider.GetElapsedTime(cached.CachedAtTimestamp) <= cacheTtl)
             {
                 return PayloadResult.Found(cached.Payload);
             }
@@ -396,7 +396,7 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
             var payload = _client.AccessSecretVersion(secretReference.ResourceName, timeout).Data;
             if (_options.CacheTtl != null)
             {
-                cache[cacheKey] = new CachedSecret(payload, _timeProvider.GetUtcNow());
+                cache[cacheKey] = new CachedSecret(payload, _timeProvider.GetTimestamp());
             }
 
             return PayloadResult.Found(payload);
@@ -589,7 +589,7 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
         string.Join("\0", options.ProjectId, options.DefaultVersion, options.AllowLatestVersion,
             options.LookupTimeout, options.CacheTtl, options.FailClosedOnProviderFailure);
 
-    private sealed record CachedSecret(byte[] Payload, DateTimeOffset CachedAt);
+    private sealed record CachedSecret(byte[] Payload, long CachedAtTimestamp);
 
     private sealed record PayloadResult(
         GoogleSecretManagerResultStatus Status,

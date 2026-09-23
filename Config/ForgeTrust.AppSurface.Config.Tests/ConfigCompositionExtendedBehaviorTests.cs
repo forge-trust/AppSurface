@@ -28,10 +28,37 @@ public sealed class ConfigCompositionExtendedBehaviorTests
         Assert.Equal(922337203685477000L, ExecuteScalar<long>("922337203685477000").Token.Value);
     }
 
+    [Fact]
+    public void Execute_UnquotedDateTimeAndUriTextBindFromProviderAndEnvironment()
+    {
+        const string date = "2026-09-15T12:34:56+00:00";
+        const string uri = "https://secrets.example.test/api";
+        Assert.Equal(DateTimeOffset.Parse(date), ExecuteScalar<DateTimeOffset>(date).Token.Value);
+        Assert.Equal(new Uri(uri), ExecuteScalar<Uri>(uri).Token.Value);
+
+        using var files = new FileFixture("{\"Service\":{\"Token\":{\"key\":\"opaque-reference\"}}}");
+        var missingProvider = new RecordingSecretProvider("test-provider", "ignored")
+        {
+            Outcome = ConfigSecretProviderResolution.Missing("test-provider")
+        };
+        var dateEnvironment = new TestEnvironmentProvider(new() { ["SERVICE__TOKEN"] = date });
+        var uriEnvironment = new TestEnvironmentProvider(new() { ["SERVICE__TOKEN"] = uri });
+
+        var dateResult = CreateEngine(files.Provider, [missingProvider], dateEnvironment)
+            .Execute(EnvironmentName, "Service", typeof(ScalarOptions<DateTimeOffset>));
+        var uriResult = CreateEngine(files.Provider, [missingProvider], uriEnvironment)
+            .Execute(EnvironmentName, "Service", typeof(ScalarOptions<Uri>));
+
+        Assert.Equal(DateTimeOffset.Parse(date), Assert.IsType<ScalarOptions<DateTimeOffset>>(dateResult.Value).Token.Value);
+        Assert.Equal(new Uri(uri), Assert.IsType<ScalarOptions<Uri>>(uriResult.Value).Token.Value);
+        Assert.Equal(nameof(EnvironmentConfigProvider), Assert.Single(dateResult.Slots).ResolvedProvider);
+        Assert.Equal(nameof(EnvironmentConfigProvider), Assert.Single(uriResult.Slots).ResolvedProvider);
+    }
+
     [Theory]
     [InlineData("guid", "not-a-guid")]
     [InlineData("date-time-offset", "not-a-date")]
-    [InlineData("uri", "not-a-uri")]
+    [InlineData("uri", "http://[")]
     [InlineData("enum", "not-an-enum")]
     [InlineData("int", "not-an-integer")]
     [InlineData("long", "not-a-long")]

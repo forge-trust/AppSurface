@@ -121,7 +121,10 @@ internal sealed class ConfigCompositionPlanCompiler
                         || inspector.InspectClaim(environment, key) != ConfigProviderClaim.Unclaimed)
                         failures.Add(new(root.Canonical, "config-composition-provider-unsupported"));
                 }
-                catch { failures.Add(new(root.Canonical, "config-composition-provider-unsupported")); }
+                catch (Exception ex) when (!IsFatalInspectionException(ex))
+                {
+                    failures.Add(new(root.Canonical, "config-composition-provider-unsupported"));
+                }
             }
         }
         // Preserve every declaration event. Invalid lower declarations cannot disappear behind later files.
@@ -250,6 +253,12 @@ internal sealed class ConfigCompositionPlanCompiler
             }
         }
     }
+
+    /// <summary>Identifies process-level failures that claim inspection must not turn into plan diagnostics.</summary>
+    private static bool IsFatalInspectionException(Exception exception) =>
+        exception is OutOfMemoryException or StackOverflowException or AccessViolationException
+            or AppDomainUnloadedException or BadImageFormatException or CannotUnloadAppDomainException
+            or InvalidProgramException or ThreadAbortException;
 
     /// <summary>Appends serialized member segments to the requested root.</summary>
     internal static ConfigLogicalPath Join(ConfigLogicalPath root, IReadOnlyList<string> members)

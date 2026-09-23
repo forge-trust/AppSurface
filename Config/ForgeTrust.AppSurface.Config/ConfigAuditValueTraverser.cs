@@ -570,7 +570,9 @@ internal sealed class ConfigAuditValueTraverser
                 entries.Add(new ConfigAuditEntry
                 {
                     Key = childPath.DisplayPath,
-                    State = ConfigAuditEntryState.Invalid,
+                    State = reportContext?.WasTruncated != true && nested.Diagnostics.Count == 0 && nested.Children.Count > 0
+                        && nested.Children.All(child => child.State == ConfigAuditEntryState.Missing)
+                        ? ConfigAuditEntryState.Missing : ConfigAuditEntryState.Invalid,
                     Children = nested.Children,
                     Diagnostics = nested.Diagnostics
                 });

@@ -28,6 +28,9 @@ public sealed class FileSecretReferencesOptions
 /// <summary>Registers the real AppSurface Config and Google modules for the network-free walkthrough.</summary>
 public sealed class FileSecretReferencesModule : IAppSurfaceHostModule
 {
+    /// <summary>Registers the Google adapter with a finite timeout and an in-process demo client.</summary>
+    /// <param name="context">The startup context supplied by the host.</param>
+    /// <param name="services">The service collection receiving the demo client and adapter options.</param>
     public void ConfigureServices(StartupContext context, IServiceCollection services)
     {
         services.ConfigureAppSurfaceGoogleSecretManager(options =>
@@ -40,16 +43,28 @@ public sealed class FileSecretReferencesModule : IAppSurfaceHostModule
         services.UseAppSurfaceGoogleSecretManagerClient(demoClient);
     }
 
+    /// <summary>Adds the Config and Google modules required by the file-declared secret walkthrough.</summary>
+    /// <param name="builder">The host module dependency builder.</param>
     public void RegisterDependentModules(ModuleDependencyBuilder builder)
     {
         builder.AddModule<AppSurfaceConfigModule>();
         builder.AddModule<AppSurfaceGoogleSecretManagerModule>();
     }
 
+    /// <summary>Leaves host setup to the dependent modules before service registration.</summary>
+    /// <param name="context">The startup context supplied by the host.</param>
+    /// <param name="builder">The host builder; this example does not modify it.</param>
     public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder) { }
 
+    /// <summary>Leaves host setup to the dependent modules after service registration.</summary>
+    /// <param name="context">The startup context supplied by the host.</param>
+    /// <param name="builder">The host builder; this example does not modify it.</param>
     public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder) { }
 
+    /// <summary>Recognizes the walkthrough's intentional missing-secret failure mode.</summary>
+    /// <param name="args">The sample command arguments; a failure mode is requested with <c>failure</c>.</param>
+    /// <param name="exception">The composition failure raised during startup.</param>
+    /// <returns><see langword="true"/> only for a requested missing-secret example.</returns>
     public static bool IsExpectedFailure(string[] args, ConfigurationCompositionException exception) =>
         args.Any(argument => string.Equals(argument, "failure", StringComparison.OrdinalIgnoreCase))
         && exception.Failures.Any(failure => failure.Code == "secret-not-found");
@@ -58,6 +73,9 @@ public sealed class FileSecretReferencesModule : IAppSurfaceHostModule
 /// <summary>Uses the standard AppSurface host builder without command or hosted-service behavior.</summary>
 public sealed class FileSecretReferencesStartup : AppSurfaceStartup<FileSecretReferencesModule>
 {
+    /// <summary>Uses the dependencies already registered by <see cref="FileSecretReferencesModule"/>.</summary>
+    /// <param name="context">The startup context supplied by the host.</param>
+    /// <param name="services">The already configured service collection.</param>
     protected override void ConfigureServicesForAppType(StartupContext context, IServiceCollection services)
     {
     }

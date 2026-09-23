@@ -89,7 +89,8 @@ ordinary when their destination is not `Secret<T>`.
 `Secret<T>` supports the scalar types handled by [`ConfigValueConverter`](../ConfigValueConverter.cs), including strings,
 booleans, numeric types, enums, GUIDs, dates/times, time spans, and URIs. Arrays, dictionaries, collections, object payloads,
 and nested `Secret<Secret<T>>` are unsupported. A provider returns text; scalar conversion occurs only after one provider
-has uniquely succeeded. Empty strings count as present when the destination accepts them. Null is absence, not a value.
+has uniquely succeeded. Provider and environment date/time, time-span, and URI text may be unquoted; JSON-quoted text for
+those types remains accepted. Empty strings count as present when the destination accepts them. Null is absence, not a value.
 
 | Enabled | HasValue | Meaning | Value access |
 | --- | --- | --- | --- |
@@ -159,8 +160,10 @@ unknown registrations, and other plan errors need a plan correction or a complet
 | `MaxSecretDestinationsPerRoot` | 256 | Scalar secret slots in one root. |
 
 Configure these through `services.Configure<AppSurfaceConfigOptions>(...)` in the host module. Rebuild the host to change
-a captured plan. Providers cap native synchronous timeouts to `ConfigSecretResolutionContext.Remaining`. The deadline
-cannot interrupt a non-cooperative implementation, but the engine rejects a late success and does not start another
+a captured plan. Providers cap native synchronous timeouts to `ConfigSecretResolutionContext.Remaining`. Explicitly
+constrained providers receive an effectively unbounded `TimeSpan.MaxValue` budget, so providers must still set a finite
+native timeout of their own and use the lesser of that timeout and `Remaining`. The deadline cannot interrupt a
+non-cooperative implementation, but the engine rejects a late success and does not start another
 provider after expiry. Synchronous providers must not block on asynchronous tasks. Explicitly constrain the provider when
 ownership is known; providerless resolution pays the cost of establishing uniqueness.
 

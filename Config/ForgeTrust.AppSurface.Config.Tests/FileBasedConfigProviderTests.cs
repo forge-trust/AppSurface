@@ -694,6 +694,55 @@ public class FileBasedConfigProviderTests
         }
     }
 
+    [Theory]
+    [InlineData("utf16-le", false)]
+    [InlineData("utf16-le", true)]
+    [InlineData("utf16-be", false)]
+    [InlineData("utf16-be", true)]
+    [InlineData("utf32-le", false)]
+    [InlineData("utf32-le", true)]
+    [InlineData("utf32-be", false)]
+    [InlineData("utf32-be", true)]
+    public void Resolve_UsesDecodedTextForDuplicateDetection(string encodingName, bool duplicate)
+    {
+        var tempDir = CreateTempDirectoryPath();
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var json = duplicate
+                ? """{"Feature":{"Enabled":true},"feature":{"Enabled":false}}"""
+                : """{"Feature":{"Enabled":true}}""";
+            var encoding = encodingName switch
+            {
+                "utf16-le" => Encoding.Unicode,
+                "utf16-be" => Encoding.BigEndianUnicode,
+                "utf32-le" => Encoding.UTF32,
+                "utf32-be" => new UTF32Encoding(bigEndian: true, byteOrderMark: true),
+                _ => throw new ArgumentOutOfRangeException(nameof(encodingName))
+            };
+            File.WriteAllText(Path.Join(tempDir, "appsettings.json"), json, encoding);
+
+            var provider = CreateProvider(tempDir);
+
+            if (duplicate)
+            {
+                Assert.Empty(provider.Snapshot.Layers);
+                Assert.Equal("config-file-duplicate-member",
+                    Assert.IsType<ConfigFileLoadFailure>(Assert.Single(provider.Snapshot.LoadEvents)).Code);
+                Assert.Null(provider.GetValue<bool?>(Environments.Production, "Feature.Enabled"));
+            }
+            else
+            {
+                Assert.Single(provider.Snapshot.Layers);
+                Assert.True(provider.GetValue<bool>(Environments.Production, "Feature.Enabled"));
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
     [Fact]
     public void Resolve_TreatsDottedJsonPropertyNamesAsUnsupportedPaths()
     {

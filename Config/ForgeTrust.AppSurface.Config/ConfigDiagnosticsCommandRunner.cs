@@ -16,8 +16,8 @@ namespace ForgeTrust.AppSurface.Config;
 /// command-level environment override, does not enumerate raw unknown environment variables, and cannot rescue apps that
 /// fail before the host and command service can run. Effective audits of roots containing <see cref="Secret{T}"/>
 /// execute the shared composition engine and can therefore perform the same file, network, IAM, provider, and latency-
-/// affecting reads as runtime composition; callers requiring zero I/O should use a separately named compile-only
-/// preflight.
+/// affecting reads as runtime composition. No public compile-only preflight is exposed; callers requiring zero provider
+/// I/O should not run effective diagnostics.
 /// </remarks>
 public sealed class ConfigDiagnosticsCommandRunner
 {

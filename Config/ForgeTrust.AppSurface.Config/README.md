@@ -198,8 +198,10 @@ Source: FileBasedConfigProvider appsettings.Staging.json :: Legacy.Unlocated
 editor display cells. A property after `é`, emoji, or other non-ASCII text can have a byte column larger than the
 column shown by an editor.
 
-`Location` can be `null` even for a file source. AppSurface omits coordinates when it cannot prove that the coordinate
-would point at the same value the existing JSON parse and merge produced. Common causes include ambiguous
+`Location` can be `null` even for a file source. BOM-marked UTF-16 and UTF-32 JSON files are decoded and checked for
+case-insensitive duplicate members, but source coordinates are available only for UTF-8 files. AppSurface omits
+coordinates when it cannot prove that the coordinate would point at the same value the existing JSON parse and merge
+produced. Common causes include ambiguous
 case-insensitive path collisions, unsupported dotted property paths, parser mismatch, collection element descendants,
 or source metadata from a provider that is not file-backed. No location is better than a misleading location.
 

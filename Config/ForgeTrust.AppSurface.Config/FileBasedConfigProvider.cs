@@ -421,7 +421,7 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigCompositionValueP
                     continue;
                 }
 
-                if (FindDuplicateMember(bytes) != null)
+                if (FindDuplicateMember(Encoding.UTF8.GetBytes(text)) != null)
                 {
                     loadEvents.Add(new ConfigFileLoadFailure("config-file-duplicate-member", environment, displayFileName, eventOrder, ConfigFileLoadFailureClassification.Parse));
                     diagnostics.Add(new ConfigFileProviderDiagnostic(environment, new ConfigAuditDiagnostic

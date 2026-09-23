@@ -172,7 +172,8 @@ services.ConfigureAppSurfaceGoogleSecretManager(options =>
 });
 ```
 
-Only successful payload reads are cached. Failures are not cached, and the provider does not run a background refresh.
+Only successful payload reads are cached. The TTL uses elapsed monotonic time, so wall-clock corrections do not extend
+or shorten a cached payload's lifetime. Failures are not cached, and the provider does not run a background refresh.
 
 ## Testing
 

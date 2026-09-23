@@ -369,7 +369,7 @@ internal sealed class ConfigCompositionExecutor(IEnvironmentConfigProvider envir
         }
         if (successes > 1) return Failed("secret-provider-ambiguous");
         if (success is null) return Failed(missing ? "secret-not-found" : "secret-reference-unsupported");
-        if (!ConfigValueConverter.TryConvert(success.ReadSensitiveValue()!, slot.Destination.InnerType, out var value) || value is null)
+        if (!TryConvertScalarText(success.ReadSensitiveValue()!, slot.Destination.InnerType, out var value))
             return Failed("secret-value-conversion-failed", success.ProviderId);
         return (value, success.ProviderId, null);
 
@@ -388,7 +388,7 @@ internal sealed class ConfigCompositionExecutor(IEnvironmentConfigProvider envir
         {
             var raw = environment.GetEnvironmentVariable(candidate);
             if (raw is null) continue;
-            if (ConfigValueConverter.TryConvert(raw, type, out value) && value is not null)
+            if (TryConvertScalarText(raw, type, out value))
             { candidateName = candidate; return true; }
             diagnostics.Add(ConversionDiagnostic(path.Canonical, candidate));
         }
@@ -402,11 +402,23 @@ internal sealed class ConfigCompositionExecutor(IEnvironmentConfigProvider envir
         value = null;
         if (node is not JsonValue scalar) return false;
         var text = scalar.TryGetValue<string>(out var s) ? s : scalar.ToJsonString();
-        // Date/URI/time types use JSON string input in the existing converter; ordinary strings stay unquoted.
-        if (type != typeof(string) && !type.IsPrimitive && !type.IsEnum && type != typeof(decimal) && type != typeof(Guid)
-            && scalar.TryGetValue<string>(out _) && Nullable.GetUnderlyingType(type) is null)
-            text = scalar.ToJsonString();
-        return ConfigValueConverter.TryConvert(text, type, out value) && value is not null;
+        return TryConvertScalarText(text, type, out value);
+    }
+
+    /// <summary>Converts provider, environment, and file scalar text without exposing failed payloads.</summary>
+    private static bool TryConvertScalarText(string raw, Type type, out object? value)
+    {
+        if (ConfigValueConverter.TryConvert(raw, type, out value) && value is not null) return true;
+
+        // The shared converter accepts JSON string literals for date/time and URI types. Provider and environment
+        // text is normally unquoted; file scalar text is decoded before it reaches this method.
+        var effectiveType = Nullable.GetUnderlyingType(type) ?? type;
+        if (effectiveType == typeof(DateTime) || effectiveType == typeof(DateTimeOffset)
+            || effectiveType == typeof(TimeSpan) || effectiveType == typeof(Uri))
+            return ConfigValueConverter.TryConvert(JsonSerializer.Serialize(raw), type, out value) && value is not null;
+
+        value = null;
+        return false;
     }
 
     private ConfigAuditSourceRecord EnvironmentSource(string candidate, string path) => new()

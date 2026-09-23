@@ -195,6 +195,34 @@ public sealed class GoogleSecretManagerCompositionRegressionTests
     }
 
     [Theory]
+    [InlineData(false, -10)]
+    [InlineData(false, 10)]
+    [InlineData(true, -10)]
+    [InlineData(true, 10)]
+    public void Cache_WallClockCorrectionDoesNotChangeLiveEntryLifetime(bool childCache, int correctionMinutes)
+    {
+        var options = OptionsWithDefaults();
+        options.CacheTtl = TimeSpan.FromMinutes(1);
+        options.MapSecret("Service:ApiKey", "api-key", "4");
+        var time = new ManualTimeProvider();
+        var client = new TestClient();
+        var provider = CreateProvider(options, client, time);
+        var reference = Reference("api-key", "4");
+
+        string? Read() => childCache
+            ? Resolve(provider, reference, time).ReadSensitiveValue()
+            : provider.GetValue<string>("Production", reference.LogicalPath);
+
+        Assert.Equal("payload-1", Read());
+        time.Advance(TimeSpan.FromSeconds(30));
+        time.AdjustUtc(TimeSpan.FromMinutes(correctionMinutes));
+        Assert.Equal("payload-1", Read());
+        time.Advance(TimeSpan.FromSeconds(31));
+        Assert.Equal("payload-2", Read());
+        Assert.Equal(2, client.Calls.Count);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void Options_AreCapturedIncludingCollectionsAndAllAccessSettings(bool cached)

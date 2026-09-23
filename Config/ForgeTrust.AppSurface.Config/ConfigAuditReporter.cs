@@ -26,7 +26,8 @@ public interface IConfigAuditReporter
     /// <remarks>
     /// For roots containing <see cref="Secret{T}"/>, this is an effective audit: it executes the shared composition
     /// engine and therefore may perform the same file, network, IAM, provider, and latency-affecting reads as runtime
-    /// composition. Use a separately named compile-only preflight when those side effects are unacceptable.
+    /// composition. No public compile-only preflight is exposed; callers requiring zero provider I/O should not use
+    /// effective audit.
     /// </remarks>
     ConfigAuditReport GetReport(string environment);
 

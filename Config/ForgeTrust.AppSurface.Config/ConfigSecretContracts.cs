@@ -78,7 +78,10 @@ public sealed class ConfigSecretResolutionContext
         _start = start ?? time.GetTimestamp();
     }
 
-    /// <summary>Gets the nonnegative time remaining; cap native call timeouts to this value.</summary>
+    /// <summary>
+    /// Gets the nonnegative time remaining. Explicitly constrained providers receive an effectively unbounded
+    /// <see cref="TimeSpan.MaxValue"/> budget. Use the lesser of a finite provider timeout and this value for native calls.
+    /// </summary>
     public TimeSpan Remaining
     {
         get

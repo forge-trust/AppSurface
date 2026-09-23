@@ -283,6 +283,7 @@ public sealed class ConfigCompositionAuditTests
         Assert.Null(root.DisplayValue);
         var channel = Assert.Single(root.Children);
         Assert.Equal("Service.channel", channel.Key);
+        Assert.Equal(ConfigAuditEntryState.Missing, channel.State);
         var access = Assert.Single(channel.Children);
         Assert.Equal("Service.channel.access", access.Key);
         Assert.Equal(ConfigAuditEntryState.Missing, access.State);
@@ -292,6 +293,64 @@ public sealed class ConfigCompositionAuditTests
         Assert.Equal(0, provider.ResolveCalls);
         Assert.Contains(report.DiscoveredKeys, item => item.Key == "Unrelated.region");
         AssertSafeReport(report);
+    }
+
+    [Fact]
+    public void MissingRoot_TruncatedSecretHierarchyDoesNotMarkAncestorMissing()
+    {
+        ConfigSecretSlotTrace[] slots =
+        [
+            new("Service:channel:access", false, false, null, null, "secret-descriptor-absent", [], [], null),
+            new("Service:channel:token", false, false, null, null, "secret-descriptor-absent", [], [], null)
+        ];
+        var traverser = new ConfigAuditValueTraverser(new ConfigAuditRedactor(), slots);
+        var result = traverser.BuildChildren(ConfigAuditPath.Root("Service"), null, [], ConfigAuditFactContext.Empty,
+            new ConfigAuditEntryOptions { MaxReportNodes = 2 }, new HashSet<object>(ReferenceEqualityComparer.Instance),
+            new ConfigAuditDictionaryLabelSet(), ConfigAuditDictionaryKeyCorrelationContext.Unavailable("test"));
+
+        var channel = Assert.Single(result.Children);
+        Assert.Equal(ConfigAuditEntryState.Invalid, channel.State);
+        Assert.Equal(ConfigAuditEntryState.Missing, Assert.Single(channel.Children).State);
+        Assert.Contains(channel.Diagnostics, diagnostic => diagnostic.Code == "config-audit-report-node-limit");
+    }
+
+    [Fact]
+    public void MissingRoot_MixedSecretOutcomesKeepAncestorInvalid()
+    {
+        ConfigSecretSlotTrace[] slots =
+        [
+            new("Service:channel:access", false, false, null, null, "secret-descriptor-absent", [], [], null),
+            new("Service:channel:token", true, false, null, null, "secret-not-found", [], [], null)
+        ];
+        var traverser = new ConfigAuditValueTraverser(new ConfigAuditRedactor(), slots);
+        var result = traverser.BuildChildren(ConfigAuditPath.Root("Service"), null, [], ConfigAuditFactContext.Empty,
+            new ConfigAuditEntryOptions(), new HashSet<object>(ReferenceEqualityComparer.Instance),
+            new ConfigAuditDictionaryLabelSet(), ConfigAuditDictionaryKeyCorrelationContext.Unavailable("test"));
+
+        var channel = Assert.Single(result.Children);
+        Assert.Equal(ConfigAuditEntryState.Invalid, channel.State);
+        Assert.Contains(channel.Children, child => child.State == ConfigAuditEntryState.Missing);
+        Assert.Contains(channel.Children, child => child.State == ConfigAuditEntryState.Invalid);
+    }
+
+    [Fact]
+    public void MissingRoot_ExpandedReportBudgetDoesNotMarkTruncatedAncestorMissing()
+    {
+        ConfigSecretSlotTrace[] slots =
+        [
+            new("Service:channel:access", false, false, null, null, "secret-descriptor-absent", [], [], null),
+            new("Service:channel:token", false, false, null, null, "secret-descriptor-absent", [], [], null)
+        ];
+        var traverser = new ConfigAuditValueTraverser(new ConfigAuditRedactor(), slots);
+        var reportContext = new ConfigAuditReportTraversalContext(2);
+        var result = traverser.BuildChildren(ConfigAuditPath.Root("Service"), null, [], ConfigAuditFactContext.Empty,
+            new ConfigAuditEntryOptions(), new HashSet<object>(ReferenceEqualityComparer.Instance),
+            new ConfigAuditDictionaryLabelSet(), ConfigAuditDictionaryKeyCorrelationContext.Unavailable("test"), reportContext);
+
+        Assert.True(reportContext.WasTruncated);
+        var channel = Assert.Single(result.Children);
+        Assert.Equal(ConfigAuditEntryState.Invalid, channel.State);
+        Assert.Equal(ConfigAuditEntryState.Missing, Assert.Single(channel.Children).State);
     }
 
     [Fact]

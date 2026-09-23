@@ -901,6 +901,28 @@ public sealed class ConfigCompositionCompilerTests
         AssertNoIo(raw);
     }
 
+    [Fact]
+    public void Compile_FatalClaimInspectionFailuresEscapeWithoutProviderIo()
+    {
+        Exception[] fatal =
+        [
+            new OutOfMemoryException(), new StackOverflowException(), new AccessViolationException(),
+            new AppDomainUnloadedException(), new BadImageFormatException(), new CannotUnloadAppDomainException(),
+            new InvalidProgramException()
+        ];
+        foreach (var exception in fatal)
+        {
+            var typed = A.Fake<IConfigProvider>(o => o.Implements<IConfigProviderClaimInspector>());
+            var inspector = (IConfigProviderClaimInspector)typed;
+            A.CallTo(() => inspector.InspectClaim("Production", "Service")).Throws(exception);
+            var raw = new FakeRawProvider();
+
+            Assert.Same(exception, Record.Exception(() =>
+                Compiler([typed, raw], []).Compile("Production", "Service", typeof(FlatOptions))));
+            AssertNoIo(raw);
+        }
+    }
+
     [Theory]
     [InlineData(typeof(SelfRecursiveOptions))]
     [InlineData(typeof(MutualA))]
