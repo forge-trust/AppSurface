@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 namespace ForgeTrust.AppSurface.PackageIndex.Tests;
@@ -58,6 +59,36 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         Assert.Equal(stagedHash, await PackageHash.ComputeSha512Async(stagedPath, CancellationToken.None));
         Assert.Equal(stagedWriteTime, File.GetLastWriteTimeUtc(stagedPath));
         Assert.True(File.Exists(TestPathUtils.PathUnder(startRequest.ReportDirectory, "diagnostics.json")));
+
+        var stagedBytes = await File.ReadAllBytesAsync(stagedPath);
+        await File.AppendAllTextAsync(stagedPath, "substituted package bytes");
+        var changedPackage = await Assert.ThrowsAsync<PackageIndexException>(() =>
+            TailwindEvidenceWorkflow.ValidatePublicationStartAsync(startRequest with
+            {
+                ReportDirectory = TestPathUtils.PathUnder(_root, "changed-package-report")
+            }, manifest, [planned], CancellationToken.None));
+        Assert.Contains("Prepared publication file", changedPackage.Message, StringComparison.Ordinal);
+        await File.WriteAllBytesAsync(stagedPath, stagedBytes);
+
+        var originalStartReceipt = await File.ReadAllBytesAsync(request.PublicationStartReceiptPath);
+        var changedReceipt = JsonNode.Parse(originalStartReceipt)!;
+        changedReceipt["aggregateArtifactId"] = "999";
+        await File.WriteAllTextAsync(request.PublicationStartReceiptPath, changedReceipt.ToJsonString());
+        var changedAuthority = await Assert.ThrowsAsync<PackageIndexException>(() =>
+            TailwindEvidenceWorkflow.ValidatePublicationStartAsync(startRequest with
+            {
+                ReportDirectory = TestPathUtils.PathUnder(_root, "changed-authority-report")
+            }, manifest, [planned], CancellationToken.None));
+        Assert.Contains("aggregateArtifactId", changedAuthority.Message, StringComparison.Ordinal);
+        await File.WriteAllBytesAsync(request.PublicationStartReceiptPath, originalStartReceipt);
+
+        await File.AppendAllTextAsync(aggregate.ReportPath, "\n");
+        var changedAggregate = await Assert.ThrowsAsync<PackageIndexException>(() =>
+            TailwindEvidenceWorkflow.ValidatePublicationStartAsync(startRequest with
+            {
+                ReportDirectory = TestPathUtils.PathUnder(_root, "changed-aggregate-report")
+            }, manifest, [planned], CancellationToken.None));
+        Assert.Contains("SHA-256", changedAggregate.Message, StringComparison.Ordinal);
 
         var originalReceipt = await File.ReadAllBytesAsync(TestPathUtils.PathUnder(fixture.Evidence, Rids[0], "tailwind-native-host-proof.json"));
         foreach (var mutation in new[] { "missing-host", "mutated-host-identity", "duplicate-receipt-field" })
