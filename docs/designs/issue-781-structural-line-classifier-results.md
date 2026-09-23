@@ -16,7 +16,7 @@ The suite also proves fail-closed rejection for these categories:
 - brace-only, blank, documentation, comment-only, and mixed-property/member locations;
 - missing, duplicate, generated, synthesized, fingerprint-mismatched, and tree-path-mismatched source evidence;
 - compiler-tree and conditional-symbol mismatches;
-- attributes, initializers, expression bodies, accessor bodies/modifiers, unsupported property shapes, partial containing types, overridden properties, unbound types, and semantic diagnostics; and
+- attributes, initializers, expression bodies, accessor bodies/modifiers, unsupported property shapes, partial containing types, overridden properties, unbound types, and semantic diagnostics on properties or containing base lists; and
 - injected analysis exceptions, where the audit retains only the exception type rather than message text.
 
 The audit serialization uses stable path/line/reason ordering and camel-cased JSON. It remains in memory: this pilot deliberately creates no structural-classifier file, changes no existing coverage artifact, and exposes no runtime CLI behavior.
@@ -29,7 +29,7 @@ Run the focused pilot tests with:
 dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --no-restore --configuration Release --filter FullyQualifiedName~StructuralLineClassifierTests --logger "console;verbosity=detailed"
 ```
 
-The expanded focused run passed all 40 tests. It used the following environment:
+The expanded focused run passed all 43 tests. It used the following environment:
 
 | Component | Value |
 | --- | --- |
@@ -45,13 +45,13 @@ The focused suite makes 25 warmed classification runs over the 200-candidate cor
 
 | Measure | Observed value |
 | --- | --- |
-| Classification min / p50 / p95 / max | 9.9632 / 10.2674 / 12.2810 / 20.7468 ms |
-| Raw-evidence traversal control | 0.0035 ms p50, recorded separately; it is not a classifier-free coverage-gate baseline or an incremental overhead claim. |
-| Maximum per-run allocation | 427,936 bytes (about 0.41 MiB) |
-| Fixture-manifest/compilation min / p50 / p95 | 0.6537 / 0.6566 / 5.6527 ms |
+| Classification min / p50 / p95 / max | 5.9328 / 6.2929 / 9.5920 / 13.8018 ms |
+| Raw-evidence traversal control | 0.0039 ms p50, recorded separately; it is not a classifier-free coverage-gate baseline or an incremental overhead claim. |
+| Maximum per-run allocation | 614,760 bytes (about 0.59 MiB) |
+| Fixture-manifest/compilation min / p50 / p95 | 0.6540 / 0.6867 / 5.4321 ms |
 | Allocation guard | 1 MiB per warmed run |
 
-The warmed measurement window uses `GC.GetAllocatedBytesForCurrentThread` immediately around classification, after one complete cache-warming pass over the reusable manifest and compilation. The separate control walks the same raw changed-line evidence and reads its coverage fields, but deliberately omits source lookup, Roslyn binding, audit construction, and sorting; it is therefore not an incremental coverage-gate baseline and no delta is reported. The September 23 rerun includes the mixed-line token ownership guard; its 10.2674 ms p50 is higher than the earlier 2.3182 ms p50 observation. The observed p95 records classifier-only latency on the named baseline host; it is not an incremental coverage-gate claim or a production SLO. The observed allocation is below the approved 1 MiB automated guard. Any future path toward runtime use should replace this synthetic corpus with representative repositories and a performance budget agreed by the owners of the prospective integration.
+The warmed measurement window uses `GC.GetAllocatedBytesForCurrentThread` immediately around classification, after one complete cache-warming pass over the reusable manifest and compilation. The separate control walks the same raw changed-line evidence and reads its coverage fields, but deliberately omits source lookup, Roslyn binding, audit construction, and sorting; it is therefore not an incremental coverage-gate baseline and no delta is reported. This September 23 rerun includes the mixed-line token ownership guard, complete parse-option identity, and containing-base-list diagnostic check; host-sensitive timings do not establish a per-change latency delta. The observed p95 records classifier-only latency on the named baseline host; it is not an incremental coverage-gate claim or a production SLO. The observed allocation is below the approved 1 MiB automated guard. Any future path toward runtime use should replace this synthetic corpus with representative repositories and a performance budget agreed by the owners of the prospective integration.
 
 ## Decision
 

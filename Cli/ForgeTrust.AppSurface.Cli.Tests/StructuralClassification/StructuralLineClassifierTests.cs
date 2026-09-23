@@ -438,6 +438,43 @@ public sealed class StructuralLineClassifierTests
     }
 
     [Fact]
+    public void Classify_RejectsPropertyWhenItsContainingBaseTypeIsUnresolved()
+    {
+        const string source = """
+            namespace Fixture;
+            public sealed class Example : MissingBase
+            {
+                public int Value { get; set; }
+            }
+            """;
+        var context = CreateContext(source);
+
+        var entry = ClassifySingle(context, LineOf(source, "public int Value"));
+
+        Assert.Equal(StructuralLineDisposition.Rejected, entry.Disposition);
+        Assert.Equal("semantic-diagnostic", entry.ReasonCode);
+    }
+
+    [Fact]
+    public void Classify_DoesNotRejectPropertyForAnUnrelatedSemanticError()
+    {
+        const string source = """
+            namespace Fixture;
+            public sealed class Example
+            {
+                public int Value { get; set; }
+                public int Broken() => MissingValue;
+            }
+            """;
+        var context = CreateContext(source);
+
+        var entry = ClassifySingle(context, LineOf(source, "public int Value"));
+
+        Assert.Equal(StructuralLineDisposition.Accepted, entry.Disposition);
+        Assert.Equal("structural-auto-property", entry.ReasonCode);
+    }
+
+    [Fact]
     public void Classify_FailsClosedForAnalysisExceptionsWithoutLeakingExceptionText()
     {
         const string source = "namespace Fixture; public sealed class Example { public int Value { get; set; } }";
@@ -593,7 +630,41 @@ public sealed class StructuralLineClassifierTests
         Assert.Equal("src/Fixture.cs", entry.SourceTreePath);
         Assert.Equal("P:Fixture.Example.Value", entry.SymbolDocumentationId);
         Assert.Equal("Value", entry.SymbolDisplayName);
-        Assert.Contains("language=Preview", entry.ParseOptionsIdentity, StringComparison.Ordinal);
+        Assert.Contains("\"languageVersion\":\"Preview\"", entry.ParseOptionsIdentity, StringComparison.Ordinal);
+        Assert.Contains("\"kind\":\"Regular\"", entry.ParseOptionsIdentity, StringComparison.Ordinal);
+        Assert.Contains("\"documentationMode\":\"Parse\"", entry.ParseOptionsIdentity, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Classify_AuditParseOptionsIdentityDistinguishesCompilerSettings()
+    {
+        var context = CreateContext(ValidSource);
+        var line = LineOf(ValidSource, "public int Value");
+        var original = ClassifySingle(context, line);
+        var variations = new[]
+        {
+            context.Document.ParseOptions.WithKind(SourceCodeKind.Script),
+            context.Document.ParseOptions.WithDocumentationMode(DocumentationMode.Diagnose),
+            context.Document.ParseOptions.WithFeatures([new KeyValuePair<string, string>("fixture-feature", "enabled")]),
+            context.Document.ParseOptions.WithPreprocessorSymbols("FIRST", "SECOND"),
+            context.Document.ParseOptions.WithPreprocessorSymbols("SECOND", "FIRST"),
+        };
+
+        var entries = variations
+            .Select(options => ClassifySingle(
+                context,
+                line,
+                new StructuralSourceManifest([context.Document with { ParseOptions = options }])))
+            .ToArray();
+        var identities = entries
+            .Select(entry => entry.ParseOptionsIdentity)
+            .Prepend(original.ParseOptionsIdentity)
+            .ToArray();
+
+        Assert.All(entries, entry => Assert.Equal(StructuralLineDisposition.Rejected, entry.Disposition));
+        Assert.All(entries.Take(3), entry => Assert.Equal("compilation-mismatch", entry.ReasonCode));
+        Assert.All(entries.Skip(3), entry => Assert.Equal("conditional-compilation-mismatch", entry.ReasonCode));
+        Assert.Equal(identities.Length, identities.Distinct(StringComparer.Ordinal).Count());
     }
 
     [Fact]

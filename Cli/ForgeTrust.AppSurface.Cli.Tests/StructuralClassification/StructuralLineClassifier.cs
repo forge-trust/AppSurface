@@ -49,7 +49,8 @@ internal enum StructuralLineDisposition
 }
 
 /// <summary>
-/// Records the deterministic explanation for one changed coverage line.
+/// Records the deterministic explanation for one changed coverage line, including a JSON identity
+/// for the manifest's complete C# parse settings when source evidence is available.
 /// </summary>
 internal sealed record StructuralLineClassificationEntry(
     string PolicyIdentifier,
@@ -513,7 +514,19 @@ internal sealed class StructuralLineClassifier
 
     private static string FormatParseOptions(CSharpParseOptions options)
     {
-        return $"language={options.LanguageVersion};symbols={string.Join(',', options.PreprocessorSymbolNames.Order(StringComparer.Ordinal))}";
+        return JsonSerializer.Serialize(new
+        {
+            languageVersion = options.LanguageVersion.ToString(),
+            specifiedLanguageVersion = options.SpecifiedLanguageVersion.ToString(),
+            kind = options.Kind.ToString(),
+            specifiedKind = options.SpecifiedKind.ToString(),
+            documentationMode = options.DocumentationMode.ToString(),
+            symbols = options.PreprocessorSymbolNames.ToArray(),
+            features = options.Features
+                .OrderBy(feature => feature.Key, StringComparer.Ordinal)
+                .Select(feature => new { feature.Key, feature.Value })
+                .ToArray(),
+        });
     }
 
     private static string NormalizePathForAudit(string? path) =>
@@ -631,8 +644,12 @@ internal sealed class StructuralLineClassifier
                 property.Ancestors().OfType<TypeDeclarationSyntax>().Any(type =>
                     type.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.PartialKeyword))),
                 !isUnbound
-                    && SemanticModel.GetDiagnostics(property.Span)
-                        .Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error));
+                    && (SemanticModel.GetDiagnostics(property.Span)
+                            .Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+                        || property.Ancestors().OfType<TypeDeclarationSyntax>()
+                            .Any(type => type.BaseList is { } baseList
+                                && SemanticModel.GetDiagnostics(baseList.Span)
+                                    .Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))));
             propertyEvidence.Add(property, evidence);
             return evidence;
         }
