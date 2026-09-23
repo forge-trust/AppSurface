@@ -441,6 +441,85 @@ public sealed class PythonDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ClassifiesImportedExportsAsUnsupportedIncludingAliases()
+    {
+        await WriteAsync(
+            "imports.py",
+            "from dependency import Original as Renamed\nimport package.module as Short\n__all__ = [\"Renamed\", \"Short\"]\n");
+        var harvester = CreateHarvester(CreateEnabledOptions("imports.py"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(docs);
+        var diagnostics = GetDiagnostics(harvester);
+        Assert.Equal(2, diagnostics.Count(diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.PythonExportNotSupported));
+        Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.PythonExportNotFound);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_DoesNotClassifyFromImportSourceAsAnImportedBinding()
+    {
+        await WriteAsync(
+            "from-import.py",
+            "from package import value\n__all__ = [\"package\", \"value\"]\n");
+        var harvester = CreateHarvester(CreateEnabledOptions("from-import.py"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(docs);
+        var diagnostics = GetDiagnostics(harvester);
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.PythonExportNotSupported
+            && diagnostic.Problem.Contains("'value'", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.PythonExportNotFound
+            && diagnostic.Problem.Contains("'package'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ClassifiesPlainImportedBindingsAsUnsupported()
+    {
+        await WriteAsync("plain-import.py", "import package\n__all__ = [\"package\"]\n");
+        var harvester = CreateHarvester(CreateEnabledOptions("plain-import.py"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(docs);
+        var diagnostics = GetDiagnostics(harvester);
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.PythonExportNotSupported);
+        Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.PythonExportNotFound);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_IgnoresCommentsWhenReadingDocstringsAndLiteralExports()
+    {
+        await WriteAsync(
+            "comments.py",
+            "# module comment\n\"\"\"Module docs.\"\"\"\n__all__ = [\"run\", # exported operation\n]\ndef run():\n    # implementation note\n    \"\"\"Run docs.\"\"\"\n    pass\n");
+        var harvester = CreateHarvester(CreateEnabledOptions("comments.py"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(docs, document => document.Path == "api/python/comments");
+        Assert.Contains(docs, document => document.Path == "api/python/comments#function-run");
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_IgnoresCommentsBeforeDecoratedDefinitionsAndInPackageInitializers()
+    {
+        await WriteAsync(
+            "decorated.py",
+            "__all__ = [\"run\"]\n# decorator explanation\n@staticmethod\ndef run():\n    \"\"\"Run docs.\"\"\"\n");
+        await WriteAsync("sidecar/__init__.py", "# package note\n\"\"\"Package description.\"\"\"\n# trailing note\n");
+        var harvester = CreateHarvester(CreateEnabledOptions("decorated.py", "sidecar/**/*.py"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(docs, document => document.Path == "api/python/decorated#function-run");
+        Assert.DoesNotContain(docs, document => document.Path == "api/python/sidecar");
+        Assert.DoesNotContain(GetDiagnostics(harvester), diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.PythonPublicBoundaryMissing);
+    }
+
+    [Fact]
     public async Task HarvestAsync_IgnoresAnOtherwiseEmptyPackageInitializerWithoutBoundaryGuidance()
     {
         await WriteAsync("sidecar/__init__.py", "\"\"\"Package description.\"\"\"\n");

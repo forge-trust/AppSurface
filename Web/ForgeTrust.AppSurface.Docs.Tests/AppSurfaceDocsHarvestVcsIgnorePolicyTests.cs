@@ -362,6 +362,7 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
             """
             **/root.py
             sidecar/**/nested.py
+            src**/generated.py
             """);
         var snapshot = CreateSnapshot();
 
@@ -370,6 +371,7 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
         Assert.False(snapshot.Evaluate("sidecar/nested.py", AppSurfaceDocsHarvestSourceKind.Python).Included);
         Assert.False(snapshot.Evaluate("sidecar/level/nested.py", AppSurfaceDocsHarvestSourceKind.Python).Included);
         Assert.True(snapshot.Evaluate("sidecar/other.py", AppSurfaceDocsHarvestSourceKind.Python).Included);
+        Assert.True(snapshot.Evaluate("srcgenerated.py", AppSurfaceDocsHarvestSourceKind.Python).Included);
     }
 
     [Fact]
@@ -623,6 +625,7 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
             \*.md
             **/root.md
             sidecar/**/nested.md
+            src**/generated.md
             """);
         var snapshot = CreateSnapshot();
         var paths = new[]
@@ -642,7 +645,8 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
             "root.md",
             "nested/root.md",
             "sidecar/nested.md",
-            "sidecar/level/nested.md"
+            "sidecar/level/nested.md",
+            "srcgenerated.md"
         };
         foreach (var path in paths)
         {

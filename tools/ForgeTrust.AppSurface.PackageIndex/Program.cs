@@ -38,7 +38,7 @@ internal static class Program
                       Restore published packages from a clean NuGet configuration.
           release-prep-witness
                       Emit a read-only JSON witness for generated package documentation in a release-preparation diff.
-        inspect-python-parser-candidate
+          inspect-python-parser-candidate
                       Statically inspect one local TreeSitter.DotNet archive without restoring or executing package content.
           gate        Validate release metadata, package class rules, stale brand strings, and managed release-guidance policy; does not write files.
 

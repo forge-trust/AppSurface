@@ -17,6 +17,8 @@ smaller language-focused distribution would be an optimization, not a prerequisi
 The accompanying [machine-readable evidence](./tree-sitter-dotnet-1.3.0-proof.json) records the archive inspection
 with no automated rejection reasons. The static inspection tool still has a 64 MiB archive-read safety cap; that is an
 inspection resource limit, not a product package-size budget.
+The JSON preserves the tool's `metadata_recorded_not_accepted` provenance status; the acceptance above is a separate
+human product decision and does not change the static inspection result or substitute for redistribution review.
 
 ## Exact artifact measured
 

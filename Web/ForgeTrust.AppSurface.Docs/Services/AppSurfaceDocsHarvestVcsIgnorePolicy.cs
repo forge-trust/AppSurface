@@ -614,7 +614,9 @@ internal sealed record AppSurfaceDocsHarvestVcsIgnoreRule(
             {
                 if (index + 1 < pattern.Length && pattern[index + 1] == '*')
                 {
-                    if (index + 2 < pattern.Length && pattern[index + 2] == '/')
+                    if (index + 2 < pattern.Length
+                        && pattern[index + 2] == '/'
+                        && (index == 0 || pattern[index - 1] == '/'))
                     {
                         builder.Append("(?:.*/)?");
                         index += 2;

@@ -330,8 +330,8 @@
     "unexpectedRuntimeIdentifiers": [],
     "licenseAndNoticePaths": [],
     "provenanceReview": {
-      "status": "accepted_for_bounded_spike",
-      "explanation": "Archive metadata and license/notice paths were reviewed as part of the bounded Python harvesting spike. Package upgrades must repeat the archive and redistribution-notice review."
+      "status": "metadata_recorded_not_accepted",
+      "explanation": "Archive metadata and license/notice paths are recorded for a separate human redistribution review; this candidate proof does not approve a dependency."
     },
     "inspectionFailure": null,
     "hasCompleteProvenanceMetadata": true

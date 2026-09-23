@@ -60,6 +60,7 @@
 
   <ItemGroup>
     <None Include="$(MSBuildProjectDirectory)\THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="" />
+    <None Include="$(MSBuildProjectDirectory)\THIRD-PARTY-TREE-SITTER-UNICODE-LICENSE.txt" Pack="true" PackagePath="" />
   </ItemGroup>
 
 </Project>

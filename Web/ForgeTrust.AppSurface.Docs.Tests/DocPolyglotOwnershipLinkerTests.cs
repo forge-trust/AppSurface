@@ -85,6 +85,46 @@ public sealed class DocPolyglotOwnershipLinkerTests
     }
 
     [Fact]
+    public void Link_RejectsDistinctRelationshipsForTheSamePythonNode()
+    {
+        var python = CreatePythonModule(
+            "api/python/combined",
+            DocPolyglotOwnershipLinker.CreatePythonModuleMarker("sidecar/worker.py")
+            + DocPolyglotOwnershipLinker.CreatePythonModuleMarker("sidecar/other.py"));
+        var workerOwner = CreateCSharpOwner(
+            "Namespaces/Worker",
+            DocPolyglotOwnershipLinker.CreateCSharpOwnerMarker("sidecar/worker.py", "Worker", "Worker"));
+        var otherOwner = CreateCSharpOwner(
+            "Namespaces/Other",
+            DocPolyglotOwnershipLinker.CreateCSharpOwnerMarker("sidecar/other.py", "Other", "Other"));
+
+        var linked = DocPolyglotOwnershipLinker.Link([python, workerOwner, otherOwner], "/docs");
+
+        Assert.All(linked, node => Assert.DoesNotContain("data-appsurfacedocs-python-", node.Content, StringComparison.Ordinal));
+        Assert.All(linked, node => Assert.DoesNotContain("doc-polyglot-link", node.Content, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Link_RejectsDistinctRelationshipsForTheSameCSharpNodeAndAnchor()
+    {
+        var workerPython = CreatePythonModule(
+            "api/python/worker",
+            DocPolyglotOwnershipLinker.CreatePythonModuleMarker("sidecar/worker.py"));
+        var otherPython = CreatePythonModule(
+            "api/python/other",
+            DocPolyglotOwnershipLinker.CreatePythonModuleMarker("sidecar/other.py"));
+        var owner = CreateCSharpOwner(
+            "Namespaces/Combined",
+            DocPolyglotOwnershipLinker.CreateCSharpOwnerMarker("sidecar/worker.py", "Host", "Host")
+            + DocPolyglotOwnershipLinker.CreateCSharpOwnerMarker("sidecar/other.py", "Host", "Host"));
+
+        var linked = DocPolyglotOwnershipLinker.Link([workerPython, otherPython, owner], "/docs");
+
+        Assert.All(linked, node => Assert.DoesNotContain("data-appsurfacedocs-python-", node.Content, StringComparison.Ordinal));
+        Assert.All(linked, node => Assert.DoesNotContain("doc-polyglot-link", node.Content, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Link_RemovesMalformedOrMismatchedMarkersWhileRetainingTheOneValidatedRelationship()
     {
         var python = CreatePythonModule(

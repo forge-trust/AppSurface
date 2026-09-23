@@ -54,8 +54,7 @@ internal static partial class DocPolyglotOwnershipLinker
             return nodes;
         }
 
-        var linksByPythonNode = new Dictionary<DocNode, OwnershipLink>(ReferenceEqualityComparer.Instance);
-        var linksByCSharpNodeAndAnchor = new Dictionary<(DocNode Node, string Anchor), OwnershipLink>(new OwnerLinkKeyComparer());
+        var candidateLinks = new List<OwnershipLink>();
         foreach (var (relativePath, modules) in pythonModules)
         {
             if (modules.Length != 1
@@ -67,9 +66,32 @@ internal static partial class DocPolyglotOwnershipLinker
 
             var module = modules[0];
             var owner = owners[0];
-            var link = new OwnershipLink(module.Node, owner.Node, owner.AnchorId!, owner.DisplayName!, relativePath);
-            linksByPythonNode.Add(module.Node, link);
-            linksByCSharpNodeAndAnchor.Add((owner.Node, owner.AnchorId!), link);
+            candidateLinks.Add(new OwnershipLink(module.Node, owner.Node, owner.AnchorId!, owner.DisplayName!, relativePath));
+        }
+
+        var ambiguousPythonNodes = candidateLinks
+            .GroupBy(static link => link.PythonNode, ReferenceEqualityComparer.Instance)
+            .Where(static group => group.Count() > 1)
+            .Select(static group => group.Key)
+            .ToHashSet(ReferenceEqualityComparer.Instance);
+        var ownerKeyComparer = new OwnerLinkKeyComparer();
+        var ambiguousOwnerKeys = candidateLinks
+            .GroupBy(static link => (link.CSharpNode, link.CSharpAnchorId), ownerKeyComparer)
+            .Where(static group => group.Count() > 1)
+            .Select(static group => group.Key)
+            .ToHashSet(ownerKeyComparer);
+        var linksByPythonNode = new Dictionary<DocNode, OwnershipLink>(ReferenceEqualityComparer.Instance);
+        var linksByCSharpNodeAndAnchor = new Dictionary<(DocNode Node, string Anchor), OwnershipLink>(ownerKeyComparer);
+        foreach (var link in candidateLinks)
+        {
+            if (ambiguousPythonNodes.Contains(link.PythonNode)
+                || ambiguousOwnerKeys.Contains((link.CSharpNode, link.CSharpAnchorId)))
+            {
+                continue;
+            }
+
+            linksByPythonNode.Add(link.PythonNode, link);
+            linksByCSharpNodeAndAnchor.Add((link.CSharpNode, link.CSharpAnchorId), link);
         }
 
         return nodes

@@ -360,7 +360,7 @@ public sealed class PythonDocHarvester : IDocHarvester, IDocHarvesterDiagnosticP
         string relativePath,
         ICollection<DocHarvestDiagnostic> diagnostics)
     {
-        var moduleStatements = root.NamedChildren;
+        var moduleStatements = NonCommentNamedChildren(root);
         var boundary = ReadPublicBoundary(moduleStatements, relativePath, diagnostics);
         if (boundary is null)
         {
@@ -486,13 +486,14 @@ public sealed class PythonDocHarvester : IDocHarvester, IDocHarvesterDiagnosticP
     private static bool TryReadLiteralExportNames(Node assignment, out IReadOnlyList<string> names)
     {
         names = [];
-        if (assignment.Type != "assignment" || assignment.NamedChildren.Count != 2)
+        var assignmentChildren = NonCommentNamedChildren(assignment);
+        if (assignment.Type != "assignment" || assignmentChildren.Count != 2)
         {
             return false;
         }
 
-        var left = assignment.GetChildForField("left") ?? assignment.NamedChildren[0];
-        var right = assignment.GetChildForField("right") ?? assignment.NamedChildren[^1];
+        var left = assignment.GetChildForField("left") ?? assignmentChildren[0];
+        var right = assignment.GetChildForField("right") ?? assignmentChildren[^1];
         if (left.Type != "identifier" || !string.Equals(left.Text, "__all__", StringComparison.Ordinal)
             || right.Type is not "list" and not "tuple")
         {
@@ -500,7 +501,7 @@ public sealed class PythonDocHarvester : IDocHarvester, IDocHarvesterDiagnosticP
         }
 
         var values = new List<string>();
-        foreach (var value in right.NamedChildren)
+        foreach (var value in NonCommentNamedChildren(right))
         {
             if (value.Type != "string" || !TryReadPlainString(value.Text, out var text))
             {
@@ -538,7 +539,7 @@ public sealed class PythonDocHarvester : IDocHarvester, IDocHarvesterDiagnosticP
         var kind = definition.Type == "class_definition" ? PythonApiKind.Class : GetFunctionKind(definition);
         var members = kind != PythonApiKind.Class
             ? []
-            : body.NamedChildren
+            : NonCommentNamedChildren(body)
                 .Select(UnwrapDecoratedDefinition)
                 .Where(static child => child?.Type == "function_definition")
                 .Select(static child => CreateDeclaration(child!))
@@ -585,6 +586,12 @@ public sealed class PythonDocHarvester : IDocHarvester, IDocHarvesterDiagnosticP
                 continue;
             }
 
+            if (statement.Type is "import_statement" or "import_from_statement")
+            {
+                AddImportedNames(statement, names);
+                continue;
+            }
+
             if (statement.Type is "assignment" or "expression_statement")
             {
                 var assignment = statement.Type == "assignment" ? statement : statement.FirstNamedChild;
@@ -601,7 +608,7 @@ public sealed class PythonDocHarvester : IDocHarvester, IDocHarvesterDiagnosticP
 
     private static string? GetDocstring(Node body)
     {
-        var statement = body.NamedChildren.FirstOrDefault();
+        var statement = NonCommentNamedChildren(body).FirstOrDefault();
         var text = statement is null ? null : GetDocstringFromStatement(statement);
         return text is null ? null : NormalizeDocstring(text);
     }
@@ -699,7 +706,9 @@ public sealed class PythonDocHarvester : IDocHarvester, IDocHarvesterDiagnosticP
             return false;
         }
 
-        return statements.Count == 0 || (statements.Count == 1 && GetDocstringFromStatement(statements[0]) is not null);
+        var executableStatements = statements.Where(static statement => statement.Type != "comment").ToArray();
+        return executableStatements.Length == 0
+            || (executableStatements.Length == 1 && GetDocstringFromStatement(executableStatements[0]) is not null);
     }
 
     private static string? GetDocstringFromStatement(Node statement)
@@ -709,15 +718,47 @@ public sealed class PythonDocHarvester : IDocHarvester, IDocHarvesterDiagnosticP
             return TryReadPlainString(statement.Text, out var directText) ? directText : null;
         }
 
-        if (statement.Type != "expression_statement" || statement.NamedChildren.Count != 1)
+        var children = NonCommentNamedChildren(statement);
+        if (statement.Type != "expression_statement" || children.Count != 1)
         {
             return null;
         }
 
-        var literal = statement.FirstNamedChild;
+        var literal = children[0];
         return literal?.Type == "string" && TryReadPlainString(literal.Text, out var text)
             ? text
             : null;
+    }
+
+    private static IReadOnlyList<Node> NonCommentNamedChildren(Node node) =>
+        node.NamedChildren.Where(static child => child.Type != "comment").ToArray();
+
+    private static void AddImportedNames(Node statement, ISet<string> names)
+    {
+        var importedNames = statement.Type == "import_from_statement"
+            ? statement.GetChildForField("name") is { } importNames
+                ? NonCommentNamedChildren(importNames)
+                : []
+            : NonCommentNamedChildren(statement);
+        foreach (var child in importedNames)
+        {
+            if (child.Type == "aliased_import")
+            {
+                var alias = child.GetChildForField("alias")?.Text;
+                var imported = child.GetChildForField("name")?.Text;
+                var boundName = alias ?? imported;
+                if (!string.IsNullOrWhiteSpace(boundName))
+                {
+                    names.Add(statement.Type == "import_statement" && alias is null
+                        ? boundName.Split('.')[0]
+                        : boundName);
+                }
+            }
+            else if (child.Type is "dotted_name" or "identifier")
+            {
+                names.Add(statement.Type == "import_statement" ? child.Text.Split('.')[0] : child.Text);
+            }
+        }
     }
 
     private static IReadOnlyList<DocNode> BuildDocNodes(

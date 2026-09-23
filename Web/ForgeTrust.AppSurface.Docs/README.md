@@ -547,6 +547,16 @@ AppSurface Docs currently emits these codes:
 - `DocHarvestDiagnosticCodes.LocalizationFallbackDisabledMissingVariant` (`appsurfacedocs.localization.fallback_disabled_missing_variant`)
 - `DocHarvestDiagnosticCodes.LocalizationFallbackConflict` (`appsurfacedocs.localization.fallback_conflict`)
 - `DocHarvestDiagnosticCodes.CSharpFileTooLarge` (`appsurfacedocs.csharp.file_too_large`)
+- `DocHarvestDiagnosticCodes.PythonFileTooLarge` (`appsurfacedocs.python.file_too_large`)
+- `DocHarvestDiagnosticCodes.PythonMissingInclude` (`appsurfacedocs.python.missing_include`)
+- `DocHarvestDiagnosticCodes.PythonParserUnavailable` (`appsurfacedocs.python.parser_unavailable`)
+- `DocHarvestDiagnosticCodes.PythonParseFailed` (`appsurfacedocs.python.parse_failed`)
+- `DocHarvestDiagnosticCodes.PythonPublicBoundaryMissing` (`appsurfacedocs.python.public_boundary_missing`)
+- `DocHarvestDiagnosticCodes.PythonPublicBoundaryInvalid` (`appsurfacedocs.python.public_boundary_invalid`)
+- `DocHarvestDiagnosticCodes.PythonExportNotSupported` (`appsurfacedocs.python.export_not_supported`)
+- `DocHarvestDiagnosticCodes.PythonExportNotFound` (`appsurfacedocs.python.export_not_found`)
+- `DocHarvestDiagnosticCodes.PythonSlugCollision` (`appsurfacedocs.python.slug_collision`)
+- `DocHarvestDiagnosticCodes.PythonOwnershipInvalid` (`appsurfacedocs.python.ownership_invalid`)
 - `DocHarvestDiagnosticCodes.JavaScriptFileTooLarge` (`appsurfacedocs.javascript.file_too_large`)
 - `DocHarvestDiagnosticCodes.JavaScriptParseFailed` (`appsurfacedocs.javascript.parse_failed`)
 - `DocHarvestDiagnosticCodes.JavaScriptMissingInclude` (`appsurfacedocs.javascript.missing_include`)
@@ -1802,7 +1812,8 @@ replacement can leave `/docs/search` permanently loading even though the server 
   - Global path policy applies first, then Python-specific includes, default exclusions, and excludes refine the candidate set. The harvester never executes or imports an accepted `.py` file.
 - `AppSurfaceDocs:Harvest:Python:StrictHealth`
   - Defaults to `false`.
-  - Makes Python parser availability and structured Python diagnostics participate in aggregate strict health. Use it only after the host has established a stable Python source boundary.
+  - A usable `IncludeGlobs` boundary already makes Python participate in aggregate strict health. With no usable include and `StrictHealth=false`, it stays out of strict totals.
+  - `StrictHealth=true` makes Python participate even without an include and raises parser-availability diagnostics from `Warning` to `Error`. Other Python diagnostics retain warning severity, but source and boundary diagnostics can still fail the participating harvester's aggregate health. Use it only after the host has established a stable Python source boundary.
 - `AppSurfaceDocs:Harvest:Python:MaxFileSizeBytes`
   - Defaults to `262144` and must be a positive byte value.
   - Files over this limit are skipped before Tree-sitter parsing with `appsurfacedocs.python.file_too_large`.
@@ -1969,7 +1980,7 @@ Python harvesting is an explicit, static sidecar-documentation option for a mixe
 }
 ```
 
-For this bounded slice, a module must declare one top-level literal `__all__` list or tuple of string names. AppSurface Docs publishes matching module-level classes and functions, plus documented methods of an exported class, under `api/python/{module-slug}`. The slug is a lowercase ASCII normalization of the repository-relative source path; a path whose meaningful characters all normalize away uses `module`, and ordinary slug-collision diagnostics still prevent ambiguous pages from publishing. Symbol fragments use the same normalized shape and add a stable encoded suffix only when distinct Python names would otherwise collide, so case-distinct exports remain independently addressable. Missing or dynamic boundaries publish no module page and emit a diagnostic instead of silently inferring visibility. Supported docstrings are plain, unprefixed single- or triple-quoted literals; Google, NumPy, and Sphinx dialect parsing is intentionally out of scope.
+For this bounded slice, a module must declare one top-level literal `__all__` list or tuple of string names. AppSurface Docs publishes matching module-level classes and functions, plus documented methods of an exported class, under `api/python/{module-slug}`. The slug is a lowercase ASCII normalization of the repository-relative source path; a path whose meaningful characters all normalize away uses `module`, and ordinary slug-collision diagnostics still prevent ambiguous pages from publishing. Symbol fragments use the same normalized shape and add a stable encoded suffix only when distinct Python names would otherwise collide, so case-distinct exports remain independently addressable. Missing or dynamic boundaries publish no module page and emit a diagnostic from the [diagnostic code reference](#diagnostics) instead of silently inferring visibility. Supported docstrings are plain, unprefixed single- or triple-quoted literals; Google, NumPy, and Sphinx dialect parsing is intentionally out of scope.
 
 Use `[AppSurfacePythonModule("sidecar/worker.py")]` on one documented top-level C# host type when readers need reciprocal navigation between that API type and an accepted Python module. The literal path is parsed from C# syntax and the link renders only when exactly one published Python module matches it. See the [Python harvesting spike design](../../docs/designs/python-docstring-harvesting-spike.md) for the parser payload trade-off, ownership contract, diagnostics, and RID evidence boundary.
 
