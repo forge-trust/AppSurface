@@ -95,6 +95,7 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
                   run|rm) exit 0 ;;
                   exec)
                     shift
+                    while [ "${1#-}" != "$1" ]; do shift; done
                     shift
                     case "${1:-}" in
                       pg_isready)

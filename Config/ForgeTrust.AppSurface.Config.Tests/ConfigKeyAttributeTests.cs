@@ -1,4 +1,5 @@
 using ForgeTrust.AppSurface.Config;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace ForgeTrust.AppSurface.Config.Tests;
@@ -36,6 +37,21 @@ public class ConfigKeyAttributeTests
         Assert.Equal<string>(["Literal.Parent", "Child.Part", "Leaf"], key.Segments);
         Assert.Equal(ConfigKeyInputOrigin.Typed, key.InputOrigin);
         Assert.Null(key.OriginalInput);
+    }
+
+    [Fact]
+    public void GetLogicalKey_UntranslatedNestedInputUsesCanonicalOriginalInput()
+    {
+        var parser = new ConfigKeyInputParser(Options.Create(new AppSurfaceConfigKeyOptions
+        {
+            LegacyDotPathBehavior = LegacyDotPathBehavior.Strict
+        }));
+
+        var key = ConfigKeyAttribute.GetLogicalKey(typeof(Parent.Child), parser);
+
+        Assert.Equal("ConfigKeyAttributeTests:Parent:Child", key.Value);
+        Assert.Equal(ConfigKeyInputOrigin.StrictString, key.InputOrigin);
+        Assert.Equal(key.Value, key.OriginalInput);
     }
 
     [Fact]

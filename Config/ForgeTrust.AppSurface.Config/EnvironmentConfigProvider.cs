@@ -407,10 +407,16 @@ internal sealed class EnvironmentConfigProvider : IEnvironmentConfigProvider, IC
             }
             var prior = member.Read(target);
             var canMutateCollection = EnvironmentBindingPlan.IsMutableList(prior);
-            if (!member.CanWrite && !canMutateCollection && (prior is null || !EnvironmentBindingPlan.IsComplex(member.Type))) continue;
             var childCandidates = _mappings.ContainsKey(childKey)
                 ? Candidates(new(request.Environment, childKey, request.Scope))
                 : candidates.Select(candidate => candidate with { Name = candidate.Name + "__" + member.NativeName }).ToArray();
+            if (!member.CanWrite && !canMutateCollection && (prior is null || !EnvironmentBindingPlan.IsComplex(member.Type)))
+            {
+                if (PresentChildren(request, snapshot, childCandidates, childKey).Any())
+                    Fail(outcome, "config-patch-failed", childKey);
+                if (outcome.Code is not null) break;
+                continue;
+            }
             var claim = _claims.Claim(new(request.Environment, childKey, request.Scope), childCandidates.Select(candidate => candidate.Name));
             if (claim is not null)
             {
@@ -453,6 +459,11 @@ internal sealed class EnvironmentConfigProvider : IEnvironmentConfigProvider, IC
             if (EnvironmentBindingPlan.IsComplex(member.Type))
             {
                 child ??= member.CanWrite ? EnvironmentBindingPlan.Create(member.Type) : null;
+                if (child is null && PresentChildren(request, snapshot, childCandidates, childKey).Any())
+                {
+                    Fail(outcome, "config-patch-failed", childKey);
+                    break;
+                }
                 if (child is not null && PatchObject(request, snapshot, child, providerPrior, childCandidates, childKey,
                         outcome, depth + 1, visiting))
                 {

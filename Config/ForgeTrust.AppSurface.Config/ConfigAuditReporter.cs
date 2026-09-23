@@ -651,7 +651,12 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
 
             if (patch is null || (patch.Patched && patch.Value is null))
             {
-                return CreateInvalidProviderResultResolution(_environmentProvider, knownEntry, ConfigAuditSourceRole.Patch, "config-patch-failed");
+                var invalid = CreateInvalidProviderResultResolution(_environmentProvider, knownEntry, ConfigAuditSourceRole.Patch, "config-patch-failed");
+                return invalid with
+                {
+                    Sources = providerResolution.Sources.Concat(invalid.Sources).ToList(),
+                    Diagnostics = diagnostics.Concat(invalid.Diagnostics).ToList()
+                };
             }
 
             if (patch != null)
@@ -964,7 +969,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             {
                 return CreateProviderExceptionResolution(
                     provider,
-                    knownEntry.Key,
+                    knownEntry,
                     role,
                     "config-provider-resolve-threw",
                 ex);
@@ -984,7 +989,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                 {
                     return CreateProviderExceptionResolution(
                         provider,
-                        knownEntry.Key,
+                        knownEntry,
                         role,
                         "config-provider-resolve-threw",
                         new InvalidOperationException("ResolveForAudit returned a mismatched key."));
@@ -1006,7 +1011,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             {
                 return CreateProviderExceptionResolution(
                     provider,
-                    knownEntry.Key,
+                    knownEntry,
                     role,
                     "config-provider-resolve-threw",
                     ex);
@@ -1029,7 +1034,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         {
             return CreateProviderExceptionResolution(
                 provider,
-                knownEntry.Key,
+                knownEntry,
                 role,
                 "config-provider-get-value-threw",
                 ex.InnerException);
@@ -1038,7 +1043,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         {
             return CreateProviderExceptionResolution(
                 provider,
-                knownEntry.Key,
+                knownEntry,
                 role,
                 "config-provider-get-value-threw",
                 ex);
@@ -1194,11 +1199,12 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
 
     private static ConfigValueResolution CreateProviderExceptionResolution(
         IConfigProvider provider,
-        string key,
+        ConfigAuditKnownEntry knownEntry,
         ConfigAuditSourceRole role,
         string code,
         Exception ex)
     {
+        var key = knownEntry.Key;
         var source = new ConfigAuditSourceRecord
         {
             Kind = ConfigAuditSourceKind.Provider,
@@ -1209,7 +1215,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             Role = role
         };
         return new ConfigValueResolution(
-            AppSurfaceConfigKey.Parse(key),
+            knownEntry.LogicalKey,
             ConfigAuditEntryState.Invalid,
             null,
             [source],

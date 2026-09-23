@@ -716,7 +716,9 @@ public static class ConfigAuditServiceCollectionExtensions
     /// wrapper already exists, because the wrapper can contribute defaults and validation diagnostics. Manual
     /// registration creates a <see cref="ConfigAuditKnownEntry"/> with <see cref="ConfigAuditKnownEntry.ConfigType"/>
     /// set to <see langword="null"/> and <typeparamref name="T"/> as the expected value type; for example,
-    /// <c>AddConfigAuditKey&lt;Uri&gt;("Billing.Endpoint")</c> includes a provider-only key in reports.
+    /// <c>AddConfigAuditKey&lt;Uri&gt;("Billing:Endpoint")</c> includes a provider-only key in reports. String keys
+    /// use the finalized input parser; see the <see href="https://appsurface.dev/guides/config-logical-keys">logical-key contract</see>
+    /// for canonical colon-separated identity and compatibility parsing rules.
     /// </remarks>
     /// <typeparam name="T">The expected value type.</typeparam>
     /// <param name="services">The service collection.</param>

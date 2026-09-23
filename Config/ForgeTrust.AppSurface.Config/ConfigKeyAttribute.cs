@@ -103,8 +103,8 @@ public class ConfigKeyAttribute : Attribute
         var parsed = fragments.Select(parser.Parse).ToArray();
         var segments = parsed.SelectMany(key => key.Segments).ToArray();
         var translated = parsed.Any(key => key.InputOrigin == ConfigKeyInputOrigin.TranslatedDot);
-        var originalInput = string.Join('.', fragments);
         var result = AppSurfaceConfigKey.FromSegments(segments);
+        var originalInput = translated ? string.Join('.', fragments) : result.Value;
         return result.WithInput(
             translated ? ConfigKeyInputOrigin.TranslatedDot : ConfigKeyInputOrigin.StrictString,
             originalInput);

@@ -22,6 +22,20 @@ public enum AppSurfaceLocalSecretMigrationState
 }
 
 /// <summary>Describes a value-safe result for an exact stored-key migration.</summary>
+/// <param name="Status">The value-safe outcome status for the migration request.</param>
+/// <param name="MigrationId">The durable journal's operation identifier when known, or a fixed sentinel when no identifier was available.</param>
+/// <param name="State">The durable migration state, or the reported state at which a failed request stopped.</param>
+/// <param name="SourceStoredKey">The exact stored identifier requested as the migration source.</param>
+/// <param name="DestinationKey">The logical destination key value.</param>
+/// <param name="Diagnostic">A value-safe diagnostic when the request did not complete normally; otherwise <see langword="null"/>.</param>
+/// <param name="Source">The backend or store name that handled the request.</param>
+/// <remarks>
+/// A real identifier is returned when a journal was read or a new operation identifier was generated, including when
+/// the subsequent journal commit reports failure. Fixed sentinels include
+/// <c>invalid</c>, <c>invalid-source</c>, <c>unsupported</c>, <c>same-key</c>, <c>unavailable</c>, and
+/// <c>io-failure</c>; they are not operation identifiers and do not prove that a failed journal write left no durable
+/// journal. Retry a failed operation with the same exact source and destination so any persisted state can be resumed.
+/// </remarks>
 public sealed record AppSurfaceLocalSecretKeyMigrationResult(
     LocalSecretResultStatus Status,
     string MigrationId,
@@ -32,6 +46,13 @@ public sealed record AppSurfaceLocalSecretKeyMigrationResult(
     string Source)
 {
     /// <summary>Creates a failed result without including secret data.</summary>
+    /// <param name="status">The value-safe outcome status.</param>
+    /// <param name="migrationId">The durable journal identifier when known, or a fixed sentinel when no identifier was available.</param>
+    /// <param name="state">The migration state associated with the failure.</param>
+    /// <param name="sourceStoredKey">The exact requested source identifier.</param>
+    /// <param name="destinationKey">The logical destination key.</param>
+    /// <param name="diagnostic">The value-safe failure diagnostic.</param>
+    /// <param name="source">The backend or store name.</param>
     public static AppSurfaceLocalSecretKeyMigrationResult Failed(
         LocalSecretResultStatus status,
         string migrationId,

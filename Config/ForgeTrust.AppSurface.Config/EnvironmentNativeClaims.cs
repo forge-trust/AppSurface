@@ -45,7 +45,7 @@ internal sealed class EnvironmentNativeClaims(AppSurfaceConfigKey[] knownKeys,
         var raw = knownKeys.Where(key => IsRepresentable(environment, key))
             .SelectMany(key => EnvironmentConfigCodec.Candidates(new(environment, key), mappings)
                 .Select(candidate => (candidate.Name, Key: key)));
-        _knownClaims[environment] = raw.GroupBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase)
+        _knownClaims[EnvironmentIdentity(environment)] = raw.GroupBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase)
             .ToFrozenDictionary(group => group.Key, group => group.Select(entry => entry.Key).Distinct().ToArray(), StringComparer.OrdinalIgnoreCase);
     }
 
@@ -60,12 +60,13 @@ internal sealed class EnvironmentNativeClaims(AppSurfaceConfigKey[] knownKeys,
             .Select(name => name.ToUpperInvariant()).Distinct().ToArray();
         lock (_gate)
         {
-            if (!_knownClaims.TryGetValue(request.Environment, out var known))
+            var environmentIdentity = EnvironmentIdentity(request.Environment);
+            if (!_knownClaims.TryGetValue(environmentIdentity, out var known))
             {
                 if (_knownClaims.Count >= capacity) return "config-environment-claim-limit";
                 try { Validate(request.Environment); }
                 catch (OptionsValidationException) { return "config-key-unrepresentable"; }
-                known = _knownClaims[request.Environment];
+                known = _knownClaims[environmentIdentity];
             }
 
             foreach (var name in names)
@@ -73,12 +74,12 @@ internal sealed class EnvironmentNativeClaims(AppSurfaceConfigKey[] knownKeys,
                     return "config-key-unrepresentable";
 
             foreach (var name in names)
-                if (_claims.TryGetValue((request.Environment, name), out var owner) && !owner.Equals(request.Key))
+                if (_claims.TryGetValue((environmentIdentity, name), out var owner) && !owner.Equals(request.Key))
                     return "config-key-unrepresentable";
 
-            var identity = (request.Environment, request.Key);
+            var identity = (environmentIdentity, request.Key);
             if (!_requests.Contains(identity) && _requests.Count >= capacity) return "config-environment-claim-limit";
-            foreach (var name in names) _claims[(request.Environment, name)] = request.Key;
+            foreach (var name in names) _claims[(environmentIdentity, name)] = request.Key;
             _requests.Add(identity);
         }
 
@@ -88,6 +89,8 @@ internal sealed class EnvironmentNativeClaims(AppSurfaceConfigKey[] knownKeys,
     private bool IsRepresentable(string environment, AppSurfaceConfigKey key) => mappings.ContainsKey(key)
         || (EnvironmentConfigCodec.TryEncode(key, out var suffix)
             && !suffix.StartsWith(EnvironmentConfigCodec.EncodeEnvironment(environment) + "__", StringComparison.OrdinalIgnoreCase));
+
+    private static string EnvironmentIdentity(string environment) => EnvironmentConfigCodec.EncodeEnvironment(environment);
 
     private static IEnumerable<string> FullNames(string environment, string suffix)
     {

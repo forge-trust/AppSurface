@@ -115,7 +115,7 @@ dotnet build "$fixture_source" --no-restore --disable-build-servers -m:1 --confi
 
 baseline_output="$fixture_root/baseline-result.txt"
 dotnet "$fixture_bin/PreviousConsumer.dll" | tee "$baseline_output"
-if ! rg -q '^BASELINE PASS:' "$baseline_output"; then
+if ! grep -Eq '^BASELINE PASS:' "$baseline_output"; then
   echo "Previous consumer fixture did not report BASELINE PASS." >&2
   exit 1
 fi
@@ -236,14 +236,14 @@ run_bootstrap() {
 
 guarded_output=$(run_bootstrap guarded guarded "$plugin_path" 2>&1)
 printf '%s\n' "$guarded_output" > "$fixture_root/guarded-old-plugin.txt"
-if ! rg -q '^GUARDED REJECTED: Code: config-package-version-mismatch$' "$fixture_root/guarded-old-plugin.txt"; then
+if ! grep -Eq '^GUARDED REJECTED: Code: config-package-version-mismatch$' "$fixture_root/guarded-old-plugin.txt"; then
   echo "Guarded old-plugin execution did not produce the normative package mismatch diagnostic." >&2
   exit 1
 fi
 
 unguarded_output=$(run_bootstrap unguarded unguarded "$plugin_path" 2>&1)
 printf '%s\n' "$unguarded_output" > "$fixture_root/unguarded-old-plugin.txt"
-if ! rg -q '^UNGUARDED RUNTIME FAILURE: (TypeLoadException|FileLoadException|FileNotFoundException|ReflectionTypeLoadException)$' "$fixture_root/unguarded-old-plugin.txt"; then
+if ! grep -Eq '^UNGUARDED RUNTIME FAILURE: (TypeLoadException|FileLoadException|FileNotFoundException|ReflectionTypeLoadException)$' "$fixture_root/unguarded-old-plugin.txt"; then
   echo "Unguarded old-plugin control did not demonstrate an actual runtime loader failure." >&2
   exit 1
 fi
@@ -251,8 +251,8 @@ fi
 for boundary in startup dependencies host-builder; do
   output=$(run_bootstrap "$boundary" "$boundary" "$plugin_path" 2>&1)
   printf '%s\n' "$output" > "$fixture_root/$boundary.txt"
-  if ! rg -q 'REJECTED: Code: config-package-version-mismatch$' "$fixture_root/$boundary.txt" \
-      || ! rg -q '^CALLBACKS: root-factory=0 dependency-registration=0$' "$fixture_root/$boundary.txt"; then
+  if ! grep -Eq 'REJECTED: Code: config-package-version-mismatch$' "$fixture_root/$boundary.txt" \
+      || ! grep -Eq '^CALLBACKS: root-factory=0 dependency-registration=0$' "$fixture_root/$boundary.txt"; then
     echo "$boundary did not reject the old plugin before module callbacks." >&2
     exit 1
   fi
@@ -267,7 +267,7 @@ for matrix in \
   assembly=${matrix#*:}
   output=$(run_bootstrap "$label" guarded-package "$assembly" 2>&1)
   printf '%s\n' "$output" > "$fixture_root/$label.txt"
-  if ! rg -q '^GUARDED REJECTED: Code: config-package-version-mismatch$' "$fixture_root/$label.txt"; then
+  if ! grep -Eq '^GUARDED REJECTED: Code: config-package-version-mismatch$' "$fixture_root/$label.txt"; then
     echo "$label did not produce the normative package mismatch diagnostic." >&2
     exit 1
   fi

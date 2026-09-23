@@ -89,7 +89,7 @@ public sealed class ConfigAuditTextRenderer
 
     private void RenderEntry(StringBuilder builder, ConfigAuditEntry entry, string indent)
     {
-        var value = entry.DisplayValue == null ? string.Empty : $" = {entry.DisplayValue}";
+        var value = entry.DisplayValue == null ? string.Empty : $" = {ConfigDiagnosticText.Prose(entry.DisplayValue)}";
         builder.AppendLine($"{indent}{Identifier(entry.Key)}{value}");
         builder.AppendLine($"{indent}  State: {entry.State}");
         foreach (var source in entry.Sources)
@@ -146,7 +146,7 @@ public sealed class ConfigAuditTextRenderer
             ConfigAuditDiscoveredValueDisplayState.OmittedInventory =>
                 $" (value omitted: {FormatInventoryOmissionReason(discoveredKey.Classification)})",
             ConfigAuditDiscoveredValueDisplayState.OmittedComplex => string.Empty,
-            _ => discoveredKey.DisplayValue == null ? string.Empty : $" = {discoveredKey.DisplayValue}"
+            _ => discoveredKey.DisplayValue == null ? string.Empty : $" = {ConfigDiagnosticText.Prose(discoveredKey.DisplayValue)}"
         };
 
     private static string FormatInventoryOmissionReason(ConfigAuditDiscoveredKeyClassification classification) =>

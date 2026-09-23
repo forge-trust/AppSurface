@@ -40,7 +40,8 @@ internal sealed class EnvironmentBindingPlan
         type = Nullable.GetUnderlyingType(type) ?? type;
         return !type.IsPrimitive && !type.IsEnum && type != typeof(string) && type != typeof(decimal)
             && type != typeof(DateTime) && type != typeof(DateTimeOffset) && type != typeof(TimeSpan)
-            && type != typeof(Guid) && !typeof(IEnumerable).IsAssignableFrom(type);
+            && type != typeof(Guid) && type != typeof(DateOnly) && type != typeof(TimeOnly)
+            && !typeof(IEnumerable).IsAssignableFrom(type);
     }
 
     /// <summary>Constructs an ordinary public instance, or reports an unsupported construction path.</summary>
@@ -109,10 +110,18 @@ internal sealed class EnvironmentBindingMember
 
     internal string Name { get; }
     internal Type Type { get; }
+    /// <summary>Gets whether the member can be assigned through its public setter or mutable field.</summary>
     internal bool CanWrite { get; }
+    /// <summary>Gets the member name normalized to the environment provider's uppercase native form.</summary>
     internal string NativeName => Name.ToUpperInvariant();
+    /// <summary>Reads the member value; returns null when a property has no public getter.</summary>
+    /// <param name="target">The object whose member is read.</param>
+    /// <returns>The member value, or null when a public property getter is unavailable.</returns>
     internal object? Read(object target) => _field is not null ? _field.GetValue(target)
         : _property!.GetMethod?.IsPublic == true ? _property.GetValue(target) : null;
+    /// <summary>Writes a value through the public field or property setter.</summary>
+    /// <param name="target">The object to update.</param>
+    /// <param name="value">The value assigned to the member.</param>
     internal void Write(object target, object? value)
     {
         if (_field is not null) _field.SetValue(target, value);

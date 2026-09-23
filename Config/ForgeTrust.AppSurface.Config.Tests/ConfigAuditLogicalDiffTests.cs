@@ -69,6 +69,83 @@ public sealed class ConfigAuditLogicalDiffTests
         Assert.Equal(ConfigAuditDiffItemStatus.Unchanged, Assert.Single(Compare(baseline, target).Items).Status);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MixedGenerationDottedRootAndColonLogicalPathAreUncomparable(bool reverse)
+    {
+        var oldCapture = Report(new ConfigAuditEntry
+        {
+            Key = "Payments.ApiKey",
+            State = ConfigAuditEntryState.Resolved,
+            DisplayValue = "marker"
+        });
+        var currentCapture = Report(Entry("Payments:ApiKey", "Payments:ApiKey", "marker"));
+
+        var result = reverse ? Compare(currentCapture, oldCapture) : Compare(oldCapture, currentCapture);
+
+        var item = Assert.Single(result.Items);
+        Assert.Equal(ConfigAuditDiffItemStatus.Uncomparable, item.Status);
+        Assert.Contains(item.Diagnostics, diagnostic => diagnostic.Code == "config-diff-logical-path-evidence-missing");
+        Assert.Equal(0, result.Summary.Added);
+        Assert.Equal(0, result.Summary.Removed);
+    }
+
+    [Fact]
+    public void MixedGenerationLegacyDottedKeyIsAmbiguousWhenCurrentCaptureHasBothTypedKeys()
+    {
+        var oldCapture = Report(new ConfigAuditEntry
+        {
+            Key = "Payments.ApiKey",
+            State = ConfigAuditEntryState.Resolved,
+            DisplayValue = "old"
+        });
+        var currentCapture = Report(
+            Entry("Payments.ApiKey", "Payments.ApiKey", "literal"),
+            Entry("Payments:ApiKey", "Payments:ApiKey", "hierarchy"));
+
+        var result = Compare(oldCapture, currentCapture);
+
+        Assert.Equal(2, result.Items.Count);
+        Assert.All(result.Items, item => Assert.Equal(ConfigAuditDiffItemStatus.Uncomparable, item.Status));
+        Assert.Equal(0, result.Summary.Added);
+        Assert.Equal(0, result.Summary.Removed);
+    }
+
+    [Fact]
+    public void DiscoveredLiteralDotAndHierarchyKeysRemainDistinctWithinOneReport()
+    {
+        var report = new ConfigAuditReport
+        {
+            Environment = "Production",
+            GeneratedAt = DateTimeOffset.UnixEpoch,
+            Redaction = new ConfigAuditRedaction { Enabled = true, Placeholder = "[redacted]" },
+            DiscoveredKeys =
+            [
+                new ConfigAuditDiscoveredKey
+                {
+                    Key = "Payments.ApiKey",
+                    Classification = ConfigAuditDiscoveredKeyClassification.Unknown,
+                    DisplayValue = "literal",
+                    ValueDisplayState = ConfigAuditDiscoveredValueDisplayState.Shown
+                },
+                new ConfigAuditDiscoveredKey
+                {
+                    Key = "Payments:ApiKey",
+                    Classification = ConfigAuditDiscoveredKeyClassification.Unknown,
+                    DisplayValue = "hierarchy",
+                    ValueDisplayState = ConfigAuditDiscoveredValueDisplayState.Shown
+                }
+            ]
+        };
+
+        var result = Compare(report, RoundTrip(report));
+
+        Assert.Equal(2, result.Items.Count);
+        Assert.All(result.Items, item => Assert.Equal(ConfigAuditDiffItemStatus.Unchanged, item.Status));
+        Assert.DoesNotContain(result.Diagnostics, diagnostic => diagnostic.Code == "config-diff-duplicate-evidence");
+    }
+
     [Fact]
     public void MalformedLegacyRootKeepsItsOpaqueIdentityAcrossSerialization()
     {

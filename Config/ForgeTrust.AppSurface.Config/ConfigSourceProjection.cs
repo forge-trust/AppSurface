@@ -15,10 +15,15 @@ internal sealed record ConfigSourceEntry<T>(
 /// <summary>The identity outcome for an entire collision domain.</summary>
 internal enum ConfigSourceProjectionStatus
 {
+    /// <summary>One unambiguous source identity is present.</summary>
     Unique,
+    /// <summary>Multiple sources provide the same identity in explicit precedence order.</summary>
     IntentionalOverride,
+    /// <summary>The same identity occurs more than once within one layer.</summary>
     Duplicate,
+    /// <summary>Distinct logical identities claim the same native identifier.</summary>
     Collision,
+    /// <summary>The logical identity cannot be represented by the provider's native naming rules.</summary>
     Unrepresentable
 }
 

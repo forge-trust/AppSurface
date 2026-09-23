@@ -258,6 +258,7 @@ public sealed class AuditContractTests
         var entry = Assert.Single(CreateReporter(environment, [provider], Known<string>()).GetReport("Production").Entries);
         Assert.Equal(ConfigAuditEntryState.Invalid, entry.State);
         Assert.Null(entry.DisplayValue);
+        Assert.Contains(entry.Sources, source => source.ProviderName == "Base");
         Assert.All(entry.Diagnostics, diagnostic => Assert.DoesNotContain("value-sentinel", diagnostic.Message, StringComparison.Ordinal));
     }
 

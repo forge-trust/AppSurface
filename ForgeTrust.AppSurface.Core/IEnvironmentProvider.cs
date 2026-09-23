@@ -41,6 +41,10 @@ public interface IEnvironmentProvider
 
     /// <summary>Captures a fresh name/value snapshot preserving distinct native spellings with ordinal comparison.</summary>
     /// <returns>An independently owned snapshot. Values are sensitive and must never be logged.</returns>
-    /// <remarks>Implementations must preserve empty values and must not fold names or combine separate captures.</remarks>
+    /// <remarks>
+    /// Use a snapshot when inspecting native name spellings together or when one operation needs a consistent
+    /// inventory. Use <see cref="GetEnvironmentVariable"/> for a point read of one known name. Implementations must
+    /// preserve empty values and must not fold names or combine separate captures.
+    /// </remarks>
     IReadOnlyDictionary<string, string> CaptureEnvironmentVariables();
 }

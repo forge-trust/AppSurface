@@ -99,7 +99,7 @@ services.ConfigureAppSurfaceGoogleSecretManager(options =>
 });
 ```
 
-Only strict descendants of the exact logical prefix are claimed. The provider encodes the complete logical key by
+The exact logical prefix key and its descendants are claimed. The provider encodes the complete logical key by
 lowercasing each valid segment and joining segments with `--`, then prepends the exact non-empty `secretIdPrefix`.
 Both `EnableConventionResolver` overloads require this prefix explicitly; an empty prefix fails startup validation.
 For example, `Payments:Api-Key` becomes `prefix-payments--api-key`. Every convention in one provider instance must use
@@ -107,9 +107,13 @@ the same ordinal-exact prefix. Dots, Unicode, empty segments, leading or trailin
 are unrepresentable; use an explicit typed mapping for those keys.
 
 The convention codec is injective and does not probe historical generated names. Before upgrading, inventory known
-convention declarations with `AppSurfaceGoogleSecretMigrationInventory.Inventory(options, knownKeys)`. For each result,
-add its `MapSecretSnippet` so the existing legacy secret id remains selected without a network probe. Unknown ad-hoc
-keys cannot be inventoried because the provider never enumerates Secret Manager.
+convention declarations with `AppSurfaceGoogleSecretMigrationInventory.Inventory(options, knownKeys)`. This overload
+assumes the old raw key prefix and old secret-id prefix match the current convention prefixes. If either historical
+prefix differs, supply both explicitly with
+`AppSurfaceGoogleSecretMigrationInventory.Inventory(options, knownKeys, legacyLogicalKeyPrefix, legacySecretIdPrefix)`;
+the raw key prefix preserves its original spelling and punctuation, and the old secret-id prefix may be empty. For each
+result, add its `MapSecretSnippet` so the existing legacy secret id remains selected without a network probe. Unknown
+ad-hoc keys cannot be inventoried because the provider never enumerates Secret Manager.
 
 Typed overloads are the primary API. The retained string overloads parse strict colon-delimited keys and are convenient
 for source migration; the obsolete provider `GetValue` and `ResolveValue` helpers throw terminal failures and should be

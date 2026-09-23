@@ -74,6 +74,10 @@ public class ConfigAuditReporterTests
     {
     }
 
+    private sealed class MismatchedNameConfig : Config<string>
+    {
+    }
+
     [ConfigKey("Throwing:Name", root: true)]
     private sealed class ThrowingNameConfig : Config<string>
     {
@@ -2526,7 +2530,7 @@ public class ConfigAuditReporterTests
         services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Throwing:Count"), typeof(ThrowingCountConfig), typeof(int)));
         services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Leaky:Name"), typeof(LeakyNameConfig), typeof(string)));
         services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Leaky:Throwing"), typeof(LeakyThrowingConfig), typeof(string)));
-        services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Mismatched:Name"), typeof(ShortNameConfig), typeof(string)));
+        services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Mismatched:Name"), typeof(MismatchedNameConfig), typeof(string)));
         services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Mismatched:Count"), typeof(RetryCountConfig), typeof(int)));
         services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Default:Port"), typeof(DefaultPortConfig), typeof(int)));
         services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Broken:Wrapper"), typeof(UnconstructableConfig), typeof(string)));

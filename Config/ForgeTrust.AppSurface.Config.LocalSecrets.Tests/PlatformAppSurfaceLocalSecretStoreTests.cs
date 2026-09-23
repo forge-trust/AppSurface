@@ -526,6 +526,42 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
+    public void IndexedStoreProbe_Should_ResolveCaseVariantAndReportLogicalCollision()
+    {
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        var store = new IndexedMemoryStore();
+        var lower = normalizer.Normalize("MyApp", "Development", null, "stripe:apikey").Identity!;
+        var upper = normalizer.Normalize("MyApp", "Development", null, "Stripe:ApiKey").Identity!;
+        store.Set(lower, "probe-secret");
+
+        var caseVariantProbe = store.Probe(upper);
+        store.SeedIndex("MyApp", "Development", null, lower.Key.Value, upper.Key.Value);
+        var collisionProbe = store.Probe(upper);
+
+        Assert.Equal(LocalSecretResultStatus.Found, caseVariantProbe.Status);
+        Assert.Equal(string.Empty, caseVariantProbe.Value);
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, collisionProbe.Status);
+        Assert.Equal("config-key-collision", collisionProbe.Diagnostic?.Code);
+        ValueSafeAssert.DoesNotExpose("probe-secret", caseVariantProbe.ToString());
+    }
+
+    [Fact]
+    public void IndexedStoreProbe_Should_PreserveExactHistoricalSourceIdentity()
+    {
+        var store = new IndexedMemoryStore();
+        var source = LocalSecretMigrationIdentity.Resolve("MyApp", "Development", null,
+            "appsurface:MyApp:Development:Legacy.Key", false)!;
+        Assert.Equal("Legacy.Key", source.StoredKey);
+        store.SeedIndex("MyApp", "Development", null, "legacy.key");
+        Assert.Equal(LocalSecretResultStatus.Missing, store.Probe(source).Status);
+
+        store.SeedIndex("MyApp", "Development", null, "legacy.key", "Legacy.Key");
+        Assert.Contains("Legacy.Key", store.ReadIndexKeys("MyApp", "Development", null));
+        Assert.Contains("Legacy.Key", store.ReadIndexForMigration("MyApp", "Development", null).Keys);
+        Assert.Equal(LocalSecretResultStatus.Found, store.Probe(source).Status);
+    }
+
+    [Fact]
     public void IndexedStoreSet_Should_NotWriteValue_WhenIndexWriteFails()
     {
         var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();

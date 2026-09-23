@@ -58,6 +58,55 @@ public sealed class MacOsV2CompatibilityLocalSecretStoreTests
     }
 
     [Fact]
+    public void Probe_Should_ResolveCaseVariantAndReportV2LogicalCollision()
+    {
+        var interop = new FakeSecItemInterop();
+        var store = CreateStore(new InMemoryAppSurfaceLocalSecretStore(), interop);
+        interop.Seed(V2Query("__appsurface_index__"), "[\"stripe:apikey\"]");
+        interop.Seed(V2Query("stripe:apikey"), "sentinel-v2-value");
+
+        var caseVariantProbe = store.Probe(Identity("Stripe:ApiKey"));
+        interop.Seed(V2Query("__appsurface_index__"), "[\"stripe:apikey\",\"Stripe:ApiKey\"]");
+        var collisionProbe = store.Probe(Identity("Stripe:ApiKey"));
+
+        Assert.Equal(LocalSecretResultStatus.Found, caseVariantProbe.Status);
+        Assert.Equal(string.Empty, caseVariantProbe.Value);
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, collisionProbe.Status);
+        Assert.Equal("config-key-collision", collisionProbe.Diagnostic?.Code);
+        ValueSafeAssert.DoesNotExpose("sentinel-v2-value", caseVariantProbe.ToString());
+    }
+
+    [Fact]
+    public void Probe_Should_PreserveExactV2MigrationSourceIdentity()
+    {
+        var interop = new FakeSecItemInterop();
+        var store = CreateStore(new InMemoryAppSurfaceLocalSecretStore(), interop);
+        var source = LocalSecretMigrationIdentity.Resolve("MyApp", "Development", null,
+            "appsurface:v2:MyApp:Development::Legacy.Key", true)!;
+        interop.Seed(V2Query("__appsurface_index__"), "[\"legacy.key\"]");
+        Assert.Equal(LocalSecretResultStatus.Missing, store.Probe(source).Status);
+
+        interop.Seed(V2Query("__appsurface_index__"), "[\"legacy.key\",\"Legacy.Key\"]");
+        Assert.Equal(LocalSecretResultStatus.Found, store.Probe(source).Status);
+    }
+
+    [Fact]
+    public void Probe_Should_FindExactHistoricalSourceInLegacyMetadata()
+    {
+        var legacy = new InMemoryAppSurfaceLocalSecretStore();
+        var source = LocalSecretMigrationIdentity.Resolve("MyApp", "Development", null,
+            "appsurface:MyApp:Development:Legacy.Key", false)!;
+        legacy.Set(source, "sentinel-legacy-value");
+        var store = CreateStore(legacy, new FakeSecItemInterop());
+
+        var result = store.Probe(source);
+
+        Assert.Equal(LocalSecretResultStatus.Found, result.Status);
+        Assert.Equal(string.Empty, result.Value);
+        ValueSafeAssert.DoesNotExpose("sentinel-legacy-value", result.ToString());
+    }
+
+    [Fact]
     public void Get_Should_ReturnLegacyLockedStatus_WhenV2IsMissing()
     {
         var legacy = new FixedGetStore(

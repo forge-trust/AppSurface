@@ -333,7 +333,21 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore
                 return AppSurfaceLocalSecretResult.NotFound(v2Index.Status, v2Index.Diagnostic!, Name);
             }
 
-            if (v2Index.Keys.Contains(identity.StoredKey, StringComparer.Ordinal))
+            if (identity.MigrationStoredKey is not null)
+                return v2Index.Keys.Contains(identity.StoredKey, StringComparer.Ordinal)
+                    ? AppSurfaceLocalSecretResult.Found(string.Empty, Name)
+                    : _legacyMetadata?.Probe(identity) ?? AppSurfaceLocalSecretResult.Missing(Name);
+
+            var matches = v2Index.Keys.Where(key => StringComparer.OrdinalIgnoreCase.Equals(key, identity.StoredKey)).ToArray();
+            if (matches.Length > 1)
+            {
+                return AppSurfaceLocalSecretResult.NotFound(LocalSecretResultStatus.ProviderFailed,
+                    new AppSurfaceLocalSecretDiagnostic("config-key-collision", "Local secret identities collide.",
+                        "The native index contains case-only spellings of one logical key.",
+                        "Migrate or remove duplicate exact records.", "local-secrets-migration"), Name);
+            }
+
+            if (matches.Length == 1)
             {
                 return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
             }

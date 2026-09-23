@@ -72,12 +72,16 @@ public sealed class ConfigInputProvenanceTests
         Assert.Equal(origin == ConfigKeyInputOrigin.TranslatedDot
             ? "Provenance:Parent:Service:Endpoint"
             : "Provenance.Parent:Service.Endpoint", stringKey.Value);
-        Assert.Equal(typed ? null : "Provenance.Parent.Service.Endpoint", stringKey.OriginalInput);
+        Assert.Equal(typed ? null : origin == ConfigKeyInputOrigin.TranslatedDot
+            ? "Provenance.Parent.Service.Endpoint"
+            : "Provenance.Parent:Service.Endpoint", stringKey.OriginalInput);
         var strictIdentity = AppSurfaceConfigKey.Parse(stringKey.Value);
         Assert.Equal(strictIdentity, stringKey);
         Assert.Equal(strictIdentity.GetHashCode(), stringKey.GetHashCode());
         Assert.Single(new HashSet<AppSurfaceConfigKey> { strictIdentity, stringKey });
-        Assert.Equal(typed ? null : "Provenance.Parent.Retry.Count", structKey.OriginalInput);
+        Assert.Equal(typed ? null : origin == ConfigKeyInputOrigin.TranslatedDot
+            ? "Provenance.Parent.Retry.Count"
+            : "Provenance.Parent:Retry.Count", structKey.OriginalInput);
 
         var stringWrapper = provider.GetRequiredService<Parent.StringValue>();
         var structWrapper = provider.GetRequiredService<Parent.StructValue>();

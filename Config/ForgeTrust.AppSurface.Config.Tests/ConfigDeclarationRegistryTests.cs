@@ -78,6 +78,20 @@ public sealed class ConfigDeclarationRegistryTests
     }
 
     [Fact]
+    public void Registry_RejectsDifferentKeysForTheSameWrapperType()
+    {
+        var first = new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("First:Value"), typeof(WrappedConfig), typeof(string));
+        var second = new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Second:Value"), typeof(WrappedConfig), typeof(string));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => new ConfigDeclarationRegistry(
+            [first, second], [], CreateParser(LegacyDotPathBehavior.Strict)));
+
+        Assert.Contains("config-key-collision", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("First:Value", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Second:Value", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Registry_LaterWrapperPreservesEarlierManualOverrides()
     {
         var key = AppSurfaceConfigKey.Parse("Shared:Value");

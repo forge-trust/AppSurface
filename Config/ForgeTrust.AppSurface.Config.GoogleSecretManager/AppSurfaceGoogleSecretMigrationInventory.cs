@@ -23,6 +23,49 @@ public static class AppSurfaceGoogleSecretMigrationInventory
         IEnumerable<AppSurfaceConfigKey> knownKeys)
     {
         ArgumentNullException.ThrowIfNull(options);
+        return Inventory(options, knownKeys, convention => convention.SecretIdPrefix, (key, convention) =>
+            {
+                var prefix = AppSurfaceConfigKey.Parse(convention.LogicalKeyPrefix);
+                return key.IsSameOrDescendantOf(prefix) ? prefix.Value.Length : -1;
+            });
+    }
+
+    /// <summary>Computes migration mappings using caller-supplied raw legacy convention prefixes.</summary>
+    /// <param name="options">The current options, which determine new encoded ids and versions.</param>
+    /// <param name="knownKeys">The logical keys to inspect.</param>
+    /// <param name="legacyLogicalKeyPrefix">The historical key prefix, checked with ordinal <see cref="string.StartsWith(string, StringComparison)"/> semantics after keys are scoped to a current convention by segment ancestry.</param>
+    /// <param name="legacySecretIdPrefix">The historical id prefix; an empty value is supported.</param>
+    /// <returns>Mappings for keys whose historical normalized id differs from the current encoded id.</returns>
+    /// <exception cref="ArgumentNullException">An argument or a key in <paramref name="knownKeys"/> is null.</exception>
+    /// <exception cref="ArgumentException">The raw legacy key prefix is empty.</exception>
+    public static IReadOnlyList<AppSurfaceGoogleSecretMigrationEntry> Inventory(
+        AppSurfaceGoogleSecretManagerOptions options,
+        IEnumerable<AppSurfaceConfigKey> knownKeys,
+        string legacyLogicalKeyPrefix,
+        string legacySecretIdPrefix)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(knownKeys);
+        ArgumentNullException.ThrowIfNull(legacyLogicalKeyPrefix);
+        ArgumentNullException.ThrowIfNull(legacySecretIdPrefix);
+        if (legacyLogicalKeyPrefix.Length == 0)
+        {
+            throw new ArgumentException("The raw legacy key prefix must not be empty.", nameof(legacyLogicalKeyPrefix));
+        }
+
+        return Inventory(options, knownKeys, _ => legacySecretIdPrefix,
+            (key, convention) => key.IsSameOrDescendantOf(AppSurfaceConfigKey.Parse(convention.LogicalKeyPrefix))
+                && key.Value.StartsWith(legacyLogicalKeyPrefix, StringComparison.Ordinal)
+                ? legacyLogicalKeyPrefix.Length
+                : -1);
+    }
+
+    private static IReadOnlyList<AppSurfaceGoogleSecretMigrationEntry> Inventory(
+        AppSurfaceGoogleSecretManagerOptions options,
+        IEnumerable<AppSurfaceConfigKey> knownKeys,
+        Func<AppSurfaceGoogleSecretConvention, string> legacyIdPrefix,
+        Func<AppSurfaceConfigKey, AppSurfaceGoogleSecretConvention, int> getPrefixLength)
+    {
         ArgumentNullException.ThrowIfNull(knownKeys);
 
         var entries = new Dictionary<AppSurfaceConfigKey, AppSurfaceGoogleSecretMigrationEntry>();
@@ -31,14 +74,14 @@ public static class AppSurfaceGoogleSecretMigrationInventory
             ArgumentNullException.ThrowIfNull(key);
             foreach (var convention in options.Conventions)
             {
-                var prefix = AppSurfaceConfigKey.Parse(convention.LogicalKeyPrefix);
-                if (!key.IsSameOrDescendantOf(prefix))
+                var prefixLength = getPrefixLength(key, convention);
+                if (prefixLength < 0)
                 {
                     continue;
                 }
 
-                var legacyId = convention.SecretIdPrefix
-                    + key.Value[prefix.Value.Length..].Replace(':', '-').Replace('.', '-').Replace('_', '-').ToLowerInvariant();
+                var legacyId = legacyIdPrefix(convention)
+                    + key.Value[prefixLength..].Replace(':', '-').Replace('.', '-').Replace('_', '-').ToLowerInvariant();
                 if (!GoogleSecretManagerSecretReference.TryEncodeKey(key, out var encoded))
                 {
                     break;

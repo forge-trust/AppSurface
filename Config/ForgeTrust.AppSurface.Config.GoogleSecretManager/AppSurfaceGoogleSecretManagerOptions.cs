@@ -114,6 +114,11 @@ public sealed class AppSurfaceGoogleSecretManagerOptions
     }
 
     /// <summary>Maps a parsed logical key to a Google Secret Manager resource.</summary>
+    /// <param name="logicalKey">The parsed logical AppSurface configuration key; dots remain literal segment content.</param>
+    /// <param name="secretIdOrResourceName">A short secret id or full <c>projects/.../secrets/.../versions/...</c> name.</param>
+    /// <param name="version">The version or alias for short secret ids. Overrides <see cref="DefaultVersion"/>.</param>
+    /// <returns>The same options instance.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="logicalKey"/> is <see langword="null"/>.</exception>
     public AppSurfaceGoogleSecretManagerOptions MapSecret(
         AppSurfaceConfigKey logicalKey,
         string secretIdOrResourceName,

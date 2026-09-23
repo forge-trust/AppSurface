@@ -6,6 +6,17 @@ namespace ForgeTrust.AppSurface.Config.Tests;
 
 public class EnvironmentConfigProviderTests
 {
+    [Fact]
+    public void Clone_PreservesImmutableDateAndTimeValues()
+    {
+        var clone = new EnvironmentObjectClone(32, CancellationToken.None);
+        var date = new DateOnly(2026, 9, 23);
+        var time = new TimeOnly(14, 35, 7);
+
+        Assert.Equal(date, (DateOnly)clone.Copy(date, typeof(DateOnly)));
+        Assert.Equal(time, (TimeOnly)clone.Copy(time, typeof(TimeOnly)));
+    }
+
     private static T? ResolveValue<T>(EnvironmentConfigProvider provider, string environment, string key)
     {
         var logicalKey = AppSurfaceConfigKey.Parse(key);
@@ -642,10 +653,13 @@ public class EnvironmentConfigProviderTests
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new NullGetterOnlyOptions();
 
-        var patched = PatchLegacy(provider, "Production", "MyApp:Settings", current, out NullGetterOnlyOptions? value);
+        var request = new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings"));
+        var result = ((IConfigValuePatcher)provider).Patch(request, current);
 
-        Assert.False(patched);
-        Assert.Null(value);
+        Assert.Equal(ConfigPatchStatus.Terminal, result.Status);
+        Assert.Equal("config-patch-failed", result.Diagnostic!.Code);
+        Assert.Contains("MyApp:Settings:Database", result.Diagnostic.Cause);
+        Assert.Null(result.Value);
         Assert.Null(current.Database);
     }
 
@@ -659,10 +673,13 @@ public class EnvironmentConfigProviderTests
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new PrivateSetterChildOptions();
 
-        var patched = PatchLegacy(provider, "Production", "MyApp:Settings", current, out PrivateSetterChildOptions? value);
+        var request = new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings"));
+        var result = ((IConfigValuePatcher)provider).Patch(request, current);
 
-        Assert.False(patched);
-        Assert.Null(value);
+        Assert.Equal(ConfigPatchStatus.Terminal, result.Status);
+        Assert.Equal("config-patch-failed", result.Diagnostic!.Code);
+        Assert.Contains("MyApp:Settings:Database", result.Diagnostic.Cause);
+        Assert.Null(result.Value);
         Assert.Null(current.Database);
     }
 

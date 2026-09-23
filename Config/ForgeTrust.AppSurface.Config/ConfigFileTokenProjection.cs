@@ -80,18 +80,21 @@ internal sealed class ConfigFileTokenProjection
         reader.Read();
         if (reader.TokenType != JsonTokenType.StartObject)
             throw new JsonException("The configuration document root must be an object.");
-        ReadObject(ref reader, [], bytes, starts, entries, occurrences, terminals, invalidKeys, locations, root);
+        var invalidRootProperty = ReadObject(ref reader, [], bytes, starts, entries, occurrences, terminals, invalidKeys, locations, root);
+        if (invalidRootProperty && entries.Count == 0)
+            throw new JsonException("The configuration document has no representable root properties.");
         // The final-block reader validates termination and rejects trailing data itself.
         reader.Read();
         foreach (var terminal in terminals) locations[terminal.Value] = null;
         return new(entries, occurrences, terminals, invalidKeys, new(locations), root);
     }
 
-    private static void ReadObject(ref Utf8JsonReader reader, IReadOnlyList<string> parent, byte[] bytes, int[] starts,
+    private static bool ReadObject(ref Utf8JsonReader reader, IReadOnlyList<string> parent, byte[] bytes, int[] starts,
         Dictionary<AppSurfaceConfigKey, ConfigFileProjectedEntry> entries, List<ConfigFileProjectedEntry> occurrences,
         HashSet<AppSurfaceConfigKey> terminals, HashSet<AppSurfaceConfigKey> invalidKeys,
         Dictionary<string, ConfigAuditSourceLocation?> locations, JsonObject target)
     {
+        var invalidRootProperty = false;
         reader.Read();
         while (reader.TokenType != JsonTokenType.EndObject)
         {
@@ -99,6 +102,8 @@ internal sealed class ConfigFileTokenProjection
             var propertyStart = checked((int)reader.TokenStartIndex);
             var spelling = reader.GetString()!;
             var segments = parent.Append(spelling).ToArray();
+            if (parent.Count == 0 && !TryKey(segments, out _))
+                invalidRootProperty = true;
             reader.Read();
             var start = checked((int)reader.TokenStartIndex);
             var child = ReadValue(ref reader, segments, bytes, starts, entries, occurrences, terminals, invalidKeys, locations);
@@ -106,6 +111,8 @@ internal sealed class ConfigFileTokenProjection
                 target[spelling] = child.Node;
             reader.Read();
         }
+
+        return invalidRootProperty;
 
         bool Record(string[] path, int start, int end, int locator, ConfigFileValueShape shape, object? scalar) =>
             RecordEntry(path, bytes, starts, start, end, locator, shape, scalar, entries, occurrences, terminals, invalidKeys, locations);

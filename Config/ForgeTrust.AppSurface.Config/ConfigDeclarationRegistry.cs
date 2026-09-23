@@ -65,9 +65,18 @@ internal sealed class ConfigDeclarationRegistry
         Entries = new ReadOnlyCollection<ConfigAuditKnownEntry>(ordered);
         Keys = new ReadOnlyCollection<AppSurfaceConfigKey>(ordered.Select(entry => entry.LogicalKey).ToArray());
         var mergedByValue = byValue;
+        var typedGroups = candidates.Where(entry => entry.ConfigType != null)
+            .GroupBy(entry => entry.ConfigType!).ToArray();
+        foreach (var group in typedGroups)
+        {
+            var keys = group.Select(entry => entry.LogicalKey).Distinct().Take(2).ToArray();
+            if (keys.Length > 1)
+            {
+                throw CreateCollision(keys[0], keys[1]);
+            }
+        }
         _byConfigType = new ReadOnlyDictionary<Type, ConfigAuditKnownEntry>(
-            candidates.Where(entry => entry.ConfigType != null)
-                .GroupBy(entry => entry.ConfigType!)
+            typedGroups
                 .ToDictionary(
                     group => group.Key,
                     group => mergedByValue[group.First().LogicalKey.Value]));

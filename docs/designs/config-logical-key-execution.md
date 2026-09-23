@@ -18,7 +18,7 @@ Implementation and scoped review are complete. The final solution run and the
 working-implementation coverage gate both passed; the committed patch is checked
 after the commit using the same coverage artifact. Historical focused passes below
 identify their exact scope and are supplemented by the all-green final solution run. The
-[normative matrix](https://github.com/forge-trust/AppSurface/blob/codex/config-logical-key-contract/tests/config-key-contract-matrix.json)
+[normative matrix](https://github.com/forge-trust/AppSurface/blob/main/tests/config-key-contract-matrix.json)
 records exact test methods and distinguishes complete assertion evidence from gaps.
 Its latest bounded source review found all 47 rows covered, with 176 exact named-method
 references verified. Source assertions
@@ -62,10 +62,11 @@ These avoid the observed shared compiler-server output access failure without
 changing test selection, coverage thresholds, or the unrestricted-run guard.
 
 Shared-project builds must run serially. Concurrent `Rebuild` previously removed
-Core/Config outputs while another test build copied them. The current local runner
-`python3 /tmp/config-validation-lock.py dotnet ...` serializes validation through an
-exclusive file lock. Provider edits can proceed independently; a missing in-progress
-helper or fixture is a build failure, never a test pass.
+Core/Config outputs while another test build copied them. This evidence run used
+the local, untracked `/tmp/config-validation-lock.py` wrapper to serialize validation
+through an exclusive file lock; maintainers can run the same `dotnet` commands
+serially without that wrapper. Provider edits can proceed independently; a missing
+in-progress helper or fixture is a build failure, never a test pass.
 
 The coverage CLI's `--diff-base` uses the committed merge-base-to-HEAD diff. Staging
 alone does not include the implementation in that patch gate. Before committing,
@@ -130,7 +131,7 @@ diagnostic trust/redaction, and previous/candidate package compatibility.
 
 Validation includes the focused Config, LocalSecrets, Google and Config.Testing suites; the
 [source proof](../../examples/config-key-contract/README.md); the
-[clean packed consumer](https://github.com/forge-trust/AppSurface/blob/codex/config-logical-key-contract/tests/config-package-consumer/README.md); compatibility
+[clean packed consumer](https://github.com/forge-trust/AppSurface/blob/main/tests/config-package-consumer/README.md); compatibility
 fixtures; solution build and formatting; documentation checks; and
 `./scripts/coverage-solution.sh`. The required kernel/parser/projection/index/codecs
 reach 100% branches and changed provider orchestration exceeds 95%. All scoped review
@@ -146,12 +147,17 @@ merging `origin/main` at `e0618ac8dcc3b5903517e9a711f42959534b7fb5`. All 2,379
 tracked/input hashes remained unchanged through the source, package, CLI,
 compatibility, and full-solution checks. This ledger update records evidence only.
 
-The unchanged [solution coverage script](https://github.com/forge-trust/AppSurface/blob/codex/config-logical-key-contract/scripts/coverage-solution.sh) and
+The unchanged [solution coverage script](https://github.com/forge-trust/AppSurface/blob/main/scripts/coverage-solution.sh) and
 its committed patch gate both exited 0. The exact invocation was:
 
 ```sh
 MSBUILDDISABLENODEREUSE=1 DOTNET_CLI_USE_MSBUILD_SERVER=0 UseSharedCompilation=false BUILD_CONFIGURATION=Debug BUILD_NO_RESTORE=true COVERAGE_PARALLELISM=1 COVERAGE_GATE_DIFF_BASE=origin/main python3 /tmp/config-validation-lock.py bash scripts/coverage-solution.sh
 ```
+
+The `/tmp/config-validation-lock.py` wrapper was local to this evidence run and is
+not part of the repository. To reproduce the coverage check, run the linked
+`scripts/coverage-solution.sh` serially with the same environment variables,
+omitting `python3 /tmp/config-validation-lock.py` from the command above.
 
 The run discovered 53 test projects and recorded **13,081 total tests: 13,080
 passed, zero failures or errors, and one skipped**. Compiler/analyzer warnings and

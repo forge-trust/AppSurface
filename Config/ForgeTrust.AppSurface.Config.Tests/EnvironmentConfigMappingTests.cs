@@ -147,6 +147,18 @@ public class EnvironmentConfigMappingTests
         Assert.Equal(ConfigPatchStatus.Terminal, ((IConfigValuePatcher)provider).Patch<Settings>(Request("App"), null).Status);
     }
 
+    [Fact]
+    public void PresentChildForUnconstructibleAggregateIsTerminalWithNestedPath()
+    {
+        var provider = new EnvironmentConfigProvider(new EnvironmentFixture([("APP__CHILD__VALUE", "supplied")]));
+        var result = ((IConfigValuePatcher)provider).Patch(Request("App"), new UnconstructibleRoot());
+
+        Assert.Equal(ConfigPatchStatus.Terminal, result.Status);
+        Assert.Equal("config-patch-failed", result.Diagnostic!.Code);
+        Assert.Contains("App:Child", result.Diagnostic.Cause);
+        Assert.Null(result.Value);
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
@@ -181,6 +193,15 @@ public class EnvironmentConfigMappingTests
         var escaped = new EnvironmentNativeClaims([mapped], new Dictionary<AppSurfaceConfigKey, string> { [mapped] = "EXACT_PAYMENTS" }, 4096);
         Assert.Null(escaped.Claim(Request(mapped.Value), ["EXACT_PAYMENTS", "PRODUCTION__EXACT_PAYMENTS"]));
         Assert.Null(escaped.Claim(Request("Payments")));
+    }
+
+    [Fact]
+    public void EnvironmentClaimIdentityIsNormalizedToEncodedNativePrefix()
+    {
+        var claims = new EnvironmentNativeClaims([], new Dictionary<AppSurfaceConfigKey, string>(), 4096);
+
+        Assert.Null(claims.Claim(Request("Payments"), ["SHARED_NATIVE"]));
+        Assert.Equal("config-key-unrepresentable", claims.Claim(new("production", AppSurfaceConfigKey.Parse("Other")), ["SHARED_NATIVE"]));
     }
 
     [Theory]
@@ -265,6 +286,8 @@ public class EnvironmentConfigMappingTests
     private sealed class Child { public string? Name { get; set; } public int Port { get; set; } }
     private sealed class UnicodeSettings { public string? É { get; set; } }
     private sealed class ProductionSettings { public int Payments { get; set; } }
+    private sealed class UnconstructibleRoot { public UnconstructibleChild? Child { get; set; } }
+    private sealed class UnconstructibleChild(string required) { public string Required { get; } = required; public string? Value { get; set; } }
     private sealed class ThrowingGetter { public int Reads; public string Name { get { Reads++; throw new InvalidOperationException("SENTINEL_SECRET"); } } }
     private sealed class GetterOnlyStruct { public string? Name { get; set; } public State State { get; } = new() { Port = 80 }; }
     private sealed class WritableStruct { public State State { get; set; } }

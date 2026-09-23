@@ -52,10 +52,25 @@ public sealed class FileProjectionContractTests
     [InlineData("{")]
     [InlineData("{\"A\":")]
     [InlineData("{\"A\":[")]
+    [InlineData("{\"\":1}")]
     [InlineData("{\"A\": [1,]}")]
     [InlineData("{}{}")]
     public void MalformedDocumentsNeverPublishPartialProjection(string json) =>
         Assert.ThrowsAny<JsonException>(() => ConfigFileTokenProjection.Parse(Encoding.UTF8.GetBytes(json)));
+
+    [Fact]
+    public void InvalidRootPropertyIsReportedAsMalformedAndCannotLookLikeAnEmptyLayer()
+    {
+        using var fixture = new Files("{\"\":\"SENTINEL_SECRET\"}");
+
+        var result = fixture.Provider.Resolve<object>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Any")));
+
+        Assert.Equal(ConfigProviderValueStatus.Missing, result.Status);
+        var diagnostics = ((IConfigDiagnosticProvider)fixture.Provider).GetReportDiagnostics("Production");
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("config-file-malformed", diagnostic.Code);
+        Assert.DoesNotContain("SENTINEL_SECRET", diagnostic.Message, StringComparison.Ordinal);
+    }
 
     [Theory]
     [InlineData("{\"A\":{\"Bad:Key\":[{\"X\":1},[2]]},\"Sibling\":3}")]

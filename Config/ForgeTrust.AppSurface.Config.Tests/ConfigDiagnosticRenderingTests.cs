@@ -49,6 +49,34 @@ public sealed class ConfigDiagnosticRenderingTests
     }
 
     [Fact]
+    public void ReportDisplayValuesCannotInjectLines()
+    {
+        var report = new ConfigAuditReport
+        {
+            Environment = "Production",
+            GeneratedAt = DateTimeOffset.UnixEpoch,
+            Redaction = new ConfigAuditRedaction { Enabled = false, Placeholder = "[redacted]" },
+            Entries = [new ConfigAuditEntry
+            {
+                Key = "Entry", State = ConfigAuditEntryState.Resolved, DisplayValue = "safe\nDiagnostic: forged"
+            }],
+            DiscoveredKeys = [new ConfigAuditDiscoveredKey
+            {
+                Key = "Discovered", Classification = ConfigAuditDiscoveredKeyClassification.Unknown,
+                DisplayValue = "safe\nSource: forged",
+                ValueDisplayState = ConfigAuditDiscoveredValueDisplayState.Shown
+            }]
+        };
+
+        var rendered = new ConfigAuditTextRenderer().Render(report);
+
+        Assert.DoesNotContain("\nDiagnostic: forged", rendered);
+        Assert.DoesNotContain("\nSource: forged", rendered);
+        Assert.Contains("safe\\u000aDiagnostic: forged", rendered);
+        Assert.Contains("safe\\u000aSource: forged", rendered);
+    }
+
+    [Fact]
     public void DiffIdentifiersUseTheSameBoundsInFullSourceDetail()
     {
         var identifier = "native\u202e" + new string('x', 300);
@@ -76,6 +104,46 @@ public sealed class ConfigDiagnosticRenderingTests
         Assert.Contains("safe\\u000aexplanation", rendered);
         Assert.Contains("…#", rendered);
         Assert.Throws<ArgumentNullException>(() => new ConfigAuditDiffTextRenderer(null!));
+    }
+
+    [Fact]
+    public void DiffDisplayValuesCannotInjectLines()
+    {
+        var report = new ConfigAuditDiffReport
+        {
+            BaselineEnvironment = "Production",
+            TargetEnvironment = "Production",
+            GeneratedAt = DateTimeOffset.UnixEpoch,
+            SourceDetail = ConfigAuditDiffSourceDetail.Summarized,
+            EvidenceMode = ConfigAuditDiffEvidenceMode.CapturedSnapshot,
+            Summary = new ConfigAuditDiffSummary
+            {
+                Changed = 1,
+                Added = 0,
+                Removed = 0,
+                Unchanged = 0,
+                Uncomparable = 0,
+                Diagnostics = 0
+            },
+            Items = [new ConfigAuditDiffItem
+            {
+                Kind = ConfigAuditDiffItemKind.KnownEntry,
+                Status = ConfigAuditDiffItemStatus.Changed,
+                Significance = ConfigAuditDiffSignificance.Context,
+                Key = "Entry",
+                Description = "changed",
+                ValueEvidence = ConfigAuditDiffValueEvidence.DisplayValuesComparable,
+                BaselineDisplayValue = "before\nSource: forged",
+                TargetDisplayValue = "after\nDiagnostic: forged"
+            }]
+        };
+
+        var rendered = new ConfigAuditDiffTextRenderer().Render(report);
+
+        Assert.DoesNotContain("\nSource: forged", rendered);
+        Assert.DoesNotContain("\nDiagnostic: forged", rendered);
+        Assert.Contains("before\\u000aSource: forged", rendered);
+        Assert.Contains("after\\u000aDiagnostic: forged", rendered);
     }
 
     [Fact]

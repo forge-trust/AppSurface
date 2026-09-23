@@ -21,7 +21,8 @@ public sealed class ConfigResourceOptions
     public int MaxRenderedIdentifierCharacters { get; set; } = 256;
     /// <summary>Gets or sets the maximum object binding depth; defaults to 32.</summary>
     public int MaxBindingDepth { get; set; } = 32;
-    /// <summary>Gets or sets the aggregate remote-audit deadline; defaults to 30 seconds.</summary>
+    /// <summary>Gets or sets the aggregate remote-audit deadline; defaults to 30 seconds and is capped at uint.MaxValue - 1 milliseconds.</summary>
+    /// <remarks>The upper bound keeps the deadline representable by the timer APIs used for cancellation.</remarks>
     public TimeSpan AuditTimeout { get; set; } = TimeSpan.FromSeconds(30);
     /// <summary>Gets or sets the maximum uncached remote lookups in one audit; defaults to 256.</summary>
     public int MaxAuditRemoteLookups { get; set; } = 256;
@@ -34,11 +35,17 @@ public sealed class ConfigResourceOptions
         if (MaxFileBytes <= 0 || MaxFilesPerEnvironment <= 0 || MaxEnvironmentEntries <= 0
             || MaxEnvironmentBytes <= 0 || MaxNoticeIdentities <= 0
             || MaxRenderedIdentifierCharacters <= 0 || MaxBindingDepth <= 0
-            || AuditTimeout <= TimeSpan.Zero || AuditTimeout.TotalMilliseconds > uint.MaxValue - 1
+            || AuditTimeout <= TimeSpan.Zero
             || MaxAuditRemoteLookups <= 0 || MaxAuditConcurrency <= 0)
         {
             throw new OptionsValidationException(nameof(ConfigResourceOptions), typeof(ConfigResourceOptions),
                 ["Every configuration resource limit must be positive."]);
+        }
+
+        if (AuditTimeout.TotalMilliseconds > uint.MaxValue - 1)
+        {
+            throw new OptionsValidationException(nameof(ConfigResourceOptions), typeof(ConfigResourceOptions),
+                [$"AuditTimeout must not exceed {uint.MaxValue - 1} milliseconds."]);
         }
 
         return (ConfigResourceOptions)MemberwiseClone();

@@ -87,8 +87,8 @@ public sealed class ConfigAuditDiffTextRenderer
 
         if (item.BaselineDisplayValue != null || item.TargetDisplayValue != null)
         {
-            builder.AppendLine($"    Baseline value: {item.BaselineDisplayValue ?? "(omitted)"}");
-            builder.AppendLine($"    Target value: {item.TargetDisplayValue ?? "(omitted)"}");
+            builder.AppendLine($"    Baseline value: {(item.BaselineDisplayValue is null ? "(omitted)" : ConfigDiagnosticText.Prose(item.BaselineDisplayValue))}");
+            builder.AppendLine($"    Target value: {(item.TargetDisplayValue is null ? "(omitted)" : ConfigDiagnosticText.Prose(item.TargetDisplayValue))}");
         }
 
         RenderSources(builder, sourceDetail, "Baseline sources", item.BaselineSources);

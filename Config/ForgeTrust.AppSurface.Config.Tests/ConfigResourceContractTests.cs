@@ -27,6 +27,17 @@ public sealed class ConfigResourceContractTests
         Assert.Throws<OptionsValidationException>(() => options.Snapshot());
 
     [Fact]
+    public void AuditTimeout_ReportsUpperBoundSeparatelyFromNonpositiveLimits()
+    {
+        var exception = Assert.Throws<OptionsValidationException>(() =>
+            new ConfigResourceOptions { AuditTimeout = TimeSpan.FromDays(60) }.Snapshot());
+
+        Assert.Contains("AuditTimeout must not exceed", exception.Message, StringComparison.Ordinal);
+        Assert.Throws<OptionsValidationException>(() =>
+            new ConfigResourceOptions { AuditTimeout = TimeSpan.Zero }.Snapshot());
+    }
+
+    [Fact]
     public void Limits_HaveDocumentedDefaultsAndSnapshotOwnership()
     {
         var options = new ConfigResourceOptions();
