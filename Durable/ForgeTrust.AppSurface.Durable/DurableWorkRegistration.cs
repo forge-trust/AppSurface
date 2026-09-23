@@ -117,17 +117,31 @@ public abstract class DurableWorkRegistration
         IDurablePayloadCodec workCodec,
         IDurablePayloadCodec resultCodec)
     {
-        if (!Enum.IsDefined(providerSafety))
-        {
-            throw new ArgumentOutOfRangeException(nameof(providerSafety));
-        }
-
-        WorkName = DurableIdentifier.Require(workName, nameof(workName), 200);
-        WorkVersion = DurableIdentifier.Require(workVersion, nameof(workVersion), 100);
-        ProviderSafety = providerSafety;
-        WorkCodec = workCodec ?? throw new ArgumentNullException(nameof(workCodec));
-        ResultCodec = resultCodec ?? throw new ArgumentNullException(nameof(resultCodec));
+        Snapshot = DurableWorkContractSnapshot.Capture(workName, workVersion, providerSafety, workCodec, resultCodec);
+        WorkName = Snapshot.Identity.WorkName;
+        WorkVersion = Snapshot.Identity.WorkVersion;
+        ProviderSafety = Snapshot.ProviderSafety;
+        WorkCodec = workCodec;
+        ResultCodec = resultCodec;
     }
+
+    /// <summary>Consumes already captured facts without exposing internal types to external subclasses.</summary>
+    private protected DurableWorkRegistration(DurableWorkContractSnapshot snapshot, bool frozen,
+        IDurablePayloadCodec workCodec, IDurablePayloadCodec resultCodec)
+    {
+        Snapshot = snapshot;
+        RequiresFrozenView = frozen;
+        WorkName = snapshot.Identity.WorkName;
+        WorkVersion = snapshot.Identity.WorkVersion;
+        ProviderSafety = snapshot.ProviderSafety;
+        WorkCodec = workCodec;
+        ResultCodec = resultCodec;
+    }
+
+    /// <summary>Gets the closed facts used by provider-local registry aggregation.</summary>
+    internal DurableWorkContractSnapshot Snapshot { get; }
+    /// <summary>Gets whether the public registration path requires frozen codec projections.</summary>
+    internal bool RequiresFrozenView { get; }
 
     /// <summary>Gets the stable work name.</summary>
     public string WorkName { get; }
@@ -256,17 +270,27 @@ public sealed class DurableWorkRegistration<TWork, TResult, TExecutor> : Durable
         IDurablePayloadCodec<TWork> workCodec,
         IDurablePayloadCodec<TResult> resultCodec,
         Func<IServiceProvider, IDurableEffectReconciler<TWork, TResult>>? reconcilerFactory = null)
-        : base(workName, workVersion, providerSafety, workCodec, resultCodec)
+        : this(DurableWorkContractSnapshot<TWork, TResult>.Create(workName, workVersion, providerSafety,
+            workCodec, resultCodec, DurableWorkRetryPolicy.Default), false, reconcilerFactory, workCodec, resultCodec)
     {
-        if (providerSafety == DurableProviderSafety.ReconcileBeforeRetry && reconcilerFactory is null)
+    }
+
+    /// <summary>Uses the authoritative snapshot for invocation while preserving legacy public source references.</summary>
+    internal DurableWorkRegistration(DurableWorkContractSnapshot<TWork, TResult> snapshot, bool frozen,
+        Func<IServiceProvider, IDurableEffectReconciler<TWork, TResult>>? reconcilerFactory = null,
+        IDurablePayloadCodec<TWork>? legacyWork = null, IDurablePayloadCodec<TResult>? legacyResult = null)
+        : base(snapshot, frozen, frozen ? snapshot.WorkView : legacyWork ?? snapshot.Work.Source,
+            frozen ? snapshot.ResultView : legacyResult ?? snapshot.Result.Source)
+    {
+        if (snapshot.ProviderSafety == DurableProviderSafety.ReconcileBeforeRetry && reconcilerFactory is null)
         {
             throw new ArgumentException(
                 "ReconcileBeforeRetry work requires a registered side-effect-free reconciler.",
                 nameof(reconcilerFactory));
         }
 
-        _workCodec = workCodec;
-        _resultCodec = resultCodec;
+        _workCodec = snapshot.WorkView;
+        _resultCodec = snapshot.ResultView;
         _reconcilerFactory = reconcilerFactory;
     }
 
@@ -348,10 +372,19 @@ public sealed class DurableWorkExitRegistration<TWork, TResult, TExecutor> : Dur
         string workVersion,
         IDurablePayloadCodec<TWork> workCodec,
         IDurablePayloadCodec<TResult> resultCodec)
-        : base(workName, workVersion, DurableProviderSafety.ProviderKeyed, workCodec, resultCodec)
+        : this(DurableWorkContractSnapshot<TWork, TResult>.Create(workName, workVersion,
+            DurableProviderSafety.ProviderKeyed, workCodec, resultCodec, DurableWorkRetryPolicy.Default), false, workCodec, resultCodec)
     {
-        _workCodec = workCodec;
-        _resultCodec = resultCodec;
+    }
+
+    /// <summary>Consumes the definition or legacy closure while retaining the existing exit invocation boundary.</summary>
+    internal DurableWorkExitRegistration(DurableWorkContractSnapshot<TWork, TResult> snapshot, bool frozen,
+        IDurablePayloadCodec<TWork>? legacyWork = null, IDurablePayloadCodec<TResult>? legacyResult = null)
+        : base(snapshot, frozen, frozen ? snapshot.WorkView : legacyWork ?? snapshot.Work.Source,
+            frozen ? snapshot.ResultView : legacyResult ?? snapshot.Result.Source)
+    {
+        _workCodec = snapshot.WorkView;
+        _resultCodec = snapshot.ResultView;
     }
 
     /// <inheritdoc />
@@ -473,28 +506,15 @@ public sealed class DurableWorkRegistry : IDurableWorkRegistry
     /// <exception cref="ArgumentNullException">Thrown when the sequence or an element is null.</exception>
     /// <exception cref="InvalidOperationException">Thrown when a Work name/version appears more than once.</exception>
     public DurableWorkRegistry(IEnumerable<DurableWorkRegistration> registrations)
+        : this(new DurableWorkRegistrationCatalog(registrations))
     {
-        ArgumentNullException.ThrowIfNull(registrations);
-        var map = new Dictionary<(string Name, string Version), DurableWorkRegistration>();
-        foreach (var registration in registrations)
-        {
-            ArgumentNullException.ThrowIfNull(registration);
-            var key = (registration.WorkName, registration.WorkVersion);
-            if (!map.TryAdd(key, registration))
-            {
-                throw new InvalidOperationException(
-                    $"Durable work '{registration.WorkName}' version '{registration.WorkVersion}' is registered more than once.");
-            }
-        }
+    }
 
-        _registrations = map;
-        _registeredContracts = map.Keys
-            .Select(key => new DurableWorkContractIdentity(key.Name, key.Version))
-            .OrderBy(static identity => identity.WorkName, StringComparer.Ordinal)
-            .ThenBy(static identity => identity.WorkVersion, StringComparer.Ordinal)
-            .Distinct()
-            .ToList()
-            .AsReadOnly();
+    /// <summary>Reuses a validated catalog instead of enumerating or validating registrations again.</summary>
+    internal DurableWorkRegistry(DurableWorkRegistrationCatalog catalog)
+    {
+        _registrations = catalog.Registrations;
+        _registeredContracts = catalog.Contracts;
     }
 
     /// <inheritdoc />
@@ -514,7 +534,7 @@ public sealed class DurableWorkRegistry : IDurableWorkRegistry
 /// <summary>
 /// Registration helpers for typed durable worker executors.
 /// </summary>
-public static class DurableServiceCollectionExtensions
+public static partial class DurableServiceCollectionExtensions
 {
     private static IServiceCollection AddWorkRegistration<TExecutor>(
         IServiceCollection services,
@@ -526,9 +546,10 @@ public static class DurableServiceCollectionExtensions
         services.AddSingleton<IDurablePayloadCodec>(workCodec);
         services.AddSingleton<IDurablePayloadCodec>(resultCodec);
         services.AddSingleton<DurableWorkRegistration>(registration);
+        services.AddSingleton(new DurableCodecContribution(registration.Snapshot.Work, registration.RequiresFrozenView));
+        services.AddSingleton(new DurableCodecContribution(registration.Snapshot.Result, registration.RequiresFrozenView));
         services.AddTransient<TExecutor>();
-        services.TryAddSingleton<IDurablePayloadCodecRegistry, DurablePayloadCodecRegistry>();
-        services.TryAddSingleton<IDurableWorkRegistry, DurableWorkRegistry>();
+        DurableRegistryInstallation.AddDefaults(services);
         return services;
     }
 
@@ -579,7 +600,7 @@ public static class DurableServiceCollectionExtensions
     /// V1 intentionally fixes this registration to <see cref="DurableProviderSafety.ProviderKeyed"/>. Register a
     /// new immutable Work version only after every eligible worker uses a provider that calls
     /// <see cref="DurablePreparedWork.InvokeExitAsync(CancellationToken)"/>; do not convert an accepted Work
-    /// version in place. Keep the legacy <see cref="AddDurableWork{TWork,TResult,TExecutor}"/> contract when an
+    /// version in place. Keep the legacy <see cref="AddDurableWork{TWork,TResult,TExecutor}(IServiceCollection,string,string,DurableProviderSafety,IDurablePayloadCodec{TWork},IDurablePayloadCodec{TResult})"/> contract when an
     /// executor cannot prove one of the four exit facts.
     /// </remarks>
     /// <exception cref="ArgumentException">Thrown when the registration is invalid.</exception>
@@ -675,8 +696,7 @@ public static class DurableServiceCollectionExtensions
         }
 
         services.AddSingleton<DurableFlowRegistration>(registration);
-        services.TryAddSingleton<IDurablePayloadCodecRegistry, DurablePayloadCodecRegistry>();
-        services.TryAddSingleton<IDurableWorkRegistry, DurableWorkRegistry>();
+        DurableRegistryInstallation.AddDefaults(services);
         services.TryAddSingleton<IDurableFlowRegistry, DurableFlowRegistry>();
         return services;
     }

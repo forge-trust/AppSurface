@@ -10,6 +10,23 @@ context.
 
 ## Available contract diagnostics
 
+### Typed Work definition validation
+
+Typed Work definitions fail locally before provider acceptance. These failures are bounded contract diagnostics and do
+not use or impersonate provider-owned `ASDURxxx` codes:
+
+| Failure boundary | Meaning | Safe response |
+|---|---|---|
+| Definition construction | Work identity, safety, retry default, or codec metadata/type is invalid | Correct the named contract and recreate the definition; no request or provider retry is appropriate |
+| Request construction | Scope, command, duplicate key, input, retry override, or due time is invalid | Correct the caller choices and create a new request with coherent identities |
+| Guarded codec encode/decode | Consumer codec output or input metadata differs from the captured contract | Repair the codec implementation or create a new Work version when semantics changed; never relabel payload bytes |
+| Binding completion | Reconciliation is missing, safety does not match, or exit binding is used outside `ProviderKeyed` | Select the binding method matching the declared safety and replace duplicate registrations |
+| Flow registration resolution | Flow activity does not use the exact globally registered Work registration or codec contract | Resolve by exact Work name/version from `IDurableWorkRegistry`; do not build a nested provider or second registration |
+
+These local failures are distinct from `ASDUR109` (historical Work contract unavailable), `ASDUR100` (provider request
+validation), and `ASDUR119` (PostgreSQL discovery registry snapshot unavailable). A passing passive proof means only that
+the contracts, request parity, and registry construction succeeded; it does not mean Work was accepted or terminalized.
+
 | Code | Problem | Typical cause | Safe action |
 |---|---|---|---|
 | `ASDUR100` | Request validation failed | Default/missing id, unregistered contract, unsafe payload, limit violation, or invalid policy | Correct the caller contract before retrying |
