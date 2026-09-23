@@ -124,6 +124,11 @@ Work name/version and pass the definition's codec views to the existing
 `DurableFlowActivityBinding<TContext,TWork,TResult>` constructor. Do not create a nested service provider or a second
 Work registration inside the Flow factory.
 
+With the default registry installation, a custom `DurableWorkRegistration` factory must not resolve
+`IDurablePayloadCodecRegistry`. The codec registry enumerates all Work registrations while it is being constructed;
+resolving it from one of those factories creates a dependency cycle and fails at startup. Pass the needed definition or
+codec directly to the registration factory instead.
+
 The [PostgreSQL Flow client](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md) accepts the same definition-owned
 and provider-owned codec views at startup. It retains captured payload guards even when a custom registry returns
 the original raw source, and validates and decodes through that allowlisted source before

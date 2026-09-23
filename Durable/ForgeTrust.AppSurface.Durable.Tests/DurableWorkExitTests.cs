@@ -146,7 +146,7 @@ public sealed class DurableWorkExitTests
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await registration.Prepare(services, CreateContext(workCodec)).InvokeExitAsync());
-        Assert.Equal("The durable payload does not match the captured codec contract. Preserve the defined codec metadata.", error.Message);
+        Assert.Equal("The durable codec returned no encoded payload.", error.Message);
     }
 
     [Fact]

@@ -1,4 +1,3 @@
-<!-- /autoplan restore point: /Users/andrew/.gstack/projects/forge-trust-AppSurface/main-autoplan-restore-20260910-093630.md -->
 # Implementation plan: typed Durable Work definitions (#800)
 
 Status: APPROVED — user approved the reviewed plan and all recommendations on 2026-09-10.

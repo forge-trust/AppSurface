@@ -170,7 +170,7 @@ python3 "$negative_root/check_sarif.py" --self-test
 
 negative_count=0
 for fixture_dir in "$negative_root"/*/; do
-  [[ -f "$fixture_dir/expected.json" ]] || continue
+  [[ -f "$fixture_dir/expected.json" ]] || fail "Missing expected.json in $fixture_dir"
   fixture_name="$(basename "$fixture_dir")"
   positive_dir="$WORK_DIR/positive-$fixture_name"
   fixture_work_dir="$WORK_DIR/negative-$fixture_name"

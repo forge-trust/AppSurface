@@ -90,8 +90,9 @@ public sealed class DurableWorkDefinitionTests
         var work = new DefinitionTestCodec<string>(getterCounts: workCounts);
         var result = new DefinitionTestCodec<string>(payloadType: typeof(int), getterCounts: resultCounts);
 
-        Assert.Throws<ArgumentException>(() => DurableWork.Define(
+        var exception = Assert.Throws<ArgumentException>(() => DurableWork.Define(
             "work", "v1", work, result, DurableProviderSafety.Idempotent, CreatePolicy()));
+        Assert.Equal("resultCodec", exception.ParamName);
 
         foreach (var counts in new[] { workCounts, resultCounts })
         {
@@ -111,7 +112,22 @@ public sealed class DurableWorkDefinitionTests
         var exception = Assert.Throws<ArgumentException>(() => DurableWork.Define(
             "work", "v1", work, result, DurableProviderSafety.Idempotent, CreatePolicy()));
 
-        Assert.Equal("codec", exception.ParamName);
+        Assert.Equal("workCodec", exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData(true, "workCodec")]
+    [InlineData(false, "resultCodec")]
+    public void Legacy_registration_reports_its_public_codec_parameter_when_null(bool nullWork, string parameterName)
+    {
+        var codec = new DefinitionTestCodec<string>();
+
+        var exception = Assert.Throws<ArgumentNullException>(() =>
+            new DurableWorkRegistration<string, string, DurableBindingRegistryTestExecutor>(
+                "work", "v1", DurableProviderSafety.Idempotent,
+                nullWork ? null! : codec, nullWork ? codec : null!));
+
+        Assert.Equal(parameterName, exception.ParamName);
     }
 
     [Fact]

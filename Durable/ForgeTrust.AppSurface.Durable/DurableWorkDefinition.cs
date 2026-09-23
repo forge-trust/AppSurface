@@ -18,6 +18,7 @@ public static class DurableWork
     /// <exception cref="ArgumentNullException">A codec or retry default is null.</exception>
     /// <exception cref="ArgumentException">An identifier or declared codec type is invalid.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Safety or classification is undefined.</exception>
+    /// <exception cref="InvalidOperationException">Input and result views of one codec source carry conflicting captured metadata.</exception>
     /// <remarks>Metadata is captured once per source. Custom getter exceptions propagate; no serializer or executor runs.</remarks>
     public static DurableWorkDefinition<TWork, TResult> Define<TWork, TResult>(
         string workName, string workVersion, IDurablePayloadCodec<TWork> workCodec,
@@ -74,7 +75,7 @@ public sealed class DurableWorkDefinition<TWork, TResult>
     /// <returns>A request with the same fields and fingerprint as equivalent direct construction.</returns>
     /// <exception cref="ArgumentException">Caller identities are invalid or the codec rejects the input.</exception>
     /// <exception cref="ArgumentNullException">Input is null.</exception>
-    /// <exception cref="InvalidOperationException">Encoded output disagrees with captured codec metadata.</exception>
+    /// <exception cref="InvalidOperationException">Encoded output is missing or disagrees with captured codec metadata.</exception>
     /// <remarks>All caller identity checks precede encoding. Codec exceptions propagate. No registration or storage is required.</remarks>
     public DurableWorkRequest CreateRequest(DurableScopeId scopeId, DurableCommandId commandId,
         string idempotencyKey, TWork work, DurableWorkRetryPolicy? retryPolicy = null, DateTimeOffset? dueAtUtc = null)
@@ -150,10 +151,10 @@ internal class DurableWorkContractSnapshot
 
     /// <summary>Closes external subclasses of the legacy abstract registration without exposing a new public seam.</summary>
     internal static DurableWorkContractSnapshot Capture(string name, string version, DurableProviderSafety safety,
-        IDurablePayloadCodec work, IDurablePayloadCodec result)
+        IDurablePayloadCodec workCodec, IDurablePayloadCodec resultCodec)
     {
         var identity = Validate(name, version, safety, DurableWorkRetryPolicy.Default);
-        var (input, output) = CaptureCodecs(work, result,
+        var (input, output) = CaptureCodecs(workCodec, resultCodec,
             DurablePayloadCodecSnapshot.Capture, DurablePayloadCodecSnapshot.Capture);
         return new(identity, safety, DurableWorkRetryPolicy.Default, input, output);
     }
@@ -161,18 +162,18 @@ internal class DurableWorkContractSnapshot
     /// <summary>Captures each distinct source once, reuses supplied views and rejects conflicting facts for one source.</summary>
     /// <remarks>Capture delegates preserve typed invocation when closing generic contracts and untyped legacy subclasses.</remarks>
     protected static (DurablePayloadCodecSnapshot Work, DurablePayloadCodecSnapshot Result) CaptureCodecs<TWorkCodec, TResultCodec>(
-        TWorkCodec work, TResultCodec result, Func<TWorkCodec, DurablePayloadCodecSnapshot> captureWork,
+        TWorkCodec workCodec, TResultCodec resultCodec, Func<TWorkCodec, DurablePayloadCodecSnapshot> captureWork,
         Func<TResultCodec, DurablePayloadCodecSnapshot> captureResult)
         where TWorkCodec : IDurablePayloadCodec
         where TResultCodec : IDurablePayloadCodec
     {
-        ArgumentNullException.ThrowIfNull(work);
-        ArgumentNullException.ThrowIfNull(result);
-        var resultSnapshot = DurablePayloadCodecSnapshot.GetSnapshot(result);
-        var input = resultSnapshot is not null && ReferenceEquals(resultSnapshot.Source, work)
-            ? resultSnapshot : captureWork(work);
-        var output = ReferenceEquals(input.Source, resultSnapshot?.Source ?? result)
-            ? resultSnapshot ?? input : captureResult(result);
+        ArgumentNullException.ThrowIfNull(workCodec);
+        ArgumentNullException.ThrowIfNull(resultCodec);
+        var resultSnapshot = DurablePayloadCodecSnapshot.GetSnapshot(resultCodec);
+        var input = resultSnapshot is not null && ReferenceEquals(resultSnapshot.Source, workCodec)
+            ? resultSnapshot : captureWork(workCodec);
+        var output = ReferenceEquals(input.Source, resultSnapshot?.Source ?? resultCodec)
+            ? resultSnapshot ?? input : captureResult(resultCodec);
         if (ReferenceEquals(input.Source, output.Source) && input.Facts != output.Facts)
         {
             throw new InvalidOperationException("A durable payload codec source was contributed with conflicting contract metadata.");
@@ -201,20 +202,21 @@ internal sealed class DurableWorkContractSnapshot<TWork, TResult> : DurableWorkC
 
     /// <summary>Captures each unique source once, with independent exact generic-type checks.</summary>
     internal static DurableWorkContractSnapshot<TWork, TResult> Create(string name, string version,
-        DurableProviderSafety safety, IDurablePayloadCodec<TWork> work, IDurablePayloadCodec<TResult> result,
+        DurableProviderSafety safety, IDurablePayloadCodec<TWork> workCodec, IDurablePayloadCodec<TResult> resultCodec,
         DurableWorkRetryPolicy retry)
     {
         var identity = Validate(name, version, safety, retry);
-        var (input, output) = CaptureCodecs(work, result,
-            DurablePayloadCodecSnapshot.Capture<TWork>, DurablePayloadCodecSnapshot.Capture<TResult>);
+        var (input, output) = CaptureCodecs(workCodec, resultCodec,
+            static codec => DurablePayloadCodecSnapshot.Capture(codec, nameof(workCodec)),
+            static codec => DurablePayloadCodecSnapshot.Capture(codec, nameof(resultCodec)));
         if (input.Facts.PayloadType != typeof(TWork))
         {
-            throw new ArgumentException("The durable input codec must declare the exact generic payload type.", nameof(work));
+            throw new ArgumentException("The durable input codec must declare the exact generic payload type.", nameof(workCodec));
         }
 
         if (output.Facts.PayloadType != typeof(TResult))
         {
-            throw new ArgumentException("The durable result codec must declare the exact generic payload type.", nameof(result));
+            throw new ArgumentException("The durable result codec must declare the exact generic payload type.", nameof(resultCodec));
         }
 
         return new(identity, safety, retry, input, output);

@@ -33,13 +33,15 @@ internal sealed class DurablePayloadCodecSnapshot
     }
 
     /// <summary>Captures a typed source and verifies its declared CLR type independently of its contract namespace.</summary>
-    internal static DurablePayloadCodecSnapshot Capture<T>(IDurablePayloadCodec<T> codec)
+    /// <param name="codec">Typed source or package-owned view to capture.</param>
+    /// <param name="parameterName">Public caller parameter name used for codec argument failures.</param>
+    internal static DurablePayloadCodecSnapshot Capture<T>(IDurablePayloadCodec<T> codec, string parameterName = "codec")
     {
-        ArgumentNullException.ThrowIfNull(codec);
+        ArgumentNullException.ThrowIfNull(codec, parameterName);
         var snapshot = GetSnapshot(codec) ?? new(codec, ReadMetadata(codec), static value => new TypedView<T>(value));
         if (snapshot.Facts.PayloadType != typeof(T))
         {
-            throw new ArgumentException("The durable payload codec must declare the exact generic payload type.", nameof(codec));
+            throw new ArgumentException("The durable payload codec must declare the exact generic payload type.", parameterName);
         }
 
         return snapshot;
@@ -92,6 +94,17 @@ internal sealed class DurablePayloadCodecSnapshot
         return new(type, name, version, classification, retention);
     }
 
+    /// <summary>Distinguishes a missing codec output from an invalid supplied payload.</summary>
+    private DurableEncodedPayload RequireEncodedPayload(DurableEncodedPayload? payload)
+    {
+        if (payload is null)
+        {
+            throw new InvalidOperationException("The durable codec returned no encoded payload.");
+        }
+
+        return RequirePayload(payload);
+    }
+
     /// <summary>Rejects incompatible payloads before decode and after encode without changing bytes or exposing values.</summary>
     private DurableEncodedPayload RequirePayload(DurableEncodedPayload? payload)
     {
@@ -121,7 +134,7 @@ internal sealed class DurablePayloadCodecSnapshot
                 throw new ArgumentException("The value must match the captured durable payload type.", nameof(value));
             }
 
-            return Snapshot.RequirePayload(Snapshot.Source.EncodeObject(value));
+            return Snapshot.RequireEncodedPayload(Snapshot.Source.EncodeObject(value));
         }
 
         public object DecodeObject(DurableEncodedPayload payload)
@@ -142,7 +155,7 @@ internal sealed class DurablePayloadCodecSnapshot
         public DurableEncodedPayload Encode(T value)
         {
             ArgumentNullException.ThrowIfNull(value);
-            return Snapshot.RequirePayload(((IDurablePayloadCodec<T>)Snapshot.Source).Encode(value));
+            return Snapshot.RequireEncodedPayload(((IDurablePayloadCodec<T>)Snapshot.Source).Encode(value));
         }
 
         public T Decode(DurableEncodedPayload payload)

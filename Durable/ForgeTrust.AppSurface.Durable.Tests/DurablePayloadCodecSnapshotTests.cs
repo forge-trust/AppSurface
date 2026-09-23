@@ -139,6 +139,8 @@ public sealed class DurablePayloadCodecSnapshotTests
         var decodeCountBeforeMismatch = source.DecodeCalls;
         Assert.Throws<InvalidOperationException>(() => view.Decode(
             new DurableEncodedPayload("other", encoded.ContractVersion, encoded.Classification, encoded.Content)));
+        var missingInput = Assert.Throws<InvalidOperationException>(() => view.Decode(null!));
+        Assert.Equal("The durable payload does not match the captured codec contract. Preserve the defined codec metadata.", missingInput.Message);
         Assert.Equal(decodeCountBeforeMismatch, source.DecodeCalls);
         Assert.Throws<ArgumentNullException>(() => view.Encode(null!));
         Assert.Equal(1, source.EncodeCalls);

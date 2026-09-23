@@ -129,7 +129,7 @@ internal static class TypedWorkDefinitionProof
         leaseDuration: TimeSpan.FromMinutes(1),
         renewalCadence: TimeSpan.FromSeconds(15),
         maximumLeaseLifetime: TimeSpan.FromMinutes(5),
-        backoffAlgorithm: "linear-v1");
+        backoffAlgorithm: "exponential-v1");
 
     internal static void Run()
     {
