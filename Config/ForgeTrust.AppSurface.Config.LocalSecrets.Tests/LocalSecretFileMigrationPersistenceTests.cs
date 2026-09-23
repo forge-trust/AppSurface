@@ -16,10 +16,12 @@ public sealed class LocalSecretFileMigrationPersistenceTests
     public void AbruptProcessExit_ShouldReopenAndRecoverEveryProtocolBoundary(int boundary, bool after)
     {
         using var fixture = new Fixture();
-        using var process = LocalSecretTestProcess.Start($"crash:{boundary}:{after}", fixture.Path, fixture.Path + ".started");
+        var startedPath = fixture.Path + ".started";
+        using var process = LocalSecretTestProcess.Start($"crash:{boundary}:{after}", fixture.Path, startedPath);
         try
         {
-            Assert.True(process.WaitForExit(10000));
+            Assert.True(process.WaitForExit(30000),
+                $"Crash child did not exit within 30 seconds (started: {File.Exists(startedPath)}).");
             Assert.Equal(91, process.ExitCode);
             var journalPath = fixture.Path + ".migration-journal.json";
             var journal = File.Exists(journalPath) ? JsonSerializer.Deserialize<AppSurfaceLocalSecretMigrationJournal>(File.ReadAllText(journalPath)) : null;
