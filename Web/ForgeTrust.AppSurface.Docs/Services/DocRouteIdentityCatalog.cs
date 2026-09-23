@@ -527,7 +527,7 @@ internal sealed class DocRouteIdentityCatalog
 
             var winner = groupCandidates
                 .OrderBy(candidate => candidate.HasFragment ? 1 : 0)
-                .ThenBy(candidate => string.IsNullOrWhiteSpace(candidate.Document.Content) ? 1 : 0)
+                .ThenBy(candidate => candidate.Document.HasReaderContent ? 0 : 1)
                 .ThenBy(candidate => candidate.Index)
                 .First();
             publicWinners[routePath] = winner;

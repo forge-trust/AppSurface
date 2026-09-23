@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Xml;
 using System.Xml.Linq;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.RazorWire;
@@ -20,12 +21,24 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     private const string HarvesterType = nameof(CSharpDocHarvester);
     private const string MaxFileSizeConfigurationKey = "AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes";
 
+    /// <summary>
+    /// The greatest supported XML element depth in one C# documentation comment, including a top-level documentation section.
+    /// </summary>
+    /// <remarks>
+    /// The bound lets the typed and legacy compatibility projections safely flatten arbitrary custom XML elements without
+    /// unbounded recursion.
+    /// It is intentionally internal so regression tests can exercise the published diagnostic behavior without making this
+    /// implementation limit part of the application configuration surface.
+    /// </remarks>
+    internal const int MaximumXmlCommentNestingDepth = 32;
+
     private readonly AppSurfaceDocsOptions _options;
     private readonly ILogger<CSharpDocHarvester> _logger;
     private readonly AppSurfaceDocsHarvestPathPolicy _pathPolicy;
     private IReadOnlyList<DocHarvestDiagnostic> _lastDiagnostics = [];
 
     private static readonly Regex WhitespaceRegex = new(@"\s+", RegexOptions.Compiled);
+    private static readonly Regex DocumentationCommentPrefixRegex = new(@"^[\t ]*/// ?", RegexOptions.Compiled | RegexOptions.Multiline);
 
     /// <summary>
     /// Initializes a new instance of <see cref="CSharpDocHarvester"/> with the provided logger.
@@ -113,7 +126,958 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
             return await ((IDocHarvester)this).HarvestAsync(context.RepositoryRoot, cancellationToken);
         }
 
-        return await HarvestAsync(context.RepositoryRoot, context.PathPolicy, context.Progress, cancellationToken);
+        return await HarvestTypedAsync(context.RepositoryRoot, context.PathPolicy, context.Progress, cancellationToken);
+    }
+
+    /// <summary>
+    /// Harvests built-in C# namespace pages into the internal semantic projection consumed by Razor.
+    /// </summary>
+    /// <remarks>
+    /// This is intentionally reachable only through the exact built-in aggregation overload. The public overload above
+    /// continues to call the legacy HTML compatibility serializer so existing <see cref="IDocHarvester"/> consumers
+    /// and derived harvesters retain their established contract.
+    /// </remarks>
+    private async Task<IReadOnlyList<DocNode>> HarvestTypedAsync(
+        string rootPath,
+        IHarvestPathPolicy pathPolicy,
+        AppSurfaceDocsHarvestProgressSession? progress,
+        CancellationToken cancellationToken)
+    {
+        var namespacePages = new Dictionary<string, TypedNamespacePage>(StringComparer.OrdinalIgnoreCase);
+        var stubNodes = new List<DocNode>();
+        var diagnostics = new List<DocHarvestDiagnostic>();
+
+        try
+        {
+            if (progress is not null)
+            {
+                await progress.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Discovering);
+            }
+
+            var csharpOptions = _options.Harvest?.CSharp ?? new AppSurfaceDocsCSharpHarvestOptions();
+            foreach (var file in EnumerateEligibleCSharpFiles(rootPath, pathPolicy, cancellationToken))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var relativePath = Path.GetRelativePath(rootPath, file).Replace('\\', '/');
+                if (!pathPolicy.ShouldIncludeFilePath(relativePath, AppSurfaceDocsHarvestSourceKind.CSharp))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (progress is not null)
+                    {
+                        await progress.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Parsing);
+                        await progress.ReportSourceUnitAsync(0);
+                    }
+
+                    var readResult = await AppSurfaceDocsParserInputBudget.ReadUtf8SourceAsync(
+                        file,
+                        relativePath,
+                        csharpOptions.MaxFileSizeBytes,
+                        MaxFileSizeConfigurationKey,
+                        DocHarvestDiagnosticCodes.CSharpFileTooLarge,
+                        HarvesterType,
+                        "C#",
+                        "Exclude generated C# with AppSurfaceDocs:Harvest:CSharp:ExcludeGlobs, or raise AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes only for authored source that should be parsed.",
+                        cancellationToken);
+                    if (!readResult.Included)
+                    {
+                        diagnostics.Add(readResult.Diagnostic!);
+                        continue;
+                    }
+
+                    var tree = CSharpSyntaxTree.ParseText(readResult.Source!, cancellationToken: cancellationToken);
+                    var syntaxError = tree.GetDiagnostics(cancellationToken)
+                        .FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+                    if (syntaxError is not null)
+                    {
+                        diagnostics.Add(CreateCSharpParseDiagnostic(relativePath, syntaxError));
+                        continue;
+                    }
+
+                    var root = await tree.GetRootAsync(cancellationToken);
+                    var fileResult = BuildTypedFileResult(root, relativePath, diagnostics);
+
+                    // Do not mutate aggregate namespace state until every declaration in this source file has been
+                    // projected. A later failure therefore cannot expose a partial type, fragment, outline, or search
+                    // record from the same file.
+                    MergeTypedFileResult(namespacePages, stubNodes, fileResult);
+                    if (progress is not null)
+                    {
+                        await progress.ReportSourceUnitAsync(1);
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException
+                                           and not OutOfMemoryException
+                                           and not StackOverflowException
+                                           and not AccessViolationException
+                                           and not AppDomainUnloadedException
+                                           and not BadImageFormatException
+                                           and not CannotUnloadAppDomainException
+                                           and not ThreadAbortException)
+                {
+                    diagnostics.Add(CreateCSharpParseDiagnostic(relativePath, diagnostic: null));
+                    _logger.LogError(ex, "Failed to project C# documentation source {File}.", relativePath);
+                }
+            }
+
+            if (progress is not null)
+            {
+                await progress.TransitionAsync(AppSurfaceDocsHarvestProgressPhase.Finalizing);
+            }
+
+            EnsureTypedNamespaceHierarchy(namespacePages);
+            var nodes = namespacePages.Values
+                .OrderBy(page => page.Path, StringComparer.OrdinalIgnoreCase)
+                .Select(
+                    page =>
+                    {
+                        var document = page.ToDocument();
+                        return new DocNode(
+                            page.Title,
+                            page.Path,
+                            string.Empty,
+                            Metadata: page.Metadata,
+                            Outline: document.Outline,
+                            SymbolSourceProvenance: document.SymbolSourceProvenance)
+                        {
+                            CSharpNamespaceDocument = document
+                        };
+                    })
+                .ToList();
+            nodes.AddRange(stubNodes);
+
+            if (progress is not null && nodes.Count > 0)
+            {
+                await progress.ReportOutputOnlyAsync(nodes.Count);
+            }
+
+            return nodes;
+        }
+        finally
+        {
+            _lastDiagnostics = diagnostics.ToArray();
+            LogDiagnostics(diagnostics);
+        }
+    }
+
+    private TypedCSharpFileResult BuildTypedFileResult(
+        SyntaxNode root,
+        string relativePath,
+        List<DocHarvestDiagnostic> diagnostics)
+    {
+        var pages = new Dictionary<string, TypedNamespacePage>(StringComparer.OrdinalIgnoreCase);
+        var stubs = new List<DocNode>();
+
+        foreach (var typeDeclaration in root.DescendantNodes().OfType<TypeDeclarationSyntax>())
+        {
+            var typeDocumentation = ExtractTypedDocumentation(typeDeclaration, relativePath, diagnostics);
+            var methods = typeDeclaration.Members
+                .OfType<MethodDeclarationSyntax>()
+                .Select(method => new TypedDocumentedMethod(method, ExtractTypedDocumentation(method, relativePath, diagnostics)))
+                .Where(item => item.Documentation.HasComment)
+                .ToList();
+            var properties = typeDeclaration.Members
+                .OfType<PropertyDeclarationSyntax>()
+                .Select(property => new TypedDocumentedProperty(property, ExtractTypedDocumentation(property, relativePath, diagnostics)))
+                .Where(item => item.Documentation.HasComment)
+                .ToList();
+
+            if (!typeDocumentation.HasComment && methods.Count == 0 && properties.Count == 0)
+            {
+                continue;
+            }
+
+            var namespacePage = GetOrCreateTypedNamespacePage(pages, GetNamespaceName(typeDeclaration));
+            var qualifiedTypeName = GetQualifiedName(typeDeclaration);
+            var typeAnchor = StringUtils.ToSafeId(qualifiedTypeName);
+            AddTypedOutlineItem(namespacePage, GetDisplayTypeName(typeDeclaration), typeAnchor, level: 2);
+            AddSymbolSourceProvenance(namespacePage.SymbolSourceProvenance, typeAnchor, relativePath, typeDeclaration);
+
+            var methodGroups = methods
+                .GroupBy(item => item.Method.Identifier.Text, StringComparer.Ordinal)
+                .Select(
+                    group =>
+                    {
+                        var groupAnchor = GetMethodGroupId(group.Key, qualifiedTypeName);
+                        AddTypedOutlineItem(namespacePage, group.Key, groupAnchor, level: 3);
+                        var overloads = group.Select(
+                                item =>
+                                {
+                                    var anchor = GetMethodId(item.Method, qualifiedTypeName);
+                                    AddSymbolSourceProvenance(namespacePage.SymbolSourceProvenance, anchor, relativePath, item.Method);
+                                    return new CSharpMethodDocument(
+                                        anchor,
+                                        CreateMethodSignature(item.Method),
+                                        item.Documentation.Documentation ?? new CSharpDocumentation([]));
+                                })
+                            .ToArray();
+                        return new CSharpMethodGroupDocument(groupAnchor, group.Key, overloads);
+                    })
+                .ToArray();
+            var typedProperties = properties
+                .Select(
+                    item =>
+                    {
+                        var anchor = GetPropertyId(item.Property, qualifiedTypeName);
+                        AddTypedOutlineItem(namespacePage, item.Property.Identifier.Text, anchor, level: 3);
+                        AddSymbolSourceProvenance(namespacePage.SymbolSourceProvenance, anchor, relativePath, item.Property);
+                        return new CSharpPropertyDocument(
+                            anchor,
+                            item.Property.Identifier.Text,
+                            CreatePropertySignature(item.Property),
+                            item.Documentation.Documentation ?? new CSharpDocumentation([]));
+                    })
+                .ToArray();
+
+            namespacePage.Types.Add(
+                new CSharpTypeDocument(
+                    typeAnchor,
+                    GetDisplayTypeName(typeDeclaration),
+                    typeDocumentation.Documentation,
+                    methodGroups,
+                    typedProperties));
+            stubs.Add(
+                new DocNode(
+                    GetDisplayTypeName(typeDeclaration),
+                    namespacePage.Path + "#" + typeAnchor,
+                    string.Empty,
+                    namespacePage.Path,
+                    Metadata: DocMetadataFactory.CreateApiReferenceMetadata(GetDisplayTypeName(typeDeclaration), namespacePage.FullNamespace)));
+        }
+
+        foreach (var enumDeclaration in root.DescendantNodes().OfType<EnumDeclarationSyntax>())
+        {
+            var documentation = ExtractTypedDocumentation(enumDeclaration, relativePath, diagnostics);
+            if (!documentation.HasComment)
+            {
+                continue;
+            }
+
+            var namespacePage = GetOrCreateTypedNamespacePage(pages, GetNamespaceName(enumDeclaration));
+            var anchor = StringUtils.ToSafeId(GetQualifiedName(enumDeclaration));
+            AddTypedOutlineItem(namespacePage, enumDeclaration.Identifier.Text, anchor, level: 2);
+            AddSymbolSourceProvenance(namespacePage.SymbolSourceProvenance, anchor, relativePath, enumDeclaration);
+            namespacePage.Enums.Add(
+                new CSharpEnumDocument(
+                    anchor,
+                    enumDeclaration.Identifier.Text,
+                    documentation.Documentation ?? new CSharpDocumentation([])));
+            stubs.Add(
+                new DocNode(
+                    enumDeclaration.Identifier.Text,
+                    namespacePage.Path + "#" + anchor,
+                    string.Empty,
+                    namespacePage.Path,
+                    Metadata: DocMetadataFactory.CreateApiReferenceMetadata(enumDeclaration.Identifier.Text, namespacePage.FullNamespace)));
+        }
+
+        return new TypedCSharpFileResult(pages.Values.ToArray(), stubs);
+    }
+
+    private static void MergeTypedFileResult(
+        IDictionary<string, TypedNamespacePage> namespacePages,
+        ICollection<DocNode> stubNodes,
+        TypedCSharpFileResult fileResult)
+    {
+        foreach (var sourcePage in fileResult.NamespacePages)
+        {
+            var targetPage = GetOrCreateTypedNamespacePage(namespacePages, sourcePage.FullNamespace);
+            targetPage.Types.AddRange(sourcePage.Types);
+            targetPage.Enums.AddRange(sourcePage.Enums);
+            foreach (var outlineItem in sourcePage.Outline)
+            {
+                AddTypedOutlineItem(targetPage, outlineItem.Title, outlineItem.Id, outlineItem.Level);
+            }
+
+            targetPage.SymbolSourceProvenance.AddRange(sourcePage.SymbolSourceProvenance);
+        }
+
+        foreach (var stub in fileResult.Stubs)
+        {
+            stubNodes.Add(stub);
+        }
+    }
+
+    private static TypedNamespacePage GetOrCreateTypedNamespacePage(
+        IDictionary<string, TypedNamespacePage> namespacePages,
+        string namespaceName)
+    {
+        var normalizedNamespace = string.IsNullOrWhiteSpace(namespaceName) ? "Global" : namespaceName.Trim();
+        var path = BuildNamespaceDocPath(normalizedNamespace);
+        if (!namespacePages.TryGetValue(path, out var page))
+        {
+            var title = GetNamespaceTitle(normalizedNamespace);
+            page = new TypedNamespacePage(
+                normalizedNamespace,
+                path,
+                title,
+                DocMetadataFactory.CreateApiReferenceMetadata(title, normalizedNamespace));
+            namespacePages[path] = page;
+        }
+
+        return page;
+    }
+
+    private static void EnsureTypedNamespaceHierarchy(IDictionary<string, TypedNamespacePage> namespacePages)
+    {
+        if (namespacePages.Count == 0)
+        {
+            return;
+        }
+
+        var pagesByNamespace = namespacePages.Values.ToDictionary(page => page.FullNamespace, StringComparer.OrdinalIgnoreCase);
+        if (!pagesByNamespace.ContainsKey(string.Empty))
+        {
+            pagesByNamespace[string.Empty] = new TypedNamespacePage(
+                string.Empty,
+                "Namespaces",
+                "Namespaces",
+                DocMetadataFactory.CreateApiReferenceMetadata("Namespaces", string.Empty));
+        }
+
+        foreach (var namespaceName in pagesByNamespace.Keys.Where(name => !string.IsNullOrWhiteSpace(name)).ToArray())
+        {
+            var parts = namespaceName.Split('.', StringSplitOptions.RemoveEmptyEntries);
+            for (var length = 1; length < parts.Length; length++)
+            {
+                var parentNamespace = string.Join(".", parts.Take(length));
+                if (!pagesByNamespace.ContainsKey(parentNamespace))
+                {
+                    var title = GetNamespaceTitle(parentNamespace);
+                    pagesByNamespace[parentNamespace] = new TypedNamespacePage(
+                        parentNamespace,
+                        BuildNamespaceDocPath(parentNamespace),
+                        title,
+                        DocMetadataFactory.CreateApiReferenceMetadata(title, parentNamespace));
+                }
+            }
+        }
+
+        foreach (var page in pagesByNamespace.Values)
+        {
+            page.ChildNamespaces.Clear();
+        }
+
+        foreach (var page in pagesByNamespace.Values.Where(page => !string.IsNullOrWhiteSpace(page.FullNamespace)))
+        {
+            if (pagesByNamespace.TryGetValue(GetParentNamespace(page.FullNamespace), out var parent))
+            {
+                parent.ChildNamespaces.Add(page.FullNamespace);
+            }
+        }
+
+        namespacePages.Clear();
+        foreach (var page in pagesByNamespace.Values)
+        {
+            namespacePages[page.Path] = page;
+        }
+    }
+
+    private TypedDocumentationResult ExtractTypedDocumentation(
+        SyntaxNode node,
+        string relativePath,
+        ICollection<DocHarvestDiagnostic> diagnostics)
+    {
+        var xml = node.GetLeadingTrivia()
+            .Select(trivia => trivia.GetStructure())
+            .OfType<DocumentationCommentTriviaSyntax>()
+            .FirstOrDefault();
+        if (xml is null)
+        {
+            return TypedDocumentationResult.None;
+        }
+
+        try
+        {
+            var cleanXml = NormalizeDocumentationCommentXml(xml);
+            var wrappedXml = $"<doc>{cleanXml}</doc>";
+            if (!IsXmlCommentNestingDepthWithinLimit(wrappedXml))
+            {
+                diagnostics.Add(CreateXmlCommentDepthExceededDiagnostic(relativePath, node));
+                return new TypedDocumentationResult(null, HasComment: true);
+            }
+
+            var root = XDocument.Parse(wrappedXml, LoadOptions.PreserveWhitespace).Root!;
+            var excludedParameterNames = node is MethodDeclarationSyntax method
+                ? GetCompilerGeneratedCallerParameterNames(method)
+                : null;
+            var sections = new List<CSharpDocumentationSection>();
+            AddTypedDocumentationSection(sections, CSharpDocumentationSectionKind.Summary, root.Element("summary"));
+            AddTypedNamedDocumentationSections(sections, CSharpDocumentationSectionKind.TypeParameter, root.Elements("typeparam"), "name");
+            AddTypedNamedDocumentationSections(
+                sections,
+                CSharpDocumentationSectionKind.Parameter,
+                root.Elements("param").Where(
+                    element => !IsExcludedDocumentationParameter(
+                        element.Attribute("name")?.Value,
+                        excludedParameterNames)),
+                "name");
+            AddTypedDocumentationSection(sections, CSharpDocumentationSectionKind.Returns, root.Element("returns"));
+            AddTypedNamedDocumentationSections(sections, CSharpDocumentationSectionKind.Exception, root.Elements("exception"), attributeName: null, crefAttributeName: "cref");
+            AddTypedDocumentationSection(sections, CSharpDocumentationSectionKind.Remarks, root.Element("remarks"));
+            AddTypedDocumentationSection(sections, CSharpDocumentationSectionKind.Example, root.Element("example"));
+            return sections.Count == 0
+                ? TypedDocumentationResult.None
+                : new TypedDocumentationResult(new CSharpDocumentation(sections), HasComment: true);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
+        {
+            diagnostics.Add(CreateMalformedXmlDiagnostic(relativePath, node));
+            _logger.LogWarning(ex, "Failed to parse C# XML documentation in {File}.", relativePath);
+            return new TypedDocumentationResult(null, HasComment: true);
+        }
+    }
+
+    private static bool IsXmlCommentNestingDepthWithinLimit(string wrappedXml)
+    {
+        using var reader = XmlReader.Create(
+            new StringReader(wrappedXml),
+            new XmlReaderSettings
+            {
+                DtdProcessing = DtdProcessing.Prohibit,
+                IgnoreComments = true,
+                IgnoreProcessingInstructions = true
+            });
+        while (reader.Read())
+        {
+            // The synthetic doc root is at depth zero, so its direct XML documentation sections count as level one.
+            if (reader.NodeType == XmlNodeType.Element && reader.Depth > MaximumXmlCommentNestingDepth)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static void AddTypedDocumentationSection(
+        ICollection<CSharpDocumentationSection> sections,
+        CSharpDocumentationSectionKind kind,
+        XElement? element)
+    {
+        if (element is null)
+        {
+            return;
+        }
+
+        var content = ToTypedXmlNodes(element.Nodes());
+        if (content.Count > 0)
+        {
+            sections.Add(new CSharpDocumentationSection(kind, null, null, null, content));
+        }
+    }
+
+    private static void AddTypedNamedDocumentationSections(
+        ICollection<CSharpDocumentationSection> sections,
+        CSharpDocumentationSectionKind kind,
+        IEnumerable<XElement> elements,
+        string? attributeName,
+        string? crefAttributeName = null)
+    {
+        foreach (var element in elements)
+        {
+            var content = ToTypedXmlNodes(element.Nodes());
+            if (content.Count == 0)
+            {
+                continue;
+            }
+
+            var target = crefAttributeName is null ? null : element.Attribute(crefAttributeName)?.Value?.Trim();
+            sections.Add(
+                new CSharpDocumentationSection(
+                    kind,
+                    attributeName is null ? null : element.Attribute(attributeName)?.Value?.Trim(),
+                    target,
+                    SimplifyCref(target),
+                    content));
+        }
+    }
+
+    private static IReadOnlyList<CSharpXmlNode> ToTypedXmlNodes(IEnumerable<XNode> nodes)
+    {
+        var result = new List<CSharpXmlNode>();
+        foreach (var node in nodes)
+        {
+            switch (node)
+            {
+                case XText text:
+                    {
+                        var value = NormalizeWhitespace(text.Value);
+                        if (!string.IsNullOrWhiteSpace(value))
+                        {
+                            result.Add(new CSharpXmlNode(CSharpXmlNodeKind.Text, value));
+                        }
+
+                        break;
+                    }
+                case XElement element:
+                    AddTypedXmlElement(result, element);
+                    break;
+            }
+        }
+
+        return result;
+    }
+
+    private static void AddTypedXmlElement(ICollection<CSharpXmlNode> result, XElement element)
+    {
+        var name = element.Name.LocalName;
+        if (name is "paramref" or "typeparamref")
+        {
+            var value = element.Attribute("name")?.Value?.Trim();
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                result.Add(new CSharpXmlNode(name == "paramref" ? CSharpXmlNodeKind.ParameterReference : CSharpXmlNodeKind.TypeParameterReference, value));
+            }
+
+            return;
+        }
+
+        if (name == "see")
+        {
+            var target = element.Attribute("cref")?.Value?.Trim() ?? element.Attribute("href")?.Value?.Trim();
+            var childText = BuildXmlReaderText(ToTypedXmlNodes(element.Nodes()));
+            var display = element.Attribute("langword")?.Value?.Trim()
+                ?? SimplifyCref(element.Attribute("cref")?.Value);
+            if (string.IsNullOrWhiteSpace(display))
+            {
+                // An href can supply a useful fallback, but authored element text is the reader-facing label.
+                display = string.IsNullOrWhiteSpace(childText) ? element.Attribute("href")?.Value?.Trim() : childText;
+            }
+
+            if (!string.IsNullOrWhiteSpace(display))
+            {
+                result.Add(new CSharpXmlNode(CSharpXmlNodeKind.Cref, display, target));
+            }
+
+            return;
+        }
+
+        if (name == "c")
+        {
+            var text = BuildXmlReaderText(ToTypedXmlNodes(element.Nodes()));
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                result.Add(new CSharpXmlNode(CSharpXmlNodeKind.InlineCode, text));
+            }
+
+            return;
+        }
+
+        if (name == "code")
+        {
+            var text = element.Value.Trim();
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                result.Add(new CSharpXmlNode(CSharpXmlNodeKind.CodeBlock, text));
+            }
+
+            return;
+        }
+
+        if (name == "para")
+        {
+            var children = ToTypedXmlNodes(element.Nodes());
+            if (children.Count > 0)
+            {
+                result.Add(new CSharpXmlNode(CSharpXmlNodeKind.Paragraph, Children: children));
+            }
+
+            return;
+        }
+
+        if (name == "list")
+        {
+            var items = element.Elements("item")
+                .Select(item => ToTypedXmlNodes((item.Element("description") ?? item).Nodes()))
+                .Where(children => children.Count > 0)
+                .Select(children => new CSharpXmlNode(CSharpXmlNodeKind.ListItem, Children: children))
+                .ToArray();
+            if (items.Length > 0)
+            {
+                result.Add(
+                    new CSharpXmlNode(
+                        CSharpXmlNodeKind.List,
+                        Children: items,
+                        Ordered: string.Equals(element.Attribute("type")?.Value, "number", StringComparison.OrdinalIgnoreCase)));
+            }
+
+            return;
+        }
+
+        foreach (var child in ToTypedXmlNodes(element.Nodes()))
+        {
+            result.Add(child);
+        }
+    }
+
+    private static CSharpSignature CreateMethodSignature(MethodDeclarationSyntax method)
+    {
+        var parameters = method.ParameterList.Parameters
+            .Where(parameter => !IsCompilerGeneratedCallerParameter(parameter))
+            .Select(
+                parameter => new CSharpSignatureParameter(
+                    parameter.Modifiers.ToString().Trim() is { Length: > 0 } modifier ? modifier : null,
+                    parameter.Type?.ToString() ?? "object",
+                    parameter.Identifier.Text,
+                    parameter.Default?.Value.ToString()))
+            .ToArray();
+        return new CSharpSignature(
+            method.ReturnType.ToString(),
+            method.Identifier.Text,
+            parameters,
+            method.TypeParameterList?.Parameters.Select(parameter => parameter.Identifier.Text).ToArray() ?? [],
+            method.ExplicitInterfaceSpecifier?.ToString().Trim());
+    }
+
+    private static HashSet<string> GetCompilerGeneratedCallerParameterNames(MethodDeclarationSyntax method)
+    {
+        return method.ParameterList.Parameters
+            .Where(IsCompilerGeneratedCallerParameter)
+            .Select(parameter => parameter.Identifier.Text)
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    private static bool IsExcludedDocumentationParameter(string? parameterName, ISet<string>? excludedParameterNames)
+    {
+        return !string.IsNullOrWhiteSpace(parameterName)
+            && excludedParameterNames?.Contains(parameterName.Trim()) == true;
+    }
+
+    private static CSharpSignature CreatePropertySignature(PropertyDeclarationSyntax property)
+    {
+        return new CSharpSignature(
+            property.Type.ToString(),
+            property.Identifier.Text,
+            [],
+            [],
+            AccessorSignature: GetPropertyAccessorSignature(property));
+    }
+
+    private static void AddTypedOutlineItem(TypedNamespacePage namespacePage, string title, string id, int level)
+    {
+        if (string.IsNullOrWhiteSpace(title)
+            || string.IsNullOrWhiteSpace(id)
+            || !namespacePage.OutlineIds.Add(id.Trim()))
+        {
+            return;
+        }
+
+        namespacePage.Outline.Add(new DocOutlineItem { Title = title.Trim(), Id = id.Trim(), Level = level });
+    }
+
+    private static void AddSymbolSourceProvenance(
+        ICollection<DocSymbolSourceProvenance> provenance,
+        string anchorId,
+        string relativePath,
+        CSharpSyntaxNode node)
+    {
+        var lineSpan = node.SyntaxTree.GetLineSpan(node.Span);
+        provenance.Add(
+            new DocSymbolSourceProvenance
+            {
+                AnchorId = anchorId,
+                SourcePath = relativePath,
+                StartLine = lineSpan.StartLinePosition.Line + 1
+            });
+    }
+
+    private static DocHarvestDiagnostic CreateCSharpParseDiagnostic(string relativePath, Diagnostic? diagnostic)
+    {
+        var sourceLocation = diagnostic is { Location.IsInSource: true } ? diagnostic.Location : null;
+        var location = sourceLocation?.GetLineSpan().StartLinePosition ?? default;
+        var locationText = sourceLocation is not null
+            ? $" at line {location.Line + 1}, column {location.Character + 1}"
+            : string.Empty;
+        return new DocHarvestDiagnostic(
+            DocHarvestDiagnosticCodes.CSharpParseFailed,
+            DocHarvestDiagnosticSeverity.Error,
+            HarvesterType,
+            $"C# source '{relativePath}' could not be harvested{locationText}.",
+            "The source contains syntax errors or the C# documentation projection could not complete, so AppSurface Docs omitted this file atomically.",
+            "Fix the C# syntax or documentation shape at the reported source location, then refresh the Docs harvest.");
+    }
+
+    private static DocHarvestDiagnostic CreateMalformedXmlDiagnostic(string relativePath, SyntaxNode node)
+    {
+        var location = node.SyntaxTree.GetLineSpan(node.Span).StartLinePosition;
+        return new DocHarvestDiagnostic(
+            DocHarvestDiagnosticCodes.CSharpXmlCommentMalformed,
+            DocHarvestDiagnosticSeverity.Warning,
+            HarvesterType,
+            $"C# XML documentation in '{relativePath}' at line {location.Line + 1}, column {location.Character + 1} is malformed.",
+            "The documentation comment could not be parsed safely, so its documentation fields were omitted while the declaration anchor remains available.",
+            "Repair the XML documentation comment and refresh the Docs harvest.");
+    }
+
+    private static DocHarvestDiagnostic CreateXmlCommentDepthExceededDiagnostic(string relativePath, SyntaxNode node)
+    {
+        var location = node.SyntaxTree.GetLineSpan(node.Span).StartLinePosition;
+        return new DocHarvestDiagnostic(
+            DocHarvestDiagnosticCodes.CSharpXmlCommentDepthExceeded,
+            DocHarvestDiagnosticSeverity.Warning,
+            HarvesterType,
+            $"C# XML documentation in '{relativePath}' at line {location.Line + 1}, column {location.Character + 1} exceeds the supported nesting depth.",
+            $"The documentation comment contains more than {MaximumXmlCommentNestingDepth} XML element levels, so its documentation fields were omitted to preserve harvest availability.",
+            $"Reduce the XML documentation nesting to no more than {MaximumXmlCommentNestingDepth} element levels and refresh the Docs harvest.");
+    }
+
+    private void LogDiagnostics(IEnumerable<DocHarvestDiagnostic> diagnostics)
+    {
+        foreach (var diagnostic in diagnostics)
+        {
+            _logger.Log(
+                diagnostic.Severity >= DocHarvestDiagnosticSeverity.Error ? LogLevel.Error : LogLevel.Warning,
+                "AppSurface Docs C# harvest diagnostic {DiagnosticCode}: {Problem}",
+                diagnostic.Code,
+                diagnostic.Problem);
+        }
+    }
+
+    private sealed record TypedCSharpFileResult(
+        IReadOnlyList<TypedNamespacePage> NamespacePages,
+        IReadOnlyList<DocNode> Stubs);
+
+    private sealed record TypedDocumentedMethod(MethodDeclarationSyntax Method, TypedDocumentationResult Documentation);
+
+    private sealed record TypedDocumentedProperty(PropertyDeclarationSyntax Property, TypedDocumentationResult Documentation);
+
+    private sealed record TypedDocumentationResult(CSharpDocumentation? Documentation, bool HasComment)
+    {
+        internal static TypedDocumentationResult None { get; } = new(null, false);
+    }
+
+    private sealed class TypedNamespacePage
+    {
+        internal TypedNamespacePage(string fullNamespace, string path, string title, DocMetadata metadata)
+        {
+            FullNamespace = fullNamespace;
+            Path = path;
+            Title = title;
+            Metadata = metadata;
+        }
+
+        internal string FullNamespace { get; }
+
+        internal string Path { get; }
+
+        internal string Title { get; }
+
+        internal DocMetadata Metadata { get; }
+
+        internal List<CSharpTypeDocument> Types { get; } = [];
+
+        internal List<CSharpEnumDocument> Enums { get; } = [];
+
+        internal List<DocOutlineItem> Outline { get; } = [];
+
+        internal HashSet<string> OutlineIds { get; } = new(StringComparer.Ordinal);
+
+        internal List<DocSymbolSourceProvenance> SymbolSourceProvenance { get; } = [];
+
+        internal HashSet<string> ChildNamespaces { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        internal CSharpNamespaceDocument ToDocument()
+        {
+            var children = ChildNamespaces
+                .OrderBy(namespaceName => namespaceName, StringComparer.OrdinalIgnoreCase)
+                .Select(
+                    namespaceName => new CSharpChildNamespace(
+                        DocRoutePath.BuildCanonicalPath(BuildNamespaceDocPath(namespaceName)),
+                        GetNamespaceTitle(namespaceName)))
+                .ToArray();
+            var types = MergeTypedTypes(Types);
+            var enums = Enums
+                .GroupBy(@enum => @enum.AnchorId, StringComparer.Ordinal)
+                .Select(group => group.First())
+                .ToArray();
+            return new CSharpNamespaceDocument(
+                FullNamespace,
+                Title,
+                children,
+                types,
+                enums,
+                Outline.ToArray(),
+                SymbolSourceProvenance.ToArray(),
+                BuildNamespaceReaderText(FullNamespace, Title, children, types, enums));
+        }
+    }
+
+    private static IReadOnlyList<CSharpTypeDocument> MergeTypedTypes(IEnumerable<CSharpTypeDocument> types)
+    {
+        return types
+            .GroupBy(type => type.AnchorId, StringComparer.Ordinal)
+            .Select(
+                group =>
+                {
+                    var first = group.First();
+                    if (group.Count() == 1)
+                    {
+                        return first;
+                    }
+
+                    return first with
+                    {
+                        Documentation = MergeTypedDocumentation(group.Select(type => type.Documentation)),
+                        MethodGroups = group
+                            .SelectMany(type => type.MethodGroups)
+                            .GroupBy(methodGroup => methodGroup.AnchorId, StringComparer.Ordinal)
+                            .Select(
+                                methodGroup => methodGroup.First() with
+                                {
+                                    Overloads = methodGroup
+                                        .SelectMany(item => item.Overloads)
+                                        .GroupBy(overload => overload.AnchorId, StringComparer.Ordinal)
+                                        .Select(overload => overload.First())
+                                        .ToArray()
+                                })
+                            .ToArray(),
+                        Properties = group
+                            .SelectMany(type => type.Properties)
+                            .GroupBy(property => property.AnchorId, StringComparer.Ordinal)
+                            .Select(property => property.First())
+                            .ToArray()
+                    };
+                })
+            .ToArray();
+    }
+
+    private static CSharpDocumentation? MergeTypedDocumentation(IEnumerable<CSharpDocumentation?> documentation)
+    {
+        var sections = documentation
+            .Where(item => item is not null)
+            .SelectMany(item => item!.Sections)
+            .ToArray();
+        return sections.Length == 0 ? null : new CSharpDocumentation(sections);
+    }
+
+    private static string BuildNamespaceReaderText(
+        string fullNamespace,
+        string title,
+        IReadOnlyList<CSharpChildNamespace> children,
+        IReadOnlyList<CSharpTypeDocument> types,
+        IReadOnlyList<CSharpEnumDocument> enums)
+    {
+        var sections = new List<string> { title, fullNamespace };
+        sections.AddRange(children.Select(child => child.Title));
+        foreach (var type in types)
+        {
+            var typeParts = new List<string> { type.DisplayName };
+            AddDocumentationReaderText(typeParts, type.Documentation);
+            foreach (var methodGroup in type.MethodGroups)
+            {
+                var methodGroupParts = new List<string> { methodGroup.Name };
+                foreach (var overload in methodGroup.Overloads)
+                {
+                    var overloadParts = new List<string>();
+                    AddSignatureReaderText(overloadParts, overload.Signature);
+                    AddDocumentationReaderText(overloadParts, overload.Documentation);
+                    methodGroupParts.Add(string.Join(' ', overloadParts.Where(part => !string.IsNullOrWhiteSpace(part))));
+                }
+
+                typeParts.Add(string.Join("\n", methodGroupParts.Where(part => !string.IsNullOrWhiteSpace(part))));
+            }
+
+            foreach (var property in type.Properties)
+            {
+                var propertyParts = new List<string> { property.Name };
+                AddSignatureReaderText(propertyParts, property.Signature);
+                AddDocumentationReaderText(propertyParts, property.Documentation);
+                typeParts.Add(string.Join(' ', propertyParts.Where(part => !string.IsNullOrWhiteSpace(part))));
+            }
+
+            sections.Add(string.Join("\n", typeParts.Where(part => !string.IsNullOrWhiteSpace(part))));
+        }
+
+        foreach (var @enum in enums)
+        {
+            var enumParts = new List<string> { @enum.DisplayName };
+            AddDocumentationReaderText(enumParts, @enum.Documentation);
+            sections.Add(string.Join(' ', enumParts.Where(part => !string.IsNullOrWhiteSpace(part))));
+        }
+
+        // Normalize each semantic section as it is appended. Joining the whole namespace and splitting it again made
+        // a second, full-page string and array for every generated API page.
+        var readerText = new StringBuilder();
+        foreach (var section in sections)
+        {
+            foreach (var line in section.Split('\n'))
+            {
+                var normalizedLine = NormalizeWhitespace(line);
+                if (!string.IsNullOrWhiteSpace(normalizedLine))
+                {
+                    readerText.AppendLine(normalizedLine);
+                }
+            }
+        }
+
+        return readerText.ToString().Trim();
+    }
+
+    private static void AddSignatureReaderText(ICollection<string> parts, CSharpSignature signature)
+    {
+        parts.Add(signature.Type);
+
+        // Keep the search projection aligned with the mutually exclusive signature shapes rendered by _Signature.cshtml.
+        // Properties expose accessors rather than a callable member shape, while explicit-interface methods display the
+        // qualification immediately before the member name.
+        if (!string.IsNullOrWhiteSpace(signature.AccessorSignature))
+        {
+            parts.Add(signature.Name);
+            parts.Add(signature.AccessorSignature);
+            return;
+        }
+
+        parts.Add(signature.ExplicitInterface ?? string.Empty);
+        parts.Add(signature.Name);
+        foreach (var typeParameter in signature.TypeParameters)
+        {
+            parts.Add(typeParameter);
+        }
+        foreach (var parameter in signature.Parameters)
+        {
+            parts.Add(parameter.Modifier ?? string.Empty);
+            parts.Add(parameter.Type);
+            parts.Add(parameter.Name);
+            parts.Add(parameter.DefaultValue ?? string.Empty);
+        }
+    }
+
+    private static void AddDocumentationReaderText(ICollection<string> parts, CSharpDocumentation? documentation)
+    {
+        if (documentation is null)
+        {
+            return;
+        }
+
+        foreach (var section in documentation.Sections)
+        {
+            parts.Add(section.Name ?? string.Empty);
+            parts.Add(section.CrefDisplay ?? string.Empty);
+            parts.Add(BuildXmlReaderText(section.Content));
+        }
+    }
+
+    private static string BuildXmlReaderText(IEnumerable<CSharpXmlNode> nodes)
+    {
+        var parts = new List<string>();
+        foreach (var node in nodes)
+        {
+            if (!string.IsNullOrWhiteSpace(node.Text))
+            {
+                parts.Add(node.Text);
+            }
+
+            if (node.Children is { Count: > 0 })
+            {
+                parts.Add(BuildXmlReaderText(node.Children));
+            }
+        }
+
+        return string.Join(' ', parts.Where(part => !string.IsNullOrWhiteSpace(part)));
     }
 
     private async Task<IReadOnlyList<DocNode>> HarvestAsync(
@@ -176,13 +1140,13 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                     var typeDeclarations = root.DescendantNodes().OfType<TypeDeclarationSyntax>().ToList();
                     foreach (var typeDecl in typeDeclarations)
                     {
-                        var doc = ExtractDoc(typeDecl);
+                        var doc = ExtractDoc(typeDecl, relativePath, diagnostics);
                         var documentedMethods = typeDecl.Members
                             .OfType<MethodDeclarationSyntax>()
                             .Select(method => new
                             {
                                 Method = method,
-                                Doc = ExtractDoc(method)
+                                Doc = ExtractDoc(method, relativePath, diagnostics)
                             })
                             .Where(x => x.Doc != null)
                             .ToList();
@@ -191,7 +1155,7 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                             .Select(property => new
                             {
                                 Property = property,
-                                Doc = ExtractDoc(property)
+                                Doc = ExtractDoc(property, relativePath, diagnostics)
                             })
                             .Where(x => x.Doc != null)
                             .ToList();
@@ -316,7 +1280,7 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                     var enumDeclarations = root.DescendantNodes().OfType<EnumDeclarationSyntax>().ToList();
                     foreach (var enumDecl in enumDeclarations)
                     {
-                        var doc = ExtractDoc(enumDecl);
+                        var doc = ExtractDoc(enumDecl, relativePath, diagnostics);
                         if (doc != null)
                         {
                             var namespacePage = GetOrCreateNamespacePage(namespacePages, GetNamespaceName(enumDecl));
@@ -401,14 +1365,7 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         finally
         {
             _lastDiagnostics = diagnostics.ToArray();
-            foreach (var diagnostic in diagnostics)
-            {
-                _logger.Log(
-                    diagnostic.Severity >= DocHarvestDiagnosticSeverity.Error ? LogLevel.Error : LogLevel.Warning,
-                    "AppSurface Docs C# harvest diagnostic {DiagnosticCode}: {Problem}",
-                    diagnostic.Code,
-                    diagnostic.Problem);
-            }
+            LogDiagnostics(diagnostics);
         }
     }
 
@@ -650,7 +1607,7 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     }
 
     /// <summary>
-    /// Determines whether a parameter is a compiler-generated caller information parameter (e.g., [CallerFilePath]).
+    /// Determines whether a parameter is a compiler-generated caller information parameter (for example, [CallerFilePath]).
     /// </summary>
     /// <param name="parameter">The parameter declaration syntax.</param>
     /// <returns><c>true</c> if the parameter should be hidden from documentation; otherwise, <c>false</c>.</returns>
@@ -663,15 +1620,22 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                 name.EndsWith("CallerFilePath", StringComparison.Ordinal)
                 || name.EndsWith("CallerFilePathAttribute", StringComparison.Ordinal)
                 || name.EndsWith("CallerLineNumber", StringComparison.Ordinal)
-                || name.EndsWith("CallerLineNumberAttribute", StringComparison.Ordinal));
+                || name.EndsWith("CallerLineNumberAttribute", StringComparison.Ordinal)
+                || name.EndsWith("CallerMemberName", StringComparison.Ordinal)
+                || name.EndsWith("CallerMemberNameAttribute", StringComparison.Ordinal));
     }
 
     /// <summary>
     /// Extracts XML documentation from the leading trivia of a syntax node and converts it into HTML fragments.
     /// </summary>
     /// <param name="node">The syntax node whose leading XML documentation comments will be parsed.</param>
+    /// <param name="relativePath">The repository-relative path used by structured documentation diagnostics.</param>
+    /// <param name="diagnostics">The harvest diagnostics that receive local XML depth-limit warnings.</param>
     /// <returns>The HTML string containing structured documentation sections, or <c>null</c> if no documentation is present or parsing fails.</returns>
-    private string? ExtractDoc(SyntaxNode node)
+    private string? ExtractDoc(
+        SyntaxNode node,
+        string relativePath,
+        ICollection<DocHarvestDiagnostic> diagnostics)
     {
         var xml = node.GetLeadingTrivia()
             .Select(i => i.GetStructure())
@@ -682,10 +1646,19 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
 
         try
         {
-            var cleanXml = xml.ToString().Replace("///", "").Trim();
+            var cleanXml = NormalizeDocumentationCommentXml(xml);
             var wrappedXml = $"<doc>{cleanXml}</doc>";
+            if (!IsXmlCommentNestingDepthWithinLimit(wrappedXml))
+            {
+                diagnostics.Add(CreateXmlCommentDepthExceededDiagnostic(relativePath, node));
+                return null;
+            }
+
             var xdoc = XDocument.Parse(wrappedXml, LoadOptions.PreserveWhitespace);
             var root = xdoc.Root!;
+            var excludedParameterNames = node is MethodDeclarationSyntax method
+                ? GetCompilerGeneratedCallerParameterNames(method)
+                : null;
 
             var html = new StringBuilder();
 
@@ -700,7 +1673,10 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                 html,
                 "doc-params",
                 "Parameters",
-                root.Elements("param").Where(e => !IsCompilerGeneratedDocParameter(e.Attribute("name")?.Value)),
+                root.Elements("param").Where(
+                    element => !IsExcludedDocumentationParameter(
+                        element.Attribute("name")?.Value,
+                        excludedParameterNames)),
                 e => e.Attribute("name")?.Value);
             AppendTextSection(html, "doc-returns", root.Element("returns"), "Returns");
             AppendNamedListSection(
@@ -959,6 +1935,11 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         return WhitespaceRegex.Replace(value, " ");
     }
 
+    private static string NormalizeDocumentationCommentXml(DocumentationCommentTriviaSyntax xml)
+    {
+        return DocumentationCommentPrefixRegex.Replace(xml.ToString(), string.Empty).Trim();
+    }
+
     /// <summary>
     /// Adds an outline item to a namespace page when the entry is complete and its target ID has not already been recorded.
     /// </summary>
@@ -1010,16 +1991,6 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         }
 
         return string.IsNullOrWhiteSpace(simplified) ? null : simplified;
-    }
-
-    /// <summary>
-    /// Determines whether a parameter name corresponds to a compiler-generated caller information parameter.
-    /// </summary>
-    /// <param name="parameterName">The name of the parameter to check.</param>
-    /// <returns><c>true</c> if it is a compiler-generated parameter; otherwise, <c>false</c>.</returns>
-    private static bool IsCompilerGeneratedDocParameter(string? parameterName)
-    {
-        return parameterName is "callerFilePath" or "callerLineNumber";
     }
 
     /// <summary>
