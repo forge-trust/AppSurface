@@ -452,6 +452,89 @@ public class CSharpDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_WithBuiltInContextShouldReturnNoNamespaces_WhenSourceHasNoDocumentedSymbols()
+    {
+        await File.WriteAllTextAsync(
+            CombineUnder(_testRoot, "Undocumented.cs"),
+            """
+            namespace Product.Api;
+
+            public sealed class UndocumentedService { }
+            """);
+
+        var typedResults = await _harvester.HarvestAsync(CreateContextWithDefaultPolicy());
+        var legacyResults = await _harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(typedResults);
+        Assert.Empty(legacyResults);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_WithBuiltInContextShouldSkipEmptyXmlComments_AndRetainDocumentedSibling()
+    {
+        await File.WriteAllTextAsync(
+            CombineUnder(_testRoot, "Api.cs"),
+            """
+            using System.Runtime.CompilerServices;
+
+            namespace Product.Api;
+
+            ///
+            public sealed class EmptyComment { }
+
+            /// <summary/>
+            public sealed class EmptySummary { }
+
+            /// <inheritdoc/>
+            public enum InheritedDocumentation { Value }
+
+            public sealed class EmptyMembers
+            {
+                /// <summary/>
+                public int Value { get; set; }
+
+                /// <inheritdoc/>
+                public void Inherited() { }
+
+                /// <param name="path">Caller-supplied path.</param>
+                public void CallerOnly([CallerFilePath] string path = "") { }
+            }
+
+            /// <summary>Published service.</summary>
+            public sealed class PublishedService
+            {
+                /// <summary/>
+                public int EmptyProperty { get; set; }
+
+                /// <summary/>
+                public void EmptyMethod() { }
+
+                /// <summary>Published method.</summary>
+                public void PublishedMethod() { }
+            }
+            """);
+
+        var typedResults = await _harvester.HarvestAsync(CreateContextWithDefaultPolicy());
+        var legacyResults = await _harvester.HarvestAsync(_testRoot);
+
+        var typedNamespace = Assert.Single(typedResults, node => node.Path == "Namespaces/Product.Api");
+        var typedDocument = Assert.IsType<CSharpNamespaceDocument>(typedNamespace.CSharpNamespaceDocument);
+        var type = Assert.Single(typedDocument.Types);
+        Assert.Equal("PublishedService", type.DisplayName);
+        Assert.Empty(type.Properties);
+        var methodGroup = Assert.Single(type.MethodGroups);
+        Assert.Equal("PublishedMethod", methodGroup.Name);
+        Assert.Single(methodGroup.Overloads);
+        Assert.Single(typedResults, node => node.Title == "PublishedService");
+        Assert.DoesNotContain(typedResults, node => node.Title is "EmptyComment" or "EmptySummary" or "EmptyMembers" or "InheritedDocumentation");
+
+        var legacyNamespace = Assert.Single(legacyResults, node => node.Path == "Namespaces/Product.Api");
+        Assert.Contains("Published service.", legacyNamespace.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("EmptyMethod", legacyNamespace.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("CallerOnly", legacyNamespace.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task HarvestAsync_WithBuiltInContextShouldHideCallerInfoParametersFromTypedDocumentation()
     {
         await File.WriteAllTextAsync(
@@ -575,6 +658,17 @@ public class CSharpDocHarvesterTests : IDisposable
 
         try
         {
+            try
+            {
+                using var probe = File.OpenRead(unreadablePath);
+                // Privileged processes can open chmod-000 files, so this filesystem cannot verify the read-failure path.
+                return;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // The permission boundary is enforced; exercise the harvester's per-file failure handling below.
+            }
+
             var results = await _harvester.HarvestAsync(CreateContextWithDefaultPolicy());
             var diagnostics = GetDiagnostics(_harvester);
 

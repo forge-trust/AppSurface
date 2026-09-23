@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using AngleSharp.Dom;
 using AngleSharp.Html.Parser;
@@ -42,11 +43,15 @@ public sealed class Issue164CSharpDetailsRenderingTests : IDisposable
     [Fact]
     public async Task Fixture_ShouldRenderTypedCSharpDetailsThroughRazorPartials()
     {
+        using var manifest = JsonDocument.Parse(File.ReadAllText(FixturePath("compatibility-manifest.json")));
+        var requiredDom = manifest.RootElement.GetProperty("requiredDom");
         File.Copy(FixturePath("ApiFixtures.cs"), Path.Join(_root, "ApiFixtures.cs"));
 
         var harvester = new CSharpDocHarvester(NullLogger<CSharpDocHarvester>.Instance);
         var results = await harvester.HarvestAsync(CreateContext());
-        var namespaceNode = Assert.Single(results, node => node.Path == "Namespaces/Issue164.Api");
+        var namespaceNode = Assert.Single(
+            results,
+            node => node.Path == manifest.RootElement.GetProperty("namespacePath").GetString());
         Assert.IsType<CSharpNamespaceDocument>(namespaceNode.CSharpNamespaceDocument);
 
         using var services = CreateServiceProvider(namespaceNode);
@@ -57,10 +62,11 @@ public sealed class Issue164CSharpDetailsRenderingTests : IDisposable
         var document = new HtmlParser().ParseDocument(html);
 
         var shellHeadings = document.QuerySelectorAll("h1.docs-detail-title");
-        Assert.Single(shellHeadings);
+        Assert.Equal(requiredDom.GetProperty("shellH1Count").GetInt32(), shellHeadings.Length);
         Assert.Equal("Api", shellHeadings[0].TextContent.Trim());
 
-        var type = Assert.Single(document.QuerySelectorAll("section.doc-type:not(.doc-enum)"));
+        var typeClass = requiredDom.GetProperty("typeClass").GetString();
+        var type = Assert.Single(document.QuerySelectorAll($"section.{typeClass}:not(.doc-enum)"));
         Assert.Equal("FixtureService<TItem>", type.QuerySelector("h2")?.TextContent.Trim());
 
         var typeParameters = Assert.Single(type.QuerySelectorAll(".doc-typeparams"));
@@ -68,10 +74,10 @@ public sealed class Issue164CSharpDetailsRenderingTests : IDisposable
         Assert.Contains("item accepted by the service", typeParameters.TextContent, StringComparison.Ordinal);
 
         var methodGroup = Assert.Single(
-            type.QuerySelectorAll("section.doc-method-group"),
+            type.QuerySelectorAll($"section.{requiredDom.GetProperty("methodGroupClass").GetString()}"),
             section => section.QuerySelector("h3")?.TextContent.Trim() == "Process");
         Assert.Equal("Process", methodGroup.QuerySelector("h3")?.TextContent.Trim());
-        var overloads = methodGroup.QuerySelectorAll("details.doc-overload");
+        var overloads = methodGroup.QuerySelectorAll($"details.{requiredDom.GetProperty("overloadClass").GetString()}");
         Assert.Equal(2, overloads.Length);
         Assert.All(overloads, overload => Assert.Equal("Process", overload.QuerySelector(".sig-method")?.TextContent.Trim()));
         Assert.Contains("TItem", overloads[0].QuerySelector(".sig-type")?.TextContent, StringComparison.Ordinal);
@@ -79,7 +85,7 @@ public sealed class Issue164CSharpDetailsRenderingTests : IDisposable
         Assert.Contains("string", overloads[1].QuerySelector(".sig-type")?.TextContent, StringComparison.Ordinal);
         Assert.Contains("item", overloads[1].QuerySelector(".sig-parameter")?.TextContent, StringComparison.Ordinal);
         Assert.Contains("1", overloads[0].QuerySelector(".sig-literal")?.TextContent, StringComparison.Ordinal);
-        Assert.True(overloads[0].HasAttribute("open"));
+        Assert.Equal(requiredDom.GetProperty("firstOverloadOpen").GetBoolean(), overloads[0].HasAttribute("open"));
         Assert.Equal(
             "Processes a item and returns a safe System.String value.",
             NormalizeReaderText(overloads[0].QuerySelector(".doc-summary")?.TextContent));
@@ -102,6 +108,7 @@ public sealed class Issue164CSharpDetailsRenderingTests : IDisposable
 
         var remarks = Assert.Single(document.QuerySelectorAll(".doc-remarks"));
         Assert.Contains("Hostile XML-like text: <script>must remain text</script>.", remarks.TextContent, StringComparison.Ordinal);
+        Assert.Equal(requiredDom.GetProperty("typedValuesAreEncoded").GetBoolean(), remarks.QuerySelectorAll("script").Length == 0);
         Assert.Empty(remarks.QuerySelectorAll("script"));
         Assert.Equal(2, remarks.QuerySelectorAll("p").Length);
         Assert.Equal(2, remarks.QuerySelectorAll("ol li").Length);
@@ -115,6 +122,48 @@ public sealed class Issue164CSharpDetailsRenderingTests : IDisposable
                     && code.TextContent.Trim() == "external documentation");
         Assert.Contains("TItem", remarks.TextContent, StringComparison.Ordinal);
         Assert.Contains("Unknown markup must fall back to text.", remarks.TextContent, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false, "Process(string item)")]
+    [InlineData(true, "Count<TCount>(TCount count)")]
+    public async Task SignaturePartial_ShouldKeepMethodNamesAndParenthesesAdjacent(
+        bool generic,
+        string expectedSignature)
+    {
+        var parameterType = generic ? "TCount" : "string";
+        var signature = new CSharpSignature(
+            parameterType,
+            generic ? "Count" : "Process",
+            [new CSharpSignatureParameter(null, parameterType, generic ? "count" : "item")],
+            generic ? ["TCount"] : []);
+        using var services = CreateServiceProvider(new DocNode("Api", "Namespaces/Issue164.Api", string.Empty));
+
+        var html = await RenderViewAsync(services, "/Views/Docs/CSharp/_Signature.cshtml", signature);
+        var document = new HtmlParser().ParseDocument(html);
+        var renderedSignature = Assert.Single(document.QuerySelectorAll("code.doc-signature")).TextContent;
+
+        Assert.Contains(expectedSignature, renderedSignature, StringComparison.Ordinal);
+        Assert.DoesNotContain(" )", renderedSignature, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SignaturePartial_ShouldEncodeSourceDerivedSignatureValues()
+    {
+        var signature = new CSharpSignature(
+            "<script>alert(1)</script>",
+            "Execute",
+            [new CSharpSignatureParameter(null, "<img src=x>", "value")],
+            []);
+        using var services = CreateServiceProvider(new DocNode("Api", "Namespaces/Issue164.Api", string.Empty));
+
+        var html = await RenderViewAsync(services, "/Views/Docs/CSharp/_Signature.cshtml", signature);
+        var document = new HtmlParser().ParseDocument(html);
+        var renderedSignature = Assert.Single(document.QuerySelectorAll("code.doc-signature"));
+
+        Assert.Contains("<script>alert(1)</script>", renderedSignature.TextContent, StringComparison.Ordinal);
+        Assert.Contains("<img src=x>", renderedSignature.TextContent, StringComparison.Ordinal);
+        Assert.Empty(renderedSignature.QuerySelectorAll("script, img"));
     }
 
     public void Dispose()

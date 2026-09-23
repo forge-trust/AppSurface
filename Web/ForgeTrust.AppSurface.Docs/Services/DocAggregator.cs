@@ -2548,7 +2548,8 @@ public class DocAggregator
                         + entryPointSearchText);
                     var snippet = TruncateSnippetAtWordBoundary(bodyText, SearchSnippetMaxLength);
                     var title = ResolveSearchIndexTitle(d);
-                    var summary = ShouldUseSearchSnippetForRichAuthoringSummary(d.Content, d.Metadata?.Summary)
+                    var summaryContent = d.CSharpNamespaceDocument?.IntroHtml ?? d.Content;
+                    var summary = ShouldUseSearchSnippetForRichAuthoringSummary(summaryContent, d.Metadata?.Summary)
                         ? snippet
                         : d.Metadata?.Summary ?? snippet;
                     var summaryPresentation = DocsSearchSummaryPresentationProjector.Project(summary);
@@ -3167,7 +3168,11 @@ public class DocAggregator
     {
         var introText = string.IsNullOrWhiteSpace(introHtml)
             ? string.Empty
-            : TagRegex.Replace(ScriptOrStyleRegex.Replace(introHtml, string.Empty), " ");
+            : TagRegex.Replace(
+                ScriptOrStyleRegex.Replace(
+                    RichAuthoringGeneratedChromeRegex.Replace(introHtml, string.Empty),
+                    string.Empty),
+                " ");
         var entryPointText = string.Join(
             " ",
             (entryPoints ?? [])

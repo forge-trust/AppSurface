@@ -3577,6 +3577,45 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetSearchIndexPayloadAsync_ShouldOmitRichAuthoringChromeAndFencesFromTypedNamespaceIntro()
+    {
+        var typedDocument = new CSharpNamespaceDocument(
+            "ForgeTrust.Web", "Web", [], [], [], [], [], "Generated API text.");
+        var harvestedDocs = new List<DocNode>
+        {
+            new("Web", "Namespaces/ForgeTrust.Web", string.Empty)
+            {
+                CSharpNamespaceDocument = typedDocument
+            },
+            new(
+                "README",
+                "docs/ForgeTrust.Web/README.md",
+                """
+                <section class="docs-rich-callout" data-appsurfacedocs-rich="callout"><p class="docs-rich-callout__label">Note</p><div>Author callout.</div></section>
+                <section class="docs-rich-tabs" data-appsurfacedocs-rich="tabs"><p>Choose an environment.</p><p class="docs-rich-tabs__baseline">All paths are available below.</p><section><h3>Local proof</h3><p>Run the local proof.</p></section></section>
+                """,
+                Metadata: new DocMetadata { Summary = ":::callout type=note\nAuthor callout.\n:::" })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var docs = await _aggregator.GetDocsAsync();
+        var namespaceNode = Assert.Single(docs, node => node.Path == "Namespaces/ForgeTrust.Web");
+        var namespaceDocument = Assert.IsType<CSharpNamespaceDocument>(namespaceNode.CSharpNamespaceDocument);
+        var payload = await _aggregator.GetSearchIndexPayloadAsync();
+        var indexedDocument = Assert.Single(payload.Documents, item => item.Id == "Namespaces/ForgeTrust.Web.html");
+
+        Assert.Contains("Generated API text.", namespaceDocument.ReaderText, StringComparison.Ordinal);
+        Assert.Contains("Author callout.", namespaceDocument.ReaderText, StringComparison.Ordinal);
+        Assert.Contains("Choose an environment.", namespaceDocument.ReaderText, StringComparison.Ordinal);
+        Assert.Contains("Run the local proof.", indexedDocument.BodyText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Note", namespaceDocument.ReaderText, StringComparison.Ordinal);
+        Assert.DoesNotContain("All paths are available below.", namespaceDocument.ReaderText, StringComparison.Ordinal);
+        Assert.DoesNotContain(":::callout", indexedDocument.Summary, StringComparison.Ordinal);
+        Assert.DoesNotContain(":::", indexedDocument.Snippet, StringComparison.Ordinal);
+        Assert.Contains("Author callout.", indexedDocument.Summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GetSearchIndexPayloadAsync_ShouldOmitGeneratedSymbolSourceLinkText_RegardlessOfAttributeOrder()
     {
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))

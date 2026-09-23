@@ -423,6 +423,11 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
 
     private static void EnsureTypedNamespaceHierarchy(IDictionary<string, TypedNamespacePage> namespacePages)
     {
+        if (namespacePages.Count == 0)
+        {
+            return;
+        }
+
         var pagesByNamespace = namespacePages.Values.ToDictionary(page => page.FullNamespace, StringComparer.OrdinalIgnoreCase);
         if (!pagesByNamespace.ContainsKey(string.Empty))
         {
@@ -514,7 +519,9 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
             AddTypedNamedDocumentationSections(sections, CSharpDocumentationSectionKind.Exception, root.Elements("exception"), attributeName: null, crefAttributeName: "cref");
             AddTypedDocumentationSection(sections, CSharpDocumentationSectionKind.Remarks, root.Element("remarks"));
             AddTypedDocumentationSection(sections, CSharpDocumentationSectionKind.Example, root.Element("example"));
-            return new TypedDocumentationResult(new CSharpDocumentation(sections), HasComment: true);
+            return sections.Count == 0
+                ? TypedDocumentationResult.None
+                : new TypedDocumentationResult(new CSharpDocumentation(sections), HasComment: true);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
         {
