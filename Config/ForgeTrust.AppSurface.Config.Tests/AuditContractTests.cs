@@ -268,12 +268,16 @@ public sealed class AuditContractTests
         var cancellation = new OperationCanceledException();
         var environment = new ScriptedPatchEnvironment
         {
-            Result = ConfigProviderValueResult<string>.Terminal(ConfigDiagnosticCatalog.Terminal("config-key-collision")),
             Patch = () => throw cancellation
+        };
+        var terminal = new GenericProvider("Terminal", 10)
+        {
+            Result = ConfigProviderValueResult<string>.Terminal(ConfigDiagnosticCatalog.Terminal("config-key-collision"))
         };
         var low = new GenericProvider("Low", 1);
         Assert.Same(cancellation, Assert.Throws<OperationCanceledException>(() =>
-            CreateReporter(environment, [low], Known<string>()).GetReport("Production")));
+            CreateReporter(environment, [terminal, low], Known<string>()).GetReport("Production")));
+        Assert.Equal(1, terminal.Calls);
         Assert.Equal(0, low.Calls);
     }
 
