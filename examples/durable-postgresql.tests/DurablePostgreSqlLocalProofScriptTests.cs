@@ -55,6 +55,134 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
     }
 
     [Fact]
+    public async Task Script_waits_for_the_final_tcp_server_before_creating_roles()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "The local proof script is a Unix Bash entry point.");
+        }
+
+        var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var scriptPath = TestPathUtils.PathUnder(
+            repositoryRoot,
+            "examples",
+            "durable-postgresql",
+            "run-local-proof.sh");
+        var temporaryRoot = Directory.CreateTempSubdirectory("appsurface-durable-proof-readiness-").FullName;
+        var fakeBin = Directory.CreateDirectory(Path.Join(temporaryRoot, "bin")).FullName;
+        var probeCountFile = Path.Join(temporaryRoot, "probe-count");
+        await File.WriteAllTextAsync(probeCountFile, "0");
+
+        try
+        {
+            WriteExecutable(
+                fakeBin,
+                "bash",
+                """
+                #!/bin/sh
+                case "${1:-}" in
+                  */examples/durable-postgresql/check-prerequisites.sh) exit 0 ;;
+                esac
+                exec /bin/bash "$@"
+                """);
+            WriteExecutable(
+                fakeBin,
+                "docker",
+                """
+                #!/bin/sh
+                case "${1:-}" in
+                  run|rm) exit 0 ;;
+                  exec)
+                    shift
+                    shift
+                    case "${1:-}" in
+                      pg_isready)
+                        count=$(cat "$APPSURFACE_TEST_PROBE_COUNT_FILE")
+                        count=$((count + 1))
+                        printf '%s\n' "$count" > "$APPSURFACE_TEST_PROBE_COUNT_FILE"
+                        case " $* " in
+                          *' -h 127.0.0.1 '*)
+                            if [ "$count" -ge 3 ]; then exit 0; fi
+                            exit 1
+                            ;;
+                          *) exit 0 ;;
+                        esac
+                        ;;
+                      psql)
+                        count=$(cat "$APPSURFACE_TEST_PROBE_COUNT_FILE")
+                        if [ "$count" -lt 3 ]; then
+                          printf '%s\n' 'database system is shutting down' >&2
+                          exit 2
+                        fi
+                        case "$*" in
+                          *gen_random_uuid*) printf '%s\n' '00000000-0000-0000-0000-000000000001' ;;
+                        esac
+                        exit 0
+                        ;;
+                    esac
+                    ;;
+                esac
+                exit 0
+                """);
+            WriteExecutable(
+                fakeBin,
+                "dotnet",
+                """
+                #!/bin/sh
+                if [ "${1:-}" = "--version" ]; then
+                  printf '%s\n' '10.0.401'
+                fi
+                exit 0
+                """);
+
+            var startInfo = new ProcessStartInfo("/bin/bash")
+            {
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                WorkingDirectory = repositoryRoot,
+            };
+            startInfo.ArgumentList.Add(scriptPath);
+            startInfo.Environment["PATH"] = string.Join(
+                Path.PathSeparator,
+                fakeBin,
+                Environment.GetEnvironmentVariable("PATH") ?? string.Empty);
+            startInfo.Environment["APPSURFACE_DURABLE_LOCAL_PORT"] = "54349";
+            startInfo.Environment["APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS"] = "20";
+            startInfo.Environment["APPSURFACE_TEST_PROBE_COUNT_FILE"] = probeCountFile;
+
+            using var process = Process.Start(startInfo)!;
+            try
+            {
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            }
+            catch
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync();
+                }
+
+                throw;
+            }
+
+            var standardOutput = await process.StandardOutput.ReadToEndAsync();
+            var standardError = await process.StandardError.ReadToEndAsync();
+            Assert.True(
+                process.ExitCode == 0,
+                $"Exit {process.ExitCode} after {await File.ReadAllTextAsync(probeCountFile)} readiness probes. stdout: {standardOutput} stderr: {standardError}");
+            Assert.Equal("3", (await File.ReadAllTextAsync(probeCountFile)).Trim());
+            Assert.Contains("[ok] local operational-assessment proof completed", standardOutput, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(temporaryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Script_deadline_terminates_a_hung_child_process_group_without_docker()
     {
         if (OperatingSystem.IsWindows())
