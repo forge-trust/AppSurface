@@ -7,6 +7,105 @@ public sealed class OriginalCandidatePublicationReplayTests
     private const string PackageVersion = "1.2.3-preview.798";
     private static readonly string[] RequiredRids = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64"];
 
+    [ManualRehearsalFact]
+    public async Task ManualRehearsal_ReplaysDownloadedCandidateThroughProductionValidator()
+    {
+        static string Required(string name) => Environment.GetEnvironmentVariable(name) is { Length: > 0 } value
+            ? value
+            : throw new InvalidOperationException($"Manual rehearsal input {name} is missing.");
+
+        var repositoryRoot = Required("TAILWIND_REHEARSAL_REPOSITORY_ROOT");
+        var producerDirectory = Required("TAILWIND_REHEARSAL_PRODUCER_DIRECTORY");
+        var aggregateDirectory = Required("TAILWIND_REHEARSAL_AGGREGATE_DIRECTORY");
+        var startReceiptPath = Required("TAILWIND_REHEARSAL_START_RECEIPT");
+        var preparedDirectory = Required("TAILWIND_REHEARSAL_PREPARED_DIRECTORY");
+        var manifestPath = Path.Combine(producerDirectory, "package-artifact-manifest.json");
+        var manifest = await new PackageArtifactManifestReader().ReadAsync(manifestPath, CancellationToken.None);
+        Assert.Contains(manifest.Entries, entry => entry.PackageId == PackageId);
+
+        var scratch = TestPathUtils.PathUnder(Path.GetTempPath(), "tailwind-real-replay", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var credentials = new TestCredentialProvider();
+            var publisher = new RealEvidenceRecordingPublisher();
+            var workflow = new PackagePublishWorkflow(
+                new PackagePublishPlanResolver(new PackageProjectScanner(), new DotNetProjectMetadataProvider(), new PackageManifestLoader()),
+                new PackageArtifactManifestReader(), publisher, new PackagePublishLedgerRenderer(), credentials);
+            var originalIdentity = new TailwindPublicationRequest(
+                repositoryRoot, producerDirectory, manifestPath,
+                Path.Combine(producerDirectory, "tailwind-proof-subject.json"),
+                Required("TAILWIND_REHEARSAL_PRODUCER_ARTIFACT_ID"),
+                Required("TAILWIND_REHEARSAL_SUBJECT_SHA256"),
+                Required("TAILWIND_REHEARSAL_REPOSITORY_ID"),
+                Required("TAILWIND_REHEARSAL_PRODUCER_RUN_ID"),
+                Required("TAILWIND_REHEARSAL_SOURCE_COMMIT"),
+                aggregateDirectory,
+                Required("TAILWIND_REHEARSAL_AGGREGATE_ARTIFACT_ID"),
+                Required("TAILWIND_REHEARSAL_AGGREGATE_SHA256"),
+                string.Empty, startReceiptPath,
+                Required("TAILWIND_REHEARSAL_START_ARTIFACT_ID"), string.Empty);
+
+            PackagePublishRequest RequestFor(int attempt)
+            {
+                var publicationDirectory = TestPathUtils.PathUnder(scratch, $"attempt-{attempt}", "publication");
+                Directory.CreateDirectory(publicationDirectory);
+                foreach (var entry in manifest.Entries)
+                {
+                    File.Copy(
+                        Path.Combine(preparedDirectory, entry.ArtifactFileName),
+                        Path.Combine(publicationDirectory, entry.ArtifactFileName));
+                }
+
+                var evidence = originalIdentity with
+                {
+                    PublicationDirectory = publicationDirectory,
+                    ReportDirectory = TestPathUtils.PathUnder(scratch, $"attempt-{attempt}", "report")
+                };
+                return new PackagePublishRequest(
+                    repositoryRoot, Path.Combine(repositoryRoot, "packages", "package-index.yml"),
+                    producerDirectory, manifestPath,
+                    TestPathUtils.PathUnder(scratch, $"attempt-{attempt}", "publish-ledger.md"),
+                    "https://api.nuget.org/v3/index.json", "TEST_ONLY_NUGET_KEY", evidence);
+            }
+
+            var firstRequest = RequestFor(1);
+            publisher.Attempt = 1;
+            var interrupted = await workflow.RunAsync(firstRequest, CancellationToken.None);
+            Assert.Equal(PackagePublishStatus.Failed, Assert.Single(interrupted.Entries, entry => entry.PackageId == PackageId).Status);
+            AssertIdentity(originalIdentity, interrupted.TailwindIdentity);
+
+            var replayRequest = RequestFor(2);
+            publisher.Attempt = 2;
+            var replayed = await workflow.RunAsync(replayRequest, CancellationToken.None);
+            Assert.Equal(PackagePublishStatus.DuplicateReported, Assert.Single(replayed.Entries, entry => entry.PackageId == PackageId).Status);
+            AssertIdentity(originalIdentity, replayed.TailwindIdentity);
+            Assert.Equal(2, credentials.Reads);
+
+            var tailwindPushes = publisher.Requests
+                .Where(request => Path.GetFileName(request.Arguments[2]).StartsWith(PackageId + ".", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            Assert.Equal(2, tailwindPushes.Length);
+            Assert.All(tailwindPushes, request =>
+            {
+                Assert.Equal("dotnet", request.FileName);
+                Assert.Equal("nuget", request.Arguments[0]);
+                Assert.Equal("push", request.Arguments[1]);
+                Assert.Equal("TEST_ONLY_SYNTHETIC_KEY", request.Arguments[6]);
+            });
+            Assert.NotEqual(tailwindPushes[0].Arguments[2], tailwindPushes[1].Arguments[2]);
+            Assert.Equal(
+                await File.ReadAllBytesAsync(tailwindPushes[0].Arguments[2]),
+                await File.ReadAllBytesAsync(tailwindPushes[1].Arguments[2]));
+            Assert.Equal(
+                manifest.Entries.Single(entry => entry.PackageId == PackageId).Sha512,
+                PackageHash.ComputeSha512(tailwindPushes[0].Arguments[2]));
+        }
+        finally
+        {
+            if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task InterruptedPublication_ReplaysOriginalCandidateThroughRecordingPublisher()
     {
@@ -94,6 +193,21 @@ public sealed class OriginalCandidatePublicationReplayTests
             return Task.FromResult(Requests.Count == 1
                 ? new ExternalCommandResult(1, string.Empty, "simulated interruption after remote acceptance")
                 : new ExternalCommandResult(0, "package already exists", string.Empty));
+        }
+    }
+
+    private sealed class RealEvidenceRecordingPublisher : IExternalCommandRunner
+    {
+        public int Attempt { get; set; }
+        public List<ExternalCommandRequest> Requests { get; } = [];
+
+        public Task<ExternalCommandResult> RunAsync(ExternalCommandRequest request, CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            var isTailwind = Path.GetFileName(request.Arguments[2]).StartsWith(PackageId + ".", StringComparison.OrdinalIgnoreCase);
+            return Task.FromResult(isTailwind && Attempt == 1
+                ? new ExternalCommandResult(1, string.Empty, "simulated interruption after remote acceptance")
+                : new ExternalCommandResult(0, Attempt == 2 ? "package already exists" : "recorded push", string.Empty));
         }
     }
 
@@ -244,5 +358,15 @@ public sealed class OriginalCandidatePublicationReplayTests
         {
             if (Directory.Exists(Root)) Directory.Delete(Root, recursive: true);
         }
+    }
+}
+
+/// <summary>Discovers the real-artifact replay only in the main-only manual rehearsal job.</summary>
+public sealed class ManualRehearsalFactAttribute : FactAttribute
+{
+    public ManualRehearsalFactAttribute()
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable("TAILWIND_REHEARSAL_ENABLED"), "true", StringComparison.Ordinal))
+            Skip = "Requires the main-only manual rehearsal's downloaded producer, aggregate, and start receipt.";
     }
 }

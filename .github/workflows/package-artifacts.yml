@@ -273,6 +273,20 @@ jobs:
       - name: Exercise recording publisher credential and push boundaries
         env:
           SOURCE_REVISION_ID: ${{ env.SOURCE_COMMIT }}
+          TAILWIND_REHEARSAL_ENABLED: "true"
+          TAILWIND_REHEARSAL_REPOSITORY_ROOT: ${{ github.workspace }}
+          TAILWIND_REHEARSAL_PRODUCER_DIRECTORY: ${{ runner.temp }}/rehearsal-producer
+          TAILWIND_REHEARSAL_AGGREGATE_DIRECTORY: ${{ runner.temp }}/rehearsal-aggregate
+          TAILWIND_REHEARSAL_START_RECEIPT: ${{ runner.temp }}/rehearsal-start/publication-start-receipt.json
+          TAILWIND_REHEARSAL_PREPARED_DIRECTORY: ${{ runner.temp }}/rehearsal-publication
+          TAILWIND_REHEARSAL_PRODUCER_ARTIFACT_ID: ${{ env.PRODUCER_ARTIFACT_ID }}
+          TAILWIND_REHEARSAL_SUBJECT_SHA256: ${{ env.EXPECTED_SUBJECT_SHA256 }}
+          TAILWIND_REHEARSAL_REPOSITORY_ID: ${{ env.REPOSITORY_ID }}
+          TAILWIND_REHEARSAL_PRODUCER_RUN_ID: ${{ env.PRODUCER_RUN_ID }}
+          TAILWIND_REHEARSAL_SOURCE_COMMIT: ${{ env.SOURCE_COMMIT }}
+          TAILWIND_REHEARSAL_AGGREGATE_ARTIFACT_ID: ${{ env.AGGREGATE_ARTIFACT_ID }}
+          TAILWIND_REHEARSAL_AGGREGATE_SHA256: ${{ env.EXPECTED_AGGREGATE_SHA256 }}
+          TAILWIND_REHEARSAL_START_ARTIFACT_ID: ${{ steps.upload-rehearsal-start.outputs.artifact-id }}
         run: |
           dotnet restore tools/ForgeTrust.AppSurface.PackageIndex.Tests/ForgeTrust.AppSurface.PackageIndex.Tests.csproj --locked-mode
           dotnet test tools/ForgeTrust.AppSurface.PackageIndex.Tests/ForgeTrust.AppSurface.PackageIndex.Tests.csproj -c Release --no-restore -p:SourceRevisionId="$SOURCE_REVISION_ID" --filter 'FullyQualifiedName~TailwindPublishingTests|FullyQualifiedName~OriginalCandidatePublicationReplayTests'

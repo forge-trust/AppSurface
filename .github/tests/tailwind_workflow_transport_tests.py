@@ -548,6 +548,11 @@ class WorkflowTransportTests(unittest.TestCase):
         self.assertIn("artifact-ids: ${{ steps.upload-rehearsal-start.outputs.artifact-id }}", package)
         self.assertIn("--mode validate-publication-start", package)
         self.assertIn("for pass in initial replay; do", package)
+        self.assertIn('TAILWIND_REHEARSAL_ENABLED: "true"', package)
+        self.assertIn("TAILWIND_REHEARSAL_PRODUCER_ARTIFACT_ID: ${{ env.PRODUCER_ARTIFACT_ID }}", package)
+        self.assertIn("TAILWIND_REHEARSAL_AGGREGATE_ARTIFACT_ID: ${{ env.AGGREGATE_ARTIFACT_ID }}", package)
+        self.assertIn("TAILWIND_REHEARSAL_START_ARTIFACT_ID: ${{ steps.upload-rehearsal-start.outputs.artifact-id }}", package)
+        self.assertIn("TAILWIND_REHEARSAL_START_RECEIPT: ${{ runner.temp }}/rehearsal-start/publication-start-receipt.json", package)
         rehearsal = package[package.index("  tailwind-publish-rehearsal:"):]
         self.assertNotIn("NuGet/login", rehearsal)
         self.assertNotIn("NUGET_API_KEY", rehearsal)
