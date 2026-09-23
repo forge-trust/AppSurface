@@ -43,6 +43,21 @@ public sealed class TailwindSourceIdentityTests : IDisposable
         Assert.Contains("modified, staged, or untracked", error.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task OlderCleanCheckout_IsRejectedWhenVerifierWasBuiltFromAnotherCommit()
+    {
+        var source = FindRepositoryRoot();
+        var olderCommit = await RunGitAsync(source, "rev-parse", "origin/main");
+        var (checkout, currentCommit) = await CloneHeadAsync();
+        Assert.NotEqual(currentCommit, olderCommit);
+        await RunGitAsync(checkout, "checkout", "--detach", olderCommit);
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
+            TailwindSourceIdentity.RequireAsync(checkout, olderCommit, CancellationToken.None));
+
+        Assert.Contains("verifier assembly SourceRevisionId stamp", error.Message, StringComparison.Ordinal);
+    }
+
     private async Task<(string Checkout, string Commit)> CloneHeadAsync()
     {
         var source = FindRepositoryRoot();

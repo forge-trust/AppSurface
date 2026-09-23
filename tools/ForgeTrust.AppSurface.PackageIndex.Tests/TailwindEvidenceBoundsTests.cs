@@ -73,6 +73,48 @@ public sealed class TailwindEvidenceBoundsTests : IDisposable
         Assert.Contains("16 MiB", error.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task BoundedCaptureStream_ImplementsWriteOnlyStreamContractAndDrainsOverflow()
+    {
+        using var capture = new BoundedCaptureStream(4);
+        Assert.False(capture.CanRead);
+        Assert.False(capture.CanSeek);
+        Assert.True(capture.CanWrite);
+        Assert.Equal(0, capture.Length);
+        Assert.Equal(0, capture.Position);
+        capture.Flush();
+
+        capture.Write(Encoding.UTF8.GetBytes("ab"), 0, 2);
+        await capture.WriteAsync(Encoding.UTF8.GetBytes("cd"), 0, 2, CancellationToken.None);
+        Assert.Equal("abcd", capture.GetText());
+        Assert.False(capture.Truncated);
+        Assert.Equal(4, capture.Length);
+        Assert.Throws<NotSupportedException>(() => capture.Read(new byte[1], 0, 1));
+        Assert.Throws<NotSupportedException>(() => capture.Seek(0, SeekOrigin.Begin));
+        Assert.Throws<NotSupportedException>(() => capture.SetLength(0));
+        Assert.Throws<NotSupportedException>(() => capture.Position = 0);
+
+        await capture.WriteAsync(Encoding.UTF8.GetBytes("overflow"), CancellationToken.None);
+        Assert.True(capture.Truncated);
+        Assert.Equal(4, capture.Length);
+        Assert.StartsWith("abcd", capture.GetText(), StringComparison.Ordinal);
+        Assert.Contains("output truncated", capture.GetText(), StringComparison.Ordinal);
+        Assert.Equal(4 * 1024 * 1024, ExternalCapturePolicy.ReleaseProof.MaximumBytesPerStream);
+    }
+
+    [Fact]
+    public async Task UnboundedCommandCapture_PreservesLegacyBufferedResult()
+    {
+        var result = await new CliWrapCommandRunner().RunAsync(
+            new ExternalCommandRequest("dotnet", ["--version"], Directory.GetCurrentDirectory(),
+                "dotnet version", "reading SDK version", 10_000), CancellationToken.None);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.NotEmpty(result.StandardOutput.Trim());
+        Assert.False(result.StandardOutputTruncated);
+        Assert.False(result.StandardErrorTruncated);
+    }
+
     private static string Sha256(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 
     public void Dispose()

@@ -154,6 +154,30 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
         Assert.Contains("Expanded first-party package payload bytes changed", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString());
     }
 
+    [Theory]
+    [InlineData("empty-sdk", "sdk-version", "Native host .NET SDK version is empty")]
+    [InlineData("missing-lock", "restored-graph-and-payload", "did not produce packages.lock.json")]
+    [InlineData("missing-css", "native-build", "did not generate fresh nonempty")]
+    [InlineData("missing-binary", "native-build", "did not acquire the expected host cache binary")]
+    public async Task ReleaseMode_ReportsFailureAtTheStageWhoseRequiredOutputIsMissing(
+        string failure, string expectedStage, string expectedMessage)
+    {
+        var producer = await CreateProducerBundleAsync();
+        var runner = new NativeReleaseRunner(producer, CurrentRid(), failure: failure);
+        var report = TestPathUtils.PathUnder(_root, "release-" + failure + "-report");
+
+        var result = await TailwindNativeConsumerWorkflow.RunAsync(producer.Repository, producer.Bundle, producer.ManifestPath,
+            ReleaseOptions(producer, CurrentRid(), failure, report), runner, CancellationToken.None,
+            ValidateFixtureProducerArtifactsAsync);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("failed", result.Status);
+        Assert.False(File.Exists(result.ReportPath));
+        using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(report, "diagnostics.json")));
+        Assert.Equal(expectedStage, diagnostics.RootElement.GetProperty("stage").GetString());
+        Assert.Contains(expectedMessage, diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString(), StringComparison.Ordinal);
+    }
+
     private static readonly string[] SupportedRids = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64"];
     private static readonly byte[] FakeCliBytes = Encoding.UTF8.GetBytes("fixture tailwind cli bytes");
 
@@ -314,7 +338,8 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
 
     private sealed record ProducerBundle(string Repository, string Bundle, string ManifestPath, string SourceCommit, string SubjectSha256);
 
-    private sealed class NativeReleaseRunner(ProducerBundle producer, string rid, bool mutateProtectedPayloadAfterBuild = false) : ICommandRunner
+    private sealed class NativeReleaseRunner(ProducerBundle producer, string rid, bool mutateProtectedPayloadAfterBuild = false,
+        string? failure = null) : ICommandRunner
     {
         private const string PackageId = "ForgeTrust.AppSurface.Web.Tailwind";
         private const string PackageVersion = "1.2.3";
@@ -329,19 +354,23 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
         {
             Requests.Add(request);
             ConsumerDirectory = request.WorkingDirectory;
-            if (request.FailureVerb == "sdk-version") return new CommandRunResult("10.0.100", string.Empty);
+            if (request.FailureVerb == "sdk-version") return new CommandRunResult(failure == "empty-sdk" ? string.Empty : "10.0.100", string.Empty);
             if (request.FailureVerb is "restore" or "locked restore")
             {
                 if (request.FailureVerb == "restore") await CreateRestoreOutputsAsync(request, cancellationToken);
                 return new CommandRunResult(string.Empty, string.Empty);
             }
             Assert.Equal("build", request.FailureVerb);
-            await File.WriteAllTextAsync(TestPathUtils.PathUnder(request.WorkingDirectory, "wwwroot", "css", "site.gen.css"), ".generated{color:red}", cancellationToken);
+            if (failure != "missing-css")
+                await File.WriteAllTextAsync(TestPathUtils.PathUnder(request.WorkingDirectory, "wwwroot", "css", "site.gen.css"), ".generated{color:red}", cancellationToken);
             Directory.CreateDirectory(TestPathUtils.PathUnder(request.WorkingDirectory, "bin", "Release", "net10.0"));
             var work = Directory.GetParent(request.WorkingDirectory)!.FullName;
-            var binary = TestPathUtils.PathUnder(work, "tailwind-cache", "tailwind-" + TailwindVersion, rid, BinaryName(rid));
-            Directory.CreateDirectory(Path.GetDirectoryName(binary)!);
-            await File.WriteAllBytesAsync(binary, FakeCliBytes, cancellationToken);
+            if (failure != "missing-binary")
+            {
+                var binary = TestPathUtils.PathUnder(work, "tailwind-cache", "tailwind-" + TailwindVersion, rid, BinaryName(rid));
+                Directory.CreateDirectory(Path.GetDirectoryName(binary)!);
+                await File.WriteAllBytesAsync(binary, FakeCliBytes, cancellationToken);
+            }
             if (mutateProtectedPayloadAfterBuild)
             {
                 Assert.NotNull(_restoredPackageDirectory);
@@ -383,7 +412,8 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
             var assetsPath = TestPathUtils.PathUnder(request.WorkingDirectory, "obj", "project.assets.json");
             Directory.CreateDirectory(Path.GetDirectoryName(assetsPath)!);
             await File.WriteAllBytesAsync(assetsPath, JsonSerializer.SerializeToUtf8Bytes(assets), cancellationToken);
-            await File.WriteAllTextAsync(TestPathUtils.PathUnder(request.WorkingDirectory, "packages.lock.json"), "{\"version\":1,\"dependencies\":{}}", cancellationToken);
+            if (failure != "missing-lock")
+                await File.WriteAllTextAsync(TestPathUtils.PathUnder(request.WorkingDirectory, "packages.lock.json"), "{\"version\":1,\"dependencies\":{}}", cancellationToken);
         }
     }
 

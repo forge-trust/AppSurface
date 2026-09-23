@@ -54,7 +54,9 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
             ReportDirectory = TestPathUtils.PathUnder(_root, "publication-start-validation-report")
         };
         var validated = await TailwindEvidenceWorkflow.ValidatePublicationStartAsync(startRequest, manifest, [planned], CancellationToken.None);
+        var publisherEntries = await new TailwindPublicationEvidenceValidator().ValidateAsync(startRequest, manifest, [planned], CancellationToken.None);
         Assert.Single(prepared.Packages);
+        Assert.Equal(stagedPath, Assert.Single(publisherEntries).ArtifactPath);
         Assert.Equal(prepared.NativeInvocationId, validated.NativeInvocationId);
         Assert.Equal(stagedHash, await PackageHash.ComputeSha512Async(stagedPath, CancellationToken.None));
         Assert.Equal(stagedWriteTime, File.GetLastWriteTimeUtc(stagedPath));

@@ -98,6 +98,33 @@ public sealed class TailwindPayloadProjectionTests
     }
 
     [Fact]
+    public void Verify_RejectsArchiveFileMissingFromEqualSizedRestoredProjection()
+    {
+        using var fixture = new PackageFixture();
+        fixture.Add("build/expected.targets", "expected", omitRestored: true);
+        fixture.Add("build/other.targets", "other");
+        File.WriteAllText(Path.Combine(fixture.RestoredDirectory, "build", "unexpected.targets"), "replacement");
+        using var target = ParseTarget("{}");
+
+        var error = Assert.Throws<PackageIndexException>(() => fixture.Verify(target.RootElement));
+
+        Assert.Contains("missing 'build/expected.targets'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Verify_RejectsArchiveFileUsedAsDirectoryAncestor()
+    {
+        using var fixture = new PackageFixture();
+        fixture.Add("build", "not a directory");
+        fixture.Add("build/child.targets", "child", omitRestored: true);
+        using var target = ParseTarget("{}");
+
+        var error = Assert.Throws<PackageIndexException>(() => fixture.Verify(target.RootElement));
+
+        Assert.Contains("ZIP file/directory collision", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Verify_RejectsUnsupportedAssetsGroup()
     {
         using var fixture = new PackageFixture();
@@ -216,6 +243,21 @@ public sealed class TailwindPayloadProjectionTests
         var collidingPath = Path.Combine(buildDirectory, "TAILWIND.targets");
         File.WriteAllText(collidingPath, "extra");
         if (!File.Exists(collidingPath) || Directory.EnumerateFiles(buildDirectory).Count() < 2) return;
+        using var target = ParseTarget("{}");
+
+        var error = Assert.Throws<PackageIndexException>(() => fixture.Verify(target.RootElement));
+
+        Assert.Contains("case-colliding", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Verify_RejectsRestoredPathsThatNormalizeToTheSameProjectionPath()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        using var fixture = new PackageFixture();
+        fixture.Add("build/A/B.targets", "expected");
+        File.WriteAllText(Path.Combine(fixture.RestoredDirectory, "build", "A\\B.targets"), "extra");
         using var target = ParseTarget("{}");
 
         var error = Assert.Throws<PackageIndexException>(() => fixture.Verify(target.RootElement));
