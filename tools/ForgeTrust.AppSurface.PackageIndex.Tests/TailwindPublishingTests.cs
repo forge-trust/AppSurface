@@ -227,6 +227,70 @@ public sealed class TailwindPublishingTests
         Assert.Empty(runner.Requests);
     }
 
+    [Theory]
+    [InlineData("empty-root")]
+    [InlineData("empty-file")]
+    [InlineData("missing-root")]
+    [InlineData("missing-file")]
+    [InlineData("nested-file")]
+    [InlineData("invalid-path")]
+    public async Task TailwindPublisher_RejectsUnsafePreparedPathsBeforeCredentialRead(string fault)
+    {
+        using var fixture = await PublishFixture.CreateAsync("ForgeTrust.AppSurface.Web.Tailwind");
+        var publicationDirectory = TestPathUtils.PathUnder(fixture.Root, "prepared-publication");
+        var evidence = fixture.CreateEvidence() with { PublicationDirectory = publicationDirectory };
+        var credential = new RecordingCredentialProvider();
+        var runner = new RecordingPushRunner();
+        var validator = new RecordingEvidenceValidator((entries, _) =>
+        {
+            if (fault == "empty-root")
+                return entries;
+
+            Directory.CreateDirectory(publicationDirectory);
+            if (fault == "missing-root")
+            {
+                Directory.Delete(publicationDirectory);
+                return entries.Select(entry => new PlannedPackageArtifact(
+                    entry.ManifestEntry,
+                    TestPathUtils.PathUnder(publicationDirectory, entry.ManifestEntry.ArtifactFileName))).ToArray();
+            }
+
+            if (fault == "missing-file")
+                return entries.Select(entry => new PlannedPackageArtifact(
+                    entry.ManifestEntry,
+                    TestPathUtils.PathUnder(publicationDirectory, entry.ManifestEntry.ArtifactFileName))).ToArray();
+
+            if (fault == "invalid-path")
+                return entries.Select(entry => new PlannedPackageArtifact(entry.ManifestEntry, "\0invalid.nupkg")).ToArray();
+
+            var prepared = new List<PlannedPackageArtifact>();
+            foreach (var entry in entries)
+            {
+                var destination = fault == "nested-file"
+                    ? TestPathUtils.PathUnder(publicationDirectory, "nested", entry.ManifestEntry.ArtifactFileName)
+                    : TestPathUtils.PathUnder(publicationDirectory, entry.ManifestEntry.ArtifactFileName);
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Copy(entry.ArtifactPath, destination);
+                prepared.Add(new PlannedPackageArtifact(entry.ManifestEntry, destination));
+            }
+
+            if (fault == "empty-file")
+                return [new PlannedPackageArtifact(prepared[0].ManifestEntry, " ")];
+
+            return prepared;
+        });
+
+        var requestedEvidence = fault == "empty-root"
+            ? evidence with { PublicationDirectory = string.Empty }
+            : evidence;
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.CreateWorkflow(runner, credential, validator)
+            .RunAsync(fixture.Request with { TailwindEvidence = requestedEvidence }, CancellationToken.None));
+
+        Assert.Contains("confined regular package archive", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, credential.Reads);
+        Assert.Empty(runner.Requests);
+    }
+
     [Fact]
     public async Task TailwindPublisher_RecordsNuGetDuplicateWithoutChangingFrozenIdentity()
     {

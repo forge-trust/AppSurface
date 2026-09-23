@@ -96,7 +96,7 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         foreach (var mutation in new[] { "missing-host", "mutated-host-identity", "mutated-cli-hash", "duplicate-receipt-field" })
         {
             if (mutation != "missing-host") await File.WriteAllBytesAsync(TestPathUtils.PathUnder(fixture.Evidence, Rids[0], "tailwind-native-host-proof.json"), originalReceipt);
-            fixture.ApplyMutation(mutation);
+            await fixture.ApplyMutation(mutation);
             var failed = await fixture.AggregateAsync("aggregate-" + mutation);
             Assert.False(failed.Succeeded);
             Assert.False(File.Exists(failed.ReportPath));
@@ -165,10 +165,16 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
     [InlineData("extra-unselected-payload", "incomplete or contains extra files")]
     [InlineData("unsupported-assets-group", "Unsupported NuGet assets group")]
     [InlineData("missing-assets-inventory", "Aggregate file inventory is incomplete")]
-    public async Task Aggregate_RequiresExactPayloadProjectionFromInventoriedConsumerAssets(string mutation, string expectedDiagnostic)
+    [InlineData("wrong-assets-target", "fixed net10.0 target")]
+    [InlineData("multiple-assets-targets", "exactly one target")]
+    [InlineData("missing-package-node", "must resolve exactly one target node")]
+    [InlineData("duplicate-package-node", "must resolve exactly one target node")]
+    [InlineData("payload-path-traversal", "Unsafe package path component")]
+    [InlineData("changed-extracted-bytes", "not byte-identical to the producer archive")]
+    public async Task Aggregate_RejectsInvalidHostAssetProjectionAndPayloadEvidence(string mutation, string expectedDiagnostic)
     {
         using var fixture = await Fixture.CreateAsync(_root);
-        fixture.ApplyMutation(mutation);
+        await fixture.ApplyMutation(mutation);
 
         var failed = await fixture.AggregateAsync("aggregate-" + mutation);
 
@@ -178,6 +184,82 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(diagnosticsPath));
         Assert.Equal("failed", diagnostics.RootElement.GetProperty("status").GetString());
         Assert.Contains(expectedDiagnostic, diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("wrong-required-rid-order", "exact ordered five-host set")]
+    [InlineData("duplicate-host", "unknown or duplicate RID")]
+    [InlineData("foreign-host", "unknown or duplicate RID")]
+    [InlineData("unsafe-receipt-path", "Unsafe relative evidence path")]
+    [InlineData("receipt-hash-mismatch", "Receipt hash mismatch")]
+    [InlineData("inventory-omission", "Aggregate file inventory is incomplete")]
+    [InlineData("inventory-surplus", "Aggregate file inventory is incomplete")]
+    [InlineData("bad-status", "Evidence field 'status'")]
+    [InlineData("bad-repository-binding", "Evidence field 'repositoryId'")]
+    [InlineData("bad-source-binding", "Evidence field 'sourceCommit'")]
+    [InlineData("bad-producer-artifact-binding", "Evidence field 'producerArtifactId'")]
+    public async Task PublishPreflight_RejectsMutatedAggregateAuthorization(string mutation, string expectedDiagnostic)
+    {
+        using var fixture = await Fixture.CreateAsync(_root);
+        var aggregate = await fixture.AggregateAsync("aggregate-authority-" + mutation);
+        Assert.True(aggregate.Succeeded);
+
+        var error = await fixture.RejectAggregateMutationAsync(aggregate.ReportPath, mutation);
+
+        Assert.Contains(expectedDiagnostic, error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("missing-checks", "native host receipt does not match the frozen")]
+    [InlineData("failed-css-check", "did not prove 'generatedCss'")]
+    [InlineData("missing-package-evidence", "native host receipt does not match the frozen")]
+    [InlineData("empty-package-evidence", "closure count differs")]
+    [InlineData("wrong-package-id", "omits or duplicates package")]
+    [InlineData("failed-payload-check", "no successful payload verification")]
+    [InlineData("bad-restored-archive-hash", "restoredSha512")]
+    [InlineData("unsafe-archive-path", "Unsafe relative evidence path")]
+    [InlineData("missing-payload-array", "must be an array")]
+    [InlineData("wrong-binary-name", "selected binary")]
+    [InlineData("changed-restored-manifest", "release manifest digest changed after restore")]
+    [InlineData("wrong-diagnostic-path", "unexpected diagnostic path")]
+    [InlineData("wrong-host-os", "hostOs")]
+    [InlineData("wrong-process-architecture", "processArchitecture")]
+    [InlineData("noncanonical-native-run-id", "native run ID")]
+    public async Task Aggregate_RejectsUntrustedHostReceiptClaims(string mutation, string expectedDiagnostic)
+    {
+        using var fixture = await Fixture.CreateAsync(_root);
+        var receiptPath = TestPathUtils.PathUnder(fixture.Evidence, Rids[0], "tailwind-native-host-proof.json");
+        var receipt = JsonNode.Parse(await File.ReadAllTextAsync(receiptPath))!.AsObject();
+        var firstPackage = ((JsonArray)receipt["firstPartyPackages"]!)[0]!.AsObject();
+        switch (mutation)
+        {
+            case "missing-checks": receipt.Remove("checks"); break;
+            case "failed-css-check": receipt["checks"]!["generatedCss"] = false; break;
+            case "missing-package-evidence": receipt.Remove("firstPartyPackages"); break;
+            case "empty-package-evidence": receipt["firstPartyPackages"] = new JsonArray(); break;
+            case "wrong-package-id": firstPackage["packageId"] = "ForgeTrust.Other"; break;
+            case "failed-payload-check": firstPackage["payloadVerified"] = false; break;
+            case "bad-restored-archive-hash": firstPackage["restoredSha512"] = new string('0', 128); break;
+            case "unsafe-archive-path": firstPackage["archivePath"] = "../outside.nupkg"; break;
+            case "missing-payload-array": firstPackage["payloadFiles"] = null; break;
+            case "wrong-binary-name": receipt["binaryName"] = "untrusted"; break;
+            case "changed-restored-manifest": receipt["restoredTailwindManifestSha256"] = new string('0', 64); break;
+            case "wrong-diagnostic-path": receipt["diagnosticPath"] = "other.md"; break;
+            case "wrong-host-os": receipt["hostOs"] = "FreeBSD"; break;
+            case "wrong-process-architecture": receipt["processArchitecture"] = "Arm64"; break;
+            case "noncanonical-native-run-id": receipt["nativeRunId"] = "01"; break;
+            default: throw new ArgumentOutOfRangeException(nameof(mutation), mutation, "Unknown host-receipt mutation.");
+        }
+        await File.WriteAllTextAsync(receiptPath, receipt.ToJsonString());
+
+        var failed = await fixture.AggregateAsync("aggregate-host-claim-" + mutation);
+
+        Assert.False(failed.Succeeded);
+        Assert.False(File.Exists(failed.ReportPath));
+        var diagnosticsPath = TestPathUtils.PathUnder(Path.GetDirectoryName(failed.ReportPath)!, "diagnostics.json");
+        using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(diagnosticsPath));
+        Assert.Contains(expectedDiagnostic,
+            diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString(), StringComparison.Ordinal);
     }
 
     public void Dispose()
@@ -346,6 +428,72 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
             return (result.Succeeded, result.ReportPath);
         }
 
+        public async Task<PackageIndexException> RejectAggregateMutationAsync(string aggregatePath, string mutation)
+        {
+            var aggregateDirectory = Path.GetDirectoryName(aggregatePath)!;
+            var aggregate = JsonNode.Parse(await File.ReadAllTextAsync(aggregatePath))!.AsObject();
+            var hosts = (JsonArray)aggregate["hosts"]!;
+            var files = (JsonArray)aggregate["files"]!;
+            switch (mutation)
+            {
+                case "wrong-required-rid-order":
+                    var rids = (JsonArray)aggregate["requiredRids"]!;
+                    var firstRid = rids[0]!.DeepClone();
+                    rids[0] = rids[1]!.DeepClone();
+                    rids[1] = firstRid;
+                    break;
+                case "duplicate-host":
+                    hosts[4]!["rid"] = hosts[0]!["rid"]!.GetValue<string>();
+                    break;
+                case "foreign-host":
+                    hosts[4]!["rid"] = "freebsd-x64";
+                    break;
+                case "unsafe-receipt-path":
+                    hosts[0]!["receiptPath"] = "../outside/tailwind-native-host-proof.json";
+                    break;
+                case "receipt-hash-mismatch":
+                    hosts[0]!["receiptSha256"] = new string('0', 64);
+                    break;
+                case "inventory-omission":
+                    var summaryIndex = files.Select((item, index) => (item, index))
+                        .Single(pair => pair.item!["path"]!.GetValue<string>() == "summary.md").index;
+                    files.RemoveAt(summaryIndex);
+                    break;
+                case "inventory-surplus":
+                    await File.WriteAllTextAsync(TestPathUtils.PathUnder(aggregateDirectory, "unbound-surplus.txt"), "surplus aggregate evidence");
+                    break;
+                case "bad-status":
+                    aggregate["status"] = "failed";
+                    break;
+                case "bad-repository-binding":
+                    aggregate["repositoryId"] = "54321";
+                    break;
+                case "bad-source-binding":
+                    aggregate["sourceCommit"] = new string('a', 40);
+                    break;
+                case "bad-producer-artifact-binding":
+                    aggregate["producerArtifactId"] = "999";
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(mutation), mutation, "Unknown aggregate mutation.");
+            }
+
+            await File.WriteAllTextAsync(aggregatePath, aggregate.ToJsonString());
+            var manifest = await new PackageArtifactManifestReader().ReadAsync(ManifestPath, CancellationToken.None);
+            var entry = manifest.Entries.Single();
+            var planned = new PlannedPackageArtifact(entry, TestPathUtils.PathUnder(Bundle, entry.ArtifactFileName));
+            var preflightReport = TestPathUtils.PathUnder(_root, "mutated-aggregate-report-" + mutation);
+            var request = new TailwindPublicationRequest(
+                Repository, Bundle, ManifestPath, TestPathUtils.PathUnder(Bundle, TailwindProofSubjectService.FileName),
+                "501", SubjectHash, "12345", "901", SourceCommit, aggregateDirectory, "702",
+                Sha256(await File.ReadAllBytesAsync(aggregatePath)),
+                TestPathUtils.PathUnder(_root, "mutated-aggregate-publication-" + mutation),
+                TestPathUtils.PathUnder(preflightReport, "publication-start-receipt.json"), "", preflightReport);
+
+            return await Assert.ThrowsAsync<PackageIndexException>(() =>
+                TailwindEvidenceWorkflow.PreparePublicationAsync(request, manifest, [planned], CancellationToken.None));
+        }
+
         public async Task<(int ExitCode, string Stdout, string Stderr)> RunEvidenceCliAsync(
             string mode, string reportDirectory, params string[] additionalArguments)
         {
@@ -375,59 +523,98 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
             => new("producer-binding", TailwindProofSubjectService.FileName, "501", SubjectHash, "12345", "901", "1", SourceCommit,
                 null, null, null, reportDirectory, null, null, null, null, null, null, null, null, null, []);
 
-        public void ApplyMutation(string mutation)
+        public async Task ApplyMutation(string mutation)
         {
             var rid = mutation == "missing-host" ? Rids[^1] : Rids[0];
             var receiptPath = TestPathUtils.PathUnder(Evidence, rid, "tailwind-native-host-proof.json");
             if (mutation == "missing-host") { File.Delete(receiptPath); return; }
-            if (mutation is "missing-selected-payload" or "extra-unselected-payload" or "unsupported-assets-group" or "missing-assets-inventory")
+            if (mutation is "missing-selected-payload" or "extra-unselected-payload" or "unsupported-assets-group" or "missing-assets-inventory"
+                or "wrong-assets-target" or "multiple-assets-targets" or "missing-package-node" or "duplicate-package-node"
+                or "payload-path-traversal" or "changed-extracted-bytes")
             {
                 var host = TestPathUtils.PathUnder(Evidence, rid);
-                var receipt = JsonNode.Parse(File.ReadAllText(receiptPath))!;
-                if (mutation is "missing-selected-payload" or "extra-unselected-payload")
+                var receipt = JsonNode.Parse(await File.ReadAllTextAsync(receiptPath))!;
+                if (mutation is "missing-selected-payload" or "extra-unselected-payload" or "payload-path-traversal" or "changed-extracted-bytes")
                 {
                     var payloadFiles = (JsonArray)receipt["firstPartyPackages"]![0]!["payloadFiles"]!;
-                    if (mutation == "missing-selected-payload")
+                    if (mutation is "missing-selected-payload" or "payload-path-traversal" or "changed-extracted-bytes")
                     {
                         var selected = payloadFiles.Select((node, index) => (node, index))
                             .Single(item => item.node!["packageRelativePath"]!.GetValue<string>() == "native/codec.bin");
-                        payloadFiles.RemoveAt(selected.index);
+                        if (mutation == "missing-selected-payload")
+                        {
+                            payloadFiles.RemoveAt(selected.index);
+                        }
+                        else if (mutation == "payload-path-traversal")
+                        {
+                            payloadFiles[selected.index]!["packageRelativePath"] = "../outside.bin";
+                        }
+                        else
+                        {
+                            var bytes = Encoding.UTF8.GetBytes("changed extracted native payload");
+                            await File.WriteAllBytesAsync(TestPathUtils.PathUnder(host, "payload", "native", "codec.bin"), bytes);
+                            payloadFiles[selected.index]!["sha256"] = Sha256(bytes);
+                        }
                     }
-                    else
+                    else if (mutation == "extra-unselected-payload")
                     {
                         const string unusedPath = "notes/unused.txt";
                         var bytes = Encoding.UTF8.GetBytes("not selected by the assets graph");
                         var evidencePath = TestPathUtils.PathUnder(host, "payload", "notes", "unused.txt");
                         Directory.CreateDirectory(Path.GetDirectoryName(evidencePath)!);
-                        File.WriteAllBytes(evidencePath, bytes);
+                        await File.WriteAllBytesAsync(evidencePath, bytes);
                         payloadFiles.Add(new JsonObject
                         {
                             ["packageRelativePath"] = unusedPath,
                             ["evidencePath"] = "payload/" + unusedPath,
                             ["sha256"] = Sha256(bytes)
                         });
-                        receipt["files"] = JsonSerializer.SerializeToNode(Inventory(host, "tailwind-native-host-proof.json"));
                     }
                 }
-                else if (mutation == "unsupported-assets-group")
+                else if (mutation is "unsupported-assets-group" or "wrong-assets-target" or "multiple-assets-targets"
+                    or "missing-package-node" or "duplicate-package-node")
                 {
                     var assetsPath = TestPathUtils.PathUnder(host, "consumer", "project.assets.json");
-                    var assets = JsonNode.Parse(File.ReadAllText(assetsPath))!;
-                    assets["targets"]!["net10.0"]![PackageId + "/" + Version]!["unexpectedGroup"] = new JsonObject();
-                    File.WriteAllText(assetsPath, assets.ToJsonString());
-                    receipt["files"] = JsonSerializer.SerializeToNode(Inventory(host, "tailwind-native-host-proof.json"));
+                    var assets = JsonNode.Parse(await File.ReadAllTextAsync(assetsPath))!;
+                    var targets = (JsonObject)assets["targets"]!;
+                    var packageKey = PackageId + "/" + Version;
+                    switch (mutation)
+                    {
+                        case "unsupported-assets-group":
+                            targets["net10.0"]![packageKey]!["unexpectedGroup"] = new JsonObject();
+                            break;
+                        case "wrong-assets-target":
+                            targets["net9.0"] = targets["net10.0"]!.DeepClone();
+                            targets.Remove("net10.0");
+                            break;
+                        case "multiple-assets-targets":
+                            targets["net9.0"] = targets["net10.0"]!.DeepClone();
+                            break;
+                        case "missing-package-node":
+                            ((JsonObject)targets["net10.0"]!).Remove(packageKey);
+                            break;
+                        case "duplicate-package-node":
+                            ((JsonObject)targets["net10.0"]!)[PackageId.ToLowerInvariant() + "/" + Version] =
+                                targets["net10.0"]![packageKey]!.DeepClone();
+                            break;
+                    }
+                    await File.WriteAllTextAsync(assetsPath, assets.ToJsonString());
                 }
-                else
+                if (mutation == "missing-assets-inventory")
                 {
                     var files = (JsonArray)receipt["files"]!;
                     var assetsItem = files.Select((node, index) => (node, index))
                         .Single(item => item.node!["path"]!.GetValue<string>() == "consumer/project.assets.json");
                     files.RemoveAt(assetsItem.index);
                 }
-                File.WriteAllText(receiptPath, receipt.ToJsonString());
+                else
+                {
+                    receipt["files"] = JsonSerializer.SerializeToNode(Inventory(host, "tailwind-native-host-proof.json"));
+                }
+                await File.WriteAllTextAsync(receiptPath, receipt.ToJsonString());
                 return;
             }
-            var json = File.ReadAllText(receiptPath);
+            var json = await File.ReadAllTextAsync(receiptPath);
             if (mutation == "mutated-host-identity")
             {
                 json = Regex.Replace(json, "\\\"observedRid\\\"\\s*:\\s*\\\"linux-x64\\\"", "\"observedRid\":\"osx-x64\"", RegexOptions.CultureInvariant);
@@ -440,8 +627,8 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
             {
                 json = Regex.Replace(json, "\\\"status\\\"\\s*:\\s*\\\"succeeded\\\"", "$0,\n  \"status\": \"succeeded\"", RegexOptions.CultureInvariant);
             }
-            Assert.NotEqual(File.ReadAllText(receiptPath), json);
-            File.WriteAllText(receiptPath, json);
+            Assert.NotEqual(await File.ReadAllTextAsync(receiptPath), json);
+            await File.WriteAllTextAsync(receiptPath, json);
         }
 
         public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true); }

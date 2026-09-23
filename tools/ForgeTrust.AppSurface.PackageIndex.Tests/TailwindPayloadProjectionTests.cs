@@ -136,6 +136,60 @@ public sealed class TailwindPayloadProjectionTests
     }
 
     [Fact]
+    public void Verify_RejectsNonObjectFirstPartyTargetNode()
+    {
+        using var fixture = new PackageFixture();
+        using var target = ParseTarget("[]");
+
+        var error = Assert.Throws<PackageIndexException>(() => fixture.Verify(target.RootElement));
+
+        Assert.Contains("target node must be an object", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Verify_RejectsSelectedAssetMissingFromRestoredPackage()
+    {
+        using var fixture = new PackageFixture();
+        fixture.Add("native/codec.bin", "archive bytes", omitRestored: true);
+        using var target = ParseTarget("{ \"native\": { \"native/codec.bin\": {} } }");
+
+        var error = Assert.Throws<PackageIndexException>(() => fixture.Verify(target.RootElement));
+
+        Assert.Contains("missing assets-graph path 'native/codec.bin'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Verify_RejectsSelectedAssetLinkOutsideProtectedRoots()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        using var fixture = new PackageFixture();
+        fixture.Add("native/codec.bin", "archive bytes");
+        var restored = TestPathUtils.PathUnder(fixture.RestoredDirectory, "native", "codec.bin");
+        var outside = TestPathUtils.PathUnder(fixture.Root, "outside.bin");
+        File.WriteAllText(outside, "archive bytes");
+        File.Delete(restored);
+        File.CreateSymbolicLink(restored, outside);
+        using var target = ParseTarget("{ \"native\": { \"native/codec.bin\": {} } }");
+
+        var error = Assert.Throws<PackageIndexException>(() => fixture.Verify(target.RootElement));
+
+        Assert.Contains("link/reparse", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Verify_RejectsMissingRestoredPackageDirectory()
+    {
+        using var fixture = new PackageFixture();
+        Directory.Delete(fixture.RestoredDirectory, recursive: true);
+        using var target = ParseTarget("{}");
+
+        var error = Assert.Throws<PackageIndexException>(() => fixture.Verify(target.RootElement));
+
+        Assert.Contains("Restored package directory", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Verify_RejectsSymlinkEntriesInPackageArchive()
     {
         using var fixture = new PackageFixture();

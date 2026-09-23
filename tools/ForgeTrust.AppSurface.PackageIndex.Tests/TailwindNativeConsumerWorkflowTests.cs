@@ -178,6 +178,39 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
         Assert.Contains(expectedMessage, diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString(), StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("restore-failed", "initial-restore", "simulated initial restore failure", "sdk-version,restore")]
+    [InlineData("locked-restore-failed", "locked-restore", "simulated locked restore failure", "sdk-version,restore,locked restore")]
+    [InlineData("unsafe-package-path", "restored-graph-and-payload", "unsafe package path", "sdk-version,restore,locked restore")]
+    [InlineData("external-package-folder", "restored-graph-and-payload", "designated fresh private NuGet cache", "sdk-version,restore,locked restore")]
+    [InlineData("missing-cache-archive", "restored-graph-and-payload", "does not contain exactly the expected archive", "sdk-version,restore,locked restore")]
+    [InlineData("extra-cache-archive", "restored-graph-and-payload", "does not contain exactly the expected archive", "sdk-version,restore,locked restore")]
+    [InlineData("changed-cache-archive", "restored-graph-and-payload", "restored archive SHA-512", "sdk-version,restore,locked restore")]
+    [InlineData("prebuild-payload-mismatch", "restored-graph-and-payload", "payload bytes changed", "sdk-version,restore,locked restore")]
+    [InlineData("wrong-binary-hash", "native-build", "cache binary SHA-256 differs", "sdk-version,restore,locked restore,build")]
+    [InlineData("changed-assets-after-build", "native-build", "assets graph changed during", "sdk-version,restore,locked restore,build")]
+    [InlineData("native-executable-in-output", "native-build", "executable was copied into consumer build output", "sdk-version,restore,locked restore,build")]
+    [InlineData("changed-cache-archive-after-build", "post-build-revalidation", "Restored archive", "sdk-version,restore,locked restore,build")]
+    public async Task ReleaseMode_FailsClosedForRestoreCachePayloadAndBuildMutations(
+        string failure, string expectedStage, string expectedMessage, string expectedCommands)
+    {
+        var producer = await CreateProducerBundleAsync();
+        var runner = new NativeReleaseRunner(producer, CurrentRid(), failure: failure);
+        var report = TestPathUtils.PathUnder(_root, "release-" + failure + "-report");
+
+        var result = await TailwindNativeConsumerWorkflow.RunAsync(producer.Repository, producer.Bundle, producer.ManifestPath,
+            ReleaseOptions(producer, CurrentRid(), failure, report), runner, CancellationToken.None,
+            ValidateFixtureProducerArtifactsAsync);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("failed", result.Status);
+        Assert.False(File.Exists(result.ReportPath));
+        Assert.Equal(expectedCommands.Split(','), runner.Requests.Select(request => request.FailureVerb));
+        using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(report, "diagnostics.json")));
+        Assert.Equal(expectedStage, diagnostics.RootElement.GetProperty("stage").GetString());
+        Assert.Contains(expectedMessage, diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString(), StringComparison.OrdinalIgnoreCase);
+    }
+
     private static readonly string[] SupportedRids = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64"];
     private static readonly byte[] FakeCliBytes = Encoding.UTF8.GetBytes("fixture tailwind cli bytes");
 
@@ -349,6 +382,8 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
         public List<CommandRunRequest> Requests { get; } = [];
         public string? ConsumerDirectory { get; private set; }
         private string? _restoredPackageDirectory;
+        private string? _cachedArchivePath;
+        private string? _assetsPath;
 
         public async Task<CommandRunResult> RunAsync(CommandRunRequest request, CancellationToken cancellationToken)
         {
@@ -357,20 +392,32 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
             if (request.FailureVerb == "sdk-version") return new CommandRunResult(failure == "empty-sdk" ? string.Empty : "10.0.100", string.Empty);
             if (request.FailureVerb is "restore" or "locked restore")
             {
+                if (failure == "restore-failed" && request.FailureVerb == "restore")
+                    throw new PackageIndexException("simulated initial restore failure");
                 if (request.FailureVerb == "restore") await CreateRestoreOutputsAsync(request, cancellationToken);
+                if (failure == "locked-restore-failed" && request.FailureVerb == "locked restore")
+                    throw new PackageIndexException("simulated locked restore failure");
                 return new CommandRunResult(string.Empty, string.Empty);
             }
             Assert.Equal("build", request.FailureVerb);
             if (failure != "missing-css")
                 await File.WriteAllTextAsync(TestPathUtils.PathUnder(request.WorkingDirectory, "wwwroot", "css", "site.gen.css"), ".generated{color:red}", cancellationToken);
-            Directory.CreateDirectory(TestPathUtils.PathUnder(request.WorkingDirectory, "bin", "Release", "net10.0"));
+            var outputDirectory = TestPathUtils.PathUnder(request.WorkingDirectory, "bin", "Release", "net10.0");
+            Directory.CreateDirectory(outputDirectory);
             var work = Directory.GetParent(request.WorkingDirectory)!.FullName;
             if (failure != "missing-binary")
             {
                 var binary = TestPathUtils.PathUnder(work, "tailwind-cache", "tailwind-" + TailwindVersion, rid, BinaryName(rid));
                 Directory.CreateDirectory(Path.GetDirectoryName(binary)!);
-                await File.WriteAllBytesAsync(binary, FakeCliBytes, cancellationToken);
+                var contents = failure == "wrong-binary-hash" ? Encoding.UTF8.GetBytes("unexpected tailwind bytes") : FakeCliBytes;
+                await File.WriteAllBytesAsync(binary, contents, cancellationToken);
             }
+            if (failure == "changed-assets-after-build")
+                await File.AppendAllTextAsync(_assetsPath!, " ", cancellationToken);
+            if (failure == "native-executable-in-output")
+                await File.WriteAllTextAsync(TestPathUtils.PathUnder(outputDirectory, "tailwindcss-fixture"), "must stay in cache", cancellationToken);
+            if (failure == "changed-cache-archive-after-build")
+                await File.AppendAllTextAsync(_cachedArchivePath!, "changed after restore", cancellationToken);
             if (mutateProtectedPayloadAfterBuild)
             {
                 Assert.NotNull(_restoredPackageDirectory);
@@ -387,8 +434,16 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
             _restoredPackageDirectory = TestPathUtils.PathUnder(packageCache, PackageId.ToLowerInvariant(), PackageVersion.ToLowerInvariant());
             Directory.CreateDirectory(_restoredPackageDirectory);
             var cachedArchive = TestPathUtils.PathUnder(_restoredPackageDirectory, _packageFileName);
+            _cachedArchivePath = cachedArchive;
             File.Copy(TestPathUtils.PathUnder(producer.Bundle, _packageFileName), cachedArchive);
             ZipFile.ExtractToDirectory(cachedArchive, _restoredPackageDirectory);
+            if (failure == "missing-cache-archive") File.Delete(cachedArchive);
+            if (failure == "extra-cache-archive")
+                await File.WriteAllTextAsync(TestPathUtils.PathUnder(_restoredPackageDirectory, "unexpected.nupkg"), "unexpected cache archive", cancellationToken);
+            if (failure == "changed-cache-archive")
+                await File.AppendAllTextAsync(cachedArchive, "changed before verification", cancellationToken);
+            if (failure == "prebuild-payload-mismatch")
+                await File.AppendAllTextAsync(TestPathUtils.PathUnder(_restoredPackageDirectory, "build", "tailwind.version"), "changed before build", cancellationToken);
 
             var packagePath = $"{PackageId.ToLowerInvariant()}/{PackageVersion}";
             var nodeKey = $"{PackageId}/{PackageVersion}";
@@ -401,17 +456,27 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
             var assets = new
             {
                 targets = new Dictionary<string, object> { ["net10.0"] = new Dictionary<string, object> { [nodeKey] = targetNode } },
-                libraries = new Dictionary<string, object> { [nodeKey] = new { type = "package", path = packagePath } },
-                packageFolders = new Dictionary<string, object> { [Path.GetFullPath(packageCache) + Path.DirectorySeparatorChar] = new Dictionary<string, object>() },
+                libraries = new Dictionary<string, object>
+                {
+                    [nodeKey] = new
+                    {
+                        type = "package",
+                        path = failure == "unsafe-package-path" ? "../outside" : packagePath
+                    }
+                },
+                packageFolders = new Dictionary<string, object>
+                {
+                    [Path.GetFullPath(failure == "external-package-folder" ? packageCache + "-external" : packageCache) + Path.DirectorySeparatorChar] = new Dictionary<string, object>()
+                },
                 project = new
                 {
                     frameworks = new Dictionary<string, object> { ["net10.0"] = new Dictionary<string, object>() },
                     restore = new Dictionary<string, object>()
                 }
             };
-            var assetsPath = TestPathUtils.PathUnder(request.WorkingDirectory, "obj", "project.assets.json");
-            Directory.CreateDirectory(Path.GetDirectoryName(assetsPath)!);
-            await File.WriteAllBytesAsync(assetsPath, JsonSerializer.SerializeToUtf8Bytes(assets), cancellationToken);
+            _assetsPath = TestPathUtils.PathUnder(request.WorkingDirectory, "obj", "project.assets.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(_assetsPath)!);
+            await File.WriteAllBytesAsync(_assetsPath, JsonSerializer.SerializeToUtf8Bytes(assets), cancellationToken);
             if (failure != "missing-lock")
                 await File.WriteAllTextAsync(TestPathUtils.PathUnder(request.WorkingDirectory, "packages.lock.json"), "{\"version\":1,\"dependencies\":{}}", cancellationToken);
         }

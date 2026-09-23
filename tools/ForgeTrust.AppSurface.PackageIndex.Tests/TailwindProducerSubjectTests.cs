@@ -327,6 +327,31 @@ public sealed class TailwindProducerSubjectTests : IDisposable
     }
 
     [Theory]
+    [InlineData("null", "closure is empty")]
+    [InlineData("empty", "closure is empty")]
+    [InlineData("missing-tailwind", "does not include Tailwind")]
+    [InlineData("different-version", "differs from the coordinated producer version")]
+    public void ValidateSubject_RejectsInvalidFirstPartyClosure(string mutation, string diagnostic)
+    {
+        var subject = MinimalSubject();
+        var package = subject.FirstPartyPackages.Single();
+        subject = mutation switch
+        {
+            "null" => subject with { FirstPartyPackages = null! },
+            "empty" => subject with { FirstPartyPackages = [] },
+            "missing-tailwind" => subject with
+            {
+                FirstPartyPackages = [package with { PackageId = "ForgeTrust.Other", ArtifactFileName = "other.nupkg" }]
+            },
+            _ => subject with { FirstPartyPackages = [package with { PackageVersion = "1.2.4-ci.798" }] }
+        };
+
+        var error = Assert.Throws<PackageIndexException>(() => TailwindProofSubjectService.ValidateSubject(subject));
+
+        Assert.Contains(diagnostic, error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("not-hex")]
@@ -536,6 +561,7 @@ public sealed class TailwindProducerSubjectTests : IDisposable
     [InlineData("malformed-dependencies")]
     [InlineData("missing-first-party-dependency")]
     [InlineData("wrong-dependency-version")]
+    [InlineData("non-string-dependency")]
     public async Task ReadResolvedClosure_RejectsUntrustedFrameworkAndDependencyMetadata(string mutation)
     {
         var fixture = await CreateFixtureAsync();
