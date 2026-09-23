@@ -635,7 +635,52 @@ Manifest and evidence schemas evolve additively and by version. Schema-1 readers
 
 Every discovery, capability preflight, build, test, merge, diagnostics, and artifact phase has its own monotonic progress clock. Positive child-process output bytes and explicit phase transitions count as progress; output from one parallel project never resets another project's clock. `--heartbeat-interval` defaults to `30s` and accepts `0` to disable heartbeats. `--no-progress-timeout` defaults to `10m`. Durations use exactly `0` or a positive lowercase integer followed by `ms`, `s`, `m`, or `h`, with a 30-day maximum; zero is valid only for the heartbeat interval.
 
-`--watchdog warn` is the default: it writes a classified warning and attempts to commit `coverage-watchdog.json`, then lets the run continue. `--watchdog fail` cancels the run, requests whole-process-tree termination through supervisor-owned process leases, applies one bounded cleanup budget, attempts the incident artifact, and exits `124` with `ASCOV121`. The terminal diagnostic reports the artifact path only after atomic commit; `Artifact: unavailable` with `ASCOV122` means termination remains authoritative but no incident artifact was committed. `--watchdog off` disables stall classification but leaves explicitly configured heartbeats available. Watchdog artifacts contain normalized operation metadata, byte counts, safe switch names, and relative project/log paths—not raw output, argument values, environment values, or secrets.
+`--watchdog fail` is the default: it cancels a stalled operation, requests whole-process-tree termination through supervisor-owned process leases, applies one bounded cleanup budget, attempts the incident artifact, and exits `124` with `ASCOV121`. `--watchdog warn` writes a classified warning and attempts to commit `coverage-watchdog.json`, then lets the run continue. The terminal diagnostic reports the artifact path only after atomic commit; `Artifact: unavailable` with `ASCOV122` means termination remains authoritative but no incident artifact was committed. `--watchdog off` disables stall classification but leaves explicitly configured heartbeats available. Both `warn` and `off` disable AppSurface's automatic VSTest hang timer. Watchdog artifacts contain normalized operation metadata, byte counts, safe switch names, and relative project/log paths—not raw output, argument values, environment values, or secrets.
+
+#### Coverage Run Hang Diagnostics
+
+With the default `--watchdog fail`, AppSurface requests VSTest hang blame during the test phase when at least `90s` remain in the test-phase budget. It appends `--blame-hang`, `--blame-hang-timeout <duration>`, and `--blame-hang-dump-type none`; no dump is requested. The VSTest timeout is per test invocation and fixed at launch. The wrapper's `--no-progress-timeout` is an output-sensitive per-operation watchdog; Evidence also has a producer deadline. A VSTest timer can stop a legitimate quiet test while the wrapper is receiving other output, and the wrapper can stop a sequence of shorter tests before VSTest's timer expires.
+
+For remaining budget `B`, AppSurface reserves `min(60 seconds, B / 3)` and rounds the resulting VSTest timeout down to whole seconds. `180s` yields `120s`; the CLI's default `10m` yields `9m`. Evidence counts time spent in discovery/build: a `180s` producer deadline with `30s` already elapsed leaves `150s` and yields a `100s` VSTest timeout. The reserve is a best-effort opportunity for VSTest's `Sequence.xml`, `Sequence_<id>.xml`, or `<id>_Sequence.xml` artifact to flush and be summarized. Below `90s`, automatic blame is skipped (`skipped-short-budget`), while the outer watchdog/deadline remains active. No VSTest timer runs during discovery, build, merge, or gate.
+
+`--test-argument` forwards one literal token per occurrence and accepts split (`--test-argument --blame-hang`) or joined (`--test-argument=--blame-hang`) forms. A split value always consumes the next token, even when it begins with a dash. This is a complete command containing the original five-token example from #815:
+
+```bash
+dotnet tool run appsurface coverage run \
+  --test-project tests/MyApp.Tests/MyApp.Tests.csproj \
+  --test-argument --blame-hang \
+  --test-argument --blame-hang-timeout \
+  --test-argument 120s \
+  --test-argument --blame-hang-dump-type \
+  --test-argument none
+```
+
+Those tokens reach `dotnet test` in order as `--blame-hang --blame-hang-timeout 120s --blame-hang-dump-type none`. Any user token equal to `--blame` or beginning `--blame-` (case-insensitive, including `=` and `:` values) claims the whole group: all supplied tokens pass through unchanged and AppSurface appends no automatic tuple, even if the manual group is incomplete. In MSBuild mode `--settings`/`-s` also claims the group because AppSurface cannot inspect the file. Manual settings can enable dumps; the caller owns their timeout, disk use, and artifacts. Collector manual runs remain inspectable within their invocation directory. MSBuild manual runs use caller-owned result paths and are reported as `unscoped`, not as missing.
+
+For MSBuild fail mode without a manual blame switch or settings file, AppSurface reserves its results-directory ownership before discovery, even if the later budget is too short to enable automatic blame. It supplies a unique directory for each project invocation when blame is active, and rejects user `--results-directory`, `--results-directory=VALUE`, or `--results-directory:VALUE` tokens before the test-host `--` separator with `ASCOV101` (a split option without its value uses the incomplete-option diagnostic). Tokens after `--` are forwarded as test-host arguments and cannot override VSTest's owned results directory. If manual blame/settings suppresses automatic blame, or watchdog mode is `warn`/`off`, existing MSBuild results-directory pass-through is preserved and no ownership claim is made.
+
+`timings.json` keeps its existing top-level contract and adds optional per-project `hangDiagnostics` with `schemaVersion: 1`, `source` (`automatic`, `manual`, `none`), status, scoped relative sequence paths, safe last-started names, and effective VSTest timeout. `automatic` means AppSurface actually appended its no-dump tuple; `manual` means a user blame token or MSBuild settings file claimed the group; `none` means no blame was requested. Readers that do not recognize this optional object's schema version must ignore it and continue reading the base timings fields. Statuses distinguish `found`, `missing`, `disabled`, `skipped-short-budget`, `not-started`, `unscoped`, `name-omitted`, and invalid or limited inspection (`malformed`, `oversized`, `escaping`, `duplicate`, `unreadable`, `inspection-limited`, `unavailable`). Names are untrusted; the summary says “last started test,” never “hung test.” Evidence results contain neither names nor XML contents.
+
+| Diagnostic status | Meaning and next step |
+| --- | --- |
+| `found` | One or more scoped sequences were read; inspect their listed relative artifacts to correlate the last-started tests with the project log. |
+| `name-omitted` | A sequence exists, but a test name was absent or failed the conservative display allowlist; inspect the artifact locally if appropriate. |
+| `missing` | No sequence appeared in this invocation's owned directory; check the project log and whether the host exited before VSTest flushed. |
+| `disabled` / `skipped-short-budget` / `not-started` | Automatic blame was disabled, the launch budget was under `90s`, or the planned test did not start; choose fail mode with a sufficient budget when a sequence is needed. |
+| `unscoped` | Manual MSBuild blame/settings own the result path; inspect the caller's configured results directory. |
+| `malformed` / `oversized` / `duplicate` / `unreadable` | The sequence could not be safely interpreted; inspect the owned artifact locally and preserve the primary test failure. |
+| `escaping` | A link or path left the owned result tree; use a fresh dedicated output directory and investigate local filesystem changes. |
+| `inspection-limited` | Traversal, XML, count, or time limits were reached; inspect the bounded set of scoped paths and the project log. |
+| `unavailable` | Child-process drain was unconfirmed or the owned directory could not be established; inspect the project log after the process stops. |
+
+| Ending actor | Primary outcome | Diagnostic behavior |
+| --- | --- | --- |
+| VSTest host or test process exits nonzero | Test failure, usually `ASCOV120` | Inspect a flushed sequence if present; a missing or invalid sequence does not change the failure. |
+| AppSurface watchdog wins | `ASCOV121`, exit `124` | Drain the process tree, then inspect the sequence if cleanup is confirmed; otherwise record `unavailable`. |
+| Evidence producer deadline wins | Evidence `TimedOut`, no assertions | Drain and write best-effort terminal timings; the Evidence result may point to the regular owned `coverage/timings.json` artifact. |
+| Caller cancels | Caller cancellation | Drain and write best-effort terminal timings; secondary inspection never replaces cancellation. |
+
+The actor that ends the operation determines the outcome: VSTest host termination remains a test failure (usually `ASCOV120`); AppSurface watchdog termination remains `ASCOV121` and exit `124`; an Evidence producer deadline remains `TimedOut` with no assertions. A healthy individual test longer than the computed VSTest timeout may be terminated even if other output keeps the wrapper active. Give that test headroom by increasing `--no-progress-timeout` or Evidence `TimeoutSeconds`, or explicitly choose `--watchdog warn`/`off` to disable automatic blame. See the [#815 migration note](../../releases/issue-815-vstest-hang.md).
 
 #### Require a non-sandboxed runner
 
@@ -669,14 +714,14 @@ Options:
 - `--no-discover-exclusive`: Disables automatic exclusive classification for integration or Playwright-shaped projects.
 - `--exclusive-test-project`: Repeatable project path or file name that should run exclusively.
 - `--logger`: Repeatable `dotnet test` logger value forwarded as `--logger:<value>`.
-- `--test-argument`: Repeatable extra argument token appended to every `dotnet test` invocation.
+- `--test-argument`: Repeatable extra argument token appended to every `dotnet test` invocation. Supports split and joined forms; split form consumes exactly the next token, including dash-prefixed values.
 - `--test-results`: Managed test-result format. Use `junit` to write AppSurface-owned top-level JUnit files. Other values fail before tests run.
 - `--slow-test-diagnostics`: Writes `slow-test-diagnostics.md` and `.json` from managed JUnit results. The Markdown starts with a bounded, failure-first test summary (counts, failed projects, and safely truncated failure evidence), then records slow-test timing diagnostics. This implies `--test-results junit`.
 - `--no-clean`: Preserves existing AppSurface-owned output instead of cleaning known coverage artifacts first. Existing patch-target files therefore remain until a later gate refreshes them or runs without a patch source.
 - `--verbosity`: `dotnet test` verbosity. Defaults to `minimal`.
 - `--heartbeat-interval`: Heartbeat interval. Defaults to `30s`; exact `0` disables heartbeats.
 - `--no-progress-timeout`: Positive per-operation progress timeout. Defaults to `10m`.
-- `--watchdog`: Stall response, `warn`, `fail`, or `off`. Defaults to `warn`.
+- `--watchdog`: Stall response, `fail`, `warn`, or `off`. Defaults to `fail`; `warn` and `off` disable automatic VSTest blame.
 - `--require-non-sandbox`: Fails before discovery or mutation when a known sandbox environment marker is enabled. Disabled by default.
 
 Duration-aware scheduling starts exclusive projects before all non-exclusive projects. If discovery returns `A.Tests`, `Browser.IntegrationTests`, and `B.Tests`, the browser project runs first; AppSurface then orders the non-exclusive projects according to the selected schedule. This prevents an exclusive resource-sensitive project from waiting for an unrelated parallel batch to drain.
@@ -723,13 +768,14 @@ Artifacts are local and private by default:
 
 - `coverage.cobertura.xml`: Merged Cobertura file consumed by `coverage gate`.
 - `summary.txt`: Human-readable merged line and branch coverage summary.
-- `timings.json`: Machine-readable build, test, merge, schedule, managed test-result, diagnostics, artifact, log, and exit-code data. Per-project entries include both `originalIndex` for stable artifact naming and `executionIndex` for the actual launch order. `executionStatus` is `pending`, `running`, `completed`, `terminated`, or `skipped-after-terminal`; `coverageArtifactStatus` is `produced`, `missing`, `multiple`, `unreadable`, `escaping`, `malformed`, or `skipped-after-terminal`. `coverageCleanupLog` and `coverageCleanupDiagnostic` record a non-fatal staged-file cleanup warning and its dedicated log-append result; the path is `null` if the log append failed. `coverageFile` is non-null only when the current invocation produced and normalized that artifact, so `--no-clean` cannot make a retained stale file look current. Terminal failures write a best-effort snapshot after launched projects are drained so automation can distinguish work that failed from work that never started.
+- `timings.json`: Machine-readable build, test, merge, schedule, managed test-result, diagnostics, artifact, log, and exit-code data. Per-project entries include both `originalIndex` for stable artifact naming and `executionIndex` for the actual launch order. `executionStatus` is `pending`, `running`, `completed`, `terminated`, or `skipped-after-terminal`; `coverageArtifactStatus` is `produced`, `missing`, `multiple`, `unreadable`, `escaping`, `malformed`, or `skipped-after-terminal`. `coverageCleanupLog` and `coverageCleanupDiagnostic` record a non-fatal staged-file cleanup warning and its dedicated log-append result; the path is `null` if the log append failed. `coverageFile` is non-null only when the current invocation produced and normalized that artifact, so `--no-clean` cannot make a retained stale file look current. Optional per-project `hangDiagnostics` is described in [Coverage Run Hang Diagnostics](#coverage-run-hang-diagnostics); unknown versions of that object do not change the base timings contract. Terminal failures write a best-effort snapshot after launched projects are drained so automation can distinguish work that failed from work that never started.
 - `reportgenerator-summary.txt`: Text summary from the package-owned ReportGenerator merge when available.
 - `junit-coverage-<index>-<project-name-hash>.xml`: AppSurface-managed JUnit test results when `--test-results junit` or `--slow-test-diagnostics` is used.
 - `slow-test-diagnostics.md` and `slow-test-diagnostics.json`: A bounded failure-first test-result summary, slow-test evidence, parser warnings, metadata completeness, and diagnostic overhead when `--slow-test-diagnostics` is used. The Markdown summary caps failed-test detail and total size for GitHub Actions; use the managed JUnit XML and project logs for complete evidence. The command writes these files through private same-directory staging files; a later normal clean run removes only GUID-named staging or backup remnants from an interrupted publication, while `--no-clean` preserves existing output.
 - `projects/<project-name-hash>/coverage.cobertura.xml`: Per-project Coverlet Cobertura output.
 - `projects/<project-name-hash>/coverage-project.json`: Schema-versioned project identity manifest consumed by PackageIndex proof; it contains the normalized solution-relative project path and CLI-owned slug.
 - `projects/<project-name-hash>/collector-results/<run-id>/`: Unique raw collector attachment tree retained for diagnosis.
+- Invocation-owned VSTest sequence files (`Sequence.xml`, `Sequence_<id>.xml`, or `<id>_Sequence.xml`): Preserved under the current invocation's results directory when available; inspect locally alongside the safe last-started-test summary.
 - `projects/<project-name-hash>/dotnet-test.log`: Full `dotnet test` output for that project.
 - `projects/<project-name-hash>/coverage-normalization.log`: Secondary collector-artifact cleanup diagnostics that are intentionally not replayed to the console.
 - `coverage-watchdog.json`: Latest classified watchdog warning or termination, when one occurs.

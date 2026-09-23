@@ -402,17 +402,25 @@ internal sealed class CoverageRunProcessLease
     /// </summary>
     public void Complete()
     {
+        var release = false;
         lock (_sync)
         {
             _completed = true;
             _resolution.TrySetResult(_process);
-            _process = null;
+            if (_process is null || HasExited(_process))
+            {
+                _process = null;
+                release = true;
+            }
         }
 
-        _owner?.ReleaseProcess(this);
+        if (release)
+        {
+            _owner?.ReleaseProcess(this);
+        }
     }
 
-    internal async Task TerminateAsync()
+    internal async Task<bool> TerminateAsync()
     {
         Process? process;
         lock (_sync)
@@ -425,7 +433,8 @@ internal sealed class CoverageRunProcessLease
             process = await _resolution.Task;
             if (process is null)
             {
-                return;
+                _owner?.ReleaseProcess(this);
+                return true;
             }
         }
 
@@ -433,14 +442,27 @@ internal sealed class CoverageRunProcessLease
         try
         {
             await process.WaitForExitAsync();
+            lock (_sync)
+            {
+                _process = null;
+            }
+            _owner?.ReleaseProcess(this);
+            return true;
         }
-        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException or System.ComponentModel.Win32Exception)
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException or System.ComponentModel.Win32Exception or TimeoutException)
         {
             Trace.TraceWarning(
                 "Coverage process termination could not observe process exit. Cause: {0}: {1}",
                 ex.GetType().Name,
                 ex.Message);
+            return false;
         }
+    }
+
+    private static bool HasExited(Process process)
+    {
+        try { return process.HasExited; }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException or System.ComponentModel.Win32Exception) { return false; }
     }
 
     private static void TryKill(Process process)
@@ -477,6 +499,11 @@ internal sealed class CoverageRunProcessLease
     }
 }
 
+/// <summary>Reports whether all registered child processes were confirmed exited during bounded cleanup.</summary>
+/// <param name="Confirmed">True only when every captured lease was confirmed drained.</param>
+/// <param name="Status">Stable cleanup status: <c>complete</c>, <c>deadline-exceeded</c>, or <c>failed</c>.</param>
+internal sealed record CoverageRunProcessDrainResult(bool Confirmed, string Status);
+
 /// <summary>
 /// Supervises coverage-run orchestration using per-operation monotonic progress clocks.
 /// </summary>
@@ -509,9 +536,11 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     private readonly Action<string> _stagedArtifactDelete;
     private readonly Action? _processCleanupStarted;
     private readonly Action<Process>? _processKiller;
+    private readonly TimeSpan _processCleanupTimeout;
     private readonly List<OperationState> _operations = [];
     private readonly HashSet<CoverageRunProcessLease> _processLeases = [];
     private readonly TaskCompletionSource _terminalCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private Task<CoverageRunProcessDrainResult>? _processDrain;
     private readonly long _runStarted;
     private readonly Task _monitor;
     private readonly string _bootstrapDirectory;
@@ -548,6 +577,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     /// expected process-state exceptions are logged. Do not provide a production callback because the default is
     /// the supported process-tree cleanup behavior.
     /// </param>
+    /// <param name="processCleanupTimeout">Optional process drain bound; defaults to 10 seconds.</param>
     public CoverageRunWatchdogSupervisor(
         CoverageRunWatchdogMode mode,
         TimeSpan heartbeatInterval,
@@ -564,7 +594,8 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         Action<string>? stagedArtifactDelete = null,
         Action? processCleanupStarted = null,
         Action<Process>? processKiller = null,
-        Action? artifactCommitWaitStarted = null)
+        Action? artifactCommitWaitStarted = null,
+        TimeSpan? processCleanupTimeout = null)
     {
         _mode = mode;
         _heartbeatInterval = heartbeatInterval;
@@ -581,6 +612,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         _stagedArtifactDelete = stagedArtifactDelete ?? File.Delete;
         _processCleanupStarted = processCleanupStarted;
         _processKiller = processKiller;
+        _processCleanupTimeout = processCleanupTimeout ?? TimeSpan.FromSeconds(10);
         _runStarted = timeProvider.GetTimestamp();
         _bootstrapDirectory = Directory.CreateTempSubdirectory("appsurface-coverage-watchdog-").FullName;
         _linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(externalCancellation, _watchdogCancellation.Token);
@@ -591,6 +623,21 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     /// Gets the token shared by all supervised coverage work.
     /// </summary>
     public CancellationToken CancellationToken => _linkedCancellation.Token;
+
+    /// <summary>Terminates and drains registered child processes within the watchdog cleanup bound.</summary>
+    /// <remarks>Safe to call after caller/Evidence cancellation; concurrent watchdog cleanup joins the same attempt.</remarks>
+    internal Task<CoverageRunProcessDrainResult> TerminateAndDrainProcessesAsync()
+    {
+        lock (_sync)
+        {
+            return _processDrain ??= DrainProcessesCoreAsync();
+        }
+    }
+
+    internal int RegisteredProcessLeaseCount
+    {
+        get { lock (_sync) { return _processLeases.Count; } }
+    }
 
     /// <summary>
     /// Gets the run-scoped bounded console sink used by all coverage workflow messages.
@@ -657,7 +704,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     /// <param name="log">Optional output-relative log path.</param>
     /// <param name="commandOptions">Safe command option names; values must already be excluded.</param>
     /// <returns>A disposable operation that marks completion and exposes progress/process seams.</returns>
-    /// <exception cref="OperationCanceledException">Thrown after the watchdog claims terminal ownership.</exception>
+    /// <exception cref="OperationCanceledException">Thrown after watchdog or caller cancellation, or after process cleanup starts.</exception>
     public CoverageRunOperation Start(
         string kind,
         string? project = null,
@@ -669,6 +716,11 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
         lock (_sync)
         {
             ThrowIfTerminalLocked();
+            _linkedCancellation.Token.ThrowIfCancellationRequested();
+            if (_processDrain is not null)
+            {
+                throw new OperationCanceledException("Coverage process cleanup has started.");
+            }
             var id = ++_nextId;
             var now = _timeProvider.GetTimestamp();
             _operations.Add(new OperationState(id, kind, project, order, state, log, commandOptions ?? [], now));
@@ -681,12 +733,17 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
     /// Reserves a process lease before a child-process start callback can attach its root process.
     /// </summary>
     /// <returns>A lease registered for terminal cleanup.</returns>
-    /// <exception cref="OperationCanceledException">Thrown after the watchdog claims terminal ownership.</exception>
+    /// <exception cref="OperationCanceledException">Thrown after watchdog or caller cancellation, or after process cleanup starts.</exception>
     internal CoverageRunProcessLease ReserveProcess()
     {
         lock (_sync)
         {
             ThrowIfTerminalLocked();
+            _linkedCancellation.Token.ThrowIfCancellationRequested();
+            if (_processDrain is not null)
+            {
+                throw new OperationCanceledException("Coverage process cleanup has started.");
+            }
             var lease = new CoverageRunProcessLease(this, _processKiller);
             _processLeases.Add(lease);
             return lease;
@@ -998,6 +1055,12 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
 
     private async Task<string> CleanupProcessesAsync()
     {
+        var result = await TerminateAndDrainProcessesAsync();
+        return result.Status;
+    }
+
+    private async Task<CoverageRunProcessDrainResult> DrainProcessesCoreAsync()
+    {
         CoverageRunProcessLease[] leases;
         lock (_sync)
         {
@@ -1008,16 +1071,16 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
 
         try
         {
-            await Task.WhenAll(leases.Select(lease => lease.TerminateAsync())).WaitAsync(TimeSpan.FromSeconds(10));
-            return "complete";
+            var completed = await Task.WhenAll(leases.Select(lease => lease.TerminateAsync())).WaitAsync(_processCleanupTimeout);
+            return new CoverageRunProcessDrainResult(completed.All(static drained => drained), completed.All(static drained => drained) ? "complete" : "failed");
         }
         catch (TimeoutException)
         {
-            return "deadline-exceeded";
+            return new CoverageRunProcessDrainResult(false, "deadline-exceeded");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return "failed";
+            return new CoverageRunProcessDrainResult(false, "failed");
         }
     }
 

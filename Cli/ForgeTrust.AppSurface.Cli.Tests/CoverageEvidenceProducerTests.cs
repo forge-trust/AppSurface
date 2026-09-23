@@ -139,6 +139,61 @@ public sealed class CoverageEvidenceProducerTests
     }
 
     [Fact]
+    public async Task RunAsync_ProducerDeadline_ShouldKeepTimedOutOutcomeAndPointToOwnedTerminalTimings()
+    {
+        using var directory = TestDirectory.Create();
+        var solutionPath = Path.Join(directory.Path, "sample.slnx");
+        var projectPath = Path.Join(directory.Path, "tests", "Sample.Tests", "Sample.Tests.csproj");
+        Directory.CreateDirectory(Path.GetDirectoryName(projectPath)!);
+        await File.WriteAllTextAsync(solutionPath, "{}");
+        await File.WriteAllTextAsync(projectPath, "<Project />");
+        var outputDirectory = Path.Join(directory.Path, "output");
+        var producer = CreateProducer(new DeadlineCoverageRunProcessRunner());
+        using var standardOutputWriter = new StringWriter();
+        using var standardErrorWriter = new StringWriter();
+
+        var result = await producer.RunAsync(
+            CreateDeclaration(timeoutSeconds: 3),
+            solutionPath,
+            outputDirectory,
+            null,
+            CoverageTextWriters.Create(standardOutputWriter, standardErrorWriter),
+            CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.TimedOut, result.Outcome);
+        Assert.Empty(result.SatisfiedAssertionIds);
+        Assert.Contains("coverage/timings.json", result.Diagnostic, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Join(outputDirectory, "coverage", "timings.json")));
+    }
+
+    [Fact]
+    public async Task RunAsync_ProducerDeadlineBeforeOutput_ShouldOmitTimingsHint()
+    {
+        using var directory = TestDirectory.Create();
+        var solutionPath = Path.Join(directory.Path, "sample.slnx");
+        var projectPath = Path.Join(directory.Path, "tests", "Sample.Tests", "Sample.Tests.csproj");
+        Directory.CreateDirectory(Path.GetDirectoryName(projectPath)!);
+        await File.WriteAllTextAsync(solutionPath, "{}");
+        await File.WriteAllTextAsync(projectPath, "<Project />");
+        var outputDirectory = Path.Join(directory.Path, "output");
+        var producer = CreateProducer(new DeadlineCoverageRunProcessRunner(waitOperation: "msbuild"));
+        using var standardOutputWriter = new StringWriter();
+        using var standardErrorWriter = new StringWriter();
+
+        var result = await producer.RunAsync(
+            CreateDeclaration(timeoutSeconds: 1),
+            solutionPath,
+            outputDirectory,
+            null,
+            CoverageTextWriters.Create(standardOutputWriter, standardErrorWriter),
+            CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.TimedOut, result.Outcome);
+        Assert.DoesNotContain("coverage/timings.json", result.Diagnostic, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Join(outputDirectory, "coverage", "timings.json")));
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldNotTranslateTerminalRuntimeFailures()
     {
         using var directory = TestDirectory.Create();
@@ -205,14 +260,15 @@ public sealed class CoverageEvidenceProducerTests
     private static EvidenceProducerDeclaration CreateDeclaration(
         string kind = "coverage",
         EvidenceCoverageGateRequirements? coverageGate = null,
-        bool includeCoverageGate = true) => new(
+        bool includeCoverageGate = true,
+        int timeoutSeconds = 60) => new(
         "coverage",
         kind,
         "1.0.0",
         [],
         ["coverage/assertion@1"],
         [],
-        60,
+        timeoutSeconds,
         includeCoverageGate ? coverageGate ?? new EvidenceCoverageGateRequirements(95, 85, TolerancePercent: 0) : null);
 
     private sealed class ThrowingCoverageRunProcessRunner(Exception exception) : ICoverageRunProcessRunner
@@ -221,6 +277,38 @@ public sealed class CoverageEvidenceProducerTests
         {
             request.Lease.Complete();
             return Task.FromException<CoverageRunProcessResult>(exception);
+        }
+    }
+
+    private sealed class DeadlineCoverageRunProcessRunner(string waitOperation = "test") : ICoverageRunProcessRunner
+    {
+        private const string CapabilityOutput = """
+            {
+              "Properties": { "TestingPlatformDotnetTestSupport": "false", "TargetFramework": "net10.0" },
+              "Items": { "PackageReference": [{ "Identity": "coverlet.collector" }] }
+            }
+            """;
+
+        public async Task<CoverageRunProcessResult> RunAsync(CoverageRunProcessRequest request, CancellationToken cancellationToken)
+        {
+            request.Lease.Complete();
+            if (request.Arguments.FirstOrDefault() == waitOperation)
+            {
+                return await WaitForDeadlineAsync(cancellationToken);
+            }
+
+            return request.Arguments.FirstOrDefault() switch
+            {
+                "sln" => new CoverageRunProcessResult(0, "Project(s)\n----------\ntests/Sample.Tests/Sample.Tests.csproj\n"),
+                "msbuild" => new CoverageRunProcessResult(0, CapabilityOutput, StandardOutput: CapabilityOutput),
+                _ => new CoverageRunProcessResult(0, "build output"),
+            };
+        }
+
+        private static async Task<CoverageRunProcessResult> WaitForDeadlineAsync(CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("The producer deadline should cancel the test invocation.");
         }
     }
 

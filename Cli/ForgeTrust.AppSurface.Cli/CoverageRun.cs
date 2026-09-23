@@ -176,9 +176,11 @@ internal sealed partial class CoverageRunCommand : ICommand
     public string[] Loggers { get; set; } = [];
 
     /// <summary>
-    /// Gets or sets extra arguments appended to every <c>dotnet test</c> invocation.
+    /// Gets or sets exact, ordered extra argument tokens appended to every <c>dotnet test</c>
+    /// invocation. Each split option consumes its next token literally, including a leading dash;
+    /// the equals form accepts one literal token after <c>=</c>.
     /// </summary>
-    [CommandOption("test-argument", Description = "Repeatable extra argument token appended to every dotnet test invocation.")]
+    [CommandOption("test-argument", Description = "Repeatable literal dotnet test token. Split form consumes exactly the next token, even --help; joined --test-argument=VALUE is also accepted.")]
     public string[] TestArguments { get; set; } = [];
 
     /// <summary>
@@ -220,8 +222,8 @@ internal sealed partial class CoverageRunCommand : ICommand
     /// <summary>
     /// Gets or sets the action taken when an active operation crosses the no-progress timeout.
     /// </summary>
-    [CommandOption("watchdog", Description = "Stall handling mode: warn, fail, or off. Defaults to warn.")]
-    public string Watchdog { get; set; } = "warn";
+    [CommandOption("watchdog", Description = "Stall handling: fail (default), warn, or off. Fail adds a no-dump VSTest per-test timer when the launch budget is at least 90s; healthy long tests may need more time. Warn/off disable that timer.")]
+    public string Watchdog { get; set; } = CoverageRunHangPolicy.DefaultWatchdogMode.ToString().ToLowerInvariant();
 
     /// <summary>
     /// Gets or sets a value indicating whether the command must fail when a known sandbox marker is present.
@@ -274,6 +276,7 @@ internal sealed partial class CoverageRunCommand : ICommand
     /// <returns>Validated coverage-run configuration for workflow execution.</returns>
     internal CoverageRunRequest CreateRequest()
     {
+        TestArguments = AppSurfaceCliApp.RestoreCoverageTestArguments(TestArguments);
         if (Parallelism <= 0)
         {
             throw CoverageRunDiagnostics.Create(
@@ -498,6 +501,7 @@ internal sealed partial class CoverageRunCommand : ICommand
 /// <param name="WatchdogMode">Action taken when an operation crosses the no-progress timeout.</param>
 /// <param name="CoverageDriver">VSTest coverage integration selected once for the complete run.</param>
 /// <param name="RequireNonSandbox">Whether an enabled known sandbox environment marker fails the run before side effects.</param>
+/// <param name="ProducerDeadline">Optional monotonic first-party Evidence deadline; the caller's linked cancellation remains authoritative.</param>
 internal sealed record CoverageRunRequest(
     string? SolutionPath,
     IReadOnlyList<string> TestProjects,
@@ -526,7 +530,135 @@ internal sealed record CoverageRunRequest(
     TimeSpan NoProgressTimeout,
     CoverageRunWatchdogMode WatchdogMode,
     CoverageRunDriver CoverageDriver,
-    bool RequireNonSandbox);
+    bool RequireNonSandbox,
+    CoverageProducerDeadline? ProducerDeadline = null);
+
+/// <summary>
+/// Monotonic Evidence producer budget shared with the private coverage workflow. The deadline does
+/// not replace producer cancellation; it only prevents a VSTest timer from outliving the producer.
+/// </summary>
+/// <param name="Clock">The producer's monotonic clock.</param>
+/// <param name="Started">Timestamp captured before collection begins.</param>
+/// <param name="Duration">The declared producer timeout.</param>
+internal sealed record CoverageProducerDeadline(TimeProvider Clock, long Started, TimeSpan Duration)
+{
+    /// <summary>Gets the nonnegative budget remaining at a test process launch.</summary>
+    internal TimeSpan Remaining
+    {
+        get
+        {
+            var elapsed = Clock.GetElapsedTime(Started);
+            return elapsed >= Duration ? TimeSpan.Zero : Duration - elapsed;
+        }
+    }
+}
+
+/// <summary>Private VSTest hang policy. Manual blame always takes precedence over automatic blame.</summary>
+internal static class CoverageRunHangPolicy
+{
+    /// <summary>Default watchdog response used by both CLI and Evidence coverage.</summary>
+    internal const CoverageRunWatchdogMode DefaultWatchdogMode = CoverageRunWatchdogMode.Fail;
+
+    /// <summary>Detects a caller-owned VSTest blame switch before the test-host argument separator.</summary>
+    internal static bool HasManualBlame(IReadOnlyList<string> arguments) => RunnerArguments(arguments).Any(value =>
+        string.Equals(value, "--blame", StringComparison.OrdinalIgnoreCase)
+        || value.StartsWith("--blame-", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Detects an MSBuild runsettings file whose blame policy AppSurface cannot inspect.</summary>
+    internal static bool HasMsbuildSettings(IReadOnlyList<string> arguments) => RunnerArguments(arguments).Any(value =>
+        string.Equals(value, "--settings", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(value, "-s", StringComparison.OrdinalIgnoreCase)
+        || value.StartsWith("--settings=", StringComparison.OrdinalIgnoreCase)
+        || value.StartsWith("--settings:", StringComparison.OrdinalIgnoreCase));
+
+    private static IEnumerable<string> RunnerArguments(IReadOnlyList<string> arguments)
+    {
+        foreach (var argument in arguments)
+        {
+            if (argument == "--") yield break;
+            yield return argument;
+        }
+    }
+
+    /// <summary>Whether AppSurface owns the MSBuild results directory for this invocation.</summary>
+    internal static bool OwnsMsbuildResults(CoverageRunRequest request) =>
+        request.CoverageDriver == CoverageRunDriver.Msbuild
+        && request.WatchdogMode == CoverageRunWatchdogMode.Fail
+        && !HasManualBlame(request.TestArguments)
+        && !HasMsbuildSettings(request.TestArguments);
+
+    /// <summary>Plans one fixed per-test VSTest timeout at process launch.</summary>
+    internal static CoverageRunHangPlan Plan(CoverageRunRequest request)
+    {
+        var manual = HasManualBlame(request.TestArguments)
+            || request.CoverageDriver == CoverageRunDriver.Msbuild && HasMsbuildSettings(request.TestArguments);
+        if (manual)
+        {
+            return new CoverageRunHangPlan(CoverageRunHangSource.Manual, CoverageRunHangPlanStatus.NotStarted, null);
+        }
+
+        if (request.WatchdogMode != CoverageRunWatchdogMode.Fail)
+        {
+            return new CoverageRunHangPlan(CoverageRunHangSource.None, CoverageRunHangPlanStatus.Disabled, null);
+        }
+
+        var budget = request.NoProgressTimeout;
+        if (request.ProducerDeadline is { } producer && producer.Remaining < budget)
+        {
+            budget = producer.Remaining;
+        }
+
+        if (budget < TimeSpan.FromSeconds(90))
+        {
+            return new CoverageRunHangPlan(CoverageRunHangSource.None, CoverageRunHangPlanStatus.SkippedShortBudget, null);
+        }
+
+        var reserve = TimeSpan.FromTicks(Math.Min(TimeSpan.FromSeconds(60).Ticks, budget.Ticks / 3));
+        var seconds = (long)Math.Floor((budget - reserve).TotalSeconds);
+        return new CoverageRunHangPlan(CoverageRunHangSource.Automatic, CoverageRunHangPlanStatus.NotStarted, TimeSpan.FromSeconds(seconds));
+    }
+}
+
+/// <summary>Identifies who supplied VSTest hang diagnostics for one invocation.</summary>
+internal enum CoverageRunHangSource
+{
+    /// <summary>No blame switch was requested.</summary>
+    None,
+    /// <summary>The caller supplied blame switches or an opaque MSBuild runsettings file.</summary>
+    Manual,
+    /// <summary>AppSurface supplied a no-dump VSTest blame tuple.</summary>
+    Automatic,
+}
+
+/// <summary>Records why VSTest diagnostics did not start before process launch.</summary>
+internal enum CoverageRunHangPlanStatus
+{
+    /// <summary>The test invocation has not yet reached post-process inspection.</summary>
+    NotStarted,
+    /// <summary>The caller chose a watchdog mode without automatic blame.</summary>
+    Disabled,
+    /// <summary>The remaining launch budget was below the automatic-blame threshold.</summary>
+    SkippedShortBudget,
+}
+
+/// <summary>One invocation's diagnostic source, status and effective VSTest timeout.</summary>
+/// <param name="Source">Caller or AppSurface ownership of the blame policy.</param>
+/// <param name="Status">Pre-launch diagnostic state.</param>
+/// <param name="Timeout">Fixed VSTest timer when automatic blame is active.</param>
+internal sealed record CoverageRunHangPlan(CoverageRunHangSource Source, CoverageRunHangPlanStatus Status, TimeSpan? Timeout)
+{
+    /// <summary>Stable source name written to timings.json.</summary>
+    internal string SourceName => Source.ToString().ToLowerInvariant();
+
+    /// <summary>Stable preflight status written to timings.json when inspection did not run.</summary>
+    internal string StatusName => Status switch
+    {
+        CoverageRunHangPlanStatus.NotStarted => "not-started",
+        CoverageRunHangPlanStatus.Disabled => "disabled",
+        CoverageRunHangPlanStatus.SkippedShortBudget => "skipped-short-budget",
+        _ => throw new ArgumentOutOfRangeException(nameof(Status)),
+    };
+}
 
 /// <summary>
 /// Scheduling modes supported by <c>coverage run</c>.
@@ -659,6 +791,7 @@ internal sealed class CoverageRunWorkflow
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(console);
+        var timingsStageCancelled = false;
 
         CoverageRunSandboxGuard.Validate(request.RequireNonSandbox, _getEnvironmentVariable);
 
@@ -690,6 +823,7 @@ internal sealed class CoverageRunWorkflow
         try
         {
             CoverageRunDriverStrategy.ValidateTestArguments(request.CoverageDriver, request.TestArguments);
+            CoverageRunDriverStrategy.ValidateHangArguments(request);
             var resolution = await ResolveProjectsAsync(request, currentDirectory, supervisor, supervisedCancellationToken);
             var schedulePlan = await CreateSchedulePlanAsync(request, resolution, outputDirectory, currentDirectory, supervisedCancellationToken);
             terminalResolution = resolution;
@@ -767,7 +901,8 @@ internal sealed class CoverageRunWorkflow
                     schedulePlan,
                     diagnostics,
                     supervisor.Commit,
-                    supervisedCancellationToken);
+                    supervisedCancellationToken,
+                    () => timingsStageCancelled = true);
                 var failure = artifactFailures[0];
                 var rawDirectory = failure.InvocationDirectory is null
                     ? Path.Join(outputDirectory, "projects", failure.Project.Slug)
@@ -794,7 +929,8 @@ internal sealed class CoverageRunWorkflow
                     schedulePlan,
                     diagnostics,
                     supervisor.Commit,
-                    supervisedCancellationToken);
+                    supervisedCancellationToken,
+                    () => timingsStageCancelled = true);
                 throw CoverageRunDiagnostics.Create(
                     "ASCOV120",
                     "Coverage run failed before coverage artifacts were produced.",
@@ -906,7 +1042,8 @@ internal sealed class CoverageRunWorkflow
                     schedulePlan,
                     diagnostics,
                     supervisor.Commit,
-                    supervisedCancellationToken);
+                    supervisedCancellationToken,
+                    () => timingsStageCancelled = true);
             }
 
             await runConsole.WriteOutputAsync($"Coverage artifacts: {outputDirectory}", supervisedCancellationToken);
@@ -939,6 +1076,59 @@ internal sealed class CoverageRunWorkflow
         }
         catch (OperationCanceledException)
         {
+            if (terminalOutputPrepared
+                && terminalResolution is not null
+                && terminalSchedulePlan is not null
+                && executionStates is not null)
+            {
+                var drain = await supervisor.TerminateAndDrainProcessesAsync();
+                foreach (var state in executionStates.Where(state => state.HangPlan is not null))
+                {
+                    if (state.Status == "running")
+                    {
+                        state.Status = "terminated";
+                    }
+
+                    if (state.HangDiagnostics is null)
+                    {
+                        if (drain.Confirmed)
+                        {
+                            InspectHangDiagnostics(state, outputDirectory);
+                        }
+                        else
+                        {
+                            state.HangDiagnostics = new CoverageRunHangDiagnosticsReader.InspectionResult("unavailable", []);
+                        }
+                    }
+
+                    try
+                    {
+                        await WriteHangSummaryAsync(state, runConsole, CancellationToken.None);
+                    }
+                    catch (Exception ex) when (IsNonFatalDiagnosticException(ex))
+                    {
+                        // A diagnostic write never replaces the original cancellation.
+                    }
+                }
+
+                MarkPendingProjectsSkipped(executionStates);
+                if (!timingsStageCancelled)
+                {
+                    await TryWriteTerminalTimingsAsync(
+                        request,
+                        terminalResolution,
+                        outputDirectory,
+                        terminalRunStarted,
+                        terminalBuildSeconds,
+                        terminalMergeSeconds,
+                        terminalMergeExitCode,
+                        executionStates,
+                        terminalSchedulePlan,
+                        terminalDiagnostics,
+                        () => timingsStageCancelled = true);
+                }
+            }
+
             supervisor.ThrowIfFailed();
             throw;
         }
@@ -1665,7 +1855,7 @@ internal sealed class CoverageRunWorkflow
                 state.Status = "running";
                 terminalFailure = await CompleteProjectAsync(
                     state,
-                    RunProjectAsync(request, resolution, outputDirectory, entry, skipBuildDuringTests, supervisor, console, cancellationToken),
+                    RunProjectAsync(request, resolution, outputDirectory, entry, state, skipBuildDuringTests, supervisor, console, cancellationToken),
                     terminalFailure);
                 continue;
             }
@@ -1681,7 +1871,7 @@ internal sealed class CoverageRunWorkflow
             }
 
             state.Status = "running";
-            active.Add((state, RunProjectAsync(request, resolution, outputDirectory, entry, skipBuildDuringTests, supervisor, console, cancellationToken)));
+            active.Add((state, RunProjectAsync(request, resolution, outputDirectory, entry, state, skipBuildDuringTests, supervisor, console, cancellationToken)));
         }
 
         terminalFailure = await DrainActiveAsync(active, terminalFailure);
@@ -1746,6 +1936,7 @@ internal sealed class CoverageRunWorkflow
         CoverageProjectResolution resolution,
         string outputDirectory,
         CoverageRunScheduleEntry entry,
+        CoverageRunProjectExecutionState state,
         bool skipBuildDuringTests,
         CoverageRunWatchdogSupervisor supervisor,
         CoverageRunConsoleSink console,
@@ -1785,8 +1976,8 @@ internal sealed class CoverageRunWorkflow
             cancellationToken);
 
         var testResults = CreateTestResultArtifacts(request, outputDirectory, project, index);
-        var driverInvocation = CoverageRunDriverStrategy.CreateInvocation(request, projectOutputDirectory);
-        var args = CreateTestArguments(request, project, driverInvocation, testResults, skipBuildDuringTests);
+        var hangPlan = CoverageRunHangPolicy.Plan(request);
+        var driverInvocation = CoverageRunDriverStrategy.CreateInvocation(request, projectOutputDirectory, hangPlan);
         CoverageRunProcessResult processResult;
         CoverageRunDriverNormalization normalization;
         string? cleanupLogPath = null;
@@ -1799,9 +1990,14 @@ internal sealed class CoverageRunWorkflow
         {
             try
             {
+                var args = CreateTestArguments(request, project, driverInvocation, testResults, skipBuildDuringTests, hangPlan);
+                state.InvocationId = Guid.NewGuid().ToString("N");
+                state.OwnedResultsDirectory = driverInvocation.RawResultsDirectory;
+                state.HangPlan = hangPlan;
                 processResult = await _processRunner.RunAsync(
                     new CoverageRunProcessRequest("dotnet", args, resolution.SolutionDirectory, logFile, operation.ObserveBytes, operation.ReserveProcess()),
                     cancellationToken);
+                InspectHangDiagnostics(state, outputDirectory);
                 operation.Transition("finalizing");
                 normalization = await CoverageRunDriverStrategy.NormalizeDetailedAsync(
                     driverInvocation,
@@ -1835,6 +2031,7 @@ internal sealed class CoverageRunWorkflow
         if (processResult.ExitCode != 0)
         {
             await console.WriteErrorAsync($"Test run failed for {project.RelativePath}; log: {logFile}", cancellationToken);
+            await WriteHangSummaryAsync(state, console, CancellationToken.None);
         }
 
         return new CoverageProjectRunResult(
@@ -1864,7 +2061,8 @@ internal sealed class CoverageRunWorkflow
         CoverageRunProject project,
         CoverageRunDriverInvocation driverInvocation,
         IReadOnlyList<CoverageRunTestResultArtifact> testResults,
-        bool skipBuildDuringTests)
+        bool skipBuildDuringTests,
+        CoverageRunHangPlan hangPlan)
     {
         var args = new List<string>
         {
@@ -1897,10 +2095,107 @@ internal sealed class CoverageRunWorkflow
             args.Add("--no-build");
         }
 
-        args.AddRange(request.TestArguments);
+        if (hangPlan.Source == CoverageRunHangSource.Automatic && hangPlan.Timeout is { } timeout)
+        {
+            var separatorIndex = request.TestArguments.ToList().FindIndex(argument => argument == "--");
+            if (separatorIndex >= 0)
+            {
+                args.AddRange(request.TestArguments.Take(separatorIndex));
+                AppendAutomaticBlame(args, timeout);
+                args.AddRange(request.TestArguments.Skip(separatorIndex));
+            }
+            else
+            {
+                args.AddRange(request.TestArguments);
+                AppendAutomaticBlame(args, timeout);
+            }
+        }
+        else
+        {
+            args.AddRange(request.TestArguments);
+        }
+
         CoverageRunDriverStrategy.AppendCollectorRunSettings(request, args);
         return args;
     }
+
+    private static void AppendAutomaticBlame(List<string> args, TimeSpan timeout)
+    {
+        args.Add("--blame-hang");
+        args.Add("--blame-hang-timeout");
+        args.Add($"{(long)timeout.TotalSeconds}s");
+        args.Add("--blame-hang-dump-type");
+        args.Add("none");
+    }
+
+    private void InspectHangDiagnostics(CoverageRunProjectExecutionState state, string outputDirectory)
+    {
+        if (state.HangPlan is not { Source: CoverageRunHangSource.Automatic or CoverageRunHangSource.Manual } plan)
+        {
+            return;
+        }
+
+        if (state.OwnedResultsDirectory is null)
+        {
+            state.HangDiagnostics = new CoverageRunHangDiagnosticsReader.InspectionResult(
+                plan.Source == CoverageRunHangSource.Manual ? "unscoped" : "unavailable", []);
+            return;
+        }
+
+        try
+        {
+            state.HangDiagnostics = CoverageRunHangDiagnosticsReader.Inspect(
+                state.OwnedResultsDirectory, outputDirectory, _timeProvider);
+        }
+        catch (Exception ex) when (IsNonFatalDiagnosticException(ex))
+        {
+            state.HangDiagnostics = new CoverageRunHangDiagnosticsReader.InspectionResult("unreadable", []);
+        }
+    }
+
+    private static async Task WriteHangSummaryAsync(
+        CoverageRunProjectExecutionState state,
+        CoverageRunConsoleSink console,
+        CancellationToken cancellationToken)
+    {
+        if (state.HangPlan is not { Source: CoverageRunHangSource.Automatic or CoverageRunHangSource.Manual } || state.HangDiagnostics is not { } diagnostics)
+        {
+            return;
+        }
+
+        foreach (var sequence in diagnostics.Sequences)
+        {
+            var path = JsonSerializer.Serialize(sequence.RelativePath);
+            var observation = sequence.LastStartedTest is null
+                ? "last started test name omitted"
+                : $"last started test {JsonSerializer.Serialize(sequence.LastStartedTest)}";
+            await console.WriteErrorAsync(
+                $"VSTest sequence {path}: {observation}; this does not prove which test hung. Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-hang-diagnostics", cancellationToken);
+        }
+
+        if (diagnostics.Status != "found")
+        {
+            var (cause, next) = HangInspectionAdvice(diagnostics.Status);
+            await console.WriteErrorAsync(
+                $"VSTest sequence inspection: {diagnostics.Status}. Cause: {cause} Next: {next} Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-hang-diagnostics",
+                cancellationToken);
+        }
+    }
+
+    private static (string Cause, string Next) HangInspectionAdvice(string status) => status switch
+    {
+        "missing" => ("No sequence was flushed in this invocation's owned results.", "Inspect the project log and check whether VSTest exited before flushing."),
+        "unscoped" => ("Manual MSBuild blame owns the result path.", "Inspect the caller-configured results directory."),
+        "name-omitted" => ("A sequence name was absent or unsafe to display.", "Inspect the scoped sequence artifact locally."),
+        "malformed" or "oversized" or "duplicate" or "unreadable" => ("The sequence could not be safely interpreted.", "Inspect the scoped artifact locally and retain the primary failure."),
+        "escaping" => ("A result path or link left the owned tree.", "Use a fresh dedicated output directory and inspect filesystem changes."),
+        "inspection-limited" => ("A traversal, XML, count, or time limit was reached.", "Inspect the bounded scoped paths and project log."),
+        "unavailable" => ("Process drain or owned-directory confirmation was unavailable.", "Inspect the project log after the process stops."),
+        _ => ("No safe sequence observation was available.", "Inspect the project log."),
+    };
+
+    private static bool IsNonFatalDiagnosticException(Exception exception) =>
+        exception is not (OutOfMemoryException or StackOverflowException or AccessViolationException or AppDomainUnloadedException);
 
     private static IReadOnlyList<CoverageRunTestResultArtifact> CreateTestResultArtifacts(
         CoverageRunRequest request,
@@ -2102,7 +2397,8 @@ internal sealed class CoverageRunWorkflow
         int? mergeExitCode,
         IReadOnlyList<CoverageRunProjectExecutionState> executionStates,
         CoverageRunSchedulePlan schedulePlan,
-        CoverageRunSlowTestDiagnosticsRun? diagnostics)
+        CoverageRunSlowTestDiagnosticsRun? diagnostics,
+        Action? onCancelledStage = null)
     {
         try
         {
@@ -2120,9 +2416,10 @@ internal sealed class CoverageRunWorkflow
                 schedulePlan,
                 diagnostics,
                 commit => commit(),
-                CancellationToken.None);
+                CancellationToken.None,
+                onCancelledStage);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        catch (Exception ex) when (IsNonFatalDiagnosticException(ex))
         {
             // Timings are best-effort and must not replace the run's original terminal failure.
         }
@@ -2150,7 +2447,8 @@ internal sealed class CoverageRunWorkflow
         CoverageRunSchedulePlan schedulePlan,
         CoverageRunSlowTestDiagnosticsRun? diagnostics,
         Action<Action> commit,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action? onCancelledStage = null)
     {
         var testResultArtifacts = executionStates
             .Where(state => state.Result is not null)
@@ -2245,7 +2543,26 @@ internal sealed class CoverageRunWorkflow
                             outputDirectory,
                             result?.LogFile ?? Path.Join(outputDirectory, "projects", entry.Project.Slug, "dotnet-test.log")),
                         coverageDriver = result?.CoverageDriver ?? CoverageRunDriverPreflight.DriverName(request.CoverageDriver),
-                        invocationDirectory = result?.InvocationDirectory,
+                        invocationDirectory = result?.InvocationDirectory
+                            ?? (state.OwnedResultsDirectory is null ? null : ToArtifactPath(outputDirectory, state.OwnedResultsDirectory)),
+                        hangDiagnostics = state.HangPlan is null
+                            ? null
+                            : new
+                            {
+                                schemaVersion = 1,
+                                source = state.HangPlan.SourceName,
+                                status = state.HangDiagnostics?.Status ?? state.HangPlan.StatusName,
+                                invocationId = state.InvocationId,
+                                sequencePaths = state.HangDiagnostics?.Sequences.Select(sequence => sequence.RelativePath).ToArray() ?? [],
+                                observations = state.HangDiagnostics?.Sequences.Select(sequence => new
+                                {
+                                    path = sequence.RelativePath,
+                                    lastStartedTest = sequence.LastStartedTest,
+                                }).ToArray() ?? [],
+                                effectiveVstestTimeoutSeconds = state.HangPlan.Timeout is null
+                                    ? (long?)null
+                                    : (long)state.HangPlan.Timeout.Value.TotalSeconds,
+                            },
                         coverageArtifactStatus = result?.CoverageArtifactStatus ?? "skipped-after-terminal",
                         coverageArtifactCause = result?.CoverageArtifactCause,
                         coverageCleanupLog = result?.CoverageCleanupLogFile is null
@@ -2272,6 +2589,10 @@ internal sealed class CoverageRunWorkflow
         {
             await File.WriteAllTextAsync(stagedPath, json + Environment.NewLine, cancellationToken);
             _timingsStaged?.Invoke();
+            if (cancellationToken.IsCancellationRequested)
+            {
+                onCancelledStage?.Invoke();
+            }
             cancellationToken.ThrowIfCancellationRequested();
             commit(() => File.Move(stagedPath, timingsPath, overwrite: true));
         }
@@ -2868,6 +3189,18 @@ internal sealed class CoverageRunProjectExecutionState(CoverageRunScheduleEntry 
     /// Gets or sets the completed project result, when execution reached normalization.
     /// </summary>
     public CoverageProjectRunResult? Result { get; set; }
+
+    /// <summary>Gets or sets the identifier of the launched test invocation.</summary>
+    public string? InvocationId { get; set; }
+
+    /// <summary>Gets or sets the verified AppSurface-owned directory for this invocation.</summary>
+    public string? OwnedResultsDirectory { get; set; }
+
+    /// <summary>Gets or sets the private source, status, and timeout plan fixed at test launch.</summary>
+    public CoverageRunHangPlan? HangPlan { get; set; }
+
+    /// <summary>Gets or sets the bounded Sequence.xml inspection result.</summary>
+    public CoverageRunHangDiagnosticsReader.InspectionResult? HangDiagnostics { get; set; }
 }
 
 /// <summary>

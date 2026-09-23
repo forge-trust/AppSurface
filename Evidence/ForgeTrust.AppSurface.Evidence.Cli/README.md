@@ -36,6 +36,8 @@ An intentionally selected `no-evidence` profile may close a gate. A skipped test
 
 The built-in coverage producer is an in-process adapter over the private [`ForgeTrust.AppSurface.Evidence.Coverage`](../ForgeTrust.AppSurface.Evidence.Coverage/README.md) engine shared with `appsurface coverage run` and `appsurface coverage gate`. Its policy declaration carries the exact overall and optional patch thresholds, tolerance, and patch-line mode; the resolved plan binds those values before collection begins. When a patch gate is selected, `evidence run` captures the bounded `--diff-file` bytes during planning and reuses that immutable snapshot for gate evaluation, so replacing the file mid-run cannot change the measured input. It does not silently convert a partial test selection into a full-profile claim.
 
+Coverage execution uses the same fail-mode [watchdog and no-dump VSTest hang policy](../../Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-hang-diagnostics) as `coverage run`. Its `TimeoutSeconds` producer deadline includes discovery and build time, limits the automatic VSTest timer at each test launch, and still maps an expired producer to `TimedOut` without assertions. After a timeout, the Evidence result may point to `coverage/timings.json` when that owned artifact was written; it never copies test names or sequence XML into the result. If a healthy individual test exceeds the derived VSTest timer, increase the declaration's `TimeoutSeconds` to leave headroom. The [#815 migration guide](../../releases/issue-815-vstest-hang.md#migration-choices) explains the opt-outs and actor-specific outcomes.
+
 ## Pitfalls
 
 - Do not run a repository-wide gate after intentionally filtering out required tests and expect a complete claim.

@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using CliFx;
@@ -26,6 +27,8 @@ namespace ForgeTrust.AppSurface.Cli;
 /// </remarks>
 internal static class AppSurfaceCliApp
 {
+    private static readonly AsyncLocal<IReadOnlyDictionary<string, string>?> CoverageTestArgumentValues = new();
+
     /// <summary>
     /// The published command name for the AppSurface CLI .NET tool.
     /// </summary>
@@ -54,6 +57,7 @@ internal static class AppSurfaceCliApp
     /// </remarks>
     internal static async Task RunAsync(string[] args, Action<ConsoleOptions>? configureOptions = null)
     {
+        var normalizedArguments = CoverageRunArgumentBinding.Normalize(args);
         var options = ConsoleOptions.Default with
         {
             OutputMode = ConsoleOutputMode.CommandFirst
@@ -61,7 +65,7 @@ internal static class AppSurfaceCliApp
         configureOptions?.Invoke(options);
 
         var module = new AppSurfaceCliModule();
-        var context = new StartupContext(args, module)
+        var context = new StartupContext(normalizedArguments.Arguments, module)
         {
             ConsoleOutputMode = options.OutputMode
         };
@@ -120,16 +124,40 @@ internal static class AppSurfaceCliApp
         var displayVersion = AppSurfaceCliVersion.ResolveDisplayVersion(typeof(AppSurfaceCliApp).Assembly);
         var commandService = new CommandService(commands, context, suggester, ToolCommandName, displayVersion);
         var previousServiceProvider = CommandService.PrimaryServiceProvider;
+        var previousTestArgumentValues = CoverageTestArgumentValues.Value;
 
         try
         {
+            CoverageTestArgumentValues.Value = normalizedArguments.RestoreValues;
             CommandService.PrimaryServiceProvider = serviceProvider;
             await commandService.RunInternalAsync(CancellationToken.None);
         }
         finally
         {
             CommandService.PrimaryServiceProvider = previousServiceProvider;
+            CoverageTestArgumentValues.Value = previousTestArgumentValues;
         }
+    }
+
+    /// <summary>Restores the literal test tokens bound through this invocation's opaque placeholders.</summary>
+    /// <param name="arguments">CliFx-bound test argument tokens in order.</param>
+    /// <returns>The original literal tokens, or the input when no normalization map is active.</returns>
+    internal static string[] RestoreCoverageTestArguments(string[] arguments)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+        var values = CoverageTestArgumentValues.Value;
+        var restored = values is null
+            ? arguments
+            : arguments.Select(argument => values.TryGetValue(argument, out var value) ? value : argument).ToArray();
+        if (restored.Any(static argument => argument.Length == 0))
+        {
+            throw new CommandException(
+                "ASCOV101 --test-argument requires one nonempty literal token. "
+                + "Fix: Add a value immediately after the option or use --test-argument=VALUE. "
+                + "Docs: Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-hang-diagnostics");
+        }
+
+        return restored;
     }
 
     /// <summary>
@@ -226,5 +254,75 @@ internal static class AppSurfaceCliApp
         }
 
         return types.Where(type => !type.IsAbstract && typeof(ICommand).IsAssignableFrom(type));
+    }
+}
+
+/// <summary>The CliFx-safe argv and immutable per-invocation map back to literal test tokens.</summary>
+/// <param name="Arguments">Arguments passed to CliFx after option-value normalization.</param>
+/// <param name="RestoreValues">Opaque placeholder to caller token map.</param>
+internal sealed record CoverageRunNormalizedArguments(string[] Arguments, IReadOnlyDictionary<string, string> RestoreValues);
+
+/// <summary>Normalizes only the registered <c>coverage run</c> command's literal test option values.</summary>
+internal static class CoverageRunArgumentBinding
+{
+    private const string OptionName = "--test-argument";
+
+    /// <summary>Replaces split and joined <c>--test-argument</c> values with opaque CliFx-safe tokens.</summary>
+    /// <param name="arguments">The unmodified command-line token array.</param>
+    /// <returns>CliFx input plus a map for restoration after binding.</returns>
+    /// <remarks>A split option consumes exactly its next token, even if that token begins with a dash.</remarks>
+    internal static CoverageRunNormalizedArguments Normalize(string[] arguments)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+        if (arguments.Length < 2
+            || !string.Equals(arguments[0], "coverage", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(arguments[1], "run", StringComparison.OrdinalIgnoreCase))
+        {
+            return new CoverageRunNormalizedArguments(
+                arguments,
+                new ReadOnlyDictionary<string, string>(new Dictionary<string, string>(StringComparer.Ordinal)));
+        }
+
+        var normalized = new List<string>(arguments.Length);
+        var restoreValues = new Dictionary<string, string>(StringComparer.Ordinal);
+        var incoming = new HashSet<string>(arguments, StringComparer.Ordinal);
+        var placeholderIndex = 0;
+        for (var index = 0; index < arguments.Length; index++)
+        {
+            var argument = arguments[index];
+            if (string.Equals(argument, OptionName, StringComparison.Ordinal))
+            {
+                var value = index + 1 < arguments.Length ? arguments[++index] : string.Empty;
+                AddPlaceholder(value);
+                continue;
+            }
+
+            if (argument.StartsWith(OptionName + "=", StringComparison.Ordinal))
+            {
+                var value = argument[(OptionName.Length + 1)..];
+                AddPlaceholder(value);
+                continue;
+            }
+
+            normalized.Add(argument);
+        }
+
+        return new CoverageRunNormalizedArguments(
+            normalized.ToArray(),
+            new ReadOnlyDictionary<string, string>(restoreValues));
+
+        void AddPlaceholder(string value)
+        {
+            string placeholder;
+            do
+            {
+                placeholder = $"appsurface-test-argument-{Guid.NewGuid():N}-{placeholderIndex++}";
+            }
+            while (incoming.Contains(placeholder) || restoreValues.ContainsKey(placeholder));
+
+            normalized.Add(OptionName);
+            normalized.Add(placeholder);
+            restoreValues.Add(placeholder, value);
+        }
     }
 }
