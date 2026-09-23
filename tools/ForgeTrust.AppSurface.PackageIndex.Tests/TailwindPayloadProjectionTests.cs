@@ -182,16 +182,13 @@ public sealed class TailwindPayloadProjectionTests
         Assert.Contains("missing assets-graph path", error.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
+    [CaseSensitiveFileSystemFact]
     public void Verify_RejectsAmbiguousCaseInsensitiveRestoredAssetLookup()
     {
-        if (OperatingSystem.IsWindows()) return;
-
         using var fixture = new PackageFixture();
         fixture.Add("native/codec.bin", "archive bytes");
         var alternate = TestPathUtils.PathUnder(fixture.RestoredDirectory, "native", "CODEC.bin");
         File.WriteAllText(alternate, "case-colliding restored bytes");
-        if (Directory.EnumerateFiles(Path.GetDirectoryName(alternate)!).Count() < 2) return;
         using var target = ParseTarget("{ \"native\": { \"native/codec.bin\": {} } }");
 
         var error = Assert.Throws<PackageIndexException>(() => fixture.Verify(target.RootElement));
@@ -199,11 +196,9 @@ public sealed class TailwindPayloadProjectionTests
         Assert.Contains("ambiguous case-insensitive path component", error.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
+    [UnixFileSystemFact]
     public void Verify_RejectsSelectedAssetLinkOutsideProtectedRoots()
     {
-        if (OperatingSystem.IsWindows()) return;
-
         using var fixture = new PackageFixture();
         fixture.Add("native/codec.bin", "archive bytes");
         var restored = TestPathUtils.PathUnder(fixture.RestoredDirectory, "native", "codec.bin");
@@ -313,11 +308,9 @@ public sealed class TailwindPayloadProjectionTests
         Assert.Contains("Duplicate", error.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
+    [UnixFileSystemFact]
     public void Verify_RejectsRestoredProtectedSymlinkWhenSupported()
     {
-        if (OperatingSystem.IsWindows()) return;
-
         using var fixture = new PackageFixture();
         fixture.Add("build/Tailwind.targets", "targets");
         var outside = Path.Combine(fixture.Root, "outside.targets");
@@ -330,7 +323,7 @@ public sealed class TailwindPayloadProjectionTests
         Assert.Contains("link/reparse", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact]
+    [CaseSensitiveFileSystemFact]
     public void Verify_RejectsCaseCollidingExtraExtractedProtectedFile()
     {
         using var fixture = new PackageFixture();
@@ -338,7 +331,6 @@ public sealed class TailwindPayloadProjectionTests
         var buildDirectory = Path.Combine(fixture.RestoredDirectory, "build");
         var collidingPath = Path.Combine(buildDirectory, "TAILWIND.targets");
         File.WriteAllText(collidingPath, "extra");
-        if (!File.Exists(collidingPath) || Directory.EnumerateFiles(buildDirectory).Count() < 2) return;
         using var target = ParseTarget("{}");
 
         var error = Assert.Throws<PackageIndexException>(() => fixture.Verify(target.RootElement));
@@ -346,11 +338,9 @@ public sealed class TailwindPayloadProjectionTests
         Assert.Contains("case-colliding", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact]
+    [UnixFileSystemFact]
     public void Verify_RejectsRestoredPathsThatNormalizeToTheSameProjectionPath()
     {
-        if (OperatingSystem.IsWindows()) return;
-
         using var fixture = new PackageFixture();
         fixture.Add("build/A/B.targets", "expected");
         File.WriteAllText(Path.Combine(fixture.RestoredDirectory, "build", "A\\B.targets"), "extra");
@@ -404,5 +394,39 @@ public sealed class TailwindPayloadProjectionTests
         {
             if (Directory.Exists(Root)) Directory.Delete(Root, recursive: true);
         }
+    }
+}
+
+/// <summary>Discovers case-collision assertions only when the test volume preserves distinct casing.</summary>
+public sealed class CaseSensitiveFileSystemFactAttribute : FactAttribute
+{
+    public CaseSensitiveFileSystemFactAttribute()
+    {
+        var root = TestPathUtils.PathUnder(Path.GetTempPath(), "tailwind-case-probe", Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllText(TestPathUtils.PathUnder(root, "asset"), "lowercase");
+            File.WriteAllText(TestPathUtils.PathUnder(root, "ASSET"), "uppercase");
+            if (Directory.EnumerateFiles(root).Count() != 2)
+                Skip = "Requires a case-sensitive test filesystem.";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Skip = $"Cannot probe test filesystem casing: {exception.Message}";
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+}
+
+/// <summary>Discovers Unix-only path and symlink fixtures as explicit skips on Windows.</summary>
+public sealed class UnixFileSystemFactAttribute : FactAttribute
+{
+    public UnixFileSystemFactAttribute()
+    {
+        if (OperatingSystem.IsWindows()) Skip = "Requires Unix filesystem path and symlink semantics.";
     }
 }

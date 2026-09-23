@@ -223,6 +223,9 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
     [InlineData("missing-assets-inventory", "Aggregate file inventory is incomplete")]
     [InlineData("wrong-assets-target", "fixed net10.0 target")]
     [InlineData("multiple-assets-targets", "exactly one target")]
+    [InlineData("malformed-assets-root", "exactly one target")]
+    [InlineData("malformed-assets-target", "exactly one target")]
+    [InlineData("malformed-assets-node-key", "must resolve exactly one target node")]
     [InlineData("missing-package-node", "must resolve exactly one target node")]
     [InlineData("duplicate-package-node", "must resolve exactly one target node")]
     [InlineData("payload-path-traversal", "Unsafe package path component")]
@@ -257,6 +260,10 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
     [InlineData("aggregate-inventory-duplicate", "duplicate path")]
     [InlineData("aggregate-inventory-containing-file", "must exclude its containing file")]
     [InlineData("aggregate-inventory-bad-hash", "does not match its bound SHA-256")]
+    [InlineData("numeric-required-rid", "must contain only strings")]
+    [InlineData("nul-receipt-path", "Unsafe relative evidence path")]
+    [InlineData("empty-component-receipt-path", "Unsafe relative evidence path")]
+    [InlineData("uppercase-receipt-digest", "lowercase hexadecimal")]
     public async Task PublishPreflight_RejectsMutatedAggregateAuthorization(string mutation, string expectedDiagnostic)
     {
         using var fixture = await Fixture.CreateAsync(_root);
@@ -290,6 +297,7 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
     [InlineData("duplicate-payload-path", "duplicate/case-colliding path")]
     [InlineData("stale-payload-bytes", "payload evidence bytes changed")]
     [InlineData("null-first-party-packages", "missing first-party package evidence")]
+    [InlineData("nonobject-package-record", "omits or duplicates package")]
     [InlineData("malformed-payload-projection-version", "payloadProjectionVersion")]
     [InlineData("missing-payload-projection-version", "frozen v2 wire schema")]
     [InlineData("unsupported-payload-projection-version", "payloadProjectionVersion")]
@@ -320,6 +328,7 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
             case "unsafe-archive-path": firstPackage!["archivePath"] = "../outside.nupkg"; break;
             case "missing-payload-array": firstPackage!["payloadFiles"] = null; break;
             case "null-first-party-packages": receipt["firstPartyPackages"] = null; break;
+            case "nonobject-package-record": ((JsonArray)receipt["firstPartyPackages"]!)[0] = "not-an-object"; break;
             case "malformed-payload-projection-version": receipt["payloadProjectionVersion"] = "1"; break;
             case "missing-payload-projection-version": receipt.Remove("payloadProjectionVersion"); break;
             case "unsupported-payload-projection-version": receipt["payloadProjectionVersion"] = 2; break;
@@ -405,11 +414,9 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         Assert.Contains("is missing or escapes its input root", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString(), StringComparison.Ordinal);
     }
 
-    [Fact]
+    [UnixFileSystemFact]
     public async Task Aggregate_RejectsLinkedHostArtifactDirectory()
     {
-        if (OperatingSystem.IsWindows()) return;
-
         using var fixture = await Fixture.CreateAsync(_root);
         var hostDirectory = TestPathUtils.PathUnder(fixture.Evidence, Rids[0]);
         Directory.Delete(hostDirectory, recursive: true);
@@ -426,6 +433,7 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
     [Theory]
     [InlineData("null-package-inventory", "Evidence field 'packages' must be an array")]
     [InlineData("empty-package-inventory", "package inventory does not match the publish plan")]
+    [InlineData("nonobject-package-entry", "does not bind exactly one package")]
     [InlineData("producer-binding-mismatch", "Evidence field 'producerArtifactId'")]
     [InlineData("wrong-native-invocation", "nativeInvocationId differs from the validated aggregate")]
     public async Task PublicationStart_RejectsMutatedInventoryAndProducerBinding(string mutation, string expectedDiagnostic)
@@ -453,6 +461,7 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         {
             case "null-package-inventory": receipt["packages"] = null; break;
             case "empty-package-inventory": receipt["packages"] = new JsonArray(); break;
+            case "nonobject-package-entry": ((JsonArray)receipt["packages"]!)[0] = "not-an-object"; break;
             case "producer-binding-mismatch": receipt["producerArtifactId"] = "999"; break;
             case "wrong-native-invocation": receipt["nativeInvocationId"] = "native-other-invocation"; break;
             default: throw new ArgumentOutOfRangeException(nameof(mutation), mutation, "Unknown publication-start mutation.");
@@ -467,6 +476,41 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
             }, manifest, [planned], CancellationToken.None));
 
         Assert.Contains(expectedDiagnostic, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublicationStart_RejectsDuplicatePackageBindingInTwoPackagePlan()
+    {
+        using var fixture = await Fixture.CreateAsync(_root, includeWebPublicationPlan: true);
+        var aggregate = await fixture.AggregateAsync("aggregate-start-duplicate-package");
+        Assert.True(aggregate.Succeeded);
+        var manifest = await new PackageArtifactManifestReader().ReadAsync(fixture.ManifestPath, CancellationToken.None);
+        var planned = manifest.Entries.Select(entry => new PlannedPackageArtifact(
+            entry, TestPathUtils.PathUnder(fixture.Bundle, entry.ArtifactFileName))).ToArray();
+        var aggregateDirectory = Path.GetDirectoryName(aggregate.ReportPath)!;
+        var reportDirectory = TestPathUtils.PathUnder(_root, "preflight-start-duplicate-package");
+        var startReceiptPath = TestPathUtils.PathUnder(reportDirectory, "publication-start-receipt.json");
+        var request = new TailwindPublicationRequest(
+            fixture.Repository, fixture.Bundle, fixture.ManifestPath,
+            TestPathUtils.PathUnder(fixture.Bundle, TailwindProofSubjectService.FileName), "501", fixture.SubjectHash,
+            "12345", "901", fixture.SourceCommit, aggregateDirectory, "702",
+            Sha256(await File.ReadAllBytesAsync(aggregate.ReportPath)),
+            TestPathUtils.PathUnder(_root, "prepared-start-duplicate-package"), startReceiptPath, string.Empty, reportDirectory);
+        await TailwindEvidenceWorkflow.PreparePublicationAsync(request, manifest, planned, CancellationToken.None);
+
+        var receipt = JsonNode.Parse(await File.ReadAllTextAsync(startReceiptPath))!.AsObject();
+        var packages = (JsonArray)receipt["packages"]!;
+        packages[1] = packages[0]!.DeepClone();
+        await File.WriteAllTextAsync(startReceiptPath, receipt.ToJsonString());
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
+            TailwindEvidenceWorkflow.ValidatePublicationStartAsync(request with
+            {
+                PublicationStartArtifactId = "703",
+                ReportDirectory = TestPathUtils.PathUnder(_root, "start-validation-duplicate-package")
+            }, manifest, planned, CancellationToken.None));
+
+        Assert.Contains("does not bind exactly one package", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -793,6 +837,18 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
                 case "aggregate-inventory-bad-hash":
                     files[0]!["sha256"] = new string('0', 64);
                     break;
+                case "numeric-required-rid":
+                    ((JsonArray)aggregate["requiredRids"]!)[0] = 7;
+                    break;
+                case "nul-receipt-path":
+                    hosts[0]!["receiptPath"] = "hosts/linux-x64/\0proof.json";
+                    break;
+                case "empty-component-receipt-path":
+                    hosts[0]!["receiptPath"] = "hosts//linux-x64/tailwind-native-host-proof.json";
+                    break;
+                case "uppercase-receipt-digest":
+                    hosts[0]!["receiptSha256"] = new string('A', 64);
+                    break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(mutation), mutation, "Unknown aggregate mutation.");
             }
@@ -849,6 +905,7 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
             if (mutation == "missing-host") { File.Delete(receiptPath); return; }
             if (mutation is "missing-selected-payload" or "extra-unselected-payload" or "unsupported-assets-group" or "missing-assets-inventory"
                 or "wrong-assets-target" or "multiple-assets-targets" or "missing-package-node" or "duplicate-package-node"
+                or "malformed-assets-root" or "malformed-assets-target" or "malformed-assets-node-key"
                 or "payload-path-traversal" or "changed-extracted-bytes")
             {
                 var host = TestPathUtils.PathUnder(Evidence, rid);
@@ -891,31 +948,48 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
                     }
                 }
                 else if (mutation is "unsupported-assets-group" or "wrong-assets-target" or "multiple-assets-targets"
-                    or "missing-package-node" or "duplicate-package-node")
+                    or "missing-package-node" or "duplicate-package-node" or "malformed-assets-root"
+                    or "malformed-assets-target" or "malformed-assets-node-key")
                 {
                     var assetsPath = TestPathUtils.PathUnder(host, "consumer", "project.assets.json");
-                    var assets = JsonNode.Parse(await File.ReadAllTextAsync(assetsPath))!;
-                    var targets = (JsonObject)assets["targets"]!;
-                    var packageKey = PackageId + "/" + Version;
-                    switch (mutation)
+                    JsonNode assets = JsonNode.Parse(await File.ReadAllTextAsync(assetsPath))!;
+                    if (mutation == "malformed-assets-root")
                     {
-                        case "unsupported-assets-group":
-                            targets["net10.0"]![packageKey]!["unexpectedGroup"] = new JsonObject();
-                            break;
-                        case "wrong-assets-target":
-                            targets["net9.0"] = targets["net10.0"]!.DeepClone();
-                            targets.Remove("net10.0");
-                            break;
-                        case "multiple-assets-targets":
-                            targets["net9.0"] = targets["net10.0"]!.DeepClone();
-                            break;
-                        case "missing-package-node":
-                            ((JsonObject)targets["net10.0"]!).Remove(packageKey);
-                            break;
-                        case "duplicate-package-node":
-                            ((JsonObject)targets["net10.0"]!)[PackageId.ToLowerInvariant() + "/" + Version] =
-                                targets["net10.0"]![packageKey]!.DeepClone();
-                            break;
+                        assets = new JsonArray(JsonValue.Create("malformed project assets root"));
+                    }
+                    else
+                    {
+                        var targets = (JsonObject)assets["targets"]!;
+                        var packageKey = PackageId + "/" + Version;
+                        switch (mutation)
+                        {
+                            case "unsupported-assets-group":
+                                targets["net10.0"]![packageKey]!["unexpectedGroup"] = new JsonObject();
+                                break;
+                            case "wrong-assets-target":
+                                targets["net9.0"] = targets["net10.0"]!.DeepClone();
+                                targets.Remove("net10.0");
+                                break;
+                            case "multiple-assets-targets":
+                                targets["net9.0"] = targets["net10.0"]!.DeepClone();
+                                break;
+                            case "missing-package-node":
+                                ((JsonObject)targets["net10.0"]!).Remove(packageKey);
+                                break;
+                            case "duplicate-package-node":
+                                ((JsonObject)targets["net10.0"]!)[PackageId.ToLowerInvariant() + "/" + Version] =
+                                    targets["net10.0"]![packageKey]!.DeepClone();
+                                break;
+                            case "malformed-assets-target":
+                                assets["targets"] = "not-an-object";
+                                break;
+                            case "malformed-assets-node-key":
+                                var targetNodes = (JsonObject)targets["net10.0"]!;
+                                var validNode = targetNodes[packageKey]!.DeepClone();
+                                targetNodes.Remove(packageKey);
+                                targetNodes["malformed-node-key"] = validNode;
+                                break;
+                        }
                     }
                     await File.WriteAllTextAsync(assetsPath, assets.ToJsonString());
                 }

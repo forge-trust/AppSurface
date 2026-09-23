@@ -265,7 +265,6 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
     [InlineData("multiple-package-folders", "restored-graph-and-payload", "designated fresh private NuGet cache", "sdk-version,restore,locked restore")]
     [InlineData("missing-package-path", "restored-graph-and-payload", "no package path", "sdk-version,restore,locked restore")]
     [InlineData("missing-package-directory", "restored-graph-and-payload", "escapes the private cache or is absent", "sdk-version,restore,locked restore")]
-    [InlineData("linked-assets-file", "restored-graph-and-payload", "not a regular file", "sdk-version,restore,locked restore")]
     [InlineData("missing-cache-archive", "restored-graph-and-payload", "does not contain exactly the expected archive", "sdk-version,restore,locked restore")]
     [InlineData("extra-cache-archive", "restored-graph-and-payload", "does not contain exactly the expected archive", "sdk-version,restore,locked restore")]
     [InlineData("changed-cache-archive", "restored-graph-and-payload", "restored archive SHA-512", "sdk-version,restore,locked restore")]
@@ -275,12 +274,25 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
     [InlineData("native-executable-in-output", "native-build", "executable was copied into consumer build output", "sdk-version,restore,locked restore,build")]
     [InlineData("changed-cache-archive-after-build", "post-build-revalidation", "Restored archive", "sdk-version,restore,locked restore,build")]
     [InlineData("renamed-cache-archive-after-build", "post-build-revalidation", "changed its expected basename", "sdk-version,restore,locked restore,build")]
-    [InlineData("linked-cache-binary-after-build", "native-build", "link/reparse point", "sdk-version,restore,locked restore,build")]
-    [InlineData("linked-cache-directory-after-build", "native-build", "link/reparse point", "sdk-version,restore,locked restore,build")]
     public async Task ReleaseMode_FailsClosedForRestoreCachePayloadAndBuildMutations(
         string failure, string expectedStage, string expectedMessage, string expectedCommands)
     {
-        if (failure.StartsWith("linked-", StringComparison.Ordinal) && OperatingSystem.IsWindows()) return;
+        await AssertReleaseModeRejectsMutationAsync(failure, expectedStage, expectedMessage, expectedCommands);
+    }
+
+    [LinkSupportTheory]
+    [InlineData("linked-assets-file", "restored-graph-and-payload", "not a regular file", "sdk-version,restore,locked restore")]
+    [InlineData("linked-cache-binary-after-build", "native-build", "link/reparse point", "sdk-version,restore,locked restore,build")]
+    [InlineData("linked-cache-directory-after-build", "native-build", "link/reparse point", "sdk-version,restore,locked restore,build")]
+    public async Task ReleaseMode_RejectsLinksInRestoredAndBuiltEvidence(
+        string failure, string expectedStage, string expectedMessage, string expectedCommands)
+    {
+        await AssertReleaseModeRejectsMutationAsync(failure, expectedStage, expectedMessage, expectedCommands);
+    }
+
+    private async Task AssertReleaseModeRejectsMutationAsync(
+        string failure, string expectedStage, string expectedMessage, string expectedCommands)
+    {
         var producer = await CreateProducerBundleAsync();
         var runner = new NativeReleaseRunner(producer, CurrentRid(), failure: failure);
         var report = TestPathUtils.PathUnder(_root, "release-" + failure + "-report");
@@ -663,6 +675,35 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
             var report = request.Arguments[reportIndex + 1];
             await File.WriteAllTextAsync(report, "# Local Tailwind consumer proof\nSuccess.\n", cancellationToken);
             return new CommandRunResult("ok", string.Empty);
+        }
+    }
+}
+
+/// <summary>Discovers link mutation assertions only when file and directory symlinks are available.</summary>
+public sealed class LinkSupportTheoryAttribute : TheoryAttribute
+{
+    public LinkSupportTheoryAttribute()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        var root = TestPathUtils.PathUnder(Path.GetTempPath(), "tailwind-link-probe", Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(root);
+            var file = TestPathUtils.PathUnder(root, "target-file");
+            File.WriteAllText(file, "target");
+            var directory = TestPathUtils.PathUnder(root, "target-directory");
+            Directory.CreateDirectory(directory);
+            File.CreateSymbolicLink(TestPathUtils.PathUnder(root, "file-link"), file);
+            Directory.CreateSymbolicLink(TestPathUtils.PathUnder(root, "directory-link"), directory);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            Skip = $"Requires file and directory symlink support: {exception.Message}";
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
     }
 }

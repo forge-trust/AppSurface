@@ -62,6 +62,25 @@ public sealed class TailwindCliDispatchTests : IDisposable
     }
 
     [Fact]
+    public async Task LocalConsumerCli_ReportsMissingManifestWithoutReleaseReceipt()
+    {
+        Directory.CreateDirectory(_root);
+        var work = TestPathUtils.PathUnder(_root, "local-work");
+        var report = TestPathUtils.PathUnder(_root, "local-report");
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exit = await Program.RunAsync(
+            ["verify-tailwind-consumer", "--repo-root", _root, "--mode", "local",
+                "--work-directory", work, "--report-directory", report],
+            stdout, stderr, _root);
+
+        Assert.Equal(1, exit);
+        Assert.False(File.Exists(TestPathUtils.PathUnder(report, "tailwind-native-host-proof.json")));
+        Assert.True(stderr.ToString().Length > 0 || stdout.ToString().Contains("failed", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task PublishPrereleaseCli_ForwardsTailwindIdentityToInjectedPublisher()
     {
         Directory.CreateDirectory(_root);
