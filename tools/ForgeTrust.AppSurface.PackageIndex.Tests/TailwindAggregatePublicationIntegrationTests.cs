@@ -91,7 +91,7 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         Assert.Contains("SHA-256", changedAggregate.Message, StringComparison.Ordinal);
 
         var originalReceipt = await File.ReadAllBytesAsync(TestPathUtils.PathUnder(fixture.Evidence, Rids[0], "tailwind-native-host-proof.json"));
-        foreach (var mutation in new[] { "missing-host", "mutated-host-identity", "duplicate-receipt-field" })
+        foreach (var mutation in new[] { "missing-host", "mutated-host-identity", "mutated-cli-hash", "duplicate-receipt-field" })
         {
             if (mutation != "missing-host") await File.WriteAllBytesAsync(TestPathUtils.PathUnder(fixture.Evidence, Rids[0], "tailwind-native-host-proof.json"), originalReceipt);
             fixture.ApplyMutation(mutation);
@@ -259,6 +259,10 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
             if (mutation == "mutated-host-identity")
             {
                 json = Regex.Replace(json, "\\\"observedRid\\\"\\s*:\\s*\\\"linux-x64\\\"", "\"observedRid\":\"osx-x64\"", RegexOptions.CultureInvariant);
+            }
+            else if (mutation == "mutated-cli-hash")
+            {
+                json = Regex.Replace(json, "\\\"binarySha256\\\"\\s*:\\s*\\\"[0-9a-f]{64}\\\"", $"\"binarySha256\":\"{new string('f', 64)}\"", RegexOptions.CultureInvariant);
             }
             else
             {

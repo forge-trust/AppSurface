@@ -198,7 +198,7 @@ public sealed class TailwindPayloadProjectionTests
             }
             if (omitRestored) return;
 
-            var restoredPath = Path.Combine(RestoredDirectory, path.Replace('/', Path.DirectorySeparatorChar));
+            var restoredPath = TestPathUtils.PathUnder(RestoredDirectory, path.Replace('/', Path.DirectorySeparatorChar));
             Directory.CreateDirectory(Path.GetDirectoryName(restoredPath)!);
             File.WriteAllText(restoredPath, restoredContents ?? archiveContents);
         }

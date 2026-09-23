@@ -595,9 +595,10 @@ internal static class TailwindEvidenceWorkflow
             ValidatePayloadFileSet(match, expected, archivePath, evidenceRoot);
         }
         var binaryName = RequireNonEmptyString(root, "binaryName");
-        var expectedBinaryName = ReadExpectedBinaryName(Path.Combine(request.ArtifactsInputPath, subject.ArtifactFileName), rid);
+        var (expectedBinaryName, expectedBinaryHash) = ReadExpectedBinary(Path.Combine(request.ArtifactsInputPath, subject.ArtifactFileName), rid);
         if (!string.Equals(binaryName, expectedBinaryName, StringComparison.Ordinal)) throw new PackageIndexException($"Native receipt '{rid}' selected binary '{binaryName}', expected '{expectedBinaryName}' from the producer Tailwind manifest.");
         RequireDigest(RequireNonEmptyString(root, "binarySha256"), 64, "Tailwind CLI binary SHA-256");
+        RequireString(root, "binarySha256", expectedBinaryHash);
         RequireDigest(RequireNonEmptyString(root, "tailwindManifestSha256"), 64, "internal Tailwind manifest SHA-256");
         RequireDigest(RequireNonEmptyString(root, "restoredTailwindManifestSha256"), 64, "restored Tailwind manifest SHA-256");
         RequireString(root, "tailwindManifestSha256", subject.TailwindManifestSha256);
@@ -692,7 +693,7 @@ internal static class TailwindEvidenceWorkflow
         return result;
     }
 
-    private static string ReadExpectedBinaryName(string archivePath, string rid)
+    private static (string Name, string Sha256) ReadExpectedBinary(string archivePath, string rid)
     {
         using var zip = System.IO.Compression.ZipFile.OpenRead(archivePath);
         var entry = zip.Entries.SingleOrDefault(item => string.Equals(item.FullName, "build/tailwind.release.json", StringComparison.OrdinalIgnoreCase))
@@ -701,9 +702,12 @@ internal static class TailwindEvidenceWorkflow
         if (!document.RootElement.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array)
             throw new PackageIndexException("Producer Tailwind release manifest has no assets array.");
         var matches = assets.EnumerateArray().Where(item => item.TryGetProperty("rid", out var value) && value.GetString() == rid).ToArray();
-        if (matches.Length != 1 || !matches[0].TryGetProperty("binaryName", out var binary) || binary.ValueKind != JsonValueKind.String)
-            throw new PackageIndexException($"Producer Tailwind release manifest does not define exactly one binary for '{rid}'.");
-        return binary.GetString()!;
+        if (matches.Length != 1 || !matches[0].TryGetProperty("binaryName", out var binary) || binary.ValueKind != JsonValueKind.String
+            || !matches[0].TryGetProperty("sha256", out var sha256) || sha256.ValueKind != JsonValueKind.String)
+            throw new PackageIndexException($"Producer Tailwind release manifest does not define exactly one binary identity for '{rid}'.");
+        var expectedHash = sha256.GetString()!;
+        RequireDigest(expectedHash, 64, "producer Tailwind CLI binary SHA-256");
+        return (binary.GetString()!, expectedHash);
     }
 
     private static string HashFile(string path)
