@@ -50,7 +50,7 @@ gh_api_array() {
     api_requests=$((api_requests + 1))
     local -a query_args=(-F per_page=100 -F "page=$page")
     [[ "$filter" == all ]] && query_args+=(-F filter=all)
-    page_json="$(timeout "${timeout_seconds}s" gh api "$endpoint" "${query_args[@]}" --jq ".${key}")" || {
+    page_json="$(timeout "${timeout_seconds}s" gh api --method GET "$endpoint" "${query_args[@]}" --jq ".${key}")" || {
       echo "GitHub API request failed or exceeded its bounded timeout: $endpoint (page $page)." >&2
       return 1
     }

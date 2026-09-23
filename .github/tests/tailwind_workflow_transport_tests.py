@@ -33,6 +33,8 @@ RIDS = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64"]
 FAKE_GH = r'''#!/usr/bin/env python3
 import json, os, pathlib, sys
 args = sys.argv[1:]
+if not any(args[index:index + 2] == ["--method", "GET"] for index in range(len(args) - 1)):
+    raise SystemExit("artifact and job pagination must explicitly use GET")
 calls = pathlib.Path(os.environ["GH_CALLS"])
 with calls.open("a") as stream:
     stream.write(json.dumps(args) + "\n")
