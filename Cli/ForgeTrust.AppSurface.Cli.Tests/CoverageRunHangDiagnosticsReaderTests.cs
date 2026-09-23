@@ -249,6 +249,129 @@ public sealed class CoverageRunHangDiagnosticsReaderTests
         }
     }
 
+    [Theory]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    public void Inspect_ReportsUnreadableWhenPathAttributesFail(Type exceptionType)
+    {
+        using var fixture = new Fixture();
+        Directory.CreateDirectory(fixture.Results);
+        var io = HangReader.InspectionIo.Live with
+        {
+            GetPathAttributes = _ => throw CreateIoException(exceptionType)
+        };
+
+        var result = HangReader.Inspect(fixture.Results, fixture.Output, io: io);
+
+        Assert.Equal("unreadable", result.Status);
+        Assert.Empty(result.Sequences);
+    }
+
+    [Theory]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    public void Inspect_ReportsUnreadableWhenDirectoryEnumerationFails(Type exceptionType)
+    {
+        using var fixture = new Fixture();
+        fixture.Write("output/results/Sequence.xml", "<TestSequence><Test Name=\"Started\" /></TestSequence>");
+        fixture.Write("output/results/child/placeholder.txt", string.Empty);
+        var childDirectory = Path.Combine(fixture.Results, "child");
+        var live = HangReader.InspectionIo.Live;
+        var io = live with
+        {
+            EnumerateChildren = path => Path.GetFullPath(path) == Path.GetFullPath(childDirectory)
+                ? throw CreateIoException(exceptionType)
+                : live.EnumerateChildren(path)
+        };
+
+        var result = HangReader.Inspect(fixture.Results, fixture.Output, io: io);
+
+        Assert.Equal("unreadable", result.Status);
+        Assert.Equal("Started", Assert.Single(result.Sequences).LastStartedTest);
+    }
+
+    [Theory]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    public void Inspect_ReportsUnreadableWhenLazyDirectoryEnumerationFails(Type exceptionType)
+    {
+        using var fixture = new Fixture();
+        var sequencePath = fixture.Write("output/results/Sequence.xml",
+            "<TestSequence><Test Name=\"Started\" /></TestSequence>");
+        var sequence = new FileInfo(sequencePath);
+        var live = HangReader.InspectionIo.Live;
+        var io = live with
+        {
+            EnumerateChildren = path => Path.GetFullPath(path) == Path.GetFullPath(fixture.Results)
+                ? YieldThenThrow(sequence, exceptionType)
+                : live.EnumerateChildren(path)
+        };
+
+        var result = HangReader.Inspect(fixture.Results, fixture.Output, io: io);
+
+        Assert.Equal("unreadable", result.Status);
+        Assert.Equal("Started", Assert.Single(result.Sequences).LastStartedTest);
+    }
+
+    [Theory]
+    [InlineData(typeof(IOException), true, "unreadable")]
+    [InlineData(typeof(UnauthorizedAccessException), true, "unreadable")]
+    [InlineData(typeof(IOException), false, "found")]
+    [InlineData(typeof(UnauthorizedAccessException), false, "found")]
+    public void Inspect_HandlesChildAttributeFailuresByEntryKind(
+        Type exceptionType,
+        bool sequenceEntry,
+        string expectedStatus)
+    {
+        using var fixture = new Fixture();
+        var sequencePath = fixture.Write("output/results/Sequence.xml",
+            "<TestSequence><Test Name=\"Started\" /></TestSequence>");
+        var failingPath = sequenceEntry
+            ? sequencePath
+            : fixture.Write("output/results/ordinary.txt", string.Empty);
+        var live = HangReader.InspectionIo.Live;
+        var io = live with
+        {
+            GetChildAttributes = child => Path.GetFullPath(child.FullName) == Path.GetFullPath(failingPath)
+                ? throw CreateIoException(exceptionType)
+                : live.GetChildAttributes(child)
+        };
+
+        var result = HangReader.Inspect(fixture.Results, fixture.Output, io: io);
+
+        Assert.Equal(expectedStatus, result.Status);
+        if (sequenceEntry) Assert.Empty(result.Sequences);
+        else Assert.Equal("Started", Assert.Single(result.Sequences).LastStartedTest);
+    }
+
+    [Theory]
+    [InlineData(typeof(IOException), "disk read failed", "unreadable")]
+    [InlineData(typeof(IOException), "path escaped root", "escaping")]
+    [InlineData(typeof(UnauthorizedAccessException), "access denied", "unreadable")]
+    public void Inspect_ReportsFileOpenFailuresAndRetainsEarlierObservations(
+        Type exceptionType,
+        string message,
+        string expectedStatus)
+    {
+        using var fixture = new Fixture();
+        fixture.Write("output/results/a/Sequence.xml", "<TestSequence><Test Name=\"Earlier\" /></TestSequence>");
+        fixture.Write("output/results/b/Sequence.xml", "<TestSequence><Test Name=\"Failed\" /></TestSequence>");
+        var live = HangReader.InspectionIo.Live;
+        var failingPath = Path.Combine(fixture.Results, "b", "Sequence.xml");
+        var io = live with
+        {
+            EnumerateChildren = path => live.EnumerateChildren(path).OrderBy(child => child.Name, StringComparer.Ordinal),
+            OpenRegularFile = (output, root, path) => Path.GetFullPath(path) == Path.GetFullPath(failingPath)
+                ? throw CreateIoException(exceptionType, message)
+                : live.OpenRegularFile(output, root, path)
+        };
+
+        var result = HangReader.Inspect(fixture.Results, fixture.Output, io: io);
+
+        Assert.Equal(expectedStatus, result.Status);
+        Assert.Equal("Earlier", Assert.Single(result.Sequences).LastStartedTest);
+    }
+
     [Fact]
     public void Inspect_IgnoresFilesWithUnrecognizedSequenceSuffix()
     {
@@ -330,6 +453,22 @@ public sealed class CoverageRunHangDiagnosticsReaderTests
         var result = HangReader.Inspect(linkedRoot, fixture.Output);
 
         Assert.Equal("escaping", result.Status);
+    }
+
+    [Fact]
+    public void Inspect_ReportsEscapingOutputAncestorSymlink()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        using var fixture = new Fixture();
+        var realOutput = fixture.Write("real-output/results/Sequence.xml",
+            "<TestSequence><Test Name=\"Hidden\" /></TestSequence>");
+        var linkedOutput = Path.Combine(Path.GetDirectoryName(fixture.Output)!, "linked-output");
+        Directory.CreateSymbolicLink(linkedOutput, Path.GetDirectoryName(Path.GetDirectoryName(realOutput)!)!);
+
+        var result = HangReader.Inspect(Path.Combine(linkedOutput, "results"), linkedOutput);
+
+        Assert.Equal("escaping", result.Status);
+        Assert.Empty(result.Sequences);
     }
 
     [Fact]
@@ -481,5 +620,18 @@ public sealed class CoverageRunHangDiagnosticsReaderTests
     {
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
         public override long GetTimestamp() => 0;
+    }
+
+    private static Exception CreateIoException(Type exceptionType, string message = "injected I/O failure")
+        => exceptionType == typeof(IOException)
+            ? new IOException(message)
+            : exceptionType == typeof(UnauthorizedAccessException)
+                ? new UnauthorizedAccessException(message)
+                : throw new ArgumentOutOfRangeException(nameof(exceptionType));
+
+    private static IEnumerable<FileSystemInfo> YieldThenThrow(FileSystemInfo entry, Type exceptionType)
+    {
+        yield return entry;
+        throw CreateIoException(exceptionType);
     }
 }

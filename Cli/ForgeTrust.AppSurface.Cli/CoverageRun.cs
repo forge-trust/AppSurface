@@ -1099,11 +1099,6 @@ internal sealed class CoverageRunWorkflow
                 var drain = await supervisor.TerminateAndDrainProcessesAsync();
                 foreach (var state in executionStates.Where(state => state.HangPlan is not null))
                 {
-                    if (state.Status == "running")
-                    {
-                        state.Status = "terminated";
-                    }
-
                     if (state.HangDiagnostics is null)
                     {
                         if (drain.Confirmed)
