@@ -1,4 +1,3 @@
-<!-- /autoplan restore point: "/Users/andrew/.gstack/projects/forge-trust-Runnable/main-autoplan-restore-20260923-090323.md" -->
 ## Implementation plan
 # Design: AppSurface-owned VSTest hang diagnostics (#815)
 
