@@ -160,6 +160,62 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         Assert.False(workflowDiagnostics.RootElement.GetProperty("releaseEligible").GetBoolean());
     }
 
+    [Fact]
+    public async Task ProgramRunAsync_DispatchesPublicationPreflightAndStartValidationSuccess()
+    {
+        using var fixture = await Fixture.CreateAsync(_root, includeWebPublicationPlan: true);
+        var aggregate = await fixture.AggregateAsync("cli-publication-aggregate");
+        Assert.True(aggregate.Succeeded);
+        var aggregateDirectory = Path.GetDirectoryName(aggregate.ReportPath)!;
+        var aggregateHash = Sha256(await File.ReadAllBytesAsync(aggregate.ReportPath));
+        var publicationDirectory = TestPathUtils.PathUnder(_root, "cli-publication-prepared");
+        var preflightReport = TestPathUtils.PathUnder(_root, "cli-publication-preflight-report");
+
+        var preflight = await fixture.RunEvidenceCliAsync("publish-preflight", preflightReport,
+            "--manifest", fixture.PlanManifestPath!,
+            "--aggregate-input", aggregateDirectory,
+            "--aggregate-artifact-id", "702",
+            "--expected-aggregate-sha256", aggregateHash,
+            "--publication-directory", publicationDirectory);
+
+        Assert.True(preflight.ExitCode == 0, preflight.Stderr + Environment.NewLine + preflight.Stdout);
+        Assert.Empty(preflight.Stderr);
+        Assert.Contains("Tailwind publication preflight succeeded for 2 packages", preflight.Stdout, StringComparison.Ordinal);
+        var startReceiptPath = TestPathUtils.PathUnder(preflightReport, "publication-start-receipt.json");
+        Assert.True(File.Exists(startReceiptPath));
+        using (var startReceipt = JsonDocument.Parse(await File.ReadAllBytesAsync(startReceiptPath)))
+        {
+            Assert.Equal("appsurface-tailwind-publication-start-v1", startReceipt.RootElement.GetProperty("schema").GetString());
+            var packages = startReceipt.RootElement.GetProperty("packages").EnumerateArray().ToArray();
+            Assert.Equal(2, packages.Length);
+            Assert.Contains(packages, item => item.GetProperty("packageId").GetString() == "ForgeTrust.AppSurface.Web");
+            Assert.Contains(packages, item => item.GetProperty("packageId").GetString() == PackageId);
+        }
+        Assert.True(File.Exists(TestPathUtils.PathUnder(publicationDirectory, $"ForgeTrust.AppSurface.Web.{Version}.nupkg")));
+        using (var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(preflightReport, "diagnostics.json"))))
+        {
+            Assert.Equal("succeeded", diagnostics.RootElement.GetProperty("status").GetString());
+            Assert.Equal("publish-preflight", diagnostics.RootElement.GetProperty("stage").GetString());
+        }
+
+        var startValidationReport = TestPathUtils.PathUnder(_root, "cli-publication-start-validation-report");
+        var startValidation = await fixture.RunEvidenceCliAsync("validate-publication-start", startValidationReport,
+            "--manifest", fixture.PlanManifestPath!,
+            "--aggregate-input", aggregateDirectory,
+            "--aggregate-artifact-id", "702",
+            "--expected-aggregate-sha256", aggregateHash,
+            "--publication-directory", publicationDirectory,
+            "--publication-start-receipt", startReceiptPath,
+            "--publication-start-artifact-id", "703");
+
+        Assert.Equal(0, startValidation.ExitCode);
+        Assert.Empty(startValidation.Stderr);
+        Assert.Contains("Validated uploaded Tailwind publication-start artifact 703 and 2 prepared packages", startValidation.Stdout, StringComparison.Ordinal);
+        using var validationDiagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(startValidationReport, "diagnostics.json")));
+        Assert.Equal("succeeded", validationDiagnostics.RootElement.GetProperty("status").GetString());
+        Assert.Equal("validate-publication-start", validationDiagnostics.RootElement.GetProperty("stage").GetString());
+    }
+
     [Theory]
     [InlineData("missing-selected-payload", "incomplete or contains extra files")]
     [InlineData("extra-unselected-payload", "incomplete or contains extra files")]
@@ -198,6 +254,9 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
     [InlineData("bad-repository-binding", "Evidence field 'repositoryId'")]
     [InlineData("bad-source-binding", "Evidence field 'sourceCommit'")]
     [InlineData("bad-producer-artifact-binding", "Evidence field 'producerArtifactId'")]
+    [InlineData("aggregate-inventory-duplicate", "duplicate path")]
+    [InlineData("aggregate-inventory-containing-file", "must exclude its containing file")]
+    [InlineData("aggregate-inventory-bad-hash", "does not match its bound SHA-256")]
     public async Task PublishPreflight_RejectsMutatedAggregateAuthorization(string mutation, string expectedDiagnostic)
     {
         using var fixture = await Fixture.CreateAsync(_root);
@@ -214,7 +273,7 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
     [InlineData("invalid-checks-object", "is missing checks")]
     [InlineData("failed-css-check", "did not prove 'generatedCss'")]
     [InlineData("missing-check-entry", "did not prove 'hostCacheBinary'")]
-    [InlineData("missing-package-evidence", "native host receipt does not match the frozen")]
+    [InlineData("missing-package-evidence", "frozen v2 wire schema")]
     [InlineData("empty-package-evidence", "closure count differs")]
     [InlineData("wrong-package-id", "omits or duplicates package")]
     [InlineData("failed-payload-check", "no successful payload verification")]
@@ -230,12 +289,22 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
     [InlineData("changed-downloaded-archive", "consumed archive")]
     [InlineData("duplicate-payload-path", "duplicate/case-colliding path")]
     [InlineData("stale-payload-bytes", "payload evidence bytes changed")]
+    [InlineData("null-first-party-packages", "missing first-party package evidence")]
+    [InlineData("malformed-payload-projection-version", "payloadProjectionVersion")]
+    [InlineData("missing-payload-projection-version", "frozen v2 wire schema")]
+    [InlineData("unsupported-payload-projection-version", "payloadProjectionVersion")]
+    [InlineData("receipt-inventory-duplicate", "duplicate path")]
+    [InlineData("receipt-inventory-containing-file", "must exclude its containing file")]
+    [InlineData("receipt-inventory-bad-hash", "does not match its bound SHA-256")]
+    [InlineData("wrong-windows-os-architecture", "Windows x64 proof must observe")]
+    [InlineData("rooted-archive-path", "Unsafe relative evidence path")]
     public async Task Aggregate_RejectsUntrustedHostReceiptClaims(string mutation, string expectedDiagnostic)
     {
         using var fixture = await Fixture.CreateAsync(_root);
-        var receiptPath = TestPathUtils.PathUnder(fixture.Evidence, Rids[0], "tailwind-native-host-proof.json");
+        var rid = mutation == "wrong-windows-os-architecture" ? "win-x64" : Rids[0];
+        var receiptPath = TestPathUtils.PathUnder(fixture.Evidence, rid, "tailwind-native-host-proof.json");
         var receipt = JsonNode.Parse(await File.ReadAllTextAsync(receiptPath))!.AsObject();
-        var firstPackage = ((JsonArray)receipt["firstPartyPackages"]!)[0]!.AsObject();
+        var firstPackage = (receipt["firstPartyPackages"] as JsonArray)?[0]?.AsObject();
         var hostDirectory = Path.GetDirectoryName(receiptPath)!;
         switch (mutation)
         {
@@ -245,11 +314,15 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
             case "missing-check-entry": ((JsonObject)receipt["checks"]!).Remove("hostCacheBinary"); break;
             case "missing-package-evidence": receipt.Remove("firstPartyPackages"); break;
             case "empty-package-evidence": receipt["firstPartyPackages"] = new JsonArray(); break;
-            case "wrong-package-id": firstPackage["packageId"] = "ForgeTrust.Other"; break;
-            case "failed-payload-check": firstPackage["payloadVerified"] = false; break;
-            case "bad-restored-archive-hash": firstPackage["restoredSha512"] = new string('0', 128); break;
-            case "unsafe-archive-path": firstPackage["archivePath"] = "../outside.nupkg"; break;
-            case "missing-payload-array": firstPackage["payloadFiles"] = null; break;
+            case "wrong-package-id": firstPackage!["packageId"] = "ForgeTrust.Other"; break;
+            case "failed-payload-check": firstPackage!["payloadVerified"] = false; break;
+            case "bad-restored-archive-hash": firstPackage!["restoredSha512"] = new string('0', 128); break;
+            case "unsafe-archive-path": firstPackage!["archivePath"] = "../outside.nupkg"; break;
+            case "missing-payload-array": firstPackage!["payloadFiles"] = null; break;
+            case "null-first-party-packages": receipt["firstPartyPackages"] = null; break;
+            case "malformed-payload-projection-version": receipt["payloadProjectionVersion"] = "1"; break;
+            case "missing-payload-projection-version": receipt.Remove("payloadProjectionVersion"); break;
+            case "unsupported-payload-projection-version": receipt["payloadProjectionVersion"] = 2; break;
             case "wrong-binary-name": receipt["binaryName"] = "untrusted"; break;
             case "changed-restored-manifest": receipt["restoredTailwindManifestSha256"] = new string('0', 64); break;
             case "wrong-diagnostic-path": receipt["diagnosticPath"] = "other.md"; break;
@@ -263,7 +336,7 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
                 receipt["files"] = JsonSerializer.SerializeToNode(Inventory(hostDirectory, "tailwind-native-host-proof.json"));
                 break;
             case "duplicate-payload-path":
-                var payloadFiles = (JsonArray)firstPackage["payloadFiles"]!;
+                var payloadFiles = (JsonArray)firstPackage!["payloadFiles"]!;
                 var duplicate = payloadFiles.Single(item => item!["packageRelativePath"]!.GetValue<string>() == "native/codec.bin")!.DeepClone();
                 duplicate["packageRelativePath"] = "NATIVE/codec.bin";
                 payloadFiles.Add(duplicate);
@@ -274,6 +347,18 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
                     Encoding.UTF8.GetBytes("changed extracted bytes with stale receipt hash"));
                 receipt["files"] = JsonSerializer.SerializeToNode(Inventory(hostDirectory, "tailwind-native-host-proof.json"));
                 break;
+            case "receipt-inventory-duplicate":
+                var files = (JsonArray)receipt["files"]!;
+                files.Add(files[0]!.DeepClone());
+                break;
+            case "receipt-inventory-containing-file":
+                ((JsonArray)receipt["files"]!)[0]!["path"] = "tailwind-native-host-proof.json";
+                break;
+            case "receipt-inventory-bad-hash":
+                ((JsonArray)receipt["files"]!)[0]!["sha256"] = new string('0', 64);
+                break;
+            case "wrong-windows-os-architecture": receipt["osArchitecture"] = "X86"; break;
+            case "rooted-archive-path": firstPackage!["archivePath"] = "/outside.nupkg"; break;
             default: throw new ArgumentOutOfRangeException(nameof(mutation), mutation, "Unknown host-receipt mutation.");
         }
         await File.WriteAllTextAsync(receiptPath, receipt.ToJsonString());
@@ -306,6 +391,135 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         Assert.Equal(5, document.RootElement.GetProperty("hosts").GetArrayLength());
     }
 
+    [Fact]
+    public async Task Aggregate_RejectsMissingHostArtifactDirectory()
+    {
+        using var fixture = await Fixture.CreateAsync(_root);
+        Directory.Delete(TestPathUtils.PathUnder(fixture.Evidence, Rids[0]), recursive: true);
+
+        var aggregate = await fixture.AggregateAsync("aggregate-invalid-host-directory");
+
+        Assert.False(aggregate.Succeeded);
+        Assert.False(File.Exists(aggregate.ReportPath));
+        using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(Path.GetDirectoryName(aggregate.ReportPath)!, "diagnostics.json")));
+        Assert.Contains("is missing or escapes its input root", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Aggregate_RejectsLinkedHostArtifactDirectory()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        using var fixture = await Fixture.CreateAsync(_root);
+        var hostDirectory = TestPathUtils.PathUnder(fixture.Evidence, Rids[0]);
+        Directory.Delete(hostDirectory, recursive: true);
+        Directory.CreateSymbolicLink(hostDirectory, TestPathUtils.PathUnder(fixture.Evidence, Rids[1]));
+
+        var aggregate = await fixture.AggregateAsync("aggregate-linked-host-directory");
+
+        Assert.False(aggregate.Succeeded);
+        Assert.False(File.Exists(aggregate.ReportPath));
+        using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(Path.GetDirectoryName(aggregate.ReportPath)!, "diagnostics.json")));
+        Assert.Contains("link/reparse-point ancestor", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("null-package-inventory", "Evidence field 'packages' must be an array")]
+    [InlineData("empty-package-inventory", "package inventory does not match the publish plan")]
+    [InlineData("producer-binding-mismatch", "Evidence field 'producerArtifactId'")]
+    [InlineData("wrong-native-invocation", "nativeInvocationId differs from the validated aggregate")]
+    public async Task PublicationStart_RejectsMutatedInventoryAndProducerBinding(string mutation, string expectedDiagnostic)
+    {
+        using var fixture = await Fixture.CreateAsync(_root);
+        var aggregate = await fixture.AggregateAsync("aggregate-start-receipt-" + mutation);
+        Assert.True(aggregate.Succeeded);
+        var manifest = await new PackageArtifactManifestReader().ReadAsync(fixture.ManifestPath, CancellationToken.None);
+        var entry = Assert.Single(manifest.Entries);
+        var planned = new PlannedPackageArtifact(entry, TestPathUtils.PathUnder(fixture.Bundle, entry.ArtifactFileName));
+        var aggregateDirectory = Path.GetDirectoryName(aggregate.ReportPath)!;
+        var reportDirectory = TestPathUtils.PathUnder(_root, "preflight-start-receipt-" + mutation);
+        var publicationDirectory = TestPathUtils.PathUnder(_root, "prepared-start-receipt-" + mutation);
+        var startReceiptPath = TestPathUtils.PathUnder(reportDirectory, "publication-start-receipt.json");
+        var request = new TailwindPublicationRequest(
+            fixture.Repository, fixture.Bundle, fixture.ManifestPath,
+            TestPathUtils.PathUnder(fixture.Bundle, TailwindProofSubjectService.FileName), "501", fixture.SubjectHash,
+            "12345", "901", fixture.SourceCommit, aggregateDirectory, "702",
+            Sha256(await File.ReadAllBytesAsync(aggregate.ReportPath)), publicationDirectory,
+            startReceiptPath, string.Empty, reportDirectory);
+        await TailwindEvidenceWorkflow.PreparePublicationAsync(request, manifest, [planned], CancellationToken.None);
+
+        var receipt = JsonNode.Parse(await File.ReadAllTextAsync(startReceiptPath))!.AsObject();
+        switch (mutation)
+        {
+            case "null-package-inventory": receipt["packages"] = null; break;
+            case "empty-package-inventory": receipt["packages"] = new JsonArray(); break;
+            case "producer-binding-mismatch": receipt["producerArtifactId"] = "999"; break;
+            case "wrong-native-invocation": receipt["nativeInvocationId"] = "native-other-invocation"; break;
+            default: throw new ArgumentOutOfRangeException(nameof(mutation), mutation, "Unknown publication-start mutation.");
+        }
+        await File.WriteAllTextAsync(startReceiptPath, receipt.ToJsonString());
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
+            TailwindEvidenceWorkflow.ValidatePublicationStartAsync(request with
+            {
+                PublicationStartArtifactId = "703",
+                ReportDirectory = TestPathUtils.PathUnder(_root, "start-validation-" + mutation)
+            }, manifest, [planned], CancellationToken.None));
+
+        Assert.Contains(expectedDiagnostic, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Publication_RejectsCallerManifestVersionThatDiffersFromFrozenSubject()
+    {
+        using var fixture = await Fixture.CreateAsync(_root);
+        var manifest = await new PackageArtifactManifestReader().ReadAsync(fixture.ManifestPath, CancellationToken.None);
+        var entry = Assert.Single(manifest.Entries);
+        var planned = new PlannedPackageArtifact(entry, TestPathUtils.PathUnder(fixture.Bundle, entry.ArtifactFileName));
+        var mismatched = manifest with { PackageVersion = "9.9.9" };
+        var report = TestPathUtils.PathUnder(_root, "mismatched-manifest-preflight");
+        var request = new TailwindPublicationRequest(
+            fixture.Repository, fixture.Bundle, fixture.ManifestPath,
+            TestPathUtils.PathUnder(fixture.Bundle, TailwindProofSubjectService.FileName), "501", fixture.SubjectHash,
+            "12345", "901", fixture.SourceCommit, TestPathUtils.PathUnder(_root, "unused-aggregate"), "702",
+            new string('0', 64), TestPathUtils.PathUnder(_root, "unused-publication"),
+            TestPathUtils.PathUnder(report, "publication-start-receipt.json"), "703", report);
+
+        var preflightError = await Assert.ThrowsAsync<PackageIndexException>(() =>
+            TailwindEvidenceWorkflow.PreparePublicationAsync(request, mismatched, [planned], CancellationToken.None));
+        Assert.Contains("Preflight manifest version differs", preflightError.Message, StringComparison.Ordinal);
+
+        var startError = await Assert.ThrowsAsync<PackageIndexException>(() =>
+            TailwindEvidenceWorkflow.ValidatePublicationStartAsync(request with
+            {
+                ReportDirectory = TestPathUtils.PathUnder(_root, "mismatched-manifest-start")
+            }, mismatched, [planned], CancellationToken.None));
+        Assert.Contains("Publisher manifest version differs", startError.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Publication_RejectsMalformedTrustedAggregateDigest()
+    {
+        using var fixture = await Fixture.CreateAsync(_root);
+        var aggregate = await fixture.AggregateAsync("aggregate-malformed-digest");
+        Assert.True(aggregate.Succeeded);
+        var manifest = await new PackageArtifactManifestReader().ReadAsync(fixture.ManifestPath, CancellationToken.None);
+        var entry = Assert.Single(manifest.Entries);
+        var planned = new PlannedPackageArtifact(entry, TestPathUtils.PathUnder(fixture.Bundle, entry.ArtifactFileName));
+        var report = TestPathUtils.PathUnder(_root, "malformed-digest-preflight");
+        var request = new TailwindPublicationRequest(
+            fixture.Repository, fixture.Bundle, fixture.ManifestPath,
+            TestPathUtils.PathUnder(fixture.Bundle, TailwindProofSubjectService.FileName), "501", fixture.SubjectHash,
+            "12345", "901", fixture.SourceCommit, Path.GetDirectoryName(aggregate.ReportPath)!, "702",
+            "NOT-A-DIGEST", TestPathUtils.PathUnder(_root, "malformed-digest-publication"),
+            TestPathUtils.PathUnder(report, "publication-start-receipt.json"), string.Empty, report);
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
+            TailwindEvidenceWorkflow.PreparePublicationAsync(request, manifest, [planned], CancellationToken.None));
+
+        Assert.Contains("expected aggregate SHA-256 must be 64 lowercase hexadecimal", error.Message, StringComparison.Ordinal);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
@@ -315,7 +529,7 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
     {
         private readonly string _root;
         private Fixture(string root, string repository, string sourceCommit, string bundle, string manifestPath, string subjectHash,
-            string evidence, string map)
+            string evidence, string map, string? planManifestPath)
         {
             _root = root;
             Repository = repository;
@@ -325,6 +539,7 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
             SubjectHash = subjectHash;
             Evidence = evidence;
             Map = map;
+            PlanManifestPath = planManifestPath;
         }
 
         public string Repository { get; }
@@ -334,8 +549,9 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         public string SubjectHash { get; }
         public string Evidence { get; }
         public string Map { get; }
+        public string? PlanManifestPath { get; }
 
-        public static async Task<Fixture> CreateAsync(string parent)
+        public static async Task<Fixture> CreateAsync(string parent, bool includeWebPublicationPlan = false)
         {
             var root = TestPathUtils.PathUnder(parent, Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(root);
@@ -347,6 +563,18 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
 
             var bundle = TestPathUtils.PathUnder(root, "producer-bundle");
             Directory.CreateDirectory(bundle);
+            PackageArtifactManifestEntry? webEntry = null;
+            if (includeWebPublicationPlan)
+            {
+                const string webPackageId = "ForgeTrust.AppSurface.Web";
+                const string webProject = "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj";
+                var webFileName = $"{webPackageId}.{Version}.nupkg";
+                var webArchivePath = TestPathUtils.PathUnder(bundle, webFileName);
+                using (var archive = ZipFile.Open(webArchivePath, ZipArchiveMode.Create))
+                    Add(archive, $"{webPackageId}.nuspec", $"<package><metadata><id>{webPackageId}</id><version>{Version}</version></metadata></package>");
+                webEntry = new PackageArtifactManifestEntry(webPackageId, webProject, "publish", webFileName,
+                    PackageHash.ComputeSha512(webArchivePath), false);
+            }
             var fileName = $"{PackageId}.{Version}.nupkg";
             var archivePath = TestPathUtils.PathUnder(bundle, fileName);
             var releaseManifest = ReleaseManifest();
@@ -362,7 +590,8 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
 
             var entry = new PackageArtifactManifestEntry(PackageId, "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
                 "publish", fileName, PackageHash.ComputeSha512(archivePath), false);
-            var manifest = new PackageArtifactManifest(1, Version, DateTimeOffset.Parse("2026-09-23T00:00:00Z"), [entry]);
+            var manifestEntries = webEntry is null ? new[] { entry } : new[] { webEntry!, entry };
+            var manifest = new PackageArtifactManifest(1, Version, DateTimeOffset.Parse("2026-09-23T00:00:00Z"), manifestEntries);
             var manifestPath = TestPathUtils.PathUnder(bundle, "package-artifact-manifest.json");
             await File.WriteAllBytesAsync(manifestPath, JsonSerializer.SerializeToUtf8Bytes(manifest, PackageArtifactJson.Options));
             var package = new TailwindSubjectPackage(PackageId, Version, fileName, entry.Sha512);
@@ -459,7 +688,44 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
 
             var map = TestPathUtils.PathUnder(root, "host-map.json");
             await File.WriteAllBytesAsync(map, JsonSerializer.SerializeToUtf8Bytes(hostMap));
-            return new Fixture(root, repository, commit, bundle, manifestPath, subjectHash, evidence, map);
+            var planManifestPath = includeWebPublicationPlan
+                ? await CreateFocusedPublicationPlanAsync(repository, root)
+                : null;
+            return new Fixture(root, repository, commit, bundle, manifestPath, subjectHash, evidence, map, planManifestPath);
+        }
+
+        private static async Task<string> CreateFocusedPublicationPlanAsync(string repository, string fixtureRoot)
+        {
+            var sourceManifest = TestPathUtils.PathUnder(repository, "packages", "package-index.yml");
+            var lines = (await File.ReadAllLinesAsync(sourceManifest)).ToList();
+            var starts = lines.Select((line, index) => (line, index))
+                .Where(item => item.line.StartsWith("  - project:", StringComparison.Ordinal))
+                .Select(item => item.index)
+                .ToArray();
+            for (var blockIndex = starts.Length - 1; blockIndex >= 0; blockIndex--)
+            {
+                var start = starts[blockIndex];
+                var end = blockIndex + 1 < starts.Length ? starts[blockIndex + 1] : lines.Count;
+                var project = lines[start]["  - project:".Length..].Trim().Trim('"', '\'');
+                if (project is "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"
+                    or "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj")
+                    continue;
+
+                var decisionIndex = Enumerable.Range(start, end - start)
+                    .FirstOrDefault(index => lines[index].StartsWith("    publish_decision:", StringComparison.Ordinal), -1);
+                if (decisionIndex < 0) continue;
+                var decision = lines[decisionIndex]["    publish_decision:".Length..].Trim();
+                if (decision is not ("publish" or "support_publish")) continue;
+                lines[decisionIndex] = "    publish_decision: do_not_publish";
+                var hasReason = Enumerable.Range(start, end - start)
+                    .Any(index => lines[index].StartsWith("    publish_reason:", StringComparison.Ordinal));
+                if (!hasReason)
+                    lines.Insert(decisionIndex + 1, "    publish_reason: Omitted from the focused evidence CLI fixture.");
+            }
+
+            var focusedManifest = TestPathUtils.PathUnder(fixtureRoot, "focused-package-index.yml");
+            await File.WriteAllLinesAsync(focusedManifest, lines);
+            return focusedManifest;
         }
 
         public async Task<(bool Succeeded, string ReportPath)> AggregateAsync(string reportName)
@@ -518,6 +784,15 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
                 case "bad-producer-artifact-binding":
                     aggregate["producerArtifactId"] = "999";
                     break;
+                case "aggregate-inventory-duplicate":
+                    files.Add(files[0]!.DeepClone());
+                    break;
+                case "aggregate-inventory-containing-file":
+                    files[0]!["path"] = "tailwind-native-aggregate.json";
+                    break;
+                case "aggregate-inventory-bad-hash":
+                    files[0]!["sha256"] = new string('0', 64);
+                    break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(mutation), mutation, "Unknown aggregate mutation.");
             }
@@ -548,7 +823,7 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
                 "--artifacts-input", Bundle,
                 "--artifact-manifest", ManifestPath,
                 "--mode", mode,
-                "--producer-subject", TailwindProofSubjectService.FileName,
+                "--producer-subject", TestPathUtils.PathUnder(Bundle, TailwindProofSubjectService.FileName),
                 "--producer-artifact-id", "501",
                 "--expected-subject-sha256", SubjectHash,
                 "--repository-id", "12345",

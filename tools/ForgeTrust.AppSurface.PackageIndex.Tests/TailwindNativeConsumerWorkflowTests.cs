@@ -154,6 +154,26 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
     }
 
     [Fact]
+    public async Task ReleaseMode_RejectsMalformedArtifactManifestBeforeStartingRestore()
+    {
+        var producer = await CreateProducerBundleAsync();
+        await File.WriteAllTextAsync(producer.ManifestPath, "{");
+        var runner = new LocalProofRunner();
+        var report = TestPathUtils.PathUnder(_root, "malformed-manifest-report");
+
+        var result = await TailwindNativeConsumerWorkflow.RunAsync(producer.Repository, producer.Bundle, producer.ManifestPath,
+            ReleaseOptions(producer, CurrentRid(), "malformed-manifest", report), runner, CancellationToken.None,
+            ValidateFixtureProducerArtifactsAsync);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("failed", result.Status);
+        Assert.Empty(runner.Requests);
+        Assert.False(File.Exists(result.ReportPath));
+        using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(report, "diagnostics.json")));
+        Assert.Equal("producer-binding", diagnostics.RootElement.GetProperty("stage").GetString());
+    }
+
+    [Fact]
     public async Task ReleaseMode_RestoresPrivatePackageCacheBuildsAndWritesNativeReceipt()
     {
         var producer = await CreateProducerBundleAsync();
@@ -242,6 +262,10 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
     [InlineData("locked-restore-failed", "locked-restore", "simulated locked restore failure", "sdk-version,restore,locked restore")]
     [InlineData("unsafe-package-path", "restored-graph-and-payload", "unsafe package path", "sdk-version,restore,locked restore")]
     [InlineData("external-package-folder", "restored-graph-and-payload", "designated fresh private NuGet cache", "sdk-version,restore,locked restore")]
+    [InlineData("multiple-package-folders", "restored-graph-and-payload", "designated fresh private NuGet cache", "sdk-version,restore,locked restore")]
+    [InlineData("missing-package-path", "restored-graph-and-payload", "no package path", "sdk-version,restore,locked restore")]
+    [InlineData("missing-package-directory", "restored-graph-and-payload", "escapes the private cache or is absent", "sdk-version,restore,locked restore")]
+    [InlineData("linked-assets-file", "restored-graph-and-payload", "not a regular file", "sdk-version,restore,locked restore")]
     [InlineData("missing-cache-archive", "restored-graph-and-payload", "does not contain exactly the expected archive", "sdk-version,restore,locked restore")]
     [InlineData("extra-cache-archive", "restored-graph-and-payload", "does not contain exactly the expected archive", "sdk-version,restore,locked restore")]
     [InlineData("changed-cache-archive", "restored-graph-and-payload", "restored archive SHA-512", "sdk-version,restore,locked restore")]
@@ -250,9 +274,13 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
     [InlineData("changed-assets-after-build", "native-build", "assets graph changed during", "sdk-version,restore,locked restore,build")]
     [InlineData("native-executable-in-output", "native-build", "executable was copied into consumer build output", "sdk-version,restore,locked restore,build")]
     [InlineData("changed-cache-archive-after-build", "post-build-revalidation", "Restored archive", "sdk-version,restore,locked restore,build")]
+    [InlineData("renamed-cache-archive-after-build", "post-build-revalidation", "changed its expected basename", "sdk-version,restore,locked restore,build")]
+    [InlineData("linked-cache-binary-after-build", "native-build", "link/reparse point", "sdk-version,restore,locked restore,build")]
+    [InlineData("linked-cache-directory-after-build", "native-build", "link/reparse point", "sdk-version,restore,locked restore,build")]
     public async Task ReleaseMode_FailsClosedForRestoreCachePayloadAndBuildMutations(
         string failure, string expectedStage, string expectedMessage, string expectedCommands)
     {
+        if (failure.StartsWith("linked-", StringComparison.Ordinal) && OperatingSystem.IsWindows()) return;
         var producer = await CreateProducerBundleAsync();
         var runner = new NativeReleaseRunner(producer, CurrentRid(), failure: failure);
         var report = TestPathUtils.PathUnder(_root, "release-" + failure + "-report");
@@ -481,9 +509,21 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
             if (failure != "missing-binary")
             {
                 var binary = TestPathUtils.PathUnder(work, "tailwind-cache", "tailwind-" + TailwindVersion, rid, BinaryName(rid));
-                Directory.CreateDirectory(Path.GetDirectoryName(binary)!);
-                var contents = failure == "wrong-binary-hash" ? Encoding.UTF8.GetBytes("unexpected tailwind bytes") : FakeCliBytes;
-                await File.WriteAllBytesAsync(binary, contents, cancellationToken);
+                if (failure == "linked-cache-directory-after-build")
+                {
+                    var versionDirectory = TestPathUtils.PathUnder(work, "tailwind-cache", "tailwind-" + TailwindVersion);
+                    Directory.CreateDirectory(versionDirectory);
+                    var outsideDirectory = TestPathUtils.PathUnder(work, "outside-cache-directory");
+                    Directory.CreateDirectory(outsideDirectory);
+                    await File.WriteAllBytesAsync(TestPathUtils.PathUnder(outsideDirectory, BinaryName(rid)), FakeCliBytes, cancellationToken);
+                    Directory.CreateSymbolicLink(Path.Combine(versionDirectory, rid), outsideDirectory);
+                }
+                else
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(binary)!);
+                    var contents = failure == "wrong-binary-hash" ? Encoding.UTF8.GetBytes("unexpected tailwind bytes") : FakeCliBytes;
+                    await File.WriteAllBytesAsync(binary, contents, cancellationToken);
+                }
             }
             if (failure == "changed-assets-after-build")
                 await File.AppendAllTextAsync(_assetsPath!, " ", cancellationToken);
@@ -491,6 +531,16 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
                 await File.WriteAllTextAsync(TestPathUtils.PathUnder(outputDirectory, "tailwindcss-fixture"), "must stay in cache", cancellationToken);
             if (failure == "changed-cache-archive-after-build")
                 await File.AppendAllTextAsync(_cachedArchivePath!, "changed after restore", cancellationToken);
+            if (failure == "renamed-cache-archive-after-build")
+                File.Move(_cachedArchivePath!, TestPathUtils.PathUnder(_restoredPackageDirectory!, "renamed-after-build.nupkg"));
+            if (failure == "linked-cache-binary-after-build")
+            {
+                var binary = TestPathUtils.PathUnder(work, "tailwind-cache", "tailwind-" + TailwindVersion, rid, BinaryName(rid));
+                File.Delete(binary);
+                var target = TestPathUtils.PathUnder(work, "outside-cache-binary");
+                await File.WriteAllBytesAsync(target, FakeCliBytes, cancellationToken);
+                File.CreateSymbolicLink(binary, target);
+            }
             if (mutateProtectedPayloadAfterBuild)
             {
                 Assert.NotNull(_restoredPackageDirectory);
@@ -526,6 +576,17 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
                 ["dependencies"] = new Dictionary<string, string>(),
                 ["build"] = new Dictionary<string, object>()
             };
+            var packageFolders = new Dictionary<string, object>
+            {
+                [Path.GetFullPath(packageCache) + Path.DirectorySeparatorChar] = new Dictionary<string, object>()
+            };
+            if (failure == "multiple-package-folders")
+                packageFolders[Path.GetFullPath(packageCache + "-external") + Path.DirectorySeparatorChar] = new Dictionary<string, object>();
+            if (failure == "external-package-folder")
+            {
+                packageFolders.Clear();
+                packageFolders[Path.GetFullPath(packageCache + "-external") + Path.DirectorySeparatorChar] = new Dictionary<string, object>();
+            }
             var assets = new
             {
                 targets = new Dictionary<string, object> { ["net10.0"] = new Dictionary<string, object> { [nodeKey] = targetNode } },
@@ -534,13 +595,16 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
                     [nodeKey] = new
                     {
                         type = "package",
-                        path = failure == "unsafe-package-path" ? "../outside" : packagePath
+                        path = failure switch
+                        {
+                            "unsafe-package-path" => "../outside",
+                            "missing-package-path" => (string?)null,
+                            "missing-package-directory" => "missing/1.2.3",
+                            _ => packagePath
+                        }
                     }
                 },
-                packageFolders = new Dictionary<string, object>
-                {
-                    [Path.GetFullPath(failure == "external-package-folder" ? packageCache + "-external" : packageCache) + Path.DirectorySeparatorChar] = new Dictionary<string, object>()
-                },
+                packageFolders,
                 project = new
                 {
                     frameworks = new Dictionary<string, object> { ["net10.0"] = new Dictionary<string, object>() },
@@ -550,6 +614,12 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
             _assetsPath = TestPathUtils.PathUnder(request.WorkingDirectory, "obj", "project.assets.json");
             Directory.CreateDirectory(Path.GetDirectoryName(_assetsPath)!);
             await File.WriteAllBytesAsync(_assetsPath, JsonSerializer.SerializeToUtf8Bytes(assets), cancellationToken);
+            if (failure == "linked-assets-file")
+            {
+                var linkedAssetsTarget = TestPathUtils.PathUnder(Directory.GetParent(request.WorkingDirectory)!.FullName, "linked-project.assets.json");
+                File.Move(_assetsPath, linkedAssetsTarget);
+                File.CreateSymbolicLink(_assetsPath, linkedAssetsTarget);
+            }
             if (failure != "missing-lock")
                 await File.WriteAllTextAsync(TestPathUtils.PathUnder(request.WorkingDirectory, "packages.lock.json"), "{\"version\":1,\"dependencies\":{}}", cancellationToken);
         }

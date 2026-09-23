@@ -743,7 +743,10 @@ internal static class TailwindEvidenceWorkflow
         RequireString(root, "subjectSha256", request.ExpectedSubjectSha256);
         RequireString(root, "artifactManifestSha256", subject.ArtifactManifestSha256);
         RequireString(root, "packageVersion", subject.PackageVersion);
-        if (!root.TryGetProperty("payloadProjectionVersion", out var projection) || !projection.TryGetInt32(out var version) || version != 1)
+        if (!root.TryGetProperty("payloadProjectionVersion", out var projection)
+            || projection.ValueKind != JsonValueKind.Number
+            || !projection.TryGetInt32(out var version)
+            || version != 1)
             throw new PackageIndexException("Evidence payloadProjectionVersion must be the integer 1.");
     }
 

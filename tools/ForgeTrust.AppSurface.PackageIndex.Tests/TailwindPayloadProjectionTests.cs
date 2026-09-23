@@ -45,6 +45,15 @@ public sealed class TailwindPayloadProjectionTests
         Assert.DoesNotContain("README.md", hashes.Keys);
     }
 
+    [Fact]
+    public void Verify_AcceptsBooleanCompileOnlyMetadata()
+    {
+        using var fixture = new PackageFixture();
+        using var target = ParseTarget("{ \"compileOnly\": true, \"dependencies\": { \"Other\": \"1.0.0\" } }");
+
+        Assert.Empty(fixture.Verify(target.RootElement));
+    }
+
     [Theory]
     [InlineData("../outside.txt")]
     [InlineData("/absolute.txt")]
@@ -159,6 +168,38 @@ public sealed class TailwindPayloadProjectionTests
     }
 
     [Fact]
+    public void Verify_RejectsSelectedAssetBelowAFileInTheRestoredPackage()
+    {
+        using var fixture = new PackageFixture();
+        fixture.Add("native/codec.bin/child", "archive bytes", omitRestored: true);
+        var blockingFile = TestPathUtils.PathUnder(fixture.RestoredDirectory, "native", "codec.bin");
+        Directory.CreateDirectory(Path.GetDirectoryName(blockingFile)!);
+        File.WriteAllText(blockingFile, "restored file occupies an ancestor");
+        using var target = ParseTarget("{ \"native\": { \"native/codec.bin/child\": {} } }");
+
+        var error = Assert.Throws<PackageIndexException>(() => fixture.Verify(target.RootElement));
+
+        Assert.Contains("missing assets-graph path", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Verify_RejectsAmbiguousCaseInsensitiveRestoredAssetLookup()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        using var fixture = new PackageFixture();
+        fixture.Add("native/codec.bin", "archive bytes");
+        var alternate = TestPathUtils.PathUnder(fixture.RestoredDirectory, "native", "CODEC.bin");
+        File.WriteAllText(alternate, "case-colliding restored bytes");
+        if (Directory.EnumerateFiles(Path.GetDirectoryName(alternate)!).Count() < 2) return;
+        using var target = ParseTarget("{ \"native\": { \"native/codec.bin\": {} } }");
+
+        var error = Assert.Throws<PackageIndexException>(() => fixture.Verify(target.RootElement));
+
+        Assert.Contains("ambiguous case-insensitive path component", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Verify_RejectsSelectedAssetLinkOutsideProtectedRoots()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -219,6 +260,7 @@ public sealed class TailwindPayloadProjectionTests
     [InlineData("{ \"type\": 1 }", "metadata")]
     [InlineData("{ \"framework\": [] }", "metadata")]
     [InlineData("{ \"dependencies\": { \"Other\": 1 } }", "dependency metadata")]
+    [InlineData("{ \"dependencies\": [] }", "dependency metadata")]
     [InlineData("{ \"frameworkAssemblies\": {} }", "metadata")]
     [InlineData("{ \"frameworkReferences\": [1] }", "metadata")]
     [InlineData("{ \"compileOnly\": \"true\" }", "metadata")]

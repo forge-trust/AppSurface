@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 
@@ -130,6 +131,15 @@ public sealed class TailwindProducerSubjectTests : IDisposable
         var error = Assert.Throws<PackageIndexException>(() => TailwindProofSubjectService.ValidateSubject(subject));
 
         Assert.Contains("unsupported Tailwind package, framework, or payload projection", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateSubject_RejectsUnsupportedSchema()
+    {
+        var error = Assert.Throws<PackageIndexException>(() => TailwindProofSubjectService.ValidateSubject(
+            MinimalSubject() with { Schema = "appsurface-tailwind-proof-subject-v0" }));
+
+        Assert.Contains("Unsupported Tailwind producer subject schema", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -529,6 +539,78 @@ public sealed class TailwindProducerSubjectTests : IDisposable
     }
 
     [Fact]
+    public async Task ReadResolvedClosure_AcceptsKnownFirstPartyDependencyWithMatchingResolvedVersion()
+    {
+        var fixture = await CreateFixtureAsync();
+        var manifest = await new PackageArtifactManifestReader().ReadAsync(fixture.ManifestPath, CancellationToken.None);
+        const string dependencyId = "ForgeTrust.AppSurface.Web";
+        var dependencyFileName = $"{dependencyId}.{Version}.nupkg";
+        var dependencyHash = new string('f', 128);
+        manifest = manifest with
+        {
+            Entries = manifest.Entries.Append(new PackageArtifactManifestEntry(
+                dependencyId, "Web/ForgeTrust.AppSurface.Web.csproj", "publish", dependencyFileName, dependencyHash, false)).ToArray()
+        };
+
+        var assets = JsonNode.Parse(Assets("net10.0"))!.AsObject();
+        var target = assets["targets"]!["net10.0"]!.AsObject();
+        target[$"{TailwindId}/{Version}"]!["dependencies"] = new JsonObject { [dependencyId] = Version };
+        target.Add($"{dependencyId}/{Version}", new JsonObject { ["type"] = "package" });
+        assets["libraries"]!.AsObject().Add($"{dependencyId}/{Version}", new JsonObject { ["type"] = "package" });
+
+        var path = TestPathUtils.PathUnder(_root, "first-party-dependency.assets.json");
+        await File.WriteAllTextAsync(path, assets.ToJsonString());
+
+        var closure = TailwindProofSubjectService.ReadResolvedClosure(path, manifest);
+        var expected = new[]
+        {
+            fixture.Package,
+            new TailwindSubjectPackage(dependencyId, Version, dependencyFileName, dependencyHash)
+        }.OrderBy(item => item.PackageId, StringComparer.Ordinal);
+
+        Assert.Equal(expected, closure);
+    }
+
+    [Fact]
+    public async Task ReadResolvedClosure_RejectsKnownFirstPartyDependencyWhenMetadataVersionDisagreesWithResolvedNode()
+    {
+        var fixture = await CreateFixtureAsync();
+        var manifest = await new PackageArtifactManifestReader().ReadAsync(fixture.ManifestPath, CancellationToken.None);
+        const string dependencyId = "ForgeTrust.AppSurface.Web";
+        var dependencyFileName = $"{dependencyId}.{Version}.nupkg";
+        manifest = manifest with
+        {
+            Entries = manifest.Entries.Append(new PackageArtifactManifestEntry(
+                dependencyId, "Web/ForgeTrust.AppSurface.Web.csproj", "publish", dependencyFileName, new string('f', 128), false)).ToArray()
+        };
+
+        var assets = JsonNode.Parse(Assets("net10.0"))!.AsObject();
+        var target = assets["targets"]!["net10.0"]!.AsObject();
+        target[$"{TailwindId}/{Version}"]!["dependencies"] = new JsonObject { [dependencyId] = "9.9.9" };
+        target.Add($"{dependencyId}/{Version}", new JsonObject { ["type"] = "package" });
+        assets["libraries"]!.AsObject().Add($"{dependencyId}/{Version}", new JsonObject { ["type"] = "package" });
+        var path = TestPathUtils.PathUnder(_root, "wrong-first-party-dependency-version.assets.json");
+        await File.WriteAllTextAsync(path, assets.ToJsonString());
+
+        var error = Assert.Throws<PackageIndexException>(() => TailwindProofSubjectService.ReadResolvedClosure(path, manifest));
+
+        Assert.Contains("First-party dependency version metadata", error.Message, StringComparison.Ordinal);
+        Assert.Contains(dependencyId, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadResolvedClosure_RejectsMissingAssetsFile()
+    {
+        var fixture = await CreateFixtureAsync();
+        var manifest = await new PackageArtifactManifestReader().ReadAsync(fixture.ManifestPath, CancellationToken.None);
+        var path = TestPathUtils.PathUnder(_root, "missing-project.assets.json");
+
+        var error = Assert.Throws<PackageIndexException>(() => TailwindProofSubjectService.ReadResolvedClosure(path, manifest));
+
+        Assert.Contains("did not produce", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ReadResolvedClosure_RejectsMissingAndUnplannedFirstPartyGraphNodes()
     {
         var fixture = await CreateFixtureAsync();
@@ -653,6 +735,53 @@ public sealed class TailwindProducerSubjectTests : IDisposable
             _artifacts, fixture.ManifestPath, "12345", "98765", "1", new string('a', 40), [fixture.Package], CancellationToken.None));
 
         Assert.Contains("missing build/tailwind.release.json", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Create_AcceptsExplicitZipDirectoryEntriesThatContainPackageFiles()
+    {
+        var fixture = await CreateFixtureAsync();
+        var packagePath = TestPathUtils.PathUnder(_artifacts, fixture.Package.ArtifactFileName);
+        using (var archive = ZipFile.Open(packagePath, ZipArchiveMode.Update))
+            archive.CreateEntry("build/");
+        var packageHash = PackageHash.ComputeSha512(packagePath);
+        await RewriteManifestHashAsync(fixture.ManifestPath, fixture.Package, packageHash);
+
+        var subject = await TailwindProofSubjectService.CreateAsync(
+            _artifacts, fixture.ManifestPath, "12345", "98765", "1", new string('a', 40),
+            [fixture.Package with { PackageSha512 = packageHash }], CancellationToken.None);
+
+        Assert.Equal(packageHash, subject.PackageSha512);
+        Assert.Equal(TailwindId, subject.FirstPartyPackages.Single().PackageId);
+    }
+
+    [Fact]
+    public async Task Create_RejectsTailwindReleaseManifestOverDocumentLimitInsideZip()
+    {
+        var fixture = await CreateFixtureAsync();
+        var packagePath = TestPathUtils.PathUnder(_artifacts, fixture.Package.ArtifactFileName);
+        using (var archive = ZipFile.Open(packagePath, ZipArchiveMode.Update))
+        {
+            archive.GetEntry("build/tailwind.release.json")!.Delete();
+            var releaseManifest = archive.CreateEntry("build/tailwind.release.json", CompressionLevel.Optimal);
+            await using var stream = releaseManifest.Open();
+            var chunk = Enumerable.Repeat((byte)'x', 64 * 1024).ToArray();
+            var remaining = TailwindProofSubjectService.MaximumDocumentBytes + 1;
+            while (remaining > 0)
+            {
+                var count = Math.Min(remaining, chunk.Length);
+                await stream.WriteAsync(chunk.AsMemory(0, count));
+                remaining -= count;
+            }
+        }
+
+        var packageHash = PackageHash.ComputeSha512(packagePath);
+        await RewriteManifestHashAsync(fixture.ManifestPath, fixture.Package, packageHash);
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => TailwindProofSubjectService.CreateAsync(
+            _artifacts, fixture.ManifestPath, "12345", "98765", "1", new string('a', 40),
+            [fixture.Package with { PackageSha512 = packageHash }], CancellationToken.None));
+
+        Assert.Contains("Tailwind release manifest exceeds the 16 MiB document limit", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
