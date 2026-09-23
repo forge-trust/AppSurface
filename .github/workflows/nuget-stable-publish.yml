@@ -46,6 +46,7 @@ jobs:
           fi
 
           git fetch --force origin "refs/tags/${tag_name}:refs/tags/${tag_name}"
+          git cat-file -e "${GITHUB_SHA}^{commit}"
           tag_type="$(git cat-file -t "refs/tags/${tag_name}")"
           if [[ "${tag_type}" != "tag" ]]; then
             echo "Stable publish requires an annotated tag. '${tag_name}' is ${tag_type}." >&2
@@ -53,6 +54,10 @@ jobs:
           fi
 
           tag_commit="$(git rev-parse "refs/tags/${tag_name}^{commit}")"
+          if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+            echo "Tag '${tag_name}' resolves to ${tag_commit}, not immutable triggering commit ${GITHUB_SHA}." >&2
+            exit 1
+          fi
           git fetch origin "${STABLE_BASE_REF}:refs/remotes/origin/${STABLE_BASE_REF}"
           if ! git merge-base --is-ancestor "${tag_commit}" "origin/${STABLE_BASE_REF}"; then
             echo "Tag '${tag_name}' resolves to ${tag_commit}, which is not reachable from origin/${STABLE_BASE_REF}." >&2
@@ -119,10 +124,16 @@ jobs:
     needs:
       - validate-tag
       - validate-source-ci
+      - pack-and-verify
     uses: ./.github/workflows/tailwind-native-host-evidence.yml
+    permissions:
+      actions: read
+      contents: read
     with:
       package_version: ${{ needs.validate-tag.outputs.package-version }}
       source_commit: ${{ needs.validate-tag.outputs.tag-commit }}
+      producer_artifact_id: ${{ needs.pack-and-verify.outputs.producer_artifact_id }}
+      expected_subject_sha256: ${{ needs.pack-and-verify.outputs.expected_subject_sha256 }}
 
   validate-source-ci:
     needs: validate-tag
@@ -159,11 +170,18 @@ jobs:
           done
 
   pack-and-verify:
+    name: pack-and-verify
     needs:
       - validate-tag
       - validate-source-ci
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      producer_artifact_id: ${{ steps.binding.outputs.producer_artifact_id }}
+      expected_subject_sha256: ${{ steps.binding.outputs.expected_subject_sha256 }}
 
     steps:
       - name: Checkout tag commit
@@ -172,24 +190,45 @@ jobs:
           ref: ${{ needs.validate-tag.outputs.tag-commit }}
           persist-credentials: false
 
+      - name: Resolve frozen producer bundle by exact run-scoped name
+        id: recovery
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bash .github/scripts/resolve-tailwind-release-artifacts.sh resolve-producer \
+            --repository "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --name "appsurface-stable-packages-$GITHUB_RUN_ID" --output "$GITHUB_OUTPUT"
+
+      - name: Download recovered producer by immutable ID
+        if: ${{ steps.recovery.outputs.producer_found == 'true' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.recovery.outputs.producer_artifact_id }}
+          path: ${{ runner.temp }}/package-artifacts
+
       - name: Setup .NET SDK
+        if: ${{ steps.recovery.outputs.producer_found != 'true' }}
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: |
             10.0.x
 
       - name: Setup pnpm
+        if: ${{ steps.recovery.outputs.producer_found != 'true' }}
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: 11.1.3
 
       - name: Setup Node.js
+        if: ${{ steps.recovery.outputs.producer_found != 'true' }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           package-manager-cache: false
 
       - name: Verify web assets
+        if: ${{ steps.recovery.outputs.producer_found != 'true' }}
         run: |
           pnpm --dir Web install --frozen-lockfile
           pnpm --dir Web run assets:typecheck
@@ -197,16 +236,52 @@ jobs:
           pnpm --dir Web run assets:verify
 
       - name: Verify package artifacts
+        if: ${{ steps.recovery.outputs.producer_found != 'true' }}
         env:
           PACKAGE_VERSION: ${{ needs.validate-tag.outputs.package-version }}
           PACKAGE_ARTIFACTS: ${{ runner.temp }}/package-artifacts
+          REPOSITORY_ID: ${{ github.repository_id }}
+          PRODUCER_RUN_ID: ${{ github.run_id }}
+          PRODUCER_ATTEMPT: ${{ github.run_attempt }}
+          SOURCE_COMMIT: ${{ needs.validate-tag.outputs.tag-commit }}
         run: |
-          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
+          dotnet restore tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --locked-mode
+          dotnet build tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -c Release --no-restore --output "$RUNNER_TEMP/package-index" /p:SourceRevisionId="$SOURCE_COMMIT"
+          dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" \
             verify-packages \
             --package-version "${PACKAGE_VERSION}" \
             --artifacts-output "${PACKAGE_ARTIFACTS}" \
             --artifact-manifest "${PACKAGE_ARTIFACTS}/package-artifact-manifest.json" \
-            --report "${PACKAGE_ARTIFACTS}/package-validation-report.md"
+            --report "${PACKAGE_ARTIFACTS}/package-validation-report.md" \
+            --repository-id "$REPOSITORY_ID" --producer-run-id "$PRODUCER_RUN_ID" \
+            --producer-attempt "$PRODUCER_ATTEMPT" --source-commit "$SOURCE_COMMIT"
+
+      - name: Upload frozen producer bundle
+        id: upload-producer
+        if: ${{ success() && steps.recovery.outputs.producer_found != 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: appsurface-stable-packages-${{ github.run_id }}
+          path: ${{ runner.temp }}/package-artifacts
+          if-no-files-found: error
+          retention-days: ${{ github.retention_days }}
+
+      - name: Re-emit frozen producer binding
+        id: binding
+        env:
+          RECOVERED_ID: ${{ steps.recovery.outputs.producer_artifact_id }}
+          UPLOADED_ID: ${{ steps.upload-producer.outputs.artifact-id }}
+          PACKAGE_ARTIFACTS: ${{ runner.temp }}/package-artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          producer_id="$RECOVERED_ID"
+          [[ -n "$producer_id" ]] || producer_id="$UPLOADED_ID"
+          [[ "$producer_id" =~ ^[1-9][0-9]*$ ]]
+          subject="$PACKAGE_ARTIFACTS/tailwind-proof-subject.json"
+          [[ -f "$subject" ]]
+          echo "producer_artifact_id=$producer_id" >> "$GITHUB_OUTPUT"
+          echo "expected_subject_sha256=$(sha256sum "$subject" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
       - name: Upload package validation diagnostics
         if: ${{ always() }}
@@ -231,12 +306,6 @@ jobs:
             ${{ runner.temp }}/package-artifacts/docs-package-consumer-proof/logs/**
           if-no-files-found: warn
 
-      - name: Upload validated package artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: appsurface-stable-packages-${{ needs.validate-tag.outputs.package-version }}
-          path: ${{ runner.temp }}/package-artifacts
-          if-no-files-found: error
 
   prove-docs-archive:
     needs:
@@ -355,6 +424,7 @@ jobs:
           if-no-files-found: warn
 
   publish-nuget:
+    name: publish-nuget
     needs:
       - validate-tag
       - validate-release-environment
@@ -364,10 +434,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
+      actions: read
       contents: read
       # Required for NuGet trusted publishing to request an OIDC token.
       id-token: write
     environment: nuget-stable
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_COMMIT: ${{ needs.validate-tag.outputs.tag-commit }}
+      REPOSITORY_ID: ${{ github.repository_id }}
+      PRODUCER_RUN_ID: ${{ github.run_id }}
+      PRODUCER_ARTIFACT_ID: ${{ needs.pack-and-verify.outputs.producer_artifact_id }}
+      EXPECTED_SUBJECT_SHA256: ${{ needs.pack-and-verify.outputs.expected_subject_sha256 }}
+      CURRENT_AGGREGATE_ARTIFACT_ID: ${{ needs.native-host-evidence.outputs.aggregate_artifact_id }}
+      CURRENT_AGGREGATE_SHA256: ${{ needs.native-host-evidence.outputs.aggregate_sha256 }}
+      CURRENT_NATIVE_INVOCATION_ID: ${{ needs.native-host-evidence.outputs.native_invocation_id }}
+      PACKAGE_ARTIFACTS: ${{ runner.temp }}/package-artifacts
+      AGGREGATE_DIRECTORY: ${{ runner.temp }}/tailwind-aggregate
+      RECOVERED_START_DIRECTORY: ${{ runner.temp }}/recovered-publication-start
+      PREFLIGHT_REPORT_DIRECTORY: ${{ runner.temp }}/tailwind-publish-preflight-report
+      PUBLICATION_DIRECTORY: ${{ runner.temp }}/tailwind-publication
 
     steps:
       - name: Checkout tag commit
@@ -376,17 +462,167 @@ jobs:
           ref: ${{ needs.validate-tag.outputs.tag-commit }}
           persist-credentials: false
 
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          dotnet-version: |
-            10.0.x
+      - name: Resolve original publication-start artifact
+        id: start-recovery
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bash .github/scripts/resolve-tailwind-release-artifacts.sh resolve-publication \
+            --repository "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --name "publication-start-$GITHUB_RUN_ID" --output "$GITHUB_OUTPUT"
 
-      - name: Download validated package artifacts
+      - name: Download recovered publication-start by immutable ID
+        if: ${{ steps.start-recovery.outputs.publication_found == 'true' }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: appsurface-stable-packages-${{ needs.validate-tag.outputs.package-version }}
-          path: ${{ runner.temp }}/package-artifacts
+          artifact-ids: ${{ steps.start-recovery.outputs.publication_artifact_id }}
+          path: ${{ runner.temp }}/recovered-publication-start
+
+      - name: Select original producer and aggregate binding
+        id: candidate
+        env:
+          RECOVERED: ${{ steps.start-recovery.outputs.publication_found }}
+          START_RECEIPT: ${{ runner.temp }}/recovered-publication-start/publication-start-receipt.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RECOVERED" == true ]]; then
+            [[ -f "$START_RECEIPT" ]]
+            python3 - "$START_RECEIPT" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          def reject_duplicate_keys(pairs):
+              result = {}
+              for key, value in pairs:
+                  if key in result:
+                      raise ValueError(f"duplicate JSON key: {key}")
+                  result[key] = value
+              return result
+
+          with pathlib.Path(sys.argv[1]).open("r", encoding="utf-8") as stream:
+              value = json.load(stream, object_pairs_hook=reject_duplicate_keys)
+          if not isinstance(value, dict):
+              raise ValueError("publication-start receipt root must be a JSON object")
+          PY
+            jq -e --arg producer "$PRODUCER_ARTIFACT_ID" \
+              '.producerArtifactId == $producer and (.producerArtifactId | type == "string" and test("^[1-9][0-9]*$"))' "$START_RECEIPT" >/dev/null
+            aggregate_id="$(jq -er 'select(.aggregateArtifactId | type == "string" and test("^[1-9][0-9]*$")) | .aggregateArtifactId' "$START_RECEIPT")"
+            aggregate_sha="$(jq -er '.aggregateSha256' "$START_RECEIPT")"
+            invocation="$(jq -er '.nativeInvocationId' "$START_RECEIPT")"
+            [[ "$aggregate_id" =~ ^[1-9][0-9]*$ && "$aggregate_sha" =~ ^[0-9a-f]{64}$ ]]
+            echo "start_receipt_path=$START_RECEIPT" >> "$GITHUB_OUTPUT"
+            echo "start_artifact_id=${{ steps.start-recovery.outputs.publication_artifact_id }}" >> "$GITHUB_OUTPUT"
+          else
+            aggregate_id="$CURRENT_AGGREGATE_ARTIFACT_ID"
+            aggregate_sha="$CURRENT_AGGREGATE_SHA256"
+            invocation="$CURRENT_NATIVE_INVOCATION_ID"
+            [[ "$aggregate_id" =~ ^[1-9][0-9]*$ && "$aggregate_sha" =~ ^[0-9a-f]{64}$ && -n "$invocation" ]]
+            echo "start_receipt_path=$PREFLIGHT_REPORT_DIRECTORY/publication-start-receipt.json" >> "$GITHUB_OUTPUT"
+          fi
+          echo "aggregate_artifact_id=$aggregate_id" >> "$GITHUB_OUTPUT"
+          echo "expected_aggregate_sha256=$aggregate_sha" >> "$GITHUB_OUTPUT"
+          echo "native_invocation_id=$invocation" >> "$GITHUB_OUTPUT"
+
+      - name: Download frozen producer bundle by immutable ID
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ env.PRODUCER_ARTIFACT_ID }}
+          path: ${{ env.PACKAGE_ARTIFACTS }}
+
+      - name: Download original aggregate by immutable ID
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.candidate.outputs.aggregate_artifact_id }}
+          path: ${{ env.AGGREGATE_DIRECTORY }}
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore verifier from locked dependencies
+        run: dotnet restore tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --locked-mode
+
+      - name: Build source-stamped verifier
+        env:
+          SOURCE_REVISION_ID: ${{ env.SOURCE_COMMIT }}
+        run: dotnet build tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -c Release --no-restore --output "$RUNNER_TEMP/package-index" /p:SourceRevisionId="$SOURCE_REVISION_ID"
+
+      - name: Validate evidence and prepare publication inputs
+        shell: bash
+        env:
+          AGGREGATE_ARTIFACT_ID: ${{ steps.candidate.outputs.aggregate_artifact_id }}
+          EXPECTED_AGGREGATE_SHA256: ${{ steps.candidate.outputs.expected_aggregate_sha256 }}
+          PREFLIGHT_OUTPUT_DIRECTORY: ${{ steps.start-recovery.outputs.publication_found == 'true' && format('{0}/tailwind-recovery-validation-report', runner.temp) || env.PREFLIGHT_REPORT_DIRECTORY }}
+        run: |
+          set -euo pipefail
+          bundle_args=(--repo-root "$GITHUB_WORKSPACE" --artifacts-input "$PACKAGE_ARTIFACTS" \
+            --artifact-manifest "$PACKAGE_ARTIFACTS/package-artifact-manifest.json" \
+            --producer-subject "$PACKAGE_ARTIFACTS/tailwind-proof-subject.json" \
+            --producer-artifact-id "$PRODUCER_ARTIFACT_ID" --expected-subject-sha256 "$EXPECTED_SUBJECT_SHA256" \
+            --repository-id "$REPOSITORY_ID" --producer-run-id "$PRODUCER_RUN_ID" --source-commit "$SOURCE_COMMIT")
+          dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" verify-tailwind-evidence \
+            "${bundle_args[@]}" --mode publish-preflight \
+            --aggregate-input "$AGGREGATE_DIRECTORY" --aggregate-artifact-id "$AGGREGATE_ARTIFACT_ID" \
+            --expected-aggregate-sha256 "$EXPECTED_AGGREGATE_SHA256" \
+            --publication-directory "$PUBLICATION_DIRECTORY" --report-directory "$PREFLIGHT_OUTPUT_DIRECTORY"
+
+      - name: Upload publication-start receipt
+        id: upload-start
+        if: ${{ success() && steps.start-recovery.outputs.publication_found != 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: publication-start-${{ github.run_id }}
+          path: ${{ runner.temp }}/tailwind-publish-preflight-report/publication-start-receipt.json
+          if-no-files-found: error
+          retention-days: ${{ github.retention_days }}
+
+      - name: Resolve authoritative publication receipt
+        id: start-binding
+        env:
+          RECOVERED_ID: ${{ steps.start-recovery.outputs.publication_artifact_id }}
+          UPLOADED_ID: ${{ steps.upload-start.outputs.artifact-id }}
+          RECOVERED: ${{ steps.start-recovery.outputs.publication_found }}
+          FRESH_RECEIPT: ${{ runner.temp }}/tailwind-publish-preflight-report/publication-start-receipt.json
+        run: |
+          set -euo pipefail
+          start_id="$RECOVERED_ID"
+          receipt="${{ steps.candidate.outputs.start_receipt_path }}"
+          if [[ "$RECOVERED" != true ]]; then start_id="$UPLOADED_ID"; receipt="$FRESH_RECEIPT"; fi
+          [[ "$start_id" =~ ^[1-9][0-9]*$ && -f "$receipt" ]]
+          echo "artifact_id=$start_id" >> "$GITHUB_OUTPUT"
+          echo "receipt_path=$receipt" >> "$GITHUB_OUTPUT"
+
+      - name: Download authoritative publication-start by immutable ID
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.start-binding.outputs.artifact_id }}
+          path: ${{ runner.temp }}/authoritative-publication-start
+
+      - name: Validate uploaded publication-start before requesting credentials
+        env:
+          START_ARTIFACT_ID: ${{ steps.start-binding.outputs.artifact_id }}
+          START_RECEIPT_PATH: ${{ runner.temp }}/authoritative-publication-start/publication-start-receipt.json
+          AGGREGATE_ARTIFACT_ID: ${{ steps.candidate.outputs.aggregate_artifact_id }}
+          EXPECTED_AGGREGATE_SHA256: ${{ steps.candidate.outputs.expected_aggregate_sha256 }}
+          VALIDATION_REPORT_DIRECTORY: ${{ runner.temp }}/tailwind-start-validation-report
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" verify-tailwind-evidence \
+            --mode validate-publication-start --repo-root "$GITHUB_WORKSPACE" \
+            --artifacts-input "$PACKAGE_ARTIFACTS" \
+            --artifact-manifest "$PACKAGE_ARTIFACTS/package-artifact-manifest.json" \
+            --producer-subject "$PACKAGE_ARTIFACTS/tailwind-proof-subject.json" \
+            --producer-artifact-id "$PRODUCER_ARTIFACT_ID" --expected-subject-sha256 "$EXPECTED_SUBJECT_SHA256" \
+            --repository-id "$REPOSITORY_ID" --producer-run-id "$PRODUCER_RUN_ID" --source-commit "$SOURCE_COMMIT" \
+            --aggregate-input "$AGGREGATE_DIRECTORY" --aggregate-artifact-id "$AGGREGATE_ARTIFACT_ID" \
+            --expected-aggregate-sha256 "$EXPECTED_AGGREGATE_SHA256" \
+            --publication-directory "$PUBLICATION_DIRECTORY" --publication-start-receipt "$START_RECEIPT_PATH" \
+            --publication-start-artifact-id "$START_ARTIFACT_ID" --report-directory "$VALIDATION_REPORT_DIRECTORY"
 
       - name: Validate NuGet trusted publishing configuration
         env:
@@ -408,13 +644,25 @@ jobs:
       - name: Publish packages to NuGet
         env:
           NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
-          PACKAGE_ARTIFACTS: ${{ runner.temp }}/package-artifacts
+          START_ARTIFACT_ID: ${{ steps.start-binding.outputs.artifact_id }}
+          START_RECEIPT_PATH: ${{ runner.temp }}/authoritative-publication-start/publication-start-receipt.json
+          AGGREGATE_ARTIFACT_ID: ${{ steps.candidate.outputs.aggregate_artifact_id }}
+          EXPECTED_AGGREGATE_SHA256: ${{ steps.candidate.outputs.expected_aggregate_sha256 }}
+          PUBLISH_REPORT_DIRECTORY: ${{ runner.temp }}/tailwind-publish-report
         run: |
-          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
-            publish-stable \
-            --artifacts-input "${PACKAGE_ARTIFACTS}" \
-            --artifact-manifest "${PACKAGE_ARTIFACTS}/package-artifact-manifest.json" \
-            --publish-log "${PACKAGE_ARTIFACTS}/package-publish-log.md"
+          set -euo pipefail
+          bundle_args=(--repo-root "$GITHUB_WORKSPACE" --artifacts-input "$PACKAGE_ARTIFACTS" \
+            --artifact-manifest "$PACKAGE_ARTIFACTS/package-artifact-manifest.json" \
+            --producer-subject "$PACKAGE_ARTIFACTS/tailwind-proof-subject.json" \
+            --producer-artifact-id "$PRODUCER_ARTIFACT_ID" --expected-subject-sha256 "$EXPECTED_SUBJECT_SHA256" \
+            --repository-id "$REPOSITORY_ID" --producer-run-id "$PRODUCER_RUN_ID" --source-commit "$SOURCE_COMMIT")
+          aggregate_args=(--aggregate-input "$AGGREGATE_DIRECTORY" --aggregate-artifact-id "$AGGREGATE_ARTIFACT_ID" \
+            --expected-aggregate-sha256 "$EXPECTED_AGGREGATE_SHA256")
+          dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" publish-stable \
+            "${bundle_args[@]}" "${aggregate_args[@]}" --publication-directory "$PUBLICATION_DIRECTORY" \
+            --publication-start-receipt "$START_RECEIPT_PATH" --publication-start-artifact-id "$START_ARTIFACT_ID" \
+            --publish-log "$PACKAGE_ARTIFACTS/package-publish-log.md" --report-directory "$PUBLISH_REPORT_DIRECTORY" \
+            --api-key-env NUGET_API_KEY
 
       - name: Upload publish ledger
         if: ${{ always() }}
@@ -423,6 +671,7 @@ jobs:
           name: appsurface-stable-publish-log-${{ needs.validate-tag.outputs.package-version }}
           path: ${{ runner.temp }}/package-artifacts/package-publish-log.md
           if-no-files-found: warn
+          retention-days: ${{ github.retention_days }}
 
   smoke-install:
     needs:

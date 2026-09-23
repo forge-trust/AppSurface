@@ -74,6 +74,14 @@ remains authored content; after that, retain the markers exactly.
    It verifies that the packed `README.md` has exactly one managed marker pair and exactly one canonical chooser and
    release-hub URL inside that region.
 
+## Tailwind artifact provenance (#798)
+
+The approved [#798 design](../../docs/designs/issue-798-tailwind-artifact-provenance.md) and [implementation plan](../../docs/plans/issue-798-tailwind-artifact-provenance.md) define a release proof binding native Tailwind consumer tests to the exact package bundle passed to NuGet. See the canonical [API and operator reference](../../docs/tailwind-artifact-provenance.md) for the implemented CLI flags, evidence schemas, and release workflow.
+
+Authority flows through four stages: the validated tag checkout and package plan establish source and allowed identities; `pack-and-verify` creates one immutable bundle with the package manifest and producer subject; each native job proves it restored and built from that bundle; then aggregation and publication validate the exact host set and candidate again. Protected workflow outputs establish artifact transport identity. Receipt contents cannot select their own authority. The aggregate has its own immutable ID and JSON digest, separate from the producer bundle's ID and subject digest.
+
+The required hosts are exactly `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`, and `win-x64`. Native v2 receipts (`appsurface-tailwind-native-host-proof-v2`) are eligible; v1 is historical diagnostic data only. Each success binds producer ID/run/attempt, subject and manifest digests, source/version, current native invocation, expected and observed host RID/OS/process architecture, and per-first-party producer/restored raw SHA-512 and protected payload evidence. The closure includes Core and Tailwind and comes from the producer's successful `net10.0` consumer graph plus validated package inventory. It also records Tailwind release-manifest and selected host CLI digests, generated CSS, absence of companion dependency, and absence of native consumer output. Full modes, flags, report shapes, limits, recipes and recovery are in the [reference](../../docs/tailwind-artifact-provenance.md).
+
 ## Recovery and release boundary
 
 If `generate` reports a marker, variant, path, or token error, fix the named manifest row or README and rerun the

@@ -55,6 +55,16 @@ Cache-enabled build jobs should restore explicitly before later .NET commands. W
 
 Package-sensitive workflows stay uncached unless a separate issue evaluates their trust boundary. In particular, `package-gate.yml` must keep its isolated `${{ runner.temp }}/nuget-packages` restore and `NuGet.package-gate.config` source policy. Publish, smoke-restore, trusted-publishing, and package validation workflows should not inherit the shared NuGet cache by convention.
 
+## Tailwind provenance release path (issue #798)
+
+The approved [artifact provenance contract](../docs/tailwind-artifact-provenance.md) changes the release dependency path for Tailwind packages. While source/workflow implementation is in progress, this describes intended behavior; the tracked workflows remain executable authority. For a Tailwind release, validated source and package plan feed one `pack-and-verify` producer and immutable bundle. The five native jobs depend on that bundle and prove the actual restore/build inputs against it; aggregation validates exactly five current-invocation successes; publish preflight validates the original producer and aggregate before credentials, and the publisher revalidates before push. This serial dependency adds producer time to the native critical path. Keep unrelated release validation parallel.
+
+The exact hosts remain `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`, and `win-x64`; configured protected native runners must report actual OS/process architecture. A matrix member rerun alone creates an incomplete invocation. Rerun all five hosts together against the frozen producer; never combine receipts from separate attempts. Preserve #790 host CLI caching and its Windows Arm64 x64-under-emulation policy. See the [release operator recovery rules](../.github/release-ops.md#tailwind-artifact-provenance-issue-798).
+
+Native proof uses fresh isolated NuGet caches, HTTP cache and CLI home, so shared package caches are not an optimization opportunity for this gate. It verifies raw restored `.nupkg` SHA-512 and extracted payload, then builds without restore and checks the existing CSS/cache/no-companion/no-native-output assertions. Cache or runner setup failures are proof failures, not permission to omit a host. Upload bounded diagnostics on success and failure without credentials, environment dumps or whole CLI homes. Keep candidate, host evidence, aggregate and start-receipt retention aligned to validated `github.retention_days`; report the earliest required-artifact expiry and 30-day/50-rerun platform limits. Do not treat artifact retention as extending workflow reruns.
+
+Because five isolated native proofs now follow one pack, record the added release critical-path duration, host failure/rerun count, retained artifact bytes and cold/warm local-fixture timing for the first three candidate runs. These are measured acceptance observations, not grounds to skip a required stage or use a shared cache. A local typed proof is expressly local-only and does not reduce five-host release evidence.
+
 ## Tailwind host-scoped CLI in CI
 
 The main Tailwind package has no native runtime-package dependency. A normal build

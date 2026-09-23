@@ -38,8 +38,24 @@ internal sealed class CliWrapCommandRunner : IExternalCommandRunner
                 command = command.WithEnvironmentVariables(request.Environment);
             }
 
-            var result = await command.ExecuteBufferedAsync(timeoutCts.Token);
-            return new ExternalCommandResult(result.ExitCode, result.StandardOutput, result.StandardError);
+            if (request.CapturePolicy is null)
+            {
+                var bufferedResult = await command.ExecuteBufferedAsync(timeoutCts.Token);
+                return new ExternalCommandResult(bufferedResult.ExitCode, bufferedResult.StandardOutput, bufferedResult.StandardError);
+            }
+
+            using var standardOutput = new BoundedCaptureStream(request.CapturePolicy.MaximumBytesPerStream);
+            using var standardError = new BoundedCaptureStream(request.CapturePolicy.MaximumBytesPerStream);
+            var result = await command
+                .WithStandardOutputPipe(PipeTarget.ToStream(standardOutput))
+                .WithStandardErrorPipe(PipeTarget.ToStream(standardError))
+                .ExecuteAsync(timeoutCts.Token);
+            return new ExternalCommandResult(
+                result.ExitCode,
+                standardOutput.GetText(),
+                standardError.GetText(),
+                standardOutput.Truncated,
+                standardError.Truncated);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -79,6 +95,14 @@ internal interface IExternalCommandRunner
 /// <summary>
 /// Command invocation for CliWrap-backed release automation.
 /// </summary>
+/// <param name="FileName">Executable to launch without a shell.</param>
+/// <param name="Arguments">Argument tokens passed without shell expansion.</param>
+/// <param name="WorkingDirectory">Existing working directory for the child process.</param>
+/// <param name="OperationName">Safe operation label used in diagnostics.</param>
+/// <param name="TimeoutDescription">Safe description of the bounded operation.</param>
+/// <param name="TimeoutMilliseconds">Positive child-process timeout.</param>
+/// <param name="Environment">Optional environment overrides; do not serialize secret values in diagnostics.</param>
+/// <param name="CapturePolicy">Optional per-stream byte cap; omitted retains legacy buffered capture.</param>
 internal sealed record ExternalCommandRequest(
     string FileName,
     IReadOnlyList<string> Arguments,
@@ -86,12 +110,127 @@ internal sealed record ExternalCommandRequest(
     string OperationName,
     string TimeoutDescription,
     int TimeoutMilliseconds,
-    IReadOnlyDictionary<string, string?>? Environment = null);
+    IReadOnlyDictionary<string, string?>? Environment = null,
+    ExternalCapturePolicy? CapturePolicy = null);
+
+/// <summary>
+/// Limits the number of bytes retained from each external-command stream while continuing to drain both streams.
+/// Use this for provenance proof commands, whose diagnostics must remain bounded even if a child process is noisy.
+/// The default of four MiB per stream is the release proof contract; ordinary existing commands retain their
+/// buffered behavior unless they explicitly pass a policy.
+/// </summary>
+/// <param name="MaximumBytesPerStream">Positive byte cap for stdout and, independently, stderr.</param>
+internal sealed record ExternalCapturePolicy(int MaximumBytesPerStream = 4 * 1024 * 1024)
+{
+    /// <summary>The standard bounded capture policy for release proof commands.</summary>
+    internal static ExternalCapturePolicy ReleaseProof { get; } = new();
+}
 
 /// <summary>
 /// Captured command result including non-zero exit codes.
 /// </summary>
-internal sealed record ExternalCommandResult(int ExitCode, string StandardOutput, string StandardError);
+/// <param name="ExitCode">Process exit code, or -1 for a launch/timeout failure.</param>
+/// <param name="StandardOutput">Captured stdout, possibly ending with a truncation marker.</param>
+/// <param name="StandardError">Captured stderr, possibly ending with a truncation marker.</param>
+/// <param name="StandardOutputTruncated">Whether stdout exceeded its capture policy and later bytes were drained.</param>
+/// <param name="StandardErrorTruncated">Whether stderr exceeded its capture policy and later bytes were drained.</param>
+internal sealed record ExternalCommandResult(
+    int ExitCode,
+    string StandardOutput,
+    string StandardError,
+    bool StandardOutputTruncated = false,
+    bool StandardErrorTruncated = false);
+
+/// <summary>
+/// Retains at most the requested number of bytes from a CliWrap output pipe and discards later bytes without
+/// closing the pipe. A successful command may therefore have truncated diagnostic output; callers must never treat
+/// a truncated stream as complete structured evidence.
+/// </summary>
+internal sealed class BoundedCaptureStream : Stream
+{
+    private const string TruncationMarker = "\n[output truncated after configured byte limit]\n";
+    private readonly MemoryStream _captured;
+    private readonly int _maximumBytes;
+
+    /// <summary>Creates a bounded sink. The byte cap applies before UTF-8 decoding.</summary>
+    internal BoundedCaptureStream(int maximumBytes)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumBytes);
+        _maximumBytes = maximumBytes;
+        _captured = new MemoryStream(Math.Min(maximumBytes, 64 * 1024));
+    }
+
+    /// <summary>Whether bytes after the configured cap were drained and discarded.</summary>
+    internal bool Truncated { get; private set; }
+
+    /// <summary>Returns retained UTF-8 text with an explicit truncation marker when needed.</summary>
+    internal string GetText()
+    {
+        var text = Encoding.UTF8.GetString(_captured.GetBuffer().AsSpan(0, checked((int)_captured.Length)));
+        return Truncated ? text + TruncationMarker : text;
+    }
+
+    /// <inheritdoc />
+    public override bool CanRead => false;
+    /// <inheritdoc />
+    public override bool CanSeek => false;
+    /// <inheritdoc />
+    public override bool CanWrite => true;
+    /// <inheritdoc />
+    public override long Length => _captured.Length;
+    /// <inheritdoc />
+    public override long Position { get => _captured.Position; set => throw new NotSupportedException(); }
+    /// <inheritdoc />
+    public override void Flush() { }
+    /// <inheritdoc />
+    public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    /// <inheritdoc />
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    /// <inheritdoc />
+    public override void SetLength(long value) => throw new NotSupportedException();
+
+    /// <inheritdoc />
+    public override void Write(byte[] buffer, int offset, int count) => Write(buffer.AsSpan(offset, count));
+
+    /// <inheritdoc />
+    public override void Write(ReadOnlySpan<byte> buffer)
+    {
+        var room = _maximumBytes - checked((int)_captured.Length);
+        var retained = Math.Min(room, buffer.Length);
+        if (retained > 0)
+        {
+            _captured.Write(buffer[..retained]);
+        }
+
+        if (retained != buffer.Length)
+        {
+            Truncated = true;
+        }
+    }
+
+    /// <inheritdoc />
+    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Write(buffer.Span);
+        return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Write(buffer.AsSpan(offset, count));
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _captured.Dispose();
+        base.Dispose(disposing);
+    }
+}
 
 /// <summary>
 /// Writes the machine-readable package artifact manifest consumed by protected publish jobs.
@@ -267,22 +406,36 @@ internal sealed class PackageArtifactManifestReader
 internal sealed class PackagePublishWorkflow
 {
     internal const int PushTimeoutMilliseconds = 180_000;
+    private const string TailwindPackageId = "ForgeTrust.AppSurface.Web.Tailwind";
 
     private readonly PackagePublishPlanResolver _planResolver;
     private readonly PackageArtifactManifestReader _manifestReader;
     private readonly IExternalCommandRunner _commandRunner;
     private readonly PackagePublishLedgerRenderer _ledgerRenderer;
+    private readonly IReleaseCredentialProvider _credentialProvider;
+    private readonly ITailwindPublicationEvidenceValidator _tailwindEvidenceValidator;
 
+    /// <summary>Creates the protected publisher with injectable command, credential, and evidence boundaries.</summary>
+    /// <param name="planResolver">Checked-in package plan resolver.</param>
+    /// <param name="manifestReader">Validated package artifact manifest reader.</param>
+    /// <param name="commandRunner">Runner used only after evidence and credential checks.</param>
+    /// <param name="ledgerRenderer">Renderer for persisted partial and complete outcomes.</param>
+    /// <param name="credentialProvider">Optional credential reader; defaults to the named environment variable.</param>
+    /// <param name="tailwindEvidenceValidator">Optional shared evidence validator; defaults to the production verifier.</param>
     internal PackagePublishWorkflow(
         PackagePublishPlanResolver planResolver,
         PackageArtifactManifestReader manifestReader,
         IExternalCommandRunner commandRunner,
-        PackagePublishLedgerRenderer ledgerRenderer)
+        PackagePublishLedgerRenderer ledgerRenderer,
+        IReleaseCredentialProvider? credentialProvider = null,
+        ITailwindPublicationEvidenceValidator? tailwindEvidenceValidator = null)
     {
         _planResolver = planResolver;
         _manifestReader = manifestReader;
         _commandRunner = commandRunner;
         _ledgerRenderer = ledgerRenderer;
+        _credentialProvider = credentialProvider ?? new EnvironmentReleaseCredentialProvider();
+        _tailwindEvidenceValidator = tailwindEvidenceValidator ?? new TailwindPublicationEvidenceValidator();
     }
 
     /// <summary>
@@ -299,17 +452,33 @@ internal sealed class PackagePublishWorkflow
         var plan = await _planResolver.ResolveAsync(request.RepositoryRoot, request.ManifestPath, cancellationToken);
         ThrowIfPublicationBlocked(plan);
 
-        var apiKey = Environment.GetEnvironmentVariable(request.ApiKeyEnvironmentVariable);
-        if (string.IsNullOrWhiteSpace(apiKey))
-        {
-            throw new PackageIndexException($"Environment variable '{request.ApiKeyEnvironmentVariable}' must contain the NuGet API key.");
-        }
-
         var artifactManifest = await _manifestReader.ReadAsync(request.ArtifactManifestPath, cancellationToken);
         var plannedEntries = PackageArtifactManifestPlanValidator.Validate(
             plan,
             artifactManifest,
             request.ArtifactsInputPath);
+        var tailwindRequired = plan.Entries.Any(entry =>
+            string.Equals(entry.PackageId, TailwindPackageId, StringComparison.OrdinalIgnoreCase));
+        if (tailwindRequired)
+        {
+            if (request.TailwindEvidence is null)
+            {
+                throw new PackageIndexException("Tailwind publication requires original producer, five-host aggregate, and uploaded publication-start evidence.");
+            }
+
+            plannedEntries = await _tailwindEvidenceValidator.ValidateAsync(
+                request.TailwindEvidence,
+                artifactManifest,
+                plannedEntries,
+                cancellationToken);
+            RequirePreparedEntries(plannedEntries, artifactManifest, request.TailwindEvidence.PublicationDirectory);
+        }
+
+        var apiKey = _credentialProvider.Read(request.ApiKeyEnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            throw new PackageIndexException($"Environment variable '{request.ApiKeyEnvironmentVariable}' must contain the NuGet API key.");
+        }
         var ledgerEntries = new List<PackagePublishLedgerEntry>(plannedEntries.Count);
         var stopPublishing = false;
 
@@ -329,6 +498,34 @@ internal sealed class PackagePublishWorkflow
                     request,
                     ledgerEntries,
                     cancellationToken);
+                continue;
+            }
+
+            if (tailwindRequired && !IsConfinedRegularFile(request.TailwindEvidence!.PublicationDirectory, entry.ArtifactPath))
+            {
+                stopPublishing = true;
+                ledgerEntries.Add(new PackagePublishLedgerEntry(
+                    entry.ManifestEntry.PackageId,
+                    entry.ManifestEntry.ProjectPath,
+                    entry.ManifestEntry.ArtifactFileName,
+                    PackagePublishStatus.Failed,
+                    -1,
+                    "Prepared package path changed before the push boundary."));
+                await PersistLedgerAsync(artifactManifest.PackageVersion, request, ledgerEntries, cancellationToken);
+                continue;
+            }
+
+            if (tailwindRequired && !PreparedHashMatches(entry.ArtifactPath, entry.ManifestEntry.Sha512))
+            {
+                stopPublishing = true;
+                ledgerEntries.Add(new PackagePublishLedgerEntry(
+                    entry.ManifestEntry.PackageId,
+                    entry.ManifestEntry.ProjectPath,
+                    entry.ManifestEntry.ArtifactFileName,
+                    PackagePublishStatus.Failed,
+                    -1,
+                    "Prepared package archive changed before the push boundary."));
+                await PersistLedgerAsync(artifactManifest.PackageVersion, request, ledgerEntries, cancellationToken);
                 continue;
             }
 
@@ -367,8 +564,95 @@ internal sealed class PackagePublishWorkflow
                 cancellationToken);
         }
 
-        var ledger = new PackagePublishLedger(artifactManifest.PackageVersion, request.Source, ledgerEntries);
+        var ledger = new PackagePublishLedger(
+            artifactManifest.PackageVersion,
+            request.Source,
+            ledgerEntries,
+            CreateTailwindIdentity(request.TailwindEvidence));
         return ledger;
+    }
+
+    private static TailwindPublicationIdentity? CreateTailwindIdentity(TailwindPublicationRequest? evidence)
+        => evidence is null
+            ? null
+            : new TailwindPublicationIdentity(
+                evidence.ProducerArtifactId,
+                evidence.ExpectedSubjectSha256,
+                evidence.AggregateArtifactId,
+                evidence.ExpectedAggregateSha256,
+                evidence.PublicationStartArtifactId);
+
+    private static void RequirePreparedEntries(
+        IReadOnlyList<PlannedPackageArtifact> entries,
+        PackageArtifactManifest manifest,
+        string publicationDirectory)
+    {
+        if (entries.Count != manifest.Entries.Count)
+        {
+            throw new PackageIndexException("Prepared Tailwind publication inventory does not match the package manifest count.");
+        }
+
+        for (var index = 0; index < entries.Count; index++)
+        {
+            var entry = entries[index];
+            if (entry.ManifestEntry != manifest.Entries[index]
+                || !IsConfinedRegularFile(publicationDirectory, entry.ArtifactPath))
+            {
+                throw new PackageIndexException($"Prepared Tailwind publication entry {index + 1} is not the expected confined regular package archive.");
+            }
+
+            if (!string.Equals(PackageHash.ComputeSha512(entry.ArtifactPath), entry.ManifestEntry.Sha512, StringComparison.Ordinal))
+            {
+                throw new PackageIndexException($"Prepared Tailwind publication entry '{entry.ManifestEntry.ArtifactFileName}' does not match the producer SHA-512.");
+            }
+        }
+    }
+
+    private static bool IsConfinedRegularFile(string directory, string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(directory) || string.IsNullOrWhiteSpace(filePath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+            var file = Path.GetFullPath(filePath);
+            if (!string.Equals(Path.GetDirectoryName(file), root, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)
+                || !Directory.Exists(root)
+                || !File.Exists(file))
+            {
+                return false;
+            }
+
+            var rootAttributes = File.GetAttributes(root);
+            var fileAttributes = File.GetAttributes(file);
+            return (rootAttributes & FileAttributes.ReparsePoint) == 0
+                && (fileAttributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) == 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            // A package path disappearing or becoming unreadable at the push boundary is a failed validation,
+            // not an unrecorded publisher crash. The caller persists this as a failed ledger entry.
+            return false;
+        }
+    }
+
+    private static bool PreparedHashMatches(string path, string expectedSha512)
+    {
+        try
+        {
+            return string.Equals(PackageHash.ComputeSha512(path), expectedSha512, StringComparison.Ordinal);
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private static void ThrowIfPublicationBlocked(PackagePublishPlan plan)
@@ -430,7 +714,11 @@ internal sealed class PackagePublishWorkflow
         IReadOnlyList<PackagePublishLedgerEntry> ledgerEntries,
         CancellationToken cancellationToken)
     {
-        var ledger = new PackagePublishLedger(packageVersion, request.Source, ledgerEntries);
+        var ledger = new PackagePublishLedger(
+            packageVersion,
+            request.Source,
+            ledgerEntries,
+            CreateTailwindIdentity(request.TailwindEvidence));
         Directory.CreateDirectory(Path.GetDirectoryName(request.PublishLogPath)!);
         await File.WriteAllTextAsync(request.PublishLogPath, _ledgerRenderer.RenderMarkdown(ledger), cancellationToken);
     }
@@ -983,6 +1271,14 @@ internal sealed class PackagePublishLedgerRenderer
         builder.AppendLine();
         builder.AppendLine($"Version: `{ledger.PackageVersion}`");
         builder.AppendLine($"Source: `{ledger.Source}`");
+        if (ledger.TailwindIdentity is not null)
+        {
+            builder.AppendLine($"Producer artifact ID: `{ledger.TailwindIdentity.ProducerArtifactId}`");
+            builder.AppendLine($"Producer subject SHA-256: `{ledger.TailwindIdentity.SubjectSha256}`");
+            builder.AppendLine($"Aggregate artifact ID: `{ledger.TailwindIdentity.AggregateArtifactId}`");
+            builder.AppendLine($"Aggregate SHA-256: `{ledger.TailwindIdentity.AggregateSha256}`");
+            builder.AppendLine($"Publication-start artifact ID: `{ledger.TailwindIdentity.PublicationStartArtifactId}`");
+        }
         builder.AppendLine();
         builder.AppendLine("| Package | Project | Artifact | Status | Exit code |");
         builder.AppendLine("| --- | --- | --- | --- | --- |");
@@ -1080,6 +1376,7 @@ internal sealed class PackageSmokeInstallReportRenderer
 /// <param name="PublishLogPath">Markdown publish ledger path.</param>
 /// <param name="Source">NuGet source URL.</param>
 /// <param name="ApiKeyEnvironmentVariable">Environment variable that supplies the NuGet API key.</param>
+/// <param name="TailwindEvidence">Original candidate and native evidence required when the resolved plan contains Tailwind; omitted for non-Tailwind plans.</param>
 internal sealed record PackagePublishRequest(
     string RepositoryRoot,
     string ManifestPath,
@@ -1087,7 +1384,87 @@ internal sealed record PackagePublishRequest(
     string ArtifactManifestPath,
     string PublishLogPath,
     string Source,
-    string ApiKeyEnvironmentVariable);
+    string ApiKeyEnvironmentVariable,
+    TailwindPublicationRequest? TailwindEvidence = null);
+
+/// <summary>
+/// Trusted workflow identity and paths needed to validate a Tailwind publication. Values are supplied from protected
+/// job outputs and the exact ID-based downloads, never inferred from evidence JSON. The uploaded start receipt is
+/// separately identified because a locally written receipt cannot authorize a push.
+/// </summary>
+/// <param name="RepositoryRoot">Exact checked-out source root.</param>
+/// <param name="ArtifactsInputPath">Exact producer bundle download directory.</param>
+/// <param name="ArtifactManifestPath">Manifest inside the producer bundle.</param>
+/// <param name="ProducerSubjectPath">Subject inside the producer bundle.</param>
+/// <param name="ProducerArtifactId">Immutable producer upload ID from the protected workflow.</param>
+/// <param name="ExpectedSubjectSha256">SHA-256 of serialized producer subject from the protected output.</param>
+/// <param name="RepositoryId">Numeric repository identity.</param>
+/// <param name="ProducerRunId">Original workflow run ID that packed the candidate.</param>
+/// <param name="SourceCommit">Full source commit expected in the checkout and verifier stamp.</param>
+/// <param name="AggregateInputPath">Exact aggregate artifact download directory.</param>
+/// <param name="AggregateArtifactId">Immutable aggregate upload ID.</param>
+/// <param name="ExpectedAggregateSha256">SHA-256 of the serialized aggregate JSON.</param>
+/// <param name="PublicationDirectory">Prepared, disjoint package archive directory.</param>
+/// <param name="PublicationStartReceiptPath">Start receipt from its completed immutable upload.</param>
+/// <param name="PublicationStartArtifactId">ID returned by that successful upload or exact recovery.</param>
+/// <param name="ReportDirectory">Fresh diagnostics directory disjoint from inputs.</param>
+internal sealed record TailwindPublicationRequest(
+    string RepositoryRoot,
+    string ArtifactsInputPath,
+    string ArtifactManifestPath,
+    string ProducerSubjectPath,
+    string ProducerArtifactId,
+    string ExpectedSubjectSha256,
+    string RepositoryId,
+    string ProducerRunId,
+    string SourceCommit,
+    string AggregateInputPath,
+    string AggregateArtifactId,
+    string ExpectedAggregateSha256,
+    string PublicationDirectory,
+    string PublicationStartReceiptPath,
+    string PublicationStartArtifactId,
+    string ReportDirectory);
+
+/// <summary>Reads a NuGet credential only after publication evidence has passed validation.</summary>
+internal interface IReleaseCredentialProvider
+{
+    /// <summary>Returns the named credential or null when it is unavailable.</summary>
+    string? Read(string environmentVariable);
+}
+
+/// <summary>Production credential reader for protected NuGet jobs.</summary>
+internal sealed class EnvironmentReleaseCredentialProvider : IReleaseCredentialProvider
+{
+    /// <inheritdoc />
+    public string? Read(string environmentVariable) => Environment.GetEnvironmentVariable(environmentVariable);
+}
+
+/// <summary>Validates original Tailwind evidence and returns the confined prepared files to push.</summary>
+internal interface ITailwindPublicationEvidenceValidator
+{
+    /// <summary>
+    /// Validates the producer, complete native evidence, uploaded start receipt, and prepared file inventory before
+    /// credential acquisition. Every returned path must be a regular file inside the publication directory.
+    /// </summary>
+    Task<IReadOnlyList<PlannedPackageArtifact>> ValidateAsync(
+        TailwindPublicationRequest request,
+        PackageArtifactManifest manifest,
+        IReadOnlyList<PlannedPackageArtifact> originalEntries,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>Default Tailwind publisher validator, delegated to the shared evidence workflow.</summary>
+internal sealed class TailwindPublicationEvidenceValidator : ITailwindPublicationEvidenceValidator
+{
+    /// <inheritdoc />
+    public Task<IReadOnlyList<PlannedPackageArtifact>> ValidateAsync(
+        TailwindPublicationRequest request,
+        PackageArtifactManifest manifest,
+        IReadOnlyList<PlannedPackageArtifact> originalEntries,
+        CancellationToken cancellationToken)
+        => TailwindEvidenceWorkflow.ValidatePublicationAsync(request, manifest, originalEntries, cancellationToken);
+}
 
 /// <summary>
 /// Request for the post-publish smoke install and tool verification workflow.
@@ -1149,10 +1526,24 @@ internal sealed record PackageArtifactManifestEntry(
 /// <param name="PackageVersion">Exact stable or prerelease package version.</param>
 /// <param name="Source">NuGet source URL.</param>
 /// <param name="Entries">Per-package publish outcomes.</param>
+/// <param name="TailwindIdentity">Original protected candidate identity for Tailwind publication, including partial outcomes.</param>
 internal sealed record PackagePublishLedger(
     string PackageVersion,
     string Source,
-    IReadOnlyList<PackagePublishLedgerEntry> Entries);
+    IReadOnlyList<PackagePublishLedgerEntry> Entries,
+    TailwindPublicationIdentity? TailwindIdentity = null);
+
+/// <summary>
+/// Original immutable producer, aggregate, and uploaded start-receipt identifiers carried by a Tailwind publish
+/// ledger. The IDs explain which candidate a partial or retried publication attempted; a duplicate response alone
+/// does not prove the remote package has matching bytes.
+/// </summary>
+internal sealed record TailwindPublicationIdentity(
+    string ProducerArtifactId,
+    string SubjectSha256,
+    string AggregateArtifactId,
+    string AggregateSha256,
+    string PublicationStartArtifactId);
 
 /// <summary>
 /// Publish outcome for one package artifact.

@@ -64,6 +64,15 @@ internal sealed class PackageArtifactWorkflow
     {
         ValidateRequest(request);
         PackageVersionValidator.Require(request.PackageVersion, PackageVersionPolicy.StableOrPrereleaseNoBuildMetadata);
+        var producerIdentityCount = new[] { request.RepositoryId, request.ProducerRunId, request.ProducerAttempt, request.SourceCommit }
+            .Count(static value => !string.IsNullOrWhiteSpace(value));
+        if (producerIdentityCount is not 0 and not 4)
+            throw new PackageIndexException("Producer identity flags must be supplied together: --repository-id, --producer-run-id, --producer-attempt, and --source-commit.");
+        if (producerIdentityCount == 4)
+        {
+            TailwindProofSubjectService.ValidateProducerContext(request.RepositoryId!, request.ProducerRunId!, request.ProducerAttempt!, request.SourceCommit!);
+            await TailwindSourceIdentity.RequireAsync(request.RepositoryRoot, request.SourceCommit!, cancellationToken);
+        }
         PackageProofWorkDirectory.RequireDisjoint(
             request.CoverageProofWorkDirectory,
             request.DocsProofWorkDirectory);
@@ -162,13 +171,14 @@ internal sealed class PackageArtifactWorkflow
             request.PackageVersion,
             request.RepositoryRoot,
             payloadInventory);
-        if (plan.Entries.Any(static entry => string.Equals(
-                entry.PackageId,
-                TailwindMainPackageId,
-                StringComparison.OrdinalIgnoreCase)))
+        var hasTailwindPackage = plan.Entries.Any(static entry => string.Equals(
+            entry.PackageId,
+            TailwindMainPackageId,
+            StringComparison.OrdinalIgnoreCase));
+        var tailwindProofSucceeded = false;
+        if (hasTailwindPackage)
         {
             DeleteFileIfPresent(tailwindProofReportPath);
-            var tailwindProofEvidencePublished = false;
             try
             {
                 await RunTailwindPackedConsumerProofAsync(
@@ -176,7 +186,7 @@ internal sealed class PackageArtifactWorkflow
                     tailwindProofWorkDirectory,
                     tailwindProofReportPath,
                     cancellationToken);
-                tailwindProofEvidencePublished = true;
+                tailwindProofSucceeded = true;
             }
             catch (PackageIndexException ex)
             {
@@ -188,13 +198,6 @@ internal sealed class PackageArtifactWorkflow
                     ex,
                     cancellationToken);
                 throw;
-            }
-            finally
-            {
-                if (tailwindProofEvidencePublished)
-                {
-                    TryDeleteProofWorkspace(tailwindProofWorkDirectory);
-                }
             }
         }
         var coverageProofReport = await _coverageProofWorkflow.RunAsync(
@@ -263,6 +266,31 @@ internal sealed class PackageArtifactWorkflow
             request.ArtifactsOutputPath,
             request.ArtifactManifestPath,
             cancellationToken);
+
+        if (producerIdentityCount == 4 && hasTailwindPackage)
+        {
+            try
+            {
+                if (!tailwindProofSucceeded) throw new PackageIndexException("Producer subject cannot be written because the local Tailwind consumer proof did not complete.");
+                var finalManifest = await new PackageArtifactManifestReader().ReadAsync(request.ArtifactManifestPath, cancellationToken);
+                var tailwindResolvedClosure = TailwindProofSubjectService.ReadResolvedClosure(
+                    Path.Combine(tailwindProofWorkDirectory, "consumer", "obj", "project.assets.json"), finalManifest);
+                var subject = await TailwindProofSubjectService.CreateAsync(
+                    request.ArtifactsOutputPath,
+                    request.ArtifactManifestPath,
+                    request.RepositoryId!, request.ProducerRunId!, request.ProducerAttempt!, request.SourceCommit!,
+                    tailwindResolvedClosure, cancellationToken);
+                _ = await TailwindProofSubjectService.WriteAsync(subject, request.ArtifactsOutputPath, cancellationToken);
+            }
+            finally
+            {
+                TryDeleteProofWorkspace(tailwindProofWorkDirectory);
+            }
+        }
+        else if (hasTailwindPackage && tailwindProofSucceeded)
+        {
+            TryDeleteProofWorkspace(tailwindProofWorkDirectory);
+        }
 
         return report;
     }
@@ -605,6 +633,10 @@ internal sealed class PackageArtifactWorkflow
 /// <param name="DocsProofWorkDirectory">Isolated work directory for the packed Docs consumer proof.</param>
 /// <param name="DocsProofReportPath">Standalone markdown report path for the packed Docs consumer proof.</param>
 /// <param name="Source">NuGet source used for third-party dependencies while first-party packages map to local artifacts.</param>
+/// <param name="RepositoryId">Optional trusted numeric repository identity used to create release producer evidence.</param>
+/// <param name="ProducerRunId">Optional trusted workflow run ID used to create release producer evidence.</param>
+/// <param name="ProducerAttempt">Optional trusted producer attempt used to create release producer evidence.</param>
+/// <param name="SourceCommit">Optional full source commit bound to the release producer evidence.</param>
 internal sealed record PackageArtifactRequest(
     string RepositoryRoot,
     string ManifestPath,
@@ -616,4 +648,8 @@ internal sealed record PackageArtifactRequest(
     string CoverageProofReportPath,
     string DocsProofWorkDirectory,
     string DocsProofReportPath,
-    string Source);
+    string Source,
+    string? RepositoryId = null,
+    string? ProducerRunId = null,
+    string? ProducerAttempt = null,
+    string? SourceCommit = null);

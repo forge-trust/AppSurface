@@ -15,6 +15,8 @@ internal static class Program
     private const string PublishStableCommand = "publish-stable";
     private const string SmokeInstallCommand = "smoke-install";
     private const string ReleasePreparationWitnessCommand = "release-prep-witness";
+    private const string VerifyTailwindConsumerCommand = "verify-tailwind-consumer";
+    private const string VerifyTailwindEvidenceCommand = "verify-tailwind-evidence";
 
     private static readonly string Usage = """
         ForgeTrust.AppSurface.PackageIndex
@@ -29,6 +31,10 @@ internal static class Program
           verify      Check that generated package-index documents and managed package README release guidance are already up to date; does not write files.
           verify-packages
                       Pack and validate stable or prerelease .nupkg artifacts without SemVer build metadata, without publishing them.
+          verify-tailwind-consumer
+                      Verify a local-only Tailwind consumer or run a producer-bound native release proof.
+          verify-tailwind-evidence
+                      Validate producer-binding, aggregate five native receipts, prepare publication inputs, or validate an uploaded publication-start receipt before credentials.
           publish-prerelease
                       Publish validated prerelease package artifacts to NuGet from a protected workflow job.
           publish-stable
@@ -53,6 +59,9 @@ internal static class Program
                                 Machine-readable validated artifact manifest path. Defaults to artifacts/package-artifact-manifest.json.
           --package-version <version>
                                 Required stable or prerelease package version without SemVer build metadata for verify-packages.
+          --repository-id <id> --producer-run-id <id> --producer-attempt <n> --source-commit <sha>
+                                Optional verify-packages producer identity; all four are required together. Build verifier with /p:SourceRevisionId=<sha>.
+          Tailwind commands accept --mode local|release|producer-binding|aggregate|publish-preflight|validate-publication-start and the explicit producer, invocation, aggregate, receipt, and directory bindings in docs/tailwind-artifact-provenance.md.
           --report <path>       Package artifact report path. Defaults to artifacts/package-validation-report.md.
           --coverage-proof-work-dir <path>
                                 Isolated packaged coverage CLI proof work directory. Defaults to <artifacts-output>/coverage-cli-consumer-proof.
@@ -145,14 +154,80 @@ internal static class Program
                 and not PublishPrereleaseCommand
                 and not PublishStableCommand
                 and not SmokeInstallCommand
-                and not ReleasePreparationWitnessCommand)
+                and not ReleasePreparationWitnessCommand
+                and not VerifyTailwindConsumerCommand
+                and not VerifyTailwindEvidenceCommand)
             {
                 await standardError.WriteLineAsync($"Unknown command '{command}'.");
                 await standardError.WriteLineAsync(Usage);
                 return 1;
             }
 
-            var options = CommandLineOptions.Parse(args.Skip(1).ToArray(), currentDirectory);
+            var tailwindOptions = TailwindCommandOptions.Extract(args.Skip(1).ToArray());
+            if (normalizedCommand == VerifyTailwindConsumerCommand)
+            {
+                var general = CommandLineOptions.Parse(tailwindOptions.RemainingArguments, currentDirectory);
+                var mode = TailwindCommandOptions.Require(tailwindOptions.Mode, "--mode");
+                if (mode is not "local" and not "release") throw new PackageIndexException("verify-tailwind-consumer --mode must be local or release.");
+                var result = await TailwindNativeConsumerWorkflow.RunAsync(
+                    general.Request.RepositoryRoot,
+                    general.ArtifactsInputPath,
+                    general.ArtifactManifestPath,
+                    tailwindOptions,
+                    cancellationToken);
+                await standardOut.WriteLineAsync($"Tailwind consumer {result.Status}; receipt/report: {result.ReportPath}.");
+                return result.Succeeded ? 0 : 1;
+            }
+
+            if (normalizedCommand == VerifyTailwindEvidenceCommand)
+            {
+                var general = CommandLineOptions.Parse(tailwindOptions.RemainingArguments, currentDirectory);
+                var mode = TailwindCommandOptions.Require(tailwindOptions.Mode, "--mode");
+                if (mode == "aggregate")
+                {
+                    var result = await TailwindEvidenceWorkflow.AggregateAsync(
+                        general.Request.RepositoryRoot, general.ArtifactsInputPath, general.ArtifactManifestPath, tailwindOptions, cancellationToken);
+                    await standardOut.WriteLineAsync($"Tailwind evidence aggregate {result.Status}; report: {result.ReportPath}.");
+                    return result.Succeeded ? 0 : 1;
+                }
+                if (mode == "producer-binding")
+                {
+                    var binding = await TailwindEvidenceWorkflow.ValidateProducerBindingAsync(
+                        general.Request.RepositoryRoot, general.ArtifactsInputPath, general.ArtifactManifestPath, tailwindOptions, cancellationToken);
+                    var output = Path.GetFullPath(TailwindCommandOptions.Require(tailwindOptions.ResolvedBindingOutput, "--resolved-binding-output"));
+                    await TailwindEvidenceWorkflow.WriteResolvedProducerBindingAsync(binding, output, cancellationToken);
+                    await standardOut.WriteLineAsync($"Validated frozen producer binding; report: {Path.GetFullPath(TailwindCommandOptions.Require(tailwindOptions.ReportDirectory, "--report-directory"))}.");
+                    return 0;
+                }
+                if (mode == "publish-preflight")
+                {
+                    var request = tailwindOptions.CreatePreflightRequest(general.Request.RepositoryRoot, general.ArtifactsInputPath, general.ArtifactManifestPath);
+                    var plan = await new PackagePublishPlanResolver(new PackageProjectScanner(), new DotNetProjectMetadataProvider(), new PackageManifestLoader())
+                        .ResolveAsync(general.Request.RepositoryRoot, general.Request.ManifestPath, cancellationToken);
+                    var manifest = await new PackageArtifactManifestReader().ReadAsync(general.ArtifactManifestPath, cancellationToken);
+                    var planned = PackageArtifactManifestPlanValidator.Validate(plan, manifest, general.ArtifactsInputPath);
+                    var preflight = await TailwindEvidenceWorkflow.PreparePublicationAsync(request, manifest, planned, cancellationToken);
+                    await standardOut.WriteLineAsync($"Tailwind publication preflight succeeded for {preflight.Packages.Count} packages; upload {Path.Combine(request.ReportDirectory, "publication-start-receipt.json")} before requesting credentials.");
+                    return 0;
+                }
+                if (mode == "validate-publication-start")
+                {
+                    var request = tailwindOptions.CreateStartValidationRequest(general.Request.RepositoryRoot, general.ArtifactsInputPath, general.ArtifactManifestPath);
+                    var plan = await new PackagePublishPlanResolver(new PackageProjectScanner(), new DotNetProjectMetadataProvider(), new PackageManifestLoader())
+                        .ResolveAsync(general.Request.RepositoryRoot, general.Request.ManifestPath, cancellationToken);
+                    var manifest = await new PackageArtifactManifestReader().ReadAsync(general.ArtifactManifestPath, cancellationToken);
+                    var planned = PackageArtifactManifestPlanValidator.Validate(plan, manifest, general.ArtifactsInputPath);
+                    var validated = await TailwindEvidenceWorkflow.ValidatePublicationStartAsync(request, manifest, planned, cancellationToken);
+                    await standardOut.WriteLineAsync($"Validated uploaded Tailwind publication-start artifact {request.PublicationStartArtifactId} and {validated.Packages.Count} prepared packages before credentials.");
+                    return 0;
+                }
+                throw new PackageIndexException("verify-tailwind-evidence --mode must be producer-binding, aggregate, publish-preflight, or validate-publication-start.");
+            }
+
+            var baseArguments = normalizedCommand is VerifyPackagesCommand or PublishPrereleaseCommand or PublishStableCommand
+                ? tailwindOptions.RemainingArguments
+                : args.Skip(1).ToArray();
+            var options = CommandLineOptions.Parse(baseArguments, currentDirectory);
             var generator = new PackageIndexGenerator(
                 new PackageProjectScanner(),
                 new DotNetProjectMetadataProvider(),
@@ -168,7 +243,7 @@ internal static class Program
 
             if (normalizedCommand == VerifyPackagesCommand)
             {
-                var packageRequest = options.CreatePackageArtifactRequest();
+                var packageRequest = options.CreatePackageArtifactRequest(tailwindOptions);
                 verifyPackagesAsync ??= RunPackageArtifactWorkflowAsync;
                 var artifactReport = await verifyPackagesAsync(packageRequest, cancellationToken);
                 var reportPath = FormatDisplayPath(packageRequest.RepositoryRoot, packageRequest.ReportPath);
@@ -179,7 +254,7 @@ internal static class Program
 
             if (normalizedCommand == PublishPrereleaseCommand)
             {
-                var publishRequest = options.CreatePackagePublishRequest();
+                var publishRequest = options.CreatePackagePublishRequest(tailwindOptions);
                 publishPrereleaseAsync ??= RunPackagePublishWorkflowAsync;
                 var ledger = await publishPrereleaseAsync(publishRequest, cancellationToken);
                 var reportPath = FormatDisplayPath(publishRequest.RepositoryRoot, publishRequest.PublishLogPath);
@@ -190,7 +265,7 @@ internal static class Program
 
             if (normalizedCommand == PublishStableCommand)
             {
-                var publishRequest = options.CreatePackagePublishRequest();
+                var publishRequest = options.CreatePackagePublishRequest(tailwindOptions);
                 publishStableAsync ??= RunPackageStablePublishWorkflowAsync;
                 var ledger = await publishStableAsync(publishRequest, cancellationToken);
                 var reportPath = FormatDisplayPath(publishRequest.RepositoryRoot, publishRequest.PublishLogPath);
@@ -567,7 +642,7 @@ internal sealed record CommandLineOptions(
     /// </summary>
     /// <returns>The package artifact request.</returns>
     /// <exception cref="PackageIndexException">Thrown when the required package version is missing.</exception>
-    internal PackageArtifactRequest CreatePackageArtifactRequest()
+    internal PackageArtifactRequest CreatePackageArtifactRequest(TailwindCommandOptions? tailwind = null)
     {
         if (string.IsNullOrWhiteSpace(PackageVersion))
         {
@@ -585,15 +660,22 @@ internal sealed record CommandLineOptions(
             CoverageProofReportPath,
             DocsProofWorkDirectory,
             DocsProofReportPath,
-            Source);
+            Source,
+            tailwind?.RepositoryId,
+            tailwind?.ProducerRunId,
+            tailwind?.ProducerAttempt,
+            tailwind?.SourceCommit);
     }
 
     /// <summary>
     /// Converts parsed CLI options into a protected package publish request.
     /// </summary>
     /// <returns>The package publish request.</returns>
-    internal PackagePublishRequest CreatePackagePublishRequest()
+    internal PackagePublishRequest CreatePackagePublishRequest(TailwindCommandOptions? tailwind = null)
     {
+        var tailwindEvidence = tailwind is not null && tailwind.ProducerSubject is not null
+            ? tailwind.CreatePublicationRequest(Request.RepositoryRoot, ArtifactsInputPath, ArtifactManifestPath)
+            : null;
         return new PackagePublishRequest(
             Request.RepositoryRoot,
             Request.ManifestPath,
@@ -601,7 +683,8 @@ internal sealed record CommandLineOptions(
             ArtifactManifestPath,
             PublishLogPath,
             Source,
-            ApiKeyEnvironmentVariable);
+            ApiKeyEnvironmentVariable,
+            tailwindEvidence);
     }
 
     /// <summary>
