@@ -134,6 +134,62 @@ public sealed class TailwindPayloadProjectionTests
         Assert.Contains("Malformed runtimeTargets metadata", error.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("{ \"type\": 1 }", "metadata")]
+    [InlineData("{ \"framework\": [] }", "metadata")]
+    [InlineData("{ \"dependencies\": { \"Other\": 1 } }", "dependency metadata")]
+    [InlineData("{ \"frameworkAssemblies\": {} }", "metadata")]
+    [InlineData("{ \"frameworkReferences\": [1] }", "metadata")]
+    [InlineData("{ \"compileOnly\": \"true\" }", "metadata")]
+    [InlineData("{ \"runtime\": [] }", "path-keyed")]
+    [InlineData("{ \"compile\": { \"native/codec.bin\": null } }", "path metadata")]
+    [InlineData("{ \"runtimeTargets\": { \"native/codec.bin\": {} } }", "runtimeTargets metadata")]
+    public void Verify_RejectsMalformedAssetMetadata(string json, string diagnostic)
+    {
+        using var fixture = new PackageFixture();
+        using var target = ParseTarget(json);
+
+        var error = Assert.Throws<PackageIndexException>(() => fixture.Verify(target.RootElement));
+
+        Assert.Contains(diagnostic, error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Verify_ProjectsSelectedNativeAssetOutsideProtectedRoots()
+    {
+        using var fixture = new PackageFixture();
+        fixture.Add("native/codec.bin", "native payload");
+        using var target = ParseTarget("{ \"native\": { \"native/codec.bin\": {} } }");
+
+        var projected = fixture.Verify(target.RootElement);
+
+        Assert.Equal("native/codec.bin", Assert.Single(projected.Keys));
+    }
+
+    [Fact]
+    public void Verify_RejectsSelectedNativeAssetMissingFromArchive()
+    {
+        using var fixture = new PackageFixture();
+        using var target = ParseTarget("{ \"native\": { \"native/codec.bin\": {} } }");
+
+        var error = Assert.Throws<PackageIndexException>(() => fixture.Verify(target.RootElement));
+
+        Assert.Contains("missing archive entry", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Verify_RejectsDuplicateArchivePathEvenOutsideProjection()
+    {
+        using var fixture = new PackageFixture();
+        fixture.Add("notes/readme.txt", "first");
+        fixture.Add("notes/readme.txt", "second");
+        using var target = ParseTarget("{}");
+
+        var error = Assert.Throws<PackageIndexException>(() => fixture.Verify(target.RootElement));
+
+        Assert.Contains("Duplicate", error.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Verify_RejectsRestoredProtectedSymlinkWhenSupported()
     {

@@ -165,6 +165,125 @@ public sealed class TailwindPublishingTests
     }
 
     [Fact]
+    public async Task TailwindPublisher_RecordsMissingPreparedPackageBeforeItsPush()
+    {
+        using var fixture = await PublishFixture.CreateAsync("ForgeTrust.AppSurface.Web.Tailwind", includeWebPackage: true);
+        var evidence = fixture.CreateEvidence();
+        var credential = new RecordingCredentialProvider();
+        var validator = new RecordingEvidenceValidator((entries, _) => CopyPrepared(evidence, entries));
+        var runner = new RecordingPushRunner(count =>
+        {
+            if (count == 1)
+                File.Delete(Directory.GetFiles(evidence.PublicationDirectory, "*Tailwind*.nupkg").Single());
+        });
+
+        var ledger = await fixture.CreateWorkflow(runner, credential, validator).RunAsync(
+            fixture.Request with { TailwindEvidence = evidence }, CancellationToken.None);
+
+        Assert.Single(runner.Requests);
+        Assert.Equal([PackagePublishStatus.Pushed, PackagePublishStatus.Failed],
+            ledger.Entries.Select(entry => entry.Status).ToArray());
+        Assert.Contains("path changed before the push boundary", ledger.Entries[1].Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TailwindPublisher_RejectsIncompletePreparedInventoryBeforeCredentialRead()
+    {
+        using var fixture = await PublishFixture.CreateAsync("ForgeTrust.AppSurface.Web.Tailwind", includeWebPackage: true);
+        var evidence = fixture.CreateEvidence();
+        var credential = new RecordingCredentialProvider();
+        var runner = new RecordingPushRunner();
+        var validator = new RecordingEvidenceValidator((entries, _) => CopyPrepared(evidence, entries).Take(1).ToArray());
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.CreateWorkflow(runner, credential, validator)
+            .RunAsync(fixture.Request with { TailwindEvidence = evidence }, CancellationToken.None));
+
+        Assert.Contains("inventory", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, credential.Reads);
+        Assert.Empty(runner.Requests);
+    }
+
+    [Theory]
+    [InlineData("reordered")]
+    [InlineData("tampered")]
+    public async Task TailwindPublisher_RejectsReorderedOrTamperedPreparedInventoryBeforeCredentialRead(string mutation)
+    {
+        using var fixture = await PublishFixture.CreateAsync("ForgeTrust.AppSurface.Web.Tailwind", includeWebPackage: true);
+        var evidence = fixture.CreateEvidence();
+        var credential = new RecordingCredentialProvider();
+        var runner = new RecordingPushRunner();
+        var validator = new RecordingEvidenceValidator((entries, _) =>
+        {
+            var prepared = CopyPrepared(evidence, entries).ToArray();
+            if (mutation == "reordered") Array.Reverse(prepared);
+            else File.AppendAllText(prepared[0].ArtifactPath, "tampered before preflight");
+            return prepared;
+        });
+
+        await Assert.ThrowsAsync<PackageIndexException>(() => fixture.CreateWorkflow(runner, credential, validator)
+            .RunAsync(fixture.Request with { TailwindEvidence = evidence }, CancellationToken.None));
+
+        Assert.Equal(0, credential.Reads);
+        Assert.Empty(runner.Requests);
+    }
+
+    [Fact]
+    public async Task TailwindPublisher_RecordsNuGetDuplicateWithoutChangingFrozenIdentity()
+    {
+        using var fixture = await PublishFixture.CreateAsync("ForgeTrust.AppSurface.Web.Tailwind");
+        var evidence = fixture.CreateEvidence();
+        var credential = new RecordingCredentialProvider();
+        var validator = new RecordingEvidenceValidator((entries, _) => CopyPrepared(evidence, entries));
+        var runner = new RecordingPushRunner((_, _) =>
+            new ExternalCommandResult(0, "Package already exists and was skipped", string.Empty));
+
+        var ledger = await fixture.CreateWorkflow(runner, credential, validator).RunAsync(
+            fixture.Request with { TailwindEvidence = evidence }, CancellationToken.None);
+
+        Assert.Equal(PackagePublishStatus.DuplicateReported, Assert.Single(ledger.Entries).Status);
+        Assert.Equal(evidence.ExpectedSubjectSha256, ledger.TailwindIdentity?.SubjectSha256);
+        Assert.Single(runner.Requests);
+    }
+
+    [Fact]
+    public async Task TailwindPublisher_StopsAfterFailedPushAndKeepsLaterPackageOutOfNuGet()
+    {
+        using var fixture = await PublishFixture.CreateAsync("ForgeTrust.AppSurface.Web.Tailwind", includeWebPackage: true);
+        var evidence = fixture.CreateEvidence();
+        var credential = new RecordingCredentialProvider();
+        var validator = new RecordingEvidenceValidator((entries, _) => CopyPrepared(evidence, entries));
+        var runner = new RecordingPushRunner((_, _) => new ExternalCommandResult(3, "push failed", string.Empty));
+
+        var ledger = await fixture.CreateWorkflow(runner, credential, validator).RunAsync(
+            fixture.Request with { TailwindEvidence = evidence }, CancellationToken.None);
+
+        Assert.Single(runner.Requests);
+        Assert.Equal([PackagePublishStatus.Failed, PackagePublishStatus.SkippedAfterFailure],
+            ledger.Entries.Select(entry => entry.Status).ToArray());
+        Assert.Equal(3, ledger.Entries[0].ExitCode);
+        Assert.Contains("earlier package failed", ledger.Entries[1].Output, StringComparison.Ordinal);
+        Assert.Equal(evidence.ProducerArtifactId, ledger.TailwindIdentity?.ProducerArtifactId);
+    }
+
+    [Fact]
+    public async Task TailwindPublisher_RequiresCredentialOnlyAfterEvidenceValidation()
+    {
+        using var fixture = await PublishFixture.CreateAsync("ForgeTrust.AppSurface.Web.Tailwind");
+        var evidence = fixture.CreateEvidence();
+        var credential = new RecordingCredentialProvider(value: null);
+        var runner = new RecordingPushRunner();
+        var validator = new RecordingEvidenceValidator((entries, _) => CopyPrepared(evidence, entries));
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.CreateWorkflow(runner, credential, validator)
+            .RunAsync(fixture.Request with { TailwindEvidence = evidence }, CancellationToken.None));
+
+        Assert.Contains("TEST_ONLY_NUGET_KEY", error.Message, StringComparison.Ordinal);
+        Assert.Equal(1, validator.Calls);
+        Assert.Equal(1, credential.Reads);
+        Assert.Empty(runner.Requests);
+    }
+
+    [Fact]
     public async Task NonTailwindPlan_RetainsExistingPublisherPath()
     {
         using var fixture = await PublishFixture.CreateAsync("ForgeTrust.AppSurface.Web");
@@ -179,14 +298,14 @@ public sealed class TailwindPublishingTests
         Assert.Equal(PackagePublishStatus.Pushed, Assert.Single(ledger.Entries).Status);
     }
 
-    private sealed class RecordingCredentialProvider : IReleaseCredentialProvider
+    private sealed class RecordingCredentialProvider(string? value = "test-only-token") : IReleaseCredentialProvider
     {
         public int Reads { get; private set; }
 
         public string? Read(string environmentVariable)
         {
             Reads++;
-            return "test-only-token";
+            return value;
         }
     }
 
@@ -194,11 +313,20 @@ public sealed class TailwindPublishingTests
     {
         public List<ExternalCommandRequest> Requests { get; } = [];
 
+        public RecordingPushRunner(Func<int, ExternalCommandRequest, ExternalCommandResult> resultFactory)
+            : this()
+        {
+            _resultFactory = resultFactory;
+        }
+
+        private readonly Func<int, ExternalCommandRequest, ExternalCommandResult>? _resultFactory;
+
         public Task<ExternalCommandResult> RunAsync(ExternalCommandRequest request, CancellationToken cancellationToken)
         {
             Requests.Add(request);
             beforeResult?.Invoke(Requests.Count);
-            return Task.FromResult(new ExternalCommandResult(0, "pushed", string.Empty));
+            return Task.FromResult(_resultFactory?.Invoke(Requests.Count, request)
+                ?? new ExternalCommandResult(0, "pushed", string.Empty));
         }
     }
 

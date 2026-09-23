@@ -21,6 +21,7 @@ internal sealed class PackageArtifactWorkflow
     private readonly IDocsPackageConsumerProofWorkflow _docsProofWorkflow;
     private readonly PackagePayloadInventoryLoader _payloadInventoryLoader;
     private readonly PackageArtifactManifestWriter _artifactManifestWriter;
+    private readonly Func<string, string, CancellationToken, Task> _sourceIdentityVerifier;
 
     /// <summary>
     /// Creates a package artifact workflow.
@@ -36,12 +37,18 @@ internal sealed class PackageArtifactWorkflow
     /// Packed Docs consumer proof that restores the validated Docs artifact in an independent locked consumer before
     /// protected publish jobs can consume the artifact manifest.
     /// </param>
+    /// <param name="sourceIdentityVerifier">
+    /// Optional exact-source verifier. Production defaults to <see cref="TailwindSourceIdentity.RequireAsync"/>;
+    /// tests may supply a deterministic verifier to exercise downstream producer-evidence behavior without creating
+    /// a Git checkout whose commit must match the test assembly's build stamp.
+    /// </param>
     internal PackageArtifactWorkflow(
         PackagePublishPlanResolver planResolver,
         ICommandRunner commandRunner,
         PackageArtifactValidator validator,
         ICoverageCliConsumerProofWorkflow coverageProofWorkflow,
-        IDocsPackageConsumerProofWorkflow docsProofWorkflow)
+        IDocsPackageConsumerProofWorkflow docsProofWorkflow,
+        Func<string, string, CancellationToken, Task>? sourceIdentityVerifier = null)
     {
         _planResolver = planResolver;
         _commandRunner = commandRunner;
@@ -50,6 +57,7 @@ internal sealed class PackageArtifactWorkflow
         _docsProofWorkflow = docsProofWorkflow;
         _payloadInventoryLoader = new PackagePayloadInventoryLoader();
         _artifactManifestWriter = new PackageArtifactManifestWriter();
+        _sourceIdentityVerifier = sourceIdentityVerifier ?? TailwindSourceIdentity.RequireAsync;
     }
 
     /// <summary>
@@ -71,7 +79,7 @@ internal sealed class PackageArtifactWorkflow
         if (producerIdentityCount == 4)
         {
             TailwindProofSubjectService.ValidateProducerContext(request.RepositoryId!, request.ProducerRunId!, request.ProducerAttempt!, request.SourceCommit!);
-            await TailwindSourceIdentity.RequireAsync(request.RepositoryRoot, request.SourceCommit!, cancellationToken);
+            await _sourceIdentityVerifier(request.RepositoryRoot, request.SourceCommit!, cancellationToken);
         }
         PackageProofWorkDirectory.RequireDisjoint(
             request.CoverageProofWorkDirectory,

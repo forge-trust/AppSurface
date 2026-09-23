@@ -34,6 +34,17 @@ internal static class TailwindPayloadProjection
         return archiveFiles;
     }
 
+    /// <summary>Hashes the projection-v1 package entries protected by roots and selected by an assets target node.</summary>
+    /// <param name="archivePath">Path to the producer package archive.</param>
+    /// <param name="targetNode">The first-party package node from the inventoried consumer assets graph.</param>
+    /// <param name="cancellationToken">Token used to stop archive enumeration and hashing.</param>
+    /// <returns>Case-insensitive archive-relative paths mapped to lowercase SHA-256 digests.</returns>
+    internal static IReadOnlyDictionary<string, string> ReadArchiveProjectionHashes(
+        string archivePath,
+        JsonElement targetNode,
+        CancellationToken cancellationToken)
+        => ReadArchiveFileHashes(archivePath, ReadSelectedAssetPaths(targetNode), cancellationToken);
+
     private static HashSet<string> ReadSelectedAssetPaths(JsonElement targetNode)
     {
         if (targetNode.ValueKind != JsonValueKind.Object) throw new PackageIndexException("First-party assets target node must be an object.");

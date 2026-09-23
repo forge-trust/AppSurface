@@ -49,6 +49,34 @@ public sealed class TailwindProducerSubjectTests : IDisposable
             _artifacts, fixture.ManifestPath, repository, run, attempt, commit, [fixture.Package], CancellationToken.None));
     }
 
+    [Theory]
+    [InlineData("0001", "1", "1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData("1", "01", "1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData("1", "1", "00", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData("1", "1", "1", "not-a-commit")]
+    public void ValidateProducerContext_RejectsNonCanonicalWorkflowIdentity(string repository, string run, string attempt, string commit)
+    {
+        Assert.Throws<PackageIndexException>(() => TailwindProofSubjectService.ValidateProducerContext(repository, run, attempt, commit));
+    }
+
+    [Theory]
+    [InlineData("wrong-package")]
+    [InlineData("wrong-framework")]
+    [InlineData("unsupported-projection")]
+    public void ValidateSubject_RejectsUnsupportedPackageContract(string mutation)
+    {
+        var subject = mutation switch
+        {
+            "wrong-package" => MinimalSubject() with { PackageId = "ForgeTrust.Other" },
+            "wrong-framework" => MinimalSubject() with { ConsumerFramework = "net9.0" },
+            _ => MinimalSubject() with { PayloadProjectionVersion = 2 }
+        };
+
+        var error = Assert.Throws<PackageIndexException>(() => TailwindProofSubjectService.ValidateSubject(subject));
+
+        Assert.Contains("unsupported Tailwind package, framework, or payload projection", error.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Validate_RejectsChangedArchiveBytesEvenWhenSubjectAndManifestRemainUntouched()
     {
@@ -166,6 +194,35 @@ public sealed class TailwindProducerSubjectTests : IDisposable
     }
 
     [Theory]
+    [InlineData("multiple-frameworks")]
+    [InlineData("runtime-identifier")]
+    [InlineData("malformed-dependencies")]
+    [InlineData("missing-first-party-dependency")]
+    [InlineData("wrong-dependency-version")]
+    public async Task ReadResolvedClosure_RejectsUntrustedFrameworkAndDependencyMetadata(string mutation)
+    {
+        var fixture = await CreateFixtureAsync();
+        var manifest = await new PackageArtifactManifestReader().ReadAsync(fixture.ManifestPath, CancellationToken.None);
+        var path = Path.Combine(_root, "invalid-closure.assets.json");
+        await File.WriteAllTextAsync(path, Assets("net10.0", mutation: mutation));
+
+        var error = Assert.Throws<PackageIndexException>(() => TailwindProofSubjectService.ReadResolvedClosure(path, manifest));
+
+        Assert.NotEmpty(error.Message);
+    }
+
+    [Fact]
+    public async Task ReadResolvedClosure_AllowsThirdPartyDependenciesOutsideProducerClosure()
+    {
+        var fixture = await CreateFixtureAsync();
+        var manifest = await new PackageArtifactManifestReader().ReadAsync(fixture.ManifestPath, CancellationToken.None);
+        var path = Path.Combine(_root, "third-party-dependency.assets.json");
+        await File.WriteAllTextAsync(path, Assets("net10.0", mutation: "third-party-dependency"));
+
+        Assert.Equal([fixture.Package], TailwindProofSubjectService.ReadResolvedClosure(path, manifest));
+    }
+
+    [Theory]
     [InlineData("../escape")]
     [InlineData("/rooted")]
     [InlineData("C:/drive")]
@@ -249,7 +306,17 @@ public sealed class TailwindProducerSubjectTests : IDisposable
         {
             var resolvedVersion = mutation == "wrong-version" ? "9.9.9" : Version;
             var key = $"{TailwindId}/{resolvedVersion}";
-            target[key] = mutation == "project-reference" ? new { type = "project" } : new { type = "package", dependencies = new Dictionary<string, string>() };
+            var dependencies = mutation switch
+            {
+                "malformed-dependencies" => (object)new[] { "invalid" },
+                "missing-first-party-dependency" => new Dictionary<string, string> { ["ForgeTrust.Unplanned"] = Version },
+                "wrong-dependency-version" => new Dictionary<string, string> { [TailwindId] = "9.9.9" },
+                "third-party-dependency" => new Dictionary<string, string> { ["Newtonsoft.Json"] = "13.0.1" },
+                _ => new Dictionary<string, string>()
+            };
+            target[key] = mutation == "project-reference"
+                ? new { type = "project" }
+                : new Dictionary<string, object> { ["type"] = "package", ["dependencies"] = dependencies };
             if (mutation != "missing-library")
                 libraries[key] = new { type = mutation == "project-reference" ? "project" : "package", path = $"forgetrust.appsurface.web.tailwind/{resolvedVersion}", sha512 = "fixture-content-hash" };
         }
@@ -259,12 +326,21 @@ public sealed class TailwindProducerSubjectTests : IDisposable
             libraries[$"ForgeTrust.Unplanned/{Version}"] = new { type = "package", path = $"forgetrust.unplanned/{Version}", sha512 = "fixture-content-hash" };
         }
         var targets = new Dictionary<string, object> { [targetName] = target };
-        return JsonSerializer.Serialize(new
+        var assets = JsonSerializer.Serialize(new
         {
             targets,
             libraries,
-            project = new { frameworks = new { net10_0 = new { } }, restore = new { } }
+            project = new
+            {
+                frameworks = mutation == "multiple-frameworks"
+                    ? new Dictionary<string, object> { ["net10_0"] = new { }, ["net9_0"] = new { } }
+                    : new Dictionary<string, object> { ["net10_0"] = new { } },
+                restore = mutation == "runtime-identifier"
+                    ? new Dictionary<string, object> { ["runtimeIdentifier"] = "linux-x64" }
+                    : new Dictionary<string, object>()
+            }
         }).Replace("net10_0", "net10.0", StringComparison.Ordinal);
+        return assets.Replace("net9_0", "net9.0", StringComparison.Ordinal);
     }
 
     private static string TailwindReleaseManifest() => JsonSerializer.Serialize(new

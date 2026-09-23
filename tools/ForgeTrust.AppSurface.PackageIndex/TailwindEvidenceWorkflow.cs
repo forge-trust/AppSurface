@@ -571,6 +571,10 @@ internal static class TailwindEvidenceWorkflow
         foreach (var check in new[] { "generatedCss", "hostCacheBinary", "noRuntimeCompanionDependency", "noNativeConsumerOutput", "postBuildPayloadUnchanged" })
             if (!checks.TryGetProperty(check, out var value) || value.ValueKind != JsonValueKind.True)
                 throw new PackageIndexException($"Native receipt '{rid}' did not prove '{check}'.");
+        // Bind project.assets.json before using it to derive the archive projection.
+        await ValidateFileInventoryAsync(root, "files", evidenceRoot, "tailwind-native-host-proof.json", token);
+        var assetsPath = ResolveEvidencePath(evidenceRoot, "consumer/project.assets.json");
+        RequireRegularFileWithoutLinks(assetsPath);
         if (!root.TryGetProperty("firstPartyPackages", out var packages) || packages.ValueKind != JsonValueKind.Array)
             throw new PackageIndexException($"Native receipt '{rid}' is missing first-party package evidence.");
         var resolved = packages.EnumerateArray().ToArray();
@@ -592,7 +596,8 @@ internal static class TailwindEvidenceWorkflow
             RequireRegularFileWithoutLinks(archivePath);
             if (!string.Equals(PackageHash.ComputeSha512(archivePath), expected.PackageSha512, StringComparison.Ordinal))
                 throw new PackageIndexException($"Native receipt '{rid}' consumed archive for '{expected.PackageId}' differs from producer bytes.");
-            ValidatePayloadFileSet(match, expected, archivePath, evidenceRoot);
+            var assetsTarget = ReadAssetsTargetNode(assetsPath, expected);
+            ValidatePayloadFileSet(match, expected, archivePath, evidenceRoot, assetsTarget, token);
         }
         var binaryName = RequireNonEmptyString(root, "binaryName");
         var (expectedBinaryName, expectedBinaryHash) = ReadExpectedBinary(Path.Combine(request.ArtifactsInputPath, subject.ArtifactFileName), rid);
@@ -604,7 +609,6 @@ internal static class TailwindEvidenceWorkflow
         RequireString(root, "tailwindManifestSha256", subject.TailwindManifestSha256);
         if (!string.Equals(root.GetProperty("tailwindManifestSha256").GetString(), root.GetProperty("restoredTailwindManifestSha256").GetString(), StringComparison.Ordinal))
             throw new PackageIndexException($"Native receipt '{rid}' Tailwind release manifest digest changed after restore.");
-        await ValidateFileInventoryAsync(root, "files", evidenceRoot, "tailwind-native-host-proof.json", token);
         var diagnosticPath = RequireNonEmptyString(root, "diagnosticPath");
         if (!string.Equals(diagnosticPath, "native-consumer-report.md", StringComparison.Ordinal))
             throw new PackageIndexException($"Native receipt '{rid}' has an unexpected diagnostic path.");
@@ -629,7 +633,7 @@ internal static class TailwindEvidenceWorkflow
         RequireString(receipt, "processArchitecture", expected.Item3);
     }
 
-    private static void ValidatePayloadFileSet(JsonElement package, TailwindSubjectPackage expected, string archivePath, string evidenceRoot)
+    private static void ValidatePayloadFileSet(JsonElement package, TailwindSubjectPackage expected, string archivePath, string evidenceRoot, JsonElement assetsTarget, CancellationToken token)
     {
         if (!package.TryGetProperty("payloadFiles", out var payloads) || payloads.ValueKind != JsonValueKind.Array)
             throw new PackageIndexException($"Native payload evidence for '{expected.PackageId}' must be an array.");
@@ -645,7 +649,7 @@ internal static class TailwindEvidenceWorkflow
             RequireDigest(expectedHash, 64, "payload SHA-256");
             if (!FixedEquals(HashFile(evidencePath), expectedHash)) throw new PackageIndexException($"Native payload evidence bytes changed at '{packagePath}'.");
         }
-        var archiveEntries = ReadProtectedArchiveHashes(archivePath);
+        var archiveEntries = TailwindPayloadProjection.ReadArchiveProjectionHashes(archivePath, assetsTarget, token);
         if (archiveEntries.Count != seen.Count || !archiveEntries.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(seen))
             throw new PackageIndexException($"Native payload inventory for '{expected.PackageId}' is incomplete or contains extra files.");
         foreach (var (path, hash) in archiveEntries)
@@ -656,41 +660,30 @@ internal static class TailwindEvidenceWorkflow
         }
     }
 
-    private static Dictionary<string, string> ReadProtectedArchiveHashes(string path)
+    private static JsonElement ReadAssetsTargetNode(string assetsPath, TailwindSubjectPackage expected)
     {
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        using var zip = System.IO.Compression.ZipFile.OpenRead(path);
-        if (zip.Entries.Count > 100_000) throw new PackageIndexException("Evidence package archive exceeds the ZIP entry limit.");
-        long expanded = 0;
-        foreach (var entry in zip.Entries)
+        using var document = ParseStrict(ReadBounded(assetsPath, TailwindProofSubjectService.MaximumDocumentBytes), "host consumer project.assets.json");
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("targets", out var targets)
+            || targets.ValueKind != JsonValueKind.Object
+            || targets.EnumerateObject().Count() != 1)
+            throw new PackageIndexException("Host consumer project.assets.json must contain exactly one target.");
+
+        var target = targets.EnumerateObject().Single();
+        if (target.Name is not ("net10.0" or ".NETCoreApp,Version=v10.0") || target.Value.ValueKind != JsonValueKind.Object)
+            throw new PackageIndexException("Host consumer project.assets.json does not contain the fixed net10.0 target.");
+
+        var matches = target.Value.EnumerateObject().Where(item =>
         {
-            if (entry.FullName.EndsWith("/", StringComparison.Ordinal))
-            {
-                _ = TailwindProofSubjectService.NormalizeArchivePath(entry.FullName[..^1]);
-                continue;
-            }
-            var name = TailwindProofSubjectService.NormalizeArchivePath(entry.FullName);
-            var protectedPath = new[] { "build/", "buildTransitive/", "buildMultiTargeting/", "lib/", "ref/", "analyzers/", "tools/", "tasks/", "runtimes/", "contentFiles/" }.Any(root => name.StartsWith(root, StringComparison.OrdinalIgnoreCase));
-            if (!protectedPath) continue;
-            if ((entry.ExternalAttributes >> 16 & 0xF000) == 0xA000) throw new PackageIndexException($"Evidence package contains symlink '{name}'.");
-            expanded = checked(expanded + entry.Length);
-            if (expanded > 4L * 1024 * 1024 * 1024) throw new PackageIndexException("Protected archive payload exceeds the 4 GiB limit.");
-            using var stream = entry.Open();
-            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            var buffer = new byte[64 * 1024];
-            long actual = 0;
-            while (true)
-            {
-                var read = stream.Read(buffer, 0, buffer.Length);
-                if (read == 0) break;
-                actual = checked(actual + read);
-                if (actual > entry.Length) throw new PackageIndexException($"Archive entry '{name}' exceeded its declared length.");
-                hash.AppendData(buffer, 0, read);
-            }
-            if (actual != entry.Length) throw new PackageIndexException($"Archive entry '{name}' expanded to an unexpected size.");
-            result.Add(name, Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant());
-        }
-        return result;
+            var separator = item.Name.LastIndexOf('/');
+            return separator > 0
+                && string.Equals(item.Name[..separator], expected.PackageId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(item.Name[(separator + 1)..], expected.PackageVersion, StringComparison.Ordinal);
+        }).ToArray();
+        if (matches.Length != 1)
+            throw new PackageIndexException($"Host consumer project.assets.json must resolve exactly one target node for '{expected.PackageId}/{expected.PackageVersion}'.");
+        return matches[0].Value.Clone();
     }
 
     private static (string Name, string Sha256) ReadExpectedBinary(string archivePath, string rid)

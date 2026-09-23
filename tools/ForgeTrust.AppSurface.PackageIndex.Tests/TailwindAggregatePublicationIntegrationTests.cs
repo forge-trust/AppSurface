@@ -105,6 +105,79 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task ProgramRunAsync_DispatchesAggregateAndProducerBindingSuccess()
+    {
+        using var fixture = await Fixture.CreateAsync(_root);
+        var aggregateReport = TestPathUtils.PathUnder(_root, "cli-aggregate-report");
+        var bindingReport = TestPathUtils.PathUnder(_root, "cli-producer-binding-report");
+        var bindingOutput = TestPathUtils.PathUnder(_root, "resolved-producer-binding.json");
+
+        var aggregate = await fixture.RunEvidenceCliAsync("aggregate", aggregateReport,
+            "--native-invocation-id", "native-798-1",
+            "--evidence-input", fixture.Evidence,
+            "--host-artifacts-map", fixture.Map);
+
+        Assert.Equal(0, aggregate.ExitCode);
+        Assert.Empty(aggregate.Stderr);
+        Assert.Contains("aggregate succeeded", aggregate.Stdout, StringComparison.OrdinalIgnoreCase);
+        var aggregatePath = TestPathUtils.PathUnder(aggregateReport, "tailwind-native-aggregate.json");
+        using (var report = JsonDocument.Parse(await File.ReadAllBytesAsync(aggregatePath)))
+        {
+            Assert.Equal("appsurface-tailwind-native-host-evidence-v2", report.RootElement.GetProperty("schema").GetString());
+            Assert.Equal(5, report.RootElement.GetProperty("hosts").GetArrayLength());
+        }
+
+        var binding = await fixture.RunEvidenceCliAsync("producer-binding", bindingReport,
+            "--resolved-binding-output", bindingOutput);
+
+        Assert.Equal(0, binding.ExitCode);
+        Assert.Empty(binding.Stderr);
+        Assert.Contains("Validated frozen producer binding", binding.Stdout, StringComparison.Ordinal);
+        Assert.NotEqual(aggregateReport, bindingReport);
+        Assert.True(File.Exists(TestPathUtils.PathUnder(aggregateReport, "diagnostics.json")));
+        Assert.True(File.Exists(TestPathUtils.PathUnder(bindingReport, "diagnostics.json")));
+        using var resolved = JsonDocument.Parse(await File.ReadAllBytesAsync(bindingOutput));
+        Assert.Equal("appsurface-tailwind-resolved-producer-binding-v1", resolved.RootElement.GetProperty("schema").GetString());
+        Assert.Equal("901", resolved.RootElement.GetProperty("producerRunId").GetString());
+        Assert.Equal("501", resolved.RootElement.GetProperty("producerArtifactId").GetString());
+
+        var workflowReport = TestPathUtils.PathUnder(_root, "workflow-producer-binding-report");
+        var workflowOutput = TestPathUtils.PathUnder(_root, "workflow-resolved-producer-binding.json");
+        var options = fixture.CreateProducerBindingOptions(workflowReport);
+        var writtenBinding = await TailwindEvidenceWorkflow.ValidateAndWriteProducerBindingAsync(
+            fixture.Repository, fixture.Bundle, fixture.ManifestPath, options, workflowOutput, CancellationToken.None);
+
+        Assert.Equal("901", writtenBinding.Subject.ProducerRunId);
+        using var workflowResolved = JsonDocument.Parse(await File.ReadAllBytesAsync(workflowOutput));
+        Assert.Equal("appsurface-tailwind-resolved-producer-binding-v1", workflowResolved.RootElement.GetProperty("schema").GetString());
+        Assert.Equal(fixture.SubjectHash, workflowResolved.RootElement.GetProperty("subjectSha256").GetString());
+        using var workflowDiagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(workflowReport, "diagnostics.json")));
+        Assert.Equal("succeeded", workflowDiagnostics.RootElement.GetProperty("status").GetString());
+        Assert.Equal("producer-binding", workflowDiagnostics.RootElement.GetProperty("stage").GetString());
+        Assert.False(workflowDiagnostics.RootElement.GetProperty("releaseEligible").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData("missing-selected-payload", "incomplete or contains extra files")]
+    [InlineData("extra-unselected-payload", "incomplete or contains extra files")]
+    [InlineData("unsupported-assets-group", "Unsupported NuGet assets group")]
+    [InlineData("missing-assets-inventory", "Aggregate file inventory is incomplete")]
+    public async Task Aggregate_RequiresExactPayloadProjectionFromInventoriedConsumerAssets(string mutation, string expectedDiagnostic)
+    {
+        using var fixture = await Fixture.CreateAsync(_root);
+        fixture.ApplyMutation(mutation);
+
+        var failed = await fixture.AggregateAsync("aggregate-" + mutation);
+
+        Assert.False(failed.Succeeded);
+        Assert.False(File.Exists(failed.ReportPath));
+        var diagnosticsPath = TestPathUtils.PathUnder(Path.GetDirectoryName(failed.ReportPath)!, "diagnostics.json");
+        using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(diagnosticsPath));
+        Assert.Equal("failed", diagnostics.RootElement.GetProperty("status").GetString());
+        Assert.Contains(expectedDiagnostic, diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString(), StringComparison.Ordinal);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
@@ -155,6 +228,8 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
                 Add(archive, "build/tailwind.release.json", releaseManifest);
                 Add(archive, "build/tailwind.version", "4.1.0");
                 Add(archive, "contentFiles/any/any/tailwind.css", ".fixture{color:red}");
+                Add(archive, "native/codec.bin", "native-fixture");
+                Add(archive, "notes/unused.txt", "not selected by the assets graph");
             }
 
             var entry = new PackageArtifactManifestEntry(PackageId, "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
@@ -183,7 +258,8 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
                 {
                     (Path: "build/tailwind.release.json", Bytes: Encoding.UTF8.GetBytes(releaseManifest)),
                     (Path: "build/tailwind.version", Bytes: Encoding.UTF8.GetBytes("4.1.0")),
-                    (Path: "contentFiles/any/any/tailwind.css", Bytes: Encoding.UTF8.GetBytes(".fixture{color:red}"))
+                    (Path: "contentFiles/any/any/tailwind.css", Bytes: Encoding.UTF8.GetBytes(".fixture{color:red}")),
+                    (Path: "native/codec.bin", Bytes: Encoding.UTF8.GetBytes("native-fixture"))
                 })
                 {
                     var dest = TestPathUtils.PathUnder(payloadRoot, item.Path.Split('/'));
@@ -191,6 +267,24 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
                     await File.WriteAllBytesAsync(dest, item.Bytes);
                     payloadFiles.Add(new { packageRelativePath = item.Path, evidencePath = "payload/" + item.Path, sha256 = Sha256(item.Bytes) });
                 }
+                var assetsPath = TestPathUtils.PathUnder(host, "consumer", "project.assets.json");
+                Directory.CreateDirectory(Path.GetDirectoryName(assetsPath)!);
+                var assets = new
+                {
+                    targets = new Dictionary<string, object>
+                    {
+                        ["net10.0"] = new Dictionary<string, object>
+                        {
+                            [$"{PackageId}/{Version}"] = new
+                            {
+                                type = "Package",
+                                framework = ".NETCoreApp,Version=v10.0",
+                                native = new Dictionary<string, object> { ["native/codec.bin"] = new { } }
+                            }
+                        }
+                    }
+                };
+                await File.WriteAllBytesAsync(assetsPath, JsonSerializer.SerializeToUtf8Bytes(assets));
                 await File.WriteAllTextAsync(TestPathUtils.PathUnder(host, "native-consumer-report.md"), "# Fixture native consumer evidence\n");
                 await File.WriteAllTextAsync(TestPathUtils.PathUnder(host, "summary.md"), "# Native host proof\n\nStatus: succeeded\n");
                 await File.WriteAllTextAsync(TestPathUtils.PathUnder(host, "diagnostics.json"), "{\"schema\":\"appsurface-tailwind-diagnostic-v1\",\"status\":\"succeeded\"}\n");
@@ -250,11 +344,87 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
             return (result.Succeeded, result.ReportPath);
         }
 
+        public async Task<(int ExitCode, string Stdout, string Stderr)> RunEvidenceCliAsync(
+            string mode, string reportDirectory, params string[] additionalArguments)
+        {
+            var args = new List<string>
+            {
+                "verify-tailwind-evidence",
+                "--repo-root", Repository,
+                "--artifacts-input", Bundle,
+                "--artifact-manifest", ManifestPath,
+                "--mode", mode,
+                "--producer-subject", TailwindProofSubjectService.FileName,
+                "--producer-artifact-id", "501",
+                "--expected-subject-sha256", SubjectHash,
+                "--repository-id", "12345",
+                "--producer-run-id", "901",
+                "--source-commit", SourceCommit,
+                "--report-directory", reportDirectory
+            };
+            args.AddRange(additionalArguments);
+            using var stdout = new StringWriter();
+            using var stderr = new StringWriter();
+            var exitCode = await Program.RunAsync(args.ToArray(), stdout, stderr, Repository);
+            return (exitCode, stdout.ToString(), stderr.ToString());
+        }
+
+        public TailwindCommandOptions CreateProducerBindingOptions(string reportDirectory)
+            => new("producer-binding", TailwindProofSubjectService.FileName, "501", SubjectHash, "12345", "901", "1", SourceCommit,
+                null, null, null, reportDirectory, null, null, null, null, null, null, null, null, null, []);
+
         public void ApplyMutation(string mutation)
         {
             var rid = mutation == "missing-host" ? Rids[^1] : Rids[0];
             var receiptPath = TestPathUtils.PathUnder(Evidence, rid, "tailwind-native-host-proof.json");
             if (mutation == "missing-host") { File.Delete(receiptPath); return; }
+            if (mutation is "missing-selected-payload" or "extra-unselected-payload" or "unsupported-assets-group" or "missing-assets-inventory")
+            {
+                var host = TestPathUtils.PathUnder(Evidence, rid);
+                var receipt = JsonNode.Parse(File.ReadAllText(receiptPath))!;
+                if (mutation is "missing-selected-payload" or "extra-unselected-payload")
+                {
+                    var payloadFiles = (JsonArray)receipt["firstPartyPackages"]![0]!["payloadFiles"]!;
+                    if (mutation == "missing-selected-payload")
+                    {
+                        var selected = payloadFiles.Select((node, index) => (node, index))
+                            .Single(item => item.node!["packageRelativePath"]!.GetValue<string>() == "native/codec.bin");
+                        payloadFiles.RemoveAt(selected.index);
+                    }
+                    else
+                    {
+                        const string unusedPath = "notes/unused.txt";
+                        var bytes = Encoding.UTF8.GetBytes("not selected by the assets graph");
+                        var evidencePath = TestPathUtils.PathUnder(host, "payload", "notes", "unused.txt");
+                        Directory.CreateDirectory(Path.GetDirectoryName(evidencePath)!);
+                        File.WriteAllBytes(evidencePath, bytes);
+                        payloadFiles.Add(new JsonObject
+                        {
+                            ["packageRelativePath"] = unusedPath,
+                            ["evidencePath"] = "payload/" + unusedPath,
+                            ["sha256"] = Sha256(bytes)
+                        });
+                        receipt["files"] = JsonSerializer.SerializeToNode(Inventory(host, "tailwind-native-host-proof.json"));
+                    }
+                }
+                else if (mutation == "unsupported-assets-group")
+                {
+                    var assetsPath = TestPathUtils.PathUnder(host, "consumer", "project.assets.json");
+                    var assets = JsonNode.Parse(File.ReadAllText(assetsPath))!;
+                    assets["targets"]!["net10.0"]![PackageId + "/" + Version]!["unexpectedGroup"] = new JsonObject();
+                    File.WriteAllText(assetsPath, assets.ToJsonString());
+                    receipt["files"] = JsonSerializer.SerializeToNode(Inventory(host, "tailwind-native-host-proof.json"));
+                }
+                else
+                {
+                    var files = (JsonArray)receipt["files"]!;
+                    var assetsItem = files.Select((node, index) => (node, index))
+                        .Single(item => item.node!["path"]!.GetValue<string>() == "consumer/project.assets.json");
+                    files.RemoveAt(assetsItem.index);
+                }
+                File.WriteAllText(receiptPath, receipt.ToJsonString());
+                return;
+            }
             var json = File.ReadAllText(receiptPath);
             if (mutation == "mutated-host-identity")
             {

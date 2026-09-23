@@ -101,6 +101,48 @@ public sealed class TailwindEvidenceWorkflowTests : IDisposable
             TailwindEvidenceWorkflow.ReadHostArtifactMapAsync(path, CancellationToken.None));
     }
 
+    [Theory]
+    [InlineData("not-json")]
+    [InlineData("duplicate-field")]
+    [InlineData("unknown-field")]
+    [InlineData("missing-field")]
+    public async Task ReadHostArtifactMap_RejectsMalformedOrAmbiguousJson(string mutation)
+    {
+        Directory.CreateDirectory(_root);
+        var path = TestPathUtils.PathUnder(_root, "malformed-host-artifacts.json");
+        var first = mutation switch
+        {
+            "not-json" => "not json",
+            "duplicate-field" => "{\"rid\":\"linux-x64\",\"rid\":\"linux-x64\",\"artifactId\":\"101\",\"directory\":\"linux-x64\"}",
+            "unknown-field" => "{\"rid\":\"linux-x64\",\"artifactId\":\"101\",\"directory\":\"linux-x64\",\"extra\":true}",
+            _ => "{\"rid\":\"linux-x64\",\"artifactId\":\"101\"}"
+        };
+        await File.WriteAllTextAsync(path, mutation == "not-json" ? first : "[" + first + "]");
+
+        var error = await Record.ExceptionAsync(() =>
+            TailwindEvidenceWorkflow.ReadHostArtifactMapAsync(path, CancellationToken.None));
+        Assert.NotNull(error);
+        Assert.True(error is PackageIndexException or JsonException, $"Unexpected exception type: {error.GetType().Name}");
+    }
+
+    [Fact]
+    public async Task ReadHostArtifactMap_HonorsCancellationWhileReading()
+    {
+        var path = WriteMap(
+        [
+            ("linux-x64", "101", "linux-x64"),
+            ("linux-arm64", "102", "linux-arm64"),
+            ("osx-x64", "103", "osx-x64"),
+            ("osx-arm64", "104", "osx-arm64"),
+            ("win-x64", "105", "win-x64")
+        ]);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            TailwindEvidenceWorkflow.ReadHostArtifactMapAsync(path, cancellation.Token));
+    }
+
     [Fact]
     public async Task CancelledProof_UsesIndependentBoundedCleanupForFailureDiagnostics()
     {

@@ -7344,9 +7344,14 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task PackageArtifactWorkflow_HandlesTailwindProofEvidenceLifecycle(bool proofFails)
+    [InlineData(true, false, false)]
+    [InlineData(false, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, true, true)]
+    public async Task PackageArtifactWorkflow_HandlesTailwindProofEvidenceLifecycle(
+        bool proofFails,
+        bool includeProducerIdentity,
+        bool consumerClosureIsInvalid)
     {
         await WriteFileAsync("packages/package-index.yml",
             """
@@ -7401,7 +7406,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var tailwindProofReportPath = CombineSafeChildPath(artifactDirectory, "tailwind-package-consumer-proof.md");
         Directory.CreateDirectory(artifactDirectory);
         await File.WriteAllTextAsync(tailwindProofReportPath, "stale successful proof", Encoding.UTF8);
-        var commandRunner = new TailwindPackageRecordingCommandRunner(proofFails);
+        var commandRunner = new TailwindPackageRecordingCommandRunner(proofFails, consumerClosureIsInvalid);
+        var sourceIdentityChecks = new List<(string RepositoryRoot, string SourceCommit)>();
         var workflow = new PackageArtifactWorkflow(
             CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
             {
@@ -7415,7 +7421,12 @@ public sealed class PackageArtifactValidationTests : IDisposable
             commandRunner,
             new PackageArtifactValidator(),
             new RecordingCoverageCliConsumerProofWorkflow(succeeded: true),
-            new RecordingDocsPackageConsumerProofWorkflow(succeeded: true));
+            new RecordingDocsPackageConsumerProofWorkflow(succeeded: true),
+            (repositoryRoot, sourceCommit, _) =>
+            {
+                sourceIdentityChecks.Add((repositoryRoot, sourceCommit));
+                return Task.CompletedTask;
+            });
 
         var request = new PackageArtifactRequest(
             _repositoryRoot,
@@ -7429,15 +7440,37 @@ public sealed class PackageArtifactValidationTests : IDisposable
             CombineSafeChildPath(artifactDirectory, "docs-proof"),
             CombineSafeChildPath(artifactDirectory, "docs-proof.md"),
             "https://api.nuget.org/v3/index.json");
+        var sourceCommit = new string('a', 40);
+        if (includeProducerIdentity)
+        {
+            request = request with
+            {
+                RepositoryId = "1",
+                ProducerRunId = "123",
+                ProducerAttempt = "1",
+                SourceCommit = sourceCommit
+            };
+        }
+
         if (proofFails)
         {
             var error = await Assert.ThrowsAsync<PackageIndexException>(() => workflow.RunAsync(request));
             Assert.Contains("simulated tailwind proof stderr", error.Message, StringComparison.Ordinal);
         }
+        else if (consumerClosureIsInvalid)
+        {
+            var error = await Assert.ThrowsAsync<PackageIndexException>(() => workflow.RunAsync(request));
+            Assert.Contains("did not resolve the Tailwind package", error.Message, StringComparison.Ordinal);
+        }
         else
         {
             await workflow.RunAsync(request);
         }
+
+        if (includeProducerIdentity)
+            Assert.Equal([(_repositoryRoot, sourceCommit)], sourceIdentityChecks);
+        else
+            Assert.Empty(sourceIdentityChecks);
 
         var proofRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "Tailwind packed consumer proof");
         var workDirectory = proofRequest.Arguments[proofRequest.Arguments.ToList().IndexOf("--work-directory") + 1];
@@ -7455,6 +7488,34 @@ public sealed class PackageArtifactValidationTests : IDisposable
             Assert.Contains("Workspace retained for investigation", validationReport, StringComparison.Ordinal);
             Assert.Contains("simulated tailwind proof stderr", validationReport, StringComparison.Ordinal);
             Assert.False(File.Exists(artifactManifestPath), "A failed Tailwind proof must not produce a publishable artifact manifest.");
+        }
+        else if (consumerClosureIsInvalid)
+        {
+            Assert.False(Directory.Exists(workDirectory), "The proof workspace should be removed when producer subject creation fails.");
+            Assert.False(File.Exists(CombineSafeChildPath(artifactDirectory, TailwindProofSubjectService.FileName)));
+            Assert.True(File.Exists(artifactManifestPath), "Artifact validation completed before the invalid resolved closure was rejected.");
+        }
+        else if (includeProducerIdentity)
+        {
+            Assert.False(Directory.Exists(workDirectory), "The proof workspace should be removed after producer subject creation.");
+            var subjectPath = CombineSafeChildPath(artifactDirectory, TailwindProofSubjectService.FileName);
+            Assert.True(File.Exists(subjectPath), "A successful proof with trusted producer identity should write its subject.");
+            var subjectBytes = await File.ReadAllBytesAsync(subjectPath);
+            var subjectHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(subjectBytes)).ToLowerInvariant();
+            var validatedSubject = await TailwindProofSubjectService.ValidateAsync(
+                subjectPath,
+                artifactDirectory,
+                artifactManifestPath,
+                subjectHash,
+                "1",
+                "123",
+                sourceCommit,
+                "456",
+                CancellationToken.None);
+            Assert.Equal("1", validatedSubject.RepositoryId);
+            Assert.Equal("123", validatedSubject.ProducerRunId);
+            Assert.Equal(sourceCommit, validatedSubject.SourceCommit);
+            Assert.Equal(2, validatedSubject.FirstPartyPackages.Count);
         }
         else
         {
@@ -7908,6 +7969,52 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("native-host-evidence", stableWorkflow, StringComparison.Ordinal);
         Assert.Contains("source_commit: ${{ needs.validate-tag.outputs.tag-commit }}", prereleaseWorkflow, StringComparison.Ordinal);
         Assert.Contains("source_commit: ${{ needs.validate-tag.outputs.tag-commit }}", stableWorkflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PackageArtifactWorkflow_RequiresCompleteCanonicalProducerIdentityBeforePackaging()
+    {
+        await WriteFileAsync("packages/package-index.yml", "packages: []\n");
+        var commandRunner = new RecordingCommandRunner();
+        var workflow = new PackageArtifactWorkflow(
+            CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)),
+            commandRunner,
+            new PackageArtifactValidator(),
+            new RecordingCoverageCliConsumerProofWorkflow(succeeded: true),
+            new RecordingDocsPackageConsumerProofWorkflow(succeeded: true));
+        var request = new PackageArtifactRequest(
+            _repositoryRoot,
+            ManifestPath,
+            CombineSafeChildPath(_repositoryRoot, "artifacts"),
+            CombineSafeChildPath(_repositoryRoot, "report.md"),
+            PackageVersion,
+            CombineSafeChildPath(_repositoryRoot, "artifact-manifest.json"),
+            CombineSafeChildPath(_repositoryRoot, "coverage-proof"),
+            CombineSafeChildPath(_repositoryRoot, "coverage-proof.md"),
+            CombineSafeChildPath(_repositoryRoot, "docs-proof"),
+            CombineSafeChildPath(_repositoryRoot, "docs-proof.md"),
+            "https://example.test/nuget",
+            RepositoryId: "1");
+
+        var incomplete = await Assert.ThrowsAsync<PackageIndexException>(() => workflow.RunAsync(request));
+        var nonCanonical = await Assert.ThrowsAsync<PackageIndexException>(() => workflow.RunAsync(request with
+        {
+            RepositoryId = "01",
+            ProducerRunId = "123",
+            ProducerAttempt = "1",
+            SourceCommit = new string('a', 40)
+        }));
+        var untrustedCheckout = await Assert.ThrowsAsync<PackageIndexException>(() => workflow.RunAsync(request with
+        {
+            ProducerRunId = "123",
+            ProducerAttempt = "1",
+            SourceCommit = new string('a', 40)
+        }));
+
+        Assert.Contains("must be supplied together", incomplete.Message, StringComparison.Ordinal);
+        Assert.Contains("canonical decimal", nonCanonical.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Exact-source git check failed", untrustedCheckout.Message, StringComparison.Ordinal);
+        Assert.Empty(commandRunner.Requests);
     }
 
     [Fact]
@@ -9879,10 +9986,12 @@ public sealed class PackageArtifactValidationTests : IDisposable
     private sealed class TailwindPackageRecordingCommandRunner : ICommandRunner
     {
         private readonly bool _failTailwindProof;
+        private readonly bool _writeInvalidTailwindAssets;
 
-        public TailwindPackageRecordingCommandRunner(bool failTailwindProof = false)
+        public TailwindPackageRecordingCommandRunner(bool failTailwindProof = false, bool writeInvalidTailwindAssets = false)
         {
             _failTailwindProof = failTailwindProof;
+            _writeInvalidTailwindAssets = writeInvalidTailwindAssets;
         }
 
         public List<CommandRunRequest> Requests { get; } = [];
@@ -9915,7 +10024,38 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 return Task.FromException<CommandRunResult>(new PackageIndexException("simulated tailwind proof stderr"));
             }
 
+            if (request.OperationName == "Tailwind packed consumer proof")
+            {
+                var workDirectory = request.Arguments[request.Arguments.ToList().IndexOf("--work-directory") + 1];
+                var assetsPath = Path.Combine(workDirectory, "consumer", "obj", "project.assets.json");
+                Directory.CreateDirectory(Path.GetDirectoryName(assetsPath)!);
+                File.WriteAllText(assetsPath, CreateTailwindConsumerAssets(request.Arguments[request.Arguments.ToList().IndexOf("--package-version") + 1], _writeInvalidTailwindAssets));
+            }
+
             return Task.FromResult(new CommandRunResult(string.Empty, string.Empty));
+        }
+
+        private static string CreateTailwindConsumerAssets(string packageVersion, bool invalid)
+        {
+            var target = new Dictionary<string, object>();
+            var libraries = new Dictionary<string, object>();
+            if (!invalid)
+            {
+                foreach (var packageId in new[] { "ForgeTrust.AppSurface.Web", "ForgeTrust.AppSurface.Web.Tailwind" })
+                {
+                    var key = $"{packageId}/{packageVersion}";
+                    target[key] = new { type = "package", dependencies = new Dictionary<string, string>() };
+                    libraries[key] = new { type = "package", path = $"{packageId.ToLowerInvariant()}/{packageVersion}", sha512 = "fixture-content-hash" };
+                }
+            }
+
+            var assets = JsonSerializer.Serialize(new
+            {
+                targets = new Dictionary<string, object> { ["net10.0"] = target },
+                libraries,
+                project = new { frameworks = new { net10_0 = new { } }, restore = new { } }
+            });
+            return assets.Replace("net10_0", "net10.0", StringComparison.Ordinal);
         }
     }
 

@@ -6,6 +6,23 @@ using System.Text.Json;
 
 namespace ForgeTrust.AppSurface.PackageIndex;
 
+/// <summary>
+/// Validates the complete coordinated producer package plan and artifact payloads before native consumer restore.
+/// The injectable form exists only to let focused native-workflow tests supply a small producer fixture; ordinary
+/// callers use the full repository-backed validation implemented by <see cref="TailwindNativeConsumerWorkflow"/>.
+/// </summary>
+/// <param name="repositoryRoot">Clean, source-stamped repository checkout.</param>
+/// <param name="artifactsInputPath">Producer bundle directory containing every coordinated package.</param>
+/// <param name="manifest">Parsed producer artifact manifest.</param>
+/// <param name="producerClosure">First-party package closure already bound by the producer subject.</param>
+/// <param name="cancellationToken">Cancellation token for validation.</param>
+internal delegate Task TailwindNativeProducerArtifactValidator(
+    string repositoryRoot,
+    string artifactsInputPath,
+    PackageArtifactManifest manifest,
+    IReadOnlyList<TailwindSubjectPackage> producerClosure,
+    CancellationToken cancellationToken);
+
 /// <summary>Produces release-bound native consumer evidence from the actual NuGet cache restore.</summary>
 internal static class TailwindNativeConsumerWorkflow
 {
@@ -21,7 +38,8 @@ internal static class TailwindNativeConsumerWorkflow
 
     internal static async Task<TailwindEvidenceCommandResult> RunAsync(
         string repositoryRoot, string artifactsInputPath, string artifactManifestPath,
-        TailwindCommandOptions options, ICommandRunner runner, CancellationToken cancellationToken)
+        TailwindCommandOptions options, ICommandRunner runner, CancellationToken cancellationToken,
+        TailwindNativeProducerArtifactValidator? producerArtifactValidator = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(runner);
@@ -49,17 +67,8 @@ internal static class TailwindNativeConsumerWorkflow
             if (!string.Equals(expectedRid, observed.Rid, StringComparison.Ordinal))
                 throw new PackageIndexException($"Native host mismatch: expected '{expectedRid}', observed '{observed.Rid ?? "unsupported"}' ({observed.Os}/{observed.ProcessArchitecture}).");
             var producerManifest = await new PackageArtifactManifestReader().ReadAsync(artifactManifestPath, cancellationToken);
-            var plan = await new PackagePublishPlanResolver(new PackageProjectScanner(), new DotNetProjectMetadataProvider(), new PackageManifestLoader())
-                .ResolveAsync(repositoryRoot, Path.Combine(repositoryRoot, "packages", "package-index.yml"), cancellationToken);
-            var planned = PackageArtifactManifestPlanValidator.Validate(plan, producerManifest, artifactsInputPath);
-            _ = new PackageArtifactValidator().Validate(plan, artifactsInputPath, producerManifest.PackageVersion, repositoryRoot);
-            foreach (var package in binding.Subject.FirstPartyPackages)
-            {
-                var match = planned.SingleOrDefault(item => item.ManifestEntry.PackageId.Equals(package.PackageId, StringComparison.OrdinalIgnoreCase));
-                if (match is null || !string.Equals(match.ManifestEntry.ArtifactFileName, package.ArtifactFileName, StringComparison.Ordinal)
-                    || !string.Equals(match.ManifestEntry.Sha512, package.PackageSha512, StringComparison.Ordinal))
-                    throw new PackageIndexException($"Producer subject closure package '{package.PackageId}' does not match the validated package plan and artifact manifest.");
-            }
+            await (producerArtifactValidator ?? ValidateProducerArtifactsAsync)(repositoryRoot, artifactsInputPath,
+                producerManifest, binding.Subject.FirstPartyPackages, cancellationToken);
 
             failedStage = "private-cache-setup";
             var consumer = Path.Combine(work, "consumer");
@@ -248,6 +257,27 @@ internal static class TailwindNativeConsumerWorkflow
             await TailwindEvidenceWorkflow.WriteFailureReportBestEffortAsync(report, failedStage ?? "prerequisites", ex, cancellationToken,
                 new { failedStage, completedStages = completed, expectedRid = options.ExpectedRid, observedHost = ObserveHost() });
             return new TailwindEvidenceCommandResult(false, ex is OperationCanceledException ? "cancelled" : "failed", receiptPath);
+        }
+    }
+
+    /// <summary>Applies the complete checked-in package plan and package payload validation used in production.</summary>
+    private static async Task ValidateProducerArtifactsAsync(
+        string repositoryRoot,
+        string artifactsInputPath,
+        PackageArtifactManifest manifest,
+        IReadOnlyList<TailwindSubjectPackage> producerClosure,
+        CancellationToken cancellationToken)
+    {
+        var plan = await new PackagePublishPlanResolver(new PackageProjectScanner(), new DotNetProjectMetadataProvider(), new PackageManifestLoader())
+            .ResolveAsync(repositoryRoot, Path.Combine(repositoryRoot, "packages", "package-index.yml"), cancellationToken);
+        var planned = PackageArtifactManifestPlanValidator.Validate(plan, manifest, artifactsInputPath);
+        _ = new PackageArtifactValidator().Validate(plan, artifactsInputPath, manifest.PackageVersion, repositoryRoot);
+        foreach (var package in producerClosure)
+        {
+            var match = planned.SingleOrDefault(item => item.ManifestEntry.PackageId.Equals(package.PackageId, StringComparison.OrdinalIgnoreCase));
+            if (match is null || !string.Equals(match.ManifestEntry.ArtifactFileName, package.ArtifactFileName, StringComparison.Ordinal)
+                || !string.Equals(match.ManifestEntry.Sha512, package.PackageSha512, StringComparison.Ordinal))
+                throw new PackageIndexException($"Producer subject closure package '{package.PackageId}' does not match the validated package plan and artifact manifest.");
         }
     }
 
