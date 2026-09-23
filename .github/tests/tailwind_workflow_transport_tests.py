@@ -292,6 +292,123 @@ class WorkflowTransportTests(unittest.TestCase):
             self.assertRegex(source, r"artifact-ids:\s*\$\{\{\s*steps\.recovery\.outputs\.producer_artifact_id")
             self.assertRegex(source, r"UPLOAD(?:ED)?_ID:\s*\$\{\{\s*steps\.upload-producer\.outputs\.artifact-id")
 
+    def test_recovered_and_fresh_producer_bindings_use_typed_source_stamped_verifier(self) -> None:
+        for publisher in PUBLISHERS:
+            with self.subTest(publisher=publisher.name):
+                source = publisher.read_text()
+                build_start = source.index("- name: Build source-stamped PackageIndex verifier")
+                build_end = source.index("\n      - name:", build_start)
+                build_step = source[build_start:build_end]
+                self.assertNotIn("if:", build_step)
+                self.assertIn("dotnet restore tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --locked-mode", build_step)
+                self.assertIn('/p:SourceRevisionId="$SOURCE_REVISION_ID"', build_step)
+
+                binding_start = source.index("- name: Re-emit frozen producer binding")
+                binding_end = source.index("\n      - name:", binding_start)
+                binding_step = source[binding_start:binding_end]
+                self.assertNotIn("if:", binding_step, "binding must run after both upload and artifact-ID recovery")
+                for argument in (
+                    "verify-tailwind-evidence", "--mode producer-binding", "--producer-artifact-id",
+                    "--expected-subject-sha256", "--report-directory \"$BINDING_REPORT_DIRECTORY\"",
+                    "--resolved-binding-output \"$RESOLVED_BINDING\"",
+                ):
+                    self.assertIn(argument, binding_step)
+                self.assertIn("--repo-root \"$GITHUB_WORKSPACE\"", binding_step)
+                self.assertIn("--source-commit \"$SOURCE_COMMIT\"", binding_step)
+                self.assertIn("jq -er '.producerArtifactId' \"$RESOLVED_BINDING\"", binding_step)
+                self.assertIn("jq -er '.subjectSha256' \"$RESOLVED_BINDING\"", binding_step)
+                self.assertNotIn('echo "expected_subject_sha256=$(sha256sum', binding_step)
+                self.assertIn("steps.recovery.outputs.producer_artifact_id", binding_step)
+                self.assertIn("steps.upload-producer.outputs.artifact-id", binding_step)
+
+    def test_producer_binding_step_uses_recovered_or_uploaded_id_and_emits_typed_outputs(self) -> None:
+        for publisher in PUBLISHERS:
+            source = publisher.read_text()
+            binding_start = source.index("- name: Re-emit frozen producer binding")
+            binding_end = source.index("\n      - name:", binding_start)
+            step = source[binding_start:binding_end]
+            run_marker = "        run: |\n"
+            self.assertIn(run_marker, step)
+            script = "\n".join(
+                line[10:] if line.startswith("          ") else ""
+                for line in step.split(run_marker, 1)[1].splitlines()
+                if not line or line.startswith("          ")
+            )
+            for recovered in (True, False):
+                with self.subTest(publisher=publisher.name, recovered=recovered):
+                    fixture = self.root / f"binding-{publisher.stem}-{recovered}"
+                    binary = fixture / "bin"
+                    artifacts = fixture / "producer"
+                    binary.mkdir(parents=True)
+                    artifacts.mkdir()
+                    subject_path = artifacts / "tailwind-proof-subject.json"
+                    subject_path.write_text('{"schema":"fixture"}', encoding="utf-8")
+                    (artifacts / "package-artifact-manifest.json").write_text("{}", encoding="utf-8")
+                    capture = fixture / "dotnet-args.json"
+                    fake_dotnet = binary / "dotnet"
+                    fake_dotnet.write_text(
+                        "#!/usr/bin/env python3\n"
+                        "import json, os, pathlib, sys\n"
+                        "args = sys.argv[1:]\n"
+                        "options = {args[i]: args[i + 1] for i in range(len(args) - 1) if args[i].startswith('--')}\n"
+                        "pathlib.Path(os.environ['DOTNET_CAPTURE']).write_text(json.dumps(args), encoding='utf-8')\n"
+                        "pathlib.Path(options['--report-directory']).mkdir()\n"
+                        "pathlib.Path(options['--resolved-binding-output']).write_text(json.dumps({\n"
+                        "  'schema': 'appsurface-tailwind-resolved-producer-binding-v1',\n"
+                        "  'repositoryId': options['--repository-id'], 'producerRunId': options['--producer-run-id'],\n"
+                        "  'producerAttempt': '1', 'sourceCommit': options['--source-commit'],\n"
+                        "  'producerArtifactId': options['--producer-artifact-id'],\n"
+                        "  'subjectSha256': options['--expected-subject-sha256']\n"
+                        "}), encoding='utf-8')\n",
+                        encoding="utf-8",
+                    )
+                    fake_dotnet.chmod(0o755)
+                    output = fixture / "github-output"
+                    environment = os.environ.copy()
+                    environment.update(
+                        PATH=f"{binary}{os.pathsep}{environment.get('PATH', '')}",
+                        RUNNER_TEMP=str(fixture), GITHUB_WORKSPACE=str(ROOT), GITHUB_OUTPUT=str(output),
+                        PACKAGE_ARTIFACTS=str(artifacts), REPOSITORY_ID="1234", PRODUCER_RUN_ID="5678",
+                        SOURCE_COMMIT="a" * 40, BINDING_REPORT_DIRECTORY=str(fixture / "fresh-report"),
+                        RESOLVED_BINDING=str(fixture / "resolved-binding.json"),
+                        RECOVERED_ID="9012" if recovered else "", UPLOADED_ID="3456" if recovered else "7890",
+                        DOTNET_CAPTURE=str(capture),
+                    )
+                    result = subprocess.run(["bash", "-c", script], cwd=ROOT, env=environment,
+                                            text=True, capture_output=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    args = json.loads(capture.read_text(encoding="utf-8"))
+                    self.assertIn("verify-tailwind-evidence", args)
+                    self.assertIn("--mode", args)
+                    self.assertEqual(args[args.index("--mode") + 1], "producer-binding")
+                    expected_id = "9012" if recovered else "7890"
+                    self.assertEqual(args[args.index("--producer-artifact-id") + 1], expected_id)
+                    subject_hash = subprocess.check_output(["sha256sum", str(subject_path)], text=True).split()[0]
+                    self.assertEqual(args[args.index("--expected-subject-sha256") + 1], subject_hash)
+                    outputs = output.read_text(encoding="utf-8")
+                    self.assertIn(f"producer_artifact_id={expected_id}", outputs)
+                    self.assertIn(f"expected_subject_sha256={subject_hash}", outputs)
+
+    def test_smoke_install_downloads_validated_producer_by_exact_id(self) -> None:
+        expected_id = "artifact-ids: ${{ needs.pack-and-verify.outputs.producer_artifact_id }}"
+        for publisher in PUBLISHERS:
+            with self.subTest(publisher=publisher.name):
+                source = publisher.read_text()
+                smoke_start = source.index("  smoke-install:")
+                remainder = source[smoke_start + len("  smoke-install:"):]
+                next_job = re.search(r"(?m)^  [a-z][a-z0-9-]*:\s*$", remainder)
+                smoke_end = smoke_start + len("  smoke-install:") + next_job.start() if next_job else len(source)
+                smoke = source[smoke_start:smoke_end]
+                self.assertRegex(smoke, r"(?m)^\s+- pack-and-verify\s*$")
+                marker = "- name: Download validated package artifacts"
+                self.assertIn(marker, smoke)
+                download_start = smoke.index(marker)
+                download_end = smoke.find("\n      - name:", download_start)
+                download = smoke[download_start:download_end if download_end >= 0 else len(smoke)]
+                self.assertIn(expected_id, download)
+                self.assertNotRegex(download, r"(?m)^\s+name:")
+                self.assertNotIn("needs.validate-tag.outputs.package-version", download)
+
     def test_failed_native_matrix_still_uploads_diagnostics_before_aggregate_validation(self) -> None:
         source = NATIVE.read_text()
         upload = source.index("- name: Upload host evidence (including failure diagnostics)")

@@ -190,6 +190,18 @@ jobs:
           ref: ${{ needs.validate-tag.outputs.tag-commit }}
           persist-credentials: false
 
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build source-stamped PackageIndex verifier
+        env:
+          SOURCE_REVISION_ID: ${{ needs.validate-tag.outputs.tag-commit }}
+        run: |
+          dotnet restore tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --locked-mode
+          dotnet build tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -c Release --no-restore --output "$RUNNER_TEMP/package-index" /p:SourceRevisionId="$SOURCE_REVISION_ID"
+
       - name: Resolve frozen producer bundle by exact run-scoped name
         id: recovery
         env:
@@ -206,13 +218,6 @@ jobs:
         with:
           artifact-ids: ${{ steps.recovery.outputs.producer_artifact_id }}
           path: ${{ runner.temp }}/package-artifacts
-
-      - name: Setup .NET SDK
-        if: ${{ steps.recovery.outputs.producer_found != 'true' }}
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          dotnet-version: |
-            10.0.x
 
       - name: Setup pnpm
         if: ${{ steps.recovery.outputs.producer_found != 'true' }}
@@ -245,8 +250,6 @@ jobs:
           PRODUCER_ATTEMPT: ${{ github.run_attempt }}
           SOURCE_COMMIT: ${{ needs.validate-tag.outputs.tag-commit }}
         run: |
-          dotnet restore tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --locked-mode
-          dotnet build tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -c Release --no-restore --output "$RUNNER_TEMP/package-index" /p:SourceRevisionId="$SOURCE_COMMIT"
           dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" \
             verify-packages \
             --package-version "${PACKAGE_VERSION}" \
@@ -272,6 +275,11 @@ jobs:
           RECOVERED_ID: ${{ steps.recovery.outputs.producer_artifact_id }}
           UPLOADED_ID: ${{ steps.upload-producer.outputs.artifact-id }}
           PACKAGE_ARTIFACTS: ${{ runner.temp }}/package-artifacts
+          REPOSITORY_ID: ${{ github.repository_id }}
+          PRODUCER_RUN_ID: ${{ github.run_id }}
+          SOURCE_COMMIT: ${{ needs.validate-tag.outputs.tag-commit }}
+          BINDING_REPORT_DIRECTORY: ${{ runner.temp }}/tailwind-producer-binding-report
+          RESOLVED_BINDING: ${{ runner.temp }}/tailwind-resolved-producer-binding.json
         shell: bash
         run: |
           set -euo pipefail
@@ -280,8 +288,24 @@ jobs:
           [[ "$producer_id" =~ ^[1-9][0-9]*$ ]]
           subject="$PACKAGE_ARTIFACTS/tailwind-proof-subject.json"
           [[ -f "$subject" ]]
-          echo "producer_artifact_id=$producer_id" >> "$GITHUB_OUTPUT"
-          echo "expected_subject_sha256=$(sha256sum "$subject" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          subject_sha256="$(sha256sum "$subject" | awk '{print $1}')"
+          dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" verify-tailwind-evidence \
+            --repo-root "$GITHUB_WORKSPACE" --mode producer-binding \
+            --artifacts-input "$PACKAGE_ARTIFACTS" \
+            --artifact-manifest "$PACKAGE_ARTIFACTS/package-artifact-manifest.json" \
+            --producer-subject "$subject" --producer-artifact-id "$producer_id" \
+            --expected-subject-sha256 "$subject_sha256" --repository-id "$REPOSITORY_ID" \
+            --producer-run-id "$PRODUCER_RUN_ID" --source-commit "$SOURCE_COMMIT" \
+            --report-directory "$BINDING_REPORT_DIRECTORY" --resolved-binding-output "$RESOLVED_BINDING"
+          jq -e --arg repository "$REPOSITORY_ID" --arg run "$PRODUCER_RUN_ID" \
+            --arg source "$SOURCE_COMMIT" --arg artifact "$producer_id" --arg subject "$subject_sha256" \
+            '.schema == "appsurface-tailwind-resolved-producer-binding-v1" and
+             .repositoryId == $repository and .producerRunId == $run and
+             .sourceCommit == $source and .producerArtifactId == $artifact and
+             .subjectSha256 == $subject and
+             (.producerAttempt | type == "string" and test("^[1-9][0-9]*$"))' "$RESOLVED_BINDING" >/dev/null
+          echo "producer_artifact_id=$(jq -er '.producerArtifactId' "$RESOLVED_BINDING")" >> "$GITHUB_OUTPUT"
+          echo "expected_subject_sha256=$(jq -er '.subjectSha256' "$RESOLVED_BINDING")" >> "$GITHUB_OUTPUT"
 
       - name: Upload package validation diagnostics
         if: ${{ always() }}
@@ -676,6 +700,7 @@ jobs:
   smoke-install:
     needs:
       - validate-tag
+      - pack-and-verify
       - publish-nuget
     runs-on: ubuntu-latest
     environment:
@@ -699,7 +724,7 @@ jobs:
       - name: Download validated package artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: appsurface-stable-packages-${{ needs.validate-tag.outputs.package-version }}
+          artifact-ids: ${{ needs.pack-and-verify.outputs.producer_artifact_id }}
           path: ${{ runner.temp }}/package-artifacts
 
       - name: Smoke install published packages
