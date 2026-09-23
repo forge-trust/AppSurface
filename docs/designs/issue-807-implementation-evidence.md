@@ -16,7 +16,7 @@ atomic file layers, diagnostics, audit behavior, and migration guidance.
 
 ## Packed consumer proof
 
-The [packed-consumer smoke](../../scripts/file-secret-references-smoke.sh) ran successfully against the final code:
+The [packed-consumer smoke](https://github.com/forge-trust/AppSurface/blob/main/scripts/file-secret-references-smoke.sh) ran successfully against the final code:
 
 ```text
 WORK_DIR=/private/tmp/issue807-final-packed-Xj4TNw \
@@ -56,7 +56,7 @@ case catches the typed composition exception; unexpected startup or assertion fa
 
 ## Reviewed implementation gates
 
-The unchanged [solution coverage command](../../scripts/coverage-solution.sh), `./scripts/coverage-solution.sh`,
+The unchanged [solution coverage command](https://github.com/forge-trust/AppSurface/blob/main/scripts/coverage-solution.sh), `./scripts/coverage-solution.sh`,
 completed with exit code `0` between `07:17:49` and `07:30:46` UTC. All 52 test projects passed, and the working tree
 was clean before and after the run. The existing gate requests 95% line and 85% branch coverage with a 0.5 percentage
 point tolerance; no threshold, tolerance, or coverage policy was changed.
@@ -148,7 +148,7 @@ Source: `/private/tmp/issue807-composition-performance.md`, recorded September 1
   [startup lifecycle validation](../../Config/ForgeTrust.AppSurface.Config.Tests/ConfigCompositionStartupTests.cs).
 - [Google two-sibling migration proof](../../Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/FileSecretReferencesMigrationTests.cs).
 - [Lifetime and performance fixture](../../Config/ForgeTrust.AppSurface.Config.Tests/ConfigCompositionLifetimeTests.cs).
-- [Contract workflow](../../.github/workflows/config-secret-references.yml): core, Google, and LocalSecrets contracts
+- [Contract workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/config-secret-references.yml): core, Google, and LocalSecrets contracts
   on macOS, Ubuntu, and Windows, plus an Ubuntu packed-consumer and rollback job with full Git history.
 
 Stable publication still requires the separately scoped real Skoolit root migration, measured glue deletion, Google
@@ -160,7 +160,7 @@ and unchanged.
 The follow-up to [PR #812](https://github.com/forge-trust/AppSurface/pull/812) corrected two `IDE0021` constructor
 formatting violations, wording rejected by the package branding gate, an unused audit-test setter, and an unnecessarily
 broad catch around framework-only JSON parsing. The real historical review-artifact path is preserved through the
-existing [dated file-and-term allowlist](../../rebrand/stale-brand-allowlist.txt). Application-provider, serializer,
+existing [dated file-and-term allowlist](https://github.com/forge-trust/AppSurface/blob/main/rebrand/stale-brand-allowlist.txt). Application-provider, serializer,
 and binding callbacks retain value-safe exception boundaries. The GC-based lifetime assertions are also retained:
 different object identities alone would not prove that overflow plans become collectible.
 

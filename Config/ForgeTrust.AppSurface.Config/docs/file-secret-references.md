@@ -167,7 +167,9 @@ ownership is known; providerless resolution pays the cost of establishing unique
 ## Provider contract
 
 A custom provider implements `IConfigSecretProvider`: a unique lower-case kebab-case `Id`, local `ValidateReference`, and
-synchronous `Resolve`. The following network-free provider is useful in a test host:
+synchronous `Resolve`. Keep `Id` available during startup: an invalid id or ordinary getter exception becomes a value-safe
+registration failure before reference validation or provider I/O, while a process-fatal exception escapes startup. The
+following network-free provider is useful in a test host:
 
 ```csharp
 public sealed class DemoSecretProvider : IConfigSecretProvider
@@ -249,7 +251,7 @@ canonical provider id and `HasValue=true`. Environment rescue proves compatibili
 Rollback means restoring the previous application artifact together with its matching configuration and package set,
 not just changing `enabled`. Keep that previous artifact until the rollout rehearsal succeeds.
 
-The [package smoke script](../../../scripts/file-secret-references-smoke.sh) and two-sibling tests provide deterministic
+The [package smoke script](https://github.com/forge-trust/AppSurface/blob/main/scripts/file-secret-references-smoke.sh) and two-sibling tests provide deterministic
 repository evidence. Stable publication additionally requires a separately scoped real Skoolit root migration, measured
 glue deletion, Google verification without environment rescue, and previous-artifact rollback. This pull request does
 not mutate that external application or claim its rehearsal has passed.

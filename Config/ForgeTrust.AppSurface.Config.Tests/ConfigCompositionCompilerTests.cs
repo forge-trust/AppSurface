@@ -843,6 +843,38 @@ public sealed class ConfigCompositionCompilerTests
         AssertNoIo(raw, a, b);
     }
 
+    [Fact]
+    public void Registry_ConvertsNonfatalIdGetterFailureWithoutRetainingProviderText()
+    {
+        var provider = A.Fake<IConfigSecretProvider>();
+        A.CallTo(() => provider.Id).Throws(new InvalidOperationException("secret-provider-id-sentinel"));
+
+        var registry = new ConfigSecretProviderRegistry([provider]);
+
+        Assert.Empty(registry.Providers);
+        Assert.Equal("secret-provider-id-invalid", Assert.Single(registry.Errors));
+        Assert.DoesNotContain("secret-provider-id-sentinel", JsonSerializer.Serialize(registry.Errors));
+    }
+
+    [Fact]
+    public void Registry_LetsFatalIdGetterFailuresEscape()
+    {
+        Exception[] exceptions =
+        [
+            new OutOfMemoryException("fatal provider id failure"),
+            new StackOverflowException("fatal provider id failure"),
+            new AccessViolationException("fatal provider id failure")
+        ];
+
+        foreach (var exception in exceptions)
+        {
+            var provider = A.Fake<IConfigSecretProvider>();
+            A.CallTo(() => provider.Id).Throws(exception);
+
+            Assert.Same(exception, Record.Exception(() => new ConfigSecretProviderRegistry([provider])));
+        }
+    }
+
     [Theory]
     [InlineData(ConfigProviderClaim.Unclaimed, false, true)]
     [InlineData(ConfigProviderClaim.MayClaim, false, false)]

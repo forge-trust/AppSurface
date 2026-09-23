@@ -9,7 +9,7 @@ internal sealed class ConfigSecretProviderRegistry
     internal IReadOnlyList<ConfigSecretRegistration> Providers { get; }
     /// <summary>Value-free registration errors detected before local reference validation or I/O.</summary>
     internal IReadOnlyList<string> Errors { get; }
-    /// <summary>Captures canonical identities once. Invalid provider ids are never retained in diagnostics.</summary>
+    /// <summary>Captures canonical identities once. Invalid ids and nonfatal getter failures never retain provider text.</summary>
     internal ConfigSecretProviderRegistry(IEnumerable<IConfigSecretProvider> providers)
     {
         var entries = new List<ConfigSecretRegistration>();
@@ -17,13 +17,19 @@ internal sealed class ConfigSecretProviderRegistry
         var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var provider in providers)
         {
+            string id;
             try
             {
-                var id = ConfigSecretSafety.ProviderId(provider.Id);
-                if (!ids.Add(id)) errors.Add("secret-provider-id-duplicate");
-                else entries.Add(new(id, provider));
+                id = ConfigSecretSafety.ProviderId(provider.Id);
             }
-            catch { errors.Add("secret-provider-id-invalid"); }
+            catch (Exception exception) when (exception is not OutOfMemoryException
+                and not StackOverflowException and not AccessViolationException)
+            {
+                errors.Add("secret-provider-id-invalid");
+                continue;
+            }
+            if (!ids.Add(id)) errors.Add("secret-provider-id-duplicate");
+            else entries.Add(new(id, provider));
         }
         Providers = entries.OrderBy(p => p.Id, StringComparer.Ordinal).ToList().AsReadOnly();
         Errors = errors.Distinct(StringComparer.Ordinal).ToList().AsReadOnly();
