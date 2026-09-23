@@ -1,3 +1,4 @@
+using ForgeTrust.AppSurface.Testing;
 using HangReader = ForgeTrust.AppSurface.Evidence.Coverage.CoverageRunHangDiagnosticsReader;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
@@ -357,7 +358,7 @@ public sealed class CoverageRunHangDiagnosticsReaderTests
 
         internal string Write(string relativePath, string content)
         {
-            var path = Path.Combine(_path, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            var path = TestPathUtils.PathUnder(_path, relativePath.Replace('/', Path.DirectorySeparatorChar));
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.WriteAllText(path, content);
             return path;

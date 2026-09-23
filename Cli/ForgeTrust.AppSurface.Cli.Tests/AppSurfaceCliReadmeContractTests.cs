@@ -226,12 +226,15 @@ public sealed class AppSurfaceCliReadmeContractTests
     }
 
     [Fact]
-    public void RepositoryLockFiles_ShouldNotRetainDirectMsbuildCoverageReferences()
+    public void ConsumerLockFiles_ShouldNotRetainDirectMsbuildCoverageReferences()
     {
         var repositoryRoot = GetRepositoryRoot();
+        // This isolated fixture intentionally exercises the supported MSBuild coverage driver.
+        const string msbuildDriverFixture = "tests/fixtures/coverage-hang/packages.lock.json";
         var staleLockFiles = Directory.EnumerateFiles(repositoryRoot, "packages*.lock.json", SearchOption.AllDirectories)
             .Where(HasDirectMsbuildCoverageReference)
             .Select(path => Path.GetRelativePath(repositoryRoot, path).Replace('\\', '/'))
+            .Where(path => !string.Equals(path, msbuildDriverFixture, StringComparison.Ordinal))
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToArray();
 
