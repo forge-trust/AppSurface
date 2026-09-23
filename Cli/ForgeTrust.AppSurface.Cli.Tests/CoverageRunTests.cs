@@ -4986,6 +4986,19 @@ public sealed class CoverageRunTests
         Assert.Contains($"'{argument}' requires a value", exception.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("--collect", "")]
+    [InlineData("--results-directory", "")]
+    [InlineData("--collect", "--")]
+    [InlineData("--results-directory", "--")]
+    public void ValidateTestArguments_ShouldRejectEmptyOrSeparatorOwnedValues(string option, string value)
+    {
+        var exception = Assert.Throws<CommandException>(() =>
+            CoverageRunDriverStrategy.ValidateTestArguments(CoverageRunDriver.Collector, [option, value]));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ValidateTestArguments_Msbuild_ShouldAllowRunsettingsOwnedOnlyByCollector()
     {

@@ -35,6 +35,76 @@ public sealed class CoverageRunHangDiagnosticsReaderTests
         Assert.Equal("Sample.HangingTest", Assert.Single(result.Sequences).LastStartedTest);
     }
 
+    [Fact]
+    public void Inspect_UsesTheLastDirectStartedTestAndIgnoresNestedMetadata()
+    {
+        using var fixture = new Fixture();
+        fixture.Write("output/results/SEQUENCE.XML",
+            "<TestSequence><Test Name=\"First.Test\" />"
+            + "<Metadata><Test Name=\"Nested.Spoof\" /></Metadata>"
+            + "<Test Name=\"Last.Test\"></Test></TestSequence>");
+
+        var result = HangReader.Inspect(fixture.Results, fixture.Output);
+
+        Assert.Equal("found", result.Status);
+        Assert.Equal("Last.Test", Assert.Single(result.Sequences).LastStartedTest);
+    }
+
+    [Theory]
+    [InlineData("<TestSequence xmlns=\"urn:spoof\"><Test Name=\"Spoof\" /></TestSequence>")]
+    [InlineData("<TestSequence><Test Name=\"Spoof\" /></TestSequence><Unexpected />")]
+    public void Inspect_RejectsNonVstestSequenceDocument(string xml)
+    {
+        using var fixture = new Fixture();
+        fixture.Write("output/results/Sequence.xml", xml);
+
+        var result = HangReader.Inspect(fixture.Results, fixture.Output);
+
+        Assert.Equal("malformed", result.Status);
+        Assert.Empty(result.Sequences);
+    }
+
+    [Fact]
+    public void Inspect_LeavesLastStartedNameEmptyWhenSequenceHasNoStartedTest()
+    {
+        using var fixture = new Fixture();
+        fixture.Write("output/results/Sequence.xml", "<TestSequence><Metadata /></TestSequence>");
+
+        var result = HangReader.Inspect(fixture.Results, fixture.Output);
+
+        Assert.Equal("name-omitted", result.Status);
+        Assert.Null(Assert.Single(result.Sequences).LastStartedTest);
+    }
+
+    [Theory]
+    [InlineData("1StartsWithDigit")]
+    [InlineData("Contains Space")]
+    [InlineData("Contains/Slash")]
+    [InlineData("Contains\u202eBidi")]
+    public void Inspect_OmitsNamesOutsideTheDisplayIdentifierAllowlist(string name)
+    {
+        using var fixture = new Fixture();
+        fixture.Write("output/results/Sequence.xml", $"<TestSequence><Test Name=\"{name}\" /></TestSequence>");
+
+        var result = HangReader.Inspect(fixture.Results, fixture.Output);
+
+        Assert.Equal("name-omitted", result.Status);
+        Assert.Null(Assert.Single(result.Sequences).LastStartedTest);
+    }
+
+    [Fact]
+    public void Inspect_AcceptsUnderscoreAndMaximumLengthIdentifier()
+    {
+        using var fixture = new Fixture();
+        var name = "_" + new string('A', HangReader.MaximumNameLength - 1);
+        fixture.Write("output/results/Sequence.xml", $"<TestSequence><Test Name=\"{name}\" /></TestSequence>");
+
+        var result = HangReader.Inspect(fixture.Results, fixture.Output);
+
+        Assert.Equal("found", result.Status);
+        Assert.Equal(name, Assert.Single(result.Sequences).LastStartedTest);
+    }
+
     [Theory]
     [InlineData("<TestSequence><Test Name=\"Good\"></TestSequence>", "malformed")]
     [InlineData("<!DOCTYPE x [<!ENTITY e SYSTEM 'file:///etc/passwd'>]><TestSequence><Test Name=\"&e;\" /></TestSequence>", "malformed")]
@@ -147,6 +217,36 @@ public sealed class CoverageRunHangDiagnosticsReaderTests
         var result = HangReader.Inspect(fixture.Results, fixture.Output);
 
         Assert.Equal("missing", result.Status);
+    }
+
+    [Fact]
+    public void Inspect_ReportsUnreadableDirectoryWhenEnumerationFails()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        using var fixture = new Fixture();
+        fixture.Write("output/results/denied/Sequence.xml", "<TestSequence><Test Name=\"Hidden\" /></TestSequence>");
+        var denied = TestPathUtils.PathUnder(fixture.Results, "denied");
+        var originalMode = File.GetUnixFileMode(denied);
+        try
+        {
+            File.SetUnixFileMode(denied, UnixFileMode.None);
+            try
+            {
+                // A privileged test runner may still enumerate this directory.
+                _ = Directory.EnumerateFileSystemEntries(denied).Any();
+                return;
+            }
+            catch (UnauthorizedAccessException) { }
+
+            var result = HangReader.Inspect(fixture.Results, fixture.Output);
+
+            Assert.Equal("unreadable", result.Status);
+            Assert.Empty(result.Sequences);
+        }
+        finally
+        {
+            File.SetUnixFileMode(denied, originalMode);
+        }
     }
 
     [Fact]

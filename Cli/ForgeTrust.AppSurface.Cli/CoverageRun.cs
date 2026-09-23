@@ -713,6 +713,21 @@ internal sealed record CoverageRunResult(bool Success, string OutputDirectory, s
 /// </summary>
 internal sealed class CoverageRunWorkflow
 {
+    private static readonly IReadOnlyDictionary<string, (string Cause, string Next)> HangInspectionAdviceByStatus =
+        new Dictionary<string, (string Cause, string Next)>(StringComparer.Ordinal)
+        {
+            ["missing"] = ("No sequence was flushed in this invocation's owned results.", "Inspect the project log and check whether VSTest exited before flushing."),
+            ["unscoped"] = ("Manual MSBuild blame owns the result path.", "Inspect the caller-configured results directory."),
+            ["name-omitted"] = ("A sequence name was absent or unsafe to display.", "Inspect the scoped sequence artifact locally."),
+            ["malformed"] = ("The sequence could not be safely interpreted.", "Inspect the scoped artifact locally and retain the primary failure."),
+            ["oversized"] = ("The sequence could not be safely interpreted.", "Inspect the scoped artifact locally and retain the primary failure."),
+            ["duplicate"] = ("The sequence could not be safely interpreted.", "Inspect the scoped artifact locally and retain the primary failure."),
+            ["unreadable"] = ("The sequence could not be safely interpreted.", "Inspect the scoped artifact locally and retain the primary failure."),
+            ["escaping"] = ("A result path or link left the owned tree.", "Use a fresh dedicated output directory and inspect filesystem changes."),
+            ["inspection-limited"] = ("A traversal, XML, count, or time limit was reached.", "Inspect the bounded scoped paths and project log."),
+            ["unavailable"] = ("Process drain or owned-directory confirmation was unavailable.", "Inspect the project log after the process stops."),
+        };
+
     private const string ExclusiveFirstScheduleReason = "exclusive-first";
 
     private static readonly XmlReaderSettings ReaderSettings = new()
@@ -2095,25 +2110,7 @@ internal sealed class CoverageRunWorkflow
             args.Add("--no-build");
         }
 
-        if (hangPlan.Source == CoverageRunHangSource.Automatic && hangPlan.Timeout is { } timeout)
-        {
-            var separatorIndex = request.TestArguments.ToList().FindIndex(argument => argument == "--");
-            if (separatorIndex >= 0)
-            {
-                args.AddRange(request.TestArguments.Take(separatorIndex));
-                AppendAutomaticBlame(args, timeout);
-                args.AddRange(request.TestArguments.Skip(separatorIndex));
-            }
-            else
-            {
-                args.AddRange(request.TestArguments);
-                AppendAutomaticBlame(args, timeout);
-            }
-        }
-        else
-        {
-            args.AddRange(request.TestArguments);
-        }
+        AppendHangArguments(args, request.TestArguments, hangPlan);
 
         CoverageRunDriverStrategy.AppendCollectorRunSettings(request, args);
         return args;
@@ -2126,6 +2123,40 @@ internal sealed class CoverageRunWorkflow
         args.Add($"{(long)timeout.TotalSeconds}s");
         args.Add("--blame-hang-dump-type");
         args.Add("none");
+    }
+
+    /// <summary>Appends caller arguments and inserts owned blame options before the VSTest separator.</summary>
+    /// <param name="args">Driver-owned argument list to extend in place.</param>
+    /// <param name="testArguments">Exact caller tokens in their original order.</param>
+    /// <param name="hangPlan">Fixed launch policy; only an automatic plan with a timeout adds options.</param>
+    internal static void AppendHangArguments(List<string> args, IReadOnlyList<string> testArguments, CoverageRunHangPlan hangPlan)
+    {
+        if (hangPlan.Source != CoverageRunHangSource.Automatic || hangPlan.Timeout is not { } timeout)
+        {
+            args.AddRange(testArguments);
+            return;
+        }
+
+        var separatorIndex = -1;
+        for (var index = 0; index < testArguments.Count; index++)
+        {
+            if (testArguments[index] == "--")
+            {
+                separatorIndex = index;
+                break;
+            }
+        }
+
+        if (separatorIndex >= 0)
+        {
+            args.AddRange(testArguments.Take(separatorIndex));
+            AppendAutomaticBlame(args, timeout);
+            args.AddRange(testArguments.Skip(separatorIndex));
+            return;
+        }
+
+        args.AddRange(testArguments);
+        AppendAutomaticBlame(args, timeout);
     }
 
     private void InspectHangDiagnostics(CoverageRunProjectExecutionState state, string outputDirectory)
@@ -2182,17 +2213,13 @@ internal sealed class CoverageRunWorkflow
         }
     }
 
-    private static (string Cause, string Next) HangInspectionAdvice(string status) => status switch
-    {
-        "missing" => ("No sequence was flushed in this invocation's owned results.", "Inspect the project log and check whether VSTest exited before flushing."),
-        "unscoped" => ("Manual MSBuild blame owns the result path.", "Inspect the caller-configured results directory."),
-        "name-omitted" => ("A sequence name was absent or unsafe to display.", "Inspect the scoped sequence artifact locally."),
-        "malformed" or "oversized" or "duplicate" or "unreadable" => ("The sequence could not be safely interpreted.", "Inspect the scoped artifact locally and retain the primary failure."),
-        "escaping" => ("A result path or link left the owned tree.", "Use a fresh dedicated output directory and inspect filesystem changes."),
-        "inspection-limited" => ("A traversal, XML, count, or time limit was reached.", "Inspect the bounded scoped paths and project log."),
-        "unavailable" => ("Process drain or owned-directory confirmation was unavailable.", "Inspect the project log after the process stops."),
-        _ => ("No safe sequence observation was available.", "Inspect the project log."),
-    };
+    /// <summary>Maps a bounded inspection status to safe operator guidance, including unknown future statuses.</summary>
+    /// <param name="status">Stable bounded-inspection status.</param>
+    /// <returns>Safe cause and next-step text for terminal reporting.</returns>
+    internal static (string Cause, string Next) HangInspectionAdvice(string status) =>
+        HangInspectionAdviceByStatus.TryGetValue(status, out var advice)
+            ? advice
+            : ("No safe sequence observation was available.", "Inspect the project log.");
 
     private static bool IsNonFatalDiagnosticException(Exception exception) =>
         exception is not (OutOfMemoryException or StackOverflowException or AccessViolationException or AppDomainUnloadedException);

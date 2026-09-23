@@ -104,6 +104,39 @@ public sealed class CoverageRunHangPolicyTests
         Assert.Contains("incomplete owned option", exception.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("--results-directory=caller-results")]
+    [InlineData("--results-directory:caller-results")]
+    public void ValidateHangArguments_RejectsJoinedOwnedResultsOption(string argument)
+    {
+        var request = CreateRequest() with { TestArguments = [argument] };
+
+        var exception = Assert.Throws<CoverageExecutionException>(() => CoverageRunDriverStrategy.ValidateHangArguments(request));
+
+        Assert.Contains("cannot override AppSurface-owned hang results", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateHangArguments_StopsAtVstestSeparator()
+    {
+        var request = CreateRequest() with
+        {
+            TestArguments = ["--filter", "Category=Fast", "--", "--results-directory", "host-value"],
+        };
+
+        CoverageRunDriverStrategy.ValidateHangArguments(request);
+    }
+
+    [Fact]
+    public void ValidateHangArguments_RejectsEmptySplitOwnedResultsValue()
+    {
+        var request = CreateRequest() with { TestArguments = ["--results-directory", ""] };
+
+        var exception = Assert.Throws<CoverageExecutionException>(() => CoverageRunDriverStrategy.ValidateHangArguments(request));
+
+        Assert.Contains("cannot override AppSurface-owned hang results", exception.Message, StringComparison.Ordinal);
+    }
+
     private static CoverageRunRequest CreateRequest() => new(
         SolutionPath: null, TestProjects: [], ExcludeTestProjects: [], OutputDirectory: "output",
         Configuration: "Debug", Parallelism: 1, ScheduleMode: CoverageRunScheduleMode.InputOrder,

@@ -173,6 +173,16 @@ public sealed class CoverageRunArgumentBindingTests
         Assert.IsType<ReadOnlyDictionary<string, string>>(normalized.RestoreValues);
     }
 
+    [Fact]
+    public void RestoreCoverageTestArguments_ShouldReturnOriginalArrayWhenNoInvocationMapIsActive()
+    {
+        var arguments = new[] { "--filter", "Category=Unit" };
+
+        var restored = AppSurfaceCliApp.RestoreCoverageTestArguments(arguments);
+
+        Assert.Same(arguments, restored);
+    }
+
     private sealed class CapturingProcessRunner : ICoverageRunProcessRunner
     {
         public List<string[]> TestCommandArguments { get; } = [];

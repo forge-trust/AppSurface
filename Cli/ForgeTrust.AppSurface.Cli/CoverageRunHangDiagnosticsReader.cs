@@ -85,88 +85,93 @@ internal static class CoverageRunHangDiagnosticsReader
             catch (IOException) { invalidStatus ??= "unreadable"; continue; }
 
             var localEntries = 0;
-            foreach (var child in children)
+            try
             {
-                if (BudgetExpired() || visitedEntries >= MaximumEntries || localEntries >= MaximumEntriesPerDirectory)
-                    return Result("inspection-limited", observations);
-                visitedEntries++;
-                localEntries++;
-                var isSequence = IsSequenceFileName(child.Name);
-                var relative = Relative(output, child.FullName);
-                if (child.Name.Length > MaximumNameLength)
+                foreach (var child in children)
                 {
-                    if (isSequence) invalidStatus ??= "escaping";
-                    continue;
-                }
-
-                FileAttributes attributes;
-                try { attributes = child.Attributes; }
-                catch (UnauthorizedAccessException) { if (isSequence) invalidStatus ??= "unreadable"; continue; }
-                catch (IOException) { if (isSequence) invalidStatus ??= "unreadable"; continue; }
-                if ((attributes & FileAttributes.ReparsePoint) != 0)
-                {
-                    invalidStatus ??= "escaping";
-                    continue;
-                }
-                if ((attributes & FileAttributes.Directory) != 0)
-                {
-                    if (depth >= MaximumDepth) { invalidStatus ??= "inspection-limited"; continue; }
-                    pending.Enqueue((child.FullName, depth + 1));
-                    continue;
-                }
-                if (!isSequence) continue;
-                if (!seenCandidates.Add(Path.GetFullPath(child.FullName))) { invalidStatus ??= "duplicate"; continue; }
-                if (sequenceCandidates >= MaximumSequences) return Result("inspection-limited", observations);
-                sequenceCandidates++;
-                if (!IsWithin(root, child.FullName)) { invalidStatus ??= "escaping"; continue; }
-
-                try
-                {
-                    using var stream = ArtifactReader.OpenRegularFile(output, root, child.FullName);
-                    if (stream.Length > MaximumFileBytes || totalBytes + stream.Length > MaximumTotalBytes)
-                    { invalidStatus ??= "oversized"; continue; }
-                    totalBytes += stream.Length;
-                    using var reader = XmlReader.Create(stream, new XmlReaderSettings
+                    if (BudgetExpired() || visitedEntries >= MaximumEntries || localEntries >= MaximumEntriesPerDirectory)
+                        return Result("inspection-limited", observations);
+                    visitedEntries++;
+                    localEntries++;
+                    var isSequence = IsSequenceFileName(child.Name);
+                    var relative = Relative(output, child.FullName);
+                    if (child.Name.Length > MaximumNameLength)
                     {
-                        DtdProcessing = DtdProcessing.Prohibit,
-                        XmlResolver = null,
-                        MaxCharactersInDocument = MaximumFileBytes,
-                        IgnoreComments = true,
-                        IgnoreProcessingInstructions = true
-                    });
-                    string? lastStartedTest = null;
-                    var elementStack = new List<string>();
-                    while (reader.Read())
-                    {
-                        if (BudgetExpired()) return Result("inspection-limited", observations);
-                        if (reader.Depth > MaximumXmlDepth) throw new XmlException("XML nesting exceeds the allowed depth.");
-                        if (reader.NodeType == XmlNodeType.Element && reader.Depth == 0
-                            && (reader.LocalName != "TestSequence" || reader.NamespaceURI.Length != 0))
-                            throw new XmlException("Unexpected sequence document root.");
-                        if (reader.NodeType == XmlNodeType.EndElement)
-                        {
-                            if (elementStack.Count > 0) elementStack.RemoveAt(elementStack.Count - 1);
-                            continue;
-                        }
-                        if (reader.NodeType != XmlNodeType.Element) continue;
-                        if (reader.LocalName == "Test" && reader.NamespaceURI.Length == 0
-                            && elementStack.Count > 0 && elementStack[^1] == "TestSequence")
-                        {
-                            if (++testEntries > MaximumTests) return Result("inspection-limited", observations);
-                            var name = reader.GetAttribute("Name");
-                            lastStartedTest = IsSafeName(name) ? name : null;
-                        }
-                        if (!reader.IsEmptyElement) elementStack.Add(reader.LocalName);
+                        if (isSequence) invalidStatus ??= "escaping";
+                        continue;
                     }
-                    observations.Add(new(relative, lastStartedTest));
-                }
-                catch (XmlException) { invalidStatus ??= "malformed"; }
-                catch (UnauthorizedAccessException) { invalidStatus ??= "unreadable"; }
-                catch (IOException ex)
-                {
-                    invalidStatus ??= ex.Message.Contains("escaped", StringComparison.OrdinalIgnoreCase) ? "escaping" : "unreadable";
+
+                    FileAttributes attributes;
+                    try { attributes = child.Attributes; }
+                    catch (UnauthorizedAccessException) { if (isSequence) invalidStatus ??= "unreadable"; continue; }
+                    catch (IOException) { if (isSequence) invalidStatus ??= "unreadable"; continue; }
+                    if ((attributes & FileAttributes.ReparsePoint) != 0)
+                    {
+                        invalidStatus ??= "escaping";
+                        continue;
+                    }
+                    if ((attributes & FileAttributes.Directory) != 0)
+                    {
+                        if (depth >= MaximumDepth) { invalidStatus ??= "inspection-limited"; continue; }
+                        pending.Enqueue((child.FullName, depth + 1));
+                        continue;
+                    }
+                    if (!isSequence) continue;
+                    if (!seenCandidates.Add(Path.GetFullPath(child.FullName))) { invalidStatus ??= "duplicate"; continue; }
+                    if (sequenceCandidates >= MaximumSequences) return Result("inspection-limited", observations);
+                    sequenceCandidates++;
+                    if (!IsWithin(root, child.FullName)) { invalidStatus ??= "escaping"; continue; }
+
+                    try
+                    {
+                        using var stream = ArtifactReader.OpenRegularFile(output, root, child.FullName);
+                        if (stream.Length > MaximumFileBytes || totalBytes + stream.Length > MaximumTotalBytes)
+                        { invalidStatus ??= "oversized"; continue; }
+                        totalBytes += stream.Length;
+                        using var reader = XmlReader.Create(stream, new XmlReaderSettings
+                        {
+                            DtdProcessing = DtdProcessing.Prohibit,
+                            XmlResolver = null,
+                            MaxCharactersInDocument = MaximumFileBytes,
+                            IgnoreComments = true,
+                            IgnoreProcessingInstructions = true
+                        });
+                        string? lastStartedTest = null;
+                        var elementStack = new List<string>();
+                        while (reader.Read())
+                        {
+                            if (BudgetExpired()) return Result("inspection-limited", observations);
+                            if (reader.Depth > MaximumXmlDepth) throw new XmlException("XML nesting exceeds the allowed depth.");
+                            if (reader.NodeType == XmlNodeType.Element && reader.Depth == 0
+                                && (reader.LocalName != "TestSequence" || reader.NamespaceURI.Length != 0))
+                                throw new XmlException("Unexpected sequence document root.");
+                            if (reader.NodeType == XmlNodeType.EndElement)
+                            {
+                                if (elementStack.Count > 0) elementStack.RemoveAt(elementStack.Count - 1);
+                                continue;
+                            }
+                            if (reader.NodeType != XmlNodeType.Element) continue;
+                            if (reader.LocalName == "Test" && reader.NamespaceURI.Length == 0
+                                && elementStack.Count > 0 && elementStack[^1] == "TestSequence")
+                            {
+                                if (++testEntries > MaximumTests) return Result("inspection-limited", observations);
+                                var name = reader.GetAttribute("Name");
+                                lastStartedTest = IsSafeName(name) ? name : null;
+                            }
+                            if (!reader.IsEmptyElement) elementStack.Add(reader.LocalName);
+                        }
+                        observations.Add(new(relative, lastStartedTest));
+                    }
+                    catch (XmlException) { invalidStatus ??= "malformed"; }
+                    catch (UnauthorizedAccessException) { invalidStatus ??= "unreadable"; }
+                    catch (IOException ex)
+                    {
+                        invalidStatus ??= ex.Message.Contains("escaped", StringComparison.OrdinalIgnoreCase) ? "escaping" : "unreadable";
+                    }
                 }
             }
+            catch (UnauthorizedAccessException) { invalidStatus ??= "unreadable"; }
+            catch (IOException) { invalidStatus ??= "unreadable"; }
         }
 
         return Result(invalidStatus ?? (observations.Count == 0
