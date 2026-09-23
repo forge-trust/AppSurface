@@ -74,9 +74,24 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
         string requestedBaseUrl,
         Action<IServiceCollection>? configureServices)
     {
+        return await StartAsync(requestedBaseUrl, additionalArgs: null, configureServices: configureServices);
+    }
+
+    /// <summary>
+    /// Builds and starts the AppSurface Docs standalone host with test-only command-line argument forwarding.
+    /// </summary>
+    /// <param name="requestedBaseUrl">The URL passed to Kestrel.</param>
+    /// <param name="additionalArgs">Additional command-line arguments appended after the default test host arguments.</param>
+    /// <param name="configureServices">Optional service registration callback.</param>
+    /// <returns>A started host wrapper whose <see cref="BaseUrl"/> contains the resolved listener address.</returns>
+    internal static async Task<AppSurfaceDocsInProcessHost> StartAsync(
+        string requestedBaseUrl,
+        IReadOnlyList<string>? additionalArgs,
+        Action<IServiceCollection>? configureServices)
+    {
         var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
         var builder = AppSurfaceDocsStandaloneHost.CreateBuilder(
-            CreateLegacyHostArgs(requestedBaseUrl, repoRoot),
+            CreateHostArgs(requestedBaseUrl, repoRoot, additionalArgs),
             DevelopmentEnvironmentProvider.Instance);
 
         return await StartAsync(ConfigureHostBuilder(builder, repoRoot, requestedBaseUrl, configureServices).Build());
@@ -93,7 +108,7 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
     {
         var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
         var builder = AppSurfaceDocsConsumerFixtureHost.CreateBuilder(
-            CreateLegacyHostArgs(requestedBaseUrl, repoRoot),
+            CreateHostArgs(requestedBaseUrl, repoRoot),
             DevelopmentEnvironmentProvider.Instance);
 
         return await StartAsync(ConfigureHostBuilder(builder, repoRoot, requestedBaseUrl).Build());
@@ -231,10 +246,20 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
         return uri.GetLeftPart(UriPartial.Authority);
     }
 
-    private static string[] CreateLegacyHostArgs(string baseUrl, string repoRoot)
+    /// <summary>
+    /// Creates the default standalone-host arguments and appends test-specific arguments in configuration order.
+    /// </summary>
+    /// <param name="baseUrl">The listener URL.</param>
+    /// <param name="repoRoot">The repository root used by the default source-backed host.</param>
+    /// <param name="additionalArgs">Optional arguments that override or extend the defaults.</param>
+    /// <returns>The complete command-line argument array passed to the standalone host.</returns>
+    internal static string[] CreateHostArgs(
+        string baseUrl,
+        string repoRoot,
+        IReadOnlyList<string>? additionalArgs = null)
     {
-        return
-        [
+        var args = new List<string>
+        {
             "--urls",
             baseUrl,
             "--environment",
@@ -257,7 +282,14 @@ internal sealed class AppSurfaceDocsInProcessHost : IAsyncDisposable
             "true",
             "--AppSurfaceDocs:Metrics:HostedCollection:Enabled",
             "true"
-        ];
+        };
+
+        if (additionalArgs is not null)
+        {
+            args.AddRange(additionalArgs);
+        }
+
+        return args.ToArray();
     }
 
     private static string[] CreateMultiInstanceConsumerHostArgs(string baseUrl, string repoRoot)

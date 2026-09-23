@@ -49,6 +49,9 @@ public sealed class PostgreSqlDurableFlowClient : IDurableFlowClient
         _store.ListAsync(request, cancellationToken);
 
     /// <inheritdoc />
+    /// <remarks>Validates context through the selected allowlisted codec. Definition-owned and provider-owned views
+    /// of the same captured source are compatible. Captured guards are retained if a custom registry selects that
+    /// source directly; equal metadata from unrelated sources is rejected before storage.</remarks>
     public async ValueTask<DurableOperationResult<DurableFlowCommandResult>> StartAsync(
         DurableFlowStartRequest request,
         CancellationToken cancellationToken = default)
@@ -59,13 +62,22 @@ public sealed class PostgreSqlDurableFlowClient : IDurableFlowClient
             registration.ContextCodec.PayloadType,
             registration.ContextCodec.ContractName,
             registration.ContextCodec.ContractVersion);
-        if (!ReferenceEquals(codec, registration.ContextCodec))
+        if (codec is null || !DurablePayloadCodecSnapshot.AreCompatible(registration.ContextCodec, codec)
+            || codec.PayloadType != registration.ContextCodec.PayloadType
+            || codec.ContractName != registration.ContextCodec.ContractName
+            || codec.ContractVersion != registration.ContextCodec.ContractVersion)
         {
             throw new InvalidOperationException(
                 $"Flow '{registration.FlowId}' version '{registration.FlowVersion}' must use its exact allowlisted context codec.");
         }
 
-        _ = registration.ContextCodec.DecodeObject(request.Context);
+        codec = DurablePayloadCodecSnapshot.RetainGuardedView(registration.ContextCodec, codec);
+        var context = codec.DecodeObject(request.Context);
+        if (context is null || !registration.ContextCodec.PayloadType.IsInstanceOfType(context))
+        {
+            throw new InvalidOperationException(
+                $"Flow '{registration.FlowId}' version '{registration.FlowVersion}' context codec returned an incompatible payload type.");
+        }
         var ambient = DurableTraceContext.CaptureCurrent();
         using var activity = AppSurfaceActivitySources.Instance.StartActivity(
             "appsurface.durable.flow.command",

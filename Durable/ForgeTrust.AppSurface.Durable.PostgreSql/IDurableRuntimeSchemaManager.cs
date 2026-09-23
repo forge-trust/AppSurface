@@ -12,7 +12,11 @@ public interface IDurableRuntimeSchemaManager
     ValueTask<DurableRuntimeSchemaStatus> GetStatusAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Generates deterministic SQL for migrations newer than the exact reviewed <paramref name="fromVersion"/>.</summary>
-    /// <remarks>The result is forward-only and is not safe to rerun after any selected migration commits.</remarks>
+    /// <remarks>
+    /// The result is forward-only and is not safe to rerun after any selected migration commits. Its advisory-lock
+    /// acquisition is bounded to 30 seconds by default. If that deadline expires, the generated SQL raises PostgreSQL
+    /// SQLSTATE <c>55P03</c> before migration SQL starts; retry after the active migration owner releases the lock.
+    /// </remarks>
     /// <param name="fromVersion">Last installed migration version, from zero through <see cref="PostgreSqlDurableRuntimeSchemaManager.RequiredVersion"/>.</param>
     /// <returns>A migration-owner script that acquires and releases the package advisory lock.</returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="fromVersion"/> is outside the supported range.</exception>
@@ -23,6 +27,10 @@ public interface IDurableRuntimeSchemaManager
     /// <returns>The version range observed before and after application and the ordered versions applied by this call.</returns>
     /// <exception cref="DurableRuntimeSchemaException">The installed schema is inconsistent or newer than this package.</exception>
     /// <exception cref="Npgsql.NpgsqlException">PostgreSQL rejects a migration or the connection fails.</exception>
+    /// <exception cref="TimeoutException">
+    /// The configured migration-lock acquisition deadline, 30 seconds by default, expires before the lock is acquired.
+    /// Retry after the active migration owner releases the advisory lock.
+    /// </exception>
     /// <exception cref="OperationCanceledException">The operation is canceled.</exception>
     ValueTask<DurableRuntimeSchemaApplyResult> ApplyAsync(CancellationToken cancellationToken = default);
 
@@ -44,6 +52,10 @@ public interface IDurableRuntimeSchemaManager
     /// <exception cref="DurableRuntimeSchemaException">The installed schema is not compatible.</exception>
     /// <exception cref="InvalidOperationException">A runtime epoch is already active.</exception>
     /// <exception cref="Npgsql.NpgsqlException">PostgreSQL rejects the mutation or the connection fails.</exception>
+    /// <exception cref="TimeoutException">
+    /// The configured migration-lock acquisition deadline, 30 seconds by default, expires before the lock is acquired.
+    /// Retry after the active migration owner releases the advisory lock.
+    /// </exception>
     /// <exception cref="OperationCanceledException">The operation is canceled.</exception>
     ValueTask<DurableRuntimeEpochActivationResult> InitializeRuntimeEpochAsync(
         Guid initialEpoch,
@@ -62,6 +74,10 @@ public interface IDurableRuntimeSchemaManager
     /// <exception cref="DurableRuntimeSchemaException">The installed schema is not compatible.</exception>
     /// <exception cref="InvalidOperationException"><paramref name="expectedActiveEpoch"/> is no longer active.</exception>
     /// <exception cref="Npgsql.NpgsqlException">PostgreSQL rejects the mutation or the connection fails.</exception>
+    /// <exception cref="TimeoutException">
+    /// The configured migration-lock acquisition deadline, 30 seconds by default, expires before the lock is acquired.
+    /// Retry after the active migration owner releases the advisory lock.
+    /// </exception>
     /// <exception cref="OperationCanceledException">The operation is canceled.</exception>
     ValueTask<DurableRuntimeEpochRotationResult> RotateRuntimeEpochAsync(
         Guid expectedActiveEpoch,

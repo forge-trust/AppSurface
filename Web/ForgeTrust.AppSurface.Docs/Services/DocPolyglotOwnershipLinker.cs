@@ -40,11 +40,7 @@ internal static partial class DocPolyglotOwnershipLinker
             .ToDictionary(static group => group.Key, static group => group.ToArray(), StringComparer.Ordinal);
         var csharpOwners = nodes
             .Where(IsCSharpApiPage)
-            .SelectMany(node => PythonOwnerMarkerRegex().Matches(node.Content).Select(match => new CSharpOwner(
-                node,
-                DecodePath(match.Groups["path"].Value),
-                DecodeAnchor(match.Groups["anchor"].Value),
-                DecodeDisplayName(match.Groups["label"].Value))))
+            .SelectMany(node => GetCSharpOwners(node))
             .Where(static owner => owner.RelativePath is not null && owner.AnchorId is not null && owner.DisplayName is not null)
             .GroupBy(static owner => owner.RelativePath!, StringComparer.Ordinal)
             .ToDictionary(static group => group.Key, static group => group.ToArray(), StringComparer.Ordinal);
@@ -115,14 +111,42 @@ internal static partial class DocPolyglotOwnershipLinker
         return $"<span {PythonOwnerMarkerAttribute}=\"{WebUtility.HtmlEncode(Uri.EscapeDataString(relativePath))}\" {PythonOwnerAnchorAttribute}=\"{WebUtility.HtmlEncode(Uri.EscapeDataString(anchorId))}\" {PythonOwnerLabelAttribute}=\"{WebUtility.HtmlEncode(Uri.EscapeDataString(displayName))}\"></span>";
     }
 
+    private static IEnumerable<CSharpOwner> GetCSharpOwners(DocNode node)
+    {
+        foreach (Match match in PythonOwnerMarkerRegex().Matches(node.Content))
+        {
+            yield return new CSharpOwner(
+                node,
+                DecodePath(match.Groups["path"].Value),
+                DecodeAnchor(match.Groups["anchor"].Value),
+                DecodeDisplayName(match.Groups["label"].Value));
+        }
+
+        foreach (var type in node.CSharpNamespaceDocument?.Types ?? [])
+        {
+            foreach (var path in type.PythonModulePaths ?? [])
+            {
+                yield return new CSharpOwner(
+                    node,
+                    IsValidPath(path) ? path : null,
+                    AnchorRegex().IsMatch(type.AnchorId) ? type.AnchorId : null,
+                    !string.IsNullOrWhiteSpace(type.DisplayName) && type.DisplayName.Length <= 512
+                        ? type.DisplayName
+                        : null);
+            }
+        }
+    }
+
     private static DocNode ReplaceMarkers(
         DocNode node,
         string docsRootPath,
         IReadOnlyDictionary<DocNode, OwnershipLink> linksByPythonNode,
         IReadOnlyDictionary<(DocNode Node, string Anchor), OwnershipLink> linksByCSharpNodeAndAnchor)
     {
+        var linkedTypedDocument = LinkTypedOwners(node, linksByCSharpNodeAndAnchor);
         if (!node.Content.Contains(PythonModuleMarkerAttribute, StringComparison.Ordinal)
-            && !node.Content.Contains(PythonOwnerMarkerAttribute, StringComparison.Ordinal))
+            && !node.Content.Contains(PythonOwnerMarkerAttribute, StringComparison.Ordinal)
+            && ReferenceEquals(linkedTypedDocument, node.CSharpNamespaceDocument))
         {
             return node;
         }
@@ -157,7 +181,28 @@ internal static partial class DocPolyglotOwnershipLinker
                 var moduleHref = DocsUrlBuilder.BuildDocUrl(docsRootPath, link.PythonNode.Path);
                 return $"<span class=\"doc-polyglot-link\">Python module: <a href=\"{WebUtility.HtmlEncode(moduleHref)}\">{WebUtility.HtmlEncode(link.RelativePath)}</a></span>";
             });
-        return content == node.Content ? node : node with { Content = content };
+        return node with { Content = content, CSharpNamespaceDocument = linkedTypedDocument };
+    }
+
+    private static CSharpNamespaceDocument? LinkTypedOwners(
+        DocNode node,
+        IReadOnlyDictionary<(DocNode Node, string Anchor), OwnershipLink> linksByCSharpNodeAndAnchor)
+    {
+        var document = node.CSharpNamespaceDocument;
+        if (document is null)
+        {
+            return null;
+        }
+
+        var linkedTypes = document.Types
+            .Select(type => linksByCSharpNodeAndAnchor.TryGetValue((node, type.AnchorId), out var link)
+                            && type.PythonModulePaths?.Contains(link.RelativePath, StringComparer.Ordinal) == true
+                ? type with { LinkedPythonModule = new CSharpPythonModuleLink(link.RelativePath, link.PythonNode.Path) }
+                : type)
+            .ToArray();
+        return linkedTypes.Where((type, index) => !ReferenceEquals(type, document.Types[index])).Any()
+            ? document with { Types = linkedTypes }
+            : document;
     }
 
     private static bool IsPythonModulePage(DocNode node)

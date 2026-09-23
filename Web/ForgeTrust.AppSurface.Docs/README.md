@@ -338,6 +338,55 @@ Do not add broad fallbacks such as `var(--docs-color-text-default, #e2e8f0)` unl
 - Do not rely on the full wrapped row text as the accessible name for a full-row search result link. The row can be visually rich while the link name stays short.
 - Do not edit generated `wwwroot/docs/search-client.js` or `wwwroot/docs/minisearch.min.js` by hand. Edit `assets/src/search-client.ts` or the pinned `minisearch` dependency, run `pnpm --dir Web run assets:build`, and then run `pnpm --dir Web run assets:verify`.
 
+## C# API rendering architecture and testing
+
+The built-in C# API harvester now separates source extraction from request-time markup. This is an internal implementation boundary: applications continue to configure and host AppSurface Docs exactly as before, and custom `IDocHarvester` implementations continue to provide their established `DocNode.Content` HTML contract.
+
+For the exact built-in `CSharpDocHarvester` inside `DocAggregator`, source is read once during the cached harvest snapshot and becomes an immutable `CSharpNamespaceDocument`. [CSharpDocHarvester](./Services/CSharpDocHarvester.cs) owns Roslyn extraction and the public legacy-HTML compatibility adapter; [CSharpDocModels](./Models/CSharpDocModels.cs) owns the internal semantic records; [DocAggregator](./Services/DocAggregator.cs) owns snapshot-time composition, search text, and safe source URLs; and [the C# Razor partial suite](./Views/Docs/CSharp/_Namespace.cshtml) owns typed markup. `Details.cshtml` remains the shell and always owns the single page H1.
+
+`CSharpNamespaceDocument`, `CSharpRenderKind`, and the Razor partials are internal on purpose. Do not create a renderer registry or teach custom harvesters to populate this shape. If a source needs custom output, use the existing `IDocHarvester`/`DocNode.Content` seam; it remains sanitized and link-rewritten by the standard aggregation path. The public positional `DocNode` constructor and deconstructor are unchanged.
+
+### Supported XML documentation semantics
+
+The typed path models and encodes the following XML documentation shapes: `summary`, `typeparam`, `param`, `returns`, `exception`, `remarks`, `example`, `see`, `paramref`, `typeparamref`, `c`, `code`, `para`, and ordered or unordered `list` items. `see` retains its source target separately from its display value, but this release deliberately renders it as encoded code text rather than introducing a new cross-reference resolver.
+
+Comments with no supported non-empty sections (including `///`, `<summary/>`, and an unexpanded `<inheritdoc/>`) do not publish a declaration or member. If no documented C# symbol remains, the built-in harvester returns no namespace pages, including no synthetic `Namespaces` root. Malformed or over-depth comments are different: the typed path retains their declaration anchors and reports the diagnostic described below. [Namespace README introductions](#namespace-intros) contribute normalized reader/search text; generated [rich-authoring](#rich-authoring) callout labels and tab baselines are omitted, and successfully rendered directives do not leak raw `:::` fences into [search summaries](#search-payload-contract).
+
+All source-derived text is emitted by Razor and encoded. The one deliberate raw-markup boundary is a namespace intro produced by the existing Markdown sanitizer before `DocAggregator` attaches it to the typed snapshot. Do not add per-page raw-HTML escapes to C# XML rendering; extend the semantic model and constrained partials instead.
+
+Malformed XML emits `DocHarvestDiagnosticCodes.CSharpXmlCommentMalformed` (`appsurfacedocs.csharp.xml_comment_malformed`) as a warning, omits only the malformed documentation fields, and keeps the declaration anchor. Both typed and legacy compatibility projections support at most 32 XML element levels within a comment, including its top-level section; deeper comments emit `DocHarvestDiagnosticCodes.CSharpXmlCommentDepthExceeded` (`appsurfacedocs.csharp.xml_comment_depth_exceeded`) as a warning. Typed namespace pages retain the declaration anchor, while the public legacy compatibility serializer omits the unsafe documentation subtree. A syntax or typed-projection failure emits `DocHarvestDiagnosticCodes.CSharpParseFailed` (`appsurfacedocs.csharp.parse_failed`) as an error and omits that source file atomically while unrelated files remain available. All diagnostics use repository-relative identity plus an actionable repair hint; inspect `{DocsRootPath}/_health.json` rather than relying on parser log output.
+
+### Maintainer verification path
+
+Use the checked-in [Issue 164 fixture](https://github.com/forge-trust/AppSurface/blob/efb90cb3de4595323fc63dd6dc4ad41431b6c90c/Web/ForgeTrust.AppSurface.Docs.Tests/TestData/Issue164CSharpApi/ApiFixtures.cs) to distinguish extraction, snapshot, and markup regressions. The fixture's [compatibility manifest](https://github.com/forge-trust/AppSurface/blob/efb90cb3de4595323fc63dd6dc4ad41431b6c90c/Web/ForgeTrust.AppSurface.Docs.Tests/TestData/Issue164CSharpApi/compatibility-manifest.json) is read-only test input for the stable path, DOM, reader-text, and search contracts; it is not generated by a repository command.
+
+```bash
+# Semantic tree and public-compatibility boundary.
+dotnet test Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Tests.csproj --filter FullyQualifiedName~Issue164CSharpSemanticContractTests
+
+# Issue 164 aggregation, routes, source links, and search projection.
+dotnet test Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Tests.csproj --filter FullyQualifiedName~Issue164CSharpAggregationContractTests
+
+# Issue 164 Razor markup and encoding assertions through RenderDocsViewAsync + AngleSharp.
+dotnet test Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Tests.csproj --filter FullyQualifiedName~Issue164CSharpDetailsRenderingTests
+
+# Live Details response, real export artifact, and verified exact-version archive mount.
+dotnet test Web/ForgeTrust.RazorWire.IntegrationTests/ForgeTrust.RazorWire.IntegrationTests.csproj --filter FullyQualifiedName~Issue164CSharpCompatibilityTests
+
+# Required repository coverage gate before shipping changes.
+./scripts/coverage-solution.sh
+```
+
+The semantic test owns the internal Roslyn-to-model contract and validates the checked-in manifest values. The aggregation test owns snapshot composition, intro and entry-point merging, outline/search text, and unresolved-entry-point diagnostics. The rendering test owns the Details shell, typed partial DOM, overload disclosure, and Razor encoding. The integration test starts a real source-backed standalone host, exports its generated namespace page and release manifest, pins that manifest in a version catalog, and then serves the verified tree at its exact-version route. It compares semantic elements, fragments, reader order, hostile-text encoding, source links, child-namespace links, and entry-point fragments without hand-writing archive HTML or manifest data. The first and third commands use the internal test friend assembly deliberately; external consumers do not receive internals visibility.
+
+### Timing evidence and repeatability
+
+The live `Issue164CSharpCompatibilityTests` export-and-archive command is the timing fixture for this migration because it exercises snapshot preparation, one typed Details response, static export, and a versioned archive mount without a rendered-page cache. It is a verification fixture, not a microbenchmark: use it to detect a bounded end-to-end regression only on a quiescent development host.
+
+On 2026-09-07, one `--no-build --no-restore` timing attempt was stopped after 147 seconds while unrelated solution-level test hosts were running in another worktree. That contention prevented a useful result, so it is deliberately **not** recorded as a page-performance baseline and no benchmark harness or cache was added for Issue #164. The structural tests above establish the remaining performance invariant: Roslyn extraction, source-link normalization, `ReaderText`, anchors, and namespace composition happen during the cached aggregate snapshot; the request-time partial only consumes the immutable typed model.
+
+Before using this fixture as a regression baseline, run it at least three times on the same otherwise-idle host and record the completed durations, commit, command, fixture revision, and whether build/restore were skipped. Treat materially divergent results as host noise rather than a renderer claim; investigate with a profiler before adding a representative benchmark under `benchmarks/AppSurfaceBenchmarks`. Do not add a second rendered-output cache or per-page timing workaround merely to improve this measurement.
+
 ## Details Page Heading Ownership
 
 AppSurface Docs details pages render the page title in the package-owned shell for authored Markdown pages. The title comes from `DocDetailsViewModel.Title`, which resolves metadata `title` first, then a leading Markdown H1, then the harvested file or folder fallback.
@@ -346,7 +395,7 @@ Because the shell already owns the semantic page H1, `Views/Docs/Details.cshtml`
 
 The suppression is intentionally narrow:
 
-- It runs only when the details shell renders the H1. C# API reference pages keep their harvested body heading because the shell hides its top H1 for generated API content.
+- It runs whenever the details shell owns the page H1. Typed built-in C# namespace pages use the same shell title and render only H2-and-below API sections; legacy custom/generated content retains its established body-content path.
 - It removes only the first body element when that element is an H1. Later H1 elements remain visible because they are body structure, not duplicated chrome.
 - Namespace intros apply the same rule before the intro HTML is wrapped in `.doc-namespace-intro`, so `# Namespace` stays useful in source while the generated namespace shell remains the only page H1.
 - For ordinary Markdown pages, suppression happens at render time. `DocNode.Content`, search extraction, and outline generation still see the harvested document as produced by the harvester.
@@ -557,6 +606,9 @@ AppSurface Docs currently emits these codes:
 - `DocHarvestDiagnosticCodes.PythonExportNotFound` (`appsurfacedocs.python.export_not_found`)
 - `DocHarvestDiagnosticCodes.PythonSlugCollision` (`appsurfacedocs.python.slug_collision`)
 - `DocHarvestDiagnosticCodes.PythonOwnershipInvalid` (`appsurfacedocs.python.ownership_invalid`)
+- `DocHarvestDiagnosticCodes.CSharpParseFailed` (`appsurfacedocs.csharp.parse_failed`)
+- `DocHarvestDiagnosticCodes.CSharpXmlCommentMalformed` (`appsurfacedocs.csharp.xml_comment_malformed`)
+- `DocHarvestDiagnosticCodes.CSharpXmlCommentDepthExceeded` (`appsurfacedocs.csharp.xml_comment_depth_exceeded`)
 - `DocHarvestDiagnosticCodes.JavaScriptFileTooLarge` (`appsurfacedocs.javascript.file_too_large`)
 - `DocHarvestDiagnosticCodes.JavaScriptParseFailed` (`appsurfacedocs.javascript.parse_failed`)
 - `DocHarvestDiagnosticCodes.JavaScriptMissingInclude` (`appsurfacedocs.javascript.missing_include`)
@@ -1982,7 +2034,7 @@ Python harvesting is an explicit, static sidecar-documentation option for a mixe
 
 For this bounded slice, a module must declare one top-level literal `__all__` list or tuple of string names. AppSurface Docs publishes matching module-level classes and functions, plus documented methods of an exported class, under `api/python/{module-slug}`. The slug is a lowercase ASCII normalization of the repository-relative source path; a path whose meaningful characters all normalize away uses `module`, and ordinary slug-collision diagnostics still prevent ambiguous pages from publishing. Symbol fragments use the same normalized shape and add a stable encoded suffix only when distinct Python names would otherwise collide, so case-distinct exports remain independently addressable. Missing or dynamic boundaries publish no module page and emit a diagnostic from the [diagnostic code reference](#diagnostics) instead of silently inferring visibility. Supported docstrings are plain, unprefixed single- or triple-quoted literals; Google, NumPy, and Sphinx dialect parsing is intentionally out of scope.
 
-Use `[AppSurfacePythonModule("sidecar/worker.py")]` on one documented top-level C# host type when readers need reciprocal navigation between that API type and an accepted Python module. The literal path is parsed from C# syntax and the link renders only when exactly one published Python module matches it. See the [Python harvesting spike design](../../docs/designs/python-docstring-harvesting-spike.md) for the parser payload trade-off, ownership contract, diagnostics, and RID evidence boundary.
+Use `[AppSurfacePythonModule("sidecar/worker.py")]` on one documented top-level C# host type when readers need reciprocal navigation between that API type and an accepted Python module. The literal path is parsed from C# syntax and the link renders only when exactly one published Python module matches it. Built-in C# namespace pages render this link through their typed Razor projection; direct public or derived C# harvester calls retain the legacy HTML output contract. Repeated ownership declarations remain ambiguous and produce no reciprocal link. See the [Python harvesting spike design](../../docs/designs/python-docstring-harvesting-spike.md) for the parser payload trade-off, ownership contract, diagnostics, and RID evidence boundary.
 
 Use emitted Python fragment routes when linking to symbols. Anchors are unique within a module, including class members, and normalization collisions receive deterministic suffixes; deriving a fragment directly from a Python name can therefore point to a different symbol. Module pages render declarations beneath the module heading while retaining the compact two-level API outline used by JavaScript.
 
@@ -2646,7 +2698,7 @@ Generated C# API pages can render small `Source` links beside documented types, 
 }
 ```
 
-Custom harvesters can populate `DocNode.SymbolSourceProvenance`, but AppSurface Docs only renders links for content that also includes the compatible placeholder emitted by the built-in C# harvester. The current placeholder contract is an implementation detail for generated API HTML:
+Built-in typed C# namespace pages carry safe source URLs in their internal semantic projection. Custom harvesters can still populate `DocNode.SymbolSourceProvenance`, but their legacy `Content` route renders links only when that content includes the compatible placeholder emitted by the public C# HTML adapter. The placeholder remains an implementation detail for legacy generated API HTML:
 
 ```html
 <span data-appsurfacedocs-symbol-source="anchor-id"></span>
@@ -2771,7 +2823,7 @@ Entry-point fields:
 - `label` is required, decoded, trimmed, and limited to 80 characters.
 - `summary` is optional, decoded, trimmed, and limited to 220 characters.
 - `target` is an anchor ID from the generated namespace page. Authors may include one leading `#`; AppSurface Docs stores it without the hash and allows only letters, digits, `_`, `-`, `.`, and `:`.
-- `href` is an escape hatch used only when `target` is absent or invalid. It must be a fragment such as `#anchor` or an app-relative docs URL under the active docs root, for example `/docs/...` or `/foo/bar/...`.
+- `href` is an escape hatch used only when `target` is absent or invalid. It must be a fragment such as `#anchor` or an app-relative docs URL under the active docs root, for example `/docs/...` or `/foo/bar/...`; an app-relative URL can include a query string and fragment such as `/docs/guides/api?tab=api#intro`. AppSurface Docs resolves only the route path, then preserves the valid query and fragment on the canonical URL.
 - `keywords` are distinct search terms, up to 20 values of 80 characters each.
 - `order` is an optional non-negative integer. Ordered entries render first, then unordered entries keep author order.
 

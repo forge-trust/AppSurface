@@ -144,8 +144,9 @@ public sealed class DurableWorkExitTests
             new NullEncodingStringCodec(new StringCodec("tests.exit.result")));
         await using var services = new ServiceCollection().AddSingleton<SuccessExitExecutor>().BuildServiceProvider();
 
-        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await registration.Prepare(services, CreateContext(workCodec)).InvokeExitAsync());
+        Assert.Equal("The durable codec returned no encoded payload.", error.Message);
     }
 
     [Fact]

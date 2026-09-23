@@ -1102,8 +1102,9 @@ public sealed class PythonDocHarvesterTests : IDisposable
         Assert.Contains("C# host:", pythonModule.Content, StringComparison.Ordinal);
         Assert.Contains("href=\"/docs/Namespaces/Sample.Host.html#Sample-Host-WorkerHost\"", pythonModule.Content, StringComparison.Ordinal);
         Assert.Contains(">WorkerHost</a>", pythonModule.Content, StringComparison.Ordinal);
-        Assert.Contains("Python module:", csharpHost.Content, StringComparison.Ordinal);
-        Assert.Contains("href=\"/docs/api/python/sidecar-worker\"", csharpHost.Content, StringComparison.Ordinal);
+        var hostType = Assert.Single(csharpHost.CSharpNamespaceDocument!.Types);
+        Assert.Equal("sidecar/worker.py", hostType.LinkedPythonModule?.SourcePath);
+        Assert.Equal("api/python/sidecar-worker", hostType.LinkedPythonModule?.DocPath);
         Assert.DoesNotContain("data-appsurfacedocs-python-", pythonModule.Content, StringComparison.Ordinal);
         Assert.DoesNotContain("data-appsurfacedocs-python-", csharpHost.Content, StringComparison.Ordinal);
     }

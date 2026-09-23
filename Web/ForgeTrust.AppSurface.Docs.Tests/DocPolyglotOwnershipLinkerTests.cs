@@ -25,6 +25,37 @@ public sealed class DocPolyglotOwnershipLinkerTests
     }
 
     [Fact]
+    public void Link_CreatesReciprocalLinksForTypedCSharpOwner()
+    {
+        var python = CreatePythonModule(
+            "api/python/sidecar-worker",
+            DocPolyglotOwnershipLinker.CreatePythonModuleMarker("sidecar/worker.py"));
+        var csharp = CreateTypedCSharpOwner("sidecar/worker.py");
+
+        var linked = DocPolyglotOwnershipLinker.Link([python, csharp], "/docs");
+
+        Assert.Contains("href=\"/docs/Namespaces/Sample.Host#Sample-Host-Worker\"", linked[0].Content, StringComparison.Ordinal);
+        var hostType = Assert.Single(linked[1].CSharpNamespaceDocument!.Types);
+        Assert.Equal("sidecar/worker.py", hostType.LinkedPythonModule?.SourcePath);
+        Assert.Equal("api/python/sidecar-worker", hostType.LinkedPythonModule?.DocPath);
+        Assert.Empty(linked[1].Content);
+    }
+
+    [Fact]
+    public void Link_RejectsRepeatedTypedOwnershipDeclarations()
+    {
+        var python = CreatePythonModule(
+            "api/python/sidecar-worker",
+            DocPolyglotOwnershipLinker.CreatePythonModuleMarker("sidecar/worker.py"));
+        var csharp = CreateTypedCSharpOwner("sidecar/worker.py", "sidecar/worker.py");
+
+        var linked = DocPolyglotOwnershipLinker.Link([python, csharp], "/docs");
+
+        Assert.DoesNotContain("C# host:", linked[0].Content, StringComparison.Ordinal);
+        Assert.Null(Assert.Single(linked[1].CSharpNamespaceDocument!.Types).LinkedPythonModule);
+    }
+
+    [Fact]
     public void Link_RemovesAmbiguousAndUnmatchedMarkersWithoutChangingUnrelatedNodes()
     {
         var firstPython = CreatePythonModule(
@@ -250,4 +281,22 @@ public sealed class DocPolyglotOwnershipLinkerTests
             path,
             content,
             Metadata: new DocMetadata { CodeLanguage = "csharp", PageType = "api-reference" });
+
+    private static DocNode CreateTypedCSharpOwner(params string[] pythonModulePaths) =>
+        new(
+            "C# owner",
+            "Namespaces/Sample.Host",
+            string.Empty,
+            Metadata: new DocMetadata { CodeLanguage = "csharp", PageType = "api-reference" })
+        {
+            CSharpNamespaceDocument = new CSharpNamespaceDocument(
+                "Sample.Host",
+                "Sample.Host",
+                [],
+                [new CSharpTypeDocument("Sample-Host-Worker", "Worker Host", null, [], [], PythonModulePaths: pythonModulePaths)],
+                [],
+                [],
+                [],
+                "Worker Host")
+        };
 }

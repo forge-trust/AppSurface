@@ -2,6 +2,12 @@
   "version": 2,
   "dependencies": {
     "net10.0": {
+      "AngleSharp": {
+        "type": "Direct",
+        "requested": "[1.7.1, 1.7.1]",
+        "resolved": "1.7.1",
+        "contentHash": "QBblGpRB3SYD66Mls7fHyl1mWkP93n7ErWDWHc1vd9sPHhdlTkmUoY3CjgfjcWNxGF9m7xjNyztRfErXqoBKOA=="
+      },
       "CliWrap": {
         "type": "Direct",
         "requested": "[3.10.1, )",
@@ -397,6 +403,18 @@
           "Microsoft.Extensions.Options": "[10.0.8, )"
         }
       },
+      "forgetrust.appsurface.auth.aspnetcore": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Auth": "[0.1.0, )"
+        }
+      },
+      "forgetrust.appsurface.auth.aspnetcore.devauth": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Auth.AspNetCore": "[0.1.0, )"
+        }
+      },
       "forgetrust.appsurface.caching": {
         "type": "Project",
         "dependencies": {
@@ -409,6 +427,13 @@
         "dependencies": {
           "ForgeTrust.AppSurface.Core": "[0.1.0, )",
           "Microsoft.Extensions.Options": "[10.0.8, )"
+        }
+      },
+      "forgetrust.appsurface.console": {
+        "type": "Project",
+        "dependencies": {
+          "CliFx": "[3.0.0, )",
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.core": {
@@ -490,28 +515,8 @@
         "type": "Project",
         "dependencies": {
           "CliWrap": "[3.10.1, )",
-          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64": "[0.1.0, )"
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.linux-arm64": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.linux-x64": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.osx-arm64": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.osx-x64": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.win-x64": {
-        "type": "Project"
       },
       "forgetrust.razorwire": {
         "type": "Project",
@@ -522,17 +527,24 @@
           "Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation": "[10.0.2, )"
         }
       },
+      "forgetrust.razorwire.cli": {
+        "type": "Project",
+        "dependencies": {
+          "AngleSharp": "[1.7.1, 1.7.1]",
+          "CliFx": "[3.0.0, )",
+          "CliWrap": "[3.10.1, )",
+          "ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Console": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Web": "[0.1.0, )",
+          "ForgeTrust.RazorWire": "[0.1.0, )",
+          "YamlDotNet": "[18.0.0, )"
+        }
+      },
       "Acornima": {
         "type": "CentralTransitive",
         "requested": "[1.6.2, )",
         "resolved": "1.6.2",
         "contentHash": "laakpDHzMwHr5C8+q5RlRf0XJJshUvghNeo4xDerICrYR3iEuGvwfpauCmXuU3RE437XDaQO5ZxieWDpADuD+w=="
-      },
-      "AngleSharp": {
-        "type": "CentralTransitive",
-        "requested": "[1.7.1, 1.7.1]",
-        "resolved": "1.7.1",
-        "contentHash": "QBblGpRB3SYD66Mls7fHyl1mWkP93n7ErWDWHc1vd9sPHhdlTkmUoY3CjgfjcWNxGF9m7xjNyztRfErXqoBKOA=="
       },
       "AngleSharp.Css": {
         "type": "CentralTransitive",
@@ -542,6 +554,12 @@
         "dependencies": {
           "AngleSharp": "[1.5.0, 2.0.0)"
         }
+      },
+      "CliFx": {
+        "type": "CentralTransitive",
+        "requested": "[3.0.0, )",
+        "resolved": "3.0.0",
+        "contentHash": "pdwqGjsOnD/aHgbFGJJOk1U5JOEsFwVhVMb2LqHUQmPEVSZf2YgyGeZvCtP2SHndBEHxgUVNlNXX37o9uz62bw=="
       },
       "HtmlSanitizer": {
         "type": "CentralTransitive",
