@@ -1,11 +1,10 @@
 namespace ForgeTrust.AppSurface.Web.Tailwind.Internal;
 
 /// <summary>
-/// Resolves the shared Tailwind standalone CLI download cache used by source-tree runtime builds.
+/// Resolves the shared Tailwind standalone CLI download cache used by build and watch resolution.
 /// </summary>
 internal static class TailwindDownloadCache
 {
-#if !APP_SURFACE_TAILWIND_TASKS
     /// <summary>
     /// Gets the default shared cache root for the current user.
     /// </summary>
@@ -14,9 +13,9 @@ internal static class TailwindDownloadCache
     /// A user-level cache directory when one can be derived from the environment; otherwise <c>null</c>.
     /// </returns>
     /// <remarks>
-    /// Source-tree runtime projects download Tailwind executables before they are packed into runtime packages.
-    /// Keeping that cache under a user-level location avoids one full copy per Git worktree while still allowing
-    /// callers to override the root through MSBuild's <c>TailwindDownloadCacheRoot</c> property.
+    /// The main package stores one verified executable per Tailwind version and build-host RID in this user-level
+    /// cache. Keeping it outside a repository avoids one full download per Git worktree while callers can still
+    /// override the root through MSBuild's <c>TailwindDownloadCacheRoot</c> property.
     /// </remarks>
     public static string? GetDefaultRoot(Func<string, string?>? getEnvironmentVariable = null)
     {
@@ -48,8 +47,6 @@ internal static class TailwindDownloadCache
 
         return null;
     }
-#endif
-
     /// <summary>
     /// Gets the cached runtime binary path for a Tailwind version and host runtime identifier.
     /// </summary>

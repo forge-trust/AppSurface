@@ -186,6 +186,10 @@ SELECT format(
 SELECT format('REVOKE ALL ON TABLE appsurface_durable.schedule_dispatch FROM %I', :'dispatcher_role') \gexec
 SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.claim_schedule_dispatch(text, interval) FROM %I', :'dispatcher_role') \gexec
 SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.claim_schedule_dispatch(text, interval) FROM %I', :'runtime_role') \gexec
+REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM PUBLIC;
+SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM %I', :'dispatcher_role') \gexec
+SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM %I', :'runtime_role') \gexec
+SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM %I', :'retention_operator_role') \gexec
 SELECT format('REVOKE ALL ON TABLE appsurface_durable.dispatch FROM %I', :'dispatcher_role') \gexec
 
 SELECT NOT EXISTS
@@ -821,6 +825,50 @@ SELECT format(
     :'retention_operator_role') \gexec
 SELECT format('GRANT USAGE ON SCHEMA appsurface_durable TO %I', :'runtime_role') \gexec
 SELECT format('GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO %I', :'runtime_role') \gexec
+SELECT has_function_privilege(
+           :'runtime_role',
+           'appsurface_durable.runtime_due_dispatch_health(integer)',
+           'EXECUTE')
+       AND NOT has_function_privilege(
+           :'runtime_role',
+           'appsurface_durable.runtime_due_dispatch_health(integer)',
+           'EXECUTE WITH GRANT OPTION')
+       AND NOT has_function_privilege(
+           'public',
+           'appsurface_durable.runtime_due_dispatch_health(integer)',
+           'EXECUTE')
+       AND NOT has_function_privilege(
+           :'dispatcher_role',
+           'appsurface_durable.runtime_due_dispatch_health(integer)',
+           'EXECUTE')
+       AND NOT has_function_privilege(
+           :'retention_operator_role',
+           'appsurface_durable.runtime_due_dispatch_health(integer)',
+           'EXECUTE')
+       AND NOT EXISTS
+       (
+           SELECT 1
+           FROM pg_catalog.pg_proc AS routine
+           CROSS JOIN LATERAL pg_catalog.aclexplode(routine.proacl) AS privilege
+           WHERE routine.oid =
+               'appsurface_durable.runtime_due_dispatch_health(integer)'::pg_catalog.regprocedure
+             AND privilege.privilege_type = 'EXECUTE'
+             AND privilege.grantee NOT IN
+             (
+                 routine.proowner,
+                 (
+                     SELECT role_value.oid
+                     FROM pg_catalog.pg_roles AS role_value
+                     WHERE role_value.rolname = :'runtime_role'
+                 )
+             )
+       )
+    AS runtime_due_dispatch_health_acl_is_exact \gset
+\if :runtime_due_dispatch_health_acl_is_exact
+\else
+  \echo 'runtime_due_dispatch_health(integer) must be executable only by the scoped runtime role (apart from its owner).'
+  SELECT 1 / 0;
+\endif
 SELECT format(
     'GRANT SELECT ON appsurface_durable.store_metadata, appsurface_durable.schema_migration, appsurface_durable.runtime_heartbeat TO %I',
     :'runtime_role') \gexec

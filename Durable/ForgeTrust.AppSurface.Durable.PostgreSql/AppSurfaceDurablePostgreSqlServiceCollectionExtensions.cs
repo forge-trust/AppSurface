@@ -2,6 +2,8 @@ using ForgeTrust.AppSurface.Durable.Provider;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql;
@@ -53,6 +55,8 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
             throw new InvalidOperationException(
                 "PostgreSQL durable storage is already registered. A service provider has exactly one durable runtime configuration.");
         }
+
+        ValidatePumpOverrideComposition(services);
 
         var configuredOptions = new AppSurfaceDurablePostgreSqlOptions();
         configure?.Invoke(configuredOptions);
@@ -155,7 +159,9 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
         services.TryAddSingleton<IDurableRuntimeExecutionBoundary>(static _ => new UninstrumentedDurableRuntimeExecutionBoundary());
         services.TryAddSingleton<PostgreSqlDurableRuntimeHealth>(static provider => new PostgreSqlDurableRuntimeHealth(
             provider.GetRequiredService<PostgreSqlDurableRuntimeRegistration>(),
-            provider.GetRequiredService<IDurableRuntimeSchemaManager>()));
+            provider.GetRequiredService<IDurableRuntimeSchemaManager>(),
+            provider.GetService<ILogger<PostgreSqlDurableRuntimeHealth>>()
+                ?? NullLogger<PostgreSqlDurableRuntimeHealth>.Instance));
         services.TryAddSingleton<IDurableRuntimeHealth>(static provider => provider.GetRequiredService<PostgreSqlDurableRuntimeHealth>());
         services.TryAddSingleton<IDurableRuntimeDrainControl>(static provider => provider.GetRequiredService<PostgreSqlDurableRuntimeHealth>());
         services.TryAddSingleton<PostgreSqlDurableControlClient>(static provider => new PostgreSqlDurableControlClient(
@@ -175,7 +181,7 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
                 provider.GetRequiredService<IServiceScopeFactory>(),
                 runtime.WorkOptions.RuntimeEpoch);
         });
-        services.TryAddSingleton<IDurableRuntimePump>(static provider => new PostgreSqlDurableRuntimePump(
+        services.TryAddSingleton<PostgreSqlDurableRuntimePump>(static provider => new PostgreSqlDurableRuntimePump(
             provider.GetRequiredService<PostgreSqlDurableRuntimeRegistration>(),
             provider.GetRequiredService<IDurableRuntimeSchemaManager>(),
             provider.GetRequiredService<PostgreSqlDurableRuntimeHealth>(),
@@ -186,8 +192,63 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
             new PostgreSqlDurableWorkContractSelection(provider.GetRequiredService<IDurableWorkRegistry>()),
             provider.GetRequiredService<IServiceScopeFactory>(),
             provider.GetRequiredService<IDurableRuntimeExecutionBoundary>(),
-            provider.GetRequiredService<DurableRuntimeAdmissionGate>()));
+            provider.GetRequiredService<DurableRuntimeAdmissionGate>(),
+            provider.GetService<ILogger<PostgreSqlDurableRuntimePump>>()
+                ?? NullLogger<PostgreSqlDurableRuntimePump>.Instance,
+            passExecutor: null));
+        services.TryAddSingleton<IDurableRuntimePump>(static provider =>
+            provider.GetRequiredService<PostgreSqlDurableRuntimePump>());
+        services.TryAddSingleton<IDurableRuntimePumpAdmission>(static provider =>
+        {
+            var packagePump = provider.GetRequiredService<PostgreSqlDurableRuntimePump>();
+            var legacyPump = provider.GetRequiredService<IDurableRuntimePump>();
+            if (!ReferenceEquals(packagePump, legacyPump))
+            {
+                throw new InvalidOperationException(
+                    "A custom IDurableRuntimePump is registered without the same singleton under " +
+                    "IDurableRuntimePumpAdmission. Register one custom singleton under both interfaces before " +
+                    "calling AddAppSurfaceDurablePostgreSql, or use only the legacy interface.");
+            }
+
+            return packagePump;
+        });
         return new AppSurfaceDurablePostgreSqlBuilder(services);
+    }
+
+    /// <summary>Rejects partial or visibly split opt-in admission overrides before package services are added.</summary>
+    private static void ValidatePumpOverrideComposition(IServiceCollection services)
+    {
+        var legacy = services.LastOrDefault(
+            static descriptor => descriptor.ServiceType == typeof(IDurableRuntimePump));
+        var admission = services.LastOrDefault(
+            static descriptor => descriptor.ServiceType == typeof(IDurableRuntimePumpAdmission));
+        if (admission is not null && legacy is null)
+        {
+            throw new InvalidOperationException(
+                "IDurableRuntimePumpAdmission cannot be overridden without registering the same singleton under " +
+                "IDurableRuntimePump before calling AddAppSurfaceDurablePostgreSql.");
+        }
+
+        if (admission is null)
+        {
+            return;
+        }
+
+        if (legacy!.ImplementationInstance is not { } legacyInstance
+            || admission.ImplementationInstance is not { } admissionInstance)
+        {
+            throw new InvalidOperationException(
+                "Custom IDurableRuntimePump and IDurableRuntimePumpAdmission overrides must be registered from the " +
+                "same pre-created singleton instance. Implementation-type or factory pairs cannot prove that both " +
+                "APIs share one process-local pass slot.");
+        }
+
+        if (!ReferenceEquals(legacyInstance, admissionInstance))
+        {
+            throw new InvalidOperationException(
+                "IDurableRuntimePump and IDurableRuntimePumpAdmission overrides must reference the same singleton " +
+                "so both APIs share one process-local pass slot.");
+        }
     }
 
     /// <summary>Adds the one critical continuous worker loop after passive PostgreSQL durable registration.</summary>

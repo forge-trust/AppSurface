@@ -3,6 +3,7 @@ using ForgeTrust.AppSurface.Durable.Provider;
 using ForgeTrust.AppSurface.Flow;
 using ForgeTrust.AppSurface.Workers;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
@@ -504,6 +505,39 @@ public sealed class PostgreSqlDurableRuntimePumpTests
     }
 
     [Fact]
+    public async Task DefaultConstructor_UsesTheProductionPassExecutor()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "default-constructor");
+        await using var provider = CreateWorkProvider(
+            database,
+            new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
+            new SuccessfulWorkRegistration(),
+            "runtime-pump-default-constructor-worker");
+
+        var pump = new PostgreSqlDurableRuntimePump(
+            provider.GetRequiredService<PostgreSqlDurableRuntimeRegistration>(),
+            provider.GetRequiredService<IDurableRuntimeSchemaManager>(),
+            provider.GetRequiredService<PostgreSqlDurableRuntimeHealth>(),
+            provider.GetRequiredService<PostgreSqlDurableWorkStore>(),
+            provider.GetRequiredService<PostgreSqlDurableFlowProcessor>(),
+            provider.GetRequiredService<PostgreSqlDurableScheduleProcessor>(),
+            provider.GetRequiredService<IDurableWorkRegistry>(),
+            new PostgreSqlDurableWorkContractSelection(provider.GetRequiredService<IDurableWorkRegistry>()),
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            provider.GetRequiredService<IDurableRuntimeExecutionBoundary>(),
+            provider.GetRequiredService<DurableRuntimeAdmissionGate>());
+
+        var result = await pump.RunOnceAsync(
+            new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work));
+
+        Assert.Equal(0, result.Processed);
+    }
+
+    [Fact]
     public async Task RunOnceAsync_ProcessesRegisteredFlowThroughTheProviderProcessor()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
@@ -866,6 +900,13 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.Equal(0, result.Failed);
         Assert.False(result.HasMore);
         Assert.Equal(DurableRuntimeHealthState.Healthy, (await provider.GetRequiredService<IDurableRuntimeHealth>().GetAsync()).State);
+
+        var attempt = await provider.GetRequiredService<IDurableRuntimePumpAdmission>().TryRunOnceAsync(
+            new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All));
+        Assert.Equal(DurableRuntimePumpAttemptKind.Completed, attempt.Kind);
+        Assert.NotNull(attempt.Result);
+        Assert.Equal(0, attempt.Result.Discovered);
+        Assert.Null(attempt.ProblemCode);
     }
 
     [Fact]
@@ -892,6 +933,8 @@ public sealed class PostgreSqlDurableRuntimePumpTests
 
         var result = await provider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
             new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.All));
+        var attempt = await provider.GetRequiredService<IDurableRuntimePumpAdmission>().TryRunOnceAsync(
+            new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.All));
 
         Assert.Equal(0, result.Discovered);
         Assert.Equal(0, result.Claimed);
@@ -900,6 +943,9 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.Equal(0, result.Failed);
         Assert.False(result.HasMore);
         Assert.Equal(TimeSpan.Zero, result.Elapsed);
+        Assert.Equal(DurableRuntimePumpAttemptKind.Refused, attempt.Kind);
+        Assert.Null(attempt.Result);
+        Assert.Null(attempt.ProblemCode);
     }
 
     [Fact]
@@ -1034,6 +1080,13 @@ public sealed class PostgreSqlDurableRuntimePumpTests
 
         var overlap = await Assert.ThrowsAsync<InvalidOperationException>(async () => await pump.RunOnceAsync(request));
         Assert.StartsWith(DurableProblemCodes.WorkerIdentityConflict, overlap.Message, StringComparison.Ordinal);
+        Assert.Equal(
+            "ASDUR405: This runtime instance already has an active Pass.",
+            overlap.Message);
+        var admissionOverlap = await provider.GetRequiredService<IDurableRuntimePumpAdmission>()
+            .TryRunOnceAsync(request);
+        Assert.Equal(DurableRuntimePumpAttemptKind.Refused, admissionOverlap.Kind);
+        Assert.Null(admissionOverlap.Result);
 
         registration.Complete.TrySetResult(registration.ResultCodec.EncodeObject(Encoding.UTF8.GetBytes("result")));
         Assert.Equal(1, (await activePass).Processed);
@@ -1362,7 +1415,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
     }
 
     [Fact]
-    public async Task RunOnceAsync_RecordsAmbiguousOutcomeWhenCancellationArrivesAfterEffectPermit()
+    public async Task RunOnceAsync_FinalizesAmbiguousOutcomeWhenCallerCancelsBeforeProviderReturns()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
         var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
@@ -1401,9 +1454,9 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         await registration.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
         cancellation.Cancel();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(
-            async () => await running.WaitAsync(TimeSpan.FromSeconds(5)));
+        var result = await running.WaitAsync(TimeSpan.FromSeconds(5));
 
+        Assert.Equal(1, result.Failed);
         var snapshot = await provider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
             new DurableWorkGetRequest(scope, accepted.Value!.WorkId));
         Assert.True(snapshot.IsSuccess);
@@ -1671,6 +1724,8 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             new PostgreSqlDurableWorkStore(database.CreateDataSource(), database.CreateDataSource(), epoch));
         var secondResult = await secondPump.RunOnceAsync(
             new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work));
+        var secondAttempt = await secondPump.TryRunOnceAsync(
+            new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work));
 
         Assert.Equal(0, secondResult.Discovered);
         Assert.Equal(0, secondResult.Claimed);
@@ -1679,6 +1734,8 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.Equal(0, secondResult.Failed);
         Assert.False(secondResult.HasMore);
         Assert.Equal(TimeSpan.Zero, secondResult.Elapsed);
+        Assert.Equal(DurableRuntimePumpAttemptKind.Refused, secondAttempt.Kind);
+        Assert.Null(secondAttempt.Result);
 
         registration.Complete.TrySetResult(registration.CompletionResult);
         Assert.Equal(1, (await firstPass).Processed);
@@ -1841,6 +1898,617 @@ public sealed class PostgreSqlDurableRuntimePumpTests
     }
 
     [Fact]
+    public async Task TryRunOnceAsync_PropagatesCancellationBeforeExecutionAndLeavesNoActivePass()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "pre-execution-cancellation");
+        var services = new ServiceCollection();
+        services.AddAppSurfaceDurablePostgreSql(
+            database.DataSource,
+            database.CreateDataSource(),
+            new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options =>
+            {
+                options.WorkerId = "runtime-pump-pre-execution-cancellation-worker";
+                options.SendWakeNotifications = false;
+            });
+        await using var provider = services.BuildServiceProvider();
+        var executorCalls = 0;
+        var pump = CreatePump(
+            provider,
+            provider.GetRequiredService<PostgreSqlDurableWorkStore>(),
+            passExecutor: (_, _) =>
+            {
+                Interlocked.Increment(ref executorCalls);
+                return ValueTask.FromResult(
+                    new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
+            });
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await pump.TryRunOnceAsync(
+                new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All),
+                cancellation.Token));
+
+        Assert.Equal(0, executorCalls);
+        var health = await provider.GetRequiredService<IDurableRuntimeHealth>().GetAsync();
+        Assert.False(health.IsPassActive);
+        Assert.Equal(DurableRuntimeHealthState.NotStarted, health.State);
+    }
+
+    [Fact]
+    public async Task TryRunOnceAsync_ProjectsSchemaIncompatibilityWithoutEnteringExecution()
+    {
+        using var dispatcher = NpgsqlDataSource.Create(
+            "Host=127.0.0.1;Port=1;Database=durable_pump;Username=durable;Timeout=1");
+        using var runtime = NpgsqlDataSource.Create(
+            "Host=127.0.0.1;Port=2;Database=durable_pump;Username=durable;Timeout=1");
+        var services = new ServiceCollection();
+        services.AddAppSurfaceDurablePostgreSql(
+            dispatcher,
+            runtime,
+            new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options => options.SendWakeNotifications = false);
+        await using var provider = services.BuildServiceProvider();
+        var status = CreateSchemaStatus(DurableRuntimeSchemaCompatibility.UpgradeRequired);
+        var expected = new DurableRuntimeSchemaException(status);
+        var schema = new StubSchemaManager(
+            _ => ValueTask.FromException(expected));
+        var executorCalls = 0;
+        var pump = CreatePump(
+            provider,
+            provider.GetRequiredService<PostgreSqlDurableWorkStore>(),
+            schemaManager: schema,
+            passExecutor: (_, _) =>
+            {
+                Interlocked.Increment(ref executorCalls);
+                return ValueTask.FromResult(
+                    new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
+            });
+        var request = new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All);
+
+        var attempt = await pump.TryRunOnceAsync(request);
+        var legacy = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
+            async () => await pump.RunOnceAsync(request));
+
+        Assert.Equal(DurableRuntimePumpAttemptKind.Incompatible, attempt.Kind);
+        Assert.Equal(DurableProblemCodes.SchemaUpgradeRequired, attempt.ProblemCode);
+        Assert.Null(attempt.Result);
+        Assert.Same(expected, legacy);
+        Assert.Equal(0, executorCalls);
+    }
+
+    [Fact]
+    public async Task TryRunOnceAsync_PropagatesUnclassifiedSchemaPrecheckFailuresAndReleasesLocalSlot()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "schema-precheck-propagation");
+        var status = await schema.GetStatusAsync();
+        var services = new ServiceCollection();
+        services.AddAppSurfaceDurablePostgreSql(
+            database.DataSource,
+            database.CreateDataSource(),
+            new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options =>
+            {
+                options.WorkerId = "runtime-pump-schema-precheck-propagation-worker";
+                options.SendWakeNotifications = false;
+            });
+        await using var provider = services.BuildServiceProvider();
+        var precheckFailure = new InvalidOperationException("unclassified schema precheck failure");
+        var schemaPrecheck = new StubSchemaManager(_ => ValueTask.FromException(precheckFailure));
+        var executorCalls = 0;
+        var pump = CreatePump(
+            provider,
+            provider.GetRequiredService<PostgreSqlDurableWorkStore>(),
+            schemaManager: schemaPrecheck,
+            passExecutor: (_, _) =>
+            {
+                Interlocked.Increment(ref executorCalls);
+                return ValueTask.FromResult(new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
+            });
+        var request = new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All);
+
+        var first = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await pump.TryRunOnceAsync(request));
+        var second = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await pump.TryRunOnceAsync(request));
+
+        Assert.Same(precheckFailure, first);
+        Assert.Same(precheckFailure, second);
+        Assert.DoesNotContain("already has an active Pass", second.Message, StringComparison.Ordinal);
+        Assert.Equal(0, executorCalls);
+    }
+
+    [Fact]
+    public async Task TryRunOnceAsync_RevalidatesSchemaInsideStoreAdmissionAfterPrecheckRace()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "schema-admission-race");
+        var status = await schema.GetStatusAsync();
+        var services = new ServiceCollection();
+        services.AddAppSurfaceDurablePostgreSql(
+            database.DataSource,
+            database.CreateDataSource(),
+            new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options =>
+            {
+                options.WorkerId = "runtime-pump-schema-admission-race-worker";
+                options.SendWakeNotifications = false;
+            });
+        await using var provider = services.BuildServiceProvider();
+        var mutatedAfterPrecheck = 0;
+        var racingSchema = new StubSchemaManager(async cancellationToken =>
+        {
+            await schema.ValidateAsync(cancellationToken);
+            if (Interlocked.Exchange(ref mutatedAfterPrecheck, 1) == 0)
+            {
+                await using var makeUnsupported = database.DataSource.CreateCommand(
+                    "DROP SCHEMA appsurface_durable CASCADE;");
+                await makeUnsupported.ExecuteNonQueryAsync(cancellationToken);
+            }
+        });
+        var executorCalls = 0;
+        var pump = CreatePump(
+            provider,
+            provider.GetRequiredService<PostgreSqlDurableWorkStore>(),
+            schemaManager: racingSchema,
+            passExecutor: (_, _) =>
+            {
+                Interlocked.Increment(ref executorCalls);
+                return ValueTask.FromResult(
+                    new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
+            });
+
+        var attempt = await pump.TryRunOnceAsync(
+            new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All));
+
+        Assert.Equal(DurableRuntimePumpAttemptKind.Incompatible, attempt.Kind);
+        Assert.Equal(DurableProblemCodes.SchemaMissing, attempt.ProblemCode);
+        Assert.Null(attempt.Result);
+        Assert.Equal(1, mutatedAfterPrecheck);
+        Assert.Equal(0, executorCalls);
+    }
+
+    [Fact]
+    public async Task PumpProjections_RefuseDrainingWorkerWithoutEnteringExecution()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "draining-projections");
+        await using var runtimeDataSource = database.CreateDataSource();
+        var services = new ServiceCollection();
+        services.AddAppSurfaceDurablePostgreSql(
+            database.DataSource,
+            runtimeDataSource,
+            new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options =>
+            {
+                options.WorkerId = "runtime-pump-draining-projections-worker";
+                options.SendWakeNotifications = false;
+            });
+        await using var provider = services.BuildServiceProvider();
+        await provider.GetRequiredService<IDurableRuntimeDrainControl>().BeginDrainAsync();
+        var executorCalls = 0;
+        var pump = CreatePump(
+            provider,
+            provider.GetRequiredService<PostgreSqlDurableWorkStore>(),
+            passExecutor: (_, _) =>
+            {
+                Interlocked.Increment(ref executorCalls);
+                return ValueTask.FromResult(
+                    new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
+            });
+        var request = new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All);
+
+        var attempt = await pump.TryRunOnceAsync(request);
+        var legacy = await pump.RunOnceAsync(request);
+
+        Assert.Equal(DurableRuntimePumpAttemptKind.Refused, attempt.Kind);
+        Assert.Null(attempt.ProblemCode);
+        Assert.Null(attempt.Result);
+        Assert.Equal(0, legacy.Discovered);
+        Assert.Equal(0, legacy.Claimed);
+        Assert.Equal(0, legacy.Processed);
+        Assert.Equal(0, legacy.Deferred);
+        Assert.Equal(0, legacy.Failed);
+        Assert.False(legacy.HasMore);
+        Assert.Null(legacy.NextDueAtUtc);
+        Assert.Equal(TimeSpan.Zero, legacy.Elapsed);
+        Assert.Equal(0, executorCalls);
+    }
+
+    [Fact]
+    public async Task TryRunOnceAsync_ProjectsRuntimeStoreOutageWithoutEnteringExecution()
+    {
+        using var dispatcher = NpgsqlDataSource.Create(
+            "Host=127.0.0.1;Port=1;Database=durable_pump;Username=durable;Timeout=1");
+        using var runtime = NpgsqlDataSource.Create(
+            "Host=127.0.0.1;Port=2;Database=durable_pump;Username=durable;Timeout=1");
+        var services = new ServiceCollection();
+        services.AddAppSurfaceDurablePostgreSql(
+            dispatcher,
+            runtime,
+            new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options => options.SendWakeNotifications = false);
+        await using var provider = services.BuildServiceProvider();
+        var schema = new StubSchemaManager(
+            _ => ValueTask.CompletedTask);
+        var executorCalls = 0;
+        var pump = CreatePump(
+            provider,
+            provider.GetRequiredService<PostgreSqlDurableWorkStore>(),
+            schemaManager: schema,
+            passExecutor: (_, _) =>
+            {
+                Interlocked.Increment(ref executorCalls);
+                return ValueTask.FromResult(
+                    new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
+            });
+        var request = new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All);
+
+        var attempt = await pump.TryRunOnceAsync(request);
+        await Assert.ThrowsAnyAsync<NpgsqlException>(
+            async () => await pump.RunOnceAsync(request));
+
+        Assert.Equal(DurableRuntimePumpAttemptKind.Unavailable, attempt.Kind);
+        Assert.Equal(DurableProblemCodes.StoreUnavailable, attempt.ProblemCode);
+        Assert.Null(attempt.Result);
+        Assert.Equal(0, executorCalls);
+    }
+
+    [Fact]
+    public async Task TryRunOnceAsync_ProjectsRuntimeAdmissionPermissionFailureWithoutEnteringExecution()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "permission-failure");
+        var status = await schema.GetStatusAsync();
+        var role = $"runtime_admission_denied_{Guid.NewGuid():N}";
+        const string password = "runtime-admission-test-password";
+        await using (var createRole = database.DataSource.CreateCommand(
+            $"""
+            CREATE ROLE {role}
+                LOGIN PASSWORD '{password}'
+                NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            GRANT USAGE ON SCHEMA appsurface_durable TO {role};
+            GRANT SELECT ON TABLE
+                appsurface_durable.store_metadata,
+                appsurface_durable.runtime_heartbeat
+                TO {role};
+            """))
+        {
+            await createRole.ExecuteNonQueryAsync();
+        }
+
+        var connectionString = new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            Username = role,
+            Password = password,
+            Pooling = false,
+        }.ConnectionString;
+        try
+        {
+            await using var restrictedDispatcherDataSource = NpgsqlDataSource.Create(connectionString);
+            await using var restrictedRuntimeDataSource = NpgsqlDataSource.Create(connectionString);
+            var services = new ServiceCollection();
+            services.AddAppSurfaceDurablePostgreSql(
+                restrictedDispatcherDataSource,
+                restrictedRuntimeDataSource,
+                new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+                new PostgreSqlDurableScheduleOptions("appsurface"),
+                options =>
+                {
+                    options.WorkerId = "runtime-pump-permission-worker";
+                    options.SendWakeNotifications = false;
+                });
+            await using var provider = services.BuildServiceProvider();
+            var executorCalls = 0;
+            var pump = CreatePump(
+                provider,
+                provider.GetRequiredService<PostgreSqlDurableWorkStore>(),
+                schemaManager: new StubSchemaManager(_ => ValueTask.CompletedTask),
+                passExecutor: (_, _) =>
+                {
+                    Interlocked.Increment(ref executorCalls);
+                    return ValueTask.FromResult(
+                        new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
+                });
+            var request = new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All);
+
+            var attempt = await pump.TryRunOnceAsync(request);
+            var legacy = await Assert.ThrowsAsync<PostgresException>(
+                async () => await pump.RunOnceAsync(request));
+
+            Assert.Equal(DurableRuntimePumpAttemptKind.Unavailable, attempt.Kind);
+            Assert.Equal(DurableProblemCodes.StoreUnavailable, attempt.ProblemCode);
+            Assert.Null(attempt.Result);
+            Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, legacy.SqlState);
+            Assert.Equal(0, executorCalls);
+        }
+        finally
+        {
+            await using var dropRole = database.DataSource.CreateCommand(
+                $"DROP OWNED BY {role}; DROP ROLE {role};");
+            await dropRole.ExecuteNonQueryAsync();
+        }
+    }
+
+    [Fact]
+    public async Task TryRunOnceAsync_ProjectsEpochAndWorkerGenerationBeforeEnteringExecution()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var activeEpoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(activeEpoch, "runtime-pump-tests", "projection-fences");
+        var status = await schema.GetStatusAsync();
+        var executorCalls = 0;
+
+        var epochServices = new ServiceCollection();
+        epochServices.AddAppSurfaceDurablePostgreSql(
+            database.DataSource,
+            database.CreateDataSource(),
+            new PostgreSqlDurableWorkOptions(Guid.NewGuid(), status.StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options =>
+            {
+                options.WorkerId = "runtime-pump-epoch-projection-worker";
+                options.SendWakeNotifications = false;
+            });
+        await using (var epochProvider = epochServices.BuildServiceProvider())
+        {
+            var epochPump = CreatePump(
+                epochProvider,
+                epochProvider.GetRequiredService<PostgreSqlDurableWorkStore>(),
+                passExecutor: (_, _) =>
+                {
+                    Interlocked.Increment(ref executorCalls);
+                    return ValueTask.FromResult(
+                        new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
+                });
+            var request = new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All);
+
+            var attempt = await epochPump.TryRunOnceAsync(request);
+            var legacy = await Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await epochPump.RunOnceAsync(request));
+
+            Assert.Equal(DurableRuntimePumpAttemptKind.Incompatible, attempt.Kind);
+            Assert.Equal(DurableProblemCodes.RecoveryEpochRequired, attempt.ProblemCode);
+            Assert.Equal(
+                "ASDUR108: The configured runtime epoch is not active in PostgreSQL.",
+                legacy.Message);
+        }
+
+        var workerServices = new ServiceCollection();
+        workerServices.AddAppSurfaceDurablePostgreSql(
+            database.DataSource,
+            database.CreateDataSource(),
+            new PostgreSqlDurableWorkOptions(activeEpoch, status.StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options =>
+            {
+                options.WorkerId = "runtime-pump-generation-projection-worker";
+                options.SendWakeNotifications = false;
+            });
+        await using var workerProvider = workerServices.BuildServiceProvider();
+        var registration = workerProvider.GetRequiredService<PostgreSqlDurableRuntimeRegistration>();
+        var otherGeneration = new PostgreSqlDurableRuntimeHealth(
+            registration with { InstanceId = Guid.NewGuid() },
+            schema);
+        Assert.True(await otherGeneration.TryBeginPassAsync(CancellationToken.None));
+        var workerPump = CreatePump(
+            workerProvider,
+            workerProvider.GetRequiredService<PostgreSqlDurableWorkStore>(),
+            passExecutor: (_, _) =>
+            {
+                Interlocked.Increment(ref executorCalls);
+                return ValueTask.FromResult(
+                    new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
+            });
+        var workerRequest = new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All);
+
+        var workerAttempt = await workerPump.TryRunOnceAsync(workerRequest);
+        var workerLegacy = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await workerPump.RunOnceAsync(workerRequest));
+
+        Assert.Equal(DurableRuntimePumpAttemptKind.Refused, workerAttempt.Kind);
+        Assert.Null(workerAttempt.ProblemCode);
+        Assert.Null(workerAttempt.Result);
+        Assert.Equal(
+            "ASDUR405: This worker generation no longer owns the configured worker identity.",
+            workerLegacy.Message);
+        Assert.Equal(0, executorCalls);
+    }
+
+    [Fact]
+    public async Task TryRunOnceAsync_EntersTheInjectedExecutorExactlyOnceAndPropagatesItsFailure()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "execution-seam");
+        var services = new ServiceCollection();
+        services.AddAppSurfaceDurablePostgreSql(
+            database.DataSource,
+            database.CreateDataSource(),
+            new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options =>
+            {
+                options.WorkerId = "runtime-pump-execution-seam-worker";
+                options.SendWakeNotifications = false;
+            });
+        await using var provider = services.BuildServiceProvider();
+        var expected = new TimeoutException("application execution boundary failed");
+        var executorCalls = 0;
+        var pump = CreatePump(
+            provider,
+            provider.GetRequiredService<PostgreSqlDurableWorkStore>(),
+            passExecutor: (_, _) =>
+            {
+                Interlocked.Increment(ref executorCalls);
+                return ValueTask.FromException<DurableRuntimePumpResult>(expected);
+            });
+
+        var observed = await Assert.ThrowsAsync<TimeoutException>(
+            async () => await pump.TryRunOnceAsync(
+                new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All)));
+
+        Assert.Same(expected, observed);
+        Assert.Equal(1, executorCalls);
+        var snapshot = await provider.GetRequiredService<IDurableRuntimeHealth>().GetAsync();
+        Assert.False(snapshot.IsPassActive);
+    }
+
+    [Fact]
+    public async Task TryRunOnceAsync_FinalizesWhenCallerCancelsAsTheProviderReturns()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "post-provider-cancellation");
+        var services = new ServiceCollection();
+        services.AddAppSurfaceDurablePostgreSql(
+            database.DataSource,
+            database.CreateDataSource(),
+            new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options =>
+            {
+                options.WorkerId = "runtime-pump-post-provider-cancellation-worker";
+                options.SendWakeNotifications = false;
+            });
+        await using var provider = services.BuildServiceProvider();
+        using var callerCancellation = new CancellationTokenSource();
+        var expected = new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero);
+        var pump = CreatePump(
+            provider,
+            provider.GetRequiredService<PostgreSqlDurableWorkStore>(),
+            passExecutor: (_, _) =>
+            {
+                callerCancellation.Cancel();
+                return ValueTask.FromResult(expected);
+            });
+
+        var attempt = await pump.TryRunOnceAsync(
+            new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All),
+            callerCancellation.Token);
+
+        Assert.Equal(DurableRuntimePumpAttemptKind.Completed, attempt.Kind);
+        Assert.Same(expected, attempt.Result);
+        Assert.Null(attempt.ProblemCode);
+        Assert.True(callerCancellation.IsCancellationRequested);
+        var snapshot = await provider.GetRequiredService<IDurableRuntimeHealth>().GetAsync();
+        Assert.False(snapshot.IsPassActive);
+        Assert.NotNull(snapshot.LastSuccessfulSweepAtUtc);
+    }
+
+    [Fact]
+    public async Task TryRunOnceAsync_CleansUpIndeterminateStoreAdmissionWithoutReplacingTheOutcome()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "admission-ack-loss");
+        var services = new ServiceCollection();
+        services.AddAppSurfaceDurablePostgreSql(
+            database.DataSource,
+            database.CreateDataSource(),
+            new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options =>
+            {
+                options.WorkerId = "runtime-pump-admission-ack-loss-worker";
+                options.SendWakeNotifications = false;
+            });
+        await using var provider = services.BuildServiceProvider();
+        var executorCalls = 0;
+        var expectedResult = new DurableRuntimePumpResult(
+            0,
+            0,
+            0,
+            0,
+            0,
+            false,
+            null,
+            TimeSpan.Zero);
+        var pump = CreatePump(
+            provider,
+            provider.GetRequiredService<PostgreSqlDurableWorkStore>(),
+            passExecutor: (_, _) =>
+            {
+                Interlocked.Increment(ref executorCalls);
+                return ValueTask.FromResult(expectedResult);
+            });
+        await using (var trigger = database.DataSource.CreateCommand(
+            """
+            CREATE OR REPLACE FUNCTION appsurface_durable.test_runtime_pump_lose_admission_ack()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                IF NEW.pass_active AND NOT OLD.pass_active THEN
+                    PERFORM pg_terminate_backend(pg_backend_pid());
+                END IF;
+                RETURN NEW;
+            END;
+            $$;
+            CREATE TRIGGER test_runtime_pump_lose_admission_ack
+            BEFORE UPDATE ON appsurface_durable.runtime_heartbeat
+            FOR EACH ROW
+            EXECUTE FUNCTION appsurface_durable.test_runtime_pump_lose_admission_ack();
+            """))
+        {
+            await trigger.ExecuteNonQueryAsync();
+        }
+
+        var request = new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All);
+        var unavailable = await pump.TryRunOnceAsync(request);
+        Assert.Equal(DurableRuntimePumpAttemptKind.Unavailable, unavailable.Kind);
+        Assert.Equal(DurableProblemCodes.StoreUnavailable, unavailable.ProblemCode);
+        Assert.Equal(0, executorCalls);
+
+        await using (var cleanup = database.DataSource.CreateCommand(
+            """
+            DROP TRIGGER IF EXISTS test_runtime_pump_lose_admission_ack
+                ON appsurface_durable.runtime_heartbeat;
+            DROP FUNCTION IF EXISTS appsurface_durable.test_runtime_pump_lose_admission_ack();
+            """))
+        {
+            await cleanup.ExecuteNonQueryAsync();
+        }
+
+        var completed = await pump.TryRunOnceAsync(request);
+        Assert.Equal(DurableRuntimePumpAttemptKind.Completed, completed.Kind);
+        Assert.Same(expectedResult, completed.Result);
+        Assert.Equal(1, executorCalls);
+    }
+
+    [Fact]
     public async Task RunOnceAsync_PreservesProviderFailureWhenFailedPassRecordingLosesTheRuntimeEpoch()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
@@ -1892,10 +2560,12 @@ public sealed class PostgreSqlDurableRuntimePumpTests
 
     private static PostgreSqlDurableRuntimePump CreatePump(
         ServiceProvider provider,
-        PostgreSqlDurableWorkStore workStore) =>
+        PostgreSqlDurableWorkStore workStore,
+        IDurableRuntimeSchemaManager? schemaManager = null,
+        PostgreSqlDurablePassExecutor? passExecutor = null) =>
         new(
             provider.GetRequiredService<PostgreSqlDurableRuntimeRegistration>(),
-            provider.GetRequiredService<IDurableRuntimeSchemaManager>(),
+            schemaManager ?? provider.GetRequiredService<IDurableRuntimeSchemaManager>(),
             provider.GetRequiredService<PostgreSqlDurableRuntimeHealth>(),
             workStore,
             provider.GetRequiredService<PostgreSqlDurableFlowProcessor>(),
@@ -1904,7 +2574,55 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             new PostgreSqlDurableWorkContractSelection(provider.GetRequiredService<IDurableWorkRegistry>()),
             provider.GetRequiredService<IServiceScopeFactory>(),
             provider.GetRequiredService<IDurableRuntimeExecutionBoundary>(),
-            provider.GetRequiredService<DurableRuntimeAdmissionGate>());
+            provider.GetRequiredService<DurableRuntimeAdmissionGate>(),
+            NullLogger<PostgreSqlDurableRuntimePump>.Instance,
+            passExecutor);
+
+    private static DurableRuntimeSchemaStatus CreateSchemaStatus(
+        DurableRuntimeSchemaCompatibility compatibility) =>
+        new(
+            compatibility,
+            Guid.NewGuid(),
+            activeRuntimeEpoch: null,
+            installedVersion: 9,
+            requiredVersion: PostgreSqlDurableRuntimeSchemaManager.RequiredVersion,
+            minimumReaderVersion: 1,
+            maximumReaderVersion: PostgreSqlDurableRuntimeSchemaManager.RequiredVersion,
+            minimumWriterVersion: 1,
+            maximumWriterVersion: PostgreSqlDurableRuntimeSchemaManager.RequiredVersion,
+            appliedVersions: Enumerable.Range(1, 9).ToArray(),
+            pendingVersions: [PostgreSqlDurableRuntimeSchemaManager.RequiredVersion],
+            problem: "test status");
+
+    private sealed class StubSchemaManager(
+        Func<CancellationToken, ValueTask> validate) : IDurableRuntimeSchemaManager
+    {
+        public ValueTask<DurableRuntimeSchemaStatus> GetStatusAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public string GenerateScript(int fromVersion = 0) => throw new NotSupportedException();
+
+        public ValueTask<DurableRuntimeSchemaApplyResult> ApplyAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public ValueTask ValidateAsync(CancellationToken cancellationToken = default) =>
+            validate(cancellationToken);
+
+        public ValueTask<DurableRuntimeEpochActivationResult> InitializeRuntimeEpochAsync(
+            Guid initialEpoch,
+            string actorId,
+            string reasonCode,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public ValueTask<DurableRuntimeEpochRotationResult> RotateRuntimeEpochAsync(
+            Guid expectedActiveEpoch,
+            Guid newActiveEpoch,
+            string actorId,
+            string reasonCode,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
 
     private static ServiceProvider CreateWorkProvider(
         PostgreSqlIntegrationTestDatabase database,
