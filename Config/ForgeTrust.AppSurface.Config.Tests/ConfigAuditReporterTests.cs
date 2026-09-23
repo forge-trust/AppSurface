@@ -15,6 +15,22 @@ public class ConfigAuditReporterTests
     private const string CorrelationSecretA = "0123456789abcdef0123456789abcdef";
     private const string CorrelationSecretB = "abcdef0123456789abcdef0123456789";
 
+    [Fact]
+    public void GetReport_DoesNotTracePatchAfterTerminalEnvironmentResolution()
+    {
+        var environmentProvider = new TerminalAuditEnvironmentProvider();
+        var services = CreateServices("/missing", A.Fake<IEnvironmentProvider>());
+        services.AddSingleton<IEnvironmentConfigProvider>(environmentProvider);
+        services.AddConfigAuditKey<AppSettings>("MyApp:Settings");
+
+        using var provider = services.BuildServiceProvider();
+        var report = provider.GetRequiredService<IConfigAuditReporter>().GetReport("Production");
+
+        var entry = AssertEntry(report, "MyApp:Settings", ConfigAuditEntryState.Invalid, null);
+        Assert.Contains(entry.Diagnostics, diagnostic => diagnostic.Code == "environment-root-terminal");
+        Assert.False(environmentProvider.WasPatched);
+    }
+
     [ConfigKey("Region", root: true)]
     private sealed class RegionConfig : Config<string>
     {
@@ -3841,6 +3857,31 @@ public class ConfigAuditReporterTests
                 ConfigAuditDictionaryKeyCorrelationContext.Unavailable("dictionary key correlation was not requested")));
 
         Assert.IsType<AccessViolationException>(exception.InnerException);
+    }
+
+    private sealed class TerminalAuditEnvironmentProvider : IEnvironmentConfigProvider, IConfigDiagnosticPatcher
+    {
+        private static readonly ConfigProviderTerminalDiagnostic RootDiagnostic = new(
+            "environment-root-terminal", "The environment root is invalid.",
+            "The root cannot be used.", "Repair the root value.", docs: null, retryable: false);
+
+        public bool WasPatched { get; private set; }
+        public int Priority => 0;
+        public string Name => nameof(TerminalAuditEnvironmentProvider);
+        public string Environment => "Production";
+        public bool IsDevelopment => false;
+
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) =>
+            ConfigProviderValueResult<T>.Terminal(RootDiagnostic);
+
+        public ConfigPatchDiagnosticResult TracePatch(ConfigProviderRequest request, object? currentValue, Type valueType)
+        {
+            WasPatched = true;
+            return new ConfigPatchDiagnosticResult(true, new AppSettings { Mode = "should-not-publish" }, [], []);
+        }
+
+        public string? GetEnvironmentVariable(string name, string? defaultValue = null) => defaultValue;
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() => new Dictionary<string, string>();
     }
 
     private static IEnvironmentProvider SnapshotEnvironment()

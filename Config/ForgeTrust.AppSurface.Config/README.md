@@ -47,8 +47,9 @@ var value = configManager.GetValue<string>("Production", key);
 `PAYMENTS__APIKEY` overrides that file value; `PRODUCTION__PAYMENTS__APIKEY` overrides
 its unscoped environment counterpart. These are deliberately non-secret demo values.
 Do not print resolved secrets. A terminal collision, conversion, or representability
-failure suppresses lower providers; valid environment child patches get one
-transactional rescue attempt. A missing key alone permits fallback.
+failure suppresses lower providers. An invalid direct environment value cannot be rescued by child variables;
+valid child variables may still rescue a terminal result from a lower-priority provider through one transactional
+patch attempt. A missing key alone permits fallback.
 
 Run the [nine-stage provider proof](../../examples/config-key-contract/README.md):
 

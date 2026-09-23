@@ -620,14 +620,12 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             };
         }
 
+        if (envResolution.State == ConfigAuditEntryState.Invalid)
+            return envResolution;
+
         var diagnostics = envResolution.Diagnostics.ToList();
-        var providerResolution = ConfigValueResolution.Missing(knownEntry.LogicalKey);
-        IReadOnlyList<ConfigAuditDiagnostic> providerDiagnostics = [];
-        ConfigValueResolution? invalidProviderResolution = null;
-        if (envResolution.State != ConfigAuditEntryState.Invalid)
-        {
-            providerResolution = ResolveBaseProviders(environment, knownEntry, scope, out providerDiagnostics, out invalidProviderResolution);
-        }
+        var providerResolution = ResolveBaseProviders(environment, knownEntry, scope,
+            out var providerDiagnostics, out var invalidProviderResolution);
         diagnostics.AddRange(providerDiagnostics);
 
         if (_environmentProvider is IConfigDiagnosticPatcher patcher)
@@ -686,9 +684,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
 
         var resolution = providerResolution.State == ConfigAuditEntryState.Resolved
             ? providerResolution
-            : envResolution.State == ConfigAuditEntryState.Invalid
-                ? envResolution
-                : invalidProviderResolution ?? providerResolution;
+            : invalidProviderResolution ?? providerResolution;
         return resolution with { Diagnostics = diagnostics };
     }
 

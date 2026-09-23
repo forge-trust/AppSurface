@@ -286,6 +286,42 @@ public class DefaultConfigManagerTests
     }
 
     [Fact]
+    public void GetValue_DoesNotPatchOverTerminalEnvironmentRoot()
+    {
+        var innerEnvironment = A.Fake<ForgeTrust.AppSurface.Core.IEnvironmentProvider>();
+        var variables = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["MYAPP__SETTINGS"] = "{invalid-json",
+            ["MYAPP__SETTINGS__MODE"] = "environment"
+        };
+        A.CallTo(() => innerEnvironment.CaptureEnvironmentVariables()).ReturnsLazily(() =>
+            new Dictionary<string, string>(variables, StringComparer.Ordinal));
+        var lowerProvider = A.Fake<IConfigProvider>();
+        var manager = new DefaultConfigManager(new EnvironmentConfigProvider(innerEnvironment),
+            [lowerProvider], A.Fake<ILogger<DefaultConfigManager>>());
+
+        var exception = Assert.Throws<ConfigurationResolutionException>(() =>
+            manager.GetValue<AppSettings>("Production", "MyApp.Settings"));
+
+        Assert.Equal("config-patch-failed", exception.Diagnostic.Code);
+        A.CallTo(() => lowerProvider.Resolve<AppSettings>(A<ConfigProviderRequest>._))
+            .MustNotHaveHappened();
+    }
+
+    [Fact]
+    public void GetValue_DoesNotInvokePatcherAfterTerminalEnvironmentResolution()
+    {
+        var environmentProvider = new TerminalEnvironmentPatcher();
+        var manager = new DefaultConfigManager(environmentProvider, [], A.Fake<ILogger<DefaultConfigManager>>());
+
+        var exception = Assert.Throws<ConfigurationResolutionException>(() =>
+            manager.GetValue<AppSettings>("Production", "MyApp.Settings"));
+
+        Assert.Equal("environment-root-terminal", exception.Diagnostic.Code);
+        Assert.False(environmentProvider.WasPatched);
+    }
+
+    [Fact]
     public void GetValue_PatchesProviderObjectWithGetterOnlyNestedObject()
     {
         var innerEnvironment = A.Fake<ForgeTrust.AppSurface.Core.IEnvironmentProvider>();
@@ -391,5 +427,30 @@ public class DefaultConfigManagerTests
             WasCalled = true;
             return ConfigProviderValueResult<T>.Terminal(_diagnostic);
         }
+    }
+
+    private sealed class TerminalEnvironmentPatcher : IEnvironmentConfigProvider, IConfigValuePatcher
+    {
+        private static readonly ConfigProviderTerminalDiagnostic RootDiagnostic = new(
+            "environment-root-terminal", "The environment root is invalid.",
+            "The root cannot be used.", "Repair the root value.", docs: null, retryable: false);
+
+        public bool WasPatched { get; private set; }
+        public int Priority => 0;
+        public string Name => nameof(TerminalEnvironmentPatcher);
+        public string Environment => "Production";
+        public bool IsDevelopment => false;
+
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) =>
+            ConfigProviderValueResult<T>.Terminal(RootDiagnostic);
+
+        public ConfigPatchResult<T> Patch<T>(ConfigProviderRequest request, T? currentValue)
+        {
+            WasPatched = true;
+            return ConfigPatchResult<T>.Applied((T)(object)new AppSettings { Mode = "should-not-publish" });
+        }
+
+        public string? GetEnvironmentVariable(string name, string? defaultValue = null) => defaultValue;
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() => new Dictionary<string, string>();
     }
 }

@@ -47,6 +47,7 @@ internal sealed class DefaultConfigManager : IConfigManager
         }
 
         var result = Resolve<T>(_environmentProvider, request);
+        var environmentTerminal = result.Status == ConfigProviderValueStatus.Terminal;
         if (result.Status == ConfigProviderValueStatus.Found)
         {
             ReportFound(request, _environmentProvider.Name, result.Notices);
@@ -67,7 +68,7 @@ internal sealed class DefaultConfigManager : IConfigManager
             }
         }
 
-        if (_environmentProvider is IConfigValuePatcher patcher)
+        if (!environmentTerminal && _environmentProvider is IConfigValuePatcher patcher)
         {
             var noticeOffset = scope.NoticeCount;
             var patch = Patch(patcher, request, result.Status == ConfigProviderValueStatus.Found ? result.Value : default);
