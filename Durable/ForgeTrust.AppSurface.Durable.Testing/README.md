@@ -112,8 +112,9 @@ by later assessments and pump calls, and does not reset; construct a new scenari
 must supply monotonic timestamps.
 
 Call `AssessHealthAsync` before `RunDirectPumpOnceAsync`. Missing assessment throws `InvalidOperationException`. A
-successful assessment is published in completion order, even if it started before another successful read; a later
-pump atomically captures the latest published one.
+successful assessment is published when its method reaches the terminal decision under the scenario lock, even if
+it started before another successful read. Provider task completion alone does not publish it. A later pump atomically
+captures the latest published assessment.
 Failed, canceled, or timed-out reads do not replace it. A published assessment may be reused for multiple pump calls.
 The snapshot is advisory: every in-budget pump call invokes authoritative admission exactly once even when
 `CanAttemptPump` is false. The exact provider attempt is returned unchanged.

@@ -204,8 +204,9 @@ public sealed class DurableHostScenario
     /// </summary>
     /// <remarks>
     /// Failed, canceled, or timed-out reads do not replace the latest assessment. A late provider result after timeout
-    /// is observed for faults but is never published. Concurrent successful reads publish in completion order, even
-    /// when the later completion was started first. A health timeout has no pump invocation handle.
+    /// is observed for faults but is never published. Concurrent successful reads publish in method terminal-decision
+    /// order under the scenario lock, even when the later publication was started first. A provider task finishing
+    /// does not by itself publish an assessment. A health timeout has no pump invocation handle.
     /// </remarks>
     /// <exception cref="DurableScenarioTimeoutException">An observation or overall budget expired.</exception>
     /// <exception cref="OperationCanceledException">The caller canceled the wait or the provider canceled.</exception>

@@ -1494,6 +1494,82 @@ public sealed class PostgreSqlDurableRuntimePumpTests
     }
 
     [Fact]
+    public async Task DurableHostScenario_TimeoutRetainsPostPermitInvocationUntilPostgreSqlPersistsAmbiguousOutcome()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "scenario-timeout-after-permit");
+        var registration = new BlockingWorkRegistration();
+        var services = new ServiceCollection();
+        services.AddSingleton<DurableWorkRegistration>(registration);
+        services.AddAppSurfaceDurablePostgreSql(
+            database.DataSource,
+            database.CreateDataSource(),
+            new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options =>
+            {
+                options.WorkerId = "runtime-pump-scenario-timeout-worker";
+                options.SendWakeNotifications = false;
+            });
+        await using var provider = services.BuildServiceProvider();
+        var scope = new DurableScopeId("runtime-pump-scenario-timeout-scope");
+        var accepted = await provider.GetRequiredService<IDurableWorkClient>().EnqueueAsync(new DurableWorkRequest(
+            scope,
+            new DurableCommandId("runtime-pump-scenario-timeout-command"),
+            "runtime-pump-scenario-timeout-key",
+            BlockingWorkRegistration.Name,
+            "v1",
+            registration.InputCodec.EncodeObject(Encoding.UTF8.GetBytes("input")),
+            DurableProviderSafety.Idempotent));
+        Assert.True(accepted.IsSuccess);
+
+        var health = provider.GetRequiredService<IDurableRuntimeHealth>();
+        var admission = provider.GetRequiredService<IDurableRuntimePumpAdmission>();
+        var request = new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work);
+        var clock = new MonotonicTimeProvider();
+        var scenario = new DurableHostScenario(
+            health,
+            admission,
+            request,
+            timeProvider: clock,
+            observationTimeout: TimeSpan.FromSeconds(1),
+            overallTimeout: TimeSpan.FromSeconds(10));
+        var assessment = await scenario.AssessHealthAsync();
+        Assert.Equal(DurableRuntimeHealthState.NotStarted, assessment.Snapshot.State);
+
+        using var cancellation = new CancellationTokenSource();
+        var run = scenario.RunDirectPumpOnceAsync(cancellation.Token);
+        await registration.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await clock.WaitForTimerAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        clock.Advance(TimeSpan.FromSeconds(1));
+        var timeout = await Assert.ThrowsAsync<DurableScenarioTimeoutException>(() => run.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        Assert.Equal(DurableScenarioPhase.Pump, timeout.Phase);
+        Assert.Equal(DurableScenarioTimeoutReason.Observation, timeout.Reason);
+        var invocation = Assert.IsType<DurableScenarioPumpInvocation>(timeout.Invocation);
+        Assert.True(timeout.InvocationStarted);
+        Assert.True(timeout.ExecutionStatusUnknown);
+        Assert.Same(request, invocation.Request);
+        Assert.Same(assessment, invocation.Assessment);
+        Assert.Same(invocation, Assert.Single(scenario.PumpInvocations));
+        Assert.False(invocation.Completion.IsCompleted);
+
+        cancellation.Cancel();
+        var attempt = await invocation.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(DurableRuntimePumpAttemptKind.Completed, attempt.Kind);
+        Assert.Equal(1, attempt.Result!.Failed);
+
+        var snapshot = await provider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
+            new DurableWorkGetRequest(scope, accepted.Value!.WorkId));
+        Assert.True(snapshot.IsSuccess);
+        Assert.Equal(DurableWorkState.Suspended, snapshot.Value!.State);
+        Assert.Equal(DurableProblemCodes.AmbiguousExternalOutcome, snapshot.Value.TerminalCode);
+    }
+
+    [Fact]
     public async Task RunOnceAsync_WaitsForTheRenewalCadenceAfterASlowLeaseRenewal()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
@@ -3041,6 +3117,94 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             DurableWorkExecutionContext work,
             CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("Idempotent test Work does not reconcile.");
+    }
+
+    private sealed class MonotonicTimeProvider : TimeProvider
+    {
+        private readonly object _gate = new();
+        private readonly List<FakeTimer> _timers = [];
+        private readonly TaskCompletionSource _firstTimerCreated = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private long _ticks;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp()
+        {
+            lock (_gate)
+            {
+                return _ticks;
+            }
+        }
+
+        internal Task WaitForTimerAsync() => _firstTimerCreated.Task;
+
+        internal void Advance(TimeSpan amount)
+        {
+            FakeTimer[] due;
+            lock (_gate)
+            {
+                _ticks = checked(_ticks + amount.Ticks);
+                due = _timers.Where(timer => timer.IsDue(_ticks)).ToArray();
+            }
+
+            foreach (var timer in due)
+            {
+                timer.Fire();
+            }
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new FakeTimer(this, callback, state);
+            timer.Change(dueTime, period);
+            lock (_gate)
+            {
+                _timers.Add(timer);
+            }
+
+            _firstTimerCreated.TrySetResult();
+            return timer;
+        }
+
+        private sealed class FakeTimer(MonotonicTimeProvider owner, TimerCallback callback, object? state) : ITimer
+        {
+            private long _due = long.MaxValue;
+            private bool _disposed;
+
+            internal bool IsDue(long now) => !_disposed && now >= _due;
+
+            internal void Fire()
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                callback(state);
+                _due = long.MaxValue;
+            }
+
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                if (_disposed)
+                {
+                    return false;
+                }
+
+                _due = dueTime == Timeout.InfiniteTimeSpan
+                    ? long.MaxValue
+                    : checked(owner.GetTimestamp() + Math.Max(0, dueTime.Ticks));
+                return true;
+            }
+
+            public void Dispose() => _disposed = true;
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
+        }
     }
 
     private sealed class StartedFailingWorkRegistration : DurableWorkRegistration
