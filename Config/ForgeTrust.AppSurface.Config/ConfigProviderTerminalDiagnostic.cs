@@ -73,20 +73,30 @@ public sealed class ConfigProviderTerminalDiagnostic
     /// <summary>
     /// Formats this diagnostic for display without exposing raw configuration values.
     /// </summary>
+    /// <remarks>Identifier fields are escaped and bounded to 256 characters plus a stable digest when truncated.</remarks>
     /// <returns>A multiline display-safe diagnostic string.</returns>
-    public string ToDisplayString()
+    public string ToDisplayString() => ToDisplayString(256);
+
+    /// <summary>
+    /// Formats this diagnostic for display with a caller-selected identifier limit.
+    /// </summary>
+    /// <param name="maxRenderedIdentifierCharacters">The maximum rendered identifier characters before a digest.</param>
+    /// <returns>A multiline display-safe diagnostic string.</returns>
+    /// <remarks>Only identifier fields are bounded; problem, cause, and fix prose retain their existing display cap.</remarks>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxRenderedIdentifierCharacters"/> is not positive.</exception>
+    public string ToDisplayString(int maxRenderedIdentifierCharacters)
     {
         var lines = new List<string>
         {
-            $"Code: {Code}",
-            $"Problem: {Problem}",
-            $"Cause: {Cause}",
-            $"Fix: {Fix}"
+            $"Code: {ConfigDiagnosticText.Identifier(Code, maxRenderedIdentifierCharacters)}",
+            $"Problem: {ConfigDiagnosticText.Prose(Problem)}",
+            $"Cause: {ConfigDiagnosticText.Prose(Cause)}",
+            $"Fix: {ConfigDiagnosticText.Prose(Fix)}"
         };
 
         if (!string.IsNullOrWhiteSpace(Docs))
         {
-            lines.Add($"Docs: {Docs}");
+            lines.Add($"Docs: {ConfigDiagnosticText.Identifier(Docs, maxRenderedIdentifierCharacters)}");
         }
 
         lines.Add($"Retryable: {Retryable.ToString().ToLowerInvariant()}");

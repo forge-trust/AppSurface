@@ -545,6 +545,7 @@ internal sealed class ConfigAuditValueTraverser
         return new ConfigAuditEntry
         {
             Key = path.DisplayPath,
+            ConfigPath = path.RequiresInheritedSource ? null : path.SourcePath.Value,
             DeclaredType = value?.GetType().FullName,
             State = state,
             DisplayValue = redacted.DisplayValue,
@@ -632,6 +633,10 @@ internal sealed class ConfigAuditValueTraverser
             return CreateInheritedSelection(sources, path, unknownWhenEmpty: true);
         }
 
+        var winningRole = matches.Min(match => match.Source.Role == ConfigAuditSourceRole.Override ? 0
+            : match.Source.Role == ConfigAuditSourceRole.Patch ? 1 : 2);
+        matches = matches.Where(match => (match.Source.Role == ConfigAuditSourceRole.Override ? 0
+            : match.Source.Role == ConfigAuditSourceRole.Patch ? 1 : 2) == winningRole).ToList();
         var maxSpecificity = matches.Max(match => match.Specificity);
         return new ConfigAuditSourceSelection(
             matches
@@ -669,7 +674,7 @@ internal sealed class ConfigAuditValueTraverser
             ]);
     }
 
-    private static ConfigAuditSourceRecord PrepareChildSource(ConfigAuditSourceRecord source, string childSourcePath)
+    private static ConfigAuditSourceRecord PrepareChildSource(ConfigAuditSourceRecord source, AppSurfaceConfigKey childSourcePath)
     {
         if (source.Location == null || SourceRepresentsExactPath(source, childSourcePath))
         {
@@ -690,30 +695,30 @@ internal sealed class ConfigAuditValueTraverser
         };
     }
 
-    private static bool SourceRepresentsExactPath(ConfigAuditSourceRecord source, string childSourcePath) =>
-        string.Equals(source.AppliedToPath, childSourcePath, StringComparison.OrdinalIgnoreCase)
-        || string.Equals(source.ConfigPath, childSourcePath, StringComparison.OrdinalIgnoreCase);
+    private static bool SourceRepresentsExactPath(ConfigAuditSourceRecord source, AppSurfaceConfigKey childSourcePath) =>
+        (AppSurfaceConfigKey.TryParse(source.AppliedToPath, out var applied) && applied.Equals(childSourcePath))
+        || (AppSurfaceConfigKey.TryParse(source.ConfigPath, out var config) && config.Equals(childSourcePath));
 
-    private static int GetSourceSpecificity(ConfigAuditSourceRecord source, string childSourcePath) =>
+    private static int GetSourceSpecificity(ConfigAuditSourceRecord source, AppSurfaceConfigKey childSourcePath) =>
         Math.Max(
-            GetPathSpecificity(source.AppliedToPath, childSourcePath, allowDescendant: source.Role is ConfigAuditSourceRole.Base or ConfigAuditSourceRole.Patch),
+            GetPathSpecificity(source.AppliedToPath, childSourcePath, allowDescendant: source.Role is ConfigAuditSourceRole.Base or ConfigAuditSourceRole.Patch or ConfigAuditSourceRole.Override),
             GetPathSpecificity(source.ConfigPath, childSourcePath, allowDescendant: false));
 
-    private static int GetPathSpecificity(string? sourcePath, string childSourcePath, bool allowDescendant)
+    private static int GetPathSpecificity(string? sourcePath, AppSurfaceConfigKey childSourcePath, bool allowDescendant)
     {
-        if (sourcePath == null)
+        if (!AppSurfaceConfigKey.TryParse(sourcePath, out var key))
         {
             return -1;
         }
 
-        if (string.Equals(sourcePath, childSourcePath, StringComparison.OrdinalIgnoreCase))
+        if (key.Equals(childSourcePath))
         {
-            return sourcePath.Length;
+            return key.Segments.Length;
         }
 
         return allowDescendant
-               && childSourcePath.StartsWith($"{sourcePath}.", StringComparison.OrdinalIgnoreCase)
-            ? sourcePath.Length
+               && childSourcePath.IsSameOrDescendantOf(key)
+            ? key.Segments.Length
             : -1;
     }
 

@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <PackageReference Include="CliWrap" />
+    <PackageReference Include="System.IO.Hashing" VersionOverride="10.0.2" />
     <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 

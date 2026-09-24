@@ -385,10 +385,55 @@
                 return;
             }
 
+            revealTargetDetails(target);
             mainContent.scrollTo({
                 top: getMainScrollTopForTarget(target),
                 behavior
             });
+        }
+
+        function revealTargetDetails(target) {
+            if (!(target instanceof Element)) {
+                return;
+            }
+
+            let details = target.closest("details");
+            while (details) {
+                details.open = true;
+                details = details.parentElement?.closest("details") ?? null;
+            }
+        }
+
+        function revealRazorWireOutlineTargetDetails(event) {
+            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                return;
+            }
+
+            const clickTarget = event.target;
+            if (!(clickTarget instanceof Element)) {
+                return;
+            }
+
+            const anchorLink = clickTarget.closest("a[data-rw-page-nav-link][data-doc-anchor-link='true'], a[data-rw-page-nav-link][data-doc-outline-link='true']");
+            if (!anchorLink || (anchorLink.target && anchorLink.target !== "_self")) {
+                return;
+            }
+
+            const targetUrl = new URL(anchorLink.href, window.location.origin);
+            if (targetUrl.pathname !== window.location.pathname
+                || targetUrl.search !== window.location.search
+                || !targetUrl.hash) {
+                return;
+            }
+
+            let targetId;
+            try {
+                targetId = decodeURIComponent(targetUrl.hash.slice(1));
+            } catch {
+                return;
+            }
+
+            revealTargetDetails(document.getElementById(targetId));
         }
 
         function getCurrentHashTarget() {
@@ -595,6 +640,9 @@
             sidebar.classList.add("transition-none");
         }
         syncSidebarForViewport();
+        if (getCurrentHashTarget()) {
+            restoreMainScrollPosition();
+        }
         if (sidebar) {
             const restoreSidebarTransitions = () => {
                 sidebar.classList.remove("transition-none");
@@ -612,6 +660,8 @@
         });
 
         document.addEventListener("turbo:frame-load", restoreMainScrollAfterFrameLoad);
+        window.addEventListener("hashchange", restoreMainScrollPosition);
+        document.addEventListener("click", revealRazorWireOutlineTargetDetails, true);
 
         document.addEventListener("click", event => {
             if (event.defaultPrevented) {
@@ -637,17 +687,18 @@
                 return;
             }
 
-            // RazorWire owns scrolling and active-link state for enhanced page-navigation outlines.
-            // Do not prevent its click handler from setting aria-current on the selected section.
-            if (anchorLink.matches("a[data-rw-page-nav-link]")) {
-                return;
-            }
-
             if (anchorLink.target && anchorLink.target !== "_self") {
                 return;
             }
 
             const targetUrl = new URL(anchorLink.href, window.location.origin);
+
+            // RazorWire owns scrolling and active-link state for enhanced page-navigation outlines.
+            // Its capture-phase disclosure helper runs first without preventing its own click handler.
+            if (anchorLink.matches("a[data-rw-page-nav-link]")) {
+                return;
+            }
+
             rememberPendingFrameHashNavigation(anchorLink, targetUrl);
             if (targetUrl.pathname !== window.location.pathname
                 || targetUrl.search !== window.location.search

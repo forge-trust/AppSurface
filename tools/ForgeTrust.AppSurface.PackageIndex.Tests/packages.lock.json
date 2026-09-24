@@ -71,6 +71,11 @@
         "resolved": "13.0.3",
         "contentHash": "HrC5BXdl00IP9zeV+0Z848QWPAoCr9P3bDEZguI+gkLcBKAOxix/tLEAAHC+UvDNPv4a2d18lOReHMOagPa+zQ=="
       },
+      "System.IO.Hashing": {
+        "type": "Transitive",
+        "resolved": "10.0.2",
+        "contentHash": "AKJknIFi9O3+rGExxTry188JPvUoZAPcCtS2qdqyFhIzsxQ1Ap94BeGDG0VzVEHakhmRxmJtVih6TsHoghIt/g=="
+      },
       "xunit.abstractions": {
         "type": "Transitive",
         "resolved": "2.0.3",
@@ -116,6 +121,7 @@
         "dependencies": {
           "CliWrap": "[3.10.1, )",
           "ForgeTrust.AppSurface.ReleaseContracts": "[0.1.0, )",
+          "System.IO.Hashing": "[10.0.2, )",
           "YamlDotNet": "[18.0.0, )"
         }
       },

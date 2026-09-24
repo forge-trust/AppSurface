@@ -68,9 +68,7 @@ internal static class SidebarDisplayHelper
     /// <returns><see langword="true"/> when the node has a parent, no body content, and a fragment path.</returns>
     internal static bool IsTypeAnchorNode(DocNode node)
     {
-        return !string.IsNullOrWhiteSpace(node.ParentPath)
-               && string.IsNullOrWhiteSpace(node.Content)
-               && node.Path.Contains('#');
+        return node.IsFragmentStub;
     }
 
     /// <summary>

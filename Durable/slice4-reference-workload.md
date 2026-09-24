@@ -20,8 +20,9 @@ Historically, this workload also executes against
 `postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302` for preserved evidence.
 Current default strict verification uses `postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877`.
 Use a disposable database. The workload exercises the forward-only Flow protocol introduced through `0003_flow_protocol`,
-but the current provider schema must be applied through `0009_work_contract_discovery.sql` before child Work discovery
-can run. This workload does not exercise every later protocol fact and supplies no destructive down migration.
+but the current provider schema must be applied through `0010_runtime_health_observation.sql`; child Work discovery
+remains the capability introduced by `0009_work_contract_discovery.sql`. This workload does not exercise every later
+protocol fact and supplies no destructive down migration.
 
 ## Run the proof
 
@@ -53,8 +54,8 @@ For strict CI verification across all PostgreSQL integration tests including Flo
 
 ## What the workload proves
 
-1. **Schema Deployment**: Migration owner checks status, applies the current reviewed forward migrations (including `0001_work_shared.sql`, `0002_forced_rls.sql`, `0003_flow_protocol.sql`, and
-   `0009_work_contract_discovery.sql`), reads `StoreId`,
+1. **Schema Deployment**: Migration owner checks status, applies the current reviewed forward migrations (including `0001_work_shared.sql`, `0002_forced_rls.sql`, `0003_flow_protocol.sql`,
+   `0009_work_contract_discovery.sql`, and `0010_runtime_health_observation.sql`), reads `StoreId`,
    and explicitly initializes the runtime epoch.
 2. **Atomic Flow Start**: `PostgreSqlDurableFlowClient` commits each Flow start atomically in its own short transaction. Slice 4 exposes no caller-owned Flow transaction API. Re-using `start_idempotency_key` with identical payload returns `Duplicate`; divergent definition or a new start identity targeting an existing Flow instance returns `ASDUR206`.
 3. **Step Evaluation & Determinism**: Step evaluation advances Flow state machine (`ready` -> `evaluating`) and verifies definition fingerprint SHA-256 against registered code.
@@ -81,7 +82,7 @@ For strict CI verification across all PostgreSQL integration tests including Flo
 The compiled reference workload requires:
 
 1. Construct `PostgreSqlDurableRuntimeSchemaManager` with a migration-owner data source.
-2. Call `GetStatusAsync`, `ApplyAsync` (applying current reviewed forward migrations through `0009_work_contract_discovery.sql`; Slice 4 exercises Flow facts introduced through `0003_flow_protocol.sql`), and `InitializeRuntimeEpochAsync`; capture StoreId and active epoch.
+2. Call `GetStatusAsync`, `ApplyAsync` (applying current reviewed forward migrations through `0010_runtime_health_observation.sql`; Slice 4 exercises Flow facts introduced through `0003_flow_protocol.sql`), and `InitializeRuntimeEpochAsync`; capture StoreId and active epoch.
 3. Construct `PostgreSqlDurableWorkOptions` with `RuntimeEpoch` and `ExpectedStoreId`.
 4. Construct `PostgreSqlDurableFlowClient` with the scoped data source, Flow registry, payload codec registry, and shared PostgreSQL options.
 5. Invoke `IDurableFlowClient.StartAsync` or `IDurableFlowClient.RaiseEventAsync`. The manually driven Slice 4 processor discovers and evaluates steps through `PostgreSqlDurableFlowProcessor.DiscoverAsync` and `TryProcessAsync`; no public `ExecuteStepAsync` API exists.

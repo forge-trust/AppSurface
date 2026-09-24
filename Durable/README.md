@@ -18,6 +18,10 @@ For the internal W3C causal-link contract, safe telemetry attributes, deployment
 [Durable Flow trace context v1](flow-trace-context-v1.md). It supplies persistence and crash-proof seams now; it does
 not make Slice 4 a hosted runtime.
 
+For the champion-tier upgrade path, start with the [Durable operational-assessment adoption guide](operational-assessments.md).
+It explains the computed health predicates, direct authoritative admission, exhaustive attempt handling, diagnostics,
+schema `9 -> 10` rollout, role reconciliation, and the supported `v0.2.0-preview.8` binary rollback boundary.
+
 ## Why this boundary
 
 Reusable modules should describe durable intent without selecting storage or starting workers. Runtime providers need
@@ -28,7 +32,7 @@ public, testable contracts without friend access to the application package. The
 The application package registers only passive registries. A provider is selected explicitly by the host. The PostgreSQL
 provider adds explicit migrations (`0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`,
 `0004_schedule_protocol`, `0005_runtime_heartbeat`, `0006_flow_trace_context`, `0007_flow_retention`,
-`0008_flow_repair`, and `0009_work_contract_discovery`) plus one-operation-at-a-time Work, Flow, and Work-first Schedule
+`0008_flow_repair`, `0009_work_contract_discovery`, and `0010_runtime_health_observation`) plus one-operation-at-a-time Work, Flow, and Work-first Schedule
 persistence with versioned W3C
 causal evidence, verified retention, and evidence-first Flow repair. PostgreSQL registration remains passive; an
 application explicitly adds one bounded polling host through
@@ -59,10 +63,11 @@ The forward-only deployment order is:
 7. `0007_flow_retention.sql`
 8. `0008_flow_repair.sql`
 9. `0009_work_contract_discovery.sql`
-10. [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
+10. `0010_runtime_health_observation.sql`
+11. [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
 
 The preferred production flow is to generate and review the Durable schema script offline, drain and stop every pre-`0009`
-worker, apply the reviewed migrations in the order above (including `0009_work_contract_discovery.sql`), apply the canonical
+worker, apply the reviewed migrations in the order above (including `0010_runtime_health_observation.sql`), apply the canonical
 role recipe, and run schema status/preflight before enabling the
 worker host. The [`durable schema` CLI commands](../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands)
 make those checks discoverable. `apply --apply` is an explicit migration-owner operation only; deployments normally
@@ -72,6 +77,10 @@ online commands accept no connection-string argument and never print connection 
 For recovery, inspect status first, produce a corrected and reviewed forward-only script, then retry the intended
 operation. Never delete or rewrite migration history. The [`durable-postgresql` example](../examples/durable-postgresql/README.md)
 is a local proof of the boundaries above, not production operations guidance.
+
+Typed Work authoring is documented in the [typed Work definition migration guide](migrations/typed-work-definitions-v1.md).
+It is a syntax and rollout guide; the existing PostgreSQL workload remains the evidence for acceptance and terminal
+completion.
 
 ## Scale and transport boundary
 

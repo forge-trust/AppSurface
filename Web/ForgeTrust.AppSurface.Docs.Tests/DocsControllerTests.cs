@@ -1203,6 +1203,57 @@ public class DocsControllerTests : IDisposable
         Assert.Equal("Title", model.Title);
         Assert.Equal("Title", model.Document.Title);
         Assert.Equal("/docs/target-path.html", model.CanonicalUrl);
+        Assert.Equal(CSharpRenderKind.Legacy, model.CSharpRenderKind);
+        Assert.False(model.IsCSharpApiDoc);
+    }
+
+    [Fact]
+    public async Task Details_ShouldSelectTypedCSharpRenderDiscriminator_ForTypedNamespaceDocument()
+    {
+        var typedDocument = new CSharpNamespaceDocument(
+            "Product.Api",
+            "Api",
+            [],
+            [],
+            [],
+            [],
+            [],
+            "Api reader text");
+        var doc = new DocNode(
+            "Api",
+            "Namespaces/Product.Api",
+            string.Empty)
+        {
+            CSharpNamespaceDocument = typedDocument
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([doc]);
+
+        var result = await _controller.Details("Namespaces/Product.Api.html");
+
+        var viewResult = Assert.IsType<ViewResult>(result);
+        var model = Assert.IsType<DocDetailsViewModel>(viewResult.Model);
+        Assert.Equal(CSharpRenderKind.TypedNamespace, model.CSharpRenderKind);
+        Assert.True(model.IsCSharpApiDoc);
+        Assert.Same(typedDocument, model.Document.CSharpNamespaceDocument);
+        Assert.Equal(string.Empty, model.Document.Content);
+    }
+
+    [Fact]
+    public async Task Details_ShouldKeepLegacyCSharpPresentationClassification_WhenTypedProjectionIsAbsent()
+    {
+        var doc = new DocNode("Legacy API", "api/LegacyApi.cs", "<section class=\"doc-type\">Legacy API</section>");
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([doc]);
+
+        var result = await _controller.Details("api/LegacyApi.cs.html");
+
+        var viewResult = Assert.IsType<ViewResult>(result);
+        var model = Assert.IsType<DocDetailsViewModel>(viewResult.Model);
+        Assert.Equal(CSharpRenderKind.Legacy, model.CSharpRenderKind);
+        Assert.True(model.IsCSharpApiDoc);
+        Assert.Null(model.Document.CSharpNamespaceDocument);
+        Assert.Equal(doc.Content, model.Document.Content);
     }
 
     [Fact]

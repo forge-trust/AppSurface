@@ -158,6 +158,31 @@ public class AppSurfaceStartupTests
         Assert.Equal(1, startupCalled);
         Assert.Equal(previous, Environment.ExitCode);
         Assert.True(startup.HostStarted);
+        Assert.Same(root, startup.ConfiguredRoot);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RunAsync_RootFactoryFailure_PropagatesUnchanged(bool loaderFailure)
+    {
+        Exception expected = loaderFailure
+            ? new TypeLoadException("root-factory-test")
+            : new InvalidOperationException("root-factory-test");
+        var calls = 0;
+        var startup = new TestStartupOverride(new RootModule(), () =>
+        {
+            calls++;
+            throw expected;
+        });
+        var previousExitCode = Environment.ExitCode;
+
+        var actual = Record.Exception(() => { _ = startup.RunAsync([]); });
+
+        Assert.Same(expected, actual);
+        Assert.Equal(1, calls);
+        Assert.False(startup.HostStarted);
+        Assert.Equal(previousExitCode, Environment.ExitCode);
     }
 
     [Fact]
@@ -300,6 +325,8 @@ public class AppSurfaceStartupTests
 
         public bool HostStarted { get; private set; }
 
+        public IAppSurfaceHostModule? ConfiguredRoot { get; private set; }
+
         protected override RootModule CreateRootModule()
         {
             _onCreate();
@@ -309,6 +336,7 @@ public class AppSurfaceStartupTests
 
         protected override void ConfigureServicesForAppType(StartupContext context, IServiceCollection services)
         {
+            ConfiguredRoot = context.RootModule;
             services.AddSingleton<IHostedService>(sp =>
                 new CallbackHostedService(() => HostStarted = true, sp.GetRequiredService<IHostApplicationLifetime>()));
         }

@@ -177,6 +177,17 @@ public sealed class ConfigAuditEntry
     public required string Key { get; init; }
 
     /// <summary>
+    /// Gets the colon-delimited logical source path when it can be disclosed independently of the display label.
+    /// </summary>
+    /// <remarks>
+    /// The reporter sets this from typed logical segments. Diff consumers parse it with strict
+    /// <see cref="AppSurfaceConfigKey"/> grammar instead of interpreting dots or brackets in <see cref="Key"/>.
+    /// It is null for paths containing redacted dictionary identifiers and may be absent from older captured reports.
+    /// Dictionary comparison uses the safe correlation metadata in <see cref="Element"/> when available.
+    /// </remarks>
+    public string? ConfigPath { get; init; }
+
+    /// <summary>
     /// Gets the declared value type name when known.
     /// </summary>
     public string? DeclaredType { get; init; }
@@ -513,14 +524,14 @@ public enum ConfigAuditEntryState
 /// <remarks>
 /// Values are explicit and append-only so serialized reports remain stable across releases. These classifications are
 /// registry-relative: <see cref="Unknown"/> does not mean globally unused, and <see cref="KnownDescendant"/> is based
-/// on dotted-path segment matching rather than schema validation of a wrapper type.
+/// on colon-delimited segment matching rather than schema validation of a wrapper type.
 /// </remarks>
 public enum ConfigAuditDiscoveredKeyClassification
 {
     /// <summary>The discovered key exactly matches a known audit entry.</summary>
     Known = 0,
 
-    /// <summary>The discovered key is under a known entry path using dotted-path segment matching.</summary>
+    /// <summary>The discovered key is under a known entry path using colon-delimited segment matching.</summary>
     KnownDescendant = 1,
 
     /// <summary>The discovered key is not known to the AppSurface audit registry.</summary>

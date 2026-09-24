@@ -18,7 +18,7 @@ internal static class ConfigPresenceValidator
     /// <param name="valueType">The declared configuration value type.</param>
     /// <param name="hasValue">Whether provider/default resolution produced a value.</param>
     public static void Validate(
-        string key,
+        AppSurfaceConfigKey key,
         Type configType,
         Type valueType,
         bool hasValue)
@@ -29,12 +29,12 @@ internal static class ConfigPresenceValidator
         }
 
         var failure = new ConfigurationValidationFailure(
-            key,
+            key.Value,
             configType,
             valueType,
             Array.Empty<string>(),
             RequiredPresenceMessage);
 
-        throw new ConfigurationValidationException(key, configType, valueType, [failure]);
+        throw new ConfigurationValidationException(key.Value, configType, valueType, [failure]);
     }
 }

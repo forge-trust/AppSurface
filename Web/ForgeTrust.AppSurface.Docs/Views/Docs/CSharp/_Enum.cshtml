@@ -1,0 +1,16 @@
+@using ForgeTrust.AppSurface.Docs.Models
+@model CSharpEnumDocument
+
+<section id="@Model.AnchorId" class="doc-type doc-enum">
+    <header class="doc-type-header">
+        <span class="doc-kind">Enum</span>
+        <h2>@Model.DisplayName</h2>
+        @if (!string.IsNullOrWhiteSpace(Model.SourceHref))
+        {
+            <a href="@Url.PathBaseAware(Model.SourceHref)" class="doc-symbol-source-link" aria-label="View source for @Model.DisplayName">Source</a>
+        }
+    </header>
+    <div class="doc-body">
+        @await Html.PartialAsync("/Views/Docs/CSharp/_Documentation.cshtml", Model.Documentation)
+    </div>
+</section>

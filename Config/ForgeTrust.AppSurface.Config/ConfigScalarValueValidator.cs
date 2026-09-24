@@ -6,7 +6,7 @@ namespace ForgeTrust.AppSurface.Config;
 internal static class ConfigScalarValueValidator
 {
     public static void Validate(
-        string key,
+        AppSurfaceConfigKey key,
         object config,
         Type valueType,
         object? value,
@@ -21,7 +21,7 @@ internal static class ConfigScalarValueValidator
         var failures = new List<ConfigurationValidationFailure>();
         var validationContext = new ValidationContext(config)
         {
-            DisplayName = key,
+            DisplayName = key.Value,
             MemberName = null
         };
 
@@ -30,12 +30,12 @@ internal static class ConfigScalarValueValidator
 
         if (failures.Count > 0)
         {
-            throw new ConfigurationValidationException(key, configType, valueType, failures);
+            throw new ConfigurationValidationException(key.Value, configType, valueType, failures);
         }
     }
 
     private static void ValidateAttributes(
-        string key,
+        AppSurfaceConfigKey key,
         Type configType,
         Type valueType,
         object value,
@@ -65,7 +65,7 @@ internal static class ConfigScalarValueValidator
     }
 
     private static void ValidateHook(
-        string key,
+        AppSurfaceConfigKey key,
         Type configType,
         Type valueType,
         object value,

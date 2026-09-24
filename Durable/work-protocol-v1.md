@@ -4,6 +4,11 @@ This is the normative operation and lock manifest for Durable slice 3. It specif
 boundaries, and ordering. Internal C# and SQL may be decomposed differently, but must preserve these invariants. The
 package starts no worker; tests and later hosting code drive one operation at a time.
 
+Typed Work definitions are an authoring projection over this same protocol. The definition captures contract facts and
+builds the existing request; it does not add a persistence state, change the fingerprint, or authorize execution. See
+the [typed Work definition migration guide](migrations/typed-work-definitions-v1.md) for syntax-only replacement,
+semantic/exit rollout, duplicate replacement, exact Flow registration lookup, and caller concurrency obligations.
+
 ## Authoritative records
 
 PostgreSQL is the only durable truth. The Work/shared schema owns store metadata and migration history, scope tombstones

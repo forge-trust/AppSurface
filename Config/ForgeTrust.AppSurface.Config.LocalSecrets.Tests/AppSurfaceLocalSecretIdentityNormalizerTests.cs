@@ -2,6 +2,14 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets.Tests;
 
 public sealed class AppSurfaceLocalSecretIdentityNormalizerTests
 {
+    [Fact]
+    public void Normalize_ShouldReturnSafeDiagnosticForNullKey()
+    {
+        var result = new AppSurfaceLocalSecretIdentityNormalizer().Normalize("App", "Development", null, null!);
+        Assert.False(result.Succeeded);
+        Assert.Equal("local-secret-key-invalid", result.Diagnostic?.Code);
+    }
+
     private readonly AppSurfaceLocalSecretIdentityNormalizer _normalizer = new();
 
     [Fact]
@@ -13,7 +21,7 @@ public sealed class AppSurfaceLocalSecretIdentityNormalizerTests
         Assert.Equal("My-App", result.Identity!.ApplicationName);
         Assert.Equal("Development", result.Identity.Environment);
         Assert.Equal("Payments", result.Identity.KeyPrefix);
-        Assert.Equal("Stripe:ApiKey", result.Identity.Key);
+        Assert.Equal("Stripe:ApiKey", result.Identity.Key.Value);
         Assert.Equal("appsurface:My-App:Development:Payments:Stripe:ApiKey", result.Identity.StorageName);
     }
 
@@ -22,10 +30,10 @@ public sealed class AppSurfaceLocalSecretIdentityNormalizerTests
     [InlineData("MyApp", "Development", "Bad/Prefix", "Stripe:ApiKey", "local-secret-keyPrefix-invalid-character")]
     [InlineData("MyApp", "Prod.Blue", null, "Stripe:ApiKey", "local-secret-environment-invalid-character")]
     [InlineData("MyApp", "", null, "Stripe:ApiKey", "local-secret-environment-empty")]
-    [InlineData("MyApp", "Development", null, "", "local-secret-key-empty")]
-    [InlineData("MyApp", "Development", null, "Stripe\rApiKey", "local-secret-key-invalid-character")]
-    [InlineData("MyApp", "Development", null, "Stripe\0ApiKey", "local-secret-key-invalid-character")]
-    [InlineData("MyApp", "Development", null, "Stripe\nApiKey", "local-secret-key-invalid-character")]
+    [InlineData("MyApp", "Development", null, "", "local-secret-key-invalid")]
+    [InlineData("MyApp", "Development", null, "Stripe\rApiKey", "local-secret-key-invalid")]
+    [InlineData("MyApp", "Development", null, "Stripe\0ApiKey", "local-secret-key-invalid")]
+    [InlineData("MyApp", "Development", null, "Stripe\nApiKey", "local-secret-key-invalid")]
     public void Normalize_Should_ReturnDiagnosticForInvalidIdentity(
         string app,
         string environment,
@@ -41,12 +49,12 @@ public sealed class AppSurfaceLocalSecretIdentityNormalizerTests
     }
 
     [Fact]
-    public void Normalize_Should_CanonicalizeDoubleUnderscoreKeySeparators()
+    public void Normalize_Should_PreserveDoubleUnderscoreKeyContent()
     {
         var result = _normalizer.Normalize("MyApp", "Development", null, "Stripe__ApiKey");
 
         Assert.True(result.Succeeded);
-        Assert.Equal("Stripe:ApiKey", result.Identity!.Key);
+        Assert.Equal("Stripe__ApiKey", result.Identity!.Key.Value);
     }
 
     [Fact]
@@ -57,16 +65,16 @@ public sealed class AppSurfaceLocalSecretIdentityNormalizerTests
         Assert.True(result.Succeeded);
         Assert.Equal("My.App", result.Identity!.ApplicationName);
         Assert.Equal("Payments.V1", result.Identity.KeyPrefix);
-        Assert.Equal("Stripe/ApiKey", result.Identity.Key);
+        Assert.Equal("Stripe\\ApiKey", result.Identity.Key.Value);
     }
 
     [Fact]
-    public void Normalize_Should_ReturnDiagnosticForLongKey()
+    public void Normalize_Should_AllowLongKeyWhenStorageIdentityFits()
     {
         var result = _normalizer.Normalize("MyApp", "Development", null, new string('K', 257));
 
-        Assert.False(result.Succeeded);
-        Assert.Equal("local-secret-key-too-long", result.Diagnostic!.Code);
+        Assert.True(result.Succeeded);
+        Assert.Equal(new string('K', 257), result.Identity!.Key.Value);
     }
 
     [Fact]

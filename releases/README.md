@@ -10,6 +10,10 @@ It also acts as a concrete AppSurface Docs example for teams that want stronger 
 
 ## Start here
 
+The [configuration logical-key migration guide](../guides/config-key-migration.md)
+documents the next coordinated configuration SPI break, persisted source migration,
+and package consumer proof.
+
 - [Package chooser](../packages/README.md) is the fastest install map for deciding which AppSurface package to add first.
 - [Current coordinated release](./current.md) is the package-facing story for the coordinated AppSurface prerelease in this documentation tree.
 - [v0.1.0](./v0.1.0.md) is the canonical archive for the first coordinated stable AppSurface release.
@@ -39,8 +43,9 @@ The release evidence bundle is not a signature or hosted-build attestation. It i
 ## Durable public-preview release gate
 
 The Durable packages are eligible for coordinated prerelease publication only when release review confirms schema
-ownership, migrations `0001` through `0009`, the canonical PostgreSQL role recipe, registry-scoped Work discovery,
-the drain-first `0009` role transition, passive storage registration, explicit `AddWorkerHost()` hosting, startup
+ownership, migrations `0001` through `0010`, the canonical PostgreSQL role recipe, registry-scoped Work discovery,
+the drain-first `0009` role transition, migration-`0010` runtime-health compatibility, passive storage registration,
+explicit `AddWorkerHost()` hosting, startup
 schema/epoch validation without DDL, recovery procedures, and the real PostgreSQL conformance evidence. The package
 chooser is the machine-facing install map; the [Durable discovery guide](../Durable/README.md#slice-7-discovery-and-reconciliation)
 is the reader-facing operational boundary. The `durable schema` commands do not replace this release review: scripts
