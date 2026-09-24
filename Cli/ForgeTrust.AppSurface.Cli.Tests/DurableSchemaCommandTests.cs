@@ -282,6 +282,43 @@ public sealed class DurableSchemaCommandTests
         ValueSafeAssert.DoesNotExpose("provider-sentinel-detail", error.Message);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(2147484)]
+    public async Task Run_online_async_rejects_timeouts_outside_cancellation_timer_range(int timeoutSeconds)
+    {
+        var timeout = TimeSpan.FromSeconds(timeoutSeconds);
+
+        var error = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await TestableDurableSchemaOnlineCommand.RunAsync(
+                "Host=localhost",
+                CancellationToken.None,
+                static (_, _) => ValueTask.FromResult(true),
+                timeout));
+
+        Assert.Equal("operationTimeout", error.ParamName);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("unexpected")]
+    [InlineData(42)]
+    public void Retention_preflight_unexpected_catalog_result_fails_closed(object? result)
+    {
+        Assert.Equal(
+            new[] { "catalog_result" },
+            DurableSchemaCommandService.MapRetentionPreflightResult(result));
+    }
+
+    [Fact]
+    public void Retention_preflight_preserves_catalog_failure_names()
+    {
+        var failures = new[] { "function_acl", "retention_index" };
+
+        Assert.Same(failures, DurableSchemaCommandService.MapRetentionPreflightResult(failures));
+    }
+
     [Fact]
     public async Task Status_and_preflight_render_the_compatible_contract()
     {
@@ -839,8 +876,9 @@ public sealed class DurableSchemaCommandTests
         internal static ValueTask<T> RunAsync<T>(
             string connectionString,
             CancellationToken cancellationToken,
-            Func<string, CancellationToken, ValueTask<T>> operation) =>
-            RunOnlineAsync(connectionString, cancellationToken, operation);
+            Func<string, CancellationToken, ValueTask<T>> operation,
+            TimeSpan? operationTimeout = null) =>
+            RunOnlineAsync(connectionString, cancellationToken, operation, operationTimeout);
     }
 
     private sealed class DurableTestDirectory(string path) : IDisposable

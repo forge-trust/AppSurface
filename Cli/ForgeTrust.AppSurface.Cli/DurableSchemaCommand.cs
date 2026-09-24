@@ -477,8 +477,12 @@ internal sealed class DurableSchemaCommandService : IDurableSchemaCommandService
         await using var dataSource = NpgsqlDataSource.Create(RequireConnectionString(connectionString));
         await using var command = dataSource.CreateCommand(RetentionStructurePreflightSql);
         var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-        return result is string[] failedChecks ? failedChecks : ["catalog_result"];
+        return MapRetentionPreflightResult(result);
     }
+
+    /// <summary>Maps the catalog query result to failed checks, failing closed for unexpected result shapes.</summary>
+    internal static IReadOnlyList<string> MapRetentionPreflightResult(object? result) =>
+        result is string[] failedChecks ? failedChecks : ["catalog_result"];
 
     /// <inheritdoc />
     public string GenerateScript(int fromVersion)

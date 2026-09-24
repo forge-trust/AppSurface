@@ -300,36 +300,49 @@ internal static class DurablePostgreSqlLocalExample
         NpgsqlDataSource runtimeDataSource,
         CancellationToken cancellationToken)
     {
+        await WaitForRetentionProofAsync(ReadCountsAsync, TimeSpan.FromSeconds(15), cancellationToken);
+
+        async Task<(long Stale, long Recent, long Current)> ReadCountsAsync(CancellationToken queryCancellationToken)
+        {
+            await using var command = runtimeDataSource.CreateCommand(
+                """
+                SELECT
+                    count(*) FILTER (WHERE worker_id LIKE 'durable-local-proof-stale-%'),
+                    count(*) FILTER (WHERE worker_id = 'durable-local-proof-recent'),
+                    count(*) FILTER (WHERE worker_id = @current_worker_id)
+                FROM appsurface_durable.runtime_heartbeat
+                WHERE worker_id LIKE 'durable-local-proof-%';
+                """);
+            command.Parameters.AddWithValue("current_worker_id", LocalProofWorkerId);
+            await using var reader = await command.ExecuteReaderAsync(queryCancellationToken);
+            // An aggregate without GROUP BY always returns exactly one count row.
+            await reader.ReadAsync(queryCancellationToken);
+            return (reader.GetInt64(0), reader.GetInt64(1), reader.GetInt64(2));
+        }
+    }
+
+    /// <summary>Waits for the first bounded cleanup batch and rejects changes to protected rows.</summary>
+    /// <remarks>This seam lets command tests exercise the asynchronous proof without PostgreSQL or a real 15-second wait.</remarks>
+    /// <param name="readCountsAsync">Reads the stale, recent, and current-worker counts using the supplied cancellation token.</param>
+    /// <param name="timeout">Maximum time allowed for the first bounded cleanup to complete.</param>
+    /// <param name="cancellationToken">Caller cancellation; cancellation from this token propagates without translation.</param>
+    /// <exception cref="ArgumentNullException">The count reader is null.</exception>
+    /// <exception cref="InvalidOperationException">A protected row is missing or cleanup deletes outside one bounded batch.</exception>
+    /// <exception cref="TimeoutException">The supplied deadline expires before cleanup completes.</exception>
+    /// <exception cref="OperationCanceledException">The caller cancels the proof.</exception>
+    internal static async Task WaitForRetentionProofAsync(
+        Func<CancellationToken, Task<(long Stale, long Recent, long Current)>> readCountsAsync,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(readCountsAsync);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        deadline.CancelAfter(TimeSpan.FromSeconds(15));
+        deadline.CancelAfter(timeout);
         try
         {
             while (true)
             {
-                long stale;
-                long recent;
-                long current;
-                await using (var command = runtimeDataSource.CreateCommand(
-                    """
-                    SELECT
-                        count(*) FILTER (WHERE worker_id LIKE 'durable-local-proof-stale-%'),
-                        count(*) FILTER (WHERE worker_id = 'durable-local-proof-recent'),
-                        count(*) FILTER (WHERE worker_id = @current_worker_id)
-                    FROM appsurface_durable.runtime_heartbeat
-                    WHERE worker_id LIKE 'durable-local-proof-%';
-                    """))
-                {
-                    command.Parameters.AddWithValue("current_worker_id", LocalProofWorkerId);
-                    await using var reader = await command.ExecuteReaderAsync(deadline.Token);
-                    if (!await reader.ReadAsync(deadline.Token))
-                    {
-                        throw new InvalidOperationException("The heartbeat maintenance proof returned no count row.");
-                    }
-
-                    stale = reader.GetInt64(0);
-                    recent = reader.GetInt64(1);
-                    current = reader.GetInt64(2);
-                }
+                var (stale, recent, current) = await readCountsAsync(deadline.Token);
 
                 if (stale == 1 && recent == 1 && current == 1)
                 {
@@ -347,7 +360,7 @@ internal static class DurablePostgreSqlLocalExample
         }
         catch (OperationCanceledException exception) when (deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
-            throw new TimeoutException("The admitted pass did not complete its first bounded heartbeat cleanup within 15 seconds.", exception);
+            throw new TimeoutException("The admitted pass did not complete its first bounded heartbeat cleanup before the configured deadline.", exception);
         }
     }
 

@@ -8,6 +8,15 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 public sealed class PostgreSqlDurableHeartbeatMaintenanceTests
 {
     [Fact]
+    public void Constructor_RejectsMissingRegistrationAndClock()
+    {
+        var registration = CreateRegistration();
+
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableHeartbeatMaintenance(null!, TimeProvider.System));
+        Assert.Throws<ArgumentNullException>(() => new PostgreSqlDurableHeartbeatMaintenance(registration, null!));
+    }
+
+    [Fact]
     public void Options_DefaultToEnabledAndRejectUnsafeMaintenanceBounds()
     {
         var defaults = new AppSurfaceDurablePostgreSqlOptions().SnapshotAndValidate();
@@ -70,6 +79,35 @@ public sealed class PostgreSqlDurableHeartbeatMaintenanceTests
         maintenance.SignalAdmittedPass();
         await Task.Delay(30);
         Assert.Equal(0, Volatile.Read(ref calls));
+    }
+
+    [Fact]
+    public async Task DisposedMaintenance_IgnoresSignalsAndRepeatedDisposal()
+    {
+        var calls = 0;
+        var maintenance = new PostgreSqlDurableHeartbeatMaintenance(
+            CreateRegistration(),
+            TimeProvider.System,
+            pruneOperation: _ =>
+            {
+                Interlocked.Increment(ref calls);
+                return Task.FromResult(0);
+            });
+
+        await maintenance.DisposeAsync();
+        await maintenance.DisposeAsync();
+        maintenance.SignalAdmittedPass();
+        Assert.Equal(0, Volatile.Read(ref calls));
+    }
+
+    [Fact]
+    public void SynchronousDisposal_CanBeRepeatedWithoutAStartedRunner()
+    {
+        var maintenance = new PostgreSqlDurableHeartbeatMaintenance(CreateRegistration(), TimeProvider.System);
+
+        maintenance.Dispose();
+        maintenance.Dispose();
+        maintenance.SignalAdmittedPass();
     }
 
     [Theory]
@@ -143,6 +181,39 @@ public sealed class PostgreSqlDurableHeartbeatMaintenanceTests
     }
 
     [Fact]
+    public async Task PruneExecutionTime_ConsumesConfiguredCadence()
+    {
+        var clock = new ManualTimeProvider();
+        var calls = 0;
+        var secondCall = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var options = new AppSurfaceDurablePostgreSqlOptions
+        {
+            HeartbeatMaintenanceCadence = TimeSpan.FromHours(1),
+        }.SnapshotAndValidate();
+        await using var maintenance = new PostgreSqlDurableHeartbeatMaintenance(
+            CreateRegistration(options),
+            clock,
+            pruneOperation: _ =>
+            {
+                if (Interlocked.Increment(ref calls) == 1)
+                {
+                    clock.Advance(TimeSpan.FromHours(1));
+                }
+                else
+                {
+                    secondCall.TrySetResult();
+                }
+
+                return Task.FromResult(0);
+            });
+
+        maintenance.SignalAdmittedPass();
+        await secondCall.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await maintenance.StopAsync();
+        Assert.Equal(2, Volatile.Read(ref calls));
+    }
+
+    [Fact]
     public async Task FullBatch_UsesOneMinuteCatchUpSpacing()
     {
         var clock = new ManualTimeProvider();
@@ -198,6 +269,34 @@ public sealed class PostgreSqlDurableHeartbeatMaintenanceTests
         clock.Advance(TimeSpan.FromHours(1));
         await retried.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await maintenance.StopAsync();
+    }
+
+    [Fact]
+    public async Task NonCancellationExceptionAfterStop_IsHandledAsCancellation()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var maintenance = new PostgreSqlDurableHeartbeatMaintenance(
+            CreateRegistration(),
+            TimeProvider.System,
+            pruneOperation: async cancellationToken =>
+            {
+                entered.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw new InvalidOperationException("operation failed while stopping");
+                }
+
+                throw new InvalidOperationException("operation failed while stopping");
+            });
+
+        maintenance.SignalAdmittedPass();
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await maintenance.StopAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        await maintenance.DisposeAsync();
     }
 
     [Fact]

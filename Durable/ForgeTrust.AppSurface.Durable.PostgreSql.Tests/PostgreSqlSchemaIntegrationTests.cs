@@ -2704,6 +2704,36 @@ public sealed class PostgreSqlSchemaIntegrationTests
     }
 
     [Fact]
+    public async Task ApplyLockContention_RejectsOutOfRangeRetryJitterAndCanRetry()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await using var blocker = await database.DataSource.OpenConnectionAsync();
+        await using (var acquire = new NpgsqlCommand("SELECT pg_advisory_lock(@lock_id);", blocker))
+        {
+            acquire.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            await acquire.ExecuteNonQueryAsync();
+        }
+
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(
+            database.DataSource,
+            DurablePostgreSqlMigrationCatalog.Load(),
+            migrationLockAcquireTimeout: TimeSpan.FromSeconds(2),
+            sampleMigrationLockRetryDelayMilliseconds: () => 74);
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () => await manager.ApplyAsync());
+
+        Assert.Contains("jitter sampler returned a value outside the supported range", exception.Message, StringComparison.Ordinal);
+
+        await using (var release = new NpgsqlCommand("SELECT pg_advisory_unlock(@lock_id);", blocker))
+        {
+            release.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            Assert.True((bool)(await release.ExecuteScalarAsync())!);
+        }
+
+        var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], applied.AppliedVersions);
+    }
+
+    [Fact]
     public async Task GeneratedScriptLockContentionTimesOutBeforeMigrationAndCanRetry()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
