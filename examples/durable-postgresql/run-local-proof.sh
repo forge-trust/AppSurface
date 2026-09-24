@@ -170,7 +170,9 @@ printf '[run-local-proof] PostgreSQL is published on 127.0.0.1:%s\n' "$LOCAL_POR
 
 ready=0
 for _ in {1..30}; do
-  if run_foreground docker exec "$CONTAINER_NAME" pg_isready -U postgres -d "$DATABASE_NAME" >/dev/null 2>&1; then
+  # The image's initialization server accepts Unix-socket connections before it shuts down.
+  # TCP becomes ready only after the final server starts.
+  if run_foreground docker exec "$CONTAINER_NAME" pg_isready -h 127.0.0.1 -U postgres -d "$DATABASE_NAME" >/dev/null 2>&1; then
     ready=1
     break
   fi

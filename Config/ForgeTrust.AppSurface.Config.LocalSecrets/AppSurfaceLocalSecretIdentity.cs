@@ -1,5 +1,7 @@
 namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 
+using ForgeTrust.AppSurface.Config;
+
 /// <summary>
 /// Identifies one local secret across application, environment, prefix, and AppSurface config key.
 /// </summary>
@@ -12,5 +14,10 @@ public sealed record AppSurfaceLocalSecretIdentity(
     string ApplicationName,
     string Environment,
     string? KeyPrefix,
-    string Key,
-    string StorageName);
+    AppSurfaceConfigKey Key,
+    string StorageName)
+{
+    /// <summary>Exact historical native key used only by migration; it is never parsed as application input.</summary>
+    internal string? MigrationStoredKey { get; init; }
+    internal string StoredKey => MigrationStoredKey ?? Key.Value;
+}

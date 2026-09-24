@@ -559,6 +559,8 @@ public sealed class ConventionalExceptionPageTests
 
     private sealed class TestEnvironmentProvider(string environmentName) : IEnvironmentProvider
     {
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() => new Dictionary<string, string>(StringComparer.Ordinal);
+
         public string Environment { get; } = environmentName;
 
         public bool IsDevelopment => string.Equals(Environment, Environments.Development, StringComparison.OrdinalIgnoreCase);

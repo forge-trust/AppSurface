@@ -397,6 +397,8 @@ public class RazorWireWebModuleTests
 
     private sealed class TestEnvironmentProvider : IEnvironmentProvider
     {
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() => new Dictionary<string, string>(StringComparer.Ordinal);
+
         public TestEnvironmentProvider(bool isDevelopment)
         {
             IsDevelopment = isDevelopment;

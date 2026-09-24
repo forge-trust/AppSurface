@@ -1,4 +1,4 @@
-﻿using ForgeTrust.AppSurface.Core.Defaults;
+using ForgeTrust.AppSurface.Core.Defaults;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -6,6 +6,40 @@ namespace ForgeTrust.AppSurface.Core.Tests;
 
 public class DefaultEnvironmentProviderTests
 {
+    [Fact]
+    public void CaptureEnvironmentVariables_PreservesNativeSpellingAndSnapshotOwnership()
+    {
+        var name = "AppSurface_Snapshot_" + Guid.NewGuid().ToString("N");
+        var caseVariant = name.ToUpperInvariant();
+        try
+        {
+            Environment.SetEnvironmentVariable(name, "first");
+            if (!OperatingSystem.IsWindows())
+            {
+                Environment.SetEnvironmentVariable(caseVariant, "separate");
+            }
+
+            var provider = new DefaultEnvironmentProvider();
+            var first = provider.CaptureEnvironmentVariables();
+            Assert.Equal("first", first[name]);
+            if (!OperatingSystem.IsWindows())
+            {
+                Assert.Equal("separate", first[caseVariant]);
+            }
+
+            Environment.SetEnvironmentVariable(name, "second");
+            var second = provider.CaptureEnvironmentVariables();
+            Assert.Equal("first", first[name]);
+            Assert.Equal("second", second[name]);
+            Assert.NotSame(first, second);
+            Assert.Throws<NotSupportedException>(() => ((IDictionary<string, string>)first).Add("not-allowed", "value"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(name, null);
+            Environment.SetEnvironmentVariable(caseVariant, null);
+        }
+    }
 
     [Theory]
     [InlineData("DOTNET_ENVIRONMENT", "Production", false)]
@@ -320,6 +354,8 @@ public class DefaultEnvironmentProviderTests
 
     private class TestEnvironmentProvider(string environment, bool isDevelopment) : IEnvironmentProvider
     {
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() => new Dictionary<string, string>(StringComparer.Ordinal);
+
         public string Environment => environment;
         public bool IsDevelopment => isDevelopment;
         public string? GetEnvironmentVariable(string name, string? defaultValue = null) => throw new NotImplementedException();

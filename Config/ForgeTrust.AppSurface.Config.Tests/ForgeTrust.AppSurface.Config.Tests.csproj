@@ -30,6 +30,7 @@
   <ItemGroup>
     <ProjectReference Include="../../ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj" />
+    <ProjectReference Include="../ForgeTrust.AppSurface.Config.Testing/ForgeTrust.AppSurface.Config.Testing.csproj" />
   </ItemGroup>
 
   <ItemGroup>
