@@ -44,16 +44,19 @@ public sealed class TailwindSourceIdentityTests : IDisposable
     }
 
     [Fact]
-    public async Task OlderCleanCheckout_IsRejectedWhenVerifierWasBuiltFromAnotherCommit()
+    public async Task DifferentCleanCheckoutCommit_IsRejectedWhenVerifierWasBuiltFromAnotherCommit()
     {
-        var source = FindRepositoryRoot();
-        var olderCommit = await RunGitAsync(source, "rev-parse", "origin/main");
         var (checkout, currentCommit) = await CloneHeadAsync();
-        Assert.NotEqual(currentCommit, olderCommit);
-        await RunGitAsync(checkout, "checkout", "--detach", olderCommit);
+        await RunGitAsync(checkout,
+            "-c", "user.name=Tailwind Source Identity Tests",
+            "-c", "user.email=tailwind-source-identity@example.invalid",
+            "-c", "commit.gpgsign=false",
+            "commit", "--allow-empty", "--no-verify", "--quiet", "-m", "Create alternate clean checkout");
+        var differentCommit = await RunGitAsync(checkout, "rev-parse", "HEAD");
+        Assert.NotEqual(currentCommit, differentCommit);
 
         var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
-            TailwindSourceIdentity.RequireAsync(checkout, olderCommit, CancellationToken.None));
+            TailwindSourceIdentity.RequireAsync(checkout, differentCommit, CancellationToken.None));
 
         Assert.Contains("verifier assembly SourceRevisionId stamp", error.Message, StringComparison.Ordinal);
     }
