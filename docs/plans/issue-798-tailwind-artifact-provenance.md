@@ -159,7 +159,7 @@ Source references below are at the reviewed main commit, available with
 | Workspace safety | [PackageProofWorkDirectory.cs](../../tools/ForgeTrust.AppSurface.PackageIndex/PackageProofWorkDirectory.cs) | Reuse lexical disjoint checks; add release-specific create-new and ancestor link checks |
 | Archive path checks | `NormalizePackagePathStrict`, PackageArtifactValidation:1500 | It currently replaces backslashes and trims slashes; reject raw invalid names before normalization in the new shared verifier |
 | Publish retry and ledger | `PackagePublishWorkflow.RunAsync`:294, `RunPushAsync`:389 | Move credential read after evidence checks; copy/recheck push files; retain original identity and duplicate-reported semantics |
-| Scheduling | Existing [stable](../../.github/workflows/nuget-stable-publish.yml) and [prerelease](../../.github/workflows/nuget-prerelease-publish.yml) flows | Preserve protected environments, per-tag concurrency, readiness checks, stable release evidence and smoke install |
+| Scheduling | Existing [stable](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/nuget-stable-publish.yml) and [prerelease](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/nuget-prerelease-publish.yml) flows | Preserve protected environments, per-tag concurrency, readiness checks, stable release evidence and smoke install |
 
 ## CEO review sections
 

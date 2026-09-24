@@ -317,8 +317,8 @@ flowchart LR
     U --> S[Push validated original package files]
 ```
 
-Change both [prerelease](../../.github/workflows/nuget-prerelease-publish.yml)
-and [stable](../../.github/workflows/nuget-stable-publish.yml) workflows. Native
+Change both [prerelease](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/nuget-prerelease-publish.yml)
+and [stable](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/nuget-stable-publish.yml) workflows. Native
 evidence depends on `pack-and-verify` and receives its binding; hosts no longer
 call `dotnet pack`. Building the maintainer verifier from the exact source
 checkout is allowed and does not recreate product package artifacts.
@@ -434,7 +434,7 @@ must not represent `duplicate-reported` as remote byte-equality proof. Keep the
 existing fix-forward policy once any coordinated package is accepted. Reusing
 expired or deleted artifact identifiers and independently restoring a remote
 copy are not supported recovery paths in #798. Update the existing
-[release operations guide](../../.github/release-ops.md) with these exact retry
+[release operations guide](https://github.com/forge-trust/AppSurface/blob/main/.github/release-ops.md) with these exact retry
 rules and artifact-retention requirements.
 
 ## Failure evidence and diagnostics
@@ -483,7 +483,7 @@ presence of strings such as `native-host-evidence`.
 
 Before merging, run focused PackageIndex tests, meaningful CLI negative tests,
 formatting/analyzers, and the existing package-artifact proof. Use the
-[solution coverage workflow](../../scripts/coverage-solution.sh) when practical,
+[solution coverage workflow](https://github.com/forge-trust/AppSurface/blob/main/scripts/coverage-solution.sh) when practical,
 with near-complete branch coverage of new verification paths. Validate the
 release workflow using nonpublishing fixtures and prove zero push calls on
 each broken-evidence case. A successful five-native-host candidate run is
@@ -494,7 +494,7 @@ required release evidence; cross-RID simulation is supplemental only.
 Ship this through the existing repository workflows and non-packable PackageIndex
 tool. Document its commands and schemas in the
 [PackageIndex README](../../tools/ForgeTrust.AppSurface.PackageIndex/README.md),
-operator behavior in [release operations](../../.github/release-ops.md), and
+operator behavior in [release operations](https://github.com/forge-trust/AppSurface/blob/main/.github/release-ops.md), and
 the runner/order implications in [CI critical path](../../eng/ci-critical-path.md).
 Update the Tailwind release-proof paragraph and the appropriate
 [unreleased entry](../../CONTRIBUTING.md). Keep named concepts linked to their
