@@ -86,6 +86,15 @@ Current: repeated local fixtures + ambiguous interpretation
 
 **Independent CEO voice.** A `combo/sub` native reviewer read the exact CEO input hash and raised seven concerns: public surface size, adopter evidence, the advisory health gate, timeout meaning, builder state matrix, PostgreSQL proof ownership, and comparison with test-local helpers. The external Codex process is unavailable from a Codex host, so CEO consensus is N/A rather than confirmed. Primary review agrees on the health-gate and deadline concerns; it keeps the confirmed package scope while requiring a concrete packed adopter journey. The native voice's narrower first release remains a taste alternative at the final gate.
 
+| CEO dual-voice dimension | Native reviewer | Outside Codex | Consensus |
+| --- | --- | --- | --- |
+| Problem and scope | Valid problem, broad public surface | N/A | Not confirmed |
+| Adopter value | Requires packed consumer proof | N/A | Not confirmed |
+| Health/admission policy | Advisory gate conflict | N/A | Not confirmed |
+| Error and timeout meaning | Ambiguous after invocation | N/A | Not confirmed |
+| Security and privacy | History retention needs limits | N/A | Not confirmed |
+| Release feasibility | Package graph must be proved | N/A | Not confirmed |
+
 #### Section 1: architecture
 
 ```text
@@ -224,6 +233,15 @@ The unresolved health-gate row is a critical gap until the final gate. All other
 
 **Native DX voice.** The `combo/sub` reviewer read the exact DX input hash and found seven issues: unspecified scenario call order/reuse, timeout evidence, state defaults, history access/retention, quick start, API error guidance, and escape-hatch docs. The outside Codex pass is unavailable from this host, so all six DX dual-voice consensus cells are N/A. The primary review accepts the documentation and error-shape remedies; the advisory health gate remains the CEO user challenge.
 
+| DX dual-voice dimension | Native reviewer | Outside Codex | Consensus |
+| --- | --- | --- | --- |
+| First use | Complete packed quick start needed | N/A | Not confirmed |
+| API discoverability | State matrix and scenario sequence needed | N/A | Not confirmed |
+| Error clarity | Named timeout/cancellation outcomes needed | N/A | Not confirmed |
+| Documentation | Escape hatch and real-provider boundary needed | N/A | Not confirmed |
+| Upgrade path | Coordinated package guidance needed | N/A | Not confirmed |
+| Measurement | Time first assertion rather than infer it | N/A | Not confirmed |
+
 | DX pass | Initial / plan after remedies | Evidence and specific remedy |
 | --- | --- | --- |
 | 1 Getting started | 4/10 → 8/10 | Package absent today; add a compiled three-step path and time it with the packed consumer. |
@@ -292,6 +310,18 @@ The production dependency direction stays one-way: neither Durable nor Provider 
 **Section 2 — code quality.** Keep builders as named defaults plus direct constructor calls. Use one state/default matrix rather than six divergent initialization branches. Make fake recording explicit with a synchronized call sequence and immutable snapshots; avoid a reusable interception framework. Keep timeout classification in one helper using the supplied `TimeProvider` so health and pump waits cannot drift. Define exceptions and public observation fields before freezing the API snapshot. Preserve the original exception from a delegate or codec; no broad catch should hide it.
 
 **Section 3 — full test review.** No #802 implementation exists yet; every row below is a planned new path and currently has no #802 test. “Unit” means provider-free tests of public Testing APIs; “PG” means a real PostgreSQL provider test; “packed” means a fresh-feed external consumer.
+
+```text
+Testing builders -> production constructors/CreateRequest/CreateNative
+                 -> provider-free valid/invalid parity tests
+Recording fakes -> ordered, concurrent, canceled, cleared histories
+                -> gated provider-free race and privacy tests
+Host scenario -> assess -> capture latest completed -> admission -> exact attempt
+              -> fake-clock deadline + cancellation + four-kind tests
+Real PostgreSQL -> claim/completion/recovery/post-permit ambiguity
+                -> provider conformance tests, never inferred from fakes
+Packed Testing nupkg -> external xUnit host -> graph + byte-identity checks
+```
 
 | New path or branch | Required verification | Gap before implementation |
 | --- | --- | --- |
@@ -365,6 +395,13 @@ With these accepted tests and handling, no path is left with the triple conditio
 - Add deterministic fake-clock tests for deadline equality, both timeout phases, caller-cancellation races, and a provider that ignores cancellation and completes after timeout; gated concurrency tests for reversed assessment completion, repeated/concurrent pump calls, snapshot/clear races, and immutable history views.
 <!-- /autoplan-accepted:eng -->
 
+### Cross-phase themes
+
+- **Advisory health versus authoritative admission:** CEO and Eng independently found that the confirmed scenario gate conflicts with production guidance. DX found the same tension in the first-use example. It remains a user choice.
+- **Timeouts after admission begins:** CEO, DX, and Eng independently required an explicit status-unknown outcome and deterministic late-completion tests. The engineering accepted block now states the shared deadline and late-task contract.
+- **Public API breadth and adoption evidence:** CEO challenged package size, DX required a five-minute packed quick start, and Eng requires artifact-level graph proof. The full package remains the selected scope; the narrower first release is still viable.
+- **History retention and privacy:** CEO flagged payload references, DX requested an immutable snapshot/clear API, and Eng specified invocation order and clear generations. The accepted plan keeps shallow references test-local and never formats payload values.
+
 <!-- AUTONOMOUS DECISION LOG -->
 ## Decision Audit Trail
 
@@ -383,3 +420,20 @@ With these accepted tests and handling, no path is left with the triple conditio
 | 11 | Eng | Compose monotonic deadlines and cancellation precedence | Mechanical | Completeness | Exact boundary behavior is required for deterministic fake-clock tests | independent ambiguous timers |
 | 12 | Eng | Use start-ordered shallow history snapshots with clear generations | Mechanical | Correctness | Prevents a cleared in-flight call from restoring retained payload references | mutable live list or silent eviction |
 | 13 | Eng | Extend packed artifact proof for Testing | Mechanical | Completeness | A source reference could mask a broken public package | compilation only from solution projects |
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+| --- | --- | --- | ---: | --- | --- |
+| CEO Review | `/autoplan` | Scope and strategy | 1 | Issues open | Confirmed package scope; advisory-health challenge and API breadth taste decision |
+| Outside Review | Codex outside voice via `/autoplan` | Independent second opinion | 0 completed | Unavailable | Codex-host preflight prevented an outside process; native reviews completed |
+| Eng Review | `/autoplan` | Architecture and tests | 1 | Issues open | 9 issues mapped across architecture, quality, tests, and performance; 0 silent critical gaps after remedies |
+| Design Review | `/autoplan` | UI and visual design | 0 | Skipped | No UI scope |
+| DX Review | `/autoplan` | Developer experience | 1 | Clear with implementation tasks | 5/10 to 8/10 planned completeness; first-assertion time unmeasured, five-minute target |
+
+- **OUTSIDE COVERAGE:** CEO, DX, and Eng outside Codex passes unavailable under this Codex host; each phase has a completed native `combo/sub` review. No cross-model consensus is claimed.
+- **VERDICT:** CEO, DX, and Eng plan reviews completed. The plan is reviewable; implementation awaits the final choices below. No code, package, or release has been produced.
+
+**UNRESOLVED DECISIONS:**
+- Decide whether to retain the full public Testing package scope or stage a narrower first package.
+- Decide whether `DurableHostScenario` must gate direct pump calls on advisory `CanAttemptPump` despite the production guide's authoritative-admission rule (+1 unresolved from prior CEO review).
