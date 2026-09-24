@@ -7,7 +7,10 @@ namespace ForgeTrust.AppSurface.Durable.Testing;
 public sealed class FakeDurableRuntimeHealth : IDurableRuntimeHealth
 {
     /// <summary>Initializes the fake with the supplied snapshot.</summary>
-    public FakeDurableRuntimeHealth(DurableRuntimeHealthSnapshot snapshot) => Snapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot));
+    public FakeDurableRuntimeHealth(DurableRuntimeHealthSnapshot snapshot)
+    {
+        Snapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot));
+    }
 
     /// <summary>Gets or sets the snapshot returned to subsequent callers.</summary>
     public DurableRuntimeHealthSnapshot Snapshot { get; set; }

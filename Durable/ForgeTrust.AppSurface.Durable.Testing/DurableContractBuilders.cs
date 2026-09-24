@@ -18,8 +18,11 @@ public sealed class DurableWorkRequestBuilder<TWork, TResult> where TWork : notn
     private DateTimeOffset? _due;
 
     /// <summary>Creates a builder for the required definition.</summary>
-    public DurableWorkRequestBuilder(DurableWorkDefinition<TWork, TResult> definition) =>
+    public DurableWorkRequestBuilder(DurableWorkDefinition<TWork, TResult> definition)
+    {
         _definition = definition ?? throw new ArgumentNullException(nameof(definition));
+    }
+
     /// <summary>Sets owning scope; the default is <c>test-scope</c>.</summary>
     public DurableWorkRequestBuilder<TWork, TResult> WithScope(DurableScopeId value) { _scope = value; return this; }
     /// <summary>Sets command identity; the default is <c>test-command</c>.</summary>
