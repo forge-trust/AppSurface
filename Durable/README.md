@@ -13,7 +13,7 @@ AppSurface Durable is a public-preview package family for portable durable contr
   deterministic test builders, provider fakes, pump histories, host-scenario observations, and typed Work observations.
   It does not simulate persistence or replace real-provider conformance tests.
 
-All three packages participate in the coordinated prerelease publish plan. They remain preview contracts: adopt them
+All four packages participate in the coordinated prerelease publish plan. They remain preview contracts: adopt them
 only with the reviewed schema, role, recovery, and operational evidence described below, and do not treat the preview
 as production support.
 
