@@ -27,6 +27,8 @@ internal sealed class AppSurfaceDocsCodeLanguageCatalog
         ["css"] = Known("css", "css", "CSS", "css"),
         ["js"] = Known("javascript", "javascript", "JavaScript", "javascript"),
         ["javascript"] = Known("javascript", "javascript", "JavaScript", "javascript"),
+        ["py"] = Known("python", "python", "Python", "python"),
+        ["python"] = Known("python", "python", "Python", "python"),
         ["md"] = Known("markdown", "markdown", "Markdown", "markdown"),
         ["markdown"] = Known("markdown", "markdown", "Markdown", "markdown"),
         ["diff"] = Known("diff", "diff", "Diff", "diff"),

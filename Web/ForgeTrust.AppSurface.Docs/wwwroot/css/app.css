@@ -2176,20 +2176,28 @@ body {
     margin-bottom: 0;
 }
 
-.docs-content--markdown a {
+.docs-content--markdown a,
+.docs-content .doc-polyglot-link a {
     color: var(--docs-color-link);
     text-decoration: underline;
     text-decoration-color: var(--docs-color-link-underline);
     text-underline-offset: 0.18em;
 }
 
-.docs-content--markdown a:visited {
+.docs-content--markdown a:visited,
+.docs-content .doc-polyglot-link a:visited {
     color: var(--docs-color-link-visited);
 }
 
-.docs-content--markdown a:hover {
+.docs-content--markdown a:hover,
+.docs-content .doc-polyglot-link a:hover {
     color: var(--docs-color-accent-soft);
     text-decoration-color: var(--docs-color-accent-soft-underline);
+}
+
+.docs-content .doc-polyglot-link a:focus-visible {
+    outline: 2px solid var(--docs-color-accent);
+    outline-offset: 3px;
 }
 
 .docs-content--markdown hr {

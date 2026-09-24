@@ -290,6 +290,7 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                 continue;
             }
 
+            var pythonModulePath = TryGetPythonModulePath(typeDeclaration, relativePath, diagnostics);
             var namespacePage = GetOrCreateTypedNamespacePage(pages, GetNamespaceName(typeDeclaration));
             var qualifiedTypeName = GetQualifiedName(typeDeclaration);
             var typeAnchor = StringUtils.ToSafeId(qualifiedTypeName);
@@ -338,7 +339,8 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                     GetDisplayTypeName(typeDeclaration),
                     typeDocumentation.Documentation,
                     methodGroups,
-                    typedProperties));
+                    typedProperties,
+                    PythonModulePaths: pythonModulePath is null ? null : [pythonModulePath]));
             stubs.Add(
                 new DocNode(
                     GetDisplayTypeName(typeDeclaration),
@@ -939,6 +941,9 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                             .SelectMany(type => type.Properties)
                             .GroupBy(property => property.AnchorId, StringComparer.Ordinal)
                             .Select(property => property.First())
+                            .ToArray(),
+                        PythonModulePaths = group
+                            .SelectMany(type => type.PythonModulePaths ?? [])
                             .ToArray()
                     };
                 })
@@ -1140,6 +1145,7 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                     var typeDeclarations = root.DescendantNodes().OfType<TypeDeclarationSyntax>().ToList();
                     foreach (var typeDecl in typeDeclarations)
                     {
+                        var pythonModulePath = TryGetPythonModulePath(typeDecl, relativePath, diagnostics);
                         var doc = ExtractDoc(typeDecl, relativePath, diagnostics);
                         var documentedMethods = typeDecl.Members
                             .OfType<MethodDeclarationSyntax>()
@@ -1177,6 +1183,7 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                             <span class=""doc-kind"">Type</span>
                             <h2>{WebUtility.HtmlEncode(typeDisplayName)}</h2>
                             {CreateSymbolSourcePlaceholder(typeId)}
+                            {CreatePythonModuleOwnerPlaceholder(pythonModulePath, typeId, typeDisplayName)}
                         </header>");
 
                         AddSymbolSourceProvenance(namespacePage, typeId, relativePath, typeDecl);
@@ -1436,9 +1443,114 @@ public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         return StringUtils.ToSafeId($"{qualifiedTypeName}.{methodName}.method-group");
     }
 
+    private static string? TryGetPythonModulePath(
+        TypeDeclarationSyntax typeDeclaration,
+        string relativePath,
+        ICollection<DocHarvestDiagnostic> diagnostics)
+    {
+        var ownershipAttributes = typeDeclaration.AttributeLists
+            .SelectMany(static list => list.Attributes)
+            .Where(IsPythonModuleAttribute)
+            .ToArray();
+        if (ownershipAttributes.Length == 0)
+        {
+            return null;
+        }
+
+        if (ownershipAttributes.Length != 1)
+        {
+            AddInvalidPythonOwnershipDiagnostic(
+                diagnostics,
+                relativePath,
+                typeDeclaration,
+                "A documented C# type can declare only one AppSurfacePythonModule attribute.");
+            return null;
+        }
+
+        if (ownershipAttributes[0].ArgumentList is not { Arguments.Count: 1 } argumentList
+            || argumentList.Arguments[0].NameColon is not null
+            || argumentList.Arguments[0].NameEquals is not null
+            || argumentList.Arguments[0].Expression is not LiteralExpressionSyntax { RawKind: (int)SyntaxKind.StringLiteralExpression } literal)
+        {
+            AddInvalidPythonOwnershipDiagnostic(
+                diagnostics,
+                relativePath,
+                typeDeclaration,
+                "AppSurfacePythonModule requires exactly one ordinary string-literal module path.");
+            return null;
+        }
+
+        if (!TryNormalizePythonModulePath(literal.Token.ValueText, out var normalizedPath))
+        {
+            AddInvalidPythonOwnershipDiagnostic(
+                diagnostics,
+                relativePath,
+                typeDeclaration,
+                "The AppSurfacePythonModule path must be a non-empty repository-relative .py path with forward slashes and no dot segments.");
+            return null;
+        }
+
+        return normalizedPath;
+    }
+
+    private static bool IsPythonModuleAttribute(AttributeSyntax attribute)
+    {
+        var name = attribute.Name.ToString();
+        var lastSeparator = name.LastIndexOf('.');
+        var simpleName = lastSeparator >= 0 ? name[(lastSeparator + 1)..] : name;
+        return string.Equals(simpleName, "AppSurfacePythonModule", StringComparison.Ordinal)
+               || string.Equals(simpleName, "AppSurfacePythonModuleAttribute", StringComparison.Ordinal);
+    }
+
+    private static bool TryNormalizePythonModulePath(string? path, out string normalizedPath)
+    {
+        normalizedPath = string.Empty;
+        if (string.IsNullOrWhiteSpace(path)
+            || !string.Equals(path, path.Trim(), StringComparison.Ordinal)
+            || Path.IsPathRooted(path)
+            || path.IndexOf('\\') >= 0
+            || !path.EndsWith(".py", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var segments = path.Split('/', StringSplitOptions.None);
+        if (segments.Any(static segment => string.IsNullOrWhiteSpace(segment) || segment is "." or ".."))
+        {
+            return false;
+        }
+
+        normalizedPath = string.Join("/", segments);
+        return true;
+    }
+
+    private static void AddInvalidPythonOwnershipDiagnostic(
+        ICollection<DocHarvestDiagnostic> diagnostics,
+        string relativePath,
+        TypeDeclarationSyntax typeDeclaration,
+        string reason)
+    {
+        var typeName = typeDeclaration.Identifier.Text;
+        diagnostics.Add(
+            new DocHarvestDiagnostic(
+                DocHarvestDiagnosticCodes.PythonOwnershipInvalid,
+                DocHarvestDiagnosticSeverity.Warning,
+                HarvesterType,
+                $"Ignored invalid Python module ownership declared by C# type '{typeName}' in '{relativePath}'.",
+                reason,
+                "Use [AppSurfacePythonModule(\"relative/path/module.py\")] on one documented top-level C# type, then include that same Python module in AppSurfaceDocs:Harvest:Python:IncludeGlobs."));
+    }
+
     private static string CreateSymbolSourcePlaceholder(string anchorId)
     {
         return $@"<span data-appsurfacedocs-symbol-source=""{WebUtility.HtmlEncode(anchorId)}""></span>";
+    }
+
+    private static string CreatePythonModuleOwnerPlaceholder(string? pythonModulePath, string anchorId, string displayName)
+    {
+        return pythonModulePath is null
+            ? string.Empty
+            : DocPolyglotOwnershipLinker.CreateCSharpOwnerMarker(pythonModulePath, anchorId, displayName);
     }
 
     private static void AddSymbolSourceProvenance(

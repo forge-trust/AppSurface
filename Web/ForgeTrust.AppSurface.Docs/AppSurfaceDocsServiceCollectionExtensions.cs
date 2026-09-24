@@ -164,6 +164,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         TryAddMarkdownHarvester(services);
         TryAddCSharpDocHarvester(services);
         TryAddJavaScriptDocHarvester(services);
+        TryAddPythonDocHarvester(services);
         services.TryAddSingleton<DocFeaturedPageResolver>();
         services.TryAddSingleton<AppSurfaceDocsHarvestProgressReporter>();
         services.TryAddSingleton<DocAggregator>();
@@ -269,6 +270,8 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         options.Harvest.CSharp.DefaultExclusions ??= new AppSurfaceDocsHarvestDefaultExclusionOptions();
         options.Harvest.JavaScript ??= new AppSurfaceDocsJavaScriptHarvestOptions();
         options.Harvest.JavaScript.DefaultExclusions ??= new AppSurfaceDocsHarvestDefaultExclusionOptions();
+        options.Harvest.Python ??= new AppSurfaceDocsPythonHarvestOptions();
+        options.Harvest.Python.DefaultExclusions ??= new AppSurfaceDocsHarvestDefaultExclusionOptions();
         options.Bundle ??= new AppSurfaceDocsBundleOptions();
         options.Sidebar ??= new AppSurfaceDocsSidebarOptions();
         options.Contributor ??= new AppSurfaceDocsContributorOptions();
@@ -317,6 +320,9 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         options.Harvest.JavaScript.ExcludeGlobs = NormalizeGlobArray(options.Harvest.JavaScript.ExcludeGlobs);
         options.Harvest.JavaScript.DefaultExclusions = NormalizeDefaultExclusions(options.Harvest.JavaScript.DefaultExclusions);
         options.Harvest.JavaScript.GroupNameRules = NormalizeJavaScriptGroupNameRules(options.Harvest.JavaScript.GroupNameRules);
+        options.Harvest.Python.IncludeGlobs = NormalizeGlobArray(options.Harvest.Python.IncludeGlobs);
+        options.Harvest.Python.ExcludeGlobs = NormalizeGlobArray(options.Harvest.Python.ExcludeGlobs);
+        options.Harvest.Python.DefaultExclusions = NormalizeDefaultExclusions(options.Harvest.Python.DefaultExclusions);
         options.Source.RepositoryRoot = options.Source.RepositoryRoot?.Trim();
         options.Bundle.Path = NormalizeOrNull(options.Bundle.Path);
         options.Contributor.DefaultBranch = NormalizeOrNull(options.Contributor.DefaultBranch);
@@ -616,6 +622,24 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                 sp.GetRequiredService<AppSurfaceDocsHarvestPathPolicy>()));
     }
 
+    private static void TryAddPythonDocHarvester(IServiceCollection services)
+    {
+        if (services.Any(
+                descriptor => descriptor.ServiceType == typeof(PythonDocHarvesterRegistrationMarker)
+                              || descriptor.ServiceType == typeof(IDocHarvester)
+                              && descriptor.ImplementationType == typeof(PythonDocHarvester)))
+        {
+            return;
+        }
+
+        services.AddSingleton(new PythonDocHarvesterRegistrationMarker());
+        services.AddSingleton<IDocHarvester>(
+            sp => new PythonDocHarvester(
+                sp.GetRequiredService<AppSurfaceDocsOptions>(),
+                sp.GetRequiredService<ILogger<PythonDocHarvester>>(),
+                sp.GetRequiredService<AppSurfaceDocsHarvestPathPolicy>()));
+    }
+
     private static string? NormalizeOrNull(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -683,4 +707,6 @@ public static class AppSurfaceDocsServiceCollectionExtensions
     private sealed class CSharpDocHarvesterRegistrationMarker;
 
     private sealed class JavaScriptDocHarvesterRegistrationMarker;
+
+    private sealed class PythonDocHarvesterRegistrationMarker;
 }

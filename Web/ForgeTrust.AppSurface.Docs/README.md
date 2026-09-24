@@ -198,7 +198,7 @@ Use `razorwire export` for arbitrary RazorWire applications that need `--url`, `
 
 - `AppSurfaceDocsWebModule` for wiring the docs UI into an AppSurface web host
 - `AddAppSurfaceDocs()` for typed options binding and core service registration
-- `DocAggregator` plus the built-in Markdown, C# API, and annotation-first JavaScript public API harvesters, including structured harvest health diagnostics
+- `DocAggregator` plus the built-in Markdown, C# API, annotation-first JavaScript public API, and opt-in static Python docstring harvesters, including structured harvest health diagnostics
 - A live harvest observatory that starts the first source-backed harvest during startup, streams real-time RazorWire progress, and keeps first navigation informative instead of appearing hung
 - Search UI assets, page-local outline behavior, and the `/docs` MVC surface used by AppSurface Docs consumers
 - `DocsUrlBuilder` plus the MVC surface used by AppSurface Docs consumers so the live docs root, search shell, and archive routes stay in one shared contract
@@ -405,9 +405,9 @@ Pitfall: do not work around duplicate headings by removing the source `# Title` 
 
 ## Generated API language tags
 
-Generated code documentation carries programming-language metadata through `DocMetadata.CodeLanguage`. The built-in C# API harvester marks generated namespace pages and symbol stubs as `csharp`; the optional JavaScript public API harvester marks generated group pages and doclet stubs as `javascript`.
+Generated code documentation carries programming-language metadata through `DocMetadata.CodeLanguage`. The built-in C# API harvester marks generated namespace pages and symbol stubs as `csharp`; the optional JavaScript public API harvester marks generated group pages and doclet stubs as `javascript`; and the opt-in Python harvester marks accepted module pages and symbol stubs as `python`.
 
-AppSurface Docs normalizes these values for reader chrome and search. `csharp`, `c-sharp`, and `cs` display as `C#`; `javascript`, `java-script`, and `js` display as `JavaScript`; unknown nonblank values fall back to safe title-cased labels. Details pages render the language as a metadata chip, and the built-in search workspace exposes it as a `Language` facet using `?language=` query state. The search index also includes language search terms so queries such as `javascript`, `js`, `csharp`, `CSharp`, `C-Sharp`, and `C#` can find generated API docs.
+AppSurface Docs normalizes these values for reader chrome and search. `csharp`, `c-sharp`, and `cs` display as `C#`; `javascript`, `java-script`, and `js` display as `JavaScript`; and `python` and `py` display as `Python`. Unknown nonblank values fall back to safe title-cased labels. Details pages render the language as a metadata chip, and the built-in search workspace exposes it as a `Language` facet using `?language=` query state. The search index also includes language search terms so queries such as `javascript`, `js`, `python`, `py`, `csharp`, `CSharp`, `C-Sharp`, and `C#` can find generated API docs.
 
 This language tag describes the source language of extracted API documentation. It is not a locale signal and it is not the same as the `data-doc-code-language` badge used by Markdown code fences.
 
@@ -596,6 +596,16 @@ AppSurface Docs currently emits these codes:
 - `DocHarvestDiagnosticCodes.LocalizationFallbackDisabledMissingVariant` (`appsurfacedocs.localization.fallback_disabled_missing_variant`)
 - `DocHarvestDiagnosticCodes.LocalizationFallbackConflict` (`appsurfacedocs.localization.fallback_conflict`)
 - `DocHarvestDiagnosticCodes.CSharpFileTooLarge` (`appsurfacedocs.csharp.file_too_large`)
+- `DocHarvestDiagnosticCodes.PythonFileTooLarge` (`appsurfacedocs.python.file_too_large`)
+- `DocHarvestDiagnosticCodes.PythonMissingInclude` (`appsurfacedocs.python.missing_include`)
+- `DocHarvestDiagnosticCodes.PythonParserUnavailable` (`appsurfacedocs.python.parser_unavailable`)
+- `DocHarvestDiagnosticCodes.PythonParseFailed` (`appsurfacedocs.python.parse_failed`)
+- `DocHarvestDiagnosticCodes.PythonPublicBoundaryMissing` (`appsurfacedocs.python.public_boundary_missing`)
+- `DocHarvestDiagnosticCodes.PythonPublicBoundaryInvalid` (`appsurfacedocs.python.public_boundary_invalid`)
+- `DocHarvestDiagnosticCodes.PythonExportNotSupported` (`appsurfacedocs.python.export_not_supported`)
+- `DocHarvestDiagnosticCodes.PythonExportNotFound` (`appsurfacedocs.python.export_not_found`)
+- `DocHarvestDiagnosticCodes.PythonSlugCollision` (`appsurfacedocs.python.slug_collision`)
+- `DocHarvestDiagnosticCodes.PythonOwnershipInvalid` (`appsurfacedocs.python.ownership_invalid`)
 - `DocHarvestDiagnosticCodes.CSharpParseFailed` (`appsurfacedocs.csharp.parse_failed`)
 - `DocHarvestDiagnosticCodes.CSharpXmlCommentMalformed` (`appsurfacedocs.csharp.xml_comment_malformed`)
 - `DocHarvestDiagnosticCodes.CSharpXmlCommentDepthExceeded` (`appsurfacedocs.csharp.xml_comment_depth_exceeded`)
@@ -615,7 +625,7 @@ AppSurface Docs currently emits these codes:
 
 ### Oversized source diagnostics
 
-The built-in C# and JavaScript harvesters apply parser-input byte budgets before decoding source text. This protects source-backed docs snapshots from generated files and accidental large bundles without changing the public path policy contract.
+The built-in C#, JavaScript, and Python harvesters apply parser-input byte budgets before decoding source text. This protects source-backed docs snapshots from generated files and accidental large bundles without changing the public path policy contract.
 
 `DocHarvestDiagnosticCodes.CSharpFileTooLarge` (`appsurfacedocs.csharp.file_too_large`) means a policy-approved `.cs` file was skipped before Roslyn parsing because the harvester read more bytes than `AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes` allows. The default C# limit is `1048576` bytes. It is intentionally larger than the JavaScript default because authored C# API source commonly carries XML documentation and generated JavaScript bundles are noisier in broad discovery.
 
@@ -626,6 +636,8 @@ Recovery order:
 3. In CI, read `{DocsRootPath}/_health.json` and branch on diagnostic codes. Block release output when `diagnostics[].code` contains `appsurfacedocs.csharp.file_too_large` for a path that should publish, rather than changing aggregate health semantics.
 
 `DocHarvestDiagnosticCodes.JavaScriptFileTooLarge` keeps the existing JavaScript behavior and default `262144` byte limit. JavaScript strictness is still controlled by `AppSurfaceDocs:Harvest:JavaScript:StrictHealth`, nonempty JavaScript `IncludeGlobs`, and the strict public event option.
+
+`DocHarvestDiagnosticCodes.PythonFileTooLarge` (`appsurfacedocs.python.file_too_large`) means a policy-approved `.py` file was skipped before Tree-sitter parsing because it exceeded `AppSurfaceDocs:Harvest:Python:MaxFileSizeBytes`. The default is `262144` bytes. Python reads no files at all until `AppSurfaceDocs:Harvest:Python:IncludeGlobs` contains at least one usable explicit boundary; see [Python docstring harvesting](#python-docstring-harvesting).
 
 An all-failed snapshot logs one critical message when that snapshot is generated. Reusing the cached health snapshot does not log again. Calling `InvalidateCache()` and then reading docs or harvest health can generate a new snapshot and, if every harvester still fails, a new critical log entry.
 
@@ -1843,6 +1855,20 @@ replacement can leave `/docs/search` permanently loading even though the server 
   - Must be a positive byte value.
   - The C# harvester reads at most this value plus one byte before decoding and Roslyn parsing. Files over the limit are skipped with `appsurfacedocs.csharp.file_too_large` and do not block aggregate health by default.
   - Prefer `AppSurfaceDocs:Harvest:CSharp:ExcludeGlobs` for generated source. Raise this limit only when an authored C# API source file is intentionally larger.
+- `AppSurfaceDocs:Harvest:Python:Enabled`
+  - Defaults to `true`, but Python harvesting remains inert until `IncludeGlobs` provides an explicit source boundary.
+  - Set to `false` to remove the Python harvester from the active Docs pipeline.
+- `AppSurfaceDocs:Harvest:Python:IncludeGlobs` / `ExcludeGlobs` / `DefaultExclusions`
+  - Include and exclude globs default to empty lists; default-exclusion controls mirror the global path option shape.
+  - Python requires at least one nonblank include glob. With no usable include, it reads no Python source and emits `appsurfacedocs.python.missing_include` with configuration guidance.
+  - Global path policy applies first, then Python-specific includes, default exclusions, and excludes refine the candidate set. The harvester never executes or imports an accepted `.py` file.
+- `AppSurfaceDocs:Harvest:Python:StrictHealth`
+  - Defaults to `false`.
+  - A usable `IncludeGlobs` boundary already makes Python participate in aggregate strict health. With no usable include and `StrictHealth=false`, it stays out of strict totals.
+  - `StrictHealth=true` makes Python participate even without an include and raises parser-availability diagnostics from `Warning` to `Error`. Other Python diagnostics retain warning severity, but source and boundary diagnostics can still fail the participating harvester's aggregate health. Use it only after the host has established a stable Python source boundary.
+- `AppSurfaceDocs:Harvest:Python:MaxFileSizeBytes`
+  - Defaults to `262144` and must be a positive byte value.
+  - Files over this limit are skipped before Tree-sitter parsing with `appsurfacedocs.python.file_too_large`.
 - `AppSurfaceDocs:Harvest:JavaScript:Enabled`
   - Defaults to `true`.
   - Set to `false` to opt out of JavaScript public API harvesting entirely.
@@ -1988,6 +2014,30 @@ These settings are pre-read byte guards. They do not provide Markdig parser-comp
 
 Production hosts can set the same value with `AppSurfaceDocs__Versioning__MaxRewrittenFileSizeBytes`.
 
+### Python docstring harvesting
+
+Python harvesting is an explicit, static sidecar-documentation option for a mixed .NET codebase. It uses the bundled Tree-sitter Python grammar but never imports a module, starts Python, evaluates source, or requires a Python runtime. Configure one narrow repository-relative boundary:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "Python": {
+        "IncludeGlobs": [
+          "sidecar/**/*.py"
+        ]
+      }
+    }
+  }
+}
+```
+
+For this bounded slice, a module must declare one top-level literal `__all__` list or tuple of string names. AppSurface Docs publishes matching module-level classes and functions, plus documented methods of an exported class, under `api/python/{module-slug}`. The slug is a lowercase ASCII normalization of the repository-relative source path; a path whose meaningful characters all normalize away uses `module`, and ordinary slug-collision diagnostics still prevent ambiguous pages from publishing. Symbol fragments use the same normalized shape and add a stable encoded suffix only when distinct Python names would otherwise collide, so case-distinct exports remain independently addressable. Missing or dynamic boundaries publish no module page and emit a diagnostic from the [diagnostic code reference](#diagnostics) instead of silently inferring visibility. Supported docstrings are plain, unprefixed single- or triple-quoted literals; Google, NumPy, and Sphinx dialect parsing is intentionally out of scope.
+
+Use `[AppSurfacePythonModule("sidecar/worker.py")]` on one documented top-level C# host type when readers need reciprocal navigation between that API type and an accepted Python module. The literal path is parsed from C# syntax and the link renders only when exactly one published Python module matches it. Built-in C# namespace pages render this link through their typed Razor projection; direct public or derived C# harvester calls retain the legacy HTML output contract. Repeated ownership declarations remain ambiguous and produce no reciprocal link. See the [Python harvesting spike design](../../docs/designs/python-docstring-harvesting-spike.md) for the parser payload trade-off, ownership contract, diagnostics, and RID evidence boundary.
+
+Use emitted Python fragment routes when linking to symbols. Anchors are unique within a module, including class members, and normalization collisions receive deterministic suffixes; deriving a fragment directly from a Python name can therefore point to a different symbol. Module pages render declarations beneath the module heading while retaining the compact two-level API outline used by JavaScript.
+
 ### JavaScript public API harvesting
 
 JavaScript harvesting is for intentional browser runtime contracts: custom events, globals, small public helpers, constants, typedefs, attributes, config fields, module mount contracts, CSS custom properties, and CSS hooks that application authors need to consume. It is enabled by default, but it is annotation-first: AppSurface Docs publishes only supported public doclets and ignores unannotated JavaScript.
@@ -2089,7 +2139,7 @@ Every valid generated JavaScript API symbol has the reader-facing lifecycle labe
  */
 ```
 
-The built-in search index projects `apiLifecycle`, `apiLifecycleLabel`, `isDeprecated`, and `isGeneratedApiSymbol` only for validated generated JavaScript API fragments. The search client uses lifecycle values as searchable terms and ranks matching symbol fragments ahead of aggregate API group-body matches. Custom search clients should treat the fields as optional additions to the v1 payload and should not infer lifecycle from ordinary page metadata. Custom harvesters retain the public model shape, but lifecycle values are projected only when the built-in JavaScript harvester has recorded internal provenance and the fragment meets the canonical lifecycle contract.
+The built-in search index projects `apiLifecycle`, `apiLifecycleLabel`, `isDeprecated`, and `isGeneratedApiSymbol` only for validated generated API fragments from built-in language harvesters. The search client uses lifecycle values as searchable terms and ranks matching symbol fragments ahead of aggregate API group-body matches. Custom search clients should treat the fields as optional additions to the v1 payload and should not infer lifecycle from ordinary page metadata. Custom harvesters retain the public model shape, but lifecycle values are projected only when a built-in language harvester has recorded internal provenance and the fragment meets the canonical lifecycle contract.
 
 Invalid combinations skip only the affected item and emit structured diagnostics: repeated or mixed `@alpha`/`@beta` modifiers and conflicting nonblank `@deprecated` messages use `DocHarvestDiagnosticCodes.JavaScriptLifecycleConflict`; modifiers with content use `DocHarvestDiagnosticCodes.JavaScriptMalformedLifecycle`. These diagnostics remain warnings in best-effort discovery and become errors when `AppSurfaceDocs:Harvest:JavaScript:StrictHealth=true`. A configured JavaScript include boundary still makes either lifecycle diagnostic fail aggregate strict health, even when the individual diagnostic remains warning-severity.
 
@@ -3103,7 +3153,7 @@ The current-surface `search-index.json` payload continues to emit the raw `pageT
 - `isSectionLanding` for authored section landing entry points
 - `entryPoints` for namespace-intro entry-point labels, summaries, targets, hrefs, and keywords when an intro source is consumed into a generated namespace page
 - `language` and `languageLabel` for generated API documentation language facets and result chrome
-- `apiLifecycle`, `apiLifecycleLabel`, `isDeprecated`, and `isGeneratedApiSymbol` for generated JavaScript API symbol fragments only
+- `apiLifecycle`, `apiLifecycleLabel`, `isDeprecated`, and `isGeneratedApiSymbol` for validated built-in generated API symbol fragments only
 These fields let custom search clients stay visually aligned with the landing and detail experiences without re-implementing the mapping table.
 
 `summaryPresentation` is an optional display-only array for clients that want to render Markdown-like summary emphasis without exposing raw Markdown markers. The legacy `summary` string remains unchanged and remains the summary search field; clients that do not recognize `summaryPresentation` can ignore it. When present, each node is one of `text`, `strong`, `emphasis`, or `code`: `text` and `code` nodes carry only `kind` and `text`, while `strong` and `emphasis` nodes carry only `kind` and `children`. The array root is not a node. Nodes are limited to depth 8, 128 total nodes, and 1,024 Unicode scalars across all leaves. The projection never carries HTML, attributes, URLs, image sources, or link destinations; links and images contribute only their reader-facing text. Custom clients should validate the whole optional tree atomically and fall back to `summary` (then `snippet`) if it is missing or invalid.

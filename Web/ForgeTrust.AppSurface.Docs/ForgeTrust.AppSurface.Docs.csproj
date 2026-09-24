@@ -42,6 +42,7 @@
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
     <PackageReference Include="TextMateSharp" />
     <PackageReference Include="TextMateSharp.Grammars" />
+    <PackageReference Include="TreeSitter.DotNet" />
     <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 
@@ -59,6 +60,7 @@
 
   <ItemGroup>
     <None Include="$(MSBuildProjectDirectory)\THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="" />
+    <None Include="$(MSBuildProjectDirectory)\THIRD-PARTY-TREE-SITTER-UNICODE-LICENSE.txt" Pack="true" PackagePath="" />
   </ItemGroup>
 
 </Project>

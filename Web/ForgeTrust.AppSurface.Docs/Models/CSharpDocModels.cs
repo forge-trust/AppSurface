@@ -68,13 +68,24 @@ internal sealed record CSharpChildNamespace(
 /// <param name="MethodGroups">The documented method overload groups declared by the type.</param>
 /// <param name="Properties">The documented properties declared by the type.</param>
 /// <param name="SourceHref">The safe source URL for the declaration, when available.</param>
+/// <param name="PythonModulePaths">Validated Python module declarations on this type, including repeated partial declarations so ambiguous ownership cannot become a link.</param>
+/// <param name="LinkedPythonModule">The accepted Python module resolved by the aggregator, or <see langword="null"/> when ownership is missing or ambiguous.</param>
 internal sealed record CSharpTypeDocument(
     string AnchorId,
     string DisplayName,
     CSharpDocumentation? Documentation,
     IReadOnlyList<CSharpMethodGroupDocument> MethodGroups,
     IReadOnlyList<CSharpPropertyDocument> Properties,
-    string? SourceHref = null);
+    string? SourceHref = null,
+    IReadOnlyList<string>? PythonModulePaths = null,
+    CSharpPythonModuleLink? LinkedPythonModule = null);
+
+/// <summary>
+/// A reciprocal link from a documented C# host type to one accepted Python module page.
+/// </summary>
+/// <param name="SourcePath">The validated repository-relative Python source path displayed to readers.</param>
+/// <param name="DocPath">The accepted module's canonical Docs path, resolved only after all harvesters complete.</param>
+internal sealed record CSharpPythonModuleLink(string SourcePath, string DocPath);
 
 /// <summary>
 /// A documented enum declaration.
