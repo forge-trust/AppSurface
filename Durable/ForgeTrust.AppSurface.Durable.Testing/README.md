@@ -57,7 +57,7 @@ public sealed class DurableHostTests
 ```
 
 Run `dotnet test` from the test-project directory. For a repository-local package feed, use the
-[packed consumer verifier](../verify-packed-consumers.sh) as the working example of restore, graph inspection, and
+[packed consumer verifier](https://github.com/forge-trust/AppSurface/blob/main/Durable/verify-packed-consumers.sh) as the working example of restore, graph inspection, and
 four-kind admission assertions against a freshly packed artifact.
 
 The default recording pump returns `Completed` with an empty result. That means this invocation completed and reported
