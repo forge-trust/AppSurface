@@ -115,16 +115,32 @@ public sealed class BuilderObservationTests
     {
         var codec = new SystemTextJsonDurablePayloadCodec<string>("registry.input", "v1", DurableDataClassification.ApprovedApplication,
             (JsonTypeInfo<string>)new JsonSerializerOptions(JsonSerializerDefaults.Web) { TypeInfoResolver = new DefaultJsonTypeInfoResolver() }.GetTypeInfo(typeof(string)), static _ => true);
-        var definition = DurableWork.Define<string, string>("registered", "v1", codec, codec,
-            DurableProviderSafety.Idempotent, DurableWorkRetryPolicy.Default);
-        var registry = new DurableWorkRegistry(new[]
-        {
-            new DurableWorkRegistration<string, string, TestExecutor>("registered", "v1",
-                DurableProviderSafety.Idempotent, codec, codec)
-        });
+        var registered = new DurableWorkRegistration<string, string, TestExecutor>("registered", "v1",
+            DurableProviderSafety.Idempotent, codec, codec);
+        var registry = new DurableWorkRegistry([registered]);
         var registration = DurableWorkRegistryObservation.Capture(registry, "registered", "v1");
         Assert.Equal("registered", registration.WorkName);
+        Assert.Same(registered, registration.Registration);
         Assert.Throws<InvalidOperationException>(() => { _ = DurableWorkRegistryObservation.Capture(registry, "missing", "v1"); });
+        Assert.Throws<InvalidOperationException>(() => new DurableWorkRegistry([registered, registered]));
+    }
+
+    [Fact]
+    public void TypedRequestBuilderRequiresWorkAndPreservesCodecRejection()
+    {
+        var codec = new SystemTextJsonDurablePayloadCodec<string>("rejected.input", "v1",
+            DurableDataClassification.ApprovedApplication,
+            (JsonTypeInfo<string>)new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                TypeInfoResolver = new DefaultJsonTypeInfoResolver()
+            }.GetTypeInfo(typeof(string)), static _ => false);
+        var definition = DurableWork.Define<string, string>("rejected.work", "v1", codec, codec,
+            DurableProviderSafety.Idempotent, DurableWorkRetryPolicy.Default);
+
+        Assert.Throws<ArgumentNullException>(() => new DurableWorkRequestBuilder<string, string>(null!));
+        Assert.Throws<InvalidOperationException>(() => new DurableWorkRequestBuilder<string, string>(definition).Build());
+        Assert.Throws<ArgumentException>(() => new DurableWorkRequestBuilder<string, string>(definition)
+            .WithWork("rejected").Build());
     }
 
     [Fact]

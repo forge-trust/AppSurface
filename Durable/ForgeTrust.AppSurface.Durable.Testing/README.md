@@ -14,12 +14,13 @@ state, leases, crash recovery, transactions, or an ambiguous external effect. Th
 
 ## Quick start
 
-The package has no test-framework or assertion-library dependency. Add it to a test project and use your chosen test
-framework (the following example uses xUnit):
+The package has no test-framework or assertion-library dependency. Start with an xUnit project (or use an existing
+test project), add Testing, and save the following test as `DurableHostTests.cs`:
 
 ```bash
+dotnet new xunit -f net10.0 -n DurableHost.Tests
+cd DurableHost.Tests
 dotnet package add ForgeTrust.AppSurface.Durable.Testing
-dotnet test
 ```
 
 Keep `ForgeTrust.AppSurface.Durable.Testing`, `ForgeTrust.AppSurface.Durable`, and
@@ -54,6 +55,10 @@ public sealed class DurableHostTests
     }
 }
 ```
+
+Run `dotnet test` from the test-project directory. For a repository-local package feed, use the
+[packed consumer verifier](../verify-packed-consumers.sh) as the working example of restore, graph inspection, and
+four-kind admission assertions against a freshly packed artifact.
 
 The default recording pump returns `Completed` with an empty result. That means this invocation completed and reported
 zero counts; it does not prove that a real store has no eligible work. Configure `RecordingDurableRuntimePump.Admission`
