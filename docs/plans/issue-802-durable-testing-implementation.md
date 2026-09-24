@@ -48,6 +48,13 @@ Do not add fake Work/Flow/Schedule persistence, an assertion DSL, HTTP adapter, 
 - Specify an atomic immutable call-history snapshot API and a retention/clear mechanism; document default behavior, payload-reference privacy, and customization limits.
 - Add API-specific problem/cause/fix/error-link guidance and coordinated preview-package upgrade instructions.
 <!-- /autoplan-accepted:dx -->
+
+<!-- autoplan-accepted:eng -->
+- Define the scenario's shared monotonic overall budget to start with its first assessment; cap each observation wait by the remaining budget. A completed result at the deadline wins if already available; caller cancellation wins only when observed before completion/timeout. After an admission call starts, an expired wait reports a distinct timeout with `InvocationStarted = true` and `ExecutionStatusUnknown = true`; it never converts the provider call to a refusal or empty pass. Do not detach and forget an in-flight task: retain it for observation or await its terminal state through a documented API, without silently retrying.
+- Define “latest assessment” as the most recently completed successful assessment, published under synchronization. A pump call atomically captures that snapshot; one snapshot may be reused for multiple pump calls. Missing assessment throws an explicit `InvalidOperationException`; failed/canceled assessments never replace the last successful one. Each pump invocation still calls authoritative admission once when permitted by the confirmed scenario contract.
+- Define fake history order by invocation-start sequence, with completion/cancellation recorded on that same entry. Snapshot returns an atomic immutable copy of entries, but payload-bearing request references remain shallow. `ClearHistory()` advances a generation: earlier in-flight calls cannot repopulate cleared history. Default retention is test-instance lifetime with explicit clear and no silent truncation. Never format or serialize payload values in diagnostics.
+- Add deterministic fake-clock tests for deadline equality, both timeout phases, caller-cancellation races, and a provider that ignores cancellation and completes after timeout; gated concurrency tests for reversed assessment completion, repeated/concurrent pump calls, snapshot/clear races, and immutable history views.
+<!-- /autoplan-accepted:eng -->
 ## Review record
 
 ### CEO review (Phase 1, selective expansion)
@@ -253,6 +260,111 @@ Overall plan score: 5/10 initially, 8/10 after the accepted DX obligations are i
 - Add API-specific problem/cause/fix/error-link guidance and coordinated preview-package upgrade instructions.
 <!-- /autoplan-accepted:dx -->
 
+### Engineering review (Phase 3, full review)
+
+**Step 0 — scope challenge and existing code.** The planned package stays within the confirmed #802 scope. `DurableRuntimeHealthSnapshot` already calculates all four predicates and validates individual fields; `DurableRuntimePumpAttempt` already enforces the four outcome shapes. `DurableWorkDefinition.CreateRequest` owns codec encoding, request identity, and fingerprint generation. `DurableWorkerEnvelope.CreateNative` owns native fencing identity. `DurableWorkRegistry.GetRequired` already provides exact registration semantics. The package should call these production paths. Its remaining value is shared fixture defaults, observable fake behavior, and a compiled external-host example. The implementation should not reimplement provider policy or add a generic event bus. The existing packed-consumer harness can prove the NuGet graph once extended for Testing and a test runner.
+
+**Dual voices.** A `combo/sub` native reviewer read the exact engineering snapshot (SHA-256 `0c5f38dc…cc05cd0`) and returned four findings: post-invocation timeout ambiguity (high), assessment ordering/reuse ambiguity (high), deadline composition (medium), and concurrent history/retention semantics (medium). The outside Codex review is unavailable under the Codex host preflight; no outside process ran. Primary review accepts the four concrete remedies into the plan. The native reviewer independently confirms the advisory-health contradiction identified in CEO review. It remains a user challenge rather than a silent change to the confirmed spec.
+
+| Dimension | Native reviewer | Outside Codex | Consensus |
+| --- | --- | --- | --- |
+| Architecture sound? | Conditional: state/timeout contracts needed | N/A | Not confirmed |
+| Test coverage sufficient? | No: race and late completion gaps | N/A | Not confirmed |
+| Performance risks addressed? | History retention needs a contract | N/A | Not confirmed |
+| Security threats covered? | Payload-bearing history needs privacy rules | N/A | Not confirmed |
+| Error paths handled? | No: timeout and cancellation races unclear | N/A | Not confirmed |
+| Deployment risk manageable? | No finding | N/A | Not confirmed |
+
+**Section 1 — architecture and coupling.**
+
+```text
+external host test
+  -> Testing (builders, recording fakes, scenario, observations)
+       -> Durable.Provider (health, drain, request, admission, attempts)
+       -> Durable (typed Work, registry, codec, binding)
+            -> Workers (native envelope + fencing identity)
+  -> packed artifact consumer (fresh local feed, xUnit assertions)
+PostgreSQL conformance tests -> same observation shapes -> real provider
+```
+
+The production dependency direction stays one-way: neither Durable nor Provider references Testing. The scenario is a host-facing test orchestrator, so it may compose an advisory assessment and authoritative admission but must not infer a provider outcome from a stale snapshot. The confirmed `CanAttemptPump` gate conflicts with the canonical provider advice to call admission directly; retain it pending final approval. No endpoint or credential surface is added. The main complexity is mutable per-instance state: assessment publication, pump capture, and fake histories require explicit synchronization. The plan needs no new inline ASCII diagrams in production code because these are small compositions; a concise state diagram beside the scenario's public documentation would help maintainers.
+
+**Section 2 — code quality.** Keep builders as named defaults plus direct constructor calls. Use one state/default matrix rather than six divergent initialization branches. Make fake recording explicit with a synchronized call sequence and immutable snapshots; avoid a reusable interception framework. Keep timeout classification in one helper using the supplied `TimeProvider` so health and pump waits cannot drift. Define exceptions and public observation fields before freezing the API snapshot. Preserve the original exception from a delegate or codec; no broad catch should hide it.
+
+**Section 3 — full test review.** No #802 implementation exists yet; every row below is a planned new path and currently has no #802 test. “Unit” means provider-free tests of public Testing APIs; “PG” means a real PostgreSQL provider test; “packed” means a fresh-feed external consumer.
+
+| New path or branch | Required verification | Gap before implementation |
+| --- | --- | --- |
+| Six named health defaults and valid overrides | Unit: full field/predicate matrix | All new |
+| Invalid and intentionally contradictory health states | Unit: checked `Build` error and explicit contradictory escape | All new |
+| Pump request bounds and result counts | Unit: production constructor parity and invalid boundaries | All new |
+| Four attempt kinds and problem-code/result pairings | Unit plus packed assertion: exact kind, nullability, code | All new |
+| Typed request/codec path | Unit: direct `CreateRequest` parity, fingerprint, null, codec rejection | All new |
+| Native envelope and fence identity | Unit: direct `CreateNative` parity, invalid identity | All new |
+| Health fake get success, cancellation, error | Unit: delegate behavior, exact history, original exception | All new |
+| Pump fake default, four outcomes, delegate, overlap | Unit: empty pass, exact request, call start order, concurrent completion, cancellation | All new |
+| Drain fake begin/resume transitions and errors | Unit: transition history, cancellation, repeat calls | All new |
+| Scenario assess success, missing, failure, concurrent completion | Unit with gated tasks: latest completed successful snapshot, failure retention | All new |
+| Scenario pump repeated/concurrent calls and stale assessment | Unit: atomic snapshot capture, one admission call, exact attempt | All new |
+| Advisory-health gate versus provider admission | Unit: NotStarted/Stale, Draining/Incompatible and provider refusal; final user decision controls expected gate | Open user challenge |
+| Per-observation/overall deadline and cancellation races | Unit with `FakeTimeProvider`: equality, precedence, pre/post-invocation, ignored cancellation | All new |
+| History snapshot, clear, retention, payload privacy | Unit: copy immutability, generation/clear race, no payload formatting | All new |
+| Definition, registry, codec, binding observations | Unit: exact identity/defaults, absent/duplicate, codec rejection, binding | All new |
+| Real claim, completion, stale recovery, post-permit ambiguity | PG: shared observation records and authoritative result/unknown distinction | Extension needed |
+| Package restore and dependency graph | Packed: fresh Testing nupkg, xUnit sample, package byte identity, forbidden dependency audit | Harness extension needed |
+
+No LLM or prompt changes exist, so no eval suite applies. The practical gate is provider-free tests, targeted PostgreSQL conformance, packed consumer, API snapshot and packaging checks, formatting, then solution coverage if the local database/toolchain permit it. The separate [engineering test plan](/Users/andrew/.gstack/projects/forge-trust-AppSurface/andrew-codex-issue-802-autoplan-test-plan-20260924.md) records the boundary cases and commands.
+
+**Section 4 — performance.** Testing adds no production query or server path. History memory grows with calls and retains shallow request/payload references until `ClearHistory()` or instance collection; no silent truncation protects assertion correctness. A bounded concurrent stress test should measure append/snapshot behavior, not benchmark database throughput. PostgreSQL and packed restore are the slow test layers. There is no N+1 query or cache strategy in the library.
+
+**Failure-mode registry.**
+
+| Path | Realistic failure | Test | Handling | Caller signal |
+| --- | --- | --- | --- | --- |
+| Health builder | Contradictory state passes unnoticed | Matrix/negative unit | Checked build, explicit escape | Argument error |
+| Pump builders | Invalid result/code pairing | Four-kind negative unit | Production constructor | Argument error |
+| Typed request/envelope | Codec or identity invalid | Parity/negative unit | Production exception | Original error |
+| Fake health/pump/drain | Delegate throws or caller cancels | Delegate/cancel unit | Propagate unchanged | Original exception |
+| Fake history | Concurrent clear loses ordering or retains old payload | Gated clear/snapshot unit | Generation and atomic copy | Explicit empty/current history |
+| Assessment | Older completion replaces newer or failed assessment overwrites good | Gated ordering unit | Synchronized completed publication | Exact captured snapshot |
+| Admission | Provider refuses after positive health | Unit + packed | Return exact attempt | Refused, no synthetic result |
+| Deadline | Provider completes after local timeout | Fake-clock unit + PG ambiguity | Distinct invocation-started unknown status; observe late task | Timeout with unknown status |
+| Registry observation | Missing or duplicate registration | Unit | Production registry exception | Exact failure |
+| Packed consumer | Source reference masks broken nupkg | Fresh-feed packed test | Artifact/graph verification | Build/test failure |
+
+With these accepted tests and handling, no path is left with the triple condition of no test, no handling, and silent failure. The advisory health gate remains an architectural conflict, not a hidden critical gap.
+
+**NOT in scope:** fake persistence, effect-permit simulator, authorization/HTTP adapter, generic assertion DSL, and new telemetry service. Each would either counterfeit provider guarantees or add a separate application concern. A bounded default history cap is also deferred because silent eviction would make assertion histories misleading; explicit clear is the retention control.
+
+**What already exists:** the production contract constructors and computed predicates, typed request and native envelope factories, exact registry, PostgreSQL tests, and packed consumer shell harness. The plan reuses each. No new production API is required.
+
+**Parallelization.** Core Testing API, its unit tests, and README all touch `Durable/ForgeTrust.AppSurface.Durable.Testing/` and should be sequential within one lane. PostgreSQL conformance work under `Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/` can run independently after observation shapes are frozen. Packed harness/docs under `Durable/packed-consumers/` and `docs/` can run in parallel with PostgreSQL after the public API exists. Final API snapshot, formatting, and verification follow integration. The solution/package-index edits are shared and should be serialized to avoid merge conflicts.
+
+| Step | Modules touched | Depends on |
+| --- | --- | --- |
+| A: public contract, builders, fakes, scenario | Testing/, solution/, packages/ | — |
+| B: provider-free tests | Testing.Tests/ | A |
+| C: real provider conformance | PostgreSql.Tests/ | A observation shape |
+| D: packed consumer and adoption docs | packed-consumers/, docs/, Testing/ README | A public API |
+| E: format, API/pack/coverage gates | repository-wide verification | A–D |
+
+**Completion summary:** FULL_REVIEW; scope accepted as confirmed. Architecture: 2 issues (advisory gate, state synchronization). Code quality: 2 issues (duplicated fixture policy risk, deadline logic drift). Test review: 18 paths mapped, 4 concrete gaps emphasized by the native reviewer. Performance: 1 issue (unbounded test-instance history). Failure modes: 10 mapped, 0 critical triple gaps after accepted remedies. Native voice: 4 findings; outside Codex: unavailable, so 0/6 dual-voice dimensions confirmed. One user challenge (health gate) and one taste choice (full public package breadth) remain for the final gate. Lake score: N/A; choices differ in kind. No new TODO was written for scope expansions because the existing transport-neutral extraction TODO already captures the deferred direction.
+
+### Engineering implementation tasks
+
+- [ ] **E1 (P1, human: ~2h / agent: ~30min)** — Scenario — Specify post-invocation timeout evidence and late-task observation. Surfaced by native engineering finding 1. Verify with fake-clock ignored-cancellation and PG post-permit tests.
+- [ ] **E2 (P1, human: ~2h / agent: ~30min)** — Scenario — Implement latest completed successful assessment publication, reuse, and atomic pump capture. Surfaced by native finding 2. Verify both completion orders and repeated/concurrent calls.
+- [ ] **E3 (P1, human: ~1h / agent: ~20min)** — Scenario — Compose observation and overall monotonic deadlines with defined equality/cancellation precedence. Surfaced by native finding 3. Verify boundary/race tests.
+- [ ] **E4 (P2, human: ~1h / agent: ~20min)** — Fakes — Define invocation-order history, generation-based clear, shallow immutable snapshots, and privacy boundary. Surfaced by native finding 4. Verify snapshot/clear races and diagnostics.
+- [ ] **E5 (P2, human: ~1h / agent: ~15min)** — Packaging — Extend the existing packed harness for Testing xUnit assertions and dependency audit. Surfaced by test review's package-graph gap. Verify fresh-feed `Durable/verify-packed-consumers.sh`.
+
+<!-- autoplan-accepted:eng -->
+- Define the scenario's shared monotonic overall budget to start with its first assessment; cap each observation wait by the remaining budget. A completed result at the deadline wins if already available; caller cancellation wins only when observed before completion/timeout. After an admission call starts, an expired wait reports a distinct timeout with `InvocationStarted = true` and `ExecutionStatusUnknown = true`; it never converts the provider call to a refusal or empty pass. Do not detach and forget an in-flight task: retain it for observation or await its terminal state through a documented API, without silently retrying.
+- Define “latest assessment” as the most recently completed successful assessment, published under synchronization. A pump call atomically captures that snapshot; one snapshot may be reused for multiple pump calls. Missing assessment throws an explicit `InvalidOperationException`; failed/canceled assessments never replace the last successful one. Each pump invocation still calls authoritative admission once when permitted by the confirmed scenario contract.
+- Define fake history order by invocation-start sequence, with completion/cancellation recorded on that same entry. Snapshot returns an atomic immutable copy of entries, but payload-bearing request references remain shallow. `ClearHistory()` advances a generation: earlier in-flight calls cannot repopulate cleared history. Default retention is test-instance lifetime with explicit clear and no silent truncation. Never format or serialize payload values in diagnostics.
+- Add deterministic fake-clock tests for deadline equality, both timeout phases, caller-cancellation races, and a provider that ignores cancellation and completes after timeout; gated concurrency tests for reversed assessment completion, repeated/concurrent pump calls, snapshot/clear races, and immutable history views.
+<!-- /autoplan-accepted:eng -->
+
 <!-- AUTONOMOUS DECISION LOG -->
 ## Decision Audit Trail
 
@@ -266,3 +378,8 @@ Overall plan score: 5/10 initially, 8/10 after the accepted DX obligations are i
 | 6 | DX | Target a measured five-minute packed first assertion | Mechanical | Pragmatic | A compiled consumer proves the package can be adopted with one install | unmeasured speed claim |
 | 7 | DX | Specify scenario errors, assessment reuse, and history snapshot API | Mechanical | Completeness | New public types must be predictable under cancellation and concurrency | document only happy path |
 | 8 | DX | Keep the copyable xUnit test as the first-use vehicle | Mechanical | Explicit over clever | Reuses the existing packed harness without new hosted infrastructure | playground or video |
+| 9 | Eng | Specify post-invocation timeout and retained late-task evidence | Mechanical | Correctness | A deadline cannot certify that admission or execution stopped | treat timeout as refusal |
+| 10 | Eng | Publish latest completed successful assessment and allow reuse | Mechanical | Explicit over clever | Makes races and repeated host calls deterministic | start-order or consume-once semantics |
+| 11 | Eng | Compose monotonic deadlines and cancellation precedence | Mechanical | Completeness | Exact boundary behavior is required for deterministic fake-clock tests | independent ambiguous timers |
+| 12 | Eng | Use start-ordered shallow history snapshots with clear generations | Mechanical | Correctness | Prevents a cleared in-flight call from restoring retained payload references | mutable live list or silent eviction |
+| 13 | Eng | Extend packed artifact proof for Testing | Mechanical | Completeness | A source reference could mask a broken public package | compilation only from solution projects |
