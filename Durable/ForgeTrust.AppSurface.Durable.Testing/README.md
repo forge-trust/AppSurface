@@ -132,6 +132,21 @@ deadline, then observation deadline. A caller cancellation observed before compl
 `OperationCanceledException`; provider exceptions propagate without being synthesized into attempts. Never silently
 retry a timed-out admission call.
 
+### Problems, causes, and remedies
+
+| API signal | Likely cause | Next step |
+| --- | --- | --- |
+| `DurableHealthSnapshotBuilder.Build()` throws `ArgumentException` | The selected named health state conflicts with an override, such as `Healthy` without a heartbeat. | Use a matching state or field combination; reserve `BuildContradictoryForTest()` for a defensive test that deliberately supplies inconsistent evidence. |
+| A request, result, typed Work, or native-envelope builder throws during `Build()` | A production contract rejected an identifier, bound, surface, payload, codec, or fence identity. | Correct the fixture input; use the [typed Work guide](../migrations/typed-work-definitions-v1.md) for definition and codec requirements. |
+| `RunDirectPumpOnceAsync()` throws `InvalidOperationException` before admission | No successful `AssessHealthAsync()` call has published an assessment. | Assess health first. A failed, canceled, or timed-out assessment does not replace a prior successful one. |
+| `DurableScenarioTimeoutException` has no `Invocation` | The health or pump observation budget expired before admission started. | Inspect `Phase` and `Reason`; create a new scenario if its shared overall budget has expired. |
+| `DurableScenarioTimeoutException` has an `Invocation` | The local wait expired after pump admission started, so execution status is still unknown. | Await `Invocation.Completion` and use the provider's [diagnostics and recovery guidance](../operational-assessments.md#diagnostics-and-recovery) before deciding whether a new attempt is safe. |
+| Admission returns `Refused`, `Unavailable`, or `Incompatible` | The provider declined admission; a health snapshot is advisory and cannot override that decision. | Handle the exact attempt kind. The [operational assessment troubleshooting matrix](../operational-assessments.md#diagnostics-and-recovery) maps problem codes to cause and repair. |
+
+The Testing package preserves provider exceptions and problem codes. Consult the
+[Durable diagnostics catalog](../../troubleshooting/durable-diagnostics.md) for code-specific explanations; do not
+classify a failure or retry from exception text.
+
 ## Contract observations
 
 `DurableWorkDefinitionObservation.Capture` snapshots definition identity, codec metadata, classifications, retention
