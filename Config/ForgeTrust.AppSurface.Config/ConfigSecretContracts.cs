@@ -24,6 +24,7 @@ public interface IConfigSecretProvider
 public interface IConfigSecretDeclarationSource
 {
     /// <summary>Reports mappings intersecting the root and a convention only if it already claims that root.</summary>
+    /// <remarks>Ordinary inspection failures become value-free composition failures; process-fatal exceptions escape.</remarks>
     IReadOnlyList<ConfigSecretConfiguredClaim> InspectClaims(string rootLogicalPath, IReadOnlyList<string> secretDestinationPaths);
 }
 

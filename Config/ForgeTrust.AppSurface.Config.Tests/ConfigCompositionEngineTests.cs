@@ -940,6 +940,68 @@ public sealed class ConfigCompositionEngineTests
     }
 
     [Theory]
+    [InlineData("Service::ApiKey", "alpha")]
+    [InlineData("Service:ApiKey", "Invalid Provider")]
+    public void Execute_InvalidConfiguredClaimIsAValueSafeFailure(string path, string providerId)
+    {
+        var claims = new DeclarationSource(new ConfigSecretConfiguredClaim(
+            ConfigSecretConfiguredClaimKind.ExactMapping, path, providerId, "claim-secret-sentinel", null));
+        var alpha = new SecretProvider("alpha");
+
+        var result = CreateEngine(secrets: [alpha], declarations: [claims])
+            .Execute(EnvironmentName, "Service", typeof(OneSecret));
+
+        Failed(result, "secret-claim-overlap");
+        Assert.DoesNotContain("claim-secret-sentinel", JsonSerializer.Serialize(result.Failures));
+        Assert.Empty(alpha.Validations);
+        Assert.Empty(alpha.Resolutions);
+    }
+
+    [Fact]
+    public void Execute_ThrowingClaimInspectorIsAValueSafeFailure()
+    {
+        var claims = new DeclarationSource
+        {
+            ExceptionToThrow = new CustomProviderException("claim-secret-sentinel")
+        };
+        var alpha = new SecretProvider("alpha");
+
+        var result = CreateEngine(secrets: [alpha], declarations: [claims])
+            .Execute(EnvironmentName, "Service", typeof(OneSecret));
+
+        Failed(result, "secret-claim-overlap");
+        Assert.DoesNotContain("claim-secret-sentinel", JsonSerializer.Serialize(result.Failures));
+        Assert.Empty(alpha.Validations);
+        Assert.Empty(alpha.Resolutions);
+    }
+
+    [Theory]
+    [InlineData(FatalProviderExceptionKind.OutOfMemory)]
+    [InlineData(FatalProviderExceptionKind.StackOverflow)]
+    [InlineData(FatalProviderExceptionKind.AccessViolation)]
+    public void Execute_FatalClaimInspectorExceptionEscapes(FatalProviderExceptionKind kind)
+    {
+        var claims = new DeclarationSource { ExceptionToThrow = CreateFatalProviderException(kind) };
+        Action execute = () => CreateEngine(declarations: [claims])
+            .Execute(EnvironmentName, "Service", typeof(OneSecret));
+
+        switch (kind)
+        {
+            case FatalProviderExceptionKind.OutOfMemory:
+                Assert.Throws<OutOfMemoryException>(execute);
+                break;
+            case FatalProviderExceptionKind.StackOverflow:
+                Assert.Throws<StackOverflowException>(execute);
+                break;
+            case FatalProviderExceptionKind.AccessViolation:
+                Assert.Throws<AccessViolationException>(execute);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(kind), kind, null);
+        }
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void Execute_BaseSelectionFallsThroughMissingOrUnclaimedInPriorityOrder(bool unclaimed)
@@ -1375,10 +1437,12 @@ public sealed class ConfigCompositionEngineTests
     private sealed class DeclarationSource(params ConfigSecretConfiguredClaim[] claims) : IConfigSecretDeclarationSource
     {
         public ConcurrentQueue<string> Reads { get; } = new();
+        public Exception? ExceptionToThrow { get; init; }
         public IReadOnlyList<ConfigSecretConfiguredClaim> InspectClaims(
             string rootLogicalPath, IReadOnlyList<string> secretDestinationPaths)
         {
             Reads.Enqueue(rootLogicalPath);
+            if (ExceptionToThrow is not null) throw ExceptionToThrow;
             return claims;
         }
     }

@@ -207,7 +207,8 @@ Whole-root providers also implement `IConfigCompositionValueProvider.ResolveRaw`
 and truthful sensitivity through `ConfigCompositionValueResolution`. A typed-only provider must implement the local
 `IConfigProviderClaimInspector` and return `Unclaimed` for the requested root, or the opted-in root fails before reads.
 `IConfigSecretDeclarationSource.InspectClaims` reports existing explicit mappings and conventions without broadening
-which roots a convention claims. Alias all implemented capabilities to the same concrete singleton; avoid registering
+which roots a convention claims. An invalid claim or ordinary exception from inspection fails composition with a
+value-free `secret-claim-overlap` diagnostic; process-fatal exceptions escape. Alias all implemented capabilities to the same concrete singleton; avoid registering
 separate provider objects through each interface. Google and LocalSecrets already provide these registrations.
 
 Known opted-in roots compile in the host's pre-start lifecycle, before ordinary hosted services start, without constructing

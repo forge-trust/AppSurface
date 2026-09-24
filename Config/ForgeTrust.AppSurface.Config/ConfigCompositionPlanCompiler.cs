@@ -175,7 +175,10 @@ internal sealed class ConfigCompositionPlanCompiler
                     mapped.Add((claim, path));
                 }
             }
-            catch { failures.Add(new(root.Canonical, "secret-claim-overlap")); }
+            catch (Exception ex) when (!IsFatalInspectionException(ex))
+            {
+                failures.Add(new(root.Canonical, "secret-claim-overlap"));
+            }
         }
         foreach (var (claim, path) in mapped)
         {
