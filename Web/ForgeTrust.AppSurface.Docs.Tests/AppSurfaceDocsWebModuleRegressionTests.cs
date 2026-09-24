@@ -610,6 +610,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
                         {
                             ["AppSurfaceDocs:Source:RepositoryRoot"] = previewSourceRoot,
                             ["AppSurfaceDocs:Routing:DocsRootPath"] = "/docs/next",
+                            ["AppSurfaceDocs:Harvest:StartupMode"] = nameof(AppSurfaceDocsHarvestStartupMode.Blocking),
                             ["AppSurfaceDocs:Versioning:Enabled"] = "true",
                             ["AppSurfaceDocs:Versioning:CatalogPath"] = catalogPath
                         });

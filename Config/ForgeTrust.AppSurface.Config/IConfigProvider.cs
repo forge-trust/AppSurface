@@ -1,37 +1,20 @@
-﻿namespace ForgeTrust.AppSurface.Config;
+namespace ForgeTrust.AppSurface.Config;
 
-/// <summary>
-/// Defines a provider that can retrieve configuration values.
-/// </summary>
+/// <summary>Resolves a parsed logical key through one provider-native source projection.</summary>
+/// <remarks>
+/// Providers must be safe for concurrent requests. Missing permits fallback; Terminal suppresses lower providers.
+/// Do not normalize logical identity or store a follow-up diagnostic cache. See the
+/// <see href="https://appsurface.dev/guides/config-provider-authors">provider-author contract</see>.
+/// </remarks>
 public interface IConfigProvider
 {
-    /// <summary>
-    /// Higher number means higher priority. When multiple providers provide the same key,
-    /// the one with the highest priority wins.
-    /// </summary>
+    /// <summary>Gets priority; larger values are queried first after the environment provider.</summary>
     int Priority { get; }
-
-    /// <summary>
-    /// Gets the name of the configuration provider.
-    /// </summary>
+    /// <summary>Gets the value-safe provider name used in provenance.</summary>
     string Name { get; }
-
-    /// <summary>
-    /// Retrieves a configuration value for a specific environment and key.
-    /// </summary>
-    /// <remarks>
-    /// Plain providers return the default value of <typeparamref name="T"/> when a key is absent. Aggregating managers
-    /// such as <see cref="IConfigManager"/> may throw <see cref="ConfigurationResolutionException"/> instead when a
-    /// fail-closed provider reports that it owns the key but cannot safely return a value, for example because a local
-    /// secret store is locked, unavailable, unsupported, or disabled by posture. Catch that exception at host, command,
-    /// or diagnostics boundaries when rendering provider guidance to users.
-    /// </remarks>
-    /// <typeparam name="T">The type of the configuration value.</typeparam>
-    /// <param name="environment">The environment name (e.g., "Production").</param>
-    /// <param name="key">The configuration key.</param>
-    /// <returns>The configuration value, or the default value of <typeparamref name="T"/> if not found.</returns>
-    /// <exception cref="ConfigurationResolutionException">
-    /// Thrown by aggregating managers when a provider reports a terminal, display-safe diagnostic for the requested key.
-    /// </exception>
-    T? GetValue<T>(string environment, string key);
+    /// <summary>Returns exactly one missing, found, or terminal outcome for the request.</summary>
+    /// <typeparam name="T">The requested type.</typeparam>
+    /// <param name="request">The immutable operation request supplied by the manager.</param>
+    /// <returns>A non-null structured result; expected provider failures are terminal diagnostics.</returns>
+    ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request);
 }

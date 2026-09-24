@@ -152,6 +152,8 @@ public sealed class AppSurfaceDocsInProcessHostTests
 
     private sealed class TestEnvironmentProvider(string environmentName) : IEnvironmentProvider
     {
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() => new Dictionary<string, string>(StringComparer.Ordinal);
+
         public string Environment { get; } = environmentName;
 
         public bool IsDevelopment { get; } = string.Equals(

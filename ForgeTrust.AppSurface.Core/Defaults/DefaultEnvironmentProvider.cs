@@ -78,6 +78,18 @@ public class DefaultEnvironmentProvider : IEnvironmentProvider
         return value ?? defaultValue;
     }
 
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables()
+    {
+        var snapshot = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (System.Collections.DictionaryEntry entry in System.Environment.GetEnvironmentVariables())
+        {
+            snapshot.Add((string)entry.Key, (string)entry.Value!);
+        }
+
+        return new System.Collections.ObjectModel.ReadOnlyDictionary<string, string>(snapshot);
+    }
+
     /// <summary>
     /// Resolves the effective command-line environment value from host arguments.
     /// </summary>
