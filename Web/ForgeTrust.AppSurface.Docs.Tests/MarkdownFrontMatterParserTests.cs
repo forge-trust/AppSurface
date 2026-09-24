@@ -622,8 +622,9 @@ public sealed class MarkdownFrontMatterParserTests
     [InlineData("#")]
     [InlineData("##bad")]
     [InlineData("/docs/bad path")]
-    [InlineData("/docs/search?query=api")]
+    [InlineData("/docs/search?query=%ZZ")]
     [InlineData("//docs.example.test/path")]
+    [InlineData("/\\\\docs.example.test/path")]
     [InlineData("https://example.test/docs")]
     public void ExtractWithDiagnostics_ShouldDropUnsupportedNamespaceEntryPointHrefs(string href)
     {
@@ -642,6 +643,25 @@ public sealed class MarkdownFrontMatterParserTests
         Assert.Equal("Bad href", entry.Label);
         Assert.Null(entry.Href);
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-href");
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldAllowNamespaceEntryPointHrefWithQueryAndFragment()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - label: API guide
+                href: "/docs/guides/api?tab=api&mode=reference#intro"
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        var entry = Assert.Single(result.Metadata!.EntryPoints!);
+        Assert.Equal("/docs/guides/api?tab=api&mode=reference#intro", entry.Href);
+        Assert.Empty(result.Diagnostics);
     }
 
     [Fact]

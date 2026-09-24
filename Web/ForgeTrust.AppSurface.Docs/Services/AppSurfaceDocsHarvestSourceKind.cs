@@ -18,5 +18,10 @@ internal enum AppSurfaceDocsHarvestSourceKind
     /// <summary>
     /// JavaScript source files used to generate browser API reference content.
     /// </summary>
-    JavaScript
+    JavaScript,
+
+    /// <summary>
+    /// Python source files used to generate static docstring API reference content.
+    /// </summary>
+    Python
 }

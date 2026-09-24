@@ -17,6 +17,7 @@ internal static class Program
     private const string ReleasePreparationWitnessCommand = "release-prep-witness";
     private const string VerifyTailwindConsumerCommand = "verify-tailwind-consumer";
     private const string VerifyTailwindEvidenceCommand = "verify-tailwind-evidence";
+    private const string InspectPythonParserCandidateCommand = "inspect-python-parser-candidate";
 
     private static readonly string Usage = """
         ForgeTrust.AppSurface.PackageIndex
@@ -43,6 +44,8 @@ internal static class Program
                       Restore published packages from a clean NuGet configuration.
           release-prep-witness
                       Emit a read-only JSON witness for generated package documentation in a release-preparation diff.
+          inspect-python-parser-candidate
+                      Statically inspect one local TreeSitter.DotNet archive without restoring or executing package content.
           gate        Validate release metadata, package class rules, stale brand strings, and managed release-guidance policy; does not write files.
 
         Options:
@@ -79,6 +82,10 @@ internal static class Program
           --smoke-report <path> Smoke install report path. Defaults to artifacts/package-smoke-report.md.
           --base-ref <ref>      Required fetched base ref or commit for release-prep-witness.
           --witness <path>      Required JSON witness output path for release-prep-witness; normally a temporary path.
+          --python-parser-package <path>
+                                Required local TreeSitter.DotNet .nupkg for inspect-python-parser-candidate.
+          --python-parser-proof-report <path>
+                                JSON candidate-proof report beneath <repo-root>/artifacts/. Defaults to <repo-root>/artifacts/python-parser-candidate-proof.json.
           -h, --help            Show this help.
         """;
 
@@ -108,6 +115,7 @@ internal static class Program
     /// <param name="publishPrereleaseAsync">Optional prerelease publish workflow override used by tests.</param>
     /// <param name="publishStableAsync">Optional stable publish workflow override used by tests.</param>
     /// <param name="smokeInstallAsync">Optional smoke install workflow override used by tests.</param>
+    /// <param name="inspectPythonParserCandidateAsync">Optional Python parser candidate-proof override used by tests.</param>
     /// <returns><c>0</c> when the command succeeds; otherwise a non-zero exit code.</returns>
     internal static async Task<int> RunAsync(
         string[] args,
@@ -118,7 +126,8 @@ internal static class Program
         Func<PackageArtifactRequest, CancellationToken, Task<PackageArtifactValidationReport>>? verifyPackagesAsync = null,
         Func<PackagePublishRequest, CancellationToken, Task<PackagePublishLedger>>? publishPrereleaseAsync = null,
         Func<PackagePublishRequest, CancellationToken, Task<PackagePublishLedger>>? publishStableAsync = null,
-        Func<PackageSmokeInstallRequest, CancellationToken, Task<PackageSmokeInstallReport>>? smokeInstallAsync = null)
+        Func<PackageSmokeInstallRequest, CancellationToken, Task<PackageSmokeInstallReport>>? smokeInstallAsync = null,
+        Func<PythonParserCandidateProofRequest, CancellationToken, Task<PythonParserCandidateProofReport>>? inspectPythonParserCandidateAsync = null)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(standardOut);
@@ -156,7 +165,8 @@ internal static class Program
                 and not SmokeInstallCommand
                 and not ReleasePreparationWitnessCommand
                 and not VerifyTailwindConsumerCommand
-                and not VerifyTailwindEvidenceCommand)
+                and not VerifyTailwindEvidenceCommand
+                and not InspectPythonParserCandidateCommand)
             {
                 await standardError.WriteLineAsync($"Unknown command '{command}'.");
                 await standardError.WriteLineAsync(Usage);
@@ -249,6 +259,19 @@ internal static class Program
                 var reportPath = FormatDisplayPath(packageRequest.RepositoryRoot, packageRequest.ReportPath);
                 await standardOut.WriteLineAsync(
                     $"Validated {artifactReport.Entries.Count} package artifacts for {packageRequest.PackageVersion}. Report: {reportPath}.");
+                return 0;
+            }
+
+            if (normalizedCommand == InspectPythonParserCandidateCommand)
+            {
+                var request = options.CreatePythonParserCandidateProofRequest();
+                inspectPythonParserCandidateAsync ??= RunPythonParserCandidateProofAsync;
+                var candidateReport = await inspectPythonParserCandidateAsync(request, cancellationToken);
+                var reportPath = FormatDisplayPath(request.RepositoryRoot, request.ReportPath);
+                var decision = candidateReport.IsEligibleForFurtherReview
+                    ? "eligible for further review"
+                    : $"rejected ({string.Join(", ", candidateReport.RejectionReasons)})";
+                await standardOut.WriteLineAsync($"Python parser candidate inspection completed: {decision}. Report: {reportPath}.");
                 return 0;
             }
 
@@ -388,6 +411,15 @@ internal static class Program
         return await workflow.RunAsync(request, cancellationToken);
     }
 
+    [ExcludeFromCodeCoverage(Justification = "Default CLI dependency wiring is covered by candidate-proof workflow tests.")]
+    private static async Task<PythonParserCandidateProofReport> RunPythonParserCandidateProofAsync(
+        PythonParserCandidateProofRequest request,
+        CancellationToken cancellationToken)
+    {
+        var workflow = new PythonParserCandidateProofWorkflow();
+        return await workflow.RunAsync(request, cancellationToken);
+    }
+
     private static string FormatDisplayPath(string repositoryRoot, string path)
     {
         var normalizedRoot = Path.GetFullPath(repositoryRoot);
@@ -426,6 +458,8 @@ internal static class Program
 /// <param name="SmokeReportPath">Resolved smoke install report path.</param>
 /// <param name="BaseRef">Optional fetched base ref or commit used only by the release-preparation witness command.</param>
 /// <param name="WitnessPath">Optional explicit JSON witness destination used only by the release-preparation witness command.</param>
+/// <param name="PythonParserCandidatePackagePath">Optional local candidate package supplied only to the parser-candidate inspection command.</param>
+/// <param name="PythonParserProofReportPath">Machine-readable candidate-proof report path.</param>
 internal sealed record CommandLineOptions(
     PackageIndexRequest Request,
     string ArtifactsOutputPath,
@@ -443,7 +477,9 @@ internal sealed record CommandLineOptions(
     string SmokeWorkDirectory,
     string SmokeReportPath,
     string? BaseRef,
-    string? WitnessPath)
+    string? WitnessPath,
+    string? PythonParserCandidatePackagePath,
+    string PythonParserProofReportPath)
 {
     /// <summary>
     /// Parses path-related CLI options into a resolved chooser request.
@@ -474,6 +510,8 @@ internal sealed record CommandLineOptions(
         string? smokeReportPath = null;
         string? baseRef = null;
         string? witnessPath = null;
+        string? pythonParserCandidatePackagePath = null;
+        string? pythonParserProofReportPath = null;
 
         for (var index = 0; index < args.Length; index++)
         {
@@ -598,6 +636,18 @@ internal sealed record CommandLineOptions(
                 continue;
             }
 
+            if (string.Equals(argument, "--python-parser-package", StringComparison.Ordinal))
+            {
+                pythonParserCandidatePackagePath = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
+
+            if (string.Equals(argument, "--python-parser-proof-report", StringComparison.Ordinal))
+            {
+                pythonParserProofReportPath = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
+
             throw new PackageIndexException($"Unknown option '{argument}'.");
         }
 
@@ -616,6 +666,7 @@ internal sealed record CommandLineOptions(
         var resolvedPublishLogPath = ResolvePath(publishLogPath, repoRoot, Path.Join(repoRoot, "artifacts", "package-publish-log.md"));
         var resolvedSmokeWorkDirectory = ResolvePath(smokeWorkDirectory, repoRoot, Path.Join(repoRoot, "artifacts", "package-smoke"));
         var resolvedSmokeReportPath = ResolvePath(smokeReportPath, repoRoot, Path.Join(repoRoot, "artifacts", "package-smoke-report.md"));
+        var resolvedPythonParserProofReportPath = ResolvePath(pythonParserProofReportPath, repoRoot, Path.Join(repoRoot, "artifacts", "python-parser-candidate-proof.json"));
 
         return new CommandLineOptions(
             new PackageIndexRequest(repoRoot, resolvedManifestPath, resolvedOutputPath, resolvedReadinessOutputPath),
@@ -634,7 +685,9 @@ internal sealed record CommandLineOptions(
             resolvedSmokeWorkDirectory,
             resolvedSmokeReportPath,
             baseRef,
-            string.IsNullOrWhiteSpace(witnessPath) ? null : ResolvePath(witnessPath, repoRoot, witnessPath));
+            string.IsNullOrWhiteSpace(witnessPath) ? null : ResolvePath(witnessPath, repoRoot, witnessPath),
+            string.IsNullOrWhiteSpace(pythonParserCandidatePackagePath) ? null : ResolvePath(pythonParserCandidatePackagePath, repoRoot, pythonParserCandidatePackagePath),
+            resolvedPythonParserProofReportPath);
     }
 
     /// <summary>
@@ -720,6 +773,24 @@ internal sealed record CommandLineOptions(
         }
 
         return new ReleasePreparationWitnessRequest(Request, BaseRef, WitnessPath);
+    }
+
+    /// <summary>
+    /// Validates and converts the parser-candidate inspection options.
+    /// </summary>
+    /// <returns>Resolved candidate archive and JSON report inputs.</returns>
+    /// <exception cref="PackageIndexException">Thrown when the required local candidate archive option is absent.</exception>
+    internal PythonParserCandidateProofRequest CreatePythonParserCandidateProofRequest()
+    {
+        if (string.IsNullOrWhiteSpace(PythonParserCandidatePackagePath))
+        {
+            throw new PackageIndexException("Command 'inspect-python-parser-candidate' requires '--python-parser-package <path>'.");
+        }
+
+        return new PythonParserCandidateProofRequest(
+            Request.RepositoryRoot,
+            PythonParserCandidatePackagePath,
+            PythonParserProofReportPath);
     }
 
     private static string ReadRequiredValue(string[] args, ref int index, string argument)

@@ -82,6 +82,33 @@ Authority flows through four stages: the validated tag checkout and package plan
 
 The required hosts are exactly `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`, and `win-x64`. Native v2 receipts (`appsurface-tailwind-native-host-proof-v2`) are eligible; v1 is historical diagnostic data only. Each success binds producer ID/run/attempt, subject and manifest digests, source/version, current native invocation, expected and observed host RID/OS/process architecture, and per-first-party producer/restored raw SHA-512 and protected payload evidence. The closure includes Core and Tailwind and comes from the producer's successful `net10.0` consumer graph plus validated package inventory. It also records Tailwind release-manifest and selected host CLI digests, generated CSS, absence of companion dependency, and absence of native consumer output. Full modes, flags, report shapes, limits, recipes and recovery are in the [reference](../../docs/tailwind-artifact-provenance.md).
 
+## Python parser candidate gate
+
+The `inspect-python-parser-candidate` command is a bounded, static dependency-selection proof. It accepts one local
+`.nupkg`, enumerates its native runtime assets, NuGet metadata, and license/notice paths, then writes JSON containing the
+archive hash, compressed size, RID inventory, and rejection reasons. It never adds, restores, builds, loads, or executes
+candidate package content. A disposable local feed or child process would not sandbox untrusted NuGet build assets,
+managed assemblies, analyzers, or native libraries.
+
+```bash
+dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
+  inspect-python-parser-candidate \
+  --python-parser-package /tmp/candidate.nupkg \
+  --python-parser-proof-report artifacts/python-parser-proof.json
+```
+
+An exit code of `0` means the inspection completed and the report was written; it does **not** mean the candidate was
+accepted. Reports must be written below the repository's `artifacts/` directory. Read `rejectionReasons` and
+`isEligibleForFurtherReview` from the JSON before taking any dependency action. Archive size is recorded as decision
+evidence rather than a hard product budget; the command's separate 64 MiB archive-read limit protects the inspection
+process itself. Report destinations are immutable: choose a new filename for every run, because existing files and
+symbolic-link paths are rejected rather than overwritten.
+
+The [source-controlled TreeSitter.DotNet 1.3.0 candidate record](https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Docs.Tests/TestData/PythonParserDecision/README.md)
+documents the accepted bounded Python-docstring spike. Its 50.93 MiB all-grammar, multi-RID archive is an explicit
+distribution trade-off, not a reason to exclude it from product code. Package upgrades must repeat the archive,
+native-RID, and redistribution-notice review.
+
 ## Recovery and release boundary
 
 If `generate` reports a marker, variant, path, or token error, fix the named manifest row or README and rerun the

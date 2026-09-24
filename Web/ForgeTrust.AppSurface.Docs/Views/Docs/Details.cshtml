@@ -55,10 +55,12 @@
         .Distinct(StringComparer.Ordinal)
         .ToArray()
         ?? [];
-    var documentContent = ResolveGeneratedContentHrefs(Model.Document.Content);
+    var isTypedCSharpNamespace = Model.CSharpRenderKind == ForgeTrust.AppSurface.Docs.Models.CSharpRenderKind.TypedNamespace
+                                 && Model.Document.CSharpNamespaceDocument is not null;
+    var documentContent = isTypedCSharpNamespace ? string.Empty : ResolveGeneratedContentHrefs(Model.Document.Content);
     var visibleDocumentContent = ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsHeadingSuppressor.SuppressLeadingMarkdownH1(
         documentContent,
-        shellOwnsH1: !Model.IsCSharpApiDoc);
+        shellOwnsH1: true);
 }
 @functions {
     private static readonly System.Text.RegularExpressions.Regex RootedSymbolSourceLinkRegex = new(
@@ -95,7 +97,7 @@
     }
 }
 
-<header class="@(Model.IsCSharpApiDoc ? "mb-5" : "mb-8")">
+<header class="@(isTypedCSharpNamespace ? "mb-5" : "mb-8")">
     @if (!string.IsNullOrWhiteSpace(Model.PublicSectionLabel) && !string.IsNullOrWhiteSpace(Model.PublicSectionHref))
     {
         <div class="mb-4 md:hidden">
@@ -175,13 +177,10 @@
         </div>
     }
 
-    @if (!Model.IsCSharpApiDoc)
+    <h1 class="docs-detail-title max-w-full break-words text-3xl font-bold leading-tight tracking-tight text-white">@Model.Title</h1>
+    @if (Model.ShowSummary && !string.IsNullOrWhiteSpace(Model.Summary))
     {
-        <h1 class="docs-detail-title max-w-full break-words text-3xl font-bold leading-tight tracking-tight text-white">@Model.Title</h1>
-        @if (Model.ShowSummary && !string.IsNullOrWhiteSpace(Model.Summary))
-        {
-            <p class="mt-3 max-w-3xl text-base text-slate-400">@Model.Summary</p>
-        }
+        <p class="mt-3 max-w-3xl text-base text-slate-400">@Model.Summary</p>
     }
 
     @if (showContributorProvenance)
@@ -407,8 +406,15 @@
         }
 
         <div class="docs-content @(Model.IsApiSurfaceDoc ? "docs-content--api" : "docs-content--markdown")">
-            @* Safe: Content is sanitized by DocAggregator before caching. *@
-            @Html.Raw(visibleDocumentContent)
+            @if (isTypedCSharpNamespace)
+            {
+                @await Html.PartialAsync("/Views/Docs/CSharp/_Namespace.cshtml", Model)
+            }
+            else
+            {
+                @* Safe: Content is sanitized by DocAggregator before caching. *@
+                @Html.Raw(visibleDocumentContent)
+            }
         </div>
 
         @if (Model.HasWayfinding)
