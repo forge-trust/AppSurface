@@ -8206,6 +8206,33 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("Failed to pack 'src/App/App.csproj' with dotnet pack", result.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProcessCommandRunner_OnlyIncludesFailedStdoutWhenRequested(bool includeStandardOutput)
+    {
+        var command = CreateShellCommand(OperatingSystem.IsWindows()
+            ? "echo error CS798: build diagnostic & exit /b 7"
+            : "printf '%s\\n' 'error CS798: build diagnostic'; exit 7");
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(
+            () => new ProcessCommandRunner().RunAsync(
+                new CommandRunRequest(
+                    command.FileName,
+                    command.Arguments,
+                    _repositoryRoot,
+                    "dotnet build",
+                    "repository",
+                    "build",
+                    "building",
+                    30_000,
+                    IncludeStandardOutputOnFailure: includeStandardOutput),
+                CancellationToken.None));
+
+        Assert.Contains("Failed to build 'repository' with dotnet build", error.Message, StringComparison.Ordinal);
+        Assert.Equal(includeStandardOutput, error.Message.Contains("error CS798: build diagnostic", StringComparison.Ordinal));
+    }
+
     [Fact]
     [Trait("Category", "Integration")]
     public async Task ProcessCommandRunner_PassesEnvironmentOverrides()

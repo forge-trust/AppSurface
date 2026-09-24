@@ -146,7 +146,8 @@ internal sealed class PackageArtifactWorkflow
             "build",
             "building",
             BuildTimeoutMilliseconds,
-            cancellationToken);
+            cancellationToken,
+            includeStandardOutputOnFailure: true);
 
         foreach (var entry in plan.Entries)
         {
@@ -365,7 +366,8 @@ internal sealed class PackageArtifactWorkflow
         string failureVerb,
         string timeoutDescription,
         int timeoutMilliseconds,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool includeStandardOutputOnFailure = false)
     {
         await _commandRunner.RunAsync(
             new CommandRunRequest(
@@ -384,7 +386,8 @@ internal sealed class PackageArtifactWorkflow
                     ["DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE"] = "1",
                     ["DOTNET_NOLOGO"] = "1",
                     ["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1"
-                }),
+                },
+                includeStandardOutputOnFailure),
             cancellationToken);
     }
 
