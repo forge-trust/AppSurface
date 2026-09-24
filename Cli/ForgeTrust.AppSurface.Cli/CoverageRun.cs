@@ -1097,7 +1097,9 @@ internal sealed class CoverageRunWorkflow
                 && executionStates is not null)
             {
                 var drain = await supervisor.TerminateAndDrainProcessesAsync();
-                foreach (var state in executionStates.Where(state => state.HangPlan is not null))
+                foreach (var state in executionStates.Where(state =>
+                    state.Result is null
+                    && state.HangPlan is { Source: CoverageRunHangSource.Automatic or CoverageRunHangSource.Manual }))
                 {
                     if (state.HangDiagnostics is null)
                     {
@@ -3457,11 +3459,14 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         CoverageRunProcessRequest request,
         CancellationToken cancellationToken)
     {
+        var processExited = false;
         try
         {
-            return request.OutputFile is null
+            var result = request.OutputFile is null
                 ? await RunBufferedAsync(request, cancellationToken)
                 : await RunStreamingAsync(request, cancellationToken);
+            processExited = true;
+            return result;
         }
         catch (OperationCanceledException)
         {
@@ -3486,7 +3491,7 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         }
         finally
         {
-            request.Lease.Complete();
+            request.Lease.Complete(processExited);
         }
     }
 

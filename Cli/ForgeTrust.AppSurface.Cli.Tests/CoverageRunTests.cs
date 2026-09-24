@@ -224,6 +224,43 @@ public sealed class CoverageRunTests
     }
 
     [Fact]
+    public async Task RunAsync_CancellationDoesNotRepeatCompletedProjectHangSummary()
+    {
+        using var repo = TempDirectory.Create("appsurface-hang-completed-cancel-");
+        var first = repo.WriteFile("tests/First.Tests/First.Tests.csproj", "<Project />");
+        var second = repo.WriteFile("tests/Second.Tests/Second.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        using var caller = new CancellationTokenSource();
+        var runner = new RecordingCoverageRunProcessRunner { TestExitCode = 1 };
+        runner.TestDelays[second] = TimeSpan.FromSeconds(5);
+        runner.TestStarted = project =>
+        {
+            if (project == second)
+            {
+                caller.Cancel();
+                return;
+            }
+
+            var args = runner.Commands.Single(command => command.Arguments[0] == "test").Arguments;
+            var resultsIndex = Array.FindIndex(args.ToArray(), argument => argument == "--results-directory");
+            var host = TestPathUtils.PathUnder(args[resultsIndex + 1], "host");
+            Directory.CreateDirectory(host);
+            File.WriteAllText(TestPathUtils.PathUnder(host, "Sequence.xml"),
+                "<TestSequence><Test Name=\"Sample.CompletedFailure\" /></TestSequence>");
+        };
+        using var console = new FakeInMemoryConsole();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => CreateWorkflow(runner, new RecordingReportGenerator()).RunAsync(
+            CreateRequest(TestProjects: [first, second], NoProgressTimeout: TimeSpan.FromSeconds(180),
+                WatchdogMode: CoverageRunWatchdogMode.Fail, CoverageDriver: CoverageRunDriver.Collector),
+            console, caller.Token));
+
+        var summaries = console.ReadErrorString().Split(Environment.NewLine)
+            .Count(line => line.Contains("last started test \"Sample.CompletedFailure\"", StringComparison.Ordinal));
+        Assert.Equal(1, summaries);
+    }
+
+    [Fact]
     public void CoverageRunCommand_ShouldCreateRequestWithWatchdogOptions()
     {
         var command = new CoverageRunCommand(CreateWorkflow(

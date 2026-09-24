@@ -15,7 +15,7 @@ VSTest sequence output records tests that started; it does not prove which test 
 | Situation | Configuration | Effect |
 | --- | --- | --- |
 | Normal CI stall detection | Omit `--watchdog` or use `--watchdog fail` | Fail after the existing 10-minute no-progress default; automatically request no-dump blame when at least 90 seconds remain. |
-| A known healthy quiet test can exceed the computed VSTest timeout | Increase `--no-progress-timeout` (or Evidence `TimeoutSeconds`) to leave headroom | Extends the wrapper budget and therefore the derived per-test VSTest timeout. Account for build/discovery time in Evidence. |
+| A known healthy quiet test can exceed the computed VSTest timeout | For `coverage run`, increase `--no-progress-timeout`; for Evidence, increase `TimeoutSeconds` only while the remaining producer deadline limits the timer | The CLI timeout extends its watchdog budget and derived per-test VSTest timeout. Evidence's remaining deadline includes discovery/build time, but its fixed 10-minute no-progress watchdog caps the automatic VSTest timeout at 9 minutes. Evidence has no watchdog or test-argument opt-out; use `coverage run` for those controls. |
 | Preserve the run after a quiet stall, or disable automatic hang blame | `--watchdog warn` | Records a warning and continues; no automatic blame tuple is added. |
 | Disable stall classification and automatic hang blame | `--watchdog off` | No watchdog failure and no automatic blame; explicitly configured heartbeats can still be emitted. |
 | Caller already configures blame | Pass any `--blame` or `--blame-*` token through `--test-argument` | Manual tokens take precedence as a group and pass through unchanged; AppSurface adds no tuple. |

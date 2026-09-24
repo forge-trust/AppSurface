@@ -159,7 +159,6 @@ internal static class CoverageRunHangDiagnosticsReader
                             IgnoreProcessingInstructions = true
                         });
                         string? lastStartedTest = null;
-                        var elementStack = new List<string>();
                         while (reader.Read())
                         {
                             if (BudgetExpired()) return Result("inspection-limited", observations);
@@ -167,20 +166,13 @@ internal static class CoverageRunHangDiagnosticsReader
                             if (reader.NodeType == XmlNodeType.Element && reader.Depth == 0
                                 && (reader.LocalName != "TestSequence" || reader.NamespaceURI.Length != 0))
                                 throw new XmlException("Unexpected sequence document root.");
-                            if (reader.NodeType == XmlNodeType.EndElement)
-                            {
-                                if (elementStack.Count > 0) elementStack.RemoveAt(elementStack.Count - 1);
-                                continue;
-                            }
                             if (reader.NodeType != XmlNodeType.Element) continue;
-                            if (reader.LocalName == "Test" && reader.NamespaceURI.Length == 0
-                                && elementStack.Count > 0 && elementStack[^1] == "TestSequence")
+                            if (reader.Depth == 1 && reader.LocalName == "Test" && reader.NamespaceURI.Length == 0)
                             {
                                 if (++testEntries > MaximumTests) return Result("inspection-limited", observations);
                                 var name = reader.GetAttribute("Name");
                                 lastStartedTest = IsSafeName(name) ? name : null;
                             }
-                            if (!reader.IsEmptyElement) elementStack.Add(reader.LocalName);
                         }
                         observations.Add(new(relative, lastStartedTest));
                     }

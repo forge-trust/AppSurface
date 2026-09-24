@@ -73,6 +73,12 @@ run_driver() {
       printf '%s hang run did not retain the VSTest failure as the primary outcome.\n' "$driver" >&2
       return 1
     fi
+    if [[ "$mode" == "healthy-fail" ]]; then
+      if ! grep -Fq "Data collector 'Blame' message: The specified inactivity time of ${vstest_budget} seconds has elapsed." "$cli_log"; then
+        printf '%s healthy test did not report the derived VSTest inactivity timeout (%ss).\n' "$driver" "$vstest_budget" >&2
+        return 1
+      fi
+    fi
     sequence="$(find "$output" -type f \( -name 'Sequence*.xml' -o -name '*_Sequence.xml' \) -print -quit)"
     if [[ -z "$sequence" || ! -s "$sequence" ]]; then
       printf '%s hang run did not flush a non-empty Sequence.xml.\n' "$driver" >&2
@@ -87,18 +93,21 @@ run_driver() {
       printf '%s hang run did not have AppSurface inspect its flushed VSTest sequence.\n' "$driver" >&2
       return 1
     fi
-    if ! python3 - "$output/timings.json" "$SCALE_SECONDS" "$expected_test" <<'PY'
+    if ! python3 - "$output/timings.json" "$SCALE_SECONDS" "$expected_test" "$mode" <<'PY'
 import json
 import sys
 
-path, budget, expected_test = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+path, budget, expected_test, mode = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
 with open(path, encoding="utf-8") as source:
     projects = json.load(source)["projects"]
-diagnostic = projects[0]["hangDiagnostics"]
+project = projects[0]
+diagnostic = project["hangDiagnostics"]
 expected = int(budget - min(60, budget / 3))
 assert diagnostic["source"] == "automatic", diagnostic
 assert diagnostic["status"] == "found", diagnostic
 assert diagnostic["effectiveVstestTimeoutSeconds"] == expected, diagnostic
+if mode == "healthy-fail":
+    assert expected - 2 <= project["seconds"] <= expected + 30, (project["seconds"], expected)
 assert diagnostic["sequencePaths"], diagnostic
 assert any(item["lastStartedTest"] == expected_test
            for item in diagnostic["observations"]), diagnostic

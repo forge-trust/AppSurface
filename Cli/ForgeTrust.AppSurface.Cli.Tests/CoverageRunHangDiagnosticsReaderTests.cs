@@ -50,6 +50,21 @@ public sealed class CoverageRunHangDiagnosticsReaderTests
         Assert.Equal("Last.Test", Assert.Single(result.Sequences).LastStartedTest);
     }
 
+    [Fact]
+    public void Inspect_IgnoresTestUnderNestedTestSequenceAfterDirectTest()
+    {
+        using var fixture = new Fixture();
+        fixture.Write("output/results/Sequence.xml",
+            "<TestSequence><Test Name=\"Direct.Test\" />"
+            + "<Metadata><TestSequence><Test Name=\"Nested.Spoof\" /></TestSequence></Metadata>"
+            + "</TestSequence>");
+
+        var result = HangReader.Inspect(fixture.Results, fixture.Output);
+
+        Assert.Equal("found", result.Status);
+        Assert.Equal("Direct.Test", Assert.Single(result.Sequences).LastStartedTest);
+    }
+
     [Theory]
     [InlineData("<TestSequence xmlns=\"urn:spoof\"><Test Name=\"Spoof\" /></TestSequence>")]
     [InlineData("<TestSequence><Test Name=\"Spoof\" /></TestSequence><Unexpected />")]

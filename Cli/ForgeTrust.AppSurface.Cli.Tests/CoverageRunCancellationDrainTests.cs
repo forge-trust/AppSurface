@@ -3,6 +3,7 @@ using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Cli;
 using ForgeTrust.AppSurface.Evidence.Coverage;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -67,6 +68,29 @@ public sealed class CoverageRunCancellationDrainTests
 
         Assert.True(result.Confirmed);
         Assert.True(caller.IsCancellationRequested);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CompletedCliWrapProcess_ReleasesLeaseAfterProcessDisposal(bool streamOutput)
+    {
+        using var directory = TestDirectory.Create();
+        using var console = new FakeInMemoryConsole();
+        await using var supervisor = CreateSupervisor(console, CancellationToken.None);
+        using var operation = supervisor.Start("project");
+        var request = new CoverageRunProcessRequest(
+            "dotnet",
+            ["--version"],
+            directory.Path,
+            streamOutput ? TestPathUtils.PathUnder(directory.Path, "dotnet-version.log") : null,
+            null,
+            operation.ReserveProcess());
+
+        var result = await new CliWrapCoverageRunProcessRunner().RunAsync(request, CancellationToken.None);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(0, supervisor.RegisteredProcessLeaseCount);
     }
 
     [Fact]

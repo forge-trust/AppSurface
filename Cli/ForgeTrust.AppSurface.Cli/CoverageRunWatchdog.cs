@@ -400,14 +400,15 @@ internal sealed class CoverageRunProcessLease
     /// <summary>
     /// Marks the command complete and unregisters the lease.
     /// </summary>
-    public void Complete()
+    /// <param name="processExited">Whether the command runner confirmed that the attached process exited before disposing it.</param>
+    public void Complete(bool processExited = false)
     {
         var release = false;
         lock (_sync)
         {
             _completed = true;
             _resolution.TrySetResult(_process);
-            if (_process is null || HasExited(_process))
+            if (_process is null || processExited || HasExited(_process))
             {
                 _process = null;
                 release = true;

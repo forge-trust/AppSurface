@@ -89,7 +89,7 @@ Ship in the existing ForgeTrust.AppSurface.Cli .NET tool package and its ordinar
 
 ## The assignment
 
-Collect one real Skoolit stalled-run configuration if available: its actual outer deadline, time spent in discovery/build, and longest known healthy individual test. Compare that test duration with the computed VSTest timeout at launch. If the healthy test exceeds it, increase the workload's --no-progress-timeout (or Evidence TimeoutSeconds) to leave headroom, or supply an explicit manual blame policy; revisit the default rule if this is common across supported consumers. If the real run cannot be obtained, use the repository's longest observed test timing plus the controlled hang/healthy fixtures and record Skoolit validation as pending rather than blocking implementation.
+Collect one real Skoolit stalled-run configuration if available: its actual outer deadline, time spent in discovery/build, and longest known healthy individual test. Compare that test duration with the computed VSTest timeout at launch. For `coverage run`, increase `--no-progress-timeout` to leave headroom or supply an explicit manual blame policy. For Evidence, increasing `TimeoutSeconds` helps only while its remaining producer deadline limits the timer; the fixed watchdog caps automatic VSTest blame at 9 minutes and Evidence has no blame opt-out. Revisit the default rule if this is common across supported consumers. If the real run cannot be obtained, use the repository's longest observed test timing plus the controlled hang/healthy fixtures and record Skoolit validation as pending rather than blocking implementation.
 
 ## What I noticed about how you think
 
