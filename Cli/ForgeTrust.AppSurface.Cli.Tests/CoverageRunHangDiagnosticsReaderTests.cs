@@ -220,6 +220,27 @@ public sealed class CoverageRunHangDiagnosticsReaderTests
     }
 
     [Fact]
+    public void Inspect_SkipsOverlongEnumeratedEntryWithoutReadingItsAttributes()
+    {
+        using var fixture = new Fixture();
+        Directory.CreateDirectory(fixture.Results);
+        var overlongPath = TestPathUtils.PathUnder(
+            fixture.Results, new string('x', HangReader.MaximumNameLength + 1));
+        var live = HangReader.InspectionIo.Live;
+        var io = live with
+        {
+            EnumerateChildren = path => Path.GetFullPath(path) == Path.GetFullPath(fixture.Results)
+                ? [new FileInfo(overlongPath)]
+                : live.EnumerateChildren(path)
+        };
+
+        var result = HangReader.Inspect(fixture.Results, fixture.Output, io: io);
+
+        Assert.Equal("missing", result.Status);
+        Assert.Empty(result.Sequences);
+    }
+
+    [Fact]
     public void Inspect_ReportsUnreadableDirectoryWhenEnumerationFails()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -230,13 +251,18 @@ public sealed class CoverageRunHangDiagnosticsReaderTests
         try
         {
             File.SetUnixFileMode(denied, UnixFileMode.None);
+            var enumerationBlocked = false;
             try
             {
                 // A privileged test runner may still enumerate this directory.
                 _ = Directory.EnumerateFileSystemEntries(denied).Any();
-                return;
             }
-            catch (UnauthorizedAccessException) { }
+            catch (UnauthorizedAccessException)
+            {
+                enumerationBlocked = true;
+            }
+
+            if (!enumerationBlocked) return;
 
             var result = HangReader.Inspect(fixture.Results, fixture.Output);
 
@@ -275,7 +301,7 @@ public sealed class CoverageRunHangDiagnosticsReaderTests
         using var fixture = new Fixture();
         fixture.Write("output/results/Sequence.xml", "<TestSequence><Test Name=\"Started\" /></TestSequence>");
         fixture.Write("output/results/child/placeholder.txt", string.Empty);
-        var childDirectory = Path.Combine(fixture.Results, "child");
+        var childDirectory = TestPathUtils.PathUnder(fixture.Results, "child");
         var live = HangReader.InspectionIo.Live;
         var io = live with
         {
@@ -357,7 +383,7 @@ public sealed class CoverageRunHangDiagnosticsReaderTests
         fixture.Write("output/results/a/Sequence.xml", "<TestSequence><Test Name=\"Earlier\" /></TestSequence>");
         fixture.Write("output/results/b/Sequence.xml", "<TestSequence><Test Name=\"Failed\" /></TestSequence>");
         var live = HangReader.InspectionIo.Live;
-        var failingPath = Path.Combine(fixture.Results, "b", "Sequence.xml");
+        var failingPath = TestPathUtils.PathUnder(fixture.Results, "b", "Sequence.xml");
         var io = live with
         {
             EnumerateChildren = path => live.EnumerateChildren(path).OrderBy(child => child.Name, StringComparer.Ordinal),
@@ -387,7 +413,7 @@ public sealed class CoverageRunHangDiagnosticsReaderTests
     public void Inspect_RejectsDirectoryOutsideOutputRoot()
     {
         using var fixture = new Fixture();
-        var outside = Path.Combine(Path.GetTempPath(), $"hang-outside-{Guid.NewGuid():N}");
+        var outside = TestPathUtils.PathUnder(Path.GetTempPath(), $"hang-outside-{Guid.NewGuid():N}");
         Directory.CreateDirectory(outside);
         try
         {
@@ -404,7 +430,7 @@ public sealed class CoverageRunHangDiagnosticsReaderTests
         if (OperatingSystem.IsWindows()) return;
         using var fixture = new Fixture();
         Directory.CreateDirectory(fixture.Results);
-        var caseChanged = Path.Combine(Path.GetDirectoryName(fixture.Output)!, "OUTPUT", "results");
+        var caseChanged = TestPathUtils.PathUnder(Path.GetDirectoryName(fixture.Output)!, "OUTPUT", "results");
 
         var result = HangReader.Inspect(caseChanged, fixture.Output);
 
@@ -418,7 +444,7 @@ public sealed class CoverageRunHangDiagnosticsReaderTests
         using var fixture = new Fixture();
         Directory.CreateDirectory(fixture.Results);
         var target = fixture.Write("outside.xml", "<TestSequence><Test Name=\"Outside\" /></TestSequence>");
-        File.CreateSymbolicLink(Path.Combine(fixture.Results, "Sequence.xml"), target);
+        File.CreateSymbolicLink(TestPathUtils.PathUnder(fixture.Results, "Sequence.xml"), target);
 
         var result = HangReader.Inspect(fixture.Results, fixture.Output);
 
@@ -433,7 +459,7 @@ public sealed class CoverageRunHangDiagnosticsReaderTests
         using var fixture = new Fixture();
         var target = fixture.Write("outside/Sequence.xml", "<TestSequence><Test Name=\"Outside\" /></TestSequence>");
         Directory.CreateDirectory(fixture.Results);
-        Directory.CreateSymbolicLink(Path.Combine(fixture.Results, "outside-link"), Path.GetDirectoryName(target)!);
+        Directory.CreateSymbolicLink(TestPathUtils.PathUnder(fixture.Results, "outside-link"), Path.GetDirectoryName(target)!);
 
         var result = HangReader.Inspect(fixture.Results, fixture.Output);
 
@@ -447,7 +473,7 @@ public sealed class CoverageRunHangDiagnosticsReaderTests
         if (OperatingSystem.IsWindows()) return;
         using var fixture = new Fixture();
         Directory.CreateDirectory(fixture.Results);
-        var linkedRoot = Path.Combine(fixture.Output, "linked-results");
+        var linkedRoot = TestPathUtils.PathUnder(fixture.Output, "linked-results");
         Directory.CreateSymbolicLink(linkedRoot, fixture.Results);
 
         var result = HangReader.Inspect(linkedRoot, fixture.Output);
@@ -462,10 +488,10 @@ public sealed class CoverageRunHangDiagnosticsReaderTests
         using var fixture = new Fixture();
         var realOutput = fixture.Write("real-output/results/Sequence.xml",
             "<TestSequence><Test Name=\"Hidden\" /></TestSequence>");
-        var linkedOutput = Path.Combine(Path.GetDirectoryName(fixture.Output)!, "linked-output");
+        var linkedOutput = TestPathUtils.PathUnder(Path.GetDirectoryName(fixture.Output)!, "linked-output");
         Directory.CreateSymbolicLink(linkedOutput, Path.GetDirectoryName(Path.GetDirectoryName(realOutput)!)!);
 
-        var result = HangReader.Inspect(Path.Combine(linkedOutput, "results"), linkedOutput);
+        var result = HangReader.Inspect(TestPathUtils.PathUnder(linkedOutput, "results"), linkedOutput);
 
         Assert.Equal("escaping", result.Status);
         Assert.Empty(result.Sequences);
@@ -492,7 +518,7 @@ public sealed class CoverageRunHangDiagnosticsReaderTests
         using var fixture = new Fixture();
         Directory.CreateDirectory(fixture.Results);
         for (var index = 0; index <= HangReader.MaximumDirectories; index++)
-            Directory.CreateDirectory(Path.Combine(fixture.Results, $"dir-{index:D3}"));
+            Directory.CreateDirectory(TestPathUtils.PathUnder(fixture.Results, $"dir-{index:D3}"));
 
         var result = HangReader.Inspect(fixture.Results, fixture.Output, new FrozenClock());
 
@@ -586,9 +612,9 @@ public sealed class CoverageRunHangDiagnosticsReaderTests
 
     private sealed class Fixture : IDisposable
     {
-        private readonly string _path = Path.Combine(Path.GetTempPath(), $"hang-reader-{Guid.NewGuid():N}");
-        internal string Output => Path.Combine(_path, "output");
-        internal string Results => Path.Combine(Output, "results");
+        private readonly string _path = TestPathUtils.PathUnder(Path.GetTempPath(), $"hang-reader-{Guid.NewGuid():N}");
+        internal string Output => TestPathUtils.PathUnder(_path, "output");
+        internal string Results => TestPathUtils.PathUnder(Output, "results");
 
         internal Fixture()
         {

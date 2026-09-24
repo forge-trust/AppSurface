@@ -14,7 +14,7 @@ public sealed class CoverageRunArgumentBindingTests
     public async Task PublicCommandPipeline_ShouldForwardRestoredTestArgumentTokensInOrder()
     {
         using var temporaryDirectory = new TemporaryDirectory();
-        var project = Path.Combine(temporaryDirectory.Path, "Sample.Tests.csproj");
+        var project = TestPathUtils.PathUnder(temporaryDirectory.Path, "Sample.Tests.csproj");
         await File.WriteAllTextAsync(project, "<Project />");
         var runner = new CapturingProcessRunner();
         using var console = new FakeInMemoryConsole();
@@ -23,7 +23,7 @@ public sealed class CoverageRunArgumentBindingTests
             [
                 "coverage", "run",
                 "--test-project", project,
-                "--output", Path.Combine(temporaryDirectory.Path, "coverage"),
+                "--output", TestPathUtils.PathUnder(temporaryDirectory.Path, "coverage"),
                 "--coverage-driver", "collector",
                 "--watchdog", "off",
                 "--test-argument", "--blame-hang",
@@ -128,9 +128,8 @@ public sealed class CoverageRunArgumentBindingTests
             ["coverage", "run", "--test-argument", ""]
         ];
 
-        foreach (var input in inputs)
+        foreach (var normalized in inputs.Select(CoverageRunArgumentBinding.Normalize))
         {
-            var normalized = CoverageRunArgumentBinding.Normalize(input);
             Assert.Contains(string.Empty, normalized.RestoreValues.Values);
         }
 
@@ -204,8 +203,8 @@ public sealed class CoverageRunArgumentBindingTests
                 TestCommandArguments.Add(arguments);
                 var resultsIndex = Array.IndexOf(arguments, "--results-directory");
                 var rawDirectory = request.Arguments[resultsIndex + 1];
-                Directory.CreateDirectory(Path.Combine(rawDirectory, "coverage"));
-                File.WriteAllText(Path.Combine(rawDirectory, "coverage", "coverage.cobertura.xml"),
+                Directory.CreateDirectory(TestPathUtils.PathUnder(rawDirectory, "coverage"));
+                File.WriteAllText(TestPathUtils.PathUnder(rawDirectory, "coverage", "coverage.cobertura.xml"),
                     "<coverage lines-covered=\"8\" lines-valid=\"10\" branches-covered=\"2\" branches-valid=\"4\" />");
                 return Task.FromResult(new CoverageRunProcessResult(0, "synthetic test success"));
             }
@@ -218,7 +217,7 @@ public sealed class CoverageRunArgumentBindingTests
     {
         public TemporaryDirectory()
         {
-            Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"appsurface-argv-{Guid.NewGuid():N}");
+            Path = TestPathUtils.PathUnder(System.IO.Path.GetTempPath(), $"appsurface-argv-{Guid.NewGuid():N}");
             Directory.CreateDirectory(Path);
         }
 

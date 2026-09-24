@@ -29,9 +29,9 @@ public sealed class CoverageRunTests
             var args = runner.Commands.Single(command => command.Arguments[0] == "test").Arguments;
             var resultsIndex = Array.FindIndex(args.ToArray(), argument => argument == "--results-directory");
             Assert.True(resultsIndex >= 0);
-            var host = Path.Join(args[resultsIndex + 1], "host");
+            var host = TestPathUtils.PathUnder(args[resultsIndex + 1], "host");
             Directory.CreateDirectory(host);
-            File.WriteAllText(Path.Join(host, "Sequence.xml"), "<TestSequence><Test Name=\"Sample.HangingTest\" /></TestSequence>");
+            File.WriteAllText(TestPathUtils.PathUnder(host, "Sequence.xml"), "<TestSequence><Test Name=\"Sample.HangingTest\" /></TestSequence>");
         };
         var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
         using var console = new FakeInMemoryConsole();
@@ -51,7 +51,7 @@ public sealed class CoverageRunTests
         Assert.Contains("none", testArgs);
         Assert.Contains("last started test", console.ReadErrorString(), StringComparison.Ordinal);
         Assert.Contains("Sample.HangingTest", console.ReadErrorString(), StringComparison.Ordinal);
-        using var timings = JsonDocument.Parse(File.ReadAllText(Path.Join(result.OutputDirectory, "timings.json")));
+        using var timings = JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(result.OutputDirectory, "timings.json")));
         var diagnostic = timings.RootElement.GetProperty("projects")[0].GetProperty("hangDiagnostics");
         Assert.Equal(1, diagnostic.GetProperty("schemaVersion").GetInt32());
         Assert.Equal("automatic", diagnostic.GetProperty("source").GetString());
@@ -81,7 +81,7 @@ public sealed class CoverageRunTests
         var args = runner.Commands.Single(command => command.Arguments[0] == "test").Arguments;
         Assert.DoesNotContain("--blame-hang", args);
         Assert.Equal(1, args.Count(argument => argument == "--results-directory"));
-        using var timings = JsonDocument.Parse(File.ReadAllText(Path.Join(result.OutputDirectory, "timings.json")));
+        using var timings = JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(result.OutputDirectory, "timings.json")));
         Assert.Equal("disabled", timings.RootElement.GetProperty("projects")[0].GetProperty("hangDiagnostics").GetProperty("status").GetString());
     }
 
@@ -105,7 +105,7 @@ public sealed class CoverageRunTests
 
         Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
         Assert.Empty(runner.Commands);
-        Assert.False(Directory.Exists(Path.Join(repo.Path, "TestResults", "coverage-merged")));
+        Assert.False(Directory.Exists(TestPathUtils.PathUnder(repo.Path, "TestResults", "coverage-merged")));
     }
 
     [Fact]
@@ -129,7 +129,7 @@ public sealed class CoverageRunTests
         Assert.True(separator > 0);
         Assert.Equal(1, args.Take(separator).Count(argument => argument == "--blame-hang"));
         Assert.Equal(new[] { "--", "--blame-hang", "literal", "--results-directory", "host-value" }, args.Skip(separator).ToArray());
-        using var timings = JsonDocument.Parse(File.ReadAllText(Path.Join(result.OutputDirectory, "timings.json")));
+        using var timings = JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(result.OutputDirectory, "timings.json")));
         Assert.Equal("automatic", timings.RootElement.GetProperty("projects")[0].GetProperty("hangDiagnostics").GetProperty("source").GetString());
     }
 
@@ -152,7 +152,7 @@ public sealed class CoverageRunTests
         var args = runner.Commands.Single(command => command.Arguments[0] == "test").Arguments;
         Assert.DoesNotContain("--blame-hang", args);
         Assert.DoesNotContain("--results-directory", args);
-        using var timings = JsonDocument.Parse(File.ReadAllText(Path.Join(result.OutputDirectory, "timings.json")));
+        using var timings = JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(result.OutputDirectory, "timings.json")));
         var diagnostic = timings.RootElement.GetProperty("projects")[0].GetProperty("hangDiagnostics");
         Assert.Equal("none", diagnostic.GetProperty("source").GetString());
         Assert.Equal("skipped-short-budget", diagnostic.GetProperty("status").GetString());
@@ -181,7 +181,7 @@ public sealed class CoverageRunTests
         Assert.Equal("caller-value", args[Array.IndexOf(args.ToArray(), option) + 1]);
         Assert.DoesNotContain("--blame-hang", args);
         if (driver == CoverageRunDriver.Msbuild) Assert.DoesNotContain("--results-directory", args);
-        using var timings = JsonDocument.Parse(File.ReadAllText(Path.Join(result.OutputDirectory, "timings.json")));
+        using var timings = JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(result.OutputDirectory, "timings.json")));
         var diagnostic = timings.RootElement.GetProperty("projects")[0].GetProperty("hangDiagnostics");
         Assert.Equal("manual", diagnostic.GetProperty("source").GetString());
         Assert.Equal(driver == CoverageRunDriver.Msbuild ? "unscoped" : "missing", diagnostic.GetProperty("status").GetString());
@@ -199,9 +199,9 @@ public sealed class CoverageRunTests
         {
             var args = runner.Commands.Single(command => command.Arguments[0] == "test").Arguments;
             var resultsIndex = Array.FindIndex(args.ToArray(), argument => argument == "--results-directory");
-            var host = Path.Join(args[resultsIndex + 1], "host");
+            var host = TestPathUtils.PathUnder(args[resultsIndex + 1], "host");
             Directory.CreateDirectory(host);
-            File.WriteAllText(Path.Join(host, "Sequence.xml"), "<TestSequence><Test Name=\"Sample.InflightTest\" /></TestSequence>");
+            File.WriteAllText(TestPathUtils.PathUnder(host, "Sequence.xml"), "<TestSequence><Test Name=\"Sample.InflightTest\" /></TestSequence>");
             caller.Cancel();
         };
         runner.TestDelays[project] = TimeSpan.FromSeconds(5);
@@ -212,7 +212,7 @@ public sealed class CoverageRunTests
                 WatchdogMode: CoverageRunWatchdogMode.Fail),
             console, caller.Token));
 
-        using var timings = JsonDocument.Parse(File.ReadAllText(Path.Join(repo.Path, "TestResults", "coverage-merged", "timings.json")));
+        using var timings = JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(repo.Path, "TestResults", "coverage-merged", "timings.json")));
         var recorded = timings.RootElement.GetProperty("projects")[0];
         Assert.Equal("terminated", recorded.GetProperty("executionStatus").GetString());
         Assert.Equal(JsonValueKind.Null, recorded.GetProperty("exitCode").ValueKind);

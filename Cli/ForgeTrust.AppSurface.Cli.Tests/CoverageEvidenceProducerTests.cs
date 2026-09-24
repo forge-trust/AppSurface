@@ -142,12 +142,12 @@ public sealed class CoverageEvidenceProducerTests
     public async Task RunAsync_ProducerDeadline_ShouldKeepTimedOutOutcomeAndPointToOwnedTerminalTimings()
     {
         using var directory = TestDirectory.Create();
-        var solutionPath = Path.Join(directory.Path, "sample.slnx");
-        var projectPath = Path.Join(directory.Path, "tests", "Sample.Tests", "Sample.Tests.csproj");
+        var solutionPath = TestPathUtils.PathUnder(directory.Path, "sample.slnx");
+        var projectPath = TestPathUtils.PathUnder(directory.Path, "tests", "Sample.Tests", "Sample.Tests.csproj");
         Directory.CreateDirectory(Path.GetDirectoryName(projectPath)!);
         await File.WriteAllTextAsync(solutionPath, "{}");
         await File.WriteAllTextAsync(projectPath, "<Project />");
-        var outputDirectory = Path.Join(directory.Path, "output");
+        var outputDirectory = TestPathUtils.PathUnder(directory.Path, "output");
         var producer = CreateProducer(new DeadlineCoverageRunProcessRunner());
         using var standardOutputWriter = new StringWriter();
         using var standardErrorWriter = new StringWriter();
@@ -163,19 +163,19 @@ public sealed class CoverageEvidenceProducerTests
         Assert.Equal(EvidenceProducerOutcome.TimedOut, result.Outcome);
         Assert.Empty(result.SatisfiedAssertionIds);
         Assert.Contains("coverage/timings.json", result.Diagnostic, StringComparison.Ordinal);
-        Assert.True(File.Exists(Path.Join(outputDirectory, "coverage", "timings.json")));
+        Assert.True(File.Exists(TestPathUtils.PathUnder(outputDirectory, "coverage", "timings.json")));
     }
 
     [Fact]
     public async Task RunAsync_ProducerDeadlineBeforeOutput_ShouldOmitTimingsHint()
     {
         using var directory = TestDirectory.Create();
-        var solutionPath = Path.Join(directory.Path, "sample.slnx");
-        var projectPath = Path.Join(directory.Path, "tests", "Sample.Tests", "Sample.Tests.csproj");
+        var solutionPath = TestPathUtils.PathUnder(directory.Path, "sample.slnx");
+        var projectPath = TestPathUtils.PathUnder(directory.Path, "tests", "Sample.Tests", "Sample.Tests.csproj");
         Directory.CreateDirectory(Path.GetDirectoryName(projectPath)!);
         await File.WriteAllTextAsync(solutionPath, "{}");
         await File.WriteAllTextAsync(projectPath, "<Project />");
-        var outputDirectory = Path.Join(directory.Path, "output");
+        var outputDirectory = TestPathUtils.PathUnder(directory.Path, "output");
         var producer = CreateProducer(new DeadlineCoverageRunProcessRunner(waitOperation: "msbuild"));
         using var standardOutputWriter = new StringWriter();
         using var standardErrorWriter = new StringWriter();
@@ -190,7 +190,7 @@ public sealed class CoverageEvidenceProducerTests
 
         Assert.Equal(EvidenceProducerOutcome.TimedOut, result.Outcome);
         Assert.DoesNotContain("coverage/timings.json", result.Diagnostic, StringComparison.Ordinal);
-        Assert.False(File.Exists(Path.Join(outputDirectory, "coverage", "timings.json")));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(outputDirectory, "coverage", "timings.json")));
     }
 
     [Fact]
