@@ -12,7 +12,12 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
-- Add release-facing changes here as they land.
+- Add the public-preview `ForgeTrust.AppSurface.Durable.Testing` package for deterministic Durable test builders,
+  provider fakes, host admission scenarios, and typed Work observations; publish it in coordination with matching
+  Durable and Provider package versions.
+- Add the [Durable Testing adoption guide](../Durable/ForgeTrust.AppSurface.Durable.Testing/README.md), including
+  the six-state health matrix, packed xUnit quick start, timeout and invocation-handle semantics, and history privacy
+  and retention guidance.
 
 <!-- appsurface:unreleased-entries section="included" -->
 

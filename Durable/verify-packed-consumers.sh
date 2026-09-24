@@ -30,6 +30,7 @@ projects=(
   "Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj"
   "Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj"
   "Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj"
+  "Durable/ForgeTrust.AppSurface.Durable.Testing/ForgeTrust.AppSurface.Durable.Testing.csproj"
 )
 
 packed_packages=(
@@ -39,6 +40,7 @@ packed_packages=(
   "ForgeTrust.AppSurface.Durable"
   "ForgeTrust.AppSurface.Durable.Provider"
   "ForgeTrust.AppSurface.Durable.PostgreSql"
+  "ForgeTrust.AppSurface.Durable.Testing"
 )
 
 fail() {
@@ -121,6 +123,32 @@ sed "s|__LOCAL_FEED__|$FEED_DIR|g" > "$CONFIG_FILE" <<'EOF'
   </packageSourceMapping>
 </configuration>
 EOF
+
+testing_consumer_dir="$WORK_DIR/TestingConsumer"
+cp -R "$ROOT_DIR/Durable/consumers/TestingConsumer" "$testing_consumer_dir"
+mv "$testing_consumer_dir/TestingConsumer.csproj.template" "$testing_consumer_dir/TestingConsumer.csproj"
+dotnet restore "$testing_consumer_dir/TestingConsumer.csproj" \
+  --configfile "$CONFIG_FILE" \
+  -m:1 \
+  -p:AppSurfacePackageVersion="$PACKAGE_VERSION" \
+  -p:UseSharedCompilation=false
+
+testing_assets_file="$testing_consumer_dir/obj/project.assets.json"
+[[ -f "$testing_assets_file" ]] || fail "restore did not produce $testing_assets_file"
+verify_assets_package "$testing_assets_file" "ForgeTrust.AppSurface.Durable.Testing"
+if jq -e '
+  .libraries | keys[] | ascii_downcase | split("/")[0]
+  | select(test("^microsoft\\.aspnetcore\\.") or . == "microsoft.aspnetcore.app.ref"
+      or . == "npgsql" or startswith("testcontainers"))
+' "$testing_assets_file" >/dev/null; then
+  fail "packed Testing consumer graph contains ASP.NET Core, Npgsql, or Testcontainers"
+fi
+dotnet test "$testing_consumer_dir/TestingConsumer.csproj" \
+  --configuration Release \
+  --no-restore \
+  -m:1 \
+  -p:AppSurfacePackageVersion="$PACKAGE_VERSION" \
+  -p:UseSharedCompilation=false
 
 for consumer in Adopter Provider PostgreSqlProvider; do
   consumer_dir="$WORK_DIR/$consumer"

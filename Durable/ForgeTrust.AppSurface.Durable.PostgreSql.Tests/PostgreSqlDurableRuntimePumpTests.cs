@@ -49,6 +49,12 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         var result = await provider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
             new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work));
 
+        var registrationObservation = DurableWorkRegistryObservation.Capture(
+            provider.GetRequiredService<IDurableWorkRegistry>(),
+            SuccessfulWorkRegistration.Name,
+            "v1");
+        Assert.Equal(SuccessfulWorkRegistration.Name, registrationObservation.WorkName);
+        Assert.Equal("v1", registrationObservation.WorkVersion);
         Assert.Equal(1, result.Discovered);
         Assert.Equal(1, result.Claimed);
         Assert.Equal(1, result.Processed);
@@ -58,6 +64,8 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.True(snapshot.IsSuccess);
         Assert.Equal(DurableWorkState.Succeeded, snapshot.Value!.State);
         Assert.Equal("runtime-pump-key", snapshot.Value.ProviderKey);
+        Assert.Equal(registrationObservation.WorkName, snapshot.Value.WorkName);
+        Assert.Equal(registrationObservation.WorkVersion, snapshot.Value.WorkVersion);
         Assert.Equal(DurableRuntimeHealthState.Healthy, (await provider.GetRequiredService<IDurableRuntimeHealth>().GetAsync()).State);
     }
 
@@ -175,6 +183,11 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             DurableProviderSafety.ProviderKeyed));
         Assert.True(accepted.IsSuccess);
 
+        var registrationObservation = DurableWorkRegistryObservation.Capture(
+            provider.GetRequiredService<IDurableWorkRegistry>(),
+            registration.WorkName,
+            registration.WorkVersion);
+
         var result = await provider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
             new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work));
         var snapshot = await provider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
@@ -184,6 +197,8 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.True(snapshot.IsSuccess);
         Assert.Equal(DurableWorkState.Succeeded, snapshot.Value!.State);
         Assert.Equal("completed", snapshot.Value.TerminalCode);
+        Assert.Equal(registrationObservation.WorkName, snapshot.Value.WorkName);
+        Assert.Equal(registrationObservation.WorkVersion, snapshot.Value.WorkVersion);
     }
 
     [Fact]
@@ -1027,6 +1042,11 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             DurableProviderSafety.Idempotent));
         Assert.True(accepted.IsSuccess);
 
+        var registrationObservation = DurableWorkRegistryObservation.Capture(
+            provider.GetRequiredService<IDurableWorkRegistry>(),
+            FailingWorkRegistration.Name,
+            "v1");
+
         var result = await provider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
             new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work));
 
@@ -1039,6 +1059,8 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.True(snapshot.IsSuccess);
         Assert.Equal(DurableWorkState.Suspended, snapshot.Value!.State);
         Assert.Equal(DurableProblemCodes.AmbiguousExternalOutcome, snapshot.Value!.TerminalCode);
+        Assert.Equal(registrationObservation.WorkName, snapshot.Value.WorkName);
+        Assert.Equal(registrationObservation.WorkVersion, snapshot.Value.WorkVersion);
     }
 
     [Fact]
@@ -1220,6 +1242,11 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             DurableProviderSafety.Idempotent));
         Assert.True(accepted.IsSuccess);
 
+        var registrationObservation = DurableWorkRegistryObservation.Capture(
+            provider.GetRequiredService<IDurableWorkRegistry>(),
+            SuccessfulWorkRegistration.Name,
+            "v1");
+
         await using (var update = database.DataSource.CreateCommand(
             "UPDATE appsurface_durable.work SET revision = revision + 1 WHERE scope_id = @scope_id AND work_id = @work_id;"))
         {
@@ -1237,6 +1264,8 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.Equal(1, result.Deferred);
         Assert.Equal(0, result.Failed);
         Assert.False(result.HasMore);
+        Assert.Equal(SuccessfulWorkRegistration.Name, registrationObservation.WorkName);
+        Assert.Equal("v1", registrationObservation.WorkVersion);
     }
 
     [Fact]
@@ -1829,6 +1858,11 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             DurableProviderSafety.Idempotent));
         Assert.True(accepted.IsSuccess);
 
+        var registrationObservation = DurableWorkRegistryObservation.Capture(
+            provider.GetRequiredService<IDurableWorkRegistry>(),
+            BlockingWorkRegistration.Name,
+            "v1");
+
         var running = provider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
             new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work)).AsTask();
         await registration.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -1845,6 +1879,8 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.Equal(0, result.Processed);
         Assert.Equal(1, result.Deferred);
         Assert.Equal(0, result.Failed);
+        Assert.Equal(BlockingWorkRegistration.Name, registrationObservation.WorkName);
+        Assert.Equal("v1", registrationObservation.WorkVersion);
     }
 
     [Fact]

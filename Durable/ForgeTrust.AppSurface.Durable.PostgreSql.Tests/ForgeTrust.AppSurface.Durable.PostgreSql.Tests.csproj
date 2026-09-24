@@ -30,10 +30,12 @@
     <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Durable.PostgreSql.TestHost/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost.csproj" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj" />
+    <ProjectReference Include="../ForgeTrust.AppSurface.Durable.Testing/ForgeTrust.AppSurface.Durable.Testing.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <Using Include="ForgeTrust.AppSurface.Testing" />
+    <Using Include="ForgeTrust.AppSurface.Durable.Testing" />
     <Using Include="Xunit" />
   </ItemGroup>
 

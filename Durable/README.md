@@ -9,6 +9,9 @@ AppSurface Durable is a public-preview package family for portable durable contr
 - [`ForgeTrust.AppSurface.Durable.PostgreSql`](ForgeTrust.AppSurface.Durable.PostgreSql/README.md) is the first
   authoritative-store implementation. Slices 3–6 supply explicit schema management, Work, Flow, Schedule, and an
   explicitly opted-in hosted runtime.
+- [`ForgeTrust.AppSurface.Durable.Testing`](ForgeTrust.AppSurface.Durable.Testing/README.md) provides production-backed
+  deterministic test builders, provider fakes, pump histories, host-scenario observations, and typed Work observations.
+  It does not simulate persistence or replace real-provider conformance tests.
 
 All three packages participate in the coordinated prerelease publish plan. They remain preview contracts: adopt them
 only with the reviewed schema, role, recovery, and operational evidence described below, and do not treat the preview
@@ -21,6 +24,10 @@ not make Slice 4 a hosted runtime.
 For the champion-tier upgrade path, start with the [Durable operational-assessment adoption guide](operational-assessments.md).
 It explains the computed health predicates, direct authoritative admission, exhaustive attempt handling, diagnostics,
 schema `9 -> 10` rollout, role reconciliation, and the supported `v0.2.0-preview.8` binary rollback boundary.
+
+For host and module tests, use the [Durable Testing package guide](ForgeTrust.AppSurface.Durable.Testing/README.md)
+for its six health-state defaults, authoritative pump-admission scenario, timeout handling, history retention, and
+privacy boundaries. Pair it with PostgreSQL conformance when a test needs evidence about stored or recovered state.
 
 ## Why this boundary
 
