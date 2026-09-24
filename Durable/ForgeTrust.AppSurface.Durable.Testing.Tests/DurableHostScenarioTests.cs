@@ -6,6 +6,22 @@ namespace ForgeTrust.AppSurface.Durable.Testing.Tests;
 
 public sealed class DurableHostScenarioTests
 {
+    [Fact]
+    public void Constructor_rejects_missing_providers_and_nonpositive_timeouts()
+    {
+        var health = new QueuedHealth(Snapshot(DurableRuntimeHealthState.Healthy));
+        var admission = new QueuedAdmission(_ => ValueTask.FromResult(Attempt(DurableRuntimePumpAttemptKind.Refused)));
+        var request = new DurableRuntimePumpRequest();
+
+        Assert.Throws<ArgumentNullException>(() => new DurableHostScenario(null!, admission, request));
+        Assert.Throws<ArgumentNullException>(() => new DurableHostScenario(health, null!, request));
+        Assert.Throws<ArgumentNullException>(() => new DurableHostScenario(health, admission, null!));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableHostScenario(health, admission, request,
+            observationTimeout: TimeSpan.Zero));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DurableHostScenario(health, admission, request,
+            overallTimeout: TimeSpan.FromTicks(-1)));
+    }
+
     [Theory]
     [InlineData(DurableRuntimeHealthState.Healthy)]
     [InlineData(DurableRuntimeHealthState.NotStarted)]
@@ -92,6 +108,62 @@ public sealed class DurableHostScenarioTests
     }
 
     [Fact]
+    public async Task Null_health_result_fails_without_replacing_latest_assessment()
+    {
+        var health = new QueuedHealth(Snapshot(DurableRuntimeHealthState.Healthy), (object)null!);
+        var scenario = Create(health,
+            new QueuedAdmission(_ => ValueTask.FromResult(Attempt(DurableRuntimePumpAttemptKind.Refused))),
+            new MonotonicTimeProvider());
+
+        var published = await scenario.AssessHealthAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => scenario.AssessHealthAsync());
+
+        Assert.Same(published, scenario.LatestAssessment);
+        Assert.Equal(2, health.Calls);
+    }
+
+    [Fact]
+    public async Task Timed_out_health_fault_is_observed_without_publishing_a_late_assessment()
+    {
+        var clock = new MonotonicTimeProvider();
+        var pending = NewSource<DurableRuntimeHealthSnapshot>();
+        var scenario = Create(new QueuedHealth(pending.Task),
+            new QueuedAdmission(_ => ValueTask.FromResult(Attempt(DurableRuntimePumpAttemptKind.Refused))), clock,
+            observation: TimeSpan.FromSeconds(1), overall: TimeSpan.FromSeconds(5));
+        var read = scenario.AssessHealthAsync();
+        await clock.WaitForTimerAsync();
+        clock.Advance(TimeSpan.FromSeconds(1));
+
+        var timeout = await Assert.ThrowsAsync<DurableScenarioTimeoutException>(() => read);
+        var lateFailure = new ApplicationException("late health failure");
+        pending.SetException(lateFailure);
+        await Assert.ThrowsAsync<ApplicationException>(() => pending.Task);
+        await Task.Yield();
+
+        Assert.Equal(DurableScenarioPhase.Health, timeout.Phase);
+        Assert.Null(scenario.LatestAssessment);
+    }
+
+    [Fact]
+    public async Task Provider_cancellation_does_not_publish_health_and_observes_late_fault()
+    {
+        using var cts = new CancellationTokenSource();
+        var pending = NewSource<DurableRuntimeHealthSnapshot>();
+        var health = new QueuedHealth(pending.Task);
+        var scenario = Create(health,
+            new QueuedAdmission(_ => ValueTask.FromResult(Attempt(DurableRuntimePumpAttemptKind.Refused))),
+            new MonotonicTimeProvider());
+        var read = scenario.AssessHealthAsync(cts.Token);
+        Assert.Equal(1, health.Calls);
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => read);
+        pending.SetException(new ApplicationException("late canceled health failure"));
+        await Task.Yield();
+        Assert.Null(scenario.LatestAssessment);
+    }
+
+    [Fact]
     public async Task Cancellation_before_pump_prevents_admission()
     {
         var admission = new QueuedAdmission(_ => ValueTask.FromResult(Attempt(DurableRuntimePumpAttemptKind.Refused)));
@@ -134,6 +206,80 @@ public sealed class DurableHostScenarioTests
         Assert.Equal(DurableScenarioTimeoutReason.Overall, overallTimeout.Reason);
         Assert.Null(overallTimeout.Invocation);
         Assert.Equal(0, admission.Calls);
+    }
+
+    [Fact]
+    public async Task Observation_budget_expiring_before_health_call_skips_provider()
+    {
+        var clock = new MonotonicTimeProvider();
+        var health = new QueuedHealth(Snapshot(DurableRuntimeHealthState.Healthy));
+        var scenario = Create(health,
+            new QueuedAdmission(_ => ValueTask.FromResult(Attempt(DurableRuntimePumpAttemptKind.Refused))), clock,
+            observation: TimeSpan.FromSeconds(1), overall: TimeSpan.FromSeconds(10));
+        clock.AdvanceOnThirdTimestampRead(TimeSpan.FromSeconds(1));
+
+        var timeout = await Assert.ThrowsAsync<DurableScenarioTimeoutException>(() => scenario.AssessHealthAsync());
+
+        Assert.Equal(DurableScenarioTimeoutReason.Observation, timeout.Reason);
+        Assert.Null(timeout.Invocation);
+        Assert.Equal(0, health.Calls);
+    }
+
+    [Fact]
+    public async Task Observation_budget_expiring_before_pump_skips_admission_and_retains_no_handle()
+    {
+        var clock = new MonotonicTimeProvider();
+        var admission = new QueuedAdmission(_ => ValueTask.FromResult(Attempt(DurableRuntimePumpAttemptKind.Refused)));
+        var scenario = Create(new QueuedHealth(Snapshot(DurableRuntimeHealthState.Healthy)), admission, clock,
+            observation: TimeSpan.FromSeconds(1), overall: TimeSpan.FromSeconds(10));
+        await scenario.AssessHealthAsync();
+        clock.AdvanceOnThirdTimestampRead(TimeSpan.FromSeconds(1));
+
+        var timeout = await Assert.ThrowsAsync<DurableScenarioTimeoutException>(() => scenario.RunDirectPumpOnceAsync());
+
+        Assert.Equal(DurableScenarioPhase.Pump, timeout.Phase);
+        Assert.Equal(DurableScenarioTimeoutReason.Observation, timeout.Reason);
+        Assert.Null(timeout.Invocation);
+        Assert.Equal(0, admission.Calls);
+        Assert.Empty(scenario.PumpInvocations);
+    }
+
+    [Fact]
+    public async Task Null_late_attempt_faults_retained_handle_and_can_be_cleared()
+    {
+        var clock = new MonotonicTimeProvider();
+        var pending = NewSource<DurableRuntimePumpAttempt>();
+        var scenario = Create(new QueuedHealth(Snapshot(DurableRuntimeHealthState.Healthy)),
+            new QueuedAdmission(_ => new ValueTask<DurableRuntimePumpAttempt>(pending.Task)), clock,
+            observation: TimeSpan.FromSeconds(1), overall: TimeSpan.FromSeconds(10));
+        await scenario.AssessHealthAsync();
+        var run = scenario.RunDirectPumpOnceAsync();
+        await clock.WaitForTimerAsync();
+        clock.Advance(TimeSpan.FromSeconds(1));
+        var timeout = await Assert.ThrowsAsync<DurableScenarioTimeoutException>(() => run);
+        var invocation = Assert.IsType<DurableScenarioPumpInvocation>(timeout.Invocation);
+
+        pending.SetResult(null!);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => invocation.Completion);
+        Assert.Contains("null attempt", error.Message);
+        Assert.Equal(1, scenario.ClearCompletedPumpInvocations());
+        Assert.Empty(scenario.PumpInvocations);
+    }
+
+    [Fact]
+    public async Task Asynchronous_admission_failure_is_preserved_by_return_and_handle()
+    {
+        var failure = new ApplicationException("admission failed asynchronously");
+        var pending = NewSource<DurableRuntimePumpAttempt>();
+        var scenario = Create(new QueuedHealth(Snapshot(DurableRuntimeHealthState.Healthy)),
+            new QueuedAdmission(_ => new ValueTask<DurableRuntimePumpAttempt>(pending.Task)), new MonotonicTimeProvider());
+        await scenario.AssessHealthAsync();
+        var run = scenario.RunDirectPumpOnceAsync();
+        pending.SetException(failure);
+
+        Assert.Same(failure, await Assert.ThrowsAsync<ApplicationException>(() => run));
+        Assert.Same(failure, await Assert.ThrowsAsync<ApplicationException>(() => Assert.Single(scenario.PumpInvocations).Completion));
     }
 
     [Fact]
@@ -197,8 +343,7 @@ public sealed class DurableHostScenarioTests
         {
             Assert.Equal(cts.Token, token);
             entered.SetResult();
-            return new ValueTask<DurableRuntimePumpAttempt>(Task.Delay(Timeout.Infinite, token).ContinueWith<DurableRuntimePumpAttempt>(
-                _ => throw new OperationCanceledException(token), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default));
+            return CancelWhenRequestedAsync(token);
         });
         var scenario = Create(new QueuedHealth(Snapshot(DurableRuntimeHealthState.Healthy)), admission, new MonotonicTimeProvider());
         await scenario.AssessHealthAsync();
@@ -209,6 +354,12 @@ public sealed class DurableHostScenarioTests
         var handle = Assert.Single(scenario.PumpInvocations);
         Assert.True(handle.Completion.IsCanceled);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => handle.Completion);
+
+        static async ValueTask<DurableRuntimePumpAttempt> CancelWhenRequestedAsync(CancellationToken token)
+        {
+            await Task.Delay(Timeout.Infinite, token);
+            throw new InvalidOperationException("The canceled delay must not complete successfully.");
+        }
     }
 
     [Fact]
@@ -272,6 +423,7 @@ public sealed class DurableHostScenarioTests
             var response = _responses.TryDequeue(out var next) ? next : throw new InvalidOperationException("No queued health response.");
             return response switch
             {
+                null => ValueTask.FromResult<DurableRuntimeHealthSnapshot>(null!),
                 DurableRuntimeHealthSnapshot snapshot => ValueTask.FromResult(snapshot),
                 Task<DurableRuntimeHealthSnapshot> task => new(task),
                 _ => throw new InvalidOperationException("Unsupported health response."),
@@ -306,10 +458,33 @@ public sealed class DurableHostScenarioTests
         private readonly TaskCompletionSource _firstTimerCreated = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private long _ticks;
         private DateTimeOffset _utcNow = DateTimeOffset.UnixEpoch;
+        private int _timestampReadsUntilAdvance = -1;
+        private TimeSpan _advanceOnElapsedRead;
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
-        public override long GetTimestamp() { lock (_gate) return _ticks; }
+        public override long GetTimestamp()
+        {
+            lock (_gate)
+            {
+                if (_timestampReadsUntilAdvance > 0 && --_timestampReadsUntilAdvance == 0)
+                {
+                    _ticks = checked(_ticks + _advanceOnElapsedRead.Ticks);
+                    _utcNow += _advanceOnElapsedRead;
+                    _timestampReadsUntilAdvance = -1;
+                }
+                return _ticks;
+            }
+        }
         public override DateTimeOffset GetUtcNow() { lock (_gate) return _utcNow; }
         public void AdjustUtc(TimeSpan amount) { lock (_gate) _utcNow += amount; }
+        public void AdvanceOnThirdTimestampRead(TimeSpan amount)
+        {
+            lock (_gate)
+            {
+                _advanceOnElapsedRead = amount;
+                // The API records one timestamp, then checks overall time before observation time.
+                _timestampReadsUntilAdvance = 3;
+            }
+        }
         public Task WaitForTimerAsync() => _firstTimerCreated.Task;
         public void Advance(TimeSpan amount)
         {

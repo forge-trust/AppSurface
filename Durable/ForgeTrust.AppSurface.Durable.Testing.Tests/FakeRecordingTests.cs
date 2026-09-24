@@ -60,6 +60,62 @@ public sealed class FakeRecordingTests
     }
 
     [Fact]
+    public async Task Delegate_that_honors_cancellation_records_its_canceled_completion()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var entered = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pump = new RecordingDurableRuntimePump
+        {
+            Admission = async (_, token) =>
+            {
+                entered.SetResult(token);
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                throw new InvalidOperationException("The canceled delay must not complete successfully.");
+            },
+        };
+
+        var running = pump.TryRunOnceAsync(new(), cancellation.Token).AsTask();
+        Assert.Equal(cancellation.Token, await entered.Task);
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => running);
+        var call = Assert.Single(pump.History);
+        Assert.True(call.IsCompleted);
+        Assert.True(call.CancellationRequestedAtCompletion);
+        Assert.IsAssignableFrom<OperationCanceledException>(call.Exception);
+        Assert.Null(call.Result);
+    }
+
+    [Fact]
+    public async Task Delegate_that_ignores_cancellation_retains_its_exact_result()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var entered = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<DurableRuntimePumpAttempt>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pump = new RecordingDurableRuntimePump
+        {
+            Admission = (_, token) =>
+            {
+                entered.SetResult(token);
+                return new ValueTask<DurableRuntimePumpAttempt>(release.Task);
+            },
+        };
+
+        var running = pump.TryRunOnceAsync(new(), cancellation.Token).AsTask();
+        Assert.Equal(cancellation.Token, await entered.Task);
+        cancellation.Cancel();
+        var expected = Attempt(DurableRuntimePumpAttemptKind.Refused);
+        release.SetResult(expected);
+
+        Assert.Same(expected, await running);
+        var call = Assert.Single(pump.History);
+        Assert.True(call.IsCompleted);
+        Assert.True(call.CancellationRequestedAtCompletion);
+        Assert.Same(expected, call.Result);
+        Assert.Null(call.Exception);
+    }
+
+    [Fact]
     public async Task History_is_start_ordered_and_clear_excludes_in_flight_calls()
     {
         var firstEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -76,10 +132,13 @@ public sealed class FakeRecordingTests
         await pump.TryRunOnceAsync(new(2));
         Assert.Equal(new[] { 1, 2 }, pump.History.Select(call => call.MaximumItems));
         var snapshot = pump.History;
+        Assert.False(snapshot[0].IsCompleted);
+        Assert.True(snapshot[1].IsCompleted);
         pump.ClearHistory();
         releaseFirst.SetResult(Attempt(DurableRuntimePumpAttemptKind.Completed));
         await first;
         Assert.Equal(2, snapshot.Length);
+        Assert.False(snapshot[0].IsCompleted);
         Assert.Empty(pump.History);
     }
 
