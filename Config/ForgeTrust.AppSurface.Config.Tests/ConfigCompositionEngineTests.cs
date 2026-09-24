@@ -77,6 +77,27 @@ public sealed class ConfigCompositionEngineTests
     }
 
     [Fact]
+    public void Execute_TypedDottedRootSelectsLiteralDeclarationInsteadOfNestedRoot()
+    {
+        using var files = new FileFixture("""{"A.B":{"Count":11,"ApiKey":{"key":"literal"}},"A":{"B":{"Count":22,"ApiKey":{"key":"nested"}}}}""");
+        var alpha = new SecretProvider("alpha");
+        var engine = CreateEngine(bases: [files.Provider], secrets: [alpha]);
+
+        var literalResult = engine.Execute(EnvironmentName, AppSurfaceConfigKey.Parse("A.B"), typeof(CountAndSecretOptions));
+        var nestedResult = engine.Execute(EnvironmentName, AppSurfaceConfigKey.Parse("A:B"), typeof(CountAndSecretOptions));
+        var literal = Resolved<CountAndSecretOptions>(literalResult);
+        var nested = Resolved<CountAndSecretOptions>(nestedResult);
+
+        AssertSecret(literal.ApiKey, true, "literal", "alpha");
+        AssertSecret(nested.ApiKey, true, "nested", "alpha");
+        Assert.Equal(11, literal.Count);
+        Assert.Equal(22, nested.Count);
+        Assert.NotNull(Assert.Single(literalResult.Slots).DeclarationSource?.Location);
+        Assert.NotNull(Assert.Single(nestedResult.Slots).DeclarationSource?.Location);
+        Assert.Equal(new[] { "A.B:ApiKey", "A:B:ApiKey" }, alpha.Resolutions.Select(item => item.Reference.LogicalPath));
+    }
+
+    [Fact]
     public void Execute_HigherFileDescriptorReplacesVersionInsteadOfInheritingMergedFields()
     {
         using var files = new FileFixture(
@@ -1236,7 +1257,7 @@ public sealed class ConfigCompositionEngineTests
         Assert.Throws<InvalidOperationException>(() => options.ApiKey.Value);
 
         ConfigDataAnnotationsValidator.Validate(
-            "Service", typeof(Config<ValidatedSecretOptions>), typeof(ValidatedSecretOptions), options);
+            AppSurfaceConfigKey.Parse("Service"), typeof(Config<ValidatedSecretOptions>), typeof(ValidatedSecretOptions), options);
 
         // Required validates wrapper presence; it does not imply the secret has a value.
         Assert.True(options.ApiKey.Enabled);
@@ -1420,9 +1441,9 @@ public sealed class ConfigCompositionEngineTests
         public ConcurrentQueue<(string Environment, string Key)> TypedReads { get; } = new();
         public Func<string, string, ConfigCompositionValueResolution>? Resolve { get; init; }
 
-        public T? GetValue<T>(string environment, string key)
+        ConfigProviderValueResult<T> IConfigProvider.Resolve<T>(ConfigProviderRequest request)
         {
-            TypedReads.Enqueue((environment, key));
+            TypedReads.Enqueue((request.Environment, request.Key.Value));
             throw new InvalidOperationException("Composition must use the raw root capability.");
         }
 
@@ -1458,6 +1479,12 @@ public sealed class ConfigCompositionEngineTests
             Lookups.Enqueue(name);
             return values is not null && values.TryGetValue(name, out var value) ? value : defaultValue;
         }
+
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() =>
+            values is null
+                ? new Dictionary<string, string>(StringComparer.Ordinal)
+                : values.Where(pair => pair.Value is not null)
+                    .ToDictionary(pair => pair.Key, pair => pair.Value!, StringComparer.Ordinal);
     }
 
     private sealed class ManualTimeProvider : TimeProvider

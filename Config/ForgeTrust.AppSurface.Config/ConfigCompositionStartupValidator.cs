@@ -21,7 +21,7 @@ internal sealed class ConfigCompositionStartupValidator(ConfigCompositionEngine 
         foreach (var entry in entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            engine.ValidatePlan(environment.Environment, entry.Key, entry.ValueType);
+            engine.ValidatePlan(environment.Environment, entry.LogicalKey, entry.ValueType);
         }
         return Task.CompletedTask;
     }

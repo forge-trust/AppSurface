@@ -64,11 +64,30 @@ internal sealed class ConfigCompositionPlanCompiler
     /// <summary>Gets a cached plan. New source/registration/options generations belong to a new host compiler.</summary>
     internal ConfigCompositionPlan Compile(string environment, string key, Type type)
     {
+        ConfigLogicalPath root;
+        try { root = ConfigLogicalPath.Parse(key); }
+        catch (ArgumentException)
+        {
+            return new(environment, key, null, type, _json.GetShape(type), [], [],
+                [new ConfigCompositionFailure(key, "secret-path-invalid")]);
+        }
+        return Compile(environment, root, type);
+    }
+
+    /// <summary>Compiles a plan from a typed root whose segments may contain literal dots.</summary>
+    internal ConfigCompositionPlan Compile(string environment, AppSurfaceConfigKey key, Type type)
+        => Compile(environment, ConfigLogicalPath.FromKey(key), type);
+
+    internal ConfigCompositionPlan Compile(string environment, ConfigLogicalPath root, Type type) => BuildCached(environment, root, type);
+
+    private ConfigCompositionPlan BuildCached(string environment, ConfigLogicalPath root, Type type)
+    {
+        var key = root.Canonical;
         var identity = (environment, key, type);
         lock (_planCacheLock)
             if (_plans.TryGetValue(identity, out var cached)) return cached;
         // Provider validation can reenter composition, so callbacks must run outside the cache lock.
-        var plan = Build(environment, key, type);
+        var plan = Build(environment, root, type);
         lock (_planCacheLock)
         {
             if (_plans.TryGetValue(identity, out var cached)) return cached;
@@ -77,16 +96,11 @@ internal sealed class ConfigCompositionPlanCompiler
         return plan;
     }
 
-    private ConfigCompositionPlan Build(string environment, string key, Type type)
+    private ConfigCompositionPlan Build(string environment, ConfigLogicalPath root, Type type)
     {
         var shape = _json.GetShape(type);
         var failures = new List<ConfigCompositionFailure>();
-        ConfigLogicalPath root;
-        try { root = ConfigLogicalPath.Parse(key); }
-        catch (ArgumentException)
-        {
-            return new(environment, key, type, shape, [], [], [new(key, "secret-path-invalid")]);
-        }
+        var key = root.Canonical;
         foreach (var error in shape.Failures)
             failures.Add(new(Join(root, error.Members).Canonical, error.Code));
         failures.AddRange(_registry.Errors.Select(code => new ConfigCompositionFailure(root.Canonical, code)));
@@ -130,6 +144,8 @@ internal sealed class ConfigCompositionPlanCompiler
         // Preserve every declaration event. Invalid lower declarations cannot disappear behind later files.
         foreach (var file in _bases.OfType<FileBasedConfigProvider>())
         {
+            if (file.HasProjectedRootCollision(environment, root))
+                failures.Add(new(root.Canonical, "config-composition-file-invalid"));
             foreach (var fileEvent in file.Snapshot.LoadEvents.Where(e => e.Environment == "*" || string.Equals(e.Environment, environment, StringComparison.OrdinalIgnoreCase)))
             {
                 if (fileEvent is ConfigFileLoadFailure failure)
@@ -144,7 +160,7 @@ internal sealed class ConfigCompositionPlanCompiler
                 {
                     var slot = slots[i];
                     if (!nodes.TryGetValue(slot.Path, out var node)) continue;
-                    var source = FileSource(layer.FilePath, slot.Path, layer.SourceLocationMap.Value.GetLocation(slot.Path.Dotted));
+                    var source = FileSource(layer.FilePath, slot.Path, layer.SourceLocationMap.Value.GetLocation(slot.Path.Canonical));
                     if (!TryDescriptor(node, out var descriptor, out var code))
                     {
                         failures.Add(new(slot.Path.Canonical, code, source: source));
@@ -239,7 +255,7 @@ internal sealed class ConfigCompositionPlanCompiler
         }
         return Result(eligibleBases);
 
-        ConfigCompositionPlan Result(IReadOnlyList<IConfigProvider>? bases = null) => new(environment, key, type, shape,
+        ConfigCompositionPlan Result(IReadOnlyList<IConfigProvider>? bases = null) => new(environment, key, root, type, shape,
             slots.OrderBy(s => s.Path.Canonical, StringComparer.OrdinalIgnoreCase).ToList().AsReadOnly(),
             bases ?? [], failures.OrderBy(f => f.Path, StringComparer.OrdinalIgnoreCase).ThenBy(f => f.Code, StringComparer.Ordinal).ToList().AsReadOnly());
 
@@ -248,7 +264,7 @@ internal sealed class ConfigCompositionPlanCompiler
             foreach (var pair in obj)
             {
                 ConfigLogicalPath path;
-                try { path = ConfigLogicalPath.Parse(parent is null ? pair.Key : $"{parent.Canonical}:{pair.Key}"); }
+                try { path = parent is null ? ConfigLogicalPath.FromKey(AppSurfaceConfigKey.FromSegments(pair.Key)) : parent.Append(pair.Key); }
                 catch (ArgumentException) { failures.Add(new(root.Canonical, "secret-path-invalid")); continue; }
                 if (!path.Overlaps(root)) continue;
                 if (!nodes.TryAdd(path, pair.Value)) failures.Add(new(path.Canonical, "secret-path-collision", source: FileSource(layer.FilePath, path, null)));
@@ -325,7 +341,7 @@ internal sealed class ConfigCompositionPlanCompiler
 }
 
 /// <summary>An immutable value-free execution plan scoped to one host and source generation.</summary>
-internal sealed record ConfigCompositionPlan(string Environment, string Key, Type ValueType, ConfigCompositionShape Shape,
+internal sealed record ConfigCompositionPlan(string Environment, string Key, ConfigLogicalPath? Root, Type ValueType, ConfigCompositionShape Shape,
     IReadOnlyList<ConfigSecretPlanSlot> Slots, IReadOnlyList<IConfigProvider> Bases, IReadOnlyList<ConfigCompositionFailure> Failures);
 /// <summary>One compiled scalar destination and its locally validated reference policy.</summary>
 internal sealed record ConfigSecretPlanSlot(ConfigSecretDestination Destination, ConfigLogicalPath Path,

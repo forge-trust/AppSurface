@@ -93,6 +93,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
     private readonly IServiceProvider _serviceProvider;
     private readonly ConfigAuditRedactor _redactor;
     private readonly ConfigAuditDictionaryKeyCorrelationOptions _correlationOptions;
+    private readonly IOptions<ConfigResourceOptions> _resourceOptions;
     private readonly ConfigAuditValueTraverser _traverser;
     private readonly ConfigCompositionEngine _composition;
     private readonly IReadOnlySet<string> _typedSecretPaths;
@@ -104,6 +105,8 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         IServiceProvider serviceProvider,
         ConfigAuditRedactor redactor,
         IOptions<ConfigAuditDictionaryKeyCorrelationOptions> correlationOptions,
+        IOptions<ConfigResourceOptions>? resourceOptions = null,
+        ConfigDeclarationRegistry? declarationRegistry = null,
         ConfigCompositionEngine? composition = null)
     {
         _environmentProvider = environmentProvider;
@@ -112,15 +115,16 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                               .OrderByDescending(provider => provider.Priority)
                               .ToList()
                           ?? [];
-        _knownEntries = knownEntries?
+        var declaredEntries = declarationRegistry?.Entries ?? knownEntries ?? [];
+        _knownEntries = declaredEntries
                             .GroupBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase)
                             .Select(MergeKnownEntries)
                             .OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase)
-                            .ToList()
-                        ?? [];
+                            .ToList();
         _serviceProvider = serviceProvider;
         _redactor = redactor;
         _correlationOptions = correlationOptions.Value;
+        _resourceOptions = resourceOptions ?? Options.Create(new ConfigResourceOptions());
         _traverser = new ConfigAuditValueTraverser(redactor);
         _composition = composition
             ?? serviceProvider.GetService<ConfigCompositionEngine>()
@@ -132,7 +136,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                 new AppSurfaceConfigOptions(),
                 TimeProvider.System);
         _typedSecretPaths = _knownEntries.Where(entry => _composition.ContainsSecrets(entry.ValueType))
-            .SelectMany(entry => _composition.GetSecretPaths(entry.Key, entry.ValueType))
+            .SelectMany(entry => _composition.GetSecretPaths(entry.LogicalKey, entry.ValueType))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
@@ -157,6 +161,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
 
     private ConfigAuditReport GetReportCore(string environment, ConfigAuditReportMode? mode)
     {
+        using var scope = new ConfigResolutionScope(auditOptions: _resourceOptions.Value.Snapshot());
         var traversalContext = mode == ConfigAuditReportMode.ExpandKnownEntryCollections
             ? new ConfigAuditReportTraversalContext(ExpandedReportNodeLimit)
             : null;
@@ -164,7 +169,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         var entries = new List<ConfigAuditEntry>(_knownEntries.Count);
         foreach (var entry in _knownEntries)
         {
-            entries.Add(BuildEntry(environment, entry, mode, traversalContext));
+            entries.Add(BuildEntry(environment, entry, mode, traversalContext, scope));
         }
 
         var dictionaryKeyCorrelationRequested = _knownEntries.Any(entry =>
@@ -181,7 +186,16 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             });
         }
 
-        var discoveredKeys = BuildDiscoveredKeys(environment, diagnostics, _typedSecretPaths);
+        var discoveredKeys = BuildDiscoveredKeys(environment, diagnostics, scope);
+        if (scope.IncompleteAuditDiagnostic is { } incomplete)
+        {
+            diagnostics.Add(new ConfigAuditDiagnostic
+            {
+                Severity = ConfigAuditDiagnosticSeverity.Error,
+                Code = incomplete.Code,
+                Message = incomplete.ToDisplayString()
+            });
+        }
         return new ConfigAuditReport
         {
             Environment = environment,
@@ -198,7 +212,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
     private IReadOnlyList<ConfigAuditDiscoveredKey> BuildDiscoveredKeys(
         string environment,
         List<ConfigAuditDiagnostic> reportDiagnostics,
-        IReadOnlySet<string> typedSecretPaths)
+        ConfigResolutionScope scope)
     {
         var discoveredKeys = new List<ConfigAuditDiscoveredKey>();
         foreach (var provider in new IConfigProvider[] { _environmentProvider }.Concat(_otherProviders))
@@ -233,7 +247,9 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             IReadOnlyList<ConfigProviderAuditDiscoveredKey> publicProviderKeys;
             try
             {
-                publicProviderKeys = publicKeyEnumerator.EnumerateKeys(environment);
+                publicProviderKeys = provider is EnvironmentConfigProvider builtInEnvironment
+                    ? builtInEnvironment.EnumerateKeys(environment, scope)
+                    : publicKeyEnumerator.EnumerateKeys(environment);
             }
             catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or System.IO.IOException)
             {
@@ -258,20 +274,26 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         {
             foreach (var providerKey in providerKeys)
             {
-                var classification = ClassifyDiscoveredKey(providerKey.Key);
-                var entrySensitivity = typedSecretPaths.Any(path =>
-                        IsTypedSecretPath(providerKey.Key, path))
+                if (providerKey.RawValue is null && providerKey.ValueKind == ConfigAuditDiscoveredValueKind.Scalar
+                    && providerKey.Sources.Count == 0 && providerKey.Diagnostics.Count == 0)
+                {
+                    continue;
+                }
+                var classification = ClassifyDiscoveredKey(providerKey.LogicalKey);
+                var entrySensitivity = _typedSecretPaths.Any(path =>
+                        IsTypedSecretPath(providerKey.LogicalKey.Value, path))
                     ? ConfigAuditSensitivity.Sensitive
-                    : GetDiscoveredKeyEntrySensitivity(providerKey.Key);
+                    : GetDiscoveredKeyEntrySensitivity(providerKey.LogicalKey);
                 var redacted = _redactor.FormatValue(
-                    providerKey.Key,
+                    providerKey.LogicalKey.Value,
                     providerKey.RawValue,
                     providerKey.Sources,
                     entrySensitivity);
                 var display = ResolveDiscoveredValueDisplay(providerKey, classification, redacted);
                 discoveredKeys.Add(new ConfigAuditDiscoveredKey
                 {
-                    Key = providerKey.Key,
+                    Key = _knownEntries.FirstOrDefault(entry => entry.LogicalKey.Equals(providerKey.LogicalKey))?.Key
+                        ?? providerKey.LogicalKey.Value,
                     Classification = classification,
                     DisplayValue = display.DisplayValue,
                     IsRedacted = display.IsRedacted,
@@ -283,13 +305,30 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         }
 
         return discoveredKeys
+            .GroupBy(entry => AppSurfaceConfigKey.Parse(entry.Key))
+            .Select(group =>
+            {
+                var winner = group.First();
+                var sensitive = group.Any(entry => entry.IsRedacted);
+                return new ConfigAuditDiscoveredKey
+                {
+                    Key = winner.Key,
+                    Classification = winner.Classification,
+                    DisplayValue = sensitive ? ConfigAuditRedactor.Placeholder : winner.DisplayValue,
+                    IsRedacted = sensitive,
+                    ValueDisplayState = sensitive ? ConfigAuditDiscoveredValueDisplayState.Redacted : winner.ValueDisplayState,
+                    Sources = group.SelectMany(entry => entry.Sources).ToList(),
+                    Diagnostics = group.SelectMany(entry => entry.Diagnostics).ToList()
+                };
+            })
             .OrderBy(key => key.Classification)
             .ThenBy(key => key.Key, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(key => key.Key, StringComparer.Ordinal)
             .ToList();
 
     }
 
-    private ConfigAuditSensitivity GetDiscoveredKeyEntrySensitivity(string key)
+    private ConfigAuditSensitivity GetDiscoveredKeyEntrySensitivity(AppSurfaceConfigKey key)
     {
         ConfigAuditSensitivity? exactSensitivity = null;
         ConfigAuditSensitivity? nearestSpecifiedParentSensitivity = null;
@@ -299,7 +338,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         {
             var sensitivity = knownEntry.OptionsSnapshot.Sensitivity;
             var normalizedSensitivity = ConfigAuditEntryOptions.NormalizeSensitivity(sensitivity);
-            if (string.Equals(knownEntry.Key, key, StringComparison.OrdinalIgnoreCase))
+            if (knownEntry.LogicalKey.Equals(key))
             {
                 if (normalizedSensitivity == ConfigAuditSensitivity.Sensitive)
                 {
@@ -314,7 +353,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                 continue;
             }
 
-            var isDescendant = IsKnownDescendantKey(key, knownEntry.Key);
+            var isDescendant = IsKnownDescendantKey(key, knownEntry.LogicalKey);
             if (isDescendant
                 && normalizedSensitivity != ConfigAuditSensitivity.Unknown
                 && knownEntry.Key.Length > nearestSpecifiedParentLength)
@@ -374,14 +413,14 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             ConfigAuditDiscoveredValueDisplayState.OmittedInventory);
     }
 
-    private ConfigAuditDiscoveredKeyClassification ClassifyDiscoveredKey(string key)
+    private ConfigAuditDiscoveredKeyClassification ClassifyDiscoveredKey(AppSurfaceConfigKey key)
     {
-        if (_knownEntries.Any(knownEntry => string.Equals(knownEntry.Key, key, StringComparison.OrdinalIgnoreCase)))
+        if (_knownEntries.Any(knownEntry => knownEntry.LogicalKey.Equals(key)))
         {
             return ConfigAuditDiscoveredKeyClassification.Known;
         }
 
-        if (_knownEntries.Any(knownEntry => IsKnownDescendantKey(key, knownEntry.Key)))
+        if (_knownEntries.Any(knownEntry => IsKnownDescendantKey(key, knownEntry.LogicalKey)))
         {
             return ConfigAuditDiscoveredKeyClassification.KnownDescendant;
         }
@@ -389,17 +428,28 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         return ConfigAuditDiscoveredKeyClassification.Unknown;
     }
 
-    private static bool IsKnownDescendantKey(string key, string knownKey) =>
-        key.Length > knownKey.Length
-        && key[knownKey.Length] == '.'
-        && key.StartsWith(knownKey, StringComparison.OrdinalIgnoreCase);
+    private static bool IsKnownDescendantKey(AppSurfaceConfigKey key, AppSurfaceConfigKey knownKey) =>
+        !key.Equals(knownKey) && key.IsSameOrDescendantOf(knownKey);
 
     private static bool IsTypedSecretPath(string key, string secretPath)
     {
-        var normalizedKey = key.Replace(':', '.');
-        var normalizedPath = secretPath.Replace(':', '.');
-        return string.Equals(normalizedKey, normalizedPath, StringComparison.OrdinalIgnoreCase)
-               || IsKnownDescendantKey(normalizedKey, normalizedPath);
+        if (AppSurfaceConfigKey.TryParse(key, out var logicalKey)
+            && AppSurfaceConfigKey.TryParse(secretPath, out var logicalPath)
+            && logicalKey.IsSameOrDescendantOf(logicalPath))
+        {
+            return true;
+        }
+
+        // Dotted names can arrive through legacy provider inventory. Treat their apparent ancestry as
+        // sensitive for redaction only; key identity and provider lookup continue to use typed keys.
+        try
+        {
+            return ConfigLogicalPath.Parse(secretPath).IsAncestorOrEqual(ConfigLogicalPath.Parse(key));
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 
     private static void RemoveEntryLevelDiagnostics(
@@ -510,6 +560,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         exception is TargetInvocationException { InnerException: { } innerException }
             ? IsRecoverableProviderException(innerException)
             : exception is not OutOfMemoryException
+                and not OperationCanceledException
                 and not StackOverflowException
                 and not AccessViolationException;
 
@@ -517,9 +568,15 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         string environment,
         ConfigAuditKnownEntry knownEntry,
         ConfigAuditReportMode? mode,
-        ConfigAuditReportTraversalContext? traversalContext)
+        ConfigAuditReportTraversalContext? traversalContext,
+        ConfigResolutionScope scope)
     {
-        var resolution = Resolve(environment, knownEntry);
+        if (knownEntry.LogicalKey.InputOrigin == ConfigKeyInputOrigin.TranslatedDot)
+        {
+            scope.AddNotice("Application", knownEntry.LogicalKey, ConfigDiagnosticCatalog.LegacyDot(knownEntry.LogicalKey),
+                _resourceOptions.Value.MaxNoticeIdentities);
+        }
+        var resolution = Resolve(environment, knownEntry, scope);
         var compositionFailed = resolution.CompositionState == ConfigCompositionRootState.Failed;
         var inspection = compositionFailed
             ? new ConfigWrapperInspection(null, ConfigAuditEntryState.Invalid, null, [])
@@ -555,10 +612,23 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         var correlation = options.DictionaryKeyCorrelationMode == ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac
             ? new ConfigAuditDictionaryKeyCorrelator(_correlationOptions).CreateContext(environment, knownEntry.Key)
             : ConfigAuditDictionaryKeyCorrelationContext.Unavailable("dictionary key correlation was not requested");
+        var secretSlots = resolution.SecretSlots;
+        var secretSlotPaths = _typedSecretPaths
+            .Where(path => AppSurfaceConfigKey.TryParse(path, out var typedPath)
+                && typedPath.IsSameOrDescendantOf(knownEntry.LogicalKey))
+            .ToArray();
+        if (resolution.CompositionState == ConfigCompositionRootState.Missing && secretSlots.Count == 0)
+        {
+            secretSlots = secretSlotPaths
+                .Select(path => new ConfigSecretSlotTrace(path, Enabled: true, HasValue: false,
+                    ResolvedProvider: null, ProviderConstraint: null, Code: "secret-descriptor-absent",
+                    Providers: [], Sources: [], DeclarationSource: null))
+                .ToList();
+        }
         var traverser = resolution.CompositionState is null ? _traverser
-            : new ConfigAuditValueTraverser(_redactor, resolution.SecretSlots);
+            : new ConfigAuditValueTraverser(_redactor, secretSlots);
         var traversal = traverser.BuildChildren(
-            ConfigAuditPath.Root(resolution.CompositionState is null ? knownEntry.Key : knownEntry.Key.Replace(':', '.')),
+            ConfigAuditPath.Root(knownEntry.LogicalKey),
             rawValue,
             traversalSources,
             resolution.AuditFacts,
@@ -568,6 +638,8 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             correlation,
             traversalContext);
         var diagnostics = resolution.Diagnostics
+            .Concat(scope.Notices.Where(notice => notice.Key.IsSameOrDescendantOf(knownEntry.LogicalKey))
+                .Select(notice => CreateNoticeDiagnostic(notice.Notice, notice.Key.Value, notice.Provider)))
             .Concat(inspection.Diagnostics)
             .Concat(optionsDiagnostics)
             .Concat(traversal.Diagnostics)
@@ -578,14 +650,22 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             state = ConfigAuditEntryState.PartiallyResolved;
         }
 
-        var redacted = _redactor.FormatValue(knownEntry.Key, rawValue, sources, rootSensitivity);
+        var redacted = rawValue is null
+            ? new RedactedValue(null, false)
+            : _redactor.FormatValue(knownEntry.Key, rawValue, sources, rootSensitivity);
+        var rootIsSecretInventory = secretSlotPaths.Any(path => IsTypedSecretPath(knownEntry.Key, path));
+        if (rootIsSecretInventory && rawValue is not null)
+        {
+            redacted = new RedactedValue(ConfigAuditRedactor.Placeholder, true);
+        }
         return new ConfigAuditEntry
         {
             Key = knownEntry.Key,
+            ConfigPath = knownEntry.LogicalKey.Value,
             DeclaredType = knownEntry.ValueType.FullName,
             State = state,
             DisplayValue = redacted.DisplayValue,
-            IsRedacted = redacted.IsRedacted,
+            IsRedacted = redacted.IsRedacted || rootIsSecretInventory,
             Sources = sources,
             Children = traversal.Children,
             Diagnostics = diagnostics
@@ -600,11 +680,11 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         return diagnostics.Count == 0 ? knownEntry.OptionsSnapshot : knownEntry.OptionsSnapshot.Normalize();
     }
 
-    private ConfigValueResolution Resolve(string environment, ConfigAuditKnownEntry knownEntry)
+    private ConfigValueResolution Resolve(string environment, ConfigAuditKnownEntry knownEntry, ConfigResolutionScope scope)
     {
         if (_composition.ContainsSecrets(knownEntry.ValueType))
         {
-            var result = _composition.Execute(environment, knownEntry.Key, knownEntry.ValueType);
+            var result = _composition.Execute(environment, knownEntry.LogicalKey, knownEntry.ValueType);
             var state = result.State switch
             {
                 ConfigCompositionRootState.Missing => ConfigAuditEntryState.Missing,
@@ -619,7 +699,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                 state = ConfigAuditEntryState.PartiallyResolved;
             }
             var sources = result.Sources.Count == 0 && state == ConfigAuditEntryState.Missing
-                ? ConfigValueResolution.Missing(knownEntry.Key).Sources
+                ? ConfigValueResolution.Missing(knownEntry.LogicalKey).Sources
                 : result.Sources;
             var compositionDiagnostics = result.Diagnostics.Concat(result.Failures.Select(failure => new ConfigAuditDiagnostic
             {
@@ -630,7 +710,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                 Source = failure.Source,
                 Message = failure.ToString()
             })).ToList();
-            return new ConfigValueResolution(knownEntry.Key, state, result.Value, sources, compositionDiagnostics)
+            return new ConfigValueResolution(knownEntry.LogicalKey, state, result.Value, sources, compositionDiagnostics)
             {
                 AuditSources = sources,
                 CompositionState = result.State,
@@ -638,20 +718,26 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             };
         }
 
-        var envResolution = ResolveProvider(_environmentProvider, environment, knownEntry, ConfigAuditSourceRole.Override);
+        var envResolution = ResolveProvider(_environmentProvider, environment, knownEntry, ConfigAuditSourceRole.Override, scope);
         if (envResolution.State == ConfigAuditEntryState.Resolved)
         {
-            var baseResolution = ResolveBaseProviders(environment, knownEntry, out var baseDiagnostics, out var invalidBaseResolution);
+            var baseResolution = ResolveBaseProviders(environment, knownEntry, scope, out var baseDiagnostics, out var invalidBaseResolution);
             var provenanceBaseResolution = SelectProvenanceBaseResolution(baseResolution, invalidBaseResolution);
             return envResolution with
             {
                 Diagnostics = envResolution.Diagnostics.Concat(baseDiagnostics).ToList(),
-                AuditFacts = BuildEnvironmentOverrideFacts(knownEntry.Key, envResolution, provenanceBaseResolution)
+                Sources = envResolution.Sources.Concat(provenanceBaseResolution.Sources.Where(source => source.Kind != ConfigAuditSourceKind.Missing)).ToList(),
+                AuditSources = envResolution.AuditSources.Concat(provenanceBaseResolution.AuditSources).ToList(),
+                AuditFacts = BuildEnvironmentOverrideFacts(knownEntry.LogicalKey, envResolution, provenanceBaseResolution)
             };
         }
 
+        if (envResolution.State == ConfigAuditEntryState.Invalid)
+            return envResolution;
+
         var diagnostics = envResolution.Diagnostics.ToList();
-        var providerResolution = ResolveBaseProviders(environment, knownEntry, out var providerDiagnostics, out var invalidProviderResolution);
+        var providerResolution = ResolveBaseProviders(environment, knownEntry, scope,
+            out var providerDiagnostics, out var invalidProviderResolution);
         diagnostics.AddRange(providerDiagnostics);
 
         if (_environmentProvider is IConfigDiagnosticPatcher patcher)
@@ -659,9 +745,9 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             ConfigPatchDiagnosticResult? patch = null;
             try
             {
-                patch = patcher.TracePatch(environment, knownEntry.Key, providerResolution.Value, knownEntry.ValueType);
+                patch = patcher.TracePatch(new ConfigProviderRequest(environment, knownEntry.LogicalKey, scope), providerResolution.Value, knownEntry.ValueType);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (IsRecoverableProviderException(ex))
             {
                 diagnostics.Add(CreateProviderExceptionDiagnostic(
                     _environmentProvider,
@@ -669,16 +755,33 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                     knownEntry.Key,
                     knownEntry.Key,
                     ex));
+                return new ConfigValueResolution(knownEntry.LogicalKey, ConfigAuditEntryState.Invalid, null,
+                    providerResolution.Sources, diagnostics);
+            }
+
+            if (patch is null || (patch.Patched && patch.Value is null))
+            {
+                var invalid = CreateInvalidProviderResultResolution(_environmentProvider, knownEntry, ConfigAuditSourceRole.Patch, "config-patch-failed");
+                return invalid with
+                {
+                    Sources = providerResolution.Sources.Concat(invalid.Sources).ToList(),
+                    Diagnostics = diagnostics.Concat(invalid.Diagnostics).ToList()
+                };
             }
 
             if (patch != null)
             {
                 diagnostics.AddRange(patch.Diagnostics);
+                if (patch.Diagnostics.Any(diagnostic => diagnostic.Severity == ConfigAuditDiagnosticSeverity.Error))
+                {
+                    return new ConfigValueResolution(knownEntry.LogicalKey, ConfigAuditEntryState.Invalid, null,
+                        providerResolution.Sources.Concat(patch.Sources).ToList(), diagnostics);
+                }
                 if (patch.Patched)
                 {
                     var sourceRecords = providerResolution.Sources.Concat(patch.Sources).ToList();
                     return new ConfigValueResolution(
-                        knownEntry.Key,
+                        knownEntry.LogicalKey,
                         ConfigAuditEntryState.PartiallyResolved,
                         patch.Value,
                         sourceRecords,
@@ -700,31 +803,45 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
     private ConfigValueResolution ResolveBaseProviders(
         string environment,
         ConfigAuditKnownEntry knownEntry,
+        ConfigResolutionScope scope,
         out IReadOnlyList<ConfigAuditDiagnostic> diagnostics,
         out ConfigValueResolution? invalidProviderResolution)
     {
         var collectedDiagnostics = new List<ConfigAuditDiagnostic>();
-        var providerResolution = ConfigValueResolution.Missing(knownEntry.Key);
+        var sources = new List<ConfigAuditSourceRecord>();
+        var auditSources = new List<ConfigAuditSourceRecord>();
+        var providerResolution = ConfigValueResolution.Missing(knownEntry.LogicalKey);
         invalidProviderResolution = null;
 
         foreach (var provider in _otherProviders)
         {
-            var current = ResolveProvider(provider, environment, knownEntry, ConfigAuditSourceRole.Base);
+            var current = ResolveProvider(provider, environment, knownEntry, ConfigAuditSourceRole.Base, scope);
             collectedDiagnostics.AddRange(current.Diagnostics);
             if (current.State == ConfigAuditEntryState.Resolved)
             {
-                providerResolution = current;
-                break;
+                if (providerResolution.State == ConfigAuditEntryState.Missing)
+                {
+                    providerResolution = current;
+                }
+                sources.AddRange(current.Sources);
+                auditSources.AddRange(current.AuditSources);
             }
-
-            if (current.State == ConfigAuditEntryState.Invalid)
+            else if (current.State == ConfigAuditEntryState.Invalid)
             {
-                invalidProviderResolution ??= current;
+                // A terminal result suppresses further reads even when it is shadowed by a winner.
+                if (providerResolution.State == ConfigAuditEntryState.Missing)
+                {
+                    invalidProviderResolution = current;
+                    providerResolution = current;
+                }
+                break;
             }
         }
 
         diagnostics = collectedDiagnostics;
-        return providerResolution;
+        return providerResolution.State == ConfigAuditEntryState.Resolved
+            ? providerResolution with { Sources = sources, AuditSources = auditSources }
+            : providerResolution;
     }
 
     private static ConfigValueResolution SelectProvenanceBaseResolution(
@@ -746,7 +863,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
     }
 
     private static ConfigAuditFactContext BuildEnvironmentOverrideFacts(
-        string rootKey,
+        AppSurfaceConfigKey rootKey,
         ConfigValueResolution envResolution,
         ConfigValueResolution baseResolution)
     {
@@ -766,7 +883,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
 
     private static bool IsCollectionElementPath(string configPath)
     {
-        var lastSeparator = configPath.LastIndexOf('.');
+        var lastSeparator = configPath.LastIndexOf(':');
         if (lastSeparator < 0 || lastSeparator == configPath.Length - 1)
         {
             return false;
@@ -776,7 +893,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
     }
 
     private static ConfigAuditPriorPresence ClassifyBasePresence(
-        string rootKey,
+        AppSurfaceConfigKey rootKey,
         string configPath,
         ConfigValueResolution baseResolution)
     {
@@ -796,26 +913,21 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
     }
 
     private static bool HasUsableBaseEvidence(
-        string rootKey,
+        AppSurfaceConfigKey rootKey,
         string configPath,
         ConfigValueResolution baseResolution) =>
         baseResolution.AuditSources.Any(source =>
             SourcePathMatches(source.ConfigPath, rootKey, configPath)
             || SourcePathMatches(source.AppliedToPath, rootKey, configPath));
 
-    private static bool SourcePathMatches(string? sourcePath, string rootKey, string configPath)
+    private static bool SourcePathMatches(string? sourcePath, AppSurfaceConfigKey rootKey, string configPath)
     {
-        if (string.IsNullOrWhiteSpace(sourcePath))
-        {
-            return false;
-        }
-
-        return string.Equals(sourcePath, configPath, StringComparison.OrdinalIgnoreCase)
-               || string.Equals(sourcePath, rootKey, StringComparison.OrdinalIgnoreCase)
-               || configPath.StartsWith($"{sourcePath}.", StringComparison.OrdinalIgnoreCase);
+        return AppSurfaceConfigKey.TryParse(sourcePath, out var sourceKey)
+               && AppSurfaceConfigKey.TryParse(configPath, out var targetKey)
+               && (sourceKey.Equals(rootKey) || targetKey.IsSameOrDescendantOf(sourceKey));
     }
 
-    private static bool TryPathExists(string rootKey, string configPath, object? value, out bool exists)
+    private static bool TryPathExists(AppSurfaceConfigKey rootKey, string configPath, object? value, out bool exists)
     {
         exists = false;
         if (value == null)
@@ -823,13 +935,14 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             return true;
         }
 
-        if (!configPath.StartsWith($"{rootKey}.", StringComparison.OrdinalIgnoreCase))
+        if (!AppSurfaceConfigKey.TryParse(configPath, out var targetKey)
+            || targetKey.Equals(rootKey) || !targetKey.IsSameOrDescendantOf(rootKey))
         {
             return false;
         }
 
         object? current = value;
-        foreach (var segment in configPath[(rootKey.Length + 1)..].Split('.'))
+        foreach (var segment in targetKey.Segments.Skip(rootKey.Segments.Length))
         {
             if (current == null)
             {
@@ -944,13 +1057,16 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         IConfigProvider provider,
         string environment,
         ConfigAuditKnownEntry knownEntry,
-        ConfigAuditSourceRole role)
+        ConfigAuditSourceRole role,
+        ConfigResolutionScope scope)
     {
+        var key = knownEntry.LogicalKey;
+        var request = new ConfigProviderRequest(environment, key, scope);
         if (provider is IConfigDiagnosticProvider diagnosticProvider)
         {
             try
             {
-                return diagnosticProvider.Resolve(environment, knownEntry.Key, knownEntry.ValueType, role);
+                return diagnosticProvider.Resolve(request, knownEntry.ValueType, role);
             }
             catch (TargetInvocationException ex) when (ex.InnerException != null && !IsRecoverableProviderException(ex.InnerException))
             {
@@ -961,7 +1077,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             {
                 return CreateProviderExceptionResolution(
                     provider,
-                    knownEntry.Key,
+                    knownEntry,
                     role,
                     "config-provider-resolve-threw",
                 ex);
@@ -973,23 +1089,22 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             try
             {
                 var resolution = publicDiagnosticProvider.ResolveForAudit(
-                    environment,
-                    knownEntry.Key,
+                    request,
                     knownEntry.ValueType,
                     role);
 
-                if (!string.Equals(resolution.Key, knownEntry.Key, StringComparison.OrdinalIgnoreCase))
+                if (!resolution.LogicalKey.Equals(key))
                 {
                     return CreateProviderExceptionResolution(
                         provider,
-                        knownEntry.Key,
+                        knownEntry,
                         role,
                         "config-provider-resolve-threw",
                         new InvalidOperationException("ResolveForAudit returned a mismatched key."));
                 }
 
                 return new ConfigValueResolution(
-                    resolution.Key,
+                    resolution.LogicalKey,
                     resolution.State,
                     resolution.Value,
                     resolution.Sources,
@@ -1004,68 +1119,146 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             {
                 return CreateProviderExceptionResolution(
                     provider,
-                    knownEntry.Key,
+                    knownEntry,
                     role,
                     "config-provider-resolve-threw",
                     ex);
             }
         }
 
-        object? value;
         try
         {
-            var method = typeof(IConfigProvider)
-                .GetMethod(nameof(IConfigProvider.GetValue))!
+            var mapper = typeof(ConfigAuditReporter)
+                .GetMethod(nameof(MapProviderResult), BindingFlags.Instance | BindingFlags.NonPublic)!
                 .MakeGenericMethod(knownEntry.ValueType);
-            value = method.Invoke(provider, [environment, knownEntry.Key]);
+            return (ConfigValueResolution)mapper.Invoke(this, [provider, knownEntry, role, request])!;
+        }
+        catch (TargetInvocationException ex) when (ex.InnerException != null && !IsRecoverableProviderException(ex.InnerException))
+        {
+            ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+            throw;
         }
         catch (TargetInvocationException ex) when (ex.InnerException != null)
         {
             return CreateProviderExceptionResolution(
                 provider,
-                knownEntry.Key,
+                knownEntry,
                 role,
                 "config-provider-get-value-threw",
                 ex.InnerException);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (IsRecoverableProviderException(ex))
         {
             return CreateProviderExceptionResolution(
                 provider,
-                knownEntry.Key,
+                knownEntry,
                 role,
                 "config-provider-get-value-threw",
                 ex);
         }
 
-        if (value == null)
+    }
+
+    private ConfigValueResolution MapProviderResult<T>(
+        IConfigProvider provider,
+        ConfigAuditKnownEntry knownEntry,
+        ConfigAuditSourceRole role,
+        ConfigProviderRequest request)
+    {
+        var result = provider.Resolve<T>(request);
+        if (result is null)
         {
-            return ConfigValueResolution.Missing(knownEntry.Key);
+            return CreateInvalidProviderResultResolution(provider, knownEntry, role, "config-provider-invalid-result");
+        }
+        var source = new ConfigAuditSourceRecord
+        {
+            Kind = ConfigAuditSourceKind.Provider,
+            ProviderName = provider.Name,
+            ProviderPriority = provider.Priority,
+            ConfigPath = knownEntry.Key,
+            AppliedToPath = knownEntry.Key,
+            Role = role
+        };
+
+        foreach (var notice in result.Notices)
+        {
+            request.Scope.AddNotice(provider.Name, request.Key, notice, _resourceOptions.Value.MaxNoticeIdentities);
         }
 
-        return new ConfigValueResolution(
-            knownEntry.Key,
-            ConfigAuditEntryState.Resolved,
-            value,
-            [
-                new ConfigAuditSourceRecord
+        return result.Status switch
+        {
+            ConfigProviderValueStatus.Missing => ConfigValueResolution.Missing(knownEntry.LogicalKey),
+            ConfigProviderValueStatus.Found => new ConfigValueResolution(
+                knownEntry.LogicalKey, ConfigAuditEntryState.Resolved, result.Value, [source], []),
+            ConfigProviderValueStatus.Terminal => new ConfigValueResolution(
+                knownEntry.LogicalKey,
+                ConfigAuditEntryState.Invalid,
+                null,
+                [source],
+                [new ConfigAuditDiagnostic
                 {
-                    Kind = ConfigAuditSourceKind.Provider,
-                    ProviderName = provider.Name,
-                    ProviderPriority = provider.Priority,
+                    Severity = ConfigAuditDiagnosticSeverity.Error,
+                    Code = result.Diagnostic!.Code,
+                    Key = knownEntry.Key,
                     ConfigPath = knownEntry.Key,
-                    AppliedToPath = knownEntry.Key,
-                    Role = role
-                }
-            ],
-            []);
+                    Source = source,
+                    Message = result.Diagnostic.ToDisplayString()
+                }]),
+            _ => CreateInvalidProviderResultResolution(provider, knownEntry, role, "config-provider-invalid-result")
+        };
+    }
+
+    /// <summary>Renders explicit notices without retaining the resolved value or hashing provider prose.</summary>
+    private static ConfigAuditDiagnostic CreateNoticeDiagnostic(ConfigProviderNotice notice, string key, string provider) =>
+        new()
+        {
+            Severity = ConfigAuditDiagnosticSeverity.Info,
+            Code = ConfigDiagnosticText.Identifier(notice.Code),
+            Key = key,
+            ConfigPath = key,
+            Source = new ConfigAuditSourceRecord { Kind = ConfigAuditSourceKind.Provider, ProviderName = provider, Role = ConfigAuditSourceRole.Base },
+            Message = $"Problem: {ConfigDiagnosticText.Prose(notice.Problem)}{Environment.NewLine}"
+                + $"Cause: {ConfigDiagnosticText.Prose(notice.Cause)}{Environment.NewLine}"
+                + $"Fix: {ConfigDiagnosticText.Prose(notice.Fix)}{Environment.NewLine}"
+                + $"Docs: {ConfigDiagnosticText.Identifier(notice.Docs)}"
+        };
+
+    private static ConfigValueResolution CreateInvalidProviderResultResolution(
+        IConfigProvider provider,
+        ConfigAuditKnownEntry knownEntry,
+        ConfigAuditSourceRole role,
+        string code)
+    {
+        var source = new ConfigAuditSourceRecord
+        {
+            Kind = ConfigAuditSourceKind.Provider,
+            ProviderName = provider.Name,
+            ProviderPriority = provider.Priority,
+            ConfigPath = knownEntry.Key,
+            AppliedToPath = knownEntry.Key,
+            Role = role
+        };
+        return new ConfigValueResolution(
+            knownEntry.LogicalKey,
+            ConfigAuditEntryState.Invalid,
+            null,
+            [source],
+            [new ConfigAuditDiagnostic
+            {
+                Severity = ConfigAuditDiagnosticSeverity.Error,
+                Code = code,
+                Key = knownEntry.Key,
+                ConfigPath = knownEntry.Key,
+                Source = source,
+                Message = "The provider returned an invalid resolution result."
+            }]);
     }
 
     private ConfigWrapperInspection InspectWrapper(
         ConfigAuditKnownEntry knownEntry,
         ConfigValueResolution resolution)
     {
-        if (knownEntry.ConfigType == null)
+        if (knownEntry.ConfigType == null || resolution.State == ConfigAuditEntryState.Invalid)
         {
             return new ConfigWrapperInspection(resolution.Value, resolution.State, null, []);
         }
@@ -1097,7 +1290,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             return new ConfigWrapperInspection(resolution.Value, resolution.State, null, []);
         }
 
-        return inspectable.Inspect(knownEntry.Key, resolution.Value, resolution.State);
+        return inspectable.Inspect(knownEntry.LogicalKey, resolution.Value, resolution.State);
     }
 
     private static ConfigAuditKnownEntry MergeKnownEntries(IGrouping<string, ConfigAuditKnownEntry> group)
@@ -1114,11 +1307,12 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
 
     private static ConfigValueResolution CreateProviderExceptionResolution(
         IConfigProvider provider,
-        string key,
+        ConfigAuditKnownEntry knownEntry,
         ConfigAuditSourceRole role,
         string code,
         Exception ex)
     {
+        var key = knownEntry.Key;
         var source = new ConfigAuditSourceRecord
         {
             Kind = ConfigAuditSourceKind.Provider,
@@ -1129,7 +1323,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             Role = role
         };
         return new ConfigValueResolution(
-            key,
+            knownEntry.LogicalKey,
             ConfigAuditEntryState.Invalid,
             null,
             [source],
@@ -1159,7 +1353,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
 /// </summary>
 /// <remarks>
 /// The reporter uses this internal contract to keep value state, provenance, and diagnostics together while it
-/// walks providers in precedence order. Missing values should be represented with <see cref="Missing(string)"/>.
+/// walks providers in precedence order. Missing values should be represented with <see cref="ConfigValueResolution.Missing(AppSurfaceConfigKey)"/>.
 /// </remarks>
 /// <param name="Key">The configuration key being resolved.</param>
 /// <param name="State">The provider-level resolution state.</param>
@@ -1167,7 +1361,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
 /// <param name="Sources">The sources that contributed to the value.</param>
 /// <param name="Diagnostics">Diagnostics emitted while resolving the value.</param>
 internal sealed record ConfigValueResolution(
-    string Key,
+    AppSurfaceConfigKey Key,
     ConfigAuditEntryState State,
     object? Value,
     IReadOnlyList<ConfigAuditSourceRecord> Sources,
@@ -1194,7 +1388,7 @@ internal sealed record ConfigValueResolution(
     /// </summary>
     /// <param name="key">The missing configuration key.</param>
     /// <returns>A missing resolution that can still be rendered with provenance.</returns>
-    public static ConfigValueResolution Missing(string key) =>
+    public static ConfigValueResolution Missing(AppSurfaceConfigKey key) =>
         new(
             key,
             ConfigAuditEntryState.Missing,
@@ -1203,8 +1397,8 @@ internal sealed record ConfigValueResolution(
                 new ConfigAuditSourceRecord
                 {
                     Kind = ConfigAuditSourceKind.Missing,
-                    ConfigPath = key,
-                    AppliedToPath = key,
+                    ConfigPath = key.Value,
+                    AppliedToPath = key.Value,
                     Role = ConfigAuditSourceRole.Base
                 }
             ],
@@ -1281,7 +1475,7 @@ internal enum ConfigAuditPriorPresence
 /// </summary>
 internal sealed class ConfigAuditFactContext
 {
-    private readonly Dictionary<string, IReadOnlyList<ConfigPatchProvenanceFact>> _factsByPath;
+    private readonly Dictionary<AppSurfaceConfigKey, IReadOnlyList<ConfigPatchProvenanceFact>> _factsByPath;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ConfigAuditFactContext"/> class.
@@ -1297,8 +1491,8 @@ internal sealed class ConfigAuditFactContext
     public ConfigAuditFactContext(IEnumerable<ConfigPatchProvenanceFact> facts)
     {
         _factsByPath = facts
-            .GroupBy(fact => fact.ConfigPath, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => (IReadOnlyList<ConfigPatchProvenanceFact>)group.ToList(), StringComparer.OrdinalIgnoreCase);
+            .GroupBy(fact => AppSurfaceConfigKey.Parse(fact.ConfigPath))
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<ConfigPatchProvenanceFact>)group.ToList());
     }
 
     /// <summary>
@@ -1313,9 +1507,9 @@ internal sealed class ConfigAuditFactContext
     /// <summary>
     /// Gets all facts associated with <paramref name="configPath"/>.
     /// </summary>
-    /// <param name="configPath">The source-style config path to inspect.</param>
+    /// <param name="configPath">The typed logical path to inspect; display labels are never reparsed.</param>
     /// <returns>Facts for the path, or an empty list when none are known.</returns>
-    public IReadOnlyList<ConfigPatchProvenanceFact> GetFacts(string configPath) =>
+    public IReadOnlyList<ConfigPatchProvenanceFact> GetFacts(AppSurfaceConfigKey configPath) =>
         _factsByPath.TryGetValue(configPath, out var facts) ? facts : [];
 }
 
@@ -1342,14 +1536,13 @@ internal sealed record ConfigWrapperInspection(
 internal interface IConfigDiagnosticProvider
 {
     /// <summary>
-    /// Resolves <paramref name="key"/> for audit reporting without losing source metadata.
+    /// Resolves the request's logical key for audit reporting without losing source metadata.
     /// </summary>
-    /// <param name="environment">The environment being audited.</param>
-    /// <param name="key">The configuration key.</param>
+    /// <param name="request">The request carrying the environment, typed logical key, and shared audit scope.</param>
     /// <param name="valueType">The expected value type.</param>
     /// <param name="role">The role the provider plays in final resolution.</param>
     /// <returns>The provider-specific resolution result.</returns>
-    ConfigValueResolution Resolve(string environment, string key, Type valueType, ConfigAuditSourceRole role);
+    ConfigValueResolution Resolve(ConfigProviderRequest request, Type valueType, ConfigAuditSourceRole role);
 
     /// <summary>
     /// Gets diagnostics that apply to the whole report rather than one key.
@@ -1380,7 +1573,7 @@ internal interface IConfigAuditKeyEnumerator
 /// <summary>
 /// Describes one provider-discovered key before public classification and redaction.
 /// </summary>
-/// <param name="Key">The discovered configuration key.</param>
+/// <param name="LogicalKey">The discovered configuration key.</param>
 /// <param name="RawValue">
 /// The scalar CLR value used for display redaction, or <see langword="null"/> for object/array parents.
 /// </param>
@@ -1388,7 +1581,7 @@ internal interface IConfigAuditKeyEnumerator
 /// <param name="Sources">Sources associated with the effective key.</param>
 /// <param name="Diagnostics">Diagnostics specific to this discovered key.</param>
 internal sealed record ConfigAuditProviderDiscoveredKey(
-    string Key,
+    AppSurfaceConfigKey LogicalKey,
     object? RawValue,
     ConfigAuditDiscoveredValueKind ValueKind,
     IReadOnlyList<ConfigAuditSourceRecord> Sources,
@@ -1442,14 +1635,13 @@ public enum ConfigAuditDiscoveredValueKind
 internal interface IConfigDiagnosticPatcher
 {
     /// <summary>
-    /// Traces patch candidates for <paramref name="key"/> and returns a cloned patched value when possible.
+    /// Traces patch candidates for <paramref name="request"/> and returns a cloned patched value when possible.
     /// </summary>
-    /// <param name="environment">The environment being audited.</param>
-    /// <param name="key">The configuration key.</param>
+    /// <param name="request">The logical key and shared audit operation scope.</param>
     /// <param name="currentValue">The lower-priority provider value to patch, when any.</param>
     /// <param name="valueType">The expected value type.</param>
     /// <returns>The patch result, including successful patch sources and diagnostics.</returns>
-    ConfigPatchDiagnosticResult TracePatch(string environment, string key, object? currentValue, Type valueType);
+    ConfigPatchDiagnosticResult TracePatch(ConfigProviderRequest request, object? currentValue, Type valueType);
 }
 
 /// <summary>
@@ -1464,9 +1656,9 @@ internal interface IConfigInspectable
     /// <summary>
     /// Inspects a resolved value for defaults and validation.
     /// </summary>
-    /// <param name="key">The configuration key.</param>
+    /// <param name="key">The declared logical key, retaining immutable application input provenance.</param>
     /// <param name="rawValue">The raw provider value, or <see langword="null"/> when missing.</param>
     /// <param name="resolutionState">The state determined during provider resolution.</param>
     /// <returns>The wrapper inspection result.</returns>
-    ConfigWrapperInspection Inspect(string key, object? rawValue, ConfigAuditEntryState resolutionState);
+    ConfigWrapperInspection Inspect(AppSurfaceConfigKey key, object? rawValue, ConfigAuditEntryState resolutionState);
 }

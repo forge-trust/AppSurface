@@ -21,11 +21,18 @@ internal sealed class ConfigLogicalPath : IEquatable<ConfigLogicalPath>
         if (segments.Any(string.IsNullOrWhiteSpace)) throw new ArgumentException("Logical paths require nonempty segments.", nameof(path));
         return new(segments);
     }
-    /// <summary>Appends one serialized member name.</summary>
+
+    /// <summary>Creates a path from an already parsed key, preserving literal dots in each segment.</summary>
+    internal static ConfigLogicalPath FromKey(AppSurfaceConfigKey key)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        return new(key.Segments.ToArray());
+    }
+    /// <summary>Appends one literal serialized member name; dots remain part of that segment.</summary>
     internal ConfigLogicalPath Append(string member)
     {
-        if (string.IsNullOrWhiteSpace(member) || member.Contains('.') || member.Contains(':'))
-            throw new ArgumentException("Serialized member names must be nonempty and cannot contain a path separator.", nameof(member));
+        if (string.IsNullOrWhiteSpace(member) || member.Contains(':'))
+            throw new ArgumentException("Serialized member names must be nonempty and cannot contain a colon separator.", nameof(member));
         return new([.. Segments, member]);
     }
     /// <summary>Tests equality or a complete-segment ancestor relationship.</summary>

@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Config;
 
@@ -12,6 +13,21 @@ namespace ForgeTrust.AppSurface.Config;
 /// </remarks>
 public sealed class ConfigAuditDiffTextRenderer
 {
+    private readonly int _identifierLimit;
+
+    /// <summary>Creates a renderer with the documented resource defaults.</summary>
+    public ConfigAuditDiffTextRenderer() : this(Options.Create(new ConfigResourceOptions())) { }
+
+    /// <summary>Creates a renderer that escapes and bounds identifiers using finalized resource options.</summary>
+    /// <param name="resourceOptions">Validated configuration limits, copied when this renderer is created.</param>
+    public ConfigAuditDiffTextRenderer(IOptions<ConfigResourceOptions> resourceOptions)
+    {
+        ArgumentNullException.ThrowIfNull(resourceOptions);
+        _identifierLimit = resourceOptions.Value.Snapshot().MaxRenderedIdentifierCharacters;
+    }
+
+    private string Identifier(string? value) => ConfigDiagnosticText.Identifier(value ?? string.Empty, _identifierLimit);
+
     /// <summary>
     /// Renders a config audit diff report.
     /// </summary>
@@ -22,7 +38,7 @@ public sealed class ConfigAuditDiffTextRenderer
         ArgumentNullException.ThrowIfNull(report);
 
         var builder = new StringBuilder();
-        builder.AppendLine($"Config audit diff: {report.BaselineEnvironment} -> {report.TargetEnvironment}");
+        builder.AppendLine($"Config audit diff: {Identifier(report.BaselineEnvironment)} -> {Identifier(report.TargetEnvironment)}");
         builder.AppendLine($"Evidence: {FormatEvidenceMode(report.EvidenceMode)}");
         if (report.EvidenceMode == ConfigAuditDiffEvidenceMode.SameHostNamedEnvironment)
         {
@@ -37,7 +53,7 @@ public sealed class ConfigAuditDiffTextRenderer
             builder.AppendLine("Comparison diagnostics:");
             foreach (var diagnostic in report.Diagnostics)
             {
-                builder.AppendLine($"  [{diagnostic.Severity}] {diagnostic.Code}: {diagnostic.Message}");
+                builder.AppendLine($"  [{diagnostic.Severity}] {Identifier(diagnostic.Code)}: {ConfigDiagnosticText.Prose(diagnostic.Message)}");
             }
         }
 
@@ -57,13 +73,13 @@ public sealed class ConfigAuditDiffTextRenderer
         return builder.ToString();
     }
 
-    private static void RenderItem(
+    private void RenderItem(
         StringBuilder builder,
         ConfigAuditDiffSourceDetail sourceDetail,
         ConfigAuditDiffItem item)
     {
-        builder.AppendLine($"  [{item.Significance}] {item.Status} {item.Kind}: {item.Key}");
-        builder.AppendLine($"    {item.Description}");
+        builder.AppendLine($"  [{item.Significance}] {item.Status} {item.Kind}: {Identifier(item.Key)}");
+        builder.AppendLine($"    {ConfigDiagnosticText.Prose(item.Description)}");
         if (item.ValueEvidence != ConfigAuditDiffValueEvidence.None)
         {
             builder.AppendLine($"    Value evidence: {FormatValueEvidence(item.ValueEvidence)}");
@@ -71,8 +87,8 @@ public sealed class ConfigAuditDiffTextRenderer
 
         if (item.BaselineDisplayValue != null || item.TargetDisplayValue != null)
         {
-            builder.AppendLine($"    Baseline value: {item.BaselineDisplayValue ?? "(omitted)"}");
-            builder.AppendLine($"    Target value: {item.TargetDisplayValue ?? "(omitted)"}");
+            builder.AppendLine($"    Baseline value: {(item.BaselineDisplayValue is null ? "(omitted)" : ConfigDiagnosticText.Prose(item.BaselineDisplayValue))}");
+            builder.AppendLine($"    Target value: {(item.TargetDisplayValue is null ? "(omitted)" : ConfigDiagnosticText.Prose(item.TargetDisplayValue))}");
         }
 
         RenderSources(builder, sourceDetail, "Baseline sources", item.BaselineSources);
@@ -80,11 +96,11 @@ public sealed class ConfigAuditDiffTextRenderer
 
         foreach (var diagnostic in item.Diagnostics)
         {
-            builder.AppendLine($"    Diagnostic: [{diagnostic.Severity}] {diagnostic.Code}: {diagnostic.Message}");
+            builder.AppendLine($"    Diagnostic: [{diagnostic.Severity}] {Identifier(diagnostic.Code)}: {ConfigDiagnosticText.Prose(diagnostic.Message)}");
         }
     }
 
-    private static void RenderSources(
+    private void RenderSources(
         StringBuilder builder,
         ConfigAuditDiffSourceDetail sourceDetail,
         string heading,
@@ -124,16 +140,16 @@ public sealed class ConfigAuditDiffTextRenderer
             _ => evidence.ToString()
         };
 
-    private static string FormatSource(ConfigAuditSourceRecord source, ConfigAuditDiffSourceDetail sourceDetail) =>
+    private string FormatSource(ConfigAuditSourceRecord source, ConfigAuditDiffSourceDetail sourceDetail) =>
         source.Kind switch
         {
             ConfigAuditSourceKind.File when source.Location != null =>
-                $"{source.ProviderName} {FormatFilePath(source.FilePath, sourceDetail)}:{source.Location.LineNumber}:{source.Location.ByteColumnNumber} :: {source.ConfigPath}",
-            ConfigAuditSourceKind.File => $"{source.ProviderName} {FormatFilePath(source.FilePath, sourceDetail)} :: {source.ConfigPath}",
-            ConfigAuditSourceKind.EnvironmentVariable => $"Environment variable {source.EnvironmentVariableName}",
-            ConfigAuditSourceKind.Default => $"Default value on {source.ProviderName}",
+                $"{Identifier(source.ProviderName)} {Identifier(FormatFilePath(source.FilePath, sourceDetail))}:{source.Location.LineNumber}:{source.Location.ByteColumnNumber} :: {Identifier(source.ConfigPath)}",
+            ConfigAuditSourceKind.File => $"{Identifier(source.ProviderName)} {Identifier(FormatFilePath(source.FilePath, sourceDetail))} :: {Identifier(source.ConfigPath)}",
+            ConfigAuditSourceKind.EnvironmentVariable => $"Environment variable {Identifier(source.EnvironmentVariableName)}",
+            ConfigAuditSourceKind.Default => $"Default value on {Identifier(source.ProviderName)}",
             ConfigAuditSourceKind.Missing => "none",
-            _ => source.ProviderName ?? source.Kind.ToString()
+            _ => Identifier(source.ProviderName ?? source.Kind.ToString())
         };
 
     private static string? FormatFilePath(string? filePath, ConfigAuditDiffSourceDetail sourceDetail) =>

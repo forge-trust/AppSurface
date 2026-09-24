@@ -2,6 +2,10 @@
 
 This directory contains sample applications that use **ForgeTrust.AppSurface**.
 
+For configuration portability, start with the [logical-key proof](config-key-contract/README.md).
+It checks identity, precedence, collisions, audit sources, mapping, and migration
+against all four built-in providers without credentials.
+
 - [RazorWire brochure starter](razorwire-brochure-starter/README.md) – a package-only MVC field-notes site that proves the smallest practical RazorWire and static-export path without source project references, Tailwind, or a delivery endpoint.
 - [Auth ASP.NET Core bridge example](auth-aspnetcore-bridge/README.md) – proves an ASP.NET Core host-owned auth stack can flow named policy results into AppSurface auth contracts.
 - [Auth ASP.NET Core DevAuth example](auth-aspnetcore-dev-auth/README.md) – retains the responsive selectable persona marker and pairs an in-process host regression with a staged real-loopback verifier that distinguishes build, child-process, Kestrel-readiness, and DevAuth HTTP failures while retaining only bounded safe evidence.

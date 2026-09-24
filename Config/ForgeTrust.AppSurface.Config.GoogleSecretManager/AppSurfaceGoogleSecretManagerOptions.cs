@@ -1,10 +1,12 @@
+using ForgeTrust.AppSurface.Config;
+
 namespace ForgeTrust.AppSurface.Config.GoogleSecretManager;
 
 /// <summary>
 /// Configures the AppSurface Google Secret Manager provider.
 /// </summary>
 /// <remarks>
-/// Keys are claimed explicitly by <see cref="MapSecret"/> or by an opt-in convention resolver. Claimed keys fail closed
+/// Keys are claimed explicitly by <see cref="MapSecret(string, string, string?)"/> or by an opt-in convention resolver. Claimed keys fail closed
 /// by default when Google Secret Manager cannot safely return the value. Environment variables still remain the top
 /// AppSurface emergency override because <see cref="DefaultConfigManager"/> checks them before normal providers.
 /// </remarks>
@@ -39,8 +41,10 @@ public sealed class AppSurfaceGoogleSecretManagerOptions
     public bool AllowLatestVersion { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether claimed-key failures should stop lower-priority providers.
+    /// Gets or sets a value indicating whether claimed-key failures permit fallback to lower-priority providers.
     /// </summary>
+    /// <remarks>File-declared scalar secret references use this compatibility policy. The logical-key provider contract
+    /// treats claimed failures as terminal.</remarks>
     public bool FailClosedOnProviderFailure { get; set; } = true;
 
     /// <summary>
@@ -57,6 +61,12 @@ public sealed class AppSurfaceGoogleSecretManagerOptions
     /// </remarks>
     public TimeSpan? CacheTtl { get; set; }
 
+    /// <summary>Gets or sets the maximum number of successful payloads retained by the bounded cache.</summary>
+    public int CacheCapacity { get; set; } = 1024;
+
+    /// <summary>Gets or sets the maximum number of ad-hoc exact-resource claims retained by this provider.</summary>
+    public int MaxAdHocClaims { get; set; } = 1024;
+
     /// <summary>
     /// Gets explicit logical-key to Secret Manager mappings.
     /// </summary>
@@ -66,6 +76,24 @@ public sealed class AppSurfaceGoogleSecretManagerOptions
     /// Gets opt-in convention resolvers.
     /// </summary>
     public IReadOnlyList<AppSurfaceGoogleSecretConvention> Conventions => _conventions;
+
+    internal AppSurfaceGoogleSecretManagerOptions Snapshot()
+    {
+        var snapshot = new AppSurfaceGoogleSecretManagerOptions
+        {
+            ProjectId = ProjectId,
+            DefaultVersion = DefaultVersion,
+            AllowLatestVersion = AllowLatestVersion,
+            FailClosedOnProviderFailure = FailClosedOnProviderFailure,
+            LookupTimeout = LookupTimeout,
+            CacheTtl = CacheTtl,
+            CacheCapacity = CacheCapacity,
+            MaxAdHocClaims = MaxAdHocClaims
+        };
+        snapshot._mappings.AddRange(_mappings);
+        snapshot._conventions.AddRange(_conventions);
+        return snapshot;
+    }
 
     /// <summary>
     /// Allows use of the mutable <c>latest</c> Secret Manager version alias.
@@ -93,16 +121,28 @@ public sealed class AppSurfaceGoogleSecretManagerOptions
         return this;
     }
 
+    /// <summary>Maps a parsed logical key to a Google Secret Manager resource.</summary>
+    /// <param name="logicalKey">The parsed logical AppSurface configuration key; dots remain literal segment content.</param>
+    /// <param name="secretIdOrResourceName">A short secret id or full <c>projects/.../secrets/.../versions/...</c> name.</param>
+    /// <param name="version">The version or alias for short secret ids. Overrides <see cref="DefaultVersion"/>.</param>
+    /// <returns>The same options instance.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="logicalKey"/> is <see langword="null"/>.</exception>
+    public AppSurfaceGoogleSecretManagerOptions MapSecret(
+        AppSurfaceConfigKey logicalKey,
+        string secretIdOrResourceName,
+        string? version = null) =>
+        MapSecret(logicalKey?.Value ?? throw new ArgumentNullException(nameof(logicalKey)), secretIdOrResourceName, version);
+
     /// <summary>
     /// Enables a scoped convention resolver for logical keys under <paramref name="logicalKeyPrefix"/>.
     /// </summary>
     /// <param name="logicalKeyPrefix">The required logical-key prefix that the convention may claim.</param>
-    /// <param name="secretIdPrefix">An optional prefix prepended to normalized secret ids.</param>
+    /// <param name="secretIdPrefix">The non-empty exact prefix prepended to encoded secret ids.</param>
     /// <param name="version">The version or alias used by claimed convention keys.</param>
     /// <returns>The same options instance.</returns>
     public AppSurfaceGoogleSecretManagerOptions EnableConventionResolver(
         string logicalKeyPrefix,
-        string secretIdPrefix = "",
+        string secretIdPrefix,
         string? version = null)
     {
         _conventions.Add(new AppSurfaceGoogleSecretConvention(logicalKeyPrefix, secretIdPrefix, version));
@@ -113,19 +153,16 @@ public sealed class AppSurfaceGoogleSecretManagerOptions
     /// <returns>An isolated options instance owned exclusively by the provider.</returns>
     /// <remarks>Mappings and conventions contain only immutable strings. Copying their collections prevents
     /// later additions or host-option changes from altering validation, access, or cache identity.</remarks>
-    internal AppSurfaceGoogleSecretManagerOptions CreateSnapshot()
-    {
-        var snapshot = new AppSurfaceGoogleSecretManagerOptions
-        {
-            ProjectId = ProjectId,
-            DefaultVersion = DefaultVersion,
-            AllowLatestVersion = AllowLatestVersion,
-            FailClosedOnProviderFailure = FailClosedOnProviderFailure,
-            LookupTimeout = LookupTimeout,
-            CacheTtl = CacheTtl
-        };
-        snapshot._mappings.AddRange(_mappings);
-        snapshot._conventions.AddRange(_conventions);
-        return snapshot;
-    }
+    internal AppSurfaceGoogleSecretManagerOptions CreateSnapshot() => Snapshot();
+
+    /// <summary>Enables a convention resolver under a parsed logical-key prefix.</summary>
+    /// <param name="logicalKeyPrefix">The required logical-key prefix that the convention may claim.</param>
+    /// <param name="secretIdPrefix">The required non-empty exact prefix prepended to encoded secret ids.</param>
+    /// <param name="version">The version or alias used by claimed convention keys.</param>
+    /// <returns>The same options instance.</returns>
+    public AppSurfaceGoogleSecretManagerOptions EnableConventionResolver(
+        AppSurfaceConfigKey logicalKeyPrefix,
+        string secretIdPrefix,
+        string? version = null) =>
+        EnableConventionResolver(logicalKeyPrefix?.Value ?? throw new ArgumentNullException(nameof(logicalKeyPrefix)), secretIdPrefix, version);
 }

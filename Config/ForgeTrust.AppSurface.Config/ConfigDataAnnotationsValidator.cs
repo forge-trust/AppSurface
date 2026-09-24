@@ -33,7 +33,7 @@ internal static class ConfigDataAnnotationsValidator
     /// Thrown when the resolved value or an opted-in nested value violates DataAnnotations validation rules.
     /// </exception>
     public static void Validate(
-        string key,
+        AppSurfaceConfigKey key,
         Type configType,
         Type valueType,
         object? value)
@@ -57,12 +57,12 @@ internal static class ConfigDataAnnotationsValidator
 
         if (failures.Count > 0)
         {
-            throw new ConfigurationValidationException(key, configType, valueType, failures);
+            throw new ConfigurationValidationException(key.Value, configType, valueType, failures);
         }
     }
 
     private static void ValidateNode(
-        string key,
+        AppSurfaceConfigKey key,
         Type configType,
         Type valueType,
         object value,
@@ -120,7 +120,7 @@ internal static class ConfigDataAnnotationsValidator
     }
 
     private static void ValidateFieldAnnotations(
-        string key,
+        AppSurfaceConfigKey key,
         Type configType,
         Type valueType,
         object parent,
@@ -161,7 +161,7 @@ internal static class ConfigDataAnnotationsValidator
     }
 
     private static void ValidateProperty(
-        string key,
+        AppSurfaceConfigKey key,
         Type configType,
         Type valueType,
         object parent,
@@ -193,7 +193,7 @@ internal static class ConfigDataAnnotationsValidator
     }
 
     private static void ValidateField(
-        string key,
+        AppSurfaceConfigKey key,
         Type configType,
         Type valueType,
         object parent,
@@ -225,7 +225,7 @@ internal static class ConfigDataAnnotationsValidator
     }
 
     private static void ValidateOptInMember(
-        string key,
+        AppSurfaceConfigKey key,
         Type configType,
         Type valueType,
         object? memberValue,
@@ -295,13 +295,13 @@ internal static class ConfigDataAnnotationsValidator
     }
 
     private static ConfigurationValidationFailure CreateUnsupportedValidatorFailure(
-        string key,
+        AppSurfaceConfigKey key,
         Type configType,
         Type valueType,
         string memberPath,
         string attributeName) =>
         new(
-            key,
+            key.Value,
             configType,
             valueType,
             [memberPath],

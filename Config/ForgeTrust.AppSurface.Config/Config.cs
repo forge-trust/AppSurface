@@ -41,7 +41,7 @@ public class Config<T> : IConfig, IConfigInspectable
     void IConfig.Init(
         IConfigManager configManager,
         IEnvironmentProvider environmentProvider,
-        string key) =>
+        AppSurfaceConfigKey key) =>
         Init(configManager, environmentProvider, key);
 
     /// <summary>
@@ -58,7 +58,7 @@ public class Config<T> : IConfig, IConfigInspectable
     internal virtual void Init(
         IConfigManager configManager,
         IEnvironmentProvider environmentProvider,
-        string key)
+        AppSurfaceConfigKey key)
     {
         T? rawValue = configManager.GetValue<T>(environmentProvider.Environment, key);
         Value = rawValue ?? DefaultValue;
@@ -98,7 +98,14 @@ public class Config<T> : IConfig, IConfigInspectable
         [];
 
     ConfigWrapperInspection IConfigInspectable.Inspect(
-        string key,
+        AppSurfaceConfigKey key,
+        object? rawValue,
+        ConfigAuditEntryState resolutionState) =>
+        Inspect(key, rawValue, resolutionState);
+
+    /// <summary>Inspects a resolved value using its typed logical key.</summary>
+    internal ConfigWrapperInspection Inspect(
+        AppSurfaceConfigKey key,
         object? rawValue,
         ConfigAuditEntryState resolutionState)
     {
@@ -118,8 +125,8 @@ public class Config<T> : IConfig, IConfigInspectable
                 {
                     Kind = ConfigAuditSourceKind.Default,
                     ProviderName = GetType().Name,
-                    ConfigPath = key,
-                    AppliedToPath = key,
+                    ConfigPath = key.Value,
+                    AppliedToPath = key.Value,
                     Role = ConfigAuditSourceRole.Fallback
                 };
             }
@@ -148,9 +155,9 @@ public class Config<T> : IConfig, IConfigInspectable
             {
                 Severity = ConfigAuditDiagnosticSeverity.Error,
                 Code = "config-value-type-mismatch",
-                Key = key,
-                ConfigPath = key,
-                Message = $"Resolved value for {key} could not be cast to {typeof(T).FullName}."
+                Key = key.Value,
+                ConfigPath = key.Value,
+                Message = $"Resolved value for {key.Value} could not be cast to {typeof(T).FullName}."
             });
         }
         catch (ConfigurationValidationException ex)
@@ -160,8 +167,8 @@ public class Config<T> : IConfig, IConfigInspectable
             {
                 Severity = ConfigAuditDiagnosticSeverity.Error,
                 Code = "config-validation-failed",
-                Key = key,
-                ConfigPath = failure.MemberNames.Count == 0 ? key : string.Join(".", failure.MemberNames),
+                Key = key.Value,
+                ConfigPath = failure.MemberNames.Count == 0 ? key.Value : string.Join(".", failure.MemberNames),
                 Message = "Configuration validation failed."
             }));
         }
@@ -172,8 +179,8 @@ public class Config<T> : IConfig, IConfigInspectable
             {
                 Severity = ConfigAuditDiagnosticSeverity.Error,
                 Code = "config-validation-threw",
-                Key = key,
-                ConfigPath = key,
+                Key = key.Value,
+                ConfigPath = key.Value,
                 Message = $"Configuration validation threw {ex.GetType().Name}."
             });
         }

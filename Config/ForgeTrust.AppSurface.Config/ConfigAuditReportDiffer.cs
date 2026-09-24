@@ -18,6 +18,7 @@ public sealed class ConfigAuditReportDiffer
     private const string DuplicateEvidenceCode = "config-diff-duplicate-evidence";
     private const string ManualEvidenceCode = "config-diff-manual-report-evidence";
     private const string RedactedDictionaryCode = "config-diff-redacted-dictionary-key-uncomparable";
+    private const string LogicalPathEvidenceCode = "config-diff-logical-path-evidence-missing";
 
     /// <summary>
     /// Compares two audit reports using default options.
@@ -85,6 +86,7 @@ public sealed class ConfigAuditReportDiffer
             .OrderByDescending(item => item.Significance)
             .ThenBy(item => item.Kind)
             .ThenBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.Key, StringComparer.Ordinal)
             .ThenBy(item => item.Status)
             .ToList();
 
@@ -108,6 +110,7 @@ public sealed class ConfigAuditReportDiffer
                 .OrderByDescending(diagnostic => diagnostic.Severity)
                 .ThenBy(diagnostic => diagnostic.Code, StringComparer.Ordinal)
                 .ThenBy(diagnostic => diagnostic.Key, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(diagnostic => diagnostic.Key, StringComparer.Ordinal)
                 .ToList(),
             Items = sortedItems
         };
@@ -139,8 +142,38 @@ public sealed class ConfigAuditReportDiffer
         List<ConfigAuditDiffItem> items,
         List<ConfigAuditComparisonDiagnostic> diagnostics)
     {
-        var baselineEntries = FlattenEntries(baseline.Entries).ToList();
-        var targetEntries = FlattenEntries(target.Entries).ToList();
+        // Older captures have no logical child paths. A display path cannot prove whether a dot or
+        // bracket is literal, so mixed metadata under one root must not invent additions/removals.
+        var uncertainRoots = new HashSet<ConfigAuditEntry>(ReferenceEqualityComparer.Instance);
+        var mixedGenerationRoots = FindMixedGenerationRootPairs(baseline.Entries, target.Entries);
+        foreach (var pair in mixedGenerationRoots)
+        {
+            uncertainRoots.Add(pair.Baseline);
+            uncertainRoots.Add(pair.Target);
+        }
+        foreach (var roots in baseline.Entries.Concat(target.Entries)
+                     .GroupBy(entry => entry.ConfigPath ?? entry.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            var metadata = roots.SelectMany(LogicalChildren).Select(child => child.ConfigPath is not null).Distinct().ToArray();
+            if (metadata.Length > 1)
+            {
+                uncertainRoots.UnionWith(roots);
+            }
+        }
+
+        var mixedBaselineRoots = new HashSet<ConfigAuditEntry>(mixedGenerationRoots.Select(pair => pair.Baseline), ReferenceEqualityComparer.Instance);
+        var mixedTargetRoots = new HashSet<ConfigAuditEntry>(mixedGenerationRoots.Select(pair => pair.Target), ReferenceEqualityComparer.Instance);
+        var mixedIdentityByEntry = new Dictionary<ConfigAuditEntry, string>(ReferenceEqualityComparer.Instance);
+        foreach (var pair in mixedGenerationRoots)
+        {
+            var dottedKey = pair.Baseline.ConfigPath == null ? pair.Baseline.Key : pair.Target.Key;
+            if (!TryGetLegacyDisplayCandidate(dottedKey, out var identity)) continue;
+            var correlation = Signature("mixed-generation-root", identity);
+            mixedIdentityByEntry[pair.Baseline] = correlation;
+            mixedIdentityByEntry[pair.Target] = correlation;
+        }
+        var baselineEntries = FlattenEntries(baseline.Entries, uncertainRoots, mixedBaselineRoots, mixedIdentityByEntry).ToList();
+        var targetEntries = FlattenEntries(target.Entries, uncertainRoots, mixedTargetRoots, mixedIdentityByEntry).ToList();
 
         CompareBuckets(
             baselineEntries,
@@ -157,6 +190,59 @@ public sealed class ConfigAuditReportDiffer
             items,
             diagnostics,
             ConfigAuditDiffItemKind.KnownEntry);
+    }
+
+    private static IReadOnlyList<(ConfigAuditEntry Baseline, ConfigAuditEntry Target)> FindMixedGenerationRootPairs(
+        IReadOnlyList<ConfigAuditEntry> baseline, IReadOnlyList<ConfigAuditEntry> target)
+    {
+        var baselineEntries = FlattenReportEntries(baseline).ToArray();
+        var targetEntries = FlattenReportEntries(target).ToArray();
+        var pairs = new List<(ConfigAuditEntry, ConfigAuditEntry)>();
+        AddPairs(baselineEntries, targetEntries);
+        AddPairs(targetEntries, baselineEntries, reverse: true);
+        return pairs;
+
+        void AddPairs(IEnumerable<ConfigAuditEntry> legacySide, IEnumerable<ConfigAuditEntry> logicalSide, bool reverse = false)
+        {
+            var legacyCandidates = new Dictionary<ConfigAuditEntry, string>(ReferenceEqualityComparer.Instance);
+            var candidateCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in legacySide.Where(entry => entry.ConfigPath == null))
+            {
+                if (!TryGetLegacyDisplayCandidate(entry.Key, out var candidate)) continue;
+                legacyCandidates.Add(entry, candidate);
+                candidateCounts[candidate] = candidateCounts.GetValueOrDefault(candidate) + 1;
+            }
+
+            var logicalByKey = new Dictionary<string, List<ConfigAuditEntry>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in logicalSide.Where(entry => entry.ConfigPath != null))
+            {
+                if (!AppSurfaceConfigKey.TryParse(entry.ConfigPath, out var currentKey)) continue;
+                if (!logicalByKey.TryGetValue(currentKey.Value, out var entries))
+                    logicalByKey[currentKey.Value] = entries = [];
+                entries.Add(entry);
+            }
+
+            foreach (var (oldEntry, candidate) in legacyCandidates)
+            {
+                if (candidateCounts[candidate] != 1
+                    || !AppSurfaceConfigKey.TryParse(oldEntry.Key, out var legacyTypedKey)
+                    || !logicalByKey.TryGetValue(candidate, out var candidateMatches)) continue;
+                var currentMatches = new HashSet<ConfigAuditEntry>(candidateMatches, ReferenceEqualityComparer.Instance);
+                if (logicalByKey.TryGetValue(legacyTypedKey.Value, out var exactMatches))
+                    currentMatches.UnionWith(exactMatches);
+                foreach (var currentEntry in currentMatches)
+                    pairs.Add(reverse ? (currentEntry, oldEntry) : (oldEntry, currentEntry));
+            }
+        }
+    }
+
+    private static IEnumerable<ConfigAuditEntry> FlattenReportEntries(IEnumerable<ConfigAuditEntry> entries)
+    {
+        foreach (var entry in entries)
+        {
+            yield return entry;
+            foreach (var descendant in FlattenReportEntries(entry.Children)) yield return descendant;
+        }
     }
 
     private static void CompareDiscoveredKeys(
@@ -181,6 +267,16 @@ public sealed class ConfigAuditReportDiffer
             items,
             diagnostics,
             ConfigAuditDiffItemKind.DiscoveredKey);
+    }
+
+    private static bool TryGetLegacyDisplayCandidate(string displayKey, out string candidate)
+    {
+        candidate = string.Empty;
+        if (!displayKey.Contains('.', StringComparison.Ordinal)) return false;
+        var rendered = displayKey.Replace('.', ':');
+        if (!AppSurfaceConfigKey.TryParse(rendered, out var parsed)) return false;
+        candidate = parsed!.Value;
+        return true;
     }
 
     private static void CompareDiagnostics(
@@ -283,7 +379,7 @@ public sealed class ConfigAuditReportDiffer
 
     private static ConfigAuditDiffItemStatus GetMissingSideStatus<T>(T item, bool targetSide = false)
     {
-        if (item is EntryDiffInput { IsUncomparableDictionarySubtree: true })
+        if (item is EntryDiffInput { IsUncomparable: true })
         {
             return ConfigAuditDiffItemStatus.Uncomparable;
         }
@@ -291,20 +387,56 @@ public sealed class ConfigAuditReportDiffer
         return targetSide ? ConfigAuditDiffItemStatus.Added : ConfigAuditDiffItemStatus.Removed;
     }
 
-    private static IEnumerable<EntryDiffInput> FlattenEntries(IEnumerable<ConfigAuditEntry> entries) =>
-        FlattenEntries(
-            entries,
-            parentDisplayPath: null,
-            parentCorrelationPath: null,
-            parentIsUncomparableDictionarySubtree: false,
-            parentUsesComparisonIdentity: false);
+    /// <summary>Finds children that require logical metadata, including object members inside visible dictionaries.</summary>
+    /// <remarks>
+    /// Dictionary items have their own label/correlation identity and need not carry ConfigPath. Visible items without
+    /// HMAC still contain ordinary children that need logical identity. Redacted and HMAC subtrees use their separate
+    /// comparison protocol, so their deliberately absent paths do not mark a root as mixed-generation evidence.
+    /// </remarks>
+    private static IEnumerable<ConfigAuditEntry> LogicalChildren(ConfigAuditEntry root)
+    {
+        foreach (var child in root.Children)
+        {
+            if (child.Element is { Kind: ConfigAuditElementKind.DictionaryItem } element)
+            {
+                if (element.IsKeyRedacted || !string.IsNullOrWhiteSpace(element.ComparisonKeyCorrelationId)) { continue; }
+            }
+            else
+            {
+                yield return child;
+            }
+            foreach (var descendant in LogicalChildren(child)) { yield return descendant; }
+        }
+    }
+
+    private static IEnumerable<EntryDiffInput> FlattenEntries(IEnumerable<ConfigAuditEntry> entries,
+        IReadOnlySet<ConfigAuditEntry> uncertainRoots, IReadOnlySet<ConfigAuditEntry> mixedGenerationRoots,
+        IReadOnlyDictionary<ConfigAuditEntry, string> mixedIdentityByEntry)
+    {
+        foreach (var root in entries)
+        {
+            var input = CreateEntryDiffInput(root, null, null, false, false);
+            input = ApplyMixedGenerationIdentity(root, input, mixedGenerationRoots, mixedIdentityByEntry);
+            yield return input;
+            foreach (var child in FlattenEntries(root.Children, root.Key, input.CorrelationPath,
+                         input.IsUncomparableDictionarySubtree, input.UsesComparisonIdentity, uncertainRoots.Contains(root),
+                         parentHasIncompleteLogicalPath: false, mixedGenerationRoots, mixedIdentityByEntry))
+            {
+                yield return child;
+            }
+        }
+    }
 
     private static IEnumerable<EntryDiffInput> FlattenEntries(
         IEnumerable<ConfigAuditEntry> entries,
         string? parentDisplayPath,
         string? parentCorrelationPath,
         bool parentIsUncomparableDictionarySubtree,
-        bool parentUsesComparisonIdentity)
+        bool parentUsesComparisonIdentity,
+        bool rootHasMixedLogicalPaths,
+        bool parentHasIncompleteLogicalPath,
+        IReadOnlySet<ConfigAuditEntry> mixedGenerationRoots,
+        IReadOnlyDictionary<ConfigAuditEntry, string> mixedIdentityByEntry)
     {
         foreach (var entry in entries)
         {
@@ -314,18 +446,35 @@ public sealed class ConfigAuditReportDiffer
                 parentCorrelationPath,
                 parentIsUncomparableDictionarySubtree,
                 parentUsesComparisonIdentity);
+            input = ApplyMixedGenerationIdentity(entry, input, mixedGenerationRoots, mixedIdentityByEntry);
+            // A dictionary's own correlation protocol cannot repair an uncertain ancestor identity. Conversely, a
+            // mixed ordinary sibling must not invalidate a direct-root dictionary governed entirely by HMAC.
+            var incomplete = input.HasIncompleteLogicalPath || parentHasIncompleteLogicalPath
+                             || (rootHasMixedLogicalPaths && !parentUsesComparisonIdentity && !parentIsUncomparableDictionarySubtree
+                                 && entry.Element is not { Kind: ConfigAuditElementKind.DictionaryItem });
+            input = input with { HasIncompleteLogicalPath = incomplete };
             yield return input;
             foreach (var child in FlattenEntries(
                          entry.Children,
                          entry.Key,
                          input.CorrelationPath,
                          input.IsUncomparableDictionarySubtree,
-                         input.UsesComparisonIdentity))
+                         input.UsesComparisonIdentity,
+                         rootHasMixedLogicalPaths,
+                         incomplete,
+                         mixedGenerationRoots,
+                         mixedIdentityByEntry))
             {
                 yield return child;
             }
         }
     }
+
+    private static EntryDiffInput ApplyMixedGenerationIdentity(ConfigAuditEntry entry, EntryDiffInput input,
+        IReadOnlySet<ConfigAuditEntry> mixedGenerationRoots, IReadOnlyDictionary<ConfigAuditEntry, string> mixedIdentityByEntry) =>
+        mixedGenerationRoots.Contains(entry) && mixedIdentityByEntry.TryGetValue(entry, out var mixedIdentity)
+            ? input with { CorrelationPath = mixedIdentity, HasIncompleteLogicalPath = true }
+            : input;
 
     private static EntryDiffInput CreateEntryDiffInput(
         ConfigAuditEntry entry,
@@ -334,6 +483,17 @@ public sealed class ConfigAuditReportDiffer
         bool parentIsUncomparableDictionarySubtree,
         bool parentUsesComparisonIdentity)
     {
+        // Current reports carry the logical path independently of presentation. Redacted dictionary subtrees
+        // deliberately omit it and retain their existing value-safe comparison-correlation protocol below.
+        // Public report roots are logical colon renderings even when captured before ConfigPath was added.
+        var sourcePath = entry.ConfigPath ?? (parentCorrelationPath is null ? entry.Key : null);
+        if (!parentIsUncomparableDictionarySubtree && !parentUsesComparisonIdentity
+            && entry.Element is not { Kind: ConfigAuditElementKind.DictionaryItem }
+            && AppSurfaceConfigKey.TryParse(sourcePath, out var logicalKey))
+        {
+            return new EntryDiffInput(entry, Signature("logical", logicalKey.Value), false, false);
+        }
+
         if (entry.Element is { Kind: ConfigAuditElementKind.DictionaryItem } element)
         {
             var fallbackParentPath = GetDictionaryParentPath(entry.Key);
@@ -345,7 +505,7 @@ public sealed class ConfigAuditReportDiffer
             var segment = GetDictionaryComparisonSegment(element);
             return new EntryDiffInput(
                 entry,
-                $"{effectiveParentCorrelationPath}{segment}",
+                Signature("dictionary", effectiveParentCorrelationPath, segment),
                 isUncomparable,
                 usesComparisonIdentity);
         }
@@ -354,7 +514,7 @@ public sealed class ConfigAuditReportDiffer
         {
             return new EntryDiffInput(
                 entry,
-                entry.Key,
+                Signature("display", entry.Key),
                 parentIsUncomparableDictionarySubtree,
                 parentUsesComparisonIdentity);
         }
@@ -362,7 +522,7 @@ public sealed class ConfigAuditReportDiffer
         var suffix = GetChildPathSuffix(parentDisplayPath, entry.Key);
         return new EntryDiffInput(
             entry,
-            $"{parentCorrelationPath}{suffix}",
+            Signature("child", parentCorrelationPath, suffix),
             parentIsUncomparableDictionarySubtree,
             parentUsesComparisonIdentity);
     }
@@ -426,9 +586,11 @@ public sealed class ConfigAuditReportDiffer
             diagnostics.Add(new ConfigAuditComparisonDiagnostic
             {
                 Severity = ConfigAuditDiagnosticSeverity.Warning,
-                Code = RedactedDictionaryCode,
+                Code = input.HasIncompleteLogicalPath ? LogicalPathEvidenceCode : RedactedDictionaryCode,
                 Key = entry.Key,
-                Message = "Redacted dictionary key labels are report-local. Enable dictionary comparison correlation metadata to compare this item across environments."
+                Message = input.HasIncompleteLogicalPath
+                    ? "Logical child path metadata is missing from one capture. Recapture both reports with ConfigPath metadata before comparing this subtree; displayed dots and brackets do not establish identity."
+                    : "Redacted dictionary key labels are report-local. Enable dictionary comparison correlation metadata to compare this item across environments."
             });
         }
 
@@ -438,7 +600,9 @@ public sealed class ConfigAuditReportDiffer
             Status = status,
             Significance = significance,
             Key = entry.Key,
-            Description = DescribeEntryChange(baseline, target, status, valueEvidence),
+            Description = input.HasIncompleteLogicalPath
+                ? "Child entry identity could not be safely matched across report formats."
+                : DescribeEntryChange(baseline, target, status, valueEvidence),
             BaselineDisplayValue = baseline?.Entry.DisplayValue,
             TargetDisplayValue = target?.Entry.DisplayValue,
             ValueEvidence = valueEvidence,
@@ -459,7 +623,6 @@ public sealed class ConfigAuditReportDiffer
         var sourceOnly = status == ConfigAuditDiffItemStatus.Changed
                          && DiscoveredKeyValueSignature(baseline) == DiscoveredKeyValueSignature(target)
                          && SourceSignature(baseline?.Sources ?? []) != SourceSignature(target?.Sources ?? []);
-
         return new ConfigAuditDiffItem
         {
             Kind = sourceOnly ? ConfigAuditDiffItemKind.Source : ConfigAuditDiffItemKind.DiscoveredKey,
@@ -518,7 +681,7 @@ public sealed class ConfigAuditReportDiffer
 
     private static ConfigAuditDiffItemStatus GetEntryStatus(EntryDiffInput baseline, EntryDiffInput target)
     {
-        if (baseline.IsUncomparableDictionarySubtree || target.IsUncomparableDictionarySubtree)
+        if (baseline.IsUncomparable || target.IsUncomparable)
         {
             return ConfigAuditDiffItemStatus.Uncomparable;
         }
@@ -747,7 +910,7 @@ public sealed class ConfigAuditReportDiffer
         input == null
             ? string.Empty
             : Signature(
-                input.CorrelationPath,
+                input.CorrelationPath.ToUpperInvariant(),
                 input.Entry.State.ToString(),
                 input.Entry.DeclaredType ?? string.Empty,
                 input.Entry.DisplayValue ?? "<null>",
@@ -769,7 +932,7 @@ public sealed class ConfigAuditReportDiffer
         key == null
             ? string.Empty
             : Signature(
-                key.Key,
+                AppSurfaceConfigKey.TryParse(key.Key, out var logicalKey) ? logicalKey.Value.ToUpperInvariant() : key.Key,
                 key.Classification.ToString(),
                 key.DisplayValue ?? "<null>",
                 key.IsRedacted.ToString(),
@@ -876,7 +1039,11 @@ public sealed class ConfigAuditReportDiffer
         ConfigAuditEntry Entry,
         string CorrelationPath,
         bool IsUncomparableDictionarySubtree,
-        bool UsesComparisonIdentity);
+        bool UsesComparisonIdentity,
+        bool HasIncompleteLogicalPath = false)
+    {
+        internal bool IsUncomparable => IsUncomparableDictionarySubtree || HasIncompleteLogicalPath;
+    }
 
     private readonly record struct DiffInput<T>(T Item, int Ordinal);
 }

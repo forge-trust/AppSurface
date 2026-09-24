@@ -189,7 +189,7 @@ public sealed class ConfigCompositionCompilerTests
             .Compile("Production", "Service", typeof(FlatOptions));
 
         Assert.Contains(plan.Failures, f => f.Code == "config-composition-provider-unsupported");
-        Assert.DoesNotContain(Fake.GetCalls(provider), c => c.Method.Name == nameof(IConfigProvider.GetValue));
+        Assert.DoesNotContain(Fake.GetCalls(provider), c => c.Method.Name == nameof(IConfigProvider.Resolve));
         Assert.Equal(0, secret.ValidateCalls);
         Assert.Equal(0, secret.ResolveCalls);
     }
@@ -437,7 +437,6 @@ public sealed class ConfigCompositionCompilerTests
     [InlineData("{\"key\":\"k\",\"enabled\":\"false\"}", "secret-descriptor-invalid")]
     [InlineData("{\"key\":\"k\",\"enabled\":null}", "secret-descriptor-invalid")]
     [InlineData("{\"key\":\"k\",\"unknown\":true}", "secret-descriptor-invalid")]
-    [InlineData("{\"key\":\"k\",\"KEY\":\"other\"}", "config-composition-file-invalid")]
     public void Compile_ValidatesDescriptorSyntaxBeforeProviderValidation(string descriptor, string code)
     {
         using var fixture = FileFixture.Create(Wrap(descriptor), null, "Production");
@@ -449,6 +448,32 @@ public sealed class ConfigCompositionCompilerTests
         Assert.Contains(plan.Failures, f => f.Code == code);
         Assert.Equal(0, secret.ValidateCalls);
         AssertNoIo(raw, secret);
+    }
+
+    [Fact]
+    public void Compile_DuplicateDescriptorMemberPoisonsAggregateBeforeValidation()
+    {
+        using var fixture = FileFixture.Create(
+            """{"Service":{"ApiKey":{"key":"affected","KEY":"duplicate"},"OtherKey":{"ApiKey":{"key":"Opaque.Other:KEY","version":"V.2"}}}}""",
+            null, "Production");
+        var secret = new FakeSecretProvider("provider-a");
+
+        var plan = Compiler(fixture.Provider, [secret]).Compile("Production", "Service", typeof(TwoSecretOptions));
+
+        Assert.Contains(plan.Failures, failure => failure.Code == "config-composition-file-invalid"
+            && failure.Path == "Service");
+        Assert.Empty(secret.Validated);
+        Assert.Equal(0, secret.ValidateCalls);
+        Assert.Equal(0, secret.ResolveCalls);
+
+        var sibling = Compiler(fixture.Provider, [secret]).Compile("Production", "Service:OtherKey", typeof(FlatOptions));
+
+        Assert.Empty(sibling.Failures);
+        Assert.Equal("Opaque.Other:KEY", Assert.Single(sibling.Slots).Reference!.Key);
+        Assert.Equal("V.2", Assert.Single(sibling.Slots).Reference!.Version);
+        Assert.Equal("Service:OtherKey:ApiKey", Assert.Single(secret.Validated).LogicalPath);
+        Assert.Equal("Opaque.Other:KEY", Assert.Single(secret.Validated).Key);
+        Assert.Equal(0, secret.ResolveCalls);
     }
 
     [Fact]
@@ -768,38 +793,28 @@ public sealed class ConfigCompositionCompilerTests
         AssertNoIo(raw, secret);
     }
 
-    [Theory]
-    [InlineData("Service.ApiKey")]
-    [InlineData("service:APIKEY")]
-    public void Compile_FlatAndNestedSpellingsCannotDeclareTheSameDestination(string flattenedPath)
+    [Fact]
+    public void Compile_LiteralDotAndNestedDeclarationsRemainDistinctAndProviderKeysStayOpaque()
     {
         using var fixture = FileFixture.Create(
-            "{\"Service\":{\"ApiKey\":{\"key\":\"first\"}},\"" + flattenedPath + "\":{\"key\":\"second\"}}", null, "Production");
+            """{"A.B":{"ApiKey":{"key":"Literal.Opaque:KEY","version":"L.2"}},"A":{"B":{"ApiKey":{"key":"Nested.Opaque:KEY","version":"N.1"}}}}""",
+            null, "Production");
         var secret = new FakeSecretProvider("provider-a");
+        var compiler = Compiler(fixture.Provider, [secret]);
 
-        var plan = Compiler(fixture.Provider, [secret]).Compile("Production", "Service", typeof(FlatOptions));
+        var literal = compiler.Compile("Production", AppSurfaceConfigKey.Parse("A.B"), typeof(FlatOptions));
+        var nested = compiler.Compile("Production", AppSurfaceConfigKey.Parse("A:B"), typeof(FlatOptions));
 
-        Assert.Contains(plan.Failures, f => f.Code == "secret-path-collision");
-        Assert.Equal(0, secret.ValidateCalls);
-        Assert.Equal(0, secret.ResolveCalls);
-    }
-
-    [Theory]
-    [InlineData("App.Service")]
-    [InlineData("APP:SERVICE")]
-    public void Compile_CanonicalizesRootAndFileAliasesWithoutNormalizingProviderKeys(string root)
-    {
-        using var fixture = FileFixture.Create(
-            """{"app.service.apikey":{"key":"Opaque.Key:CaseSensitive","version":"Release.V:1"}}""", null, "Production");
-        var secret = new FakeSecretProvider("provider-a");
-
-        var plan = Compiler(fixture.Provider, [secret]).Compile("production", root, typeof(FlatOptions));
-
-        Assert.Empty(plan.Failures);
-        var reference = Assert.Single(secret.Validated);
-        Assert.Equal(root.Replace('.', ':') + ":ApiKey", reference.LogicalPath);
-        Assert.Equal("Opaque.Key:CaseSensitive", reference.Key);
-        Assert.Equal("Release.V:1", reference.Version);
+        Assert.Empty(literal.Failures);
+        Assert.Empty(nested.Failures);
+        Assert.Equal("Literal.Opaque:KEY", Assert.Single(literal.Slots).Reference!.Key);
+        Assert.Equal("L.2", Assert.Single(literal.Slots).Reference!.Version);
+        Assert.Equal("Nested.Opaque:KEY", Assert.Single(nested.Slots).Reference!.Key);
+        Assert.Equal("N.1", Assert.Single(nested.Slots).Reference!.Version);
+        Assert.Equal(new[] { "A.B:ApiKey", "A:B:ApiKey" },
+            secret.Validated.Select(reference => reference.LogicalPath));
+        Assert.Equal(new[] { "Literal.Opaque:KEY", "Nested.Opaque:KEY" },
+            secret.Validated.Select(reference => reference.Key));
         Assert.Equal(0, secret.ResolveCalls);
     }
 
@@ -897,7 +912,7 @@ public sealed class ConfigCompositionCompilerTests
         }
         else Assert.Contains(plan.Failures, f => f.Code == "config-composition-provider-unsupported");
         A.CallTo(() => inspector.InspectClaim("Production", "Service")).MustHaveHappenedOnceExactly();
-        Assert.DoesNotContain(Fake.GetCalls(typed), c => c.Method.Name == nameof(IConfigProvider.GetValue));
+        Assert.DoesNotContain(Fake.GetCalls(typed), c => c.Method.Name == nameof(IConfigProvider.Resolve));
         AssertNoIo(raw);
     }
 
@@ -1072,6 +1087,11 @@ public sealed class ConfigCompositionCompilerTests
         public string Name => "raw-base";
         public int ResolveCalls { get; private set; }
         public int GetValueCalls { get; private set; }
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request)
+        {
+            GetValueCalls++;
+            return ConfigProviderValueResult<T>.Missing();
+        }
         public T? GetValue<T>(string environment, string key)
         {
             GetValueCalls++;

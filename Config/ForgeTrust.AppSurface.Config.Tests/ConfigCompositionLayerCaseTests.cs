@@ -65,7 +65,7 @@ public sealed class ConfigCompositionLayerCaseTests
     {
         using var fixture = new FileFixture(
             "{\"Service\":{\"ApiKey\":{\"key\":\"old\",\"version\":\"1\"}}}",
-            "{\"service\":{\"apikey\":{\"key\":\"new\",\"version\":\"7\"}}}");
+            "{\"Service\":{\"ApiKey\":{\"key\":\"new\",\"version\":\"7\"}}}");
         var provider = new RecordingSecretProvider();
         var engine = CreateEngine(fixture.Provider, provider);
 
@@ -82,7 +82,7 @@ public sealed class ConfigCompositionLayerCaseTests
     {
         using var fixture = new FileFixture(
             "{\"Service\":{\"ApiKey\":{\"key\":\"old\",\"version\":\"1\"}}}",
-            "{\"service\":{\"apikey\":{\"key\":\"new\",\"version\":\"7\",\"enabled\":false}}}");
+            "{\"Service\":{\"ApiKey\":{\"key\":\"new\",\"version\":\"7\",\"enabled\":false}}}");
         var provider = new RecordingSecretProvider();
         var engine = CreateEngine(fixture.Provider, provider);
 
@@ -93,21 +93,6 @@ public sealed class ConfigCompositionLayerCaseTests
         var options = Assert.IsType<SecretOptions>(result.Value);
         Assert.False(options.ApiKey.Enabled);
         Assert.False(options.ApiKey.HasValue);
-    }
-
-    [Fact]
-    public void LegacyGetValue_PreservesExistingCaseSensitiveMergeBehavior()
-    {
-        using var fixture = new FileFixture(
-            "{\"Service\":{\"ApiKey\":{\"key\":\"old\"},\"Endpoint\":\"https://service\"}}",
-            "{\"service\":{\"apikey\":{\"key\":\"new\"},\"Region\":\"us-east1\"}}");
-
-        var legacy = fixture.Provider.GetValue<JsonObject>(Environments.Production, "Service");
-
-        Assert.NotNull(legacy);
-        Assert.Equal("old", GetObject(legacy!, "ApiKey")["key"]!.GetValue<string>());
-        Assert.Equal("https://service", legacy["Endpoint"]!.GetValue<string>());
-        Assert.Null(legacy["Region"]);
     }
 
     private static string ResolveRaw(FileBasedConfigProvider provider, string key) =>
@@ -173,5 +158,7 @@ public sealed class ConfigCompositionLayerCaseTests
         public string Environment => Environments.Production;
         public bool IsDevelopment => false;
         public string? GetEnvironmentVariable(string name, string? defaultValue = null) => defaultValue;
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() =>
+            new Dictionary<string, string>(StringComparer.Ordinal);
     }
 }

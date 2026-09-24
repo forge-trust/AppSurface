@@ -1,0 +1,12 @@
+{
+  "issue": 164,
+  "namespacePath": "Namespaces/Issue164.Api",
+  "requiredDom": {
+    "shellH1Count": 1,
+    "typeClass": "doc-type",
+    "methodGroupClass": "doc-method-group",
+    "overloadClass": "doc-overload",
+    "firstOverloadOpen": true,
+    "typedValuesAreEncoded": true
+  }
+}

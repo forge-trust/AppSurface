@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using FakeItEasy;
 using Microsoft.Extensions.Hosting;
@@ -8,6 +9,128 @@ namespace ForgeTrust.AppSurface.Config.Tests;
 
 public class FileBasedConfigProviderTests
 {
+    [Fact]
+    public void Resolve_UsesColonLogicalKeysAndPreservesLiteralDots()
+    {
+        var tempDir = CreateTempDirectoryPath();
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            File.WriteAllText(
+                Path.Join(tempDir, "appsettings.json"),
+                "{\"Feature:Enabled\":true,\"Feature\":{\"Enabled\":false},\"Feature.Name\":\"literal\"}");
+
+            var provider = CreateProvider(tempDir);
+            var nested = provider.Resolve<bool>(new ConfigProviderRequest(
+                Environments.Production,
+                AppSurfaceConfigKey.Parse("Feature:Enabled")));
+            var literal = provider.Resolve<string>(new ConfigProviderRequest(
+                Environments.Production,
+                AppSurfaceConfigKey.Parse("Feature.Name")));
+
+            Assert.Equal(ConfigProviderValueStatus.Found, nested.Status);
+            Assert.False(nested.Value);
+            Assert.Equal(ConfigProviderValueStatus.Found, literal.Status);
+            Assert.Equal("literal", literal.Value);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void Resolve_TerminatesCollisionDomainButKeepsUnrelatedSiblingsAvailable()
+    {
+        var tempDir = CreateTempDirectoryPath();
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            File.WriteAllText(
+                Path.Join(tempDir, "appsettings.json"),
+                "{\"Feature\":{\"Port\":1,\"port\":2,\"Name\":\"ok\"},\"Other\":3}");
+
+            var provider = CreateProvider(tempDir);
+            var collision = provider.Resolve<int>(new ConfigProviderRequest(
+                Environments.Production,
+                AppSurfaceConfigKey.Parse("Feature:Port")));
+            var ancestor = provider.Resolve<Dictionary<string, int>>(new ConfigProviderRequest(
+                Environments.Production,
+                AppSurfaceConfigKey.Parse("Feature")));
+            var sibling = provider.Resolve<string>(new ConfigProviderRequest(
+                Environments.Production,
+                AppSurfaceConfigKey.Parse("Feature:Name")));
+            var unrelated = provider.Resolve<int>(new ConfigProviderRequest(
+                Environments.Production,
+                AppSurfaceConfigKey.Parse("Other")));
+
+            Assert.Equal(ConfigProviderValueStatus.Terminal, collision.Status);
+            Assert.Equal(ConfigProviderValueStatus.Terminal, ancestor.Status);
+            Assert.Equal(ConfigProviderValueStatus.Found, sibling.Status);
+            Assert.Equal("ok", sibling.Value);
+            Assert.Equal(ConfigProviderValueStatus.Found, unrelated.Status);
+            Assert.Equal(3, unrelated.Value);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void Resolve_TreatsNullAsMissingAndSupportsReplacementShapes()
+    {
+        var tempDir = CreateTempDirectoryPath();
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            File.WriteAllText(Path.Join(tempDir, "appsettings.json"), "{\"Value\":null,\"Replace\":{\"Child\":true},\"Items\":[1,2]}");
+            File.WriteAllText(Path.Join(tempDir, "config_override.json"), "{\"Replace\":7,\"Items\":{\"Child\":true}}");
+
+            var provider = CreateProvider(tempDir);
+            var missing = provider.Resolve<string>(new ConfigProviderRequest(
+                Environments.Production,
+                AppSurfaceConfigKey.Parse("Value")));
+            var scalar = provider.Resolve<int>(new ConfigProviderRequest(
+                Environments.Production,
+                AppSurfaceConfigKey.Parse("Replace")));
+            var objectValue = provider.Resolve<Dictionary<string, bool>>(new ConfigProviderRequest(
+                Environments.Production,
+                AppSurfaceConfigKey.Parse("Items")));
+
+            Assert.Equal(ConfigProviderValueStatus.Missing, missing.Status);
+            Assert.Equal(ConfigProviderValueStatus.Found, scalar.Status);
+            Assert.Equal(7, scalar.Value);
+            Assert.Equal(ConfigProviderValueStatus.Found, objectValue.Status);
+            Assert.True(objectValue.Value!["Child"]);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void TokenProjection_TerminatesRepresentableAncestorsForInvalidSegments()
+    {
+        var projection = ConfigFileTokenProjection.Parse(
+            System.Text.Encoding.UTF8.GetBytes("{\"Feature\":{\"Bad:Segment\":true,\"Name\":\"ok\"}}"));
+
+        Assert.Contains(AppSurfaceConfigKey.Parse("Feature"), projection.TerminalKeys);
+        Assert.DoesNotContain(AppSurfaceConfigKey.Parse("Feature:Name"), projection.TerminalKeys);
+        Assert.Contains(AppSurfaceConfigKey.Parse("Feature:Name"), projection.Entries.Keys);
+    }
+
+    [Fact]
+    public void TokenProjection_RejectsTrailingTokensAfterTheRoot()
+    {
+        Assert.ThrowsAny<JsonException>(() => ConfigFileTokenProjection.Parse(
+            System.Text.Encoding.UTF8.GetBytes("{} {}")));
+    }
+
     [Fact]
     public void GetValue_MergesFilesByEnvironmentAndPriority()
     {
@@ -37,12 +160,12 @@ public class FileBasedConfigProviderTests
 
             var provider = new FileBasedConfigProvider(locationProvider, logger);
 
-            Assert.Equal("Dev", provider.GetValue<string>("Development", "Feature.Name"));
-            Assert.True(provider.GetValue<bool>("Development", "Feature.Enabled"));
-            Assert.Equal("Value", provider.GetValue<string>("Development", "Feature.Extra"));
-            Assert.False(provider.GetValue<bool>("Production", "Feature.Enabled"));
-            Assert.Equal("ProdExtra", provider.GetValue<string>("Production", "Feature.Extra"));
-            Assert.Null(provider.GetValue<string>("Production", "Feature.Unknown"));
+            Assert.Equal("Dev", provider.Resolve<string>(new ConfigProviderRequest("Development", AppSurfaceConfigKey.Parse("Feature:Name"))).Value);
+            Assert.True(provider.Resolve<bool>(new ConfigProviderRequest("Development", AppSurfaceConfigKey.Parse("Feature:Enabled"))).Value);
+            Assert.Equal("Value", provider.Resolve<string>(new ConfigProviderRequest("Development", AppSurfaceConfigKey.Parse("Feature:Extra"))).Value);
+            Assert.False(provider.Resolve<bool>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Feature:Enabled"))).Value);
+            Assert.Equal("ProdExtra", provider.Resolve<string>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Feature:Extra"))).Value);
+            Assert.Null(provider.Resolve<string>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Feature:Unknown"))).Value);
         }
         finally
         {
@@ -64,7 +187,7 @@ public class FileBasedConfigProviderTests
 
         var provider = new FileBasedConfigProvider(locationProvider, logger);
 
-        Assert.Null(provider.GetValue<string>("Production", "Any.Key"));
+        Assert.Null(provider.Resolve<string>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Any.Key"))).Value);
     }
 
     [Fact]
@@ -85,11 +208,11 @@ public class FileBasedConfigProviderTests
 
             var provider = new FileBasedConfigProvider(locationProvider, logger);
 
-            Assert.True(provider.GetValue<bool>("Production", "Feature.Enabled"));
+            Assert.True(provider.Resolve<bool>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Feature:Enabled"))).Value);
 
             File.WriteAllText(configPath, """{"Feature":{"Enabled":false}}""");
 
-            Assert.True(provider.GetValue<bool>("Production", "Feature.Enabled"));
+            Assert.True(provider.Resolve<bool>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Feature:Enabled"))).Value);
         }
         finally
         {
@@ -131,7 +254,7 @@ public class FileBasedConfigProviderTests
             var provider = new FileBasedConfigProvider(locationProvider, logger);
 
             // Should still read valid file and ignore others
-            Assert.True(provider.GetValue<bool>("Production", "Feature.Enabled"));
+            Assert.True(provider.Resolve<bool>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Feature:Enabled"))).Value);
         }
         finally
         {
@@ -166,7 +289,7 @@ public class FileBasedConfigProviderTests
             var provider = new FileBasedConfigProvider(locationProvider, logger);
 
             // Null in override should not trigger overwrite
-            Assert.True(provider.GetValue<bool>("Production", "Feature.Enabled"));
+            Assert.True(provider.Resolve<bool>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Feature:Enabled"))).Value);
         }
         finally
         {
@@ -178,7 +301,7 @@ public class FileBasedConfigProviderTests
     }
 
     [Fact]
-    public void GetValue_ReturnsDefaultOnDeserializationFailure()
+    public void Resolve_ReturnsTerminalOnDeserializationFailure()
     {
         var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
@@ -196,9 +319,11 @@ public class FileBasedConfigProviderTests
 
             var provider = new FileBasedConfigProvider(locationProvider, logger);
 
-            var value = provider.GetValue<int>("Production", "Feature.Count");
+            var result = provider.Resolve<int>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Feature:Count")));
 
-            Assert.Equal(0, value);
+            Assert.Equal(ConfigProviderValueStatus.Terminal, result.Status);
+            Assert.NotNull(result.Diagnostic);
+            Assert.Equal(0, result.Value);
         }
         finally
         {
@@ -234,9 +359,9 @@ public class FileBasedConfigProviderTests
 
             var provider = new FileBasedConfigProvider(locationProvider, logger);
 
-            Assert.Equal("Staging", provider.GetValue<string>("Staging", "Env"));
-            Assert.Equal("Dev", provider.GetValue<string>("Development", "Env"));
-            Assert.Equal("Base", provider.GetValue<string>("Production", "Env"));
+            Assert.Equal("Staging", provider.Resolve<string>(new ConfigProviderRequest("Staging", AppSurfaceConfigKey.Parse("Env"))).Value);
+            Assert.Equal("Dev", provider.Resolve<string>(new ConfigProviderRequest("Development", AppSurfaceConfigKey.Parse("Env"))).Value);
+            Assert.Equal("Base", provider.Resolve<string>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Env"))).Value);
         }
         finally
         {
@@ -274,8 +399,8 @@ public class FileBasedConfigProviderTests
 
             var provider = new FileBasedConfigProvider(locationProvider, logger);
 
-            Assert.Equal(3, provider.GetValue<int>("Production", "App.Settings.RetryCount"));
-            var endpoints = provider.GetValue<string[]>("Production", "App.Settings.Endpoints");
+            Assert.Equal(3, provider.Resolve<int>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("App:Settings:RetryCount"))).Value);
+            var endpoints = provider.Resolve<string[]>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("App:Settings:Endpoints"))).Value;
             Assert.NotNull(endpoints);
             Assert.Equal(2, endpoints.Length);
             Assert.Equal("http://a.com", endpoints[0]);
@@ -307,11 +432,11 @@ public class FileBasedConfigProviderTests
 
             var provider = new FileBasedConfigProvider(locationProvider, logger);
 
-            var list1 = provider.GetValue<List<string>>("Production", "List");
+            var list1 = provider.Resolve<List<string>>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("List"))).Value;
             Assert.NotNull(list1);
             list1.Add("c");
 
-            var list2 = provider.GetValue<List<string>>("Production", "List");
+            var list2 = provider.Resolve<List<string>>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("List"))).Value;
             Assert.NotNull(list2);
 
             // list2 should not contain "c" because list1 was a clone
@@ -337,7 +462,7 @@ public class FileBasedConfigProviderTests
         var provider = new FileBasedConfigProvider(locationProvider, logger);
 
         // Should not throw, should just log and have no configs
-        Assert.Null(provider.GetValue<string>("Production", "Any"));
+        Assert.Null(provider.Resolve<string>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Any"))).Value);
     }
 
     [Fact]
@@ -357,7 +482,7 @@ public class FileBasedConfigProviderTests
 
             var provider = new FileBasedConfigProvider(locationProvider, logger);
 
-            Assert.Equal(1, provider.GetValue<int>("Production", "Key.Nested"));
+            Assert.Equal(1, provider.Resolve<int>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Key:Nested"))).Value);
         }
         finally
         {
@@ -385,7 +510,7 @@ public class FileBasedConfigProviderTests
             var provider = new FileBasedConfigProvider(locationProvider, logger);
 
             // "Key" is an array, asking for "Key.Sub" should return null via default switch case
-            Assert.Null(provider.GetValue<string>("Production", "Key.Sub"));
+            Assert.Null(provider.Resolve<string>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Key:Sub"))).Value);
         }
         finally
         {
@@ -410,7 +535,7 @@ public class FileBasedConfigProviderTests
             File.WriteAllText(Path.Join(tempDir, "appsettings.json"), "");
 
             var provider = new FileBasedConfigProvider(locationProvider, logger);
-            var result = provider.GetValue<string>("Production", "Key");
+            var result = provider.Resolve<string>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Key"))).Value;
 
             Assert.Null(result);
         }
@@ -437,7 +562,7 @@ public class FileBasedConfigProviderTests
             File.WriteAllText(Path.Join(tempDir, "appsettings.json"), "   ");
 
             var provider = new FileBasedConfigProvider(locationProvider, logger);
-            var result = provider.GetValue<string>("Production", "Key");
+            var result = provider.Resolve<string>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Key"))).Value;
 
             Assert.Null(result);
         }
@@ -466,8 +591,8 @@ public class FileBasedConfigProviderTests
 
             var provider = new FileBasedConfigProvider(locationProvider, logger);
 
-            Assert.Equal("Value1", provider.GetValue<string>("Production", "Key1"));
-            Assert.Equal("Value2", provider.GetValue<string>("Production", "Key2"));
+            Assert.Equal("Value1", provider.Resolve<string>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Key1"))).Value);
+            Assert.Equal("Value2", provider.Resolve<string>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Key2"))).Value);
         }
         finally
         {
@@ -491,7 +616,7 @@ public class FileBasedConfigProviderTests
 
             var provider = new FileBasedConfigProvider(locationProvider, logger);
 
-            var values = provider.GetValue<List<string>>("Production", "Items");
+            var values = provider.Resolve<List<string>>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Items"))).Value;
 
             Assert.NotNull(values);
             Assert.Equal(["override"], values);
@@ -510,7 +635,7 @@ public class FileBasedConfigProviderTests
         var logger = A.Fake<ILogger<FileBasedConfigProvider>>();
 
         var provider = new FileBasedConfigProvider(locationProvider, logger);
-        var result = provider.GetValue<string>("Production", "Key");
+        var result = provider.Resolve<string>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Key"))).Value;
 
         Assert.Null(result);
     }
@@ -523,7 +648,7 @@ public class FileBasedConfigProviderTests
         var logger = A.Fake<ILogger<FileBasedConfigProvider>>();
 
         var provider = new FileBasedConfigProvider(locationProvider, logger);
-        var result = provider.GetValue<string>("Production", "Key");
+        var result = provider.Resolve<string>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Key"))).Value;
 
         Assert.Null(result);
     }
@@ -544,7 +669,7 @@ public class FileBasedConfigProviderTests
             var provider = new FileBasedConfigProvider(locationProvider, logger);
 
             var resolution = ((IConfigDiagnosticProvider)provider)
-                .Resolve("Production", "Feature.Count", typeof(int), ConfigAuditSourceRole.Base);
+                .Resolve(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Feature:Count")), typeof(int), ConfigAuditSourceRole.Base);
 
             Assert.Equal(ConfigAuditEntryState.Invalid, resolution.State);
             Assert.Contains(resolution.Sources, source => source.Kind == ConfigAuditSourceKind.File);
@@ -572,9 +697,9 @@ public class FileBasedConfigProviderTests
 
             var provider = new FileBasedConfigProvider(locationProvider, logger);
 
-            Assert.Equal("scalar", provider.GetValue<string>("Production", "Shape"));
+            Assert.Equal("scalar", provider.Resolve<string>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Shape"))).Value);
             var staleChild = ((IConfigDiagnosticProvider)provider)
-                .Resolve("Production", "Shape.Nested", typeof(string), ConfigAuditSourceRole.Base);
+                .Resolve(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Shape:Nested")), typeof(string), ConfigAuditSourceRole.Base);
             Assert.Equal(ConfigAuditEntryState.Missing, staleChild.State);
             Assert.Contains(staleChild.Sources, source => source.Kind == ConfigAuditSourceKind.Missing);
         }
@@ -604,7 +729,7 @@ public class FileBasedConfigProviderTests
             var provider = CreateProvider(tempDir);
 
             var parent = AssertFileSource(Resolve(provider, "Feature", typeof(Dictionary<string, bool>)));
-            var child = AssertFileSource(Resolve(provider, "Feature.Enabled", typeof(bool)));
+            var child = AssertFileSource(Resolve(provider, "Feature:Enabled", typeof(bool)));
 
             AssertLocation(parent, lineNumber: 2, byteColumnNumber: 3);
             AssertLocation(child, lineNumber: 3, byteColumnNumber: 5);
@@ -616,7 +741,7 @@ public class FileBasedConfigProviderTests
     }
 
     [Fact]
-    public void Resolve_AttachesCollectionParentLocationWithoutArrayDescendantOrigins()
+    public void Resolve_ProjectsArrayElementsAndNestedObjectMembers()
     {
         var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
@@ -637,11 +762,12 @@ public class FileBasedConfigProviderTests
             var provider = CreateProvider(tempDir);
 
             var parent = AssertFileSource(Resolve(provider, "Items", typeof(List<NamedItem>)));
-            var descendant = Resolve(provider, "Items.0.Name", typeof(string));
+            var descendant = Resolve(provider, "Items:0:Name", typeof(string));
 
             AssertLocation(parent, lineNumber: 2, byteColumnNumber: 3);
-            Assert.Equal(ConfigAuditEntryState.Missing, descendant.State);
-            Assert.Contains(descendant.Sources, source => source.Kind == ConfigAuditSourceKind.Missing);
+            Assert.Equal(ConfigAuditEntryState.Resolved, descendant.State);
+            Assert.Equal("one", descendant.Value);
+            AssertFileSource(descendant);
         }
         finally
         {
@@ -671,22 +797,12 @@ public class FileBasedConfigProviderTests
 
             var provider = CreateProvider(tempDir);
 
-            var resolution = Resolve(provider, "feature.Enabled", typeof(bool));
+            var result = Resolve(provider, "feature:Enabled", typeof(bool));
 
-            // Case-only duplicate members are intentionally invalid input. The loader retains a failed
-            // load event and skips the file instead of choosing a legacy value or attaching an origin.
-            Assert.Equal(ConfigAuditEntryState.Missing, resolution.State);
-            Assert.Null(resolution.Value);
-            Assert.DoesNotContain(resolution.Sources, source => source.Kind == ConfigAuditSourceKind.File);
-            Assert.Empty(provider.Snapshot.Layers);
-            var failure = Assert.IsType<ConfigFileLoadFailure>(Assert.Single(provider.Snapshot.LoadEvents));
-            Assert.Equal("config-file-duplicate-member", failure.Code);
-            Assert.Equal(ConfigFileLoadFailureClassification.Parse, failure.Classification);
-            Assert.Equal(Environments.Production, failure.Environment);
-            Assert.Equal("appsettings.json", failure.DisplayPath);
-            var reportDiagnostics = ((IConfigDiagnosticProvider)provider).GetReportDiagnostics(Environments.Production);
-            Assert.Contains(reportDiagnostics, diagnostic => diagnostic.Code == failure.Code);
-            Assert.Null(provider.GetValue<bool?>(Environments.Production, "feature.Enabled"));
+            Assert.Equal(ConfigAuditEntryState.Invalid, result.State);
+            Assert.Null(result.Value);
+            Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "config-key-collision");
+            Assert.All(result.Sources, source => Assert.Null(source.Location));
         }
         finally
         {
@@ -729,12 +845,12 @@ public class FileBasedConfigProviderTests
                 Assert.Empty(provider.Snapshot.Layers);
                 Assert.Equal("config-file-duplicate-member",
                     Assert.IsType<ConfigFileLoadFailure>(Assert.Single(provider.Snapshot.LoadEvents)).Code);
-                Assert.Null(provider.GetValue<bool?>(Environments.Production, "Feature.Enabled"));
+                Assert.Null(provider.Resolve<bool?>(new ConfigProviderRequest(Environments.Production, AppSurfaceConfigKey.Parse("Feature:Enabled"))).Value);
             }
             else
             {
                 Assert.Single(provider.Snapshot.Layers);
-                Assert.True(provider.GetValue<bool>(Environments.Production, "Feature.Enabled"));
+                Assert.True(provider.Resolve<bool>(new ConfigProviderRequest(Environments.Production, AppSurfaceConfigKey.Parse("Feature:Enabled"))).Value);
             }
         }
         finally
@@ -744,7 +860,7 @@ public class FileBasedConfigProviderTests
     }
 
     [Fact]
-    public void Resolve_TreatsDottedJsonPropertyNamesAsUnsupportedPaths()
+    public void Resolve_TreatsLiteralDotsAsPartOfAKey()
     {
         var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
@@ -756,8 +872,8 @@ public class FileBasedConfigProviderTests
 
             var resolution = Resolve(provider, "Feature.Enabled", typeof(bool));
 
-            Assert.Equal(ConfigAuditEntryState.Missing, resolution.State);
-            Assert.Contains(resolution.Sources, source => source.Kind == ConfigAuditSourceKind.Missing);
+            Assert.Equal(ConfigAuditEntryState.Resolved, resolution.State);
+            Assert.Equal(true, resolution.Value);
         }
         finally
         {
@@ -766,7 +882,7 @@ public class FileBasedConfigProviderTests
     }
 
     [Fact]
-    public void Resolve_SuppressesLocationWhenDottedLiteralCollidesWithNestedPath()
+    public void Resolve_KeepsLiteralAndNestedPathsDistinct()
     {
         var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
@@ -785,11 +901,12 @@ public class FileBasedConfigProviderTests
 
             var provider = CreateProvider(tempDir);
 
-            var resolution = Resolve(provider, "Feature.Enabled", typeof(bool));
-            var source = AssertFileSource(resolution);
-
-            Assert.Equal(false, resolution.Value);
-            Assert.Null(source.Location);
+            var nested = Resolve(provider, "Feature:Enabled", typeof(bool));
+            var literal = Resolve(provider, "Feature.Enabled", typeof(bool));
+            Assert.Equal(ConfigAuditEntryState.Resolved, nested.State);
+            Assert.Equal(false, nested.Value);
+            Assert.Equal(ConfigAuditEntryState.Resolved, literal.State);
+            Assert.Equal(true, literal.Value);
         }
         finally
         {
@@ -798,7 +915,7 @@ public class FileBasedConfigProviderTests
     }
 
     [Fact]
-    public void Resolve_SuppressesDescendantLocationWhenDottedLiteralObjectCollidesWithNestedPath()
+    public void Resolve_KeepsLiteralObjectAndNestedPathDistinct()
     {
         var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
@@ -821,11 +938,12 @@ public class FileBasedConfigProviderTests
 
             var provider = CreateProvider(tempDir);
 
-            var resolution = Resolve(provider, "Feature.Enabled.Nested", typeof(bool));
-            var source = AssertFileSource(resolution);
-
-            Assert.Equal(false, resolution.Value);
-            Assert.Null(source.Location);
+            var nested = Resolve(provider, "Feature:Enabled:Nested", typeof(bool));
+            var literal = Resolve(provider, "Feature.Enabled:Nested", typeof(bool));
+            Assert.Equal(ConfigAuditEntryState.Resolved, nested.State);
+            Assert.Equal(false, nested.Value);
+            Assert.Equal(ConfigAuditEntryState.Resolved, literal.State);
+            Assert.Equal(true, literal.Value);
         }
         finally
         {
@@ -880,7 +998,7 @@ public class FileBasedConfigProviderTests
     }
 
     [Fact]
-    public void SourceLocationMap_UsesLastDuplicateExactPathLocation()
+    public void SourceLocationMap_RejectsDuplicateExactPathLocations()
     {
         var map = ConfigFileSourceLocationMap.Create(Encoding.UTF8.GetBytes(
             """
@@ -892,9 +1010,7 @@ public class FileBasedConfigProviderTests
 
         var location = map.GetLocation("Port");
 
-        Assert.NotNull(location);
-        Assert.Equal(3, location.LineNumber);
-        Assert.Equal(3, location.ByteColumnNumber);
+        Assert.Null(location);
     }
 
     [Fact]
@@ -946,7 +1062,7 @@ public class FileBasedConfigProviderTests
             """));
 
         Assert.Null(map.GetLocation("Feature"));
-        Assert.Null(map.GetLocation("Feature.Enabled"));
+        Assert.Null(map.GetLocation("Feature:Enabled"));
     }
 
     [Fact]
@@ -996,7 +1112,7 @@ public class FileBasedConfigProviderTests
             });
         var provider = new FileBasedConfigProvider(snapshot);
 
-        Assert.Equal(5, provider.GetValue<int>(Environments.Production, "Port"));
+        Assert.Equal(5, provider.Resolve<int>(new ConfigProviderRequest(Environments.Production, AppSurfaceConfigKey.Parse("Port"))).Value);
         Assert.Equal(0, mapCreationCount);
 
         var source = AssertFileSource(Resolve(provider, "Port", typeof(int)));
@@ -1033,8 +1149,10 @@ public class FileBasedConfigProviderTests
 
             var provider = CreateProvider(tempDir);
 
-            var source = AssertFileSource(Resolve(provider, "Shape", typeof(string)));
-            var child = Resolve(provider, "Shape.Nested", typeof(string));
+            var resolution = Resolve(provider, "Shape", typeof(string));
+            var source = Assert.Single(resolution.Sources, item => Path.GetFileName(item.FilePath) == "config_override.json");
+            Assert.Contains(resolution.Sources, item => Path.GetFileName(item.FilePath) == "appsettings.json");
+            var child = Resolve(provider, "Shape:Nested", typeof(string));
 
             AssertLocation(source, lineNumber: 2, byteColumnNumber: 3);
             Assert.Equal("config_override.json", Path.GetFileName(source.FilePath));
@@ -1099,7 +1217,7 @@ public class FileBasedConfigProviderTests
 
     private static ConfigValueResolution Resolve(FileBasedConfigProvider provider, string key, Type valueType) =>
         ((IConfigDiagnosticProvider)provider)
-        .Resolve("Production", key, valueType, ConfigAuditSourceRole.Base);
+        .Resolve(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse(key)), valueType, ConfigAuditSourceRole.Base);
 
     private static ConfigAuditSourceRecord AssertFileSource(ConfigValueResolution resolution) =>
         Assert.Single(resolution.Sources, source => source.Kind == ConfigAuditSourceKind.File);

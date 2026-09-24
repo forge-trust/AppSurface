@@ -138,7 +138,7 @@ public sealed class ConfigCompositionExtendedBehaviorTests
         Assert.Equal("test-provider", value.Token.ResolvedProvider);
         Assert.Contains(result.Sources, source =>
             source.EnvironmentVariableName == "SERVICE__METADATA__ENDPOINT"
-            && source.ConfigPath == "Service.Metadata.Endpoint");
+            && source.ConfigPath == "Service:Metadata:Endpoint");
     }
 
     [Fact]
@@ -156,7 +156,7 @@ public sealed class ConfigCompositionExtendedBehaviorTests
         var reporter = new ConfigAuditReporter(
             environmentProvider,
             [files.Provider],
-            [new ConfigAuditKnownEntry("Service", null, typeof(UnsupportedShapeOptions))],
+            [new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Service"), null, typeof(UnsupportedShapeOptions))],
             new ServiceCollection().BuildServiceProvider(),
             new ConfigAuditRedactor(),
             Options.Create(new ConfigAuditDictionaryKeyCorrelationOptions()));
@@ -280,6 +280,11 @@ public sealed class ConfigCompositionExtendedBehaviorTests
 
         public string? GetEnvironmentVariable(string name, string? defaultValue = null) =>
             values is not null && values.TryGetValue(name, out var value) ? value : defaultValue;
+
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() =>
+            values?.Where(pair => pair.Value is not null)
+                .ToDictionary(pair => pair.Key, pair => pair.Value!, StringComparer.Ordinal)
+            ?? new Dictionary<string, string>(StringComparer.Ordinal);
     }
 
     private sealed class FileFixture : IDisposable

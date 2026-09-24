@@ -19,7 +19,7 @@ public sealed class FileBasedConfigProviderLayerTests
 
             var provider = CreateProvider(directory);
 
-            Assert.Equal("override", provider.GetValue<string>(Environments.Production, "Feature.Name"));
+            Assert.Equal("override", provider.Resolve<string>(new ConfigProviderRequest(Environments.Production, AppSurfaceConfigKey.Parse("Feature:Name"))).Value);
             Assert.Equal(2, provider.Snapshot.Layers.Length);
             Assert.Equal(2, provider.Snapshot.LoadEvents.Length);
             Assert.Equal(0, provider.Snapshot.LoadEvents[0].Order);
@@ -61,7 +61,6 @@ public sealed class FileBasedConfigProviderLayerTests
     [Theory]
     [InlineData("{\"Feature\":{\"Value\":}", "config-file-malformed")]
     [InlineData("{\"Feature\":{\"Value\":1}", "config-file-malformed")]
-    [InlineData("{\"Feature\":{\"Value\":1,\"value\":2}}", "config-file-duplicate-member")]
     public void Snapshot_RetainsSanitizedParseFailures(string content, string expectedCode)
     {
         var directory = CreateDirectory();
@@ -77,7 +76,7 @@ public sealed class FileBasedConfigProviderLayerTests
             Assert.Equal("appsettings.json", failure.DisplayPath);
             Assert.DoesNotContain("Value", failure.DisplayPath);
             Assert.Empty(provider.Snapshot.Layers);
-            Assert.Null(provider.GetValue<string>(Environments.Production, "Feature.Value"));
+            Assert.Null(provider.Resolve<string>(new ConfigProviderRequest(Environments.Production, AppSurfaceConfigKey.Parse("Feature:Value"))).Value);
         }
         finally
         {
@@ -86,20 +85,22 @@ public sealed class FileBasedConfigProviderLayerTests
     }
 
     [Fact]
-    public void Snapshot_ScansNestedObjectsForCaseInsensitiveDuplicateMembers()
+    public void Snapshot_RetainsSiblingsWhenNestedArrayMemberCollides()
     {
         var directory = CreateDirectory();
         try
         {
             File.WriteAllText(
                 Path.Join(directory, "appsettings.json"),
-                "{\"Feature\":{\"Items\":[{\"Key\":1,\"key\":2}]}}");
+                "{\"Feature\":{\"Items\":[{\"Key\":1,\"key\":2}],\"Sibling\":7}}");
 
             var provider = CreateProvider(directory);
 
-            var failure = Assert.IsType<ConfigFileLoadFailure>(Assert.Single(provider.Snapshot.LoadEvents));
-            Assert.Equal("config-file-duplicate-member", failure.Code);
-            Assert.Equal(ConfigFileLoadFailureClassification.Parse, failure.Classification);
+            Assert.IsType<ConfigFileLayer>(Assert.Single(provider.Snapshot.Layers));
+            Assert.Equal(ConfigProviderValueStatus.Terminal, provider.Resolve<int>(new ConfigProviderRequest(Environments.Production,
+                AppSurfaceConfigKey.Parse("Feature:Items:0"))).Status);
+            Assert.Equal(7, provider.Resolve<int>(new ConfigProviderRequest(Environments.Production,
+                AppSurfaceConfigKey.Parse("Feature:Sibling"))).Value);
         }
         finally
         {
@@ -144,7 +145,7 @@ public sealed class FileBasedConfigProviderLayerTests
         Assert.Equal(Environments.Production, failure.Environment);
         Assert.Equal(upper, Assert.Single(readPaths));
         // The ordinal tie-break loads uppercase first; collision handling skips the lowercase file entirely.
-        Assert.Equal(2, provider.GetValue<int>(Environments.Production, "A"));
+        Assert.Equal(2, provider.Resolve<int>(new ConfigProviderRequest(Environments.Production, AppSurfaceConfigKey.Parse("A"))).Value);
         Assert.Equal(upper, provider.Snapshot.Origins[Environments.Production]["A"].FilePath);
     }
 
@@ -179,8 +180,8 @@ public sealed class FileBasedConfigProviderLayerTests
         Assert.Equal(Environments.Development, failure.Environment);
         Assert.Equal(1, failure.Order);
         Assert.Equal(2, provider.Snapshot.LoadEvents[2].Order);
-        Assert.Equal(1, provider.GetValue<int>(Environments.Development, "Retained"));
-        Assert.Equal(2, provider.GetValue<int>(Environments.Development, "Continued"));
+        Assert.Equal(1, provider.Resolve<int>(new ConfigProviderRequest(Environments.Development, AppSurfaceConfigKey.Parse("Retained"))).Value);
+        Assert.Equal(2, provider.Resolve<int>(new ConfigProviderRequest(Environments.Development, AppSurfaceConfigKey.Parse("Continued"))).Value);
         AssertSanitizedFailure(provider, logger, failure.Code, "config_unreadable.Development.json");
     }
 
@@ -295,13 +296,13 @@ public sealed class FileBasedConfigProviderLayerTests
         Assert.Equal(0, existsCalls);
         Assert.Empty(patterns);
         Assert.Equal(0, reads);
-        Assert.Equal("base", provider.GetValue<string>(Environments.Production, "Feature.Name"));
+        Assert.Equal("base", provider.Resolve<string>(new ConfigProviderRequest(Environments.Production, AppSurfaceConfigKey.Parse("Feature:Name"))).Value);
         var snapshot = provider.Snapshot;
         Assert.Same(snapshot, provider.Snapshot);
         Assert.Single(snapshot.Layers);
         Assert.Single(snapshot.LoadEvents);
         Assert.NotNull(snapshot.Layers[0].SourceLocationMap.Value.GetLocation("Feature.Name"));
-        Assert.Equal("base", provider.GetValue<string>(Environments.Production, "Feature.Name"));
+        Assert.Equal("base", provider.Resolve<string>(new ConfigProviderRequest(Environments.Production, AppSurfaceConfigKey.Parse("Feature:Name"))).Value);
         Assert.Equal(1, existsCalls);
         Assert.Equal(new[] { "appsettings*.json", "config_*.json" }, patterns);
         Assert.Equal(1, reads);
@@ -317,7 +318,7 @@ public sealed class FileBasedConfigProviderLayerTests
         Assert.Empty(provider.Snapshot.LoadEvents);
         Assert.Empty(provider.Snapshot.Layers);
         Assert.Empty(provider.Snapshot.Diagnostics);
-        Assert.Null(provider.GetValue<string>(Environments.Production, "Feature.Name"));
+        Assert.Null(provider.Resolve<string>(new ConfigProviderRequest(Environments.Production, AppSurfaceConfigKey.Parse("Feature:Name"))).Value);
     }
 
     [Fact]
@@ -349,12 +350,7 @@ public sealed class FileBasedConfigProviderLayerTests
 
     [Theory]
     [InlineData("SeRvEr", "SeRvIcE", "PaYmEnTs", "SERVER:SERVICE:PAYMENTS")]
-    [InlineData("SeRvEr", "SeRvIcE", "PaYmEnTs", "server.service.payments")]
-    [InlineData("server.service.payments", null, null, "SERVER:SERVICE:PAYMENTS")]
-    [InlineData("SERVER:SERVICE:PAYMENTS", null, null, "server.service.payments")]
-    [InlineData("Server.Service:Payments", null, null, "server:service.payments")]
-    [InlineData("Server.Service", "Payments", null, "SERVER:SERVICE:PAYMENTS")]
-    [InlineData("Server", "Service:Payments", null, "server.service.payments")]
+    [InlineData("SeRvEr", "SeRvIcE", "PaYmEnTs", "server:SERVICE:payments")]
     public void ResolveRaw_SelectsCanonicalRootAndRetainsOrdinaryValuesAndSecretDeclarations(
         string outer, string? middle, string? inner, string requestedRoot)
     {
@@ -391,10 +387,6 @@ public sealed class FileBasedConfigProviderLayerTests
 
     [Theory]
     [InlineData("{\"ServiceOther\":{\"Endpoint\":\"wrong\"},\"Service\":{\"Endpoint\":\"correct\"}}", "SERVICE", "correct")]
-    [InlineData("{\"Server\":{\"Other\":0},\"Server.Service\":{\"Endpoint\":\"correct\"}}", "SERVER:SERVICE", "correct")]
-    [InlineData("{\"Server..Service\":{\"Endpoint\":\"wrong\"},\"Server:Service\":{\"Endpoint\":\"correct\"}}", "server.service", "correct")]
-    [InlineData("{\"Server.Service\":{\"Endpoint\":\"first\"},\"Server\":{\"Service\":{\"Endpoint\":\"second\"}}}", "server:service", "first")]
-    [InlineData("{\"Server\":{\"Service\":{\"Endpoint\":\"first\"}},\"Server:Service\":{\"Endpoint\":\"second\"}}", "server.service", "first")]
     public void ResolveRaw_ReturnsFirstCompleteCanonicalMatchWithoutMergingCandidates(
         string document, string requestedRoot, string expected)
     {
@@ -424,7 +416,7 @@ public sealed class FileBasedConfigProviderLayerTests
     }
 
     [Fact]
-    public void ResolveRaw_UsesLegacyMergedViewForCanonicalRootSelection()
+    public void ResolveRaw_DoesNotTreatDottedJsonMemberAsHierarchy()
     {
         var directory = VirtualDirectory();
         var provider = CreateProvider(directory,
@@ -432,29 +424,27 @@ public sealed class FileBasedConfigProviderLayerTests
                 ? [Path.Join(directory, "appsettings.json")]
                 : [Path.Join(directory, "config_override.json")],
             path => Encoding.UTF8.GetBytes(Path.GetFileName(path) == "appsettings.json"
-                ? "{\"Server.Service\":{\"Endpoint\":\"base\",\"ApiKey\":{\"key\":\"demo-key\",\"version\":\"4\"}}}"
-                : "{\"Server.Service\":{\"Endpoint\":\"override\"}}"));
+                ? "{\"Server.Service\":{\"Endpoint\":\"literal\"},\"Server\":{\"Service\":{\"Endpoint\":\"nested\"}}}"
+                : "{}"));
 
         var raw = ((IConfigCompositionValueProvider)provider).ResolveRaw(Environments.Production, "SERVER:SERVICE");
 
         Assert.Equal(ConfigCompositionValueResolutionStatus.Resolved, raw.Status);
         var root = JsonNode.Parse(raw.ReadRaw()!)!;
-        Assert.Equal("override", root["Endpoint"]!.GetValue<string>());
-        Assert.Equal("demo-key", root["ApiKey"]!["key"]!.GetValue<string>());
+        Assert.Equal("nested", root["Endpoint"]!.GetValue<string>());
         Assert.Equal(2, provider.Snapshot.Layers.Length);
     }
 
     [Fact]
-    public void ResolveRaw_DoesNotChangeLegacyTypedCaseOrSeparatorSemantics()
+    public void ResolveRaw_UsesLiteralDottedJsonMemberAndCaseInsensitiveLogicalIdentity()
     {
-        var provider = CreateRawProvider("{\"Server\":{\"Service\":{\"Endpoint\":\"value\"}}}");
-
-        Assert.Equal("value", provider.GetValue<string>(Environments.Production, "Server.Service.Endpoint"));
-        Assert.Null(provider.GetValue<string>(Environments.Production, "server.service.endpoint"));
-        Assert.Null(provider.GetValue<string>(Environments.Production, "Server:Service:Endpoint"));
-        var raw = ((IConfigCompositionValueProvider)provider).ResolveRaw(Environments.Production, "server:SERVICE.endpoint");
-        Assert.Equal(ConfigCompositionValueResolutionStatus.Resolved, raw.Status);
-        Assert.Equal("value", JsonNode.Parse(raw.ReadRaw()!)!.GetValue<string>());
+        var provider = CreateRawProvider("{\"Server.Service\":\"literal\",\"Server\":{\"Service\":{\"Endpoint\":\"nested\"}}}");
+        var literal = provider.Resolve<string>(new ConfigProviderRequest(Environments.Production,
+            AppSurfaceConfigKey.FromSegments("Server.Service")));
+        var nested = provider.Resolve<string>(new ConfigProviderRequest(Environments.Production,
+            AppSurfaceConfigKey.Parse("server:SERVICE:Endpoint")));
+        Assert.Equal("literal", literal.Value);
+        Assert.Equal("nested", nested.Value);
     }
 
     private static FileBasedConfigProvider CreateRawProvider(string document)

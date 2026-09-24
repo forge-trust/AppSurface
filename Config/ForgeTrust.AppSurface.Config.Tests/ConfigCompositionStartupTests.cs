@@ -259,7 +259,7 @@ public sealed class ConfigCompositionStartupTests
         var provider = new CountingSecretProvider();
         using var host = CreateHost(files.Location, [provider], services =>
             services.AddSingleton(new ConfigAuditKnownEntry(
-                "Service", typeof(ConfigStruct<StartupStruct>), typeof(StartupStruct))));
+                AppSurfaceConfigKey.Parse("Service"), typeof(ConfigStruct<StartupStruct>), typeof(StartupStruct))));
 
         var exception = await Assert.ThrowsAsync<ConfigurationCompositionException>(() => host.StartAsync());
 
@@ -278,7 +278,7 @@ public sealed class ConfigCompositionStartupTests
         using var files = new FileFixture(EnabledDeclaration);
         var provider = new CountingSecretProvider();
         using var host = CreateHost(files.Location, [provider], services =>
-            services.AddSingleton(new ConfigAuditKnownEntry("Service", null, typeof(StartupOptions))));
+            services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Service"), null, typeof(StartupOptions))));
 
         await host.StartAsync();
         Assert.Equal(1, provider.ValidateCalls);
@@ -338,12 +338,12 @@ public sealed class ConfigCompositionStartupTests
     {
         services.AddSingleton<ConstructionTracker>();
         services.AddSingleton(new ConfigAuditKnownEntry(
-            "Service", typeof(LazyStartupConfig<StartupOptions>), typeof(StartupOptions)));
+            AppSurfaceConfigKey.Parse("Service"), typeof(LazyStartupConfig<StartupOptions>), typeof(StartupOptions)));
         services.AddSingleton(sp =>
         {
             var wrapper = new LazyStartupConfig<StartupOptions>(sp.GetRequiredService<ConstructionTracker>());
             ((IConfig)wrapper).Init(
-                sp.GetRequiredService<IConfigManager>(), sp.GetRequiredService<IEnvironmentProvider>(), "Service");
+                sp.GetRequiredService<IConfigManager>(), sp.GetRequiredService<IEnvironmentProvider>(), AppSurfaceConfigKey.Parse("Service"));
             return wrapper;
         });
     }
@@ -432,6 +432,11 @@ public sealed class ConfigCompositionStartupTests
             Lookups.Add(name);
             return values is not null && values.TryGetValue(name, out var value) ? value : defaultValue;
         }
+
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() =>
+            values?.Where(pair => pair.Value is not null)
+                .ToDictionary(pair => pair.Key, pair => pair.Value!, StringComparer.Ordinal)
+            ?? new Dictionary<string, string>(StringComparer.Ordinal);
     }
 
     /// <summary>Separates local syntax checks from the remote-read boundary without accessing private state.</summary>

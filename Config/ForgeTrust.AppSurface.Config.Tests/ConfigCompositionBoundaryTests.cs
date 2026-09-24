@@ -187,7 +187,6 @@ public sealed class ConfigCompositionBoundaryTests
     [Theory]
     [InlineData("")]
     [InlineData(" ")]
-    [InlineData("Token.Child")]
     [InlineData("Token:Child")]
     public void LogicalPath_RejectsInvalidMemberSegments(string member)
     {
@@ -195,6 +194,15 @@ public sealed class ConfigCompositionBoundaryTests
 
         Assert.Throws<ArgumentException>(() => root.Append(member));
         Assert.Equal("Service", root.ToString());
+    }
+
+    [Fact]
+    public void LogicalPath_AppendsDottedMemberAsOneLiteralSegment()
+    {
+        var path = ConfigLogicalPath.Parse("Service").Append("Token.Child");
+
+        Assert.Equal(new[] { "Service", "Token.Child" }, path.Segments);
+        Assert.False(path.Equals(ConfigLogicalPath.Parse("Service:Token:Child")));
     }
 
     [Fact]
@@ -225,6 +233,10 @@ public sealed class ConfigCompositionBoundaryTests
             Reads++;
             return values.TryGetValue(name, out var value) ? value : defaultValue;
         }
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() =>
+            new Dictionary<string, string>(values, StringComparer.Ordinal);
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => throw new InvalidOperationException(
+            "Composition must read raw candidates without invoking typed binding.");
         public T? GetValue<T>(string environment, string key) => throw new InvalidOperationException(
             "Composition must read raw candidates without invoking legacy typed binding.");
     }
@@ -263,6 +275,7 @@ public sealed class ConfigCompositionBoundaryTests
         public int Priority => throws ? 10 : 1;
         public string Name => "raw-provider";
         public int Reads { get; private set; }
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => throw new InvalidOperationException();
         public T? GetValue<T>(string environment, string key) => throw new InvalidOperationException();
         public ConfigCompositionValueResolution ResolveRaw(string environment, string logicalKey)
         {

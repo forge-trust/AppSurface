@@ -303,6 +303,8 @@ public sealed class ConfigCompositionLifetimeTests(ITestOutputHelper output)
         public int Priority => int.MaxValue;
         public string Name => "empty-environment";
         public string? GetEnvironmentVariable(string name, string? defaultValue = null) => defaultValue;
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() => new Dictionary<string, string>();
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
         public T? GetValue<T>(string environment, string key) => default;
     }
 
@@ -334,6 +336,8 @@ public sealed class ConfigCompositionLifetimeTests(ITestOutputHelper output)
         public int Priority => 1;
         public string Name => "ephemeral-raw-provider";
         public ConcurrentQueue<WeakReference<object>> Payloads { get; } = new();
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) =>
+            throw new InvalidOperationException("Only raw resolution is expected.");
         public T? GetValue<T>(string environment, string key) => throw new InvalidOperationException("Only raw resolution is expected.");
 
         [MethodImpl(MethodImplOptions.NoInlining)]

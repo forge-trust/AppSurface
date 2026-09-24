@@ -285,10 +285,10 @@ public class ConfigTests
         var config = new TestConfig();
 
         A.CallTo(() => environmentProvider.Environment).Returns("Production");
-        A.CallTo(() => configManager.GetValue<string>("Production", "Test.Key"))
+        A.CallTo(() => configManager.GetValue<string>("Production", AppSurfaceConfigKey.Parse("Test.Key")))
             .Returns(null);
 
-        ((IConfig)config).Init(configManager, environmentProvider, "Test.Key");
+        ((IConfig)config).Init(configManager, environmentProvider, AppSurfaceConfigKey.Parse("Test.Key"));
 
         Assert.True(config.HasValue);
         Assert.True(config.IsDefaultValue);
@@ -303,10 +303,10 @@ public class ConfigTests
         var config = new TestConfig();
 
         A.CallTo(() => environmentProvider.Environment).Returns("Production");
-        A.CallTo(() => configManager.GetValue<string>("Production", "Test.Key"))
+        A.CallTo(() => configManager.GetValue<string>("Production", AppSurfaceConfigKey.Parse("Test.Key")))
             .Returns("value");
 
-        ((IConfig)config).Init(configManager, environmentProvider, "Test.Key");
+        ((IConfig)config).Init(configManager, environmentProvider, AppSurfaceConfigKey.Parse("Test.Key"));
 
         Assert.True(config.HasValue);
         Assert.False(config.IsDefaultValue);
@@ -317,7 +317,7 @@ public class ConfigTests
     public void Init_ForStructConfigUsesManagerValueWhenPresent()
     {
         var configManager = A.Fake<IConfigManager>();
-        A.CallTo(() => configManager.GetValue<int?>(A<string>._, A<string>._))
+        A.CallTo(() => configManager.GetValue<int?>(A<string>._, A<AppSurfaceConfigKey>._))
             .Returns(7);
 
         var environmentProvider = A.Fake<IEnvironmentProvider>();
@@ -325,7 +325,7 @@ public class ConfigTests
 
         A.CallTo(() => environmentProvider.Environment).Returns("Production");
 
-        ((IConfig)config).Init(configManager, environmentProvider, "Struct.Key");
+        ((IConfig)config).Init(configManager, environmentProvider, AppSurfaceConfigKey.Parse("Struct.Key"));
 
         Assert.True(config.HasValue);
         Assert.False(config.IsDefaultValue);
@@ -579,9 +579,9 @@ public class ConfigTests
         var config = new RawConfig();
 
         A.CallTo(() => environmentProvider.Environment).Returns("Production");
-        A.CallTo(() => configManager.GetValue<string>(A<string>._, A<string>._)).Returns(null);
+        A.CallTo(() => configManager.GetValue<string>(A<string>._, A<AppSurfaceConfigKey>._)).Returns(null);
 
-        ((IConfig)config).Init(configManager, environmentProvider, "Key");
+        ((IConfig)config).Init(configManager, environmentProvider, AppSurfaceConfigKey.Parse("Key"));
 
         Assert.False(config.HasValue);
         Assert.True(config.IsDefaultValue);
@@ -596,9 +596,9 @@ public class ConfigTests
         var environmentProvider = A.Fake<IEnvironmentProvider>();
 
         A.CallTo(() => environmentProvider.Environment).Returns("Production");
-        A.CallTo(() => configManager.GetValue<int?>(A<string>._, A<string>._)).Returns(42);
+        A.CallTo(() => configManager.GetValue<int?>(A<string>._, A<AppSurfaceConfigKey>._)).Returns(42);
 
-        ((IConfig)config).Init(configManager, environmentProvider, "Key");
+        ((IConfig)config).Init(configManager, environmentProvider, AppSurfaceConfigKey.Parse("Key"));
 
         Assert.True(config.HasValue);
         Assert.False(config.IsDefaultValue);
@@ -613,9 +613,9 @@ public class ConfigTests
         var environmentProvider = A.Fake<IEnvironmentProvider>();
 
         A.CallTo(() => environmentProvider.Environment).Returns("Production");
-        A.CallTo(() => configManager.GetValue<int?>(A<string>._, A<string>._)).Returns(42);
+        A.CallTo(() => configManager.GetValue<int?>(A<string>._, A<AppSurfaceConfigKey>._)).Returns(42);
 
-        ((IConfig)config).Init(configManager, environmentProvider, "Key");
+        ((IConfig)config).Init(configManager, environmentProvider, AppSurfaceConfigKey.Parse("Key"));
 
         Assert.True(config.HasValue);
         Assert.True(config.IsDefaultValue);
@@ -630,10 +630,10 @@ public class ConfigTests
         var environmentProvider = A.Fake<IEnvironmentProvider>();
 
         A.CallTo(() => environmentProvider.Environment).Returns("Production");
-        A.CallTo(() => configManager.GetValue<AnnotatedStructOptions?>("Production", "Struct.Settings"))
+        A.CallTo(() => configManager.GetValue<AnnotatedStructOptions?>("Production", AppSurfaceConfigKey.Parse("Struct.Settings")))
             .Returns(null);
 
-        ((IConfig)config).Init(configManager, environmentProvider, "Struct.Settings");
+        ((IConfig)config).Init(configManager, environmentProvider, AppSurfaceConfigKey.Parse("Struct.Settings"));
 
         Assert.False(config.HasValue);
         Assert.True(config.IsDefaultValue);
@@ -732,11 +732,11 @@ public class ConfigTests
         var environmentProvider = A.Fake<IEnvironmentProvider>();
 
         A.CallTo(() => environmentProvider.Environment).Returns("Production");
-        A.CallTo(() => configManager.GetValue<AnnotatedOptions>(A<string>._, A<string>._))
+        A.CallTo(() => configManager.GetValue<AnnotatedOptions>(A<string>._, A<AppSurfaceConfigKey>._))
             .Returns(null);
 
         var exception = Assert.Throws<ConfigurationValidationException>(() =>
-            ((IConfig)config).Init(configManager, environmentProvider, "App.Settings"));
+            ((IConfig)config).Init(configManager, environmentProvider, AppSurfaceConfigKey.Parse("App.Settings")));
 
         Assert.True(config.HasValue);
         Assert.True(config.IsDefaultValue);
@@ -751,11 +751,11 @@ public class ConfigTests
         var environmentProvider = A.Fake<IEnvironmentProvider>();
 
         A.CallTo(() => environmentProvider.Environment).Returns("Production");
-        A.CallTo(() => configManager.GetValue<AnnotatedStructOptions?>("Production", "Struct.Settings"))
+        A.CallTo(() => configManager.GetValue<AnnotatedStructOptions?>("Production", AppSurfaceConfigKey.Parse("Struct.Settings")))
             .Returns(new AnnotatedStructOptions { RetryCount = 7 });
 
         var exception = Assert.Throws<ConfigurationValidationException>(() =>
-            ((IConfig)config).Init(configManager, environmentProvider, "Struct.Settings"));
+            ((IConfig)config).Init(configManager, environmentProvider, AppSurfaceConfigKey.Parse("Struct.Settings")));
 
         Assert.Equal("Struct.Settings", exception.Key);
         Assert.Equal(typeof(AnnotatedStructOptionsConfig), exception.ConfigType);
@@ -772,11 +772,11 @@ public class ConfigTests
         var environmentProvider = A.Fake<IEnvironmentProvider>();
 
         A.CallTo(() => environmentProvider.Environment).Returns("Production");
-        A.CallTo(() => configManager.GetValue<AnnotatedStructOptions?>("Production", "Struct.Settings"))
+        A.CallTo(() => configManager.GetValue<AnnotatedStructOptions?>("Production", AppSurfaceConfigKey.Parse("Struct.Settings")))
             .Returns(null);
 
         var exception = Assert.Throws<ConfigurationValidationException>(() =>
-            ((IConfig)config).Init(configManager, environmentProvider, "Struct.Settings"));
+            ((IConfig)config).Init(configManager, environmentProvider, AppSurfaceConfigKey.Parse("Struct.Settings")));
 
         Assert.True(config.HasValue);
         Assert.True(config.IsDefaultValue);
@@ -1031,10 +1031,10 @@ public class ConfigTests
         var environmentProvider = A.Fake<IEnvironmentProvider>();
 
         A.CallTo(() => environmentProvider.Environment).Returns("Production");
-        A.CallTo(() => configManager.GetValue<string>("Production", "App.Settings"))
+        A.CallTo(() => configManager.GetValue<string>("Production", AppSurfaceConfigKey.Parse("App.Settings")))
             .Returns(null);
 
-        ((IConfig)config).Init(configManager, environmentProvider, "App.Settings");
+        ((IConfig)config).Init(configManager, environmentProvider, AppSurfaceConfigKey.Parse("App.Settings"));
 
         Assert.False(config.HasValue);
         Assert.Null(config.Value);
@@ -1150,13 +1150,13 @@ public class ConfigTests
     public void Init_WithInheritedRequiredAttribute_UsesDerivedConfigKeySemantics()
     {
         var config = new DerivedRequiredStringConfig();
-        var key = ConfigKeyAttribute.GetKeyPath(config.GetType());
+        var key = ConfigKeyAttribute.GetLogicalKey(config.GetType()).Value;
 
         var exception = Assert.Throws<ConfigurationValidationException>(() =>
             Init(config, null, key));
 
-        Assert.Equal($"{nameof(ConfigTests)}.{nameof(DerivedRequiredStringConfig)}", key);
-        Assert.Equal($"{nameof(ConfigTests)}.{nameof(DerivedRequiredStringConfig)}", exception.Key);
+        Assert.Equal($"{nameof(ConfigTests)}:{nameof(DerivedRequiredStringConfig)}", key);
+        Assert.Equal($"{nameof(ConfigTests)}:{nameof(DerivedRequiredStringConfig)}", exception.Key);
         Assert.NotEqual("Base.Required", exception.Key);
         Assert.Equal(typeof(DerivedRequiredStringConfig), exception.ConfigType);
         Assert.Equal("A value is required for this configuration key.", Assert.Single(exception.Failures).Message);
@@ -1426,10 +1426,10 @@ public class ConfigTests
         var environmentProvider = A.Fake<IEnvironmentProvider>();
 
         A.CallTo(() => environmentProvider.Environment).Returns("Production");
-        A.CallTo(() => configManager.GetValue<T>("Production", key))
+        A.CallTo(() => configManager.GetValue<T>("Production", AppSurfaceConfigKey.Parse(key)))
             .Returns(value);
 
-        ((IConfig)config).Init(configManager, environmentProvider, key);
+        ((IConfig)config).Init(configManager, environmentProvider, AppSurfaceConfigKey.Parse(key));
     }
 
     private static void InitStruct<T>(ConfigStruct<T> config, T? value)
@@ -1439,9 +1439,9 @@ public class ConfigTests
         var environmentProvider = A.Fake<IEnvironmentProvider>();
 
         A.CallTo(() => environmentProvider.Environment).Returns("Production");
-        A.CallTo(() => configManager.GetValue<T?>("Production", "App.Settings"))
+        A.CallTo(() => configManager.GetValue<T?>("Production", AppSurfaceConfigKey.Parse("App.Settings")))
             .Returns(value);
 
-        ((IConfig)config).Init(configManager, environmentProvider, "App.Settings");
+        ((IConfig)config).Init(configManager, environmentProvider, AppSurfaceConfigKey.Parse("App.Settings"));
     }
 }

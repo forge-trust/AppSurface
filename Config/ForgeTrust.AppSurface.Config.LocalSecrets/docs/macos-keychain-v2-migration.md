@@ -36,6 +36,12 @@ Migration is resumable and idempotent. It retains v1 records for recovery, write
 adding their v2 index entries, and never overwrites an existing v2 value. Once v2 exists, it is canonical: update it with
 `appsurface secrets set`, not by editing a legacy v1 record and rerunning migration.
 
+This namespace migration is separate from `secrets migrate-key`. The macOS adapter supports the exact-key capability for
+moving a retained v1 record into the v2 namespace: it uses the package-wide exclusive lease, durable journal, exact
+rereads with fixed-time value comparison, and index publication before source deletion required by
+[`IAppSurfaceLocalSecretMigrationStore.MigrateKey`](../README.md#exact-key-migration-capability). An unsupported
+exact-key result indicates that the selected backend cannot prove those guarantees; it is not a completed migration.
+
 ## macOS smoke checklist
 
 Run this only in an interactive macOS user session. Use generated, non-secret smoke values and verify status/startup,

@@ -63,7 +63,7 @@ public sealed class GoogleSecretManagerCompositionProviderTests
             options.ProjectId = "project";
             options.MapSecret("Service:Plain", "plain", "1");
             options.MapSecret("Service:Nested:ApiKey", "nested", "2");
-            options.EnableConventionResolver("Service", version: "3");
+            options.EnableConventionResolver("Service", "service-", version: "3");
         });
 
         var claims = provider.InspectClaims("Service", ["Service:ApiKey"]);

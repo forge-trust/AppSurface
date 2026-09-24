@@ -10,6 +10,10 @@ It also acts as a concrete AppSurface Docs example for teams that want stronger 
 
 ## Start here
 
+The [configuration logical-key migration guide](../guides/config-key-migration.md)
+documents the next coordinated configuration SPI break, persisted source migration,
+and package consumer proof.
+
 - [Package chooser](../packages/README.md) is the fastest install map for deciding which AppSurface package to add first.
 - [Current coordinated release](./current.md) is the package-facing story for the coordinated AppSurface prerelease in this documentation tree.
 - [v0.1.0](./v0.1.0.md) is the canonical archive for the first coordinated stable AppSurface release.

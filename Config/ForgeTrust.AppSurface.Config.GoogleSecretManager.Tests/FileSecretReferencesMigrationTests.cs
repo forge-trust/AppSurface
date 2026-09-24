@@ -244,6 +244,10 @@ public sealed class FileSecretReferencesMigrationTests
 
         public string? GetEnvironmentVariable(string name, string? defaultValue = null) =>
             values.TryGetValue(name, out var value) ? value : defaultValue;
+
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() =>
+            values.Where(pair => pair.Value is not null)
+                .ToDictionary(pair => pair.Key, pair => pair.Value!, StringComparer.Ordinal);
     }
 
     private sealed class TestFileLocationProvider(string directory) : IConfigFileLocationProvider

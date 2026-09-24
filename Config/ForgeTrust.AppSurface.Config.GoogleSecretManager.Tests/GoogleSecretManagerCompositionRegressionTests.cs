@@ -8,46 +8,48 @@ namespace ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests;
 public sealed class GoogleSecretManagerCompositionRegressionTests
 {
     [Theory]
-    [InlineData("Billing.Service")]
+    [InlineData("Billing:Service")]
     [InlineData("billing:service")]
     [InlineData("BILLING:Service")]
-    public void InspectClaims_NormalizesOnlyExplicitMappingSegments(string root)
+    public void InspectClaims_UsesColonSegmentsAndKeepsDotsLiteral(string root)
     {
         var client = new TestClient();
         var options = OptionsWithDefaults();
         options.MapSecret("billing", "ancestor", "1");
-        options.MapSecret("BILLING.service", "root", "2");
-        options.MapSecret("Billing:Service.ApiKey", "secret", "3");
-        options.MapSecret("billing.service.PLAIN", "plain", "4");
-        options.MapSecret("Billing.Service.Nested.Token", "nested", "5");
-        options.MapSecret("Billing.ServiceOther", "sibling", "6");
-        options.MapSecret("BillingOther.Service", "other", "7");
+        options.MapSecret("BILLING:Service", "root", "2");
+        options.MapSecret("Billing:Service:ApiKey", "secret", "3");
+        options.MapSecret("billing:service:PLAIN", "plain", "4");
+        options.MapSecret("Billing:Service:Nested:Token", "nested", "5");
+        options.MapSecret("Billing:ServiceOther", "sibling", "6");
+        options.MapSecret("BillingOther:Service", "other", "7");
+        options.MapSecret("Billing.Service", "literal-dot", "8");
         var provider = CreateProvider(options, client);
 
         var claims = provider.InspectClaims(root, ["Billing:Service:ApiKey"]);
 
         Assert.Equal(5, claims.Count);
-        Assert.Equal("BILLING.service", Assert.Single(claims,
+        Assert.Equal("BILLING:Service", Assert.Single(claims,
             claim => claim.Kind == ConfigSecretConfiguredClaimKind.RootMapping).LogicalPath);
-        Assert.Equal(new[] { "billing", "Billing:Service.ApiKey", "billing.service.PLAIN", "Billing.Service.Nested.Token" },
+        Assert.Equal(new[] { "billing", "Billing:Service:ApiKey", "billing:service:PLAIN", "Billing:Service:Nested:Token" },
             claims.Where(claim => claim.Kind == ConfigSecretConfiguredClaimKind.ExactMapping).Select(claim => claim.LogicalPath));
+        Assert.Equal("literal-dot", Assert.Single(provider.InspectClaims("Billing.Service", [])).Key);
         Assert.All(claims, claim => Assert.Equal(GoogleSecretManagerConfigProvider.ProviderId, claim.ProviderId));
         Assert.Empty(client.Calls);
-        // Inspection does not alter the existing ordinal lookup predicate.
-        Assert.Equal(ConfigProviderClaim.Unclaimed, provider.InspectClaim("Production", "billing:service"));
+        // Convention ancestry follows the case-insensitive logical-key contract.
+        Assert.Equal(ConfigProviderClaim.MayClaim, provider.InspectClaim("Production", "billing:service"));
         Assert.Equal(ConfigProviderClaim.MayClaim, provider.InspectClaim("Production", "BILLING.service"));
     }
 
     [Theory]
-    [InlineData("Billing.Service", "Billing.", true)]
-    [InlineData("Billing:Service", "Billing.", false)]
-    [InlineData("billing.Service", "Billing.", false)]
-    [InlineData("Billing.Service", "Billing.Service.", false)]
-    [InlineData("Billing", "Billing.", false)]
-    public void InspectClaims_PreservesOriginalConventionPredicate(string root, string prefix, bool claimsRoot)
+    [InlineData("Billing:Service", "Billing", true, "projects/project/secrets/prefix-billing--service/versions/4")]
+    [InlineData("Billing:Service", "Billing:Service", true, "projects/project/secrets/prefix-billing--service/versions/4")]
+    [InlineData("billing:Service", "Billing", true, "projects/project/secrets/prefix-billing--service/versions/4")]
+    [InlineData("Billing:Service", "Billing:Service:Child", false, null)]
+    [InlineData("Billing", "Billing:Service", false, null)]
+    public void InspectClaims_PreservesOriginalConventionPredicate(string root, string prefix, bool claimsRoot, string? expectedResource)
     {
         var options = OptionsWithDefaults();
-        options.EnableConventionResolver(prefix, "prefix-", "stable");
+        options.EnableConventionResolver(prefix, "prefix-");
         var client = new TestClient();
         var provider = CreateProvider(options, client);
 
@@ -61,7 +63,7 @@ public sealed class GoogleSecretManagerCompositionRegressionTests
             var claim = Assert.Single(claims);
             Assert.Equal(ConfigSecretConfiguredClaimKind.RootConvention, claim.Kind);
             Assert.Equal(root, claim.LogicalPath);
-            Assert.Equal("projects/project/secrets/prefix-service/versions/stable", claim.Key);
+            Assert.Equal(expectedResource, claim.Key);
             Assert.Null(claim.Version); // A full resource must not also carry Version.
         }
         Assert.Empty(client.Calls);
@@ -71,17 +73,40 @@ public sealed class GoogleSecretManagerCompositionRegressionTests
     public void InspectClaims_DoesNotReportConventionSuppressedByExactLegacyMapping()
     {
         var options = OptionsWithDefaults();
-        options.MapSecret("Billing.Service", "mapped", "4");
-        options.EnableConventionResolver("Billing.", "convention-", "5");
+        options.MapSecret("Billing:Service", "mapped", "4");
+        options.EnableConventionResolver("Billing", "convention-", "5");
         var client = new TestClient();
         var provider = CreateProvider(options, client);
 
-        var claim = Assert.Single(provider.InspectClaims("Billing.Service", []));
+        var claim = Assert.Single(provider.InspectClaims("Billing:Service", []));
 
         Assert.Equal(ConfigSecretConfiguredClaimKind.RootMapping, claim.Kind);
         Assert.Equal("mapped", claim.Key);
-        provider.ResolveRaw("Production", "Billing.Service");
+        provider.ResolveRaw("Production", "Billing:Service");
         Assert.Equal("projects/project/secrets/mapped/versions/4", Assert.Single(client.Calls).Resource);
+    }
+
+    [Fact]
+    public void InspectClaims_ConventionUsesSegmentAncestryAndMappingKeepsLiteralDotDistinct()
+    {
+        var options = OptionsWithDefaults();
+        options.EnableConventionResolver("Payments", "prefix-");
+        options.MapSecret("Payments.Invoice.Id", "literal-dot");
+        var provider = CreateProvider(options, new TestClient());
+
+        var similarName = provider.InspectClaims("PaymentsExtra", []);
+        var nested = provider.InspectClaims("Payments:Extra", []);
+        var literalDot = provider.InspectClaims("Payments.Invoice.Id", []);
+        var nestedPath = provider.InspectClaims("Payments:Invoice:Id", []);
+
+        Assert.Empty(similarName);
+        Assert.Equal(ConfigProviderClaim.Unclaimed, provider.InspectClaim("Production", "PaymentsExtra"));
+        Assert.Single(nested);
+        Assert.Equal(ConfigSecretConfiguredClaimKind.RootConvention, Assert.Single(nested).Kind);
+        Assert.Equal("literal-dot", Assert.Single(literalDot).Key);
+        Assert.Equal(ConfigSecretConfiguredClaimKind.RootMapping, Assert.Single(literalDot).Kind);
+        Assert.DoesNotContain(nestedPath, claim => claim.Kind == ConfigSecretConfiguredClaimKind.RootMapping);
+        Assert.Contains(nestedPath, claim => claim.Kind == ConfigSecretConfiguredClaimKind.RootConvention);
     }
 
     public static IEnumerable<object[]> FailurePolicies()
@@ -102,18 +127,20 @@ public sealed class GoogleSecretManagerCompositionRegressionTests
         options.FailClosedOnProviderFailure = failClosed;
         options.MapSecret("Service", "root");
         var provider = CreateProvider(options, new TestClient((_, _) => Fail(failure)));
+        var request = new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Service"));
 
-        var legacy = provider.ResolveValue<string>("Production", "Service");
+        var legacy = LegacyResolveValue<string>(provider, "Production", "Service");
+        var resolved = provider.Resolve<string>(request);
         var raw = provider.ResolveRaw("Production", "Service");
 
         Assert.NotEqual(GoogleSecretManagerResultStatus.Found, legacy.Status);
         Assert.NotNull(legacy.Diagnostic);
+        Assert.Equal(ConfigProviderValueStatus.Terminal, resolved.Status);
+        Assert.NotNull(resolved.Diagnostic);
+        Assert.Equal(legacy.Diagnostic.Code, resolved.Diagnostic.Code);
         Assert.Equal(failClosed ? ConfigCompositionValueResolutionStatus.TerminalFailure : ConfigCompositionValueResolutionStatus.Missing,
             raw.Status);
         Assert.Equal(failClosed && legacy.Diagnostic.Retryable, raw.Retryable);
-        Assert.Equal(failClosed, provider.TryGetTerminalDiagnostic("Production", "Service", out var diagnostic));
-        if (failClosed)
-            Assert.Equal(legacy.Diagnostic.Code, diagnostic.Code);
         Assert.Null(raw.ReadRaw());
         Assert.True(raw.IsSensitive);
         Assert.Equal(provider.Name, raw.ProviderName);
@@ -133,14 +160,19 @@ public sealed class GoogleSecretManagerCompositionRegressionTests
         var client = new TestClient((_, call) => call == 1 ? Fail("NotFound") : Encoding.UTF8.GetBytes(text));
         var provider = CreateProvider(options, client);
 
+        var failed = provider.Resolve<string>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Service")));
+        Assert.Equal(ConfigProviderValueStatus.Terminal, failed.Status);
+        Assert.NotNull(failed.Diagnostic);
         Assert.Equal(ConfigCompositionValueResolutionStatus.TerminalFailure, provider.ResolveRaw("Production", "Service").Status);
         var raw = provider.ResolveRaw("Production", "Service");
 
         Assert.Equal(ConfigCompositionValueResolutionStatus.Resolved, raw.Status);
         Assert.Equal(text, raw.ReadRaw());
-        Assert.False(provider.TryGetTerminalDiagnostic("Production", "Service", out _));
+        var resolved = provider.Resolve<string>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Service")));
+        Assert.Equal(ConfigProviderValueStatus.Found, resolved.Status);
+        Assert.Null(resolved.Diagnostic);
         Assert.Equal(ConfigCompositionValueResolutionStatus.Unclaimed, provider.ResolveRaw("Production", "Other").Status);
-        Assert.Equal(2, client.Calls.Count);
+        Assert.Equal(3, client.Calls.Count); // No TTL: the recovered raw and typed reads each fetch again.
     }
 
     [Fact]
@@ -154,7 +186,7 @@ public sealed class GoogleSecretManagerCompositionRegressionTests
         var provider = CreateProvider(options, client, time);
         var reference = Reference("api-key", "4");
 
-        Assert.Equal("payload-1", provider.GetValue<string>("Production", reference.LogicalPath));
+        Assert.Equal("payload-1", LegacyGetValue<string>(provider, "Production", reference.LogicalPath));
         Assert.Equal("payload-1", provider.ResolveRaw("Production", reference.LogicalPath).ReadRaw());
         Assert.Equal("payload-2", Resolve(provider, reference, time).ReadSensitiveValue());
         Assert.Equal("payload-2", Resolve(provider, reference with
@@ -211,7 +243,7 @@ public sealed class GoogleSecretManagerCompositionRegressionTests
 
         string? Read() => childCache
             ? Resolve(provider, reference, time).ReadSensitiveValue()
-            : provider.GetValue<string>("Production", reference.LogicalPath);
+            : LegacyGetValue<string>(provider, "Production", reference.LogicalPath);
 
         Assert.Equal("payload-1", Read());
         time.Advance(TimeSpan.FromSeconds(30));
@@ -231,7 +263,7 @@ public sealed class GoogleSecretManagerCompositionRegressionTests
         options.CacheTtl = cached ? TimeSpan.FromMinutes(1) : null;
         options.LookupTimeout = TimeSpan.FromSeconds(2);
         options.MapSecret("Service:ApiKey", "mapped-key");
-        options.EnableConventionResolver("Original.", "prefix-");
+        options.EnableConventionResolver("Original", "prefix-");
         var client = new TestClient();
         var time = new ManualTimeProvider();
         var provider = CreateProvider(options, client, time);
@@ -243,14 +275,15 @@ public sealed class GoogleSecretManagerCompositionRegressionTests
         options.LookupTimeout = TimeSpan.FromHours(1);
         options.CacheTtl = cached ? null : TimeSpan.FromMinutes(1);
         options.MapSecret("Added", "added-key");
-        options.EnableConventionResolver("Added.", "added-");
+        options.EnableConventionResolver("Added", "prefix-");
         ((IList<AppSurfaceGoogleSecretMapping>)options.Mappings)[0] = new("Service:ApiKey", "replacement", "9");
-        ((IList<AppSurfaceGoogleSecretConvention>)options.Conventions)[0] = new("Original.", "replacement-", "9");
+        ((IList<AppSurfaceGoogleSecretConvention>)options.Conventions)[0] = new("Original", "prefix-", "9");
+        ((IList<AppSurfaceGoogleSecretConvention>)options.Conventions)[1] = new("Added", "prefix-", "9");
 
         Assert.Equal(ConfigProviderClaim.Unclaimed, provider.InspectClaim("Production", "Added"));
-        Assert.Equal(ConfigProviderClaim.Unclaimed, provider.InspectClaim("Production", "Added.Child"));
+        Assert.Equal(ConfigProviderClaim.Unclaimed, provider.InspectClaim("Production", "Added:Child"));
         Assert.Equal("mapped-key", Assert.Single(provider.InspectClaims("Service", [])).Key);
-        Assert.Equal("projects/project/secrets/prefix-child/versions/4", Assert.Single(provider.InspectClaims("Original.Child", [])).Key);
+        Assert.Equal("projects/project/secrets/prefix-original--child/versions/4", Assert.Single(provider.InspectClaims("Original:Child", [])).Key);
         Assert.Equal(ConfigSecretReferenceValidationStatus.Invalid, provider.ValidateReference(Reference("api-key", "latest")).Status);
 
         Resolve(provider, Reference("api-key", null), time);
@@ -340,7 +373,17 @@ public sealed class GoogleSecretManagerCompositionRegressionTests
 
     private static GoogleSecretManagerConfigProvider CreateProvider(
         AppSurfaceGoogleSecretManagerOptions options, TestClient client, TimeProvider? time = null) =>
-        new(Options.Create(options), client, time);
+        new(Options.Create(options), client, time ?? TimeProvider.System);
+
+    // These wrappers keep explicit regression coverage of obsolete compatibility entry points scoped and documented.
+#pragma warning disable CS0618 // Compatibility APIs are exercised here to preserve their historical behavior.
+    private static GoogleSecretManagerConfigResolution<T> LegacyResolveValue<T>(
+        GoogleSecretManagerConfigProvider provider, string environment, string logicalKey) =>
+        provider.ResolveValue<T>(environment, logicalKey);
+
+    private static T? LegacyGetValue<T>(GoogleSecretManagerConfigProvider provider, string environment, string logicalKey) =>
+        provider.GetValue<T>(environment, logicalKey);
+#pragma warning restore CS0618
 
     private static ConfigSecretProviderResolution Resolve(
         GoogleSecretManagerConfigProvider provider, ConfigSecretReference reference, TimeProvider? time = null) =>

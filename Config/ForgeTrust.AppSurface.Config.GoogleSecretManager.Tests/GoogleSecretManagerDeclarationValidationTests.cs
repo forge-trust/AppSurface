@@ -134,7 +134,10 @@ public sealed class GoogleSecretManagerDeclarationValidationTests
         var client = new RecordingClient();
         var provider = new GoogleSecretManagerConfigProvider(Options.Create(options), client);
 
-        Assert.Equal("value", provider.GetValue<string>("Production", "Service.ApiKey"));
+        var request = new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Service.ApiKey"));
+        var resolved = provider.Resolve<string>(request);
+        Assert.Equal(ConfigProviderValueStatus.Found, resolved.Status);
+        Assert.Equal("value", resolved.Value);
         Assert.Equal(GoogleSecretManagerSecretReference.FromMapping(options, options.Mappings[0]).ResourceName,
             Assert.Single(client.Resources));
         Assert.Equal(ConfigSecretReferenceValidationStatus.Invalid,

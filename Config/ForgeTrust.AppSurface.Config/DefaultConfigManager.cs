@@ -1,140 +1,213 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Config;
 
-/// <summary>
-/// Default implementation of <see cref="IConfigManager"/> that aggregates configuration from multiple sources.
-/// </summary>
-internal partial class DefaultConfigManager : IConfigManager
+/// <summary>Orchestrates one parsed identity and one environment snapshot through ordered sources and patching.</summary>
+internal sealed class DefaultConfigManager : IConfigManager
 {
-    private static readonly Type ConfigManagerType = typeof(IConfigManager);
-    private static readonly Type EnvironmentConfigProviderType = typeof(IEnvironmentConfigProvider);
-
-    // Lowest priority, we do not expect other config managers to be used over this one
-    /// <inheritdoc />
-    public int Priority { get; } = -1;
-
-    /// <inheritdoc />
-    public string Name { get; } = nameof(DefaultConfigManager);
-
-    private static readonly Type[] ExcludedTypes = [ConfigManagerType, EnvironmentConfigProviderType];
-
     private readonly IEnvironmentConfigProvider _environmentProvider;
     private readonly IReadOnlyList<IConfigProvider> _otherProviders;
     private readonly ILogger<DefaultConfigManager> _logger;
     private readonly ConfigCompositionEngine _composition;
+    private readonly IConfigKeyInputParser _parser;
+    private readonly ConfigResourceOptions _limits;
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="DefaultConfigManager"/> class.
-    /// </summary>
+    /// <summary>Captures provider order and finalized parser/resource options without activating wrappers.</summary>
     /// <param name="environmentProvider">The environment configuration provider.</param>
     /// <param name="otherProviders">The collection of other configuration providers.</param>
     /// <param name="logger">The logger for configuration events.</param>
-    /// <param name="composition">The shared host composition authority; omitted only by legacy manual construction.</param>
+    /// <param name="parser">The application-input parser.</param>
+    /// <param name="resourceOptions">Limits for diagnostics and resolution.</param>
+    /// <param name="declarations">The finalized declaration registry.</param>
+    /// <param name="composition">The shared secret composition authority.</param>
     public DefaultConfigManager(
         IEnvironmentConfigProvider environmentProvider,
         IEnumerable<IConfigProvider>? otherProviders,
         ILogger<DefaultConfigManager> logger,
+        IConfigKeyInputParser? parser = null,
+        IOptions<ConfigResourceOptions>? resourceOptions = null,
+        ConfigDeclarationRegistry? declarations = null,
         ConfigCompositionEngine? composition = null)
     {
+        ArgumentNullException.ThrowIfNull(environmentProvider);
+        ArgumentNullException.ThrowIfNull(logger);
         _environmentProvider = environmentProvider;
-        // we don't want to include ourselves or the environment provider in the list of other providers
-        _otherProviders = otherProviders?.Where(x => !ExcludedTypes.Any(t => t.IsInstanceOfType(x)))
-                              .OrderByDescending(x => x.Priority)
-                              .ToList()
-                          ?? [];
+        _otherProviders = otherProviders?.Where(provider => provider is not IEnvironmentConfigProvider)
+            .OrderByDescending(provider => provider.Priority).ToArray() ?? [];
         _logger = logger;
         _composition = composition ?? new ConfigCompositionEngine(environmentProvider, _otherProviders,
             _otherProviders.OfType<IConfigSecretProvider>(), _otherProviders.OfType<IConfigSecretDeclarationSource>(),
             new AppSurfaceConfigOptions(), TimeProvider.System);
+        _parser = parser ?? new ConfigKeyInputParser(Options.Create(new AppSurfaceConfigKeyOptions()));
+        _limits = (resourceOptions?.Value ?? new ConfigResourceOptions()).Snapshot();
+        // DI constructs the complete registry before manager use, even when no wrapper is requested.
+        _ = declarations?.Entries;
+    }
+
+    /// <summary>Preserves manual construction with a shared composition authority.</summary>
+    internal DefaultConfigManager(IEnvironmentConfigProvider environmentProvider,
+        IEnumerable<IConfigProvider>? otherProviders, ILogger<DefaultConfigManager> logger,
+        ConfigCompositionEngine composition)
+        : this(environmentProvider, otherProviders, logger, parser: null, composition: composition)
+    {
     }
 
     /// <inheritdoc />
-    public T? GetValue<T>(string environment, string key)
+    public T? GetValue<T>(string environment, string key) => GetValue<T>(environment, _parser.Parse(key));
+
+    /// <inheritdoc />
+    public T? GetValue<T>(string environment, AppSurfaceConfigKey key)
     {
+        using var scope = new ConfigResolutionScope();
+        var request = new ConfigProviderRequest(environment, key, scope);
+        if (key.InputOrigin == ConfigKeyInputOrigin.TranslatedDot)
+        {
+            ReportNotice(request, "Application", ConfigDiagnosticCatalog.LegacyDot(key));
+        }
+
         if (_composition.ContainsSecrets(typeof(T)))
         {
-            var result = _composition.Execute(environment, key, typeof(T));
-            if (result.State == ConfigCompositionRootState.Failed)
-                throw new ConfigurationCompositionException(environment, key, result.Failures);
-            return result.Value is null ? default : (T)result.Value;
+            var composed = _composition.Execute(environment, key, typeof(T));
+            if (composed.State == ConfigCompositionRootState.Failed)
+                throw new ConfigurationCompositionException(environment, key.Value, composed.Failures);
+            return composed.Value is null ? default : (T)composed.Value;
         }
 
-        var envValue = _environmentProvider.GetValue<T>(environment, key);
-        if (envValue != null)
+        var result = Resolve<T>(_environmentProvider, request);
+        var environmentTerminal = result.Status == ConfigProviderValueStatus.Terminal;
+        if (result.Status == ConfigProviderValueStatus.Found)
         {
-            LogRetrievedFromEnvironment(key, environment, "Environment");
-
-            return envValue;
+            ReportFound(request, _environmentProvider.Name, result.Notices);
+            return result.Value;
         }
 
-        T? providerValue = default;
-        string? providerName = null;
-        ConfigProviderTerminalDiagnostic? terminalDiagnostic = null;
-        string? terminalProviderName = null;
-        foreach (var provider in _otherProviders)
+        var providerName = _environmentProvider.Name;
+        if (result.Status == ConfigProviderValueStatus.Missing)
         {
-            var value = provider.GetValue<T>(environment, key);
-            if (value != null)
+            foreach (var provider in _otherProviders)
             {
-                providerValue = value;
+                result = Resolve<T>(provider, request);
                 providerName = provider.Name;
-
-                break;
+                if (result.Status != ConfigProviderValueStatus.Missing)
+                {
+                    break;
+                }
             }
+        }
 
-            if (provider is IConfigProviderTerminalDiagnosticProvider terminalProvider
-                && terminalProvider.TryGetTerminalDiagnostic(environment, key, out var diagnostic))
+        if (!environmentTerminal && _environmentProvider is IConfigValuePatcher patcher)
+        {
+            var noticeOffset = scope.NoticeCount;
+            var patch = Patch(patcher, request, result.Status == ConfigProviderValueStatus.Found ? result.Value : default);
+            if (patch.Status == ConfigPatchStatus.Applied)
             {
-                terminalDiagnostic = diagnostic;
-                terminalProviderName = provider.Name;
-                break;
+                foreach (var collected in scope.Notices.Skip(noticeOffset))
+                {
+                    EmitNotice(new ConfigProviderRequest(environment, collected.Key, scope), collected.Provider, collected.Notice);
+                }
+
+                if (result.Status == ConfigProviderValueStatus.Found)
+                {
+                    ReportFound(request, providerName, result.Notices);
+                }
+
+                SafeLog(LogLevel.Debug, "config-key-found", request, _environmentProvider.Name);
+                return patch.Value;
+            }
+
+            if (patch.Status == ConfigPatchStatus.Terminal)
+            {
+                ConfigDiagnosticMetrics.Terminal(patch.Diagnostic!.Code, _environmentProvider.Name);
+                throw new ConfigurationResolutionException(environment, key, _environmentProvider.Name, patch.Diagnostic!,
+                    _limits.MaxRenderedIdentifierCharacters);
             }
         }
 
-        if (_environmentProvider is IConfigValuePatcher patcher
-            && patcher.TryPatch(environment, key, providerValue, out var patchedValue))
+        if (result.Status == ConfigProviderValueStatus.Terminal)
         {
-            LogRetrievedFromEnvironment(key, environment, "Environment");
-
-            return patchedValue;
+            ConfigDiagnosticMetrics.Terminal(result.Diagnostic!.Code, providerName);
+            throw new ConfigurationResolutionException(environment, key, providerName, result.Diagnostic!,
+                _limits.MaxRenderedIdentifierCharacters);
         }
 
-        if (terminalDiagnostic != null)
+        if (result.Status == ConfigProviderValueStatus.Found)
         {
-            throw new ConfigurationResolutionException(environment, key, terminalProviderName!, terminalDiagnostic);
+            ReportFound(request, providerName, result.Notices);
+            return result.Value;
         }
 
-        if (providerValue != null)
-        {
-            LogRetrievedFromEnvironment(key, environment, providerName!);
-
-            return providerValue;
-        }
-
-        LogKeyNotFound(key, environment);
-
-        return default(T);
+        SafeLog(LogLevel.Debug, "config-key-missing", request, providerName);
+        return default;
     }
 
-    /// <summary>
-    /// Logs that a configuration key was not found.
-    /// </summary>
-    /// <param name="key">The configuration key.</param>
-    /// <param name="environment">The environment name.</param>
-    [LoggerMessage(
-        Level = LogLevel.Debug,
-        Message = "Configuration key '{Key}' not found in environment '{Environment}'.")]
-    public partial void LogKeyNotFound(string key, string environment);
+    private static ConfigProviderValueResult<T> Resolve<T>(IConfigProvider provider, ConfigProviderRequest request)
+    {
+        try
+        {
+            return provider.Resolve<T>(request) ?? ConfigProviderValueResult<T>.Terminal(
+                ConfigDiagnosticCatalog.Terminal("config-provider-invalid-result"));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return ConfigProviderValueResult<T>.Terminal(ConfigDiagnosticCatalog.Terminal("config-provider-failed"));
+        }
+    }
 
-    /// <summary>
-    /// Logs that a configuration key was retrieved from a specific source.
-    /// </summary>
-    /// <param name="key">The configuration key.</param>
-    /// <param name="environment">The environment name.</param>
-    /// <param name="source">The source of the configuration value.</param>
-    [LoggerMessage(
-        Level = LogLevel.Debug,
-        Message = "Configuration key '{Key}' retrieved from environment '{Environment}' using source '{Source}'.")]
-    public partial void LogRetrievedFromEnvironment(string key, string environment, string source);
+    /// <summary>Contains unexpected patch failures without retaining raw exception text or publishing a partial value.</summary>
+    private static ConfigPatchResult<T> Patch<T>(IConfigValuePatcher patcher, ConfigProviderRequest request, T? value)
+    {
+        try
+        {
+            return patcher.Patch(request, value) ?? ConfigPatchResult<T>.Terminal(
+                ConfigDiagnosticCatalog.Terminal("config-patch-failed"));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return ConfigPatchResult<T>.Terminal(ConfigDiagnosticCatalog.Terminal("config-patch-failed"));
+        }
+    }
+
+    private void ReportFound(ConfigProviderRequest request, string provider, IReadOnlyList<ConfigProviderNotice> notices)
+    {
+        foreach (var notice in notices)
+        {
+            ReportNotice(request, provider, notice);
+        }
+
+        SafeLog(LogLevel.Debug, "config-key-found", request, provider);
+    }
+
+    private void ReportNotice(ConfigProviderRequest request, string provider, ConfigProviderNotice notice)
+    {
+        request.Scope.AddNotice(provider, request.Key, notice, _limits.MaxNoticeIdentities);
+        EmitNotice(request, provider, notice);
+    }
+
+    /// <summary>Logs a committed notice once without recollecting notices already published by an environment patch.</summary>
+    private void EmitNotice(ConfigProviderRequest request, string provider, ConfigProviderNotice notice)
+    {
+        ConfigDiagnosticMetrics.Notice(notice.Code, provider);
+        var code = ConfigDiagnosticCatalog.SafeCode(notice.Code, "config-provider-notice");
+        if (ConfigNoticeHistory.TryRemember(code, provider, request.Environment, request.Key, notice.SafeSourceIdentifier,
+                _limits.MaxNoticeIdentities))
+        {
+            SafeLog(LogLevel.Warning, code, request, provider);
+        }
+    }
+
+    private void SafeLog(LogLevel level, string code, ConfigProviderRequest request, string provider)
+    {
+        try
+        {
+            _logger.Log(level, "Configuration {Code}: provider '{Provider}', environment '{Environment}', key '{Key}'.",
+                code, ConfigDiagnosticText.Identifier(provider, _limits.MaxRenderedIdentifierCharacters),
+                ConfigDiagnosticText.Identifier(request.Environment, _limits.MaxRenderedIdentifierCharacters),
+                ConfigDiagnosticText.Identifier(request.Key.Value, _limits.MaxRenderedIdentifierCharacters));
+        }
+        catch (Exception)
+        {
+            // Logging is observational. It must never change configuration resolution.
+        }
+    }
 }

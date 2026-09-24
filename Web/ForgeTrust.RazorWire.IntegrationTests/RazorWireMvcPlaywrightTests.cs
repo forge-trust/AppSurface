@@ -1678,7 +1678,7 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
             throw new FileNotFoundException("Could not find RazorWire MVC example project.", projectPath);
         }
 
-        var appProcess = CliWrapProcessLease.Start(Cli.Wrap("dotnet")
+        var appProcess = CliWrapProcessLease.Start(global::CliWrap.Cli.Wrap("dotnet")
             .WithArguments(BuildExampleAppArguments(repoRoot, readmeProjectPath))
             .WithWorkingDirectory(repoRoot)
             .WithEnvironmentVariables(new Dictionary<string, string?>

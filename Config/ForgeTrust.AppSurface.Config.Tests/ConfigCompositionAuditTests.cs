@@ -31,8 +31,8 @@ public sealed class ConfigCompositionAuditTests
         AssertOpaqueSlot(Child(root, "Service.access"), "secret-resolved", hasValue: true);
         Assert.Equal("us-east-1", Child(root, "Service.region").DisplayValue);
         Assert.Contains(report.Providers, item => item.Name == nameof(FileBasedConfigProvider));
-        Assert.Contains(report.DiscoveredKeys, item => item.Key == "Unrelated.region");
-        AssertDescriptorInventory(report, "Service.access");
+        Assert.Contains(report.DiscoveredKeys, item => item.Key == "Unrelated:region");
+        AssertDescriptorInventory(report, "Service:access");
         AssertSafeReport(report);
 
         // Effective audits are fresh observations; serializing/rendering an existing report does no I/O.
@@ -43,7 +43,7 @@ public sealed class ConfigCompositionAuditTests
         Assert.Equal(ConfigAuditEntryState.Invalid, Assert.Single(laterReport.Entries).State);
         AssertOpaqueSlot(Child(Assert.Single(laterReport.Entries), "Service.access"), "secret-not-found", hasValue: false);
         Assert.Equal(ConfigAuditEntryState.PartiallyResolved, root.State);
-        AssertDescriptorInventory(laterReport, "Service.access");
+        AssertDescriptorInventory(laterReport, "Service:access");
         AssertSafeReport(laterReport);
     }
 
@@ -95,7 +95,7 @@ public sealed class ConfigCompositionAuditTests
         AssertOpaqueSlot(slot, code, hasValue: !failed);
         if (failed) Assert.Contains(root.Diagnostics, diagnostic => diagnostic.Code == code);
         else Assert.Contains(slot.Sources, source => source.ProviderName == (rescue ? nameof(EnvironmentConfigProvider) : first.Id));
-        AssertDescriptorInventory(report, "Service.access");
+        AssertDescriptorInventory(report, "Service:access");
         AssertSafeReport(report);
     }
 
@@ -119,7 +119,7 @@ public sealed class ConfigCompositionAuditTests
         Assert.Equal(invalidDeclaration ? 0 : 1, provider.ResolveCalls);
         Assert.Contains(root.Diagnostics, diagnostic => diagnostic.Code ==
             (invalidDeclaration ? "secret-descriptor-invalid" : "secret-not-found"));
-        AssertDescriptorInventory(report, "Service.access");
+        AssertDescriptorInventory(report, "Service:access");
         AssertSafeReport(report);
     }
 
@@ -160,7 +160,7 @@ public sealed class ConfigCompositionAuditTests
         Assert.Empty(host.ResolveSequence);
         AssertOpaqueSlot(Child(Assert.Single(report.Entries), "Service.access"),
             environmentValue ? "secret-environment-supplied" : "secret-declared-disabled", environmentValue);
-        AssertDescriptorInventory(report, "Service.access");
+        AssertDescriptorInventory(report, "Service:access");
         AssertSafeReport(report);
     }
 
@@ -188,7 +188,7 @@ public sealed class ConfigCompositionAuditTests
         var slot = Child(root, "Service.access");
         AssertOpaqueSlot(slot, "secret-direct-environment-root", hasValue: true);
         Assert.Contains(slot.Sources, source => source.EnvironmentVariableName == "PRODUCTION_SERVICE");
-        AssertDescriptorInventory(report, "Service.access");
+        AssertDescriptorInventory(report, "Service:access");
         AssertSafeReport(report);
     }
 
@@ -215,7 +215,7 @@ public sealed class ConfigCompositionAuditTests
         Assert.DoesNotContain(Flatten(root), entry => entry.Key.Contains("Credential", StringComparison.Ordinal)
             || entry.Key.Contains("Settings", StringComparison.Ordinal));
         if (!failed) Assert.Equal("us-east-1", Child(channel, "Service.channel.region").DisplayValue);
-        AssertDescriptorInventory(report, "Service.channel.access");
+        AssertDescriptorInventory(report, "Service:channel:access");
         AssertSafeReport(report);
     }
 
@@ -237,7 +237,7 @@ public sealed class ConfigCompositionAuditTests
         Assert.False(ConfigAuditRedactor.ContainsSensitiveFragment("Service.access.version"));
         Assert.Equal(ConfigAuditEntryState.Invalid, Assert.Single(report.Entries).State);
         Assert.Equal(0, provider.ResolveCalls);
-        AssertDescriptorInventory(report, "Service.access");
+        AssertDescriptorInventory(report, "Service:access");
         AssertSafeReport(report);
     }
 
@@ -248,7 +248,7 @@ public sealed class ConfigCompositionAuditTests
     {
         using var host = new HostingEnvironment(FileDocument(Descriptor()));
         host.AddProvider("test-provider");
-        var knownVersion = new ConfigAuditKnownEntry("Service.access.version", null, typeof(string));
+        var knownVersion = new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Service:access:version"), null, typeof(string));
         var reporter = unsupported
             ? host.CreateReporter<UnsupportedCollectionOptions>(additionalEntries: [knownVersion])
             : host.CreateReporter<AuditOptions>(additionalEntries: [knownVersion]);
@@ -258,7 +258,7 @@ public sealed class ConfigCompositionAuditTests
         var version = Assert.Single(report.Entries, entry => entry.Key == knownVersion.Key);
         Assert.True(version.IsRedacted);
         Assert.Equal(ConfigAuditRedactor.Placeholder, version.DisplayValue);
-        AssertDescriptorInventory(report, "Service.access");
+        AssertDescriptorInventory(report, "Service:access");
         AssertSafeReport(report);
     }
 
@@ -291,7 +291,7 @@ public sealed class ConfigCompositionAuditTests
         Assert.DoesNotContain(Flatten(root), entry => entry.Key.EndsWith(".region", StringComparison.Ordinal));
         Assert.Equal(0, provider.ValidateCalls);
         Assert.Equal(0, provider.ResolveCalls);
-        Assert.Contains(report.DiscoveredKeys, item => item.Key == "Unrelated.region");
+        Assert.Contains(report.DiscoveredKeys, item => item.Key == "Unrelated:region");
         AssertSafeReport(report);
     }
 
@@ -428,12 +428,12 @@ public sealed class ConfigCompositionAuditTests
 
     private static void AssertDescriptorInventory(ConfigAuditReport report, string path)
     {
-        var version = Assert.Single(report.DiscoveredKeys, item => item.Key == $"{path}.version");
+        var version = Assert.Single(report.DiscoveredKeys, item => item.Key == $"{path}:version");
         Assert.True(version.IsRedacted);
         Assert.Equal(ConfigAuditDiscoveredValueDisplayState.Redacted, version.ValueDisplayState);
         Assert.Equal(ConfigAuditRedactor.Placeholder, version.DisplayValue);
         Assert.Contains(version.Sources, source => source.Kind == ConfigAuditSourceKind.File && Path.GetFileName(source.FilePath) == "appsettings.json");
-        var inventory = report.DiscoveredKeys.Where(item => item.Key.StartsWith($"{path}.", StringComparison.Ordinal)).ToArray();
+        var inventory = report.DiscoveredKeys.Where(item => item.Key.StartsWith($"{path}:", StringComparison.Ordinal)).ToArray();
         Assert.NotEmpty(inventory);
         Assert.All(inventory, item =>
         {
@@ -522,7 +522,7 @@ public sealed class ConfigCompositionAuditTests
                 return new AuditOptions();
             }
         }
-        ConfigWrapperInspection IConfigInspectable.Inspect(string key, object? rawValue, ConfigAuditEntryState resolutionState)
+        ConfigWrapperInspection IConfigInspectable.Inspect(AppSurfaceConfigKey key, object? rawValue, ConfigAuditEntryState resolutionState)
         {
             _counts.Inspections++;
             return new(rawValue ?? DefaultValue, resolutionState, null, []);
@@ -603,6 +603,8 @@ public sealed class ConfigCompositionAuditTests
         public InspectionCounts Inspection { get; } = new();
         public string? GetEnvironmentVariable(string name, string? defaultValue = null) =>
             Variables.TryGetValue(name, out var value) ? value : defaultValue;
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() =>
+            new Dictionary<string, string>(Variables, StringComparer.Ordinal);
         public CountingSecretProvider AddProvider(string id, string outcome = "resolved")
         {
             var provider = new CountingSecretProvider(id, outcome, ResolveSequence);
@@ -610,8 +612,8 @@ public sealed class ConfigCompositionAuditTests
             return provider;
         }
         public ConfigAuditReporter CreateReporter<T>(Type? wrapper = null, string key = "Service", params ConfigAuditKnownEntry[] additionalEntries) =>
-            new(_environment, [_file], [new ConfigAuditKnownEntry(key, wrapper, typeof(T)), .. additionalEntries], _services,
-                new ConfigAuditRedactor(), Options.Create(new ConfigAuditDictionaryKeyCorrelationOptions()), Engine);
+            new(_environment, [_file], [new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse(key), wrapper, typeof(T)), .. additionalEntries], _services,
+                new ConfigAuditRedactor(), Options.Create(new ConfigAuditDictionaryKeyCorrelationOptions()), composition: Engine);
         public IConfigManager CreateManager() => new DefaultConfigManager(_environment, [_file], NullLogger<DefaultConfigManager>.Instance, Engine);
         private ConfigCompositionEngine Engine => _engine ??= new(_environment, [_file], _providers, [], new AppSurfaceConfigOptions(), TimeProvider.System);
         public void Dispose()

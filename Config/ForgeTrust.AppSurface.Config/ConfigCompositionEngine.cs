@@ -56,12 +56,39 @@ internal sealed class ConfigCompositionEngine
         catch (ArgumentException) { return []; }
     }
 
+    internal IReadOnlyList<string> GetSecretPaths(AppSurfaceConfigKey key, Type type)
+    {
+        try
+        {
+            var root = ConfigLogicalPath.FromKey(key);
+            var shape = _json.GetShape(type);
+            if (shape.Failures.Count > 0) return [root.Canonical];
+            return shape.Secrets.Select(slot => ConfigCompositionPlanCompiler.Join(root, slot.Members).Canonical).ToList().AsReadOnly();
+        }
+        catch (ArgumentException) { return []; }
+    }
+
     /// <summary>Executes one observation. Runtime and audit receive identical semantics for identical inputs.</summary>
     internal ConfigCompositionExecutionResult Execute(string environment, string key, Type type)
     {
-        var direct = _executor.TryDirect(environment, key, type, out var directDiagnostics);
+        ConfigLogicalPath root;
+        try { root = ConfigLogicalPath.Parse(key); }
+        catch (ArgumentException)
+        {
+            return new(ConfigCompositionRootState.Failed, null,
+                [new ConfigCompositionFailure(key, "secret-path-invalid")], [], [], [], false);
+        }
+        return Execute(environment, root, type);
+    }
+
+    internal ConfigCompositionExecutionResult Execute(string environment, AppSurfaceConfigKey key, Type type)
+        => Execute(environment, ConfigLogicalPath.FromKey(key), type);
+
+    private ConfigCompositionExecutionResult Execute(string environment, ConfigLogicalPath root, Type type)
+    {
+        var direct = _executor.TryDirect(environment, root, type, out var directDiagnostics);
         if (direct is not null) return direct;
-        var result = _executor.Execute(_compiler.Compile(environment, key, type));
+        var result = _executor.Execute(_compiler.Compile(environment, root, type));
         return directDiagnostics.Count == 0 ? result : new(result.State, result.Value, result.Failures, result.Slots,
             result.Sources, directDiagnostics.Concat(result.Diagnostics).ToList().AsReadOnly(), result.DirectRoot);
     }
@@ -70,8 +97,25 @@ internal sealed class ConfigCompositionEngine
     internal void ValidatePlan(string environment, string key, Type type)
     {
         if (!ContainsSecrets(type)) return;
-        if (_executor.TryDirect(environment, key, type, out _) is { State: ConfigCompositionRootState.Resolved }) return;
-        var plan = _compiler.Compile(environment, key, type);
+        ConfigLogicalPath root;
+        try { root = ConfigLogicalPath.Parse(key); }
+        catch (ArgumentException)
+        {
+            throw new ConfigurationCompositionException(environment, key,
+                [new ConfigCompositionFailure(key, "secret-path-invalid")]);
+        }
+        ValidatePlan(environment, root, type);
+    }
+
+    internal void ValidatePlan(string environment, AppSurfaceConfigKey key, Type type)
+        => ValidatePlan(environment, ConfigLogicalPath.FromKey(key), type);
+
+    private void ValidatePlan(string environment, ConfigLogicalPath root, Type type)
+    {
+        if (!ContainsSecrets(type)) return;
+        var key = root.Canonical;
+        if (_executor.TryDirect(environment, root, type, out _) is { State: ConfigCompositionRootState.Resolved }) return;
+        var plan = _compiler.Compile(environment, root, type);
         if (plan.Failures.Count > 0) throw new ConfigurationCompositionException(environment, key, plan.Failures);
     }
 }
@@ -82,12 +126,16 @@ internal sealed class ConfigCompositionExecutor(IEnvironmentConfigProvider envir
 {
     /// <summary>Probes every legacy direct-root candidate before compiling file policy or resolving providers.</summary>
     internal ConfigCompositionExecutionResult? TryDirect(string environmentName, string key, Type type,
+        out IReadOnlyList<ConfigAuditDiagnostic> conversionDiagnostics) => TryDirect(environmentName, ConfigLogicalPath.Parse(key), type, out conversionDiagnostics);
+
+    internal ConfigCompositionExecutionResult? TryDirect(string environmentName, ConfigLogicalPath root, Type type,
         out IReadOnlyList<ConfigAuditDiagnostic> conversionDiagnostics)
     {
         var diagnostics = new List<ConfigAuditDiagnostic>();
+        var key = root.Canonical;
         conversionDiagnostics = diagnostics.AsReadOnly();
         IReadOnlyList<string> candidates;
-        try { candidates = ConfigEnvironmentCandidates.GetPathCandidates(environmentName, ConfigLogicalPath.Parse(key).Segments); }
+        try { candidates = ConfigEnvironmentCandidates.GetPathCandidates(environmentName, root.Segments); }
         catch (ArgumentException) { return null; }
         foreach (var candidate in candidates)
         {
@@ -104,7 +152,6 @@ internal sealed class ConfigCompositionExecutor(IEnvironmentConfigProvider envir
                     diagnostics.Add(ConversionDiagnostic(key, candidate));
                     continue;
                 }
-                var root = ConfigLogicalPath.Parse(key);
                 var invalid = false;
                 foreach (var destination in shape.Secrets)
                 {
@@ -147,7 +194,7 @@ internal sealed class ConfigCompositionExecutor(IEnvironmentConfigProvider envir
         var hasContribution = plan.Slots.Any(s => s.Reference is not null);
         var sensitiveBase = false;
         string? baseProvider = null;
-        var root = ConfigLogicalPath.Parse(plan.Key);
+        var root = plan.Root!;
         // The monotonic root deadline spans all unconstrained slots and includes preceding root work.
         var budget = new ConfigSecretResolutionContext(time, options.ProviderlessResolutionBudget);
         try
@@ -155,7 +202,12 @@ internal sealed class ConfigCompositionExecutor(IEnvironmentConfigProvider envir
             foreach (var provider in plan.Bases)
             {
                 ConfigCompositionValueResolution raw;
-                try { raw = ((IConfigCompositionValueProvider)provider).ResolveRaw(plan.Environment, plan.Key); }
+                try
+                {
+                    raw = provider is FileBasedConfigProvider file
+                        ? file.ResolveRaw(plan.Environment, root)
+                        : ((IConfigCompositionValueProvider)provider).ResolveRaw(plan.Environment, plan.Key);
+                }
                 catch
                 {
                     failures.Add(new(root.Canonical, "config-composition-base-failed"));
@@ -253,7 +305,9 @@ internal sealed class ConfigCompositionExecutor(IEnvironmentConfigProvider envir
                 {
                     // Reuse indexed-array/dictionary support and first-parseable candidates from the existing
                     // environment implementation; ordinary subtrees contain no opaque secret destinations.
-                    var resolved = diagnosticEnvironment.Resolve(plan.Environment, path.Dotted, member.ValueType, ConfigAuditSourceRole.Patch);
+                    using var scope = new ConfigResolutionScope();
+                    var request = new ConfigProviderRequest(plan.Environment, AppSurfaceConfigKey.Parse(path.Canonical), scope);
+                    var resolved = diagnosticEnvironment.Resolve(request, member.ValueType, ConfigAuditSourceRole.Patch);
                     diagnostics.AddRange(resolved.Diagnostics);
                     if (resolved.State == ConfigAuditEntryState.Resolved)
                     {
