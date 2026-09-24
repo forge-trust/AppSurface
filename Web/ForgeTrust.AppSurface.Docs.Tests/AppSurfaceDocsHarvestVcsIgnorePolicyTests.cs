@@ -335,6 +335,46 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
     }
 
     [Fact]
+    public async Task Evaluate_WhenGlobMetacharactersAreEscapedMatchesOnlyTheirLiteralNames()
+    {
+        await WriteAsync(
+            ".gitignore",
+            """
+            \*.py
+            literal\?.py
+            literal\[name].py
+            """);
+        var snapshot = CreateSnapshot();
+
+        Assert.False(snapshot.Evaluate("*.py", AppSurfaceDocsHarvestSourceKind.Python).Included);
+        Assert.True(snapshot.Evaluate("worker.py", AppSurfaceDocsHarvestSourceKind.Python).Included);
+        Assert.False(snapshot.Evaluate("literal?.py", AppSurfaceDocsHarvestSourceKind.Python).Included);
+        Assert.True(snapshot.Evaluate("literal1.py", AppSurfaceDocsHarvestSourceKind.Python).Included);
+        Assert.False(snapshot.Evaluate("literal[name].py", AppSurfaceDocsHarvestSourceKind.Python).Included);
+        Assert.True(snapshot.Evaluate("literalxname].py", AppSurfaceDocsHarvestSourceKind.Python).Included);
+    }
+
+    [Fact]
+    public async Task Evaluate_WhenDoubleStarDirectorySegmentsAreOptionalMatchesGitStylePatterns()
+    {
+        await WriteAsync(
+            ".gitignore",
+            """
+            **/root.py
+            sidecar/**/nested.py
+            src**/generated.py
+            """);
+        var snapshot = CreateSnapshot();
+
+        Assert.False(snapshot.Evaluate("root.py", AppSurfaceDocsHarvestSourceKind.Python).Included);
+        Assert.False(snapshot.Evaluate("nested/root.py", AppSurfaceDocsHarvestSourceKind.Python).Included);
+        Assert.False(snapshot.Evaluate("sidecar/nested.py", AppSurfaceDocsHarvestSourceKind.Python).Included);
+        Assert.False(snapshot.Evaluate("sidecar/level/nested.py", AppSurfaceDocsHarvestSourceKind.Python).Included);
+        Assert.True(snapshot.Evaluate("sidecar/other.py", AppSurfaceDocsHarvestSourceKind.Python).Included);
+        Assert.True(snapshot.Evaluate("srcgenerated.py", AppSurfaceDocsHarvestSourceKind.Python).Included);
+    }
+
+    [Fact]
     public async Task EvaluateFile_WhenNegatedCharacterClassContainsClosingBracketUsesGitStyleClass()
     {
         await WriteAsync(
@@ -582,6 +622,10 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
             /dist/**
             *.generated.md
             CaseSensitive.md
+            \*.md
+            **/root.md
+            sidecar/**/nested.md
+            src**/generated.md
             """);
         var snapshot = CreateSnapshot();
         var paths = new[]
@@ -595,10 +639,24 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
             "docs/api+generated.generated.md",
             "docs/public.md",
             "casesensitive.md",
-            "CaseSensitive.md"
+            "CaseSensitive.md",
+            "*.md",
+            "worker.md",
+            "root.md",
+            "nested/root.md",
+            "sidecar/nested.md",
+            "sidecar/level/nested.md",
+            "srcgenerated.md"
         };
         foreach (var path in paths)
         {
+            // Git check-ignore accepts paths that do not exist. Keep the escaped-star assertion
+            // on Windows too, where a literal '*' cannot be created in a file name.
+            if (path == "*.md")
+            {
+                continue;
+            }
+
             await WriteAsync(path, "# candidate");
         }
 

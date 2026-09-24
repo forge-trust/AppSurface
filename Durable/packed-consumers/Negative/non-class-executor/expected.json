@@ -1,0 +1,11 @@
+{
+  "fixture": "non-class-executor",
+  "invalid": {
+    "file": "Invalid.cs",
+    "line": 4,
+    "allowedDiagnostics": ["CS0452"]
+  },
+  "positive": {
+    "file": "Positive.cs"
+  }
+}

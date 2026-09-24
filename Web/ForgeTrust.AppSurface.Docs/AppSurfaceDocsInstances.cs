@@ -691,6 +691,10 @@ internal sealed class AppSurfaceDocsInstanceRegistry : IDisposable
             new JavaScriptDocHarvester(
                 options,
                 loggerFactory.CreateLogger<JavaScriptDocHarvester>(),
+                pathPolicy),
+            new PythonDocHarvester(
+                options,
+                loggerFactory.CreateLogger<PythonDocHarvester>(),
                 pathPolicy)
         };
         var aggregator = new DocAggregator(

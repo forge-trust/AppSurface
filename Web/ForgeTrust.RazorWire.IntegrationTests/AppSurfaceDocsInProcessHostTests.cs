@@ -73,6 +73,24 @@ public sealed class AppSurfaceDocsInProcessHostTests
     }
 
     [Fact]
+    public void CreateHostArgs_ForwardsAdditionalArgumentsAfterDefaults()
+    {
+        var args = AppSurfaceDocsInProcessHost.CreateHostArgs(
+            "http://127.0.0.1:0",
+            "/repo",
+            ["--AppSurfaceDocs:Versioning:Enabled", "true"]);
+
+        var enabledIndex = Array.IndexOf(args, "--AppSurfaceDocs:Versioning:Enabled");
+
+        Assert.True(enabledIndex > 0);
+        Assert.Equal("--urls", args[0]);
+        Assert.Equal("http://127.0.0.1:0", args[1]);
+        Assert.Equal("--AppSurfaceDocs:Metrics:HostedCollection:Enabled", args[args.Length - 4]);
+        Assert.Equal("true", args[args.Length - 3]);
+        Assert.Equal("true", args[enabledIndex + 1]);
+    }
+
+    [Fact]
     public void ResolveBoundBaseUrl_ReturnsOnlyPublishedAddress()
     {
         var baseUrl = AppSurfaceDocsInProcessHost.ResolveBoundBaseUrl(["http://127.0.0.1:5000"]);

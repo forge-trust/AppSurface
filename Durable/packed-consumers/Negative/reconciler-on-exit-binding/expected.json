@@ -1,0 +1,11 @@
+{
+  "fixture": "reconciler-on-exit-binding",
+  "invalid": {
+    "file": "Invalid.cs",
+    "line": 4,
+    "allowedDiagnostics": ["CS1061"]
+  },
+  "positive": {
+    "file": "Positive.cs"
+  }
+}

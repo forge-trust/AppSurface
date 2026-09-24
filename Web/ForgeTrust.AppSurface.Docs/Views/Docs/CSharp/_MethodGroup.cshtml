@@ -1,0 +1,32 @@
+@using ForgeTrust.AppSurface.Docs.Models
+@model CSharpMethodGroupDocument
+
+<section id="@Model.AnchorId" class="doc-method-group" aria-labelledby="@(Model.AnchorId + "-heading")">
+    <header class="doc-method-group-header">
+        <span class="doc-kind">Method</span>
+        <h3 id="@(Model.AnchorId + "-heading")">@Model.Name</h3>
+        @if (Model.Overloads.Count > 1)
+        {
+            <span class="doc-overload-count">@Model.Overloads.Count overloads</span>
+        }
+    </header>
+    @for (var overloadIndex = 0; overloadIndex < Model.Overloads.Count; overloadIndex++)
+    {
+        var overload = Model.Overloads[overloadIndex];
+        <details id="@overload.AnchorId" class="doc-overload" open="@(overloadIndex == 0 ? "open" : null)">
+            <summary>@await Html.PartialAsync("/Views/Docs/CSharp/_Signature.cshtml", overload.Signature)</summary>
+            <div class="doc-overload-body">
+                @if (!string.IsNullOrWhiteSpace(overload.SourceHref))
+                {
+                    <div class="doc-overload-actions">
+                        <a href="@Url.PathBaseAware(overload.SourceHref)" class="doc-symbol-source-link" aria-label="View source for @overload.Signature.Name">Source</a>
+                    </div>
+                }
+                @await Html.PartialAsync(
+                    "/Views/Docs/CSharp/_Documentation.cshtml",
+                    overload.Documentation,
+                    new ViewDataDictionary(ViewData) { ["CSharpDocumentationHeadingLevel"] = 4 })
+            </div>
+        </details>
+    }
+</section>

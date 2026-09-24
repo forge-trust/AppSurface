@@ -1,0 +1,124 @@
+@using ForgeTrust.AppSurface.Docs.Models
+@model CSharpDocumentation
+@{
+    var documentationSections = Model.Sections.Where(item => item.Content.Count > 0).ToArray();
+    var typeParameters = documentationSections.Where(item => item.Kind == CSharpDocumentationSectionKind.TypeParameter).ToArray();
+    var parameters = documentationSections.Where(item => item.Kind == CSharpDocumentationSectionKind.Parameter).ToArray();
+    var exceptions = documentationSections.Where(item => item.Kind == CSharpDocumentationSectionKind.Exception).ToArray();
+}
+
+@foreach (var documentationSection in documentationSections.Where(item => item.Kind == CSharpDocumentationSectionKind.Summary))
+{
+    <div class="doc-summary">
+        @if (CSharpDocumentationMarkup.HasBlockNodes(documentationSection.Content))
+        {
+            @await Html.PartialAsync("/Views/Docs/CSharp/_XmlNodes.cshtml", documentationSection.Content)
+        }
+        else
+        {
+            <p>@await Html.PartialAsync("/Views/Docs/CSharp/_XmlNodes.cshtml", documentationSection.Content)</p>
+        }
+    </div>
+}
+
+@if (typeParameters.Length > 0)
+{
+    <div class="doc-typeparams">
+        @await Html.PartialAsync("/Views/Docs/CSharp/_DocumentationHeading.cshtml", "Type parameters")
+        <ul>
+            @foreach (var documentationSection in typeParameters)
+            {
+                <li>
+                    @if (!string.IsNullOrWhiteSpace(documentationSection.Name))
+                    {
+                        <code>@documentationSection.Name</code>
+                    }
+                    <div>@await Html.PartialAsync("/Views/Docs/CSharp/_XmlNodes.cshtml", documentationSection.Content)</div>
+                </li>
+            }
+        </ul>
+    </div>
+}
+
+@if (parameters.Length > 0)
+{
+    <div class="doc-params">
+        @await Html.PartialAsync("/Views/Docs/CSharp/_DocumentationHeading.cshtml", "Parameters")
+        <ul>
+            @foreach (var documentationSection in parameters)
+            {
+                <li>
+                    @if (!string.IsNullOrWhiteSpace(documentationSection.Name))
+                    {
+                        <code>@documentationSection.Name</code>
+                    }
+                    <div>@await Html.PartialAsync("/Views/Docs/CSharp/_XmlNodes.cshtml", documentationSection.Content)</div>
+                </li>
+            }
+        </ul>
+    </div>
+}
+
+@foreach (var documentationSection in documentationSections.Where(item => item.Kind == CSharpDocumentationSectionKind.Returns))
+{
+    <div class="doc-returns">
+        @await Html.PartialAsync("/Views/Docs/CSharp/_DocumentationHeading.cshtml", "Returns")
+        @if (CSharpDocumentationMarkup.HasBlockNodes(documentationSection.Content))
+        {
+            @await Html.PartialAsync("/Views/Docs/CSharp/_XmlNodes.cshtml", documentationSection.Content)
+        }
+        else
+        {
+            <p>@await Html.PartialAsync("/Views/Docs/CSharp/_XmlNodes.cshtml", documentationSection.Content)</p>
+        }
+    </div>
+}
+
+@if (exceptions.Length > 0)
+{
+    <div class="doc-exceptions">
+        @await Html.PartialAsync("/Views/Docs/CSharp/_DocumentationHeading.cshtml", "Exceptions")
+        <ul>
+            @foreach (var documentationSection in exceptions)
+            {
+                <li>
+                    @if (!string.IsNullOrWhiteSpace(documentationSection.CrefDisplay))
+                    {
+                        <code data-csharp-cref="@documentationSection.CrefTarget">@documentationSection.CrefDisplay</code>
+                    }
+                    <div>@await Html.PartialAsync("/Views/Docs/CSharp/_XmlNodes.cshtml", documentationSection.Content)</div>
+                </li>
+            }
+        </ul>
+    </div>
+}
+
+@foreach (var documentationSection in documentationSections.Where(item => item.Kind == CSharpDocumentationSectionKind.Remarks))
+{
+    <div class="doc-remarks">
+        @await Html.PartialAsync("/Views/Docs/CSharp/_DocumentationHeading.cshtml", "Remarks")
+        @if (CSharpDocumentationMarkup.HasBlockNodes(documentationSection.Content))
+        {
+            @await Html.PartialAsync("/Views/Docs/CSharp/_XmlNodes.cshtml", documentationSection.Content)
+        }
+        else
+        {
+            <p>@await Html.PartialAsync("/Views/Docs/CSharp/_XmlNodes.cshtml", documentationSection.Content)</p>
+        }
+    </div>
+}
+
+@foreach (var documentationSection in documentationSections.Where(item => item.Kind == CSharpDocumentationSectionKind.Example))
+{
+    <div class="doc-example">
+        @await Html.PartialAsync("/Views/Docs/CSharp/_DocumentationHeading.cshtml", "Example")
+        @if (CSharpDocumentationMarkup.HasBlockNodes(documentationSection.Content))
+        {
+            @await Html.PartialAsync("/Views/Docs/CSharp/_XmlNodes.cshtml", documentationSection.Content)
+        }
+        else
+        {
+            <p>@await Html.PartialAsync("/Views/Docs/CSharp/_XmlNodes.cshtml", documentationSection.Content)</p>
+        }
+    </div>
+}

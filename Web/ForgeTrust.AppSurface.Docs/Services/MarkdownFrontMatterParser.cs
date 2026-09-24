@@ -733,8 +733,9 @@ internal static class MarkdownFrontMatterParser
         var valid = href.StartsWith('#') && href.Length > 1 && !href.StartsWith("##", StringComparison.Ordinal)
                     || href.StartsWith('/') && !href.StartsWith("//", StringComparison.Ordinal);
         if (valid
-            && !href.Contains('?', StringComparison.Ordinal)
-            && !href.Any(char.IsWhiteSpace))
+            && !href.Contains('\\', StringComparison.Ordinal)
+            && !href.Any(char.IsWhiteSpace)
+            && HasValidEntryPointQueryEncoding(href))
         {
             return href;
         }
@@ -744,9 +745,40 @@ internal static class MarkdownFrontMatterParser
                 "invalid-namespace-entry-point-href",
                 $"{fieldPath}.href",
                 "A namespace entry-point href is not supported.",
-                "Entry-point href values must be a fragment such as #anchor or an app-relative URL under the active docs root.",
+                "Entry-point href values must be a fragment such as #anchor or an app-relative URL under the active docs root; query strings must use valid percent escapes.",
                 "Use a generated target anchor when possible, or replace href with a valid app-relative docs URL."));
         return null;
+    }
+
+    private static bool HasValidEntryPointQueryEncoding(string href)
+    {
+        var fragmentIndex = href.IndexOf('#');
+        var queryIndex = href.IndexOf('?');
+        if (queryIndex < 0 || queryIndex > fragmentIndex && fragmentIndex >= 0)
+        {
+            return true;
+        }
+
+        var queryEnd = fragmentIndex < 0 ? href.Length : fragmentIndex;
+        for (var index = queryIndex + 1; index < queryEnd; index++)
+        {
+            if (char.IsControl(href[index]))
+            {
+                return false;
+            }
+
+            if (href[index] == '%')
+            {
+                if (index + 2 >= queryEnd || !Uri.IsHexDigit(href[index + 1]) || !Uri.IsHexDigit(href[index + 2]))
+                {
+                    return false;
+                }
+
+                index += 2;
+            }
+        }
+
+        return true;
     }
 
     private static IReadOnlyList<string>? NormalizeEntryPointKeywords(

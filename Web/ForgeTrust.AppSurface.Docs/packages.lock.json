@@ -67,6 +67,12 @@
           "TextMateSharp": "2.0.3"
         }
       },
+      "TreeSitter.DotNet": {
+        "type": "Direct",
+        "requested": "[1.3.0, )",
+        "resolved": "1.3.0",
+        "contentHash": "VFl5j5UguKI3BvdQ/bbHDrDP1FG7lkEjv9LZCQ01bPe4NuAiXQVnEfuFRWdJ8TA9NmY/D7qqGkj8CuD3ptiDDw=="
+      },
       "YamlDotNet": {
         "type": "Direct",
         "requested": "[18.0.0, )",
@@ -142,28 +148,8 @@
         "type": "Project",
         "dependencies": {
           "CliWrap": "[3.10.1, )",
-          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64": "[0.1.0, )"
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.linux-arm64": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.linux-x64": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.osx-arm64": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.osx-x64": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.win-x64": {
-        "type": "Project"
       },
       "forgetrust.razorwire": {
         "type": "Project",
