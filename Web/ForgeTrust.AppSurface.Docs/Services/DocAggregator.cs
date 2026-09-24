@@ -71,7 +71,7 @@ internal sealed record DocsSearchIndexMetadata(
 /// <param name="ApiLifecycle">Optional generated-symbol lifecycle: <c>public</c>, <c>alpha</c>, or <c>beta</c>. Omitted for all other documents.</param>
 /// <param name="ApiLifecycleLabel">Optional reader-facing label paired with <paramref name="ApiLifecycle"/>: <c>Public API</c>, <c>Alpha</c>, or <c>Beta</c>. Omitted for all other documents.</param>
 /// <param name="IsDeprecated">Optional deprecation flag. <c>true</c> is emitted only with generated-symbol metadata; <c>false</c> and missing values are omitted for other documents.</param>
-/// <param name="IsGeneratedApiSymbol">Optional <c>true</c> marker emitted only for validated, provenanced JavaScript API fragments. Consumers must not infer lifecycle from ordinary page metadata.</param>
+/// <param name="IsGeneratedApiSymbol">Optional <c>true</c> marker emitted only for validated, provenanced built-in generated API fragments. Consumers must not infer lifecycle from ordinary page metadata.</param>
 internal sealed record DocsSearchIndexDocument(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("path")] string Path,
@@ -1039,7 +1039,11 @@ public class DocAggregator
                                        : node with { CSharpNamespaceDocument = ResolveTypedNamespaceSourceHrefs(node) })
                                .ToList();
 
-                           var sanitizedNodes = nodesWithSymbolSourceLinks
+                           var polyglotLinkedNodes = DocPolyglotOwnershipLinker.Link(
+                               nodesWithSymbolSourceLinks,
+                               _docsUrlBuilder.CurrentDocsRootPath);
+
+                           var sanitizedNodes = polyglotLinkedNodes
                                .Select(
                                    n =>
                                    {
@@ -1520,7 +1524,8 @@ public class DocAggregator
         var harvesterType = harvester.GetType();
         return harvesterType == typeof(MarkdownHarvester)
                || harvesterType == typeof(CSharpDocHarvester)
-               || harvesterType == typeof(JavaScriptDocHarvester);
+               || harvesterType == typeof(JavaScriptDocHarvester)
+               || harvesterType == typeof(PythonDocHarvester);
     }
 
     private static bool ParticipatesInStrictHealth(IDocHarvester harvester)
@@ -1538,27 +1543,41 @@ public class DocAggregator
             return diagnostics.FirstOrDefault(static diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.CSharpParseFailed);
         }
 
-        if (harvester is not JavaScriptDocHarvester)
+        if (harvester is JavaScriptDocHarvester)
+        {
+            var eventDiagnostic = diagnostics.FirstOrDefault(static diagnostic =>
+                diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
+            if (eventDiagnostic is not null || !ParticipatesInStrictHealth(harvester))
+            {
+                return eventDiagnostic;
+            }
+
+            return diagnostics.FirstOrDefault(static diagnostic => diagnostic.Code is
+                DocHarvestDiagnosticCodes.JavaScriptFileTooLarge
+                or DocHarvestDiagnosticCodes.JavaScriptMissingInclude
+                or DocHarvestDiagnosticCodes.JavaScriptParseFailed
+                or DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped
+                or DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape
+                or DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet
+                or DocHarvestDiagnosticCodes.JavaScriptLifecycleConflict
+                or DocHarvestDiagnosticCodes.JavaScriptMalformedLifecycle);
+        }
+
+        if (harvester is not PythonDocHarvester || !ParticipatesInStrictHealth(harvester))
         {
             return null;
         }
 
-        var eventDiagnostic = diagnostics.FirstOrDefault(static diagnostic =>
-            diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
-        if (eventDiagnostic is not null || !ParticipatesInStrictHealth(harvester))
-        {
-            return eventDiagnostic;
-        }
-
         return diagnostics.FirstOrDefault(static diagnostic => diagnostic.Code is
-            DocHarvestDiagnosticCodes.JavaScriptFileTooLarge
-            or DocHarvestDiagnosticCodes.JavaScriptMissingInclude
-            or DocHarvestDiagnosticCodes.JavaScriptParseFailed
-            or DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped
-            or DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape
-            or DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet
-            or DocHarvestDiagnosticCodes.JavaScriptLifecycleConflict
-            or DocHarvestDiagnosticCodes.JavaScriptMalformedLifecycle);
+            DocHarvestDiagnosticCodes.PythonFileTooLarge
+            or DocHarvestDiagnosticCodes.PythonMissingInclude
+            or DocHarvestDiagnosticCodes.PythonParserUnavailable
+            or DocHarvestDiagnosticCodes.PythonParseFailed
+            or DocHarvestDiagnosticCodes.PythonPublicBoundaryMissing
+            or DocHarvestDiagnosticCodes.PythonPublicBoundaryInvalid
+            or DocHarvestDiagnosticCodes.PythonExportNotSupported
+            or DocHarvestDiagnosticCodes.PythonExportNotFound
+            or DocHarvestDiagnosticCodes.PythonSlugCollision);
     }
 
     private static Task<IReadOnlyList<DocNode>> HarvestWithContextAsync(
@@ -1574,6 +1593,11 @@ public class DocAggregator
         if (harvester is JavaScriptDocHarvester javaScriptDocHarvester)
         {
             return javaScriptDocHarvester.HarvestAsync(context, cancellationToken);
+        }
+
+        if (harvester is PythonDocHarvester pythonDocHarvester)
+        {
+            return pythonDocHarvester.HarvestAsync(context, cancellationToken);
         }
 
         return harvester.HarvestAsync(context.RepositoryRoot, cancellationToken);
@@ -2623,12 +2647,25 @@ public class DocAggregator
     {
         var marker = node.GeneratedApiSymbol;
         if (marker is null
-            || !node.HasJavaScriptApiLifecycleProvenance
-            || string.IsNullOrWhiteSpace(node.ParentPath)
-            || !node.Path.StartsWith("api/javascript/", StringComparison.Ordinal)
-            || !node.Path.StartsWith($"{node.ParentPath}#", StringComparison.Ordinal)
-            || node.Metadata?.PageType?.StartsWith("javascript-", StringComparison.Ordinal) != true
+               || !(node.HasGeneratedApiSymbolProvenance || node.HasJavaScriptApiLifecycleProvenance)
+               || string.IsNullOrWhiteSpace(node.ParentPath)
             || !IsCanonicalGeneratedApiSymbol(marker))
+        {
+            return null;
+        }
+
+        var codeLanguage = node.Metadata?.CodeLanguage;
+        if (string.IsNullOrWhiteSpace(codeLanguage) && node.HasJavaScriptApiLifecycleProvenance)
+        {
+            // Preserve the established JavaScript internal-provenance contract for prior package versions while Python
+            // and future language harvesters require explicit language metadata.
+            codeLanguage = "javascript";
+        }
+
+        if (string.IsNullOrWhiteSpace(codeLanguage)
+            || !node.Path.StartsWith($"api/{codeLanguage}/", StringComparison.Ordinal)
+            || !node.Path.StartsWith($"{node.ParentPath}#", StringComparison.Ordinal)
+            || node.Metadata?.PageType?.StartsWith($"{codeLanguage}-", StringComparison.Ordinal) != true)
         {
             return null;
         }

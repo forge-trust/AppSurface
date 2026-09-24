@@ -560,7 +560,8 @@ public sealed class AppSurfaceDocsSourceOptions
 /// active harvester fails, times out, or cancels. Use <see cref="Paths"/>, <see cref="Markdown"/>, and
 /// <see cref="CSharp"/> to define the repository-relative public documentation boundary shared by runtime hosts,
 /// export flows, and hygiene checks. JavaScript discovery is enabled by default and remains annotation-first; use
-/// <see cref="JavaScript"/> for JavaScript opt-out, narrowing, and strict-health behavior.
+/// <see cref="JavaScript"/> for JavaScript opt-out, narrowing, and strict-health behavior. Use <see cref="Python"/>
+/// to opt into explicit Python source boundaries and static docstring extraction.
 /// </remarks>
 public sealed class AppSurfaceDocsHarvestOptions
 {
@@ -662,6 +663,11 @@ public sealed class AppSurfaceDocsHarvestOptions
     /// Gets JavaScript public API path policy and parser settings.
     /// </summary>
     public AppSurfaceDocsJavaScriptHarvestOptions JavaScript { get; set; } = new();
+
+    /// <summary>
+    /// Gets Python source path policy and static docstring parser settings.
+    /// </summary>
+    public AppSurfaceDocsPythonHarvestOptions Python { get; set; } = new();
 }
 
 /// <summary>
@@ -1618,6 +1624,7 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
             ValidateHarvestSourceOptions(harvest.Markdown, "AppSurfaceDocs:Harvest:Markdown", failures);
             ValidateHarvestSourceOptions(harvest.CSharp, "AppSurfaceDocs:Harvest:CSharp", failures);
             ValidateHarvestSourceOptions(harvest.JavaScript, "AppSurfaceDocs:Harvest:JavaScript", failures);
+            ValidateHarvestSourceOptions(harvest.Python, "AppSurfaceDocs:Harvest:Python", failures);
             if (harvest.Markdown is not null)
             {
                 if (harvest.Markdown.MaxFileSizeBytes <= 0)
@@ -1644,6 +1651,11 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
                     failures.Add("AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes must be greater than zero.");
                 }
 
+            }
+
+            if (harvest.Python is not null && harvest.Python.MaxFileSizeBytes <= 0)
+            {
+                failures.Add("AppSurfaceDocs:Harvest:Python:MaxFileSizeBytes must be greater than zero.");
             }
         }
 
@@ -2148,6 +2160,22 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
         ValidateGlobPatterns(options.ExcludeGlobs, $"{configurationPath}:ExcludeGlobs", failures);
         ValidateDefaultExclusions(options.DefaultExclusions, $"{configurationPath}:DefaultExclusions", failures);
         ValidateJavaScriptGroupNameRules(options.GroupNameRules, $"{configurationPath}:GroupNameRules", failures);
+    }
+
+    private static void ValidateHarvestSourceOptions(
+        AppSurfaceDocsPythonHarvestOptions? options,
+        string configurationPath,
+        List<string> failures)
+    {
+        if (options is null)
+        {
+            failures.Add($"{configurationPath} must not be null.");
+            return;
+        }
+
+        ValidateGlobPatterns(options.IncludeGlobs, $"{configurationPath}:IncludeGlobs", failures);
+        ValidateGlobPatterns(options.ExcludeGlobs, $"{configurationPath}:ExcludeGlobs", failures);
+        ValidateDefaultExclusions(options.DefaultExclusions, $"{configurationPath}:DefaultExclusions", failures);
     }
 
     private static void ValidateJavaScriptGroupNameRules(

@@ -806,6 +806,12 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("--color-sky-100: var(--docs-color-link);", tailwindEntryStylesheet);
         Assert.Contains(".docs-token-bg-accent-strong.text-white", tailwindEntryStylesheet);
         Assert.Contains(".docs-content--markdown a:visited", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content .doc-polyglot-link a {", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content .doc-polyglot-link a:visited {", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content .doc-polyglot-link a:hover {", tailwindEntryStylesheet);
+        Assert.Contains(
+            ".docs-content .doc-polyglot-link a:focus-visible {\n    outline: 2px solid var(--docs-color-accent);\n    outline-offset: 3px;\n}",
+            tailwindEntryStylesheet);
         Assert.Contains("color: var(--docs-color-link-visited);", tailwindEntryStylesheet);
         Assert.True(
             tailwindEntryStylesheet.IndexOf(".docs-content--markdown a:visited", StringComparison.Ordinal)
@@ -3124,7 +3130,9 @@ public class AppSurfaceDocsViewsTests
                             new CSharpDocumentation([]),
                             "/source/Calculator.cs#L20")
                     ],
-                    "/source/Calculator.cs#L5")
+                    "/source/Calculator.cs#L5",
+                    PythonModulePaths: ["sidecar/worker.py"],
+                    LinkedPythonModule: new CSharpPythonModuleLink("sidecar/worker.py", "api/python/sidecar-worker"))
             ],
             [
                 new CSharpEnumDocument(
@@ -3200,6 +3208,9 @@ public class AppSurfaceDocsViewsTests
             .Single(anchor => anchor.TextContent.Contains("Guide", StringComparison.Ordinal));
         Assert.Equal("/mounted/docs/guides/api?tab=api#intro", guideEntryPoint.GetAttribute("href"));
         Assert.Equal("/mounted/source/Calculator.cs#L5", document.QuerySelector($"#{typeAnchor} .doc-symbol-source-link")?.GetAttribute("href"));
+        var pythonModuleLink = document.QuerySelector($"#{typeAnchor} .doc-polyglot-link a");
+        Assert.Equal("/mounted/docs/api/python/sidecar-worker", pythonModuleLink?.GetAttribute("href"));
+        Assert.Equal("sidecar/worker.py", pythonModuleLink?.TextContent.Trim());
         var sourceLink = document.QuerySelector($"#{overloadAnchor} .doc-symbol-source-link");
         Assert.Equal("/mounted/source/Calculator.cs#L12", sourceLink?.GetAttribute("href"));
         Assert.Equal("View source for Process", sourceLink?.GetAttribute("aria-label"));
