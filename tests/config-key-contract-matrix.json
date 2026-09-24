@@ -1,0 +1,1604 @@
+{
+  "title": "AppSurface logical-key contract normative matrix",
+  "source": "docs/designs/config-logical-key-contract.md",
+  "sourceRange": "1031-1077",
+  "rows": [
+    {
+      "id": "LKC-001",
+      "source": "docs/designs/config-logical-key-contract.md:1031",
+      "case": "Case identity",
+      "inputOrSourceArrangement": "Payments:ApiKey queried with casing variants",
+      "expectedOutcome": "Same value and hash identity",
+      "verificationLevels": "Kernel unit + every provider",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConfigProviderContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretProviderContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/FileProviderConformanceTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyContractTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/FileProviderConformanceTests.cs",
+          "method": "PublicConformanceCases_UseRealFileAndManagerResolution"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "ActualEnvironmentProviderPassesApplicableConfigTestingCases"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConfigProviderContractTests.cs",
+          "method": "ActualProvider_Should_PassGoogleApplicableSharedContractCases"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretProviderContractTests.cs",
+          "method": "PublicProvider_ShouldPassSharedContract"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyContractTests.cs",
+          "method": "EqualityHashingAndObjectEquality_AreOrdinalIgnoreCase"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "All four real provider harnesses include CaseIdentity and compare original/lowercase typed queries with the same expected value through ConfigProviderContractAssert.Case. The kernel test asserts equal hashes. No remaining assertion gap identified."
+    },
+    {
+      "id": "LKC-002",
+      "source": "docs/designs/config-logical-key-contract.md:1032",
+      "case": "Dotted segment",
+      "inputOrSourceArrangement": "Logging:LogLevel:Microsoft.Hosting.Lifetime",
+      "expectedOutcome": "Three segments; final dotted segment intact",
+      "verificationLevels": "Kernel unit + file/env",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/FileBasedConfigProviderTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyContractTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyContractTests.cs",
+          "method": "Parse_PreservesColonSegmentsAndLiteralPunctuation"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/FileBasedConfigProviderTests.cs",
+          "method": "Resolve_UsesColonLogicalKeysAndPreservesLiteralDots"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "ActualEnvironmentProviderPassesApplicableConfigTestingCases"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-003",
+      "source": "docs/designs/config-logical-key-contract.md:1033",
+      "case": "Hyphen distinction",
+      "inputOrSourceArrangement": "Payments:Api-Key and Payments:Api:Key",
+      "expectedOutcome": "Distinct identities/native ids",
+      "verificationLevels": "Kernel unit + env/Google",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConfigProviderContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyContractTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyContractTests.cs",
+          "method": "Equality_DoesNotNormalizeSeparatorsOrUnicode"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "ActualEnvironmentProviderPassesApplicableConfigTestingCases"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConfigProviderContractTests.cs",
+          "method": "ActualProvider_Should_PassGoogleApplicableSharedContractCases"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-004",
+      "source": "docs/designs/config-logical-key-contract.md:1034",
+      "case": "Invalid grammar",
+      "inputOrSourceArrangement": "empty, :A, A:, A::B, controls, edge whitespace",
+      "expectedOutcome": "Reject with no partial key",
+      "verificationLevels": "Kernel unit",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyFoundationTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyContractTests.cs",
+          "method": "TryParse_RejectsMalformedInputWithoutPartialOutput"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyFoundationTests.cs",
+          "method": "Parser_InvalidInputIsAnApplicationArgumentFailure"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-005",
+      "source": "docs/designs/config-logical-key-contract.md:1035",
+      "case": "Segment construction",
+      "inputOrSourceArrangement": "null/empty array, null/invalid member, caller mutates source array",
+      "expectedOutcome": "Defined exceptions; successful Segments remains unchanged",
+      "verificationLevels": "Kernel unit",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyContractTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyContractTests.cs",
+          "method": "FromSegments_CopiesInputAndJoinsWithoutNormalization"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyContractTests.cs",
+          "method": "FromSegments_RejectsNullArrayAndEmptyArray"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyContractTests.cs",
+          "method": "FromSegments_ReportsFailingMemberIndex"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-006",
+      "source": "docs/designs/config-logical-key-contract.md:1036",
+      "case": "Provider result invariants",
+      "inputOrSourceArrangement": "missing/found/terminal factories with null and diagnostic combinations",
+      "expectedOutcome": "Only the three valid states construct",
+      "verificationLevels": "Core unit",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyFoundationTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyContractTests.cs",
+          "method": "MissingFactory_ProducesOnlyMissingState"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyContractTests.cs",
+          "method": "FoundFactory_PreservesValueIncludingValueTypeDefaultAndCopiesNotices"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyContractTests.cs",
+          "method": "TerminalFactory_ProducesOnlyTerminalState"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyFoundationTests.cs",
+          "method": "PatchFactoriesEnforceExclusiveStates"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-007",
+      "source": "docs/designs/config-logical-key-contract.md:1037",
+      "case": "Terminal protocol",
+      "inputOrSourceArrangement": "high provider returns terminal result",
+      "expectedOutcome": "No lower-provider lookup; preserve one transactional any-successful-child environment rescue; throw when no child applies",
+      "verificationLevels": "Manager integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/ConfigManagerContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/DefaultConfigManagerTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyFoundationTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyFoundationTests.cs",
+          "method": "Manager_TerminalSuppressesLowerProvider"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyFoundationTests.cs",
+          "method": "Manager_OneValidTransactionalChildRescuesTerminal"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigManagerContractTests.cs",
+          "method": "Terminal_StopsLowerProvidersAndRetainsDiagnostic"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/DefaultConfigManagerTests.cs",
+          "method": "GetValue_AppliesNestedEnvironmentPatchBeforeThrowingTerminalProviderDiagnostic"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-008",
+      "source": "docs/designs/config-logical-key-contract.md:1038",
+      "case": "Patch transaction",
+      "inputOrSourceArrangement": "multiple children present and one conversion/collision fails",
+      "expectedOutcome": "No mutation or partial rescue; terminal patch diagnostic wins",
+      "verificationLevels": "Environment/manager integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/ConfigManagerContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyFoundationTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyFoundationTests.cs",
+          "method": "Manager_PatchTerminalWinsAndNeverPublishesLowerValue"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "PatchDoesNotPublishPartialMutationWhenPresentChildIsInvalid"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigManagerContractTests.cs",
+          "method": "PatchTerminal_WinsOverRetainedProviderDiagnostic"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-009",
+      "source": "docs/designs/config-logical-key-contract.md:1039",
+      "case": "Same-layer duplicate",
+      "inputOrSourceArrangement": "same spelling twice",
+      "expectedOutcome": "Duplicate failure before value selection",
+      "verificationLevels": "File/mapping unit",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/ConfigSourceProjectionTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/FileBasedConfigProviderTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/FileBasedConfigProviderTests.cs",
+          "method": "Resolve_TerminatesCollisionDomainButKeepsUnrelatedSiblingsAvailable"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigSourceProjectionTests.cs",
+          "method": "ExactDuplicate_InOneLayerIsTerminalEvenWhenValuesMatch"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-010",
+      "source": "docs/designs/config-logical-key-contract.md:1040",
+      "case": "Raw JSON duplicate",
+      "inputOrSourceArrangement": "exact/case-varied duplicate properties in UTF-8 tokens",
+      "expectedOutcome": "Token parser rejects before DOM materialization",
+      "verificationLevels": "File parser unit",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/FileBasedConfigProviderTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/FileBasedConfigProviderTests.cs",
+          "method": "Resolve_TerminatesCollisionDomainButKeepsUnrelatedSiblingsAvailable"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/FileBasedConfigProviderTests.cs",
+          "method": "TokenProjection_TerminatesRepresentableAncestorsForInvalidSegments"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-011",
+      "source": "docs/designs/config-logical-key-contract.md:1041",
+      "case": "Aggregate JSON collision",
+      "inputOrSourceArrangement": "colliding descendant plus unrelated sibling",
+      "expectedOutcome": "Exact key and ancestors terminal; unrelated sibling remains available",
+      "verificationLevels": "File parser/manager integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/FileBasedConfigProviderTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/FileProjectionContractTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/FileBasedConfigProviderTests.cs",
+          "method": "Resolve_TerminatesCollisionDomainButKeepsUnrelatedSiblingsAvailable"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/FileProjectionContractTests.cs",
+          "method": "RealManagerStopsAtFileCollisionButUnrelatedSiblingStillResolves"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "Real colliding file tokens make the exact key/ancestors terminal, retain unrelated siblings, and suppress a recording lower provider through DefaultConfigManager."
+    },
+    {
+      "id": "LKC-012",
+      "source": "docs/designs/config-logical-key-contract.md:1042",
+      "case": "JSON shape layering",
+      "inputOrSourceArrangement": "null, empty aggregate, array, scalar/object replacement",
+      "expectedOutcome": "Normative replacement and missing semantics with correct provenance",
+      "verificationLevels": "File provider unit",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/FileBasedConfigProviderTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/FileProjectionContractTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/FileBasedConfigProviderTests.cs",
+          "method": "Resolve_TreatsNullAsMissingAndSupportsReplacementShapes"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/FileBasedConfigProviderTests.cs",
+          "method": "Merge_OverwritesNonObjectWithObject"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/FileBasedConfigProviderTests.cs",
+          "method": "Initialize_ListMerge_UsesReplaceSemantics"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/FileBasedConfigProviderTests.cs",
+          "method": "Initialize_RemovesDescendantOriginsWhenParentIsReplacedByScalar"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/FileBasedConfigProviderTests.cs",
+          "method": "Resolve_UsesOverrideLocationWhenParentIsReplaced"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/FileProjectionContractTests.cs",
+          "method": "LayeredShapesPreserveReplacementAndOriginRules"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "Current layering table includes scalar-to-array and array-to-scalar, empty aggregates, object merge and null-as-missing. Assertions verify replacement value, exact winner-first file origins with locations, and removal of stale object/array descendants. Latest two cases were source-inspected; their owner controls execution, and the Google run does not execute them."
+    },
+    {
+      "id": "LKC-013",
+      "source": "docs/designs/config-logical-key-contract.md:1043",
+      "case": "Same-layer case collision",
+      "inputOrSourceArrangement": "ApiKey plus apikey",
+      "expectedOutcome": "Collision terminal/startup failure",
+      "verificationLevels": "Every enumerable provider",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretProviderContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/FileBasedConfigProviderTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/FileBasedConfigProviderTests.cs",
+          "method": "Resolve_TerminatesCollisionDomainButKeepsUnrelatedSiblingsAvailable"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/FileBasedConfigProviderTests.cs",
+          "method": "Resolve_SuppressesLocationForCaseInsensitivePathCollisions"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "ResolveRejectsCaseOnlyNativeCollision"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretProviderContractTests.cs",
+          "method": "PublicProvider_ShouldPassSharedContract"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "CaseOnlyLogicalMappings_AreRejectedAtHostStartupBeforeClientAccess"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "File/environment cases exercise case-varied same-layer names. Local shared harness seeds exact case-varied durable records and asserts terminal/no fallback. Google host startup registers the real module with case-only logical mapping duplicates and distinct native ids, then asserts OptionsValidationException before any client call. Google run executes its portion only.",
+      "verificationRun": "google-review-verified-2026-09-15"
+    },
+    {
+      "id": "LKC-014",
+      "source": "docs/designs/config-logical-key-contract.md:1044",
+      "case": "Declaration merge",
+      "inputOrSourceArrangement": "exact wrapper/manual spelling registered twice",
+      "expectedOutcome": "Existing metadata merge; one report spelling",
+      "verificationLevels": "Registration + audit unit",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/ConfigDeclarationRegistryTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigDeclarationRegistryTests.cs",
+          "method": "Registry_MergesExactCanonicalDuplicatesAndKeepsWrapperMetadata"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigDeclarationRegistryTests.cs",
+          "method": "Registry_MapsEveryWrapperSharingAnExactKeyToTheMergedEntry"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-015",
+      "source": "docs/designs/config-logical-key-contract.md:1045",
+      "case": "Declaration conflict",
+      "inputOrSourceArrangement": "case-only or legacy/canonical spellings identify same key",
+      "expectedOutcome": "Startup collision with both safe spellings",
+      "verificationLevels": "Registration integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/ConfigDeclarationRegistryTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigDeclarationRegistryTests.cs",
+          "method": "Registry_RejectsCaseOnlyCollision"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigDeclarationRegistryTests.cs",
+          "method": "Registry_RejectsLegacyCanonicalCollision"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigDeclarationRegistryTests.cs",
+          "method": "Registry_RejectsDistinctTranslatedSpellingsForOneIdentity"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-016",
+      "source": "docs/designs/config-logical-key-contract.md:1046",
+      "case": "Ordered-layer override",
+      "inputOrSourceArrangement": "same spelling in scoped/unscoped or ordered files",
+      "expectedOutcome": "Higher layer wins; both sources audited",
+      "verificationLevels": "File/env integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigTransactionTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/FileBasedConfigProviderTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/FileProjectionContractTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/FileBasedConfigProviderTests.cs",
+          "method": "GetValue_MergesFilesByEnvironmentAndPriority"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "ResolveUsesOneSnapshotAndScopedValueWins"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/FileProjectionContractTests.cs",
+          "method": "LayeredShapesPreserveReplacementAndOriginRules"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigTransactionTests.cs",
+          "method": "OrderedScopesRetainBothExactSourcesAndWinningRoles"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "File layering asserts the higher replacement value and both exact file origins in winner-first order; environment diagnostic resolution asserts scoped winner and exact scoped/unscoped origins with Base/Override roles."
+    },
+    {
+      "id": "LKC-017",
+      "source": "docs/designs/config-logical-key-contract.md:1047",
+      "case": "Ordered-layer case mismatch",
+      "inputOrSourceArrangement": "casing differs across layers",
+      "expectedOutcome": "Collision for affected key",
+      "verificationLevels": "File/env integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/FileProviderConformanceTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/FileProviderConformanceTests.cs",
+          "method": "PublicConformanceCases_UseRealFileAndManagerResolution"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "ActualEnvironmentProviderPassesApplicableConfigTestingCases"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-018",
+      "source": "docs/designs/config-logical-key-contract.md:1048",
+      "case": "Cross-provider duplicate",
+      "inputOrSourceArrangement": "same logical key in two providers",
+      "expectedOutcome": "Existing manager precedence; both sources audited",
+      "verificationLevels": "Manager integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/AuditContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/DefaultConfigManagerTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/DefaultConfigManagerTests.cs",
+          "method": "GetValue_QueriesProvidersByDescendingPriority"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/AuditContractTests.cs",
+          "method": "EverySuccessfulProviderIsAuditedWithoutChangingWinner"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "Audit deliberately shuffles high/low provider order, asserts precedence winner and both provider sources/calls, with and without a winning environment provider."
+    },
+    {
+      "id": "LKC-019",
+      "source": "docs/designs/config-logical-key-contract.md:1049",
+      "case": "Report representative",
+      "inputOrSourceArrangement": "declaration present/absent across casing-varied providers",
+      "expectedOutcome": "Declaration spelling, else winning-provider spelling; stable ordering",
+      "verificationLevels": "Audit unit",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/AuditContractTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/AuditContractTests.cs",
+          "method": "DiscoveryUsesDeclarationElseWinnerSpellingAndStableTypedGrouping"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "Discovery arranges case-varied logical identities in shuffled high/low providers, then asserts declaration spelling when declared, winning source spelling otherwise, stable ordering, one grouped identity, and both exact source spellings."
+    },
+    {
+      "id": "LKC-020",
+      "source": "docs/designs/config-logical-key-contract.md:1050",
+      "case": "Native alias collision",
+      "inputOrSourceArrangement": "two aliases in one scope",
+      "expectedOutcome": "Terminal collision even if values match",
+      "verificationLevels": "Env/LocalSecrets unit",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretProviderTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/LocalSecretProviderAliasTableTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "StrictCanonicalAndLegacyInOneScopeAreTerminalEvenWhenValuesMatch"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "UnscopedCanonicalAndLegacyInOneScopeAreTerminal"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "TwoLegacySpellingsInOneScopeAreTerminal"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretProviderTests.cs",
+          "method": "Resolve_Should_ReturnTerminalCollisionWhenCanonicalAndHistoricalAliasExist"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/LocalSecretProviderAliasTableTests.cs",
+          "method": "StrictInput_ShouldApplyCompleteThreeCandidateTable"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/LocalSecretProviderAliasTableTests.cs",
+          "method": "TranslatedInput_ShouldApplyCompleteTwoCandidateTable"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "Real Local file-backed alias tables use identical payloads for every canonical/historical candidate combination, including two historical aliases; collisions select no value and diagnostics omit the payload. Existing environment equal-value collision evidence is retained."
+    },
+    {
+      "id": "LKC-021",
+      "source": "docs/designs/config-logical-key-contract.md:1051",
+      "case": "Native id collision",
+      "inputOrSourceArrangement": "distinct keys encode/map to same id",
+      "expectedOutcome": "Options or pre-network representability failure",
+      "verificationLevels": "Env/Google unit",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConfigProviderTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "ExplicitMappingSuffixCollisionIsAtomic"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConfigProviderTests.cs",
+          "method": "Constructor_Should_RejectDistinctExplicitKeysThatShareAnExactResource"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "Environment explicit suffix collision and Google distinct-key/same-exact-resource constructor tests both assert OptionsValidationException, satisfying the options-failure alternative. No remaining assertion gap identified."
+    },
+    {
+      "id": "LKC-022",
+      "source": "docs/designs/config-logical-key-contract.md:1052",
+      "case": "Prefix boundary",
+      "inputOrSourceArrangement": "Payments with Payments:Key and PaymentsArchive:Key",
+      "expectedOutcome": "Claim first only",
+      "verificationLevels": "Kernel + Google unit",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConfigProviderTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyContractTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyContractTests.cs",
+          "method": "Ancestry_IsSegmentAwareAndCaseInsensitive"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConfigProviderTests.cs",
+          "method": "Resolve_Should_ClaimOnlyScopedConventionKeys"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-023",
+      "source": "docs/designs/config-logical-key-contract.md:1053",
+      "case": "Environment mapping",
+      "inputOrSourceArrangement": "explicit suffix configured",
+      "expectedOutcome": "Replaces canonical suffix in scoped and unscoped layers",
+      "verificationLevels": "Environment integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigProviderTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "ResolveUsesOneSnapshotAndScopedValueWins"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigProviderTests.cs",
+          "method": "GetValue_UsesEnvironmentSpecificVariableFirst"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-024",
+      "source": "docs/designs/config-logical-key-contract.md:1054",
+      "case": "Environment codec injectivity",
+      "inputOrSourceArrangement": "underscore boundaries and environment-prefix counterexamples",
+      "expectedOutcome": "Convention rejects or maps explicitly; no two accepted keys share one full name",
+      "verificationLevels": "Property + regression tests",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigCodecTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigTransactionTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "ResolvePreservesLiteralSeparatorsAndReportsUnrepresentableSegments"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigTransactionTests.cs",
+          "method": "PermanentBoundaryCounterexamplesCannotClaimTheSameFullName"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigTransactionTests.cs",
+          "method": "GeneratedFullNamesAreInjectiveAcrossScopesAndEnvironmentPrefixes"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigCodecTests.cs",
+          "method": "GeneratedAcceptedKeysNeverCollapseUnequalIdentities"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "Provider counterexamples A_:B, A:_B and environment-prefixed logical keys reject ambiguous conventions; explicit mapping escapes the prefix case. Generated accepted claims across three environments assert every complete scoped/unscoped native candidate has only one logical owner."
+    },
+    {
+      "id": "LKC-025",
+      "source": "docs/designs/config-logical-key-contract.md:1055",
+      "case": "Environment layer",
+      "inputOrSourceArrangement": "scoped and unscoped expected names both present",
+      "expectedOutcome": "Scoped wins; both sources audited",
+      "verificationLevels": "Environment integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigProviderTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "ResolveUsesOneSnapshotAndScopedValueWins"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigProviderTests.cs",
+          "method": "GetValue_FallsBackToKeyWhenEnvironmentSpecificVariableMissing"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-026",
+      "source": "docs/designs/config-logical-key-contract.md:1056",
+      "case": "Environment casing",
+      "inputOrSourceArrangement": "exact, one case-only, and two case-varied native names",
+      "expectedOutcome": "Resolve, casing terminal, and collision respectively on Unix/Windows fakes",
+      "verificationLevels": "Environment integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "ResolveRejectsCaseOnlyNativeCollision"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "TranslatedDotAliasCaseOnlyCollisionIsTerminal"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-027",
+      "source": "docs/designs/config-logical-key-contract.md:1057",
+      "case": "Environment snapshot",
+      "inputOrSourceArrangement": "backing variables mutate during direct/collection/patch operations",
+      "expectedOutcome": "One top-level resolution stays on captured snapshot; next call sees new state",
+      "verificationLevels": "Environment concurrency integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyFoundationTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "ResolveUsesOneSnapshotAndScopedValueWins"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyFoundationTests.cs",
+          "method": "Scope_CapturesExactlyOnceConcurrentlyAndNewScopeSeesMutation"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-028",
+      "source": "docs/designs/config-logical-key-contract.md:1058",
+      "case": "Environment bounded traversal",
+      "inputOrSourceArrangement": "sparse high collection indices and a large object graph",
+      "expectedOutcome": "Prefix index visits present candidates only; cached bind plan respects depth/cycle limits",
+      "verificationLevels": "Performance regression",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/ConfigAuditBudgetTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/ConfigResourceContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "ResourceLimitFailsClosedBeforePublishingAResolution"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigResourceContractTests.cs",
+          "method": "Limits_RejectEveryNonpositiveOption"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigAuditBudgetTests.cs",
+          "method": "LookupLimit_RejectsBeforeRemoteWorkAndRetainsFirstFailure"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-029",
+      "source": "docs/designs/config-logical-key-contract.md:1059",
+      "case": "Environment discovery",
+      "inputOrSourceArrangement": "unrelated native variables beside registered keys",
+      "expectedOutcome": "Only forward-known keys are audited; unrelated names omitted",
+      "verificationLevels": "Environment audit integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "ResolveDiscoversAllPresentCollectionEntriesWithoutSpeculativeReads"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-030",
+      "source": "docs/designs/config-logical-key-contract.md:1060",
+      "case": "Google full-resource collision",
+      "inputOrSourceArrangement": "explicit/generated mappings across project, id, version, and casing",
+      "expectedOutcome": "Exact full-resource equality collides; distinct ordinal resources do not",
+      "verificationLevels": "Google options + concurrent unit",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "DistinctOrdinalResources_PreserveIndependentClaimsCacheAndAuditSources"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "IdenticalOrdinalResource_RejectsDistinctExplicitKeysBeforeClientAccess"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "OverlappingDistinctKeyClaim_PoisonsThePendingFetchAndEverySubsequentResolution"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "DistinctKeysResolvingToOneConcreteResource_PoisonBothRequestedClaims"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "ResolvedAliases_PreserveExactResponseWithoutChangingLogicalIdentity"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "UnrelatedResolvedNames_RemainTerminalAndAreNeverCached"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "Six exact ordinal resource pairs vary project, secret id, version, and casing independently. Concurrent explicit/convention reads retain independent fetches, cache values, and exact audit sources. Identical explicit resources fail before client access; overlapping explicit/convention identity is terminal. Resolved aliases and project ID/number responses retain exact returned identifiers; distinct keys converging on one concrete resource poison both requested claims. Actually unrelated resource responses remain terminal.",
+      "verificationRun": "google-review-verified-2026-09-15"
+    },
+    {
+      "id": "LKC-031",
+      "source": "docs/designs/config-logical-key-contract.md:1061",
+      "case": "Google concurrent claim",
+      "inputOrSourceArrangement": "two concurrent keys attempt one resource",
+      "expectedOutcome": "Atomic claim is poisoned; triggering and subsequent requests are terminal",
+      "verificationLevels": "Google concurrency unit",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "OverlappingDistinctKeyClaim_PoisonsThePendingFetchAndEverySubsequentResolution"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "LatestResponse_PreservesConcreteVersionThroughRuntimeAuditAndCache"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "RotatingAlias_AuditAssociatesEachValueWithItsOwnVersionWithoutASecondFetch"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "ResolvedAliasClaims_StopBeforePublishingAnUnboundedVersionHistory"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "RejectedPayload_IsEvictedForRepairedAliasRetryWithNewVersion"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "OldConversionFailure_CannotEvictANewerSuccessfulCacheGeneration"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "A blocked Explicit:Key fetch overlaps distinct Payments:One claiming the same native resource. Triggering, pending, and subsequent resolutions for both keys are terminal with and without caching; audit is invalid and no extra client access occurs. The test exposed and now verifies the claim recheck at value publication. Alias response provenance is tested through the real Google adapter seam for runtime-first/audit-first calls, cache enabled/disabled, rotating uncached values and bounded resolved-name history. Audit sources remain coupled to the exact payload version without a second fetch. UTF-8, scalar, JSON and null conversion failures evict only their own generation; runtime/audit retries fetch the repaired alias version, and a controlled second resolver proves a newer cache entry survives an older conversion failure.",
+      "verificationRun": "google-review-verified-2026-09-15"
+    },
+    {
+      "id": "LKC-032",
+      "source": "docs/designs/config-logical-key-contract.md:1062",
+      "case": "Google single-flight",
+      "inputOrSourceArrangement": "many concurrent waiters, cancellation, failure, and retry",
+      "expectedOutcome": "One shared fetch, cancelled waiter isolated, failed entry evicted, payloads immutable",
+      "verificationLevels": "Google concurrency unit",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConfigProviderTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConfigProviderTests.cs",
+          "method": "Resolve_Should_SingleflightConcurrentRequestsWhenCacheIsDisabled"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "CancellingOneWaiter_DoesNotCancelTheOtherWaiterOrSharedFetch"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "SharedFetchFailure_ReachesEveryWaiterAndIsEvictedBeforeRetry"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "MutableClientPayloadAndReturnedValues_CannotAlterLaterResolutions"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "PreCancelledRequest_StopsBeforeClaimsCacheOrClient"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "ExpiredAuditDeadline_IsIncompleteBeforeClaimsCacheOrClient"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "Cancellation of either the initiating or following blocked waiter leaves the other successful on one shared fetch. Four waiters receive one shared failure; retry fetches again and caches success. Mutated client input bytes, exposed payload copies, and returned mutable objects/arrays cannot change cached or uncached later results. Existing 32-waiter evidence is retained. Warm and cold pre-cancelled runtime/audit requests test both the exact cached key and a would-be conflicting key: caller cancellation preserves OperationCanceledException without client/claim effects; audit-only deadlines remain incomplete diagnostics. Shared live waiter cancellation evidence is retained.",
+      "verificationRun": "google-review-verified-2026-09-15"
+    },
+    {
+      "id": "LKC-033",
+      "source": "docs/designs/config-logical-key-contract.md:1063",
+      "case": "Google limits",
+      "inputOrSourceArrangement": "cache/claim/audit budget exhausted",
+      "expectedOutcome": "Stable terminal or explicit incomplete audit; bounded memory and elapsed time",
+      "verificationLevels": "Google load/integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConfigProviderTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/ConfigAuditBudgetTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConfigProviderTests.cs",
+          "method": "Resolve_Should_EnforceAdHocClaimCapacityBeforeNetworkAccess"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConfigProviderTests.cs",
+          "method": "Resolve_Should_EnforceCacheCapacityByExactResource"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConfigProviderTests.cs",
+          "method": "Resolve_Should_EnforceAuditRemoteLookupLimitBeforeNetworkAccess"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigAuditBudgetTests.cs",
+          "method": "ConcurrentReservations_AdmitOnlyConfiguredCount"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-034",
+      "source": "docs/designs/config-logical-key-contract.md:1064",
+      "case": "Explicit Google mapping",
+      "inputOrSourceArrangement": "exact mapping under a matching convention",
+      "expectedOutcome": "Explicit wins for that key; full identifier retained",
+      "verificationLevels": "Google integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConfigProviderContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConfigProviderTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConfigProviderTests.cs",
+          "method": "Resolve_Should_ReturnMappedSecretAndConvertType"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConfigProviderContractTests.cs",
+          "method": "ActualProvider_Should_AcceptNativeUnderscoreKeyAndRejectConventionDot"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-035",
+      "source": "docs/designs/config-logical-key-contract.md:1065",
+      "case": "Legacy translation",
+      "inputOrSourceArrangement": "dot-only string in compatibility mode",
+      "expectedOutcome": "One translated identity plus replacement diagnostic",
+      "verificationLevels": "Manager integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/ConfigManagerContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyFoundationTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyFoundationTests.cs",
+          "method": "Manager_TranslationAndProviderRequestsRetainTheOriginalInput"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigManagerContractTests.cs",
+          "method": "ParserOrigin_IsPreservedAcrossTypedAndStringBoundaries"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-036",
+      "source": "docs/designs/config-logical-key-contract.md:1066",
+      "case": "Legacy declaration conflict",
+      "inputOrSourceArrangement": "legacy and canonical declarations translate to same identity",
+      "expectedOutcome": "Startup collision; no provider traversal",
+      "verificationLevels": "Registration integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/ConfigDeclarationRegistryTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigDeclarationRegistryTests.cs",
+          "method": "Registry_RejectsLegacyCanonicalCollision"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigDeclarationRegistryTests.cs",
+          "method": "Registry_RejectsDistinctTranslatedSpellingsForOneIdentity"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-037",
+      "source": "docs/designs/config-logical-key-contract.md:1067",
+      "case": "Provider alias migration",
+      "inputOrSourceArrangement": "none, canonical only, one legacy only, canonical+legacy, two legacy",
+      "expectedOutcome": "Missing, found, warned found, collision, collision",
+      "verificationLevels": "Env/LocalSecrets integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretProviderTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/LocalSecretProviderAliasTableTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "StrictAliasTableAppliesIndependentlyPerScope"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "TranslatedDotAliasTableAppliesIndependentlyPerScope"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "TranslatedDotCanonicalAndAliasInOneScopeAreTerminal"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "StrictCanonicalAndLegacyInOneScopeAreTerminalEvenWhenValuesMatch"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "UnscopedCanonicalAndLegacyInOneScopeAreTerminal"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/EnvironmentConfigContractTests.cs",
+          "method": "TwoLegacySpellingsInOneScopeAreTerminal"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretProviderTests.cs",
+          "method": "Resolve_Should_ReadHistoricalUnderscoreAliasAndReturnNotice"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretProviderTests.cs",
+          "method": "Resolve_Should_ReturnTerminalCollisionWhenCanonicalAndHistoricalAliasExist"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/LocalSecretProviderAliasTableTests.cs",
+          "method": "StrictInput_ShouldApplyCompleteThreeCandidateTable"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/LocalSecretProviderAliasTableTests.cs",
+          "method": "TranslatedInput_ShouldApplyCompleteTwoCandidateTable"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "Local real-file strict three-candidate and translated two-candidate tables assert every subset: missing/no notice, canonical/no notice, each legacy exact migration notice, and multiple equal-valued candidates terminal/no selected value. Environment alias evidence is retained."
+    },
+    {
+      "id": "LKC-038",
+      "source": "docs/designs/config-logical-key-contract.md:1068",
+      "case": "Local migration arguments",
+      "inputOrSourceArrangement": "exact --from-stored-key plus strict --to",
+      "expectedOutcome": "Source bypasses parsing; destination shows parsed segments, with dots literal and colons hierarchical",
+      "verificationLevels": "CLI unit",
+      "testFiles": [
+        "Cli/ForgeTrust.AppSurface.Cli.Tests/SecretsKeyMigrationCommandTests.cs"
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "New CLI theories assert source strings that fail logical grammar are forwarded exactly; destination dots stay literal and colons create displayed segments; preview calls no migration; apply forwards exact source/typed destination only after displaying preview; invalid destination fails before store creation. Test execution is pending the assigned watcher.",
+      "testMethods": [
+        {
+          "file": "Cli/ForgeTrust.AppSurface.Cli.Tests/SecretsKeyMigrationCommandTests.cs",
+          "method": "Preview_ShowsStrictSegmentsWithoutInvokingMigration"
+        },
+        {
+          "file": "Cli/ForgeTrust.AppSurface.Cli.Tests/SecretsKeyMigrationCommandTests.cs",
+          "method": "Apply_PassesExactSourceAndStrictDestinationAfterDisplayingPreview"
+        },
+        {
+          "file": "Cli/ForgeTrust.AppSurface.Cli.Tests/SecretsKeyMigrationCommandTests.cs",
+          "method": "InvalidDestination_FailsBeforeCreatingStore"
+        }
+      ]
+    },
+    {
+      "id": "LKC-039",
+      "source": "docs/designs/config-logical-key-contract.md:1069",
+      "case": "Terminal precedence",
+      "inputOrSourceArrangement": "higher source returns collision/unrepresentable",
+      "expectedOutcome": "Stop; do not query lower providers",
+      "verificationLevels": "Manager integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/ConfigManagerContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/DefaultConfigManagerTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigManagerContractTests.cs",
+          "method": "TerminalEnvironment_NeverQueriesLowerProvider"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/DefaultConfigManagerTests.cs",
+          "method": "GetValue_AppliesNestedEnvironmentPatchBeforeThrowingTerminalProviderDiagnostic"
+        }
+      ],
+      "coverageStatus": "covered"
+    },
+    {
+      "id": "LKC-040",
+      "source": "docs/designs/config-logical-key-contract.md:1070",
+      "case": "Local migration retry",
+      "inputOrSourceArrangement": "crash/failure before/after every durable transition and store mutation",
+      "expectedOutcome": "Resume roll-forward or stop safely; never expose/overwrite value",
+      "verificationLevels": "Store integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretKeyMigrationTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/LocalSecretFileMigrationPersistenceTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretKeyMigrationTests.cs",
+          "method": "Run_ShouldResumeFromDurableDestinationWrittenJournalWithSameMigrationId"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretKeyMigrationTests.cs",
+          "method": "Run_ShouldReturnSafeResumePointWhenJournalTransitionFails"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretKeyMigrationTests.cs",
+          "method": "Run_ShouldRefuseDifferentExistingDestinationWithoutMutation"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretKeyMigrationTests.cs",
+          "method": "Run_ShouldKeepSourceWhenVerificationRereadChanges"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretKeyMigrationTests.cs",
+          "method": "Run_ShouldRetainPendingJournalWhenSourceDeletionCannotBeConfirmed"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretKeyMigrationTests.cs",
+          "method": "Run_ShouldRetainChangedSourceWhenResumingAfterPendingTransitionFailure"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretKeyMigrationTests.cs",
+          "method": "Run_ShouldRetainSourceWhenDestinationWriteFails"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretKeyMigrationTests.cs",
+          "method": "Run_ShouldRetainSourceWhenVerificationReadFails"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretKeyMigrationTests.cs",
+          "method": "Run_ShouldRetainSourceWhenPreDeleteIndexPublicationFails"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretKeyMigrationTests.cs",
+          "method": "Run_ShouldRetainSourceWhenDeleteFails"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretKeyMigrationTests.cs",
+          "method": "Run_ShouldReportWhenPostDeleteIndexPublicationFailsWithoutReDeleting"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/LocalSecretFileMigrationPersistenceTests.cs",
+          "method": "Reopen_ShouldRecoverRealFilesAtEveryBeforeAndAfterBoundary"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/LocalSecretFileMigrationPersistenceTests.cs",
+          "method": "ReopenedWriterChangedDestination_ShouldRetainExactSource"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "Real file backend injects before/after all 17 read/commit/mutation boundaries, reopens the persisted store/journal, resumes Complete with retained migration ID/value and absent source, and checks payload-free journal/result. Reopened changed destinations stop without deleting source."
+    },
+    {
+      "id": "LKC-041",
+      "source": "docs/designs/config-logical-key-contract.md:1071",
+      "case": "Local migration capability",
+      "inputOrSourceArrangement": "backend lacks lock/durable journal/confirmed operations",
+      "expectedOutcome": "Unsupported before Prepared; no mutation",
+      "verificationLevels": "Store integration",
+      "testFiles": [
+        "Cli/ForgeTrust.AppSurface.Cli.Tests/SecretsKeyMigrationCommandTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/LocalSecretFileMigrationPersistenceTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Cli/ForgeTrust.AppSurface.Cli.Tests/SecretsKeyMigrationCommandTests.cs",
+          "method": "UnsupportedStore_FailsWithoutReadingValues"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/LocalSecretFileMigrationPersistenceTests.cs",
+          "method": "UnsupportedFileSystem_ShouldStopBeforePreparedAndBeforeAnyIo"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "File backend capability rejection uses a filesystem whose operations count and throw: unsupported result before any I/O, including Prepared journal. CLI separately rejects a store lacking migration capability before operations."
+    },
+    {
+      "id": "LKC-042",
+      "source": "docs/designs/config-logical-key-contract.md:1072",
+      "case": "Local migration coordination",
+      "inputOrSourceArrangement": "second process/write races every journal boundary",
+      "expectedOutcome": "Shared lease or CAS prevents stale delete; index and journal recover together",
+      "verificationLevels": "Store concurrency/failure injection",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretKeyMigrationTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/LocalSecretFileMigrationPersistenceTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/PlatformLocalSecretMaintenanceLeaseTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretKeyMigrationTests.cs",
+          "method": "Run_ShouldPublishIndexBeforeDeletingSourceAndCommitEveryState"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretKeyMigrationTests.cs",
+          "method": "Run_ShouldRefuseAnActiveJournalForADifferentRequestWithoutTouchingValues"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/AppSurfaceLocalSecretKeyMigrationTests.cs",
+          "method": "Run_ShouldRetainChangedSourceWhenResumingAfterPendingTransitionFailure"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/PlatformLocalSecretMaintenanceLeaseTests.cs",
+          "method": "Acquire_ShouldExcludeAnotherHandleForTheSamePackageIdentity"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/PlatformLocalSecretMaintenanceLeaseTests.cs",
+          "method": "Acquire_ShouldUseDifferentLocksForDifferentPackageIdentities"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/LocalSecretFileMigrationPersistenceTests.cs",
+          "method": "IndependentProcessWriter_ShouldWaitAtEveryDurableJournalBoundary"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/LocalSecretFileMigrationPersistenceTests.cs",
+          "method": "ReopenedWriterChangedDestination_ShouldRetainExactSource"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.LocalSecrets.Tests/LocalSecretFileMigrationPersistenceTests.cs",
+          "method": "Reopen_ShouldRecoverRealFilesAtEveryBeforeAndAfterBoundary"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "Independent process writer is excluded before/after each durable journal state; after lease release it succeeds and a reopened store retains both writes. Reopen/retry tests cover every mutation boundary; changed destinations preserve source, preventing stale delete."
+    },
+    {
+      "id": "LKC-043",
+      "source": "docs/designs/config-logical-key-contract.md:1073",
+      "case": "Concurrent projection",
+      "inputOrSourceArrangement": "same/different keys register concurrently",
+      "expectedOutcome": "One deterministic mapping or safe collision",
+      "verificationLevels": "Projection/provider concurrency",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/ConfigSourceProjectionTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigSourceProjectionTests.cs",
+          "method": "ConcurrentReadsRetainEveryOriginAndNeverSelectACollisionWinner"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "ConcurrentConventionClaims_KeepDistinctKeysAndCoalesceCaseVariants"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "OverlappingDistinctKeyClaim_PoisonsThePendingFetchAndEverySubsequentResolution"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/GoogleSecretManagerConcurrencyContractTests.cs",
+          "method": "ClaimPoisonedDuringConversion_CannotPublishRuntimeOrAuditValue"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "Four controlled concurrent convention resolutions register two distinct keys and their case variants, retain distinct mappings, and coalesce each identity to one fetch. An overlapping distinct-key/same-resource test proves claim poisoning. Immutable projection read evidence is retained.",
+      "verificationRun": "google-review-verified-2026-09-15"
+    },
+    {
+      "id": "LKC-044",
+      "source": "docs/designs/config-logical-key-contract.md:1074",
+      "case": "Registry lifecycle",
+      "inputOrSourceArrangement": "late options, manual-only declarations, concurrent first access, and two hosts",
+      "expectedOutcome": "One complete immutable registry per host; no wrapper activation or partial seal",
+      "verificationLevels": "DI/startup integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/AppSurfaceConfigModuleTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/ConfigDeclarationRegistryTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigDeclarationRegistryTests.cs",
+          "method": "Registry_ResolvesRawDeclarationsWithOptionsFinalizedAfterCapture"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigDeclarationRegistryTests.cs",
+          "method": "AddConfigAuditKey_RegistersStandaloneDeclarationInfrastructure"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigDeclarationRegistryTests.cs",
+          "method": "Registry_IsolatedBetweenHostsWithDifferentStringPolicies"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigDeclarationRegistryTests.cs",
+          "method": "Registry_ConcurrentFirstAccessReturnsOneImmutableInstance"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigDeclarationRegistryTests.cs",
+          "method": "StartupMarker_RejectsManualOnlyCollisionBeforeProviderTraversal"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/AppSurfaceConfigModuleTests.cs",
+          "method": "CustomRegistrationTask_ScansAssembliesAndRegistersConfigs"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/AppSurfaceConfigModuleTests.cs",
+          "method": "StartupAndRegistry_DoNotActivateDiscoveredWrappers"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigDeclarationRegistryTests.cs",
+          "method": "Registry_SortsAndExposesReadOnlySnapshots"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "Concurrent first access asserts one complete 64-key mixed raw/typed registry across 32 requests; read-only snapshots, late policy, manual-only setup and two-host isolation are covered. A counting/throwing discovered wrapper remains inactive through registration, registry creation and host startup.",
+      "verificationRun": "registry-wrapper-2026-09-15"
+    },
+    {
+      "id": "LKC-045",
+      "source": "docs/designs/config-logical-key-contract.md:1075",
+      "case": "Input provenance",
+      "inputOrSourceArrangement": "translated nested attribute reaches wrapper/provider/audit",
+      "expectedOutcome": "Original composed spelling and origin survive without affecting equality",
+      "verificationLevels": "Registration/manager integration",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/AuditContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/ConfigInputProvenanceTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/ConfigManagerContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyFoundationTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyFoundationTests.cs",
+          "method": "Manager_TranslationAndProviderRequestsRetainTheOriginalInput"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigManagerContractTests.cs",
+          "method": "ParserOrigin_IsPreservedAcrossTypedAndStringBoundaries"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/AuditContractTests.cs",
+          "method": "AuditResolutionReceivesTheTypedKnownEntryWithoutReparsingItsOrigin"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigInputProvenanceTests.cs",
+          "method": "NestedAttributeKeyRetainsIdentityThroughWrapperProviderAndAudit"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "Real nested attributed wrappers registered through AppSurfaceConfigModule exercise strict/translated/typed origins. Assertions track exact key instance, composed original spelling, origin, equality/hash through registry, wrapper initialization, provider request and audit; no wrapper activation before resolution.",
+      "verificationRun": "registry-wrapper-2026-09-15"
+    },
+    {
+      "id": "LKC-046",
+      "source": "docs/designs/config-logical-key-contract.md:1076",
+      "case": "Diagnostic trust",
+      "inputOrSourceArrangement": "external free text plus controls/oversized identifiers",
+      "expectedOutcome": "Manager logs only catalogued fields and escaped bounded safe identifiers",
+      "verificationLevels": "Security/golden tests",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/ConfigManagerContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/ConfigResourceContractTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigManagerContractTests.cs",
+          "method": "Logging_DropsExternalProseAndBoundsIdentifiers"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigResourceContractTests.cs",
+          "method": "Identifiers_EscapeUntrustedControlAndFormatCharacters"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigResourceContractTests.cs",
+          "method": "Identifiers_BoundRenderingAndAppendStableDistinctDigest"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigResourceContractTests.cs",
+          "method": "Catalog_RejectsUntrustedCodeAndContainsCompleteGuidance"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "Manager logging test supplies external sentinel prose, controls, and oversized identifiers; asserts no sentinel/newline leakage, bounded messages, and catalogued fallback code. Identifier/catalog tests assert escaping and stable bounds. Replaced incidental history, metrics, and redacted-report evidence."
+    },
+    {
+      "id": "LKC-047",
+      "source": "docs/designs/config-logical-key-contract.md:1077",
+      "case": "Resource limits",
+      "inputOrSourceArrangement": "file, environment, notice, and renderer limits exceeded",
+      "expectedOutcome": "Stable value-safe failure; no partial snapshot or unbounded retention",
+      "verificationLevels": "Load/failure tests",
+      "testFiles": [
+        "Config/ForgeTrust.AppSurface.Config.Tests/ConfigDiagnosticRenderingTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/ConfigNoticeHistoryTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/ConfigResourceContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/FileProjectionContractTests.cs",
+        "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyFoundationTests.cs"
+      ],
+      "testMethods": [
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigNoticeHistoryTests.cs",
+          "method": "SaturationNeverEvictsExistingIdentitiesAndConcurrentDuplicatesAreAdmittedOnce"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigResourceContractTests.cs",
+          "method": "ScopeNoticeCapacityRemainsBoundedUnderConcurrency"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/LogicalKeyFoundationTests.cs",
+          "method": "Snapshot_EnforcesExactBoundariesAndCachesCaptureFailure"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigDiagnosticRenderingTests.cs",
+          "method": "ReportIdentifiersAreBoundedAndControlCharactersCannotInjectLines"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/ConfigDiagnosticRenderingTests.cs",
+          "method": "DiffIdentifiersUseTheSameBoundsInFullSourceDetail"
+        },
+        {
+          "file": "Config/ForgeTrust.AppSurface.Config.Tests/FileProjectionContractTests.cs",
+          "method": "ActualFileLimitsAreTerminalWithoutPublishingAPartialEnvironment"
+        }
+      ],
+      "coverageStatus": "covered",
+      "coverageNote": "Actual FileBasedConfigProvider byte/count exhaustion asserts stable terminal runtime/audit status, no value or enumerable partial snapshot, and an unaffected environment. Retained tests directly assert environment snapshot failure, bounded notice retention and escaped bounded report/diff rendering."
+    }
+  ],
+  "coverageInterpretation": "Coverage status describes assertion evidence in current shared source, not an assertion that current tests have executed or passed. Named methods and files are checked. verificationRuns records only actual existing run artifacts with their stated scope; source changes after a run require revalidation. This bounded refresh re-evaluated previously partial/uncovered rows and retained the other rows from earlier assertion audits.",
+  "evidenceReviewedOn": "2026-09-15",
+  "verificationRuns": {
+    "google-concurrency-contract-2026-09-15": {
+      "command": "python3 /tmp/config-validation-lock.py dotnet test Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests.csproj --no-restore --logger 'console;verbosity=normal' --logger 'trx;LogFileName=google-concurrency-final.trx' --results-directory /tmp/config-google-concurrency-results",
+      "logFile": "/tmp/config-google-concurrency-final.log",
+      "trxFile": "/tmp/config-google-concurrency-results/google-concurrency-final.trx",
+      "passed": 147,
+      "failed": 0,
+      "newContractCasesPassed": 15,
+      "scope": "Full Google test project. Retained Config.Tests projection evidence was not rerun by this command."
+    },
+    "registry-wrapper-2026-09-15": {
+      "logFile": "/tmp/config-registry-sept15-verified.log",
+      "trxFile": "/tmp/config-registry-sept15-verified/registry-wrapper.trx",
+      "passed": 139,
+      "failed": 0,
+      "scope": "Recorded focused registry/wrapper/module/attribute tests, 139 cases; evidence inspected, no rerun in matrix audit."
+    },
+    "public-harness-counterexample-fallback-2026-09-15": {
+      "validationLock": "/tmp/appsurface-config-validation.lock",
+      "buildOptions": "--no-restore --disable-build-servers -m:1",
+      "tests": [
+        {
+          "project": "Config.Testing.Tests",
+          "passed": 14,
+          "failed": 0,
+          "logFile": "/tmp/config-conformance-harness.log",
+          "trxFile": "/tmp/config-conformance-fixes/harness.trx"
+        },
+        {
+          "project": "Config.Tests",
+          "filter": "FileProviderConformanceTests|ActualEnvironmentProviderPassesApplicableConfigTestingCases",
+          "passed": 2,
+          "failed": 0,
+          "logFile": "/tmp/config-conformance-core.log",
+          "trxFile": "/tmp/config-conformance-fixes/core-conformance.trx"
+        },
+        {
+          "project": "LocalSecrets.Tests",
+          "filter": "AppSurfaceLocalSecretProviderContractTests",
+          "passed": 11,
+          "failed": 0,
+          "logFile": "/tmp/config-conformance-local.log",
+          "trxFile": "/tmp/config-conformance-fixes/local-conformance.trx"
+        },
+        {
+          "project": "GoogleSecretManager.Tests",
+          "filter": "GoogleSecretManagerConfigProviderContractTests",
+          "passed": 4,
+          "failed": 0,
+          "logFile": "/tmp/config-conformance-google-final.log",
+          "trxFile": "/tmp/config-conformance-fixes/google-conformance-final.trx"
+        }
+      ],
+      "sourceProof": {
+        "passedStages": 10,
+        "elapsedMilliseconds": 244,
+        "logFile": "/tmp/config-conformance-source.log"
+      },
+      "packedConsumer": {
+        "sharedCasesPassedPerRun": 2,
+        "runs": [
+          "file",
+          "environment override"
+        ],
+        "result": "passed",
+        "buildWarnings": 0,
+        "buildErrors": 0,
+        "evidenceFile": "/tmp/config-conformance-packed-final/evidence.json"
+      },
+      "formatLog": "/tmp/config-conformance-format.log",
+      "scope": "Focused conformance plus source and public packed-consumer proofs; no broad solution or full provider suite run."
+    },
+    "google-resolved-alias-2026-09-15": {
+      "command": "python3 /tmp/config-validation-lock.py dotnet test Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests.csproj --no-restore --collect:'XPlat Code Coverage' --logger 'trx;LogFileName=google-alias-final.trx' --results-directory /tmp/config-google-alias-final",
+      "logFile": "/tmp/config-google-alias-final.log",
+      "trxFile": "/tmp/config-google-alias-final/google-alias-final.trx",
+      "passed": 178,
+      "failed": 0,
+      "coverageFile": "/tmp/config-google-alias-final/293c318f-ab82-42af-8d38-f24aa6b54c64/coverage.cobertura.xml",
+      "coverage": {
+        "googleAssemblyLinePercent": 99.04,
+        "googleAssemblyBranchPercent": 95.72,
+        "providerLinePercent": 99.68,
+        "providerBranchPercent": 95.76,
+        "payloadLinePercent": 100,
+        "payloadBranchPercent": 100
+      },
+      "scope": "Full Google test project only; source-inspected file/env/Local/registry evidence is not rerun by this command. Registry 139 recorded separately."
+    },
+    "google-review-verified-2026-09-15": {
+      "command": "python3 /tmp/config-validation-lock.py dotnet test Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests/ForgeTrust.AppSurface.Config.GoogleSecretManager.Tests.csproj --no-restore --disable-build-servers -p:UseSharedCompilation=false --collect:'XPlat Code Coverage' --logger 'trx;LogFileName=google-review-verified.trx' --results-directory /tmp/config-google-review-verified",
+      "logFile": "/tmp/config-google-review-verified.log",
+      "trxFile": "/tmp/config-google-review-verified/google-review-verified.trx",
+      "passed": 200,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 0,
+      "errors": 0,
+      "coverageFile": "/tmp/config-google-review-verified/99ddf638-f2cc-42e8-ace6-61ee6a9db6c8/coverage.cobertura.xml",
+      "coverage": {
+        "googleAssemblyLinePercent": 99.05,
+        "googleAssemblyBranchPercent": 95.84,
+        "providerLinePercent": 99.7,
+        "providerBranchPercent": 96.09,
+        "providerCoveredBranches": 123,
+        "providerTotalBranches": 128,
+        "payloadLinePercent": 100,
+        "payloadBranchPercent": null,
+        "payloadBranchNote": "No instrumented payload branches; Cobertura represents the empty branch set as rate 1."
+      },
+      "scope": "Full Google test project, including 66 concurrency/provenance/cancellation/cache contract cases. Does not execute the other providers or retained Config.Tests projection assertions. Historical runs remain separately recorded.",
+      "independentReview": "Nash independently verified 200/200, provider 123/128 branches, strengthened cancellation and generation-race assertions; both accepted P2 findings closed and no remaining scoped P1/P2 findings."
+    }
+  },
+  "publicHarness": {
+    "canonicalCaseCount": 14,
+    "addedCase": "MissingToLowerFallback",
+    "counterexampleApi": "ConfigProviderContractSession.UnrepresentableKey (optional constructor argument; Unrepresentable only)",
+    "defaultCounterexample": "A_:B (environment codec)",
+    "providerCounterexamples": {
+      "Google": "Payments:Unsupported.Dot under a valid Payments convention; A_:B separately resolves through the Google convention",
+      "File": "Payments above an Invalid:Segment JSON property",
+      "Environment": "A_:B",
+      "LocalSecrets": "Not applicable; existing exclusion retained"
+    },
+    "applicableSharedCases": {
+      "Google": 12,
+      "File": 13,
+      "Environment": 12,
+      "LocalSecrets": 11
+    },
+    "runnerRegressions": [
+      "UnrepresentableUsesProviderCounterexampleInsteadOfRepresentableDefault",
+      "CounterexampleCannotReplaceOtherCanonicalCases",
+      "TerminalForAnotherKeyCannotSatisfyCounterexample",
+      "MissingToLowerFallbackRequiresTheLowerMarkerIncludingCaseVariant",
+      "IncorrectScenarioBehaviorFailsSafely(MissingToLowerFallback)"
+    ],
+    "googleRegressions": [
+      "SharedUnrepresentableCaseRejectsGoogleDottedDescendantBeforeNetworkOrFallback",
+      "SharedMissingCaseReachesLowerProviderAfterGoogleReturnsMissing",
+      "ActualProvider_Should_AcceptNativeUnderscoreKeyAndRejectConventionDot"
+    ],
+    "fallbackEvidence": "All four real provider fixtures leave the requested key absent and verify two lower-provider reads (original and lowercase). Google and file unrepresentability fixtures retain populated lower sources and verify zero lower reads; Google also verifies zero remote requests.",
+    "packageCountChanged": false
+  }
+}

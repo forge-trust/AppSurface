@@ -1,13 +1,23 @@
-﻿namespace ForgeTrust.AppSurface.Config;
+namespace ForgeTrust.AppSurface.Config;
 
-/// <summary>
-/// Defines the central manager for configuration, which aggregates multiple <see cref="IConfigProvider"/> instances.
-/// </summary>
-/// <remarks>
-/// <see cref="IConfigProvider.GetValue{T}"/> preserves ordinary provider fallback for missing values, but it also honors
-/// fail-closed provider diagnostics. When a provider reports that resolution must stop, the manager throws
-/// <see cref="ConfigurationResolutionException"/> instead of querying lower-priority providers.
-/// </remarks>
-public interface IConfigManager : IConfigProvider
+/// <summary>The application boundary for environment-first, ordered configuration resolution.</summary>
+/// <remarks>Terminal failures suppress fallback but allow one transactional environment-child rescue.</remarks>
+public interface IConfigManager
 {
+    /// <summary>Resolves a strict typed key without applying legacy aliases.</summary>
+    /// <typeparam name="T">The requested value type.</typeparam>
+    /// <param name="environment">The environment name, independent of key identity.</param>
+    /// <param name="key">The immutable logical key.</param>
+    /// <returns>The value, or default only when all providers and patches are missing.</returns>
+    /// <exception cref="ConfigurationResolutionException">A terminal failure could not be rescued.</exception>
+    T? GetValue<T>(string environment, AppSurfaceConfigKey key);
+
+    /// <summary>Parses application input once using the configured compatibility mode, then resolves.</summary>
+    /// <typeparam name="T">The requested value type.</typeparam>
+    /// <param name="environment">The environment name.</param>
+    /// <param name="key">A colon path, or train-1 dot-only migration input.</param>
+    /// <returns>The value, or default when absent.</returns>
+    /// <exception cref="ArgumentException">The key violates the logical grammar.</exception>
+    /// <exception cref="ConfigurationResolutionException">A terminal failure could not be rescued.</exception>
+    T? GetValue<T>(string environment, string key);
 }

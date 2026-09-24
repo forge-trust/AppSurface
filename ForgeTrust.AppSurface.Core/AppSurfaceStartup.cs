@@ -71,7 +71,17 @@ public abstract class AppSurfaceStartup<TRootModule> : AppSurfaceStartup, IAppSu
     /// </summary>
     /// <param name="args">Command-line arguments supplied to the application.</param>
     /// <returns>A task that completes when the host run finishes.</returns>
-    public Task RunAsync(string[] args) => RunAsync(new StartupContext(args, CreateRootModule()));
+    /// <exception cref="AppSurfacePackageCompatibilityException">An already loaded assembly targets an incompatible AppSurface contract.</exception>
+    /// <remarks>
+    /// Validates loaded assembly identities and references before invoking <see cref="CreateRootModule"/>.
+    /// A custom root factory that loads additional plugins must validate their metadata before scanning or activating
+    /// their types. Factory exceptions propagate to the caller without being relabeled as compatibility failures.
+    /// </remarks>
+    public Task RunAsync(string[] args)
+    {
+        AppSurfacePackageCompatibility.ValidateAssemblies(AppDomain.CurrentDomain.GetAssemblies());
+        return RunAsync(new StartupContext(args, CreateRootModule()));
+    }
 
     /// <summary>
     /// Runs the host configured by the provided startup context and logs lifecycle events according to the configured console output mode.
@@ -123,6 +133,7 @@ public abstract class AppSurfaceStartup<TRootModule> : AppSurfaceStartup, IAppSu
     /// <returns>A host builder configured with the context's host application identity, registered modules, and service registrations.</returns>
     private IHostBuilder CreateHostBuilderCore(StartupContext context)
     {
+        AppSurfacePackageCompatibility.ValidateAssemblies(AppDomain.CurrentDomain.GetAssemblies());
         var hostArgs = NormalizeAllHostsArgument(context.Args);
         var builder = Host.CreateDefaultBuilder(hostArgs);
 
@@ -211,6 +222,11 @@ public abstract class AppSurfaceStartup<TRootModule> : AppSurfaceStartup, IAppSu
     /// Creates a new instance of the root module.
     /// </summary>
     /// <returns>A new <typeparamref name="TRootModule"/> instance.</returns>
+    /// <remarks>
+    /// The string <see cref="RunAsync(string[])"/> entry point validates already loaded assembly contracts before
+    /// calling this factory. Overrides retain control of root construction. If an override loads plugins, call
+    /// <see cref="AppSurfacePackageCompatibility.ValidateAssemblies"/> on those assemblies before type discovery or activation.
+    /// </remarks>
     protected virtual TRootModule CreateRootModule() => new();
 
     /// <summary>
@@ -230,6 +246,12 @@ public abstract class AppSurfaceStartup<TRootModule> : AppSurfaceStartup, IAppSu
     /// marks <see cref="StartupContext.DependenciesRegistered"/> so repeated calls are no-ops for the same context.
     /// This method is not thread-safe; access each <see cref="StartupContext"/> from a single thread during startup.
     /// </para>
+    /// <para>
+    /// Before the first dependency callback, loaded package identities and references are checked by
+    /// <see cref="AppSurfacePackageCompatibility.ValidateAssemblies"/>. This also protects specialized startups that
+    /// prepare dependencies before creating a host builder. Module callbacks that load more plugins own their metadata
+    /// validation before activation; this check does not intercept assembly loading inside user code.
+    /// </para>
     /// </remarks>
     protected void RegisterDependencies(StartupContext context)
     {
@@ -237,6 +259,8 @@ public abstract class AppSurfaceStartup<TRootModule> : AppSurfaceStartup, IAppSu
         {
             return;
         }
+
+        AppSurfacePackageCompatibility.ValidateAssemblies(AppDomain.CurrentDomain.GetAssemblies());
 
         // Ensure internal services (like Default IEnvironmentProvider) are included first so external modules can override them.
         context.Dependencies.AddModule<Defaults.InternalServicesModule>();

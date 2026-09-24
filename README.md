@@ -19,6 +19,10 @@ ForgeTrust.AppSurface is a collection of .NET libraries designed to provide a li
 If you are deciding which package to install first, start with the [AppSurface package chooser](./packages/README.md). If you are choosing among Auth packages, use the [AppSurface Auth adoption ladder](./start-here/auth-adoption-ladder.md) before installing optional auth adapters.
 If your CI gate should distinguish an explicit low-risk change from an incomplete test run, start with the [EvidenceHost guide](./start-here/evidencehost.md).
 
+For portable configuration, start with the [logical-key quickstart](Config/ForgeTrust.AppSurface.Config/README.md#logical-key-quickstart),
+[executable provider proof](examples/config-key-contract/README.md), and
+[coordinated upgrade guide](guides/config-key-migration.md).
+
 ## Vision
 
 The primary vision of AppSurface is to simplify application bootstrapping by encouraging **composition through small, focused modules**. Instead of monolithic startup classes or scattered configuration logic, AppSurface allows developers to encapsulate features into reusable modules that handle:
@@ -207,6 +211,11 @@ overrides the comparison value with `HEAD^1` for its pull-request merge checkout
 evaluates exactly the tested merge tree. Set `COVERAGE_GATE_DIFF_BASE=` to run only the aggregate
 gate, as CI does for baseline builds.
 
+Matching local and hosted patch results also requires the same coverage artifact and changed-line
+inventory. If the results disagree, compare the commit and base, source paths, and measurable
+changed-line counts. A file can have coverage in a hosted report while contributing no diff lines;
+a passing local gate does not establish that the hosted patch status passed.
+
 The repository lane requires a non-sandboxed host by default. Set
 `COVERAGE_REQUIRE_NON_SANDBOX=false` only when a restricted run is intentional. This marker check
 deliberately leaves ordinary CI and container hosts valid; see the [non-sandboxed runner reference](./Cli/ForgeTrust.AppSurface.Cli/README.md#require-a-non-sandboxed-runner).
@@ -234,9 +243,9 @@ This command:
   full-solution lane.
 - Gates at 95% line coverage and 85% branch coverage, plus 95% line and 85% branch coverage for
   the selected patch when a diff base is configured.
-- Keeps Codecov's patch status aligned with the repository's 95% patch-line gate through
-  [`codecov.yml`](./codecov.yml) and `--patch-line-mode codecov`, with a 0.5-point tolerance; the
-  local gate remains authoritative for patch branches.
+- Uses the same configured 95% patch-line threshold and 0.5-point tolerance as
+  [`codecov.yml`](./codecov.yml), with `--patch-line-mode codecov` for partial-condition semantics;
+  the local gate remains authoritative for patch branches.
 
 ### Coverage efficiency evidence for issue #728
 

@@ -12,6 +12,7 @@ public sealed class GoogleSecretManagerRegistrationTests
     public void ConfigureServices_Should_RegisterProviderClientOptionsAndConfigProvider()
     {
         var services = new ServiceCollection();
+        services.AddLogging();
         var client = new FakeSecretManagerClient();
         services.UseAppSurfaceGoogleSecretManagerClient(client);
         services.ConfigureAppSurfaceGoogleSecretManager(options =>
@@ -19,9 +20,9 @@ public sealed class GoogleSecretManagerRegistrationTests
             options.ProjectId = "project";
             options.MapSecret("Stripe:ApiKey", "api-key", version: "5");
         });
-        var module = new AppSurfaceGoogleSecretManagerModule();
-
-        module.ConfigureServices(new StartupContext([], new TestHostModule()), services);
+        var context = new StartupContext([], new TestHostModule());
+        new AppSurfaceConfigModule().ConfigureServices(context, services);
+        new AppSurfaceGoogleSecretManagerModule().ConfigureServices(context, services);
 
         using var provider = services.BuildServiceProvider();
         var options = provider.GetRequiredService<IOptions<AppSurfaceGoogleSecretManagerOptions>>().Value;
@@ -30,9 +31,9 @@ public sealed class GoogleSecretManagerRegistrationTests
         Assert.Same(
             provider.GetRequiredService<GoogleSecretManagerConfigProvider>(),
             provider.GetServices<IConfigProvider>().Single(config => config is GoogleSecretManagerConfigProvider));
-        Assert.Contains(
+        Assert.Collection(
             provider.GetServices<IValidateOptions<AppSurfaceGoogleSecretManagerOptions>>(),
-            validator => validator is AppSurfaceGoogleSecretManagerOptionsValidator);
+            validator => Assert.IsType<AppSurfaceGoogleSecretManagerDeclarationValidator>(validator));
     }
 
     [Fact]

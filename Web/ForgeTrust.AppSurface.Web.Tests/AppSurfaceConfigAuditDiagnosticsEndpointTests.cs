@@ -660,6 +660,8 @@ public sealed class AppSurfaceConfigAuditDiagnosticsEndpointTests
 
     private sealed class TestEnvironmentProvider(string environmentName) : IEnvironmentProvider
     {
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() => new Dictionary<string, string>(StringComparer.Ordinal);
+
         public string Environment => environmentName;
 
         public bool IsDevelopment => string.Equals(environmentName, Environments.Development, StringComparison.OrdinalIgnoreCase);
@@ -669,6 +671,8 @@ public sealed class AppSurfaceConfigAuditDiagnosticsEndpointTests
 
     private sealed class ThrowingEnvironmentProvider : IEnvironmentProvider
     {
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() => new Dictionary<string, string>(StringComparer.Ordinal);
+
         public string Environment => throw new InvalidOperationException("raw-secret should never leak");
 
         public bool IsDevelopment => false;

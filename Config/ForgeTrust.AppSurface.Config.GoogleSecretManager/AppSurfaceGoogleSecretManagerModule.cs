@@ -15,7 +15,7 @@ public sealed class AppSurfaceGoogleSecretManagerModule : IAppSurfaceModule
     public void ConfigureServices(StartupContext context, IServiceCollection services)
     {
         services.AddOptions<AppSurfaceGoogleSecretManagerOptions>().ValidateOnStart();
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<AppSurfaceGoogleSecretManagerOptions>, AppSurfaceGoogleSecretManagerOptionsValidator>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<AppSurfaceGoogleSecretManagerOptions>, AppSurfaceGoogleSecretManagerDeclarationValidator>());
         services.TryAddSingleton<IAppSurfaceGoogleSecretManagerClient, GoogleSecretManagerClientAdapter>();
         services.TryAddSingleton<IAppSurfaceGoogleSecretTransferClient, GoogleSecretManagerTransferClientAdapter>();
         services.AddSingleton<GoogleSecretManagerConfigProvider>();

@@ -180,6 +180,8 @@ public sealed class CanaryLabSettingsTests
 
     private sealed class TestEnvironmentProvider(bool isDevelopment = true) : IEnvironmentProvider
     {
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() => new Dictionary<string, string>(StringComparer.Ordinal);
+
         public string Environment => isDevelopment ? Environments.Development : Environments.Production;
 
         public bool IsDevelopment => isDevelopment;
