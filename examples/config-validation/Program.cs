@@ -5,7 +5,7 @@ var config = new PortConfig();
 
 try
 {
-    ((IConfig)config).Init(new ExampleConfigManager(), new ExampleEnvironmentProvider(), "PortConfig");
+    ((IConfig)config).Init(new ExampleConfigManager(), new ExampleEnvironmentProvider(), AppSurfaceConfigKey.Parse("PortConfig"));
     Console.WriteLine("Configuration validation unexpectedly passed.");
 
     return 0;
@@ -25,13 +25,11 @@ internal sealed class PortConfig : ConfigStruct<int>
 
 internal sealed class ExampleConfigManager : IConfigManager
 {
-    public int Priority => 0;
+    public T? GetValue<T>(string environment, string key) => GetValue<T>(environment, AppSurfaceConfigKey.Parse(key));
 
-    public string Name => nameof(ExampleConfigManager);
-
-    public T? GetValue<T>(string environment, string key)
+    public T? GetValue<T>(string environment, AppSurfaceConfigKey key)
     {
-        if (key == "PortConfig" && typeof(T) == typeof(int?))
+        if (key.Equals(AppSurfaceConfigKey.Parse("PortConfig")) && typeof(T) == typeof(int?))
         {
             return (T)(object)70000;
         }
@@ -42,6 +40,8 @@ internal sealed class ExampleConfigManager : IConfigManager
 
 internal sealed class ExampleEnvironmentProvider : IEnvironmentProvider
 {
+    public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() => new Dictionary<string, string>(StringComparer.Ordinal);
+
     public string Environment => "Development";
 
     public bool IsDevelopment => true;

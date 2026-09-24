@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using FakeItEasy;
 using ForgeTrust.AppSurface.Core;
 
@@ -6,54 +7,70 @@ namespace ForgeTrust.AppSurface.Config.Tests;
 public class EnvironmentConfigProviderTests
 {
     [Fact]
+    public void Clone_PreservesImmutableDateAndTimeValues()
+    {
+        var clone = new EnvironmentObjectClone(32, CancellationToken.None);
+        var date = new DateOnly(2026, 9, 23);
+        var time = new TimeOnly(14, 35, 7);
+
+        Assert.Equal(date, (DateOnly)clone.Copy(date, typeof(DateOnly)));
+        Assert.Equal(time, (TimeOnly)clone.Copy(time, typeof(TimeOnly)));
+    }
+
+    private static T? ResolveValue<T>(EnvironmentConfigProvider provider, string environment, string key)
+    {
+        var logicalKey = AppSurfaceConfigKey.Parse(key);
+        var result = provider.Resolve<T>(new ConfigProviderRequest(environment, logicalKey));
+        return result.Status switch
+        {
+            ConfigProviderValueStatus.Found => result.Value,
+            ConfigProviderValueStatus.Missing => default,
+            _ => throw new ConfigurationResolutionException(
+                environment, logicalKey, provider.Name,
+                result.Diagnostic ?? ConfigDiagnosticCatalog.Terminal("config-provider-failed"))
+        };
+    }
+
+    private static readonly ConditionalWeakTable<IEnvironmentProvider, Dictionary<string, string>> SnapshotValues = new();
+    [Fact]
     public void GetValue_UsesEnvironmentSpecificVariableFirst()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_FEATURE_ENABLED", A<string?>._))
-            .Returns("true");
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "PRODUCTION__FEATURE__ENABLED", "true");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        var value = provider.GetValue<bool>("Production", "Feature.Enabled");
+        var value = ResolveValue<bool>(provider, "Production", "Feature:Enabled");
 
         Assert.True(value);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_FEATURE_ENABLED", A<string?>._))
-            .MustHaveHappenedOnceExactly();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("FEATURE_ENABLED", A<string?>._))
-            .MustNotHaveHappened();
+        A.CallTo(() => innerProvider.CaptureEnvironmentVariables()).MustHaveHappenedOnceExactly();
     }
 
     [Fact]
     public void GetValue_FallsBackToKeyWhenEnvironmentSpecificVariableMissing()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("DEV_US_SECTION_VALUE", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("SECTION_VALUE", A<string?>._))
-            .Returns("42");
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "DEV_US__SECTION__VALUE", null);
+        SetSnapshotValue(innerProvider, "SECTION__VALUE", "42");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        var value = provider.GetValue<int>("Dev-Us", "Section.Value");
+        var value = ResolveValue<int>(provider, "Dev-Us", "Section:Value");
 
         Assert.Equal(42, value);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("DEV_US_SECTION_VALUE", A<string?>._))
-            .MustHaveHappenedOnceExactly();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("SECTION_VALUE", A<string?>._))
-            .MustHaveHappenedOnceExactly();
+        A.CallTo(() => innerProvider.CaptureEnvironmentVariables()).MustHaveHappenedOnceExactly();
     }
 
     [Fact]
     public void GetValue_ParsesEnumValuesCaseInsensitive()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_DAY", A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("DAY", A<string?>._))
-            .Returns("monday");
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "PRODUCTION_DAY", null);
+        SetSnapshotValue(innerProvider, "DAY", "monday");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        var value = provider.GetValue<DayOfWeek>("Production", "Day");
+        var value = ResolveValue<DayOfWeek>(provider, "Production", "Day");
 
         Assert.Equal(DayOfWeek.Monday, value);
     }
@@ -61,54 +78,52 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void GetValue_HandlesNullableTypes()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_A", A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("A", A<string?>._)).Returns("123");
-        Assert.Equal(123, provider.GetValue<int?>("Production", "A"));
+        SetSnapshotValue(innerProvider, "PRODUCTION_A", null);
+        SetSnapshotValue(innerProvider, "A", "123");
+        Assert.Equal(123, ResolveValue<int?>(provider, "Production", "A"));
 
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_B", A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("B", A<string?>._)).Returns("");
-        Assert.Null(provider.GetValue<int?>("Production", "B"));
+        SetSnapshotValue(innerProvider, "PRODUCTION_B", null);
+        SetSnapshotValue(innerProvider, "B", "");
+        Assert.Throws<ConfigurationResolutionException>(() => ResolveValue<int?>(provider, "Production", "B"));
 
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_C", A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("C", A<string?>._)).Returns(null);
-        Assert.Null(provider.GetValue<int?>("Production", "C"));
+        SetSnapshotValue(innerProvider, "PRODUCTION_C", null);
+        SetSnapshotValue(innerProvider, "C", null);
+        Assert.Null(ResolveValue<int?>(provider, "Production", "C"));
     }
 
     [Fact]
-    public void GetValue_ReturnsDefaultOnInvalidFormat()
+    public void GetValue_ThrowsTerminalOnInvalidFormat()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("VALUE", A<string?>._))
-            .Returns("not-a-number");
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "VALUE", "not-a-number");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        Assert.Equal(0, provider.GetValue<int>("Production", "Value"));
+        Assert.Throws<ConfigurationResolutionException>(() => ResolveValue<int>(provider, "Production", "Value"));
     }
 
     [Fact]
-    public void GetValue_ReturnsDefaultOnOverflow()
+    public void GetValue_ThrowsTerminalOnOverflow()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("VALUE", A<string?>._))
-            .Returns(long.MaxValue.ToString());
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "VALUE", long.MaxValue.ToString());
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        Assert.Equal(0, provider.GetValue<int>("Production", "Value"));
+        Assert.Throws<ConfigurationResolutionException>(() => ResolveValue<int>(provider, "Production", "Value"));
     }
 
     [Fact]
     public void Properties_AreProxiedToInnerProvider()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.Environment).Returns("Test");
         A.CallTo(() => innerProvider.IsDevelopment).Returns(true);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("ANY", A<string?>._))
-            .Returns("value");
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("ANY", A<string?>._)).Returns("value");
+        SetSnapshotValue(innerProvider, "ANY", "value");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
@@ -118,27 +133,26 @@ public class EnvironmentConfigProviderTests
     }
 
     [Fact]
-    public void GetValue_ReturnsDefaultOnInvalidEnum()
+    public void GetValue_ThrowsTerminalOnInvalidEnum()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("VALUE", A<string?>._))
-            .Returns("InvalidEnumValue");
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "VALUE", "InvalidEnumValue");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        Assert.Equal(default(System.UriKind), provider.GetValue<System.UriKind>("Production", "Value"));
+        Assert.Throws<ConfigurationResolutionException>(() => ResolveValue<System.UriKind>(provider, "Production", "Value"));
     }
 
     [Fact]
     public void GetValue_BindsTopLevelListFromJsonValue()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP_ITEMS", A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("ITEMS", A<string?>._)).Returns("""["a","b"]""");
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "MYAPP__ITEMS", null);
+        SetSnapshotValue(innerProvider, "ITEMS", """["a","b"]""");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        var value = provider.GetValue<List<string>>("MyApp", "Items");
+        var value = ResolveValue<List<string>>(provider, "MyApp", "Items");
 
         Assert.NotNull(value);
         Assert.Equal(["a", "b"], value);
@@ -147,15 +161,13 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void GetValue_BindsTopLevelDictionaryFromJsonValue()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_SETTINGS", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("SETTINGS", A<string?>._))
-            .Returns("""{"Retries":3,"Timeout":30}""");
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "PRODUCTION_SETTINGS", null);
+        SetSnapshotValue(innerProvider, "SETTINGS", """{"Retries":3,"Timeout":30}""");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        var value = provider.GetValue<Dictionary<string, int>>("Production", "Settings");
+        var value = ResolveValue<Dictionary<string, int>>(provider, "Production", "Settings");
 
         Assert.NotNull(value);
         Assert.Equal(3, value["Retries"]);
@@ -165,27 +177,19 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void GetValue_BindsIndexedListFromDoubleUnderscoreVariables()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_MYAPP_ITEMS", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP_ITEMS", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__MYAPP__ITEMS", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__ITEMS", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__MYAPP__ITEMS__0", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__ITEMS__0", A<string?>._))
-            .Returns("First");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__ITEMS__1", A<string?>._))
-            .Returns("Second");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__ITEMS__2", A<string?>._))
-            .Returns(null);
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "PRODUCTION_MYAPP__ITEMS", null);
+        SetSnapshotValue(innerProvider, "MYAPP__ITEMS", null);
+        SetSnapshotValue(innerProvider, "PRODUCTION__MYAPP__ITEMS", null);
+        SetSnapshotValue(innerProvider, "MYAPP__ITEMS", null);
+        SetSnapshotValue(innerProvider, "PRODUCTION__MYAPP__ITEMS__0", null);
+        SetSnapshotValue(innerProvider, "MYAPP__ITEMS__0", "First");
+        SetSnapshotValue(innerProvider, "MYAPP__ITEMS__1", "Second");
+        SetSnapshotValue(innerProvider, "MYAPP__ITEMS__2", null);
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        var value = provider.GetValue<List<string>>("Production", "MyApp.Items");
+        var value = ResolveValue<List<string>>(provider, "Production", "MyApp:Items");
 
         Assert.NotNull(value);
         Assert.Equal(["First", "Second"], value);
@@ -194,113 +198,89 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void GetValue_BindsEnvScopedIndexedListFromDoubleUnderscoreVariables()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_MYAPP_ITEMS", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP_ITEMS", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__MYAPP__ITEMS", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__ITEMS", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__MYAPP__ITEMS__0", A<string?>._))
-            .Returns("First");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__MYAPP__ITEMS__1", A<string?>._))
-            .Returns("Second");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__MYAPP__ITEMS__2", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__ITEMS__0", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__ITEMS__1", A<string?>._))
-            .Returns(null);
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "PRODUCTION_MYAPP__ITEMS", null);
+        SetSnapshotValue(innerProvider, "MYAPP__ITEMS", null);
+        SetSnapshotValue(innerProvider, "PRODUCTION__MYAPP__ITEMS", null);
+        SetSnapshotValue(innerProvider, "MYAPP__ITEMS", null);
+        SetSnapshotValue(innerProvider, "PRODUCTION__MYAPP__ITEMS__0", "First");
+        SetSnapshotValue(innerProvider, "PRODUCTION__MYAPP__ITEMS__1", "Second");
+        SetSnapshotValue(innerProvider, "PRODUCTION__MYAPP__ITEMS__2", null);
+        SetSnapshotValue(innerProvider, "MYAPP__ITEMS__0", null);
+        SetSnapshotValue(innerProvider, "MYAPP__ITEMS__1", null);
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        var value = provider.GetValue<List<string>>("Production", "MyApp.Items");
+        var value = ResolveValue<List<string>>(provider, "Production", "MyApp:Items");
 
         Assert.NotNull(value);
         Assert.Equal(["First", "Second"], value);
     }
 
     [Fact]
-    public void GetValue_ContinuesToNextCandidateWhenEarlierValueIsUnparseable()
+    public void GetValue_ThrowsTerminalInsteadOfRescuingAnUnparseableHigherLayer()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_VALUE", A<string?>._))
-            .Returns("not-a-number");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("VALUE", A<string?>._))
-            .Returns("123");
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "PRODUCTION__VALUE", "not-a-number");
+        SetSnapshotValue(innerProvider, "VALUE", "123");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        var value = provider.GetValue<int>("Production", "Value");
-
-        Assert.Equal(123, value);
+        Assert.Throws<ConfigurationResolutionException>(() => ResolveValue<int>(provider, "Production", "Value"));
     }
 
     [Fact]
     public void GetValue_DeduplicatesDirectCandidatesWhenKeyHasNoSeparators()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_ITEMS", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("ITEMS", A<string?>._))
-            .Returns("not-json");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__ITEMS", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__ITEMS__0", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("ITEMS__0", A<string?>._))
-            .Returns(null);
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "PRODUCTION_ITEMS", null);
+        SetSnapshotValue(innerProvider, "ITEMS", "not-json");
+        SetSnapshotValue(innerProvider, "PRODUCTION__ITEMS", null);
+        SetSnapshotValue(innerProvider, "PRODUCTION__ITEMS__0", null);
+        SetSnapshotValue(innerProvider, "ITEMS__0", null);
 
         var provider = new EnvironmentConfigProvider(innerProvider);
-        var value = provider.GetValue<Dictionary<string, int>>("Production", "Items");
-
-        Assert.Null(value);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("ITEMS", A<string?>._))
-            .MustHaveHappenedOnceExactly();
+        Assert.Throws<ConfigurationResolutionException>(() => ResolveValue<Dictionary<string, int>>(provider, "Production", "Items"));
+        A.CallTo(() => innerProvider.CaptureEnvironmentVariables()).MustHaveHappenedOnceExactly();
     }
 
     [Fact]
     public void GetValue_ParsesGuid()
     {
         var expected = Guid.NewGuid();
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_ID", A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("ID", A<string?>._))
-            .Returns(expected.ToString("D"));
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "PRODUCTION_ID", null);
+        SetSnapshotValue(innerProvider, "ID", expected.ToString("D"));
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        var value = provider.GetValue<Guid>("Production", "Id");
+        var value = ResolveValue<Guid>(provider, "Production", "Id");
 
         Assert.Equal(expected, value);
     }
 
     [Fact]
-    public void GetValue_ReturnsDefaultOnInvalidGuid()
+    public void GetValue_ThrowsTerminalOnInvalidGuid()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_ID", A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("ID", A<string?>._))
-            .Returns("not-a-guid");
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "PRODUCTION_ID", null);
+        SetSnapshotValue(innerProvider, "ID", "not-a-guid");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        Assert.Equal(Guid.Empty, provider.GetValue<Guid>("Production", "Id"));
+        Assert.Throws<ConfigurationResolutionException>(() => ResolveValue<Guid>(provider, "Production", "Id"));
     }
 
     [Fact]
     public void GetValue_ParsesDateTime()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_WHEN", A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("WHEN", A<string?>._))
-            .Returns("2026-02-13T12:34:56Z");
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "PRODUCTION_WHEN", null);
+        SetSnapshotValue(innerProvider, "WHEN", "2026-02-13T12:34:56Z");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        var value = provider.GetValue<DateTime>("Production", "When");
+        var value = ResolveValue<DateTime>(provider, "Production", "When");
 
         Assert.Equal(new DateTime(2026, 2, 13, 12, 34, 56, DateTimeKind.Utc), value.ToUniversalTime());
     }
@@ -309,14 +289,13 @@ public class EnvironmentConfigProviderTests
     public void GetValue_ParsesDateTimeOffset()
     {
         var expected = DateTimeOffset.Parse("2026-02-13T12:34:56+00:00");
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_WHEN_OFFSET", A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("WHEN_OFFSET", A<string?>._))
-            .Returns("2026-02-13T12:34:56+00:00");
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "PRODUCTION__WHEN__OFFSET", null);
+        SetSnapshotValue(innerProvider, "WHEN__OFFSET", "2026-02-13T12:34:56+00:00");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        var value = provider.GetValue<DateTimeOffset>("Production", "When.Offset");
+        var value = ResolveValue<DateTimeOffset>(provider, "Production", "When:Offset");
 
         Assert.Equal(expected, value);
     }
@@ -325,14 +304,13 @@ public class EnvironmentConfigProviderTests
     public void GetValue_ParsesTimeSpan()
     {
         var expected = TimeSpan.FromMinutes(90);
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_DURATION", A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("DURATION", A<string?>._))
-            .Returns("01:30:00");
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "PRODUCTION_DURATION", null);
+        SetSnapshotValue(innerProvider, "DURATION", "01:30:00");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        var value = provider.GetValue<TimeSpan>("Production", "Duration");
+        var value = ResolveValue<TimeSpan>(provider, "Production", "Duration");
 
         Assert.Equal(expected, value);
     }
@@ -340,14 +318,13 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void GetValue_ParsesDecimalWithInvariantCulture()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_RATE", A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("RATE", A<string?>._))
-            .Returns("12.34");
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "PRODUCTION_RATE", null);
+        SetSnapshotValue(innerProvider, "RATE", "12.34");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        var value = provider.GetValue<decimal>("Production", "Rate");
+        var value = ResolveValue<decimal>(provider, "Production", "Rate");
 
         Assert.Equal(12.34m, value);
     }
@@ -355,109 +332,96 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void GetValue_HandlesNullableGuidEmptyString()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_OPTIONAL_ID", A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("OPTIONAL_ID", A<string?>._))
-            .Returns(string.Empty);
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "PRODUCTION__OPTIONAL__ID", null);
+        SetSnapshotValue(innerProvider, "OPTIONAL__ID", string.Empty);
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        Assert.Null(provider.GetValue<Guid?>("Production", "Optional.Id"));
+        Assert.Throws<ConfigurationResolutionException>(() => ResolveValue<Guid?>(provider, "Production", "Optional:Id"));
     }
 
     [Fact]
     public void GetValue_BindsIndexedArrayFromDoubleUnderscoreVariables()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_MYAPP_VALUES", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP_VALUES", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__MYAPP__VALUES", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__VALUES", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__MYAPP__VALUES__0", A<string?>._))
-            .Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__VALUES__0", A<string?>._))
-            .Returns("A");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__VALUES__1", A<string?>._))
-            .Returns("B");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__VALUES__2", A<string?>._))
-            .Returns(null);
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "PRODUCTION_MYAPP__VALUES", null);
+        SetSnapshotValue(innerProvider, "MYAPP__VALUES", null);
+        SetSnapshotValue(innerProvider, "PRODUCTION__MYAPP__VALUES", null);
+        SetSnapshotValue(innerProvider, "MYAPP__VALUES", null);
+        SetSnapshotValue(innerProvider, "PRODUCTION__MYAPP__VALUES__0", null);
+        SetSnapshotValue(innerProvider, "MYAPP__VALUES__0", "A");
+        SetSnapshotValue(innerProvider, "MYAPP__VALUES__1", "B");
+        SetSnapshotValue(innerProvider, "MYAPP__VALUES__2", null);
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        var value = provider.GetValue<string[]>("Production", "MyApp.Values");
+        var value = ResolveValue<string[]>(provider, "Production", "MyApp:Values");
 
         Assert.NotNull(value);
         Assert.Equal(["A", "B"], value);
     }
 
     [Fact]
-    public void GetValue_ReturnsDefaultOnUnsupportedJsonType()
+    public void GetValue_ThrowsTerminalOnUnsupportedJsonType()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_VALUE", A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("VALUE", A<string?>._))
-            .Returns("\"System.String\"");
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "PRODUCTION_VALUE", null);
+        SetSnapshotValue(innerProvider, "VALUE", "\"System.String\"");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        Assert.Null(provider.GetValue<Type>("Production", "Value"));
+        Assert.Throws<ConfigurationResolutionException>(() => ResolveValue<Type>(provider, "Production", "Value"));
     }
 
     [Fact]
-    public void GetValue_ReturnsDefaultOnInvalidDateTimeOffset()
+    public void GetValue_ThrowsTerminalOnInvalidDateTimeOffset()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_WHEN_OFFSET", A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("WHEN_OFFSET", A<string?>._))
-            .Returns("not-a-datetimeoffset");
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "PRODUCTION__WHEN__OFFSET", null);
+        SetSnapshotValue(innerProvider, "WHEN__OFFSET", "not-a-datetimeoffset");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        Assert.Equal(default(DateTimeOffset), provider.GetValue<DateTimeOffset>("Production", "When.Offset"));
+        Assert.Throws<ConfigurationResolutionException>(() => ResolveValue<DateTimeOffset>(provider, "Production", "When:Offset"));
     }
 
     [Fact]
-    public void GetValue_ReturnsDefaultOnInvalidTimeSpan()
+    public void GetValue_ThrowsTerminalOnInvalidTimeSpan()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_DURATION", A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("DURATION", A<string?>._))
-            .Returns("not-a-timespan");
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "PRODUCTION_DURATION", null);
+        SetSnapshotValue(innerProvider, "DURATION", "not-a-timespan");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        Assert.Equal(default(TimeSpan), provider.GetValue<TimeSpan>("Production", "Duration"));
+        Assert.Throws<ConfigurationResolutionException>(() => ResolveValue<TimeSpan>(provider, "Production", "Duration"));
     }
 
     [Fact]
-    public void GetValue_ReturnsDefaultWhenIndexedCollectionContainsInvalidElement()
+    public void GetValue_ThrowsTerminalWhenIndexedCollectionContainsInvalidElement()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION_MYAPP_VALUES", A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP_VALUES", A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__MYAPP__VALUES", A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__VALUES", A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__MYAPP__VALUES__0", A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__VALUES__0", A<string?>._)).Returns("1");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__VALUES__1", A<string?>._)).Returns("not-an-int");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__VALUES__2", A<string?>._)).Returns(null);
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "PRODUCTION_MYAPP__VALUES", null);
+        SetSnapshotValue(innerProvider, "MYAPP__VALUES", null);
+        SetSnapshotValue(innerProvider, "PRODUCTION__MYAPP__VALUES", null);
+        SetSnapshotValue(innerProvider, "MYAPP__VALUES", null);
+        SetSnapshotValue(innerProvider, "PRODUCTION__MYAPP__VALUES__0", null);
+        SetSnapshotValue(innerProvider, "MYAPP__VALUES__0", "1");
+        SetSnapshotValue(innerProvider, "MYAPP__VALUES__1", "not-an-int");
+        SetSnapshotValue(innerProvider, "MYAPP__VALUES__2", null);
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        Assert.Null(provider.GetValue<List<int>>("Production", "MyApp.Values"));
+        Assert.Throws<ConfigurationResolutionException>(() => ResolveValue<List<int>>(provider, "Production", "MyApp:Values"));
     }
 
     [Fact]
     public void TryPatch_PatchesNestedObjectFromDoubleUnderscoreVariables()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__DATABASE__PORT", A<string?>._))
-            .Returns("6543");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__DATABASE__PORT", "6543");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new AppSettings
@@ -470,10 +434,10 @@ public class EnvironmentConfigProviderTests
             }
         };
 
-        var patched = provider.TryPatch("Production", "MyApp.Settings", current, out AppSettings? value);
+        var patched = PatchLegacy(provider, "Production", "MyApp:Settings", current, out AppSettings? value);
 
         Assert.True(patched);
-        Assert.Same(current, value);
+        Assert.NotSame(current, value);
         Assert.NotNull(value);
         Assert.Equal("file", value.Mode);
         Assert.Equal("db.from.file", value.Database.Host);
@@ -483,16 +447,14 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void TryPatch_CreatesNestedObjectWhenOnlyChildEnvironmentVariablesExist()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__MYAPP__SETTINGS__MODE", A<string?>._))
-            .Returns("env");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__MYAPP__SETTINGS__DATABASE__HOST", A<string?>._))
-            .Returns("db.from.env");
+        SetSnapshotValue(innerProvider, "PRODUCTION__MYAPP__SETTINGS__MODE", "env");
+        SetSnapshotValue(innerProvider, "PRODUCTION__MYAPP__SETTINGS__DATABASE__HOST", "db.from.env");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        var patched = provider.TryPatch<AppSettings>("Production", "MyApp.Settings", null, out var value);
+        var patched = PatchLegacy<AppSettings>(provider, "Production", "MyApp:Settings", null, out var value);
 
         Assert.True(patched);
         Assert.NotNull(value);
@@ -504,17 +466,15 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void TryPatch_PatchesIndexedCollectionMember()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
-            .Returns("https://one.example");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
-            .Returns("https://two.example");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__0", "https://one.example");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__1", "https://two.example");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new AppSettings();
 
-        var patched = provider.TryPatch("Production", "MyApp.Settings", current, out AppSettings? value);
+        var patched = PatchLegacy(provider, "Production", "MyApp:Settings", current, out AppSettings? value);
 
         Assert.True(patched);
         Assert.NotNull(value);
@@ -524,10 +484,9 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void TryPatch_PatchesExistingGetterOnlyNestedObject()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__DATABASE__PORT", A<string?>._))
-            .Returns("6543");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__DATABASE__PORT", "6543");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new GetterOnlyAppSettings
@@ -537,10 +496,10 @@ public class EnvironmentConfigProviderTests
         current.Database.Host = "db.from.file";
         current.Database.Port = 5432;
 
-        var patched = provider.TryPatch("Production", "MyApp.Settings", current, out GetterOnlyAppSettings? value);
+        var patched = PatchLegacy(provider, "Production", "MyApp:Settings", current, out GetterOnlyAppSettings? value);
 
         Assert.True(patched);
-        Assert.Same(current, value);
+        Assert.NotSame(current, value);
         Assert.NotNull(value);
         Assert.Equal("file", value.Mode);
         Assert.Equal("db.from.file", value.Database.Host);
@@ -550,21 +509,19 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void TryPatch_PatchesExistingGetterOnlyCollection()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
-            .Returns("https://one.example");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
-            .Returns("https://two.example");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__0", "https://one.example");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__1", "https://two.example");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new GetterOnlyAppSettings();
         current.Endpoints.Add("https://file.example");
 
-        var patched = provider.TryPatch("Production", "MyApp.Settings", current, out GetterOnlyAppSettings? value);
+        var patched = PatchLegacy(provider, "Production", "MyApp:Settings", current, out GetterOnlyAppSettings? value);
 
         Assert.True(patched);
-        Assert.Same(current, value);
+        Assert.NotSame(current, value);
         Assert.NotNull(value);
         Assert.Equal(["https://one.example", "https://two.example"], value.Endpoints);
     }
@@ -572,18 +529,16 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void TryPatch_PatchesExistingGetterOnlyCollectionFromEnvironmentScopedVariables()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
-            .Returns("https://one.example");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
-            .Returns("https://two.example");
+        SetSnapshotValue(innerProvider, "PRODUCTION__MYAPP__SETTINGS__ENDPOINTS__0", "https://one.example");
+        SetSnapshotValue(innerProvider, "PRODUCTION__MYAPP__SETTINGS__ENDPOINTS__1", "https://two.example");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new GetterOnlyAppSettings();
         current.Endpoints.Add("https://file.example");
 
-        var patched = provider.TryPatch("Production", "MyApp.Settings", current, out GetterOnlyAppSettings? value);
+        var patched = PatchLegacy(provider, "Production", "MyApp:Settings", current, out GetterOnlyAppSettings? value);
 
         Assert.True(patched);
         Assert.NotNull(value);
@@ -593,10 +548,10 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void TryPatch_DoesNotPatchScalarTopLevelValue()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        var patched = provider.TryPatch<string>("Production", "MyApp.Settings", null, out var value);
+        var patched = PatchLegacy<string>(provider, "Production", "MyApp:Settings", null, out var value);
 
         Assert.False(patched);
         Assert.Null(value);
@@ -605,10 +560,10 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void TryPatch_DoesNotPatchNullableScalarTopLevelValue()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        var patched = provider.TryPatch<int?>("Production", "MyApp.Settings", null, out var value);
+        var patched = PatchLegacy<int?>(provider, "Production", "MyApp:Settings", null, out var value);
 
         Assert.False(patched);
         Assert.Null(value);
@@ -617,10 +572,10 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void TryPatch_DoesNotPatchTopLevelRuntimeScalarValue()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        var patched = provider.TryPatch<object>("Production", "MyApp.Settings", "file", out var value);
+        var patched = PatchLegacy<object>(provider, "Production", "MyApp:Settings", "file", out var value);
 
         Assert.False(patched);
         Assert.Null(value);
@@ -629,10 +584,10 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void TryPatch_DoesNotCreateTopLevelInterfaceValue()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         var provider = new EnvironmentConfigProvider(innerProvider);
 
-        var patched = provider.TryPatch<IConfigPatchContract>("Production", "MyApp.Settings", null, out var value);
+        var patched = PatchLegacy<IConfigPatchContract>(provider, "Production", "MyApp:Settings", null, out var value);
 
         Assert.False(patched);
         Assert.Null(value);
@@ -641,13 +596,13 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void TryPatch_SkipsIndexerProperties()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new IndexedOptions();
 
-        var patched = provider.TryPatch("Production", "MyApp.Settings", current, out IndexedOptions? value);
+        var patched = PatchLegacy(provider, "Production", "MyApp:Settings", current, out IndexedOptions? value);
 
         Assert.False(patched);
         Assert.Null(value);
@@ -657,15 +612,14 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void TryPatch_DoesNotPatchGetterOnlyScalarProperty()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__MODE", A<string?>._))
-            .Returns("environment");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__MODE", "environment");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new GetterOnlyScalarOptions();
 
-        var patched = provider.TryPatch("Production", "MyApp.Settings", current, out GetterOnlyScalarOptions? value);
+        var patched = PatchLegacy(provider, "Production", "MyApp:Settings", current, out GetterOnlyScalarOptions? value);
 
         Assert.False(patched);
         Assert.Null(value);
@@ -675,15 +629,14 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void TryPatch_DoesNotPatchPrivateSetterScalarProperty()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__MODE", A<string?>._))
-            .Returns("environment");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__MODE", "environment");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new PrivateSetterOptions();
 
-        var patched = provider.TryPatch("Production", "MyApp.Settings", current, out PrivateSetterOptions? value);
+        var patched = PatchLegacy(provider, "Production", "MyApp:Settings", current, out PrivateSetterOptions? value);
 
         Assert.False(patched);
         Assert.Null(value);
@@ -693,51 +646,54 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void TryPatch_DoesNotAttachNullGetterOnlyNestedObject()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__DATABASE__PORT", A<string?>._))
-            .Returns("6543");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__DATABASE__PORT", "6543");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new NullGetterOnlyOptions();
 
-        var patched = provider.TryPatch("Production", "MyApp.Settings", current, out NullGetterOnlyOptions? value);
+        var request = new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings"));
+        var result = ((IConfigValuePatcher)provider).Patch(request, current);
 
-        Assert.False(patched);
-        Assert.Null(value);
+        Assert.Equal(ConfigPatchStatus.Terminal, result.Status);
+        Assert.Equal("config-patch-failed", result.Diagnostic!.Code);
+        Assert.Contains("MyApp:Settings:Database", result.Diagnostic.Cause);
+        Assert.Null(result.Value);
         Assert.Null(current.Database);
     }
 
     [Fact]
     public void TryPatch_DoesNotUsePrivateSetterToAttachNestedObject()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__DATABASE__PORT", A<string?>._))
-            .Returns("6543");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__DATABASE__PORT", "6543");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new PrivateSetterChildOptions();
 
-        var patched = provider.TryPatch("Production", "MyApp.Settings", current, out PrivateSetterChildOptions? value);
+        var request = new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings"));
+        var result = ((IConfigValuePatcher)provider).Patch(request, current);
 
-        Assert.False(patched);
-        Assert.Null(value);
+        Assert.Equal(ConfigPatchStatus.Terminal, result.Status);
+        Assert.Equal("config-patch-failed", result.Diagnostic!.Code);
+        Assert.Contains("MyApp:Settings:Database", result.Diagnostic.Cause);
+        Assert.Null(result.Value);
         Assert.Null(current.Database);
     }
 
     [Fact]
     public void TryPatch_DoesNotPatchGetterOnlyReadOnlyCollection()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
-            .Returns("https://one.example");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__0", "https://one.example");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new GetterOnlyReadOnlyCollectionOptions();
 
-        var patched = provider.TryPatch("Production", "MyApp.Settings", current, out GetterOnlyReadOnlyCollectionOptions? value);
+        var patched = PatchLegacy(provider, "Production", "MyApp:Settings", current, out GetterOnlyReadOnlyCollectionOptions? value);
 
         Assert.False(patched);
         Assert.Null(value);
@@ -745,12 +701,11 @@ public class EnvironmentConfigProviderTests
     }
 
     [Fact]
-    public void TryPatch_PatchesRootMemberWhenKeyIsEmpty()
+    public void TryPatch_RejectsEmptyLogicalKey()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MODE", A<string?>._))
-            .Returns("environment");
+        SetSnapshotValue(innerProvider, "MODE", "environment");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new AppSettings
@@ -758,34 +713,26 @@ public class EnvironmentConfigProviderTests
             Mode = "file"
         };
 
-        var patched = provider.TryPatch("Production", string.Empty, current, out AppSettings? value);
-
-        Assert.True(patched);
-        Assert.Same(current, value);
-        Assert.Equal("environment", value?.Mode);
+        Assert.Throws<FormatException>(() => PatchLegacy(provider, "Production", string.Empty, current, out AppSettings? _));
     }
 
     [Fact]
     public void TryPatch_PatchesPublicWritableFields()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__MODE", A<string?>._))
-            .Returns("environment");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__DATABASE__PORT", A<string?>._))
-            .Returns("6543");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__READ_ONLY_MODE", A<string?>._))
-            .Returns("environment-readonly");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__MODE", "environment");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__DATABASE__PORT", "6543");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new FieldBackedOptions();
         current.Database.Host = "db.from.file";
         current.Database.Port = 5432;
 
-        var patched = provider.TryPatch("Production", "MyApp.Settings", current, out FieldBackedOptions? value);
+        var patched = PatchLegacy(provider, "Production", "MyApp:Settings", current, out FieldBackedOptions? value);
 
         Assert.True(patched);
-        Assert.Same(current, value);
+        Assert.NotSame(current, value);
         Assert.NotNull(value);
         Assert.Equal("environment", value.Mode);
         Assert.Equal("file-readonly", value.ReadOnlyMode);
@@ -794,20 +741,39 @@ public class EnvironmentConfigProviderTests
     }
 
     [Fact]
+    public void TryPatch_RejectsConfiguredReadOnlyFieldWithoutMutatingOriginal()
+    {
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__MODE", "environment");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__READONLYMODE", "environment-readonly");
+        var provider = new EnvironmentConfigProvider(innerProvider);
+        var current = new FieldBackedOptions();
+
+        var result = ((IConfigValuePatcher)provider).Patch(
+            new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), current);
+
+        Assert.Equal(ConfigPatchStatus.Terminal, result.Status);
+        Assert.Equal("config-patch-failed", result.Diagnostic?.Code);
+        Assert.Contains("MyApp:Settings:ReadOnlyMode", result.Diagnostic!.Cause, StringComparison.Ordinal);
+        Assert.Null(result.Value);
+        Assert.Equal("file", current.Mode);
+        Assert.Equal("file-readonly", current.ReadOnlyMode);
+    }
+
+    [Fact]
     public void TryPatch_CreatesNullFieldChildWhenChildEnvironmentVariablesExist()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__DATABASE__PORT", A<string?>._))
-            .Returns("6543");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__DATABASE__PORT", "6543");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new NullableFieldBackedOptions();
 
-        var patched = provider.TryPatch("Production", "MyApp.Settings", current, out NullableFieldBackedOptions? value);
+        var patched = PatchLegacy(provider, "Production", "MyApp:Settings", current, out NullableFieldBackedOptions? value);
 
         Assert.True(patched);
-        Assert.Same(current, value);
+        Assert.NotSame(current, value);
         Assert.NotNull(value?.Database);
         Assert.Equal(6543, value.Database.Port);
     }
@@ -815,15 +781,14 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void TryPatch_SkipsNullInterfaceChildProperty()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__CHILD__VALUE", A<string?>._))
-            .Returns("environment");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__CHILD__VALUE", "environment");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new InterfaceChildOptions();
 
-        var patched = provider.TryPatch("Production", "MyApp.Settings", current, out InterfaceChildOptions? value);
+        var patched = PatchLegacy(provider, "Production", "MyApp:Settings", current, out InterfaceChildOptions? value);
 
         Assert.False(patched);
         Assert.Null(value);
@@ -833,15 +798,14 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void TryPatch_SkipsChildPropertyWhenConstructorThrows()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__CHILD__VALUE", A<string?>._))
-            .Returns("environment");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__CHILD__VALUE", "environment");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new ThrowingChildOptions();
 
-        var patched = provider.TryPatch("Production", "MyApp.Settings", current, out ThrowingChildOptions? value);
+        var patched = PatchLegacy(provider, "Production", "MyApp:Settings", current, out ThrowingChildOptions? value);
 
         Assert.False(patched);
         Assert.Null(value);
@@ -851,15 +815,14 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void TryPatch_DoesNotRecurseThroughCycles()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__CHILD__NAME", A<string?>._))
-            .Returns("environment");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__CHILD__NAME", "environment");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new CyclicOptions();
 
-        var patched = provider.TryPatch("Production", "MyApp.Settings", current, out CyclicOptions? value);
+        var patched = PatchLegacy(provider, "Production", "MyApp:Settings", current, out CyclicOptions? value);
 
         Assert.False(patched);
         Assert.Null(value);
@@ -869,10 +832,9 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void TryPatch_DoesNotReplaceExistingValueWhenChildEnvironmentVariableIsInvalid()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__DATABASE__PORT", A<string?>._))
-            .Returns("not-a-port");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__DATABASE__PORT", "not-a-port");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new AppSettings
@@ -884,7 +846,7 @@ public class EnvironmentConfigProviderTests
             }
         };
 
-        var patched = provider.TryPatch("Production", "MyApp.Settings", current, out AppSettings? value);
+        var patched = PatchLegacy(provider, "Production", "MyApp:Settings", current, out AppSettings? value);
 
         Assert.False(patched);
         Assert.Null(value);
@@ -894,15 +856,14 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void Resolve_ReturnsInvalidDiagnosticWhenDirectValueCannotConvert()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PORT", A<string?>._))
-            .Returns("not-a-port");
+        SetSnapshotValue(innerProvider, "PORT", "not-a-port");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
         var resolution = ((IConfigDiagnosticProvider)provider)
-            .Resolve("Production", "Port", typeof(int), ConfigAuditSourceRole.Override);
+            .Resolve(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Port")), typeof(int), ConfigAuditSourceRole.Override);
 
         Assert.Equal(ConfigAuditEntryState.Invalid, resolution.State);
         Assert.Contains(resolution.Diagnostics, diagnostic => diagnostic.Code == "config-environment-conversion-failed");
@@ -912,19 +873,16 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void Resolve_ReadsIndexedCollectionsWithSourceDiagnostics()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__ITEMS__0", A<string?>._))
-            .Returns("first");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__ITEMS__1", A<string?>._))
-            .Returns("second");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("FALLBACKITEMS__0", A<string?>._))
-            .Returns("fallback");
+        SetSnapshotValue(innerProvider, "PRODUCTION__ITEMS__0", "first");
+        SetSnapshotValue(innerProvider, "PRODUCTION__ITEMS__1", "second");
+        SetSnapshotValue(innerProvider, "FALLBACKITEMS__0", "fallback");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
         var resolution = ((IConfigDiagnosticProvider)provider)
-            .Resolve("Production", "Items", typeof(string[]), ConfigAuditSourceRole.Override);
+            .Resolve(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Items")), typeof(string[]), ConfigAuditSourceRole.Override);
 
         var values = Assert.IsType<string[]>(resolution.Value);
         Assert.Equal(["first", "second"], values);
@@ -932,7 +890,7 @@ public class EnvironmentConfigProviderTests
         Assert.All(resolution.Sources, source => Assert.Equal(ConfigAuditSourceKind.EnvironmentVariable, source.Kind));
 
         var fallbackResolution = ((IConfigDiagnosticProvider)provider)
-            .Resolve("Production", "FallbackItems", typeof(List<string>), ConfigAuditSourceRole.Override);
+            .Resolve(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("FallbackItems")), typeof(List<string>), ConfigAuditSourceRole.Override);
         var fallbackValues = Assert.IsType<List<string>>(fallbackResolution.Value);
         Assert.Equal(["fallback"], fallbackValues);
     }
@@ -940,124 +898,129 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void Resolve_ReturnsInvalidWhenIndexedCollectionElementCannotConvert()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("ITEMS__0", A<string?>._))
-            .Returns("not-a-number");
+        SetSnapshotValue(innerProvider, "ITEMS__0", "not-a-number");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
         var resolution = ((IConfigDiagnosticProvider)provider)
-            .Resolve("Production", "Items", typeof(List<int>), ConfigAuditSourceRole.Override);
+            .Resolve(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Items")), typeof(List<int>), ConfigAuditSourceRole.Override);
 
         Assert.Equal(ConfigAuditEntryState.Invalid, resolution.State);
-        Assert.Contains(resolution.Diagnostics, diagnostic => diagnostic.ConfigPath == "Items.0");
+        Assert.Contains(resolution.Diagnostics, diagnostic => diagnostic.ConfigPath == "Items:0");
     }
 
     [Fact]
-    public void TracePatch_DoesNotReportSourceForReadableButUnpatchableMembers()
+    public void TracePatch_RejectsDirectValueForReadableButUnpatchableMember()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__MODE", A<string?>._))
-            .Returns("environment");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__DATABASE__PORT", A<string?>._))
-            .Returns("6543");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__MODE", "environment");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__DATABASE__PORT", "6543");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
         var patch = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", null, typeof(GetterOnlyScalarWithWritableChildOptions));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), null, typeof(GetterOnlyScalarWithWritableChildOptions));
 
-        var value = Assert.IsType<GetterOnlyScalarWithWritableChildOptions>(patch.Value);
-        Assert.True(patch.Patched);
+        Assert.Null(patch.Value);
+        Assert.False(patch.Patched);
+        Assert.Contains(patch.Diagnostics, diagnostic => diagnostic.Code == "config-patch-failed"
+            && diagnostic.ConfigPath == "MyApp:Settings:Mode");
+        Assert.Empty(patch.Sources);
+
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__MODE", null);
+        var noDirectValue = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), null, typeof(GetterOnlyScalarWithWritableChildOptions));
+        var value = Assert.IsType<GetterOnlyScalarWithWritableChildOptions>(noDirectValue.Value);
+        Assert.True(noDirectValue.Patched);
         Assert.Equal("file", value.Mode);
         Assert.Equal(6543, value.Database.Port);
-        Assert.DoesNotContain(patch.Sources, source => source.ConfigPath == "MyApp.Settings.Mode");
-        Assert.Contains(patch.Sources, source => source.ConfigPath == "MyApp.Settings.Database.Port");
     }
 
     [Fact]
     public void TracePatch_CoversDiagnosticPatchBranchesWithoutMutatingInputs()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
-            .Returns("https://one.example");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
-            .Returns("https://two.example");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__DATABASE__PORT", A<string?>._))
-            .Returns("6543");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__MODE", A<string?>._))
-            .Returns("environment");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__CHILD__VALUE", A<string?>._))
-            .Returns("environment-child");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__0", "https://one.example");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__1", "https://two.example");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__DATABASE__PORT", "6543");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__MODE", "environment");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__CHILD__VALUE", "environment-child");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
         var simpleNull = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", null, typeof(string));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), null, typeof(string));
         Assert.False(simpleNull.Patched);
 
         var scalarRuntime = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", 42, typeof(object));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), 42, typeof(object));
         Assert.False(scalarRuntime.Patched);
 
         var abstractType = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", null, typeof(AbstractPatchOptions));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), null, typeof(AbstractPatchOptions));
         Assert.False(abstractType.Patched);
 
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__CHILD__VALUE", null);
         var created = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", null, typeof(AppSettings));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), null, typeof(AppSettings));
         var createdValue = Assert.IsType<AppSettings>(created.Value);
         Assert.True(created.Patched);
         Assert.Equal(["https://one.example", "https://two.example"], createdValue.Endpoints);
         Assert.Equal(6543, createdValue.Database.Port);
 
         var getterOnly = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", null, typeof(GetterOnlyAppSettings));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), null, typeof(GetterOnlyAppSettings));
         var getterOnlyValue = Assert.IsType<GetterOnlyAppSettings>(getterOnly.Value);
         Assert.True(getterOnly.Patched);
         Assert.Equal(["https://one.example", "https://two.example"], getterOnlyValue.Endpoints);
 
         var readOnlyCollection = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", null, typeof(GetterOnlyReadOnlyCollectionOptions));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), null, typeof(GetterOnlyReadOnlyCollectionOptions));
         Assert.False(readOnlyCollection.Patched);
 
         var indexed = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", null, typeof(IndexedOptions));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), null, typeof(IndexedOptions));
         Assert.False(indexed.Patched);
 
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__0", null);
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__1", null);
         var fieldBacked = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", null, typeof(FieldBackedOptions));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), null, typeof(FieldBackedOptions));
         var fieldBackedValue = Assert.IsType<FieldBackedOptions>(fieldBacked.Value);
         Assert.True(fieldBacked.Patched);
         Assert.Equal("environment", fieldBackedValue.Mode);
         Assert.Equal("file-readonly", fieldBackedValue.ReadOnlyMode);
         Assert.Equal(6543, fieldBackedValue.Database.Port);
 
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__MODE", null);
         var nullableField = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", null, typeof(NullableFieldBackedOptions));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), null, typeof(NullableFieldBackedOptions));
         var nullableFieldValue = Assert.IsType<NullableFieldBackedOptions>(nullableField.Value);
         Assert.True(nullableField.Patched);
         Assert.NotNull(nullableFieldValue.Database);
         Assert.Equal(6543, nullableFieldValue.Database.Port);
 
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__DATABASE__PORT", null);
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__CHILD__VALUE", "environment-child");
         var interfaceChild = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", null, typeof(InterfaceChildOptions));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), null, typeof(InterfaceChildOptions));
         Assert.False(interfaceChild.Patched);
 
         var throwingChild = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", null, typeof(ThrowingChildOptions));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), null, typeof(ThrowingChildOptions));
         Assert.False(throwingChild.Patched);
 
         var createdCycle = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", null, typeof(CyclicOptions));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), null, typeof(CyclicOptions));
         Assert.False(createdCycle.Patched);
 
         var cyclic = new CyclicOptions();
         var cloneFailure = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", cyclic, typeof(CyclicOptions));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), cyclic, typeof(CyclicOptions));
         Assert.False(cloneFailure.Patched);
         Assert.Contains(cloneFailure.Diagnostics, diagnostic => diagnostic.Code == "config-patch-clone-failed");
         Assert.Empty(cloneFailure.Facts);
@@ -1066,12 +1029,10 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void TracePatch_RecordsPerElementPriorPresenceForCollectionReplacement()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
-            .Returns("https://one.example");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
-            .Returns("https://two.example");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__0", "https://one.example");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__1", "https://two.example");
         var current = new AppSettings
         {
             Endpoints = ["https://file.example"]
@@ -1080,11 +1041,11 @@ public class EnvironmentConfigProviderTests
         var provider = new EnvironmentConfigProvider(innerProvider);
 
         var patch = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", current, typeof(AppSettings));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), current, typeof(AppSettings));
 
         Assert.True(patch.Patched);
-        var first = Assert.Single(patch.Facts, fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0");
-        var second = Assert.Single(patch.Facts, fact => fact.ConfigPath == "MyApp.Settings.Endpoints.1");
+        var first = Assert.Single(patch.Facts, fact => fact.ConfigPath == "MyApp:Settings:Endpoints:0");
+        var second = Assert.Single(patch.Facts, fact => fact.ConfigPath == "MyApp:Settings:Endpoints:1");
         Assert.Equal(ConfigAuditPriorPresence.Present, first.PriorPresence);
         Assert.Equal(ConfigAuditPriorPresence.Missing, second.PriorPresence);
         Assert.Equal(ConfigPatchProvenanceAction.ReplacedCollection, first.Action);
@@ -1093,12 +1054,10 @@ public class EnvironmentConfigProviderTests
     [Fact]
     public void TracePatch_RecordsEnvironmentScopedCollectionReplacementFacts()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
-            .Returns("https://one.example");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
-            .Returns("https://two.example");
+        SetSnapshotValue(innerProvider, "PRODUCTION__MYAPP__SETTINGS__ENDPOINTS__0", "https://one.example");
+        SetSnapshotValue(innerProvider, "PRODUCTION__MYAPP__SETTINGS__ENDPOINTS__1", "https://two.example");
         var current = new AppSettings
         {
             Endpoints = ["https://file.example"]
@@ -1107,24 +1066,23 @@ public class EnvironmentConfigProviderTests
         var provider = new EnvironmentConfigProvider(innerProvider);
 
         var patch = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", current, typeof(AppSettings));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), current, typeof(AppSettings));
 
         Assert.True(patch.Patched);
         Assert.Equal(
             ConfigAuditPriorPresence.Present,
-            patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0").PriorPresence);
+            patch.Facts.Single(fact => fact.ConfigPath == "MyApp:Settings:Endpoints:0").PriorPresence);
         Assert.Equal(
             ConfigAuditPriorPresence.Missing,
-            patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.1").PriorPresence);
+            patch.Facts.Single(fact => fact.ConfigPath == "MyApp:Settings:Endpoints:1").PriorPresence);
     }
 
     [Fact]
     public void TracePatch_RecordsUnknownPriorPresenceWhenProviderEvidenceCollectionIsNull()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
-            .Returns("https://one.example");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__0", "https://one.example");
         var current = new AppSettings
         {
             Endpoints = null!
@@ -1133,84 +1091,80 @@ public class EnvironmentConfigProviderTests
         var provider = new EnvironmentConfigProvider(innerProvider);
 
         var patch = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", current, typeof(AppSettings));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), current, typeof(AppSettings));
 
         Assert.True(patch.Patched);
-        var fact = Assert.Single(patch.Facts, fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0");
+        var fact = Assert.Single(patch.Facts, fact => fact.ConfigPath == "MyApp:Settings:Endpoints:0");
         Assert.Equal(ConfigAuditPriorPresence.Unknown, fact.PriorPresence);
     }
 
     [Fact]
     public void TracePatch_RecordsUnknownPriorPresenceForSetOnlyCollectionProperty()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
-            .Returns("https://one.example");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__0", "https://one.example");
         var current = new SetOnlyEndpointSettings();
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
         var patch = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", current, typeof(SetOnlyEndpointSettings));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), current, typeof(SetOnlyEndpointSettings));
 
         Assert.True(patch.Patched);
         var value = Assert.IsType<SetOnlyEndpointSettings>(patch.Value);
         Assert.Equal(["https://one.example"], value.WrittenEndpoints);
-        var fact = Assert.Single(patch.Facts, fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0");
+        var fact = Assert.Single(patch.Facts, fact => fact.ConfigPath == "MyApp:Settings:Endpoints:0");
         Assert.Equal(ConfigAuditPriorPresence.Unknown, fact.PriorPresence);
     }
 
     [Fact]
     public void TracePatch_TreatsConstructorDefaultCollectionAsMissingWhenRootWasMissing()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
-            .Returns("https://one.example");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__0", "https://one.example");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
         var patch = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", null, typeof(ConstructorDefaultCollectionOptions));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), null, typeof(ConstructorDefaultCollectionOptions));
 
         Assert.True(patch.Patched);
-        var fact = Assert.Single(patch.Facts, fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0");
+        var fact = Assert.Single(patch.Facts, fact => fact.ConfigPath == "MyApp:Settings:Endpoints:0");
         Assert.Equal(ConfigAuditPriorPresence.Missing, fact.PriorPresence);
     }
 
     [Fact]
     public void TracePatch_RecordsPerElementPriorPresenceForGetterOnlyCollectionPatch()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
-            .Returns("https://one.example");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
-            .Returns("https://two.example");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__0", "https://one.example");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__1", "https://two.example");
         var current = new GetterOnlyAppSettings();
         current.Endpoints.Add("https://file.example");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
         var patch = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", current, typeof(GetterOnlyAppSettings));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), current, typeof(GetterOnlyAppSettings));
 
         Assert.True(patch.Patched);
+        var patchedValue = Assert.IsType<GetterOnlyAppSettings>(patch.Value);
+        Assert.Equal(["https://one.example", "https://two.example"], patchedValue.Endpoints);
         Assert.Equal(ConfigPatchProvenanceAction.PatchedExistingCollection, patch.Facts[0].Action);
-        Assert.Equal(ConfigAuditPriorPresence.Present, patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0").PriorPresence);
-        Assert.Equal(ConfigAuditPriorPresence.Missing, patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.1").PriorPresence);
+        Assert.Equal(ConfigAuditPriorPresence.Present, patch.Facts.Single(fact => fact.ConfigPath == "MyApp:Settings:Endpoints:0").PriorPresence);
+        Assert.Equal(ConfigAuditPriorPresence.Missing, patch.Facts.Single(fact => fact.ConfigPath == "MyApp:Settings:Endpoints:1").PriorPresence);
     }
 
     [Fact]
     public void TracePatch_RecordsArrayPriorPresenceForCollectionReplacement()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
-            .Returns("https://one.example");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
-            .Returns("https://two.example");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__0", "https://one.example");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__1", "https://two.example");
         var current = new ArrayEndpointSettings
         {
             Endpoints = ["https://file.example"]
@@ -1219,22 +1173,20 @@ public class EnvironmentConfigProviderTests
         var provider = new EnvironmentConfigProvider(innerProvider);
 
         var patch = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", current, typeof(ArrayEndpointSettings));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), current, typeof(ArrayEndpointSettings));
 
         Assert.True(patch.Patched);
-        Assert.Equal(ConfigAuditPriorPresence.Present, patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0").PriorPresence);
-        Assert.Equal(ConfigAuditPriorPresence.Missing, patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.1").PriorPresence);
+        Assert.Equal(ConfigAuditPriorPresence.Present, patch.Facts.Single(fact => fact.ConfigPath == "MyApp:Settings:Endpoints:0").PriorPresence);
+        Assert.Equal(ConfigAuditPriorPresence.Missing, patch.Facts.Single(fact => fact.ConfigPath == "MyApp:Settings:Endpoints:1").PriorPresence);
     }
 
     [Fact]
     public void TracePatch_RecordsReadOnlyCollectionPriorPresenceForCollectionReplacement()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
-            .Returns("https://one.example");
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
-            .Returns("https://two.example");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__0", "https://one.example");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__1", "https://two.example");
         var current = new ReadOnlyEndpointSettings
         {
             Endpoints = new ReadOnlyEndpointList("https://file.example")
@@ -1243,29 +1195,60 @@ public class EnvironmentConfigProviderTests
         var provider = new EnvironmentConfigProvider(innerProvider);
 
         var patch = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", current, typeof(ReadOnlyEndpointSettings));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), current, typeof(ReadOnlyEndpointSettings));
 
         Assert.True(patch.Patched);
-        Assert.Equal(ConfigAuditPriorPresence.Present, patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0").PriorPresence);
-        Assert.Equal(ConfigAuditPriorPresence.Missing, patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.1").PriorPresence);
+        Assert.Equal(ConfigAuditPriorPresence.Present, patch.Facts.Single(fact => fact.ConfigPath == "MyApp:Settings:Endpoints:0").PriorPresence);
+        Assert.Equal(ConfigAuditPriorPresence.Missing, patch.Facts.Single(fact => fact.ConfigPath == "MyApp:Settings:Endpoints:1").PriorPresence);
     }
 
     [Fact]
     public void TracePatch_SkipsGetterOnlyMultiDimensionalArrayCollection()
     {
-        var innerProvider = A.Fake<IEnvironmentProvider>();
+        var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
-        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
-            .Returns("https://one.example");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__ENDPOINTS__0", "https://one.example");
         var current = new MultiDimensionalArrayEndpointSettings();
 
         var provider = new EnvironmentConfigProvider(innerProvider);
 
         var patch = ((IConfigDiagnosticPatcher)provider)
-            .TracePatch("Production", "MyApp.Settings", current, typeof(MultiDimensionalArrayEndpointSettings));
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), current, typeof(MultiDimensionalArrayEndpointSettings));
 
         Assert.False(patch.Patched);
         Assert.Empty(patch.Facts);
+    }
+
+    private static bool PatchLegacy<T>(EnvironmentConfigProvider provider, string environment, string key, T? currentValue, out T? patchedValue)
+    {
+        var request = new ConfigProviderRequest(environment, AppSurfaceConfigKey.Parse(key));
+        var result = ((IConfigValuePatcher)provider).Patch(request, currentValue);
+        patchedValue = result.Value;
+        return result.Status == ConfigPatchStatus.Applied;
+    }
+
+    private static IEnvironmentProvider SnapshotFake()
+    {
+        var fake = A.Fake<IEnvironmentProvider>();
+        var values = SnapshotValues.GetOrCreateValue(fake);
+        A.CallTo(() => fake.Environment).Returns("Production");
+        A.CallTo(() => fake.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => fake.CaptureEnvironmentVariables()).ReturnsLazily(() =>
+            new Dictionary<string, string>(values, StringComparer.Ordinal));
+        return fake;
+    }
+
+    private static void SetSnapshotValue(IEnvironmentProvider provider, string name, string? value)
+    {
+        var values = SnapshotValues.GetOrCreateValue(provider);
+        if (value is null)
+        {
+            values.Remove(name);
+        }
+        else
+        {
+            values[name] = value;
+        }
     }
 
     private sealed class AppSettings

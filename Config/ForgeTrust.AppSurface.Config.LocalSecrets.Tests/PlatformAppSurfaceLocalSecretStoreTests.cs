@@ -9,7 +9,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         "MyApp",
         "Development",
         null,
-        "Stripe:ApiKey",
+        AppSurfaceConfigKey.Parse("Stripe:ApiKey"),
         "appsurface:MyApp:Development:Stripe:ApiKey");
 
     [Fact]
@@ -448,7 +448,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
     {
         var unicode = Identity with
         {
-            Key = "Stripe:雪",
+            Key = AppSurfaceConfigKey.Parse("Stripe:雪"),
             StorageName = "appsurface:MyApp:Development:Stripe:雪"
         };
         var account = PlatformAppSurfaceLocalSecretStore.MacOsKeychainLocalSecretStore.Account(unicode);
@@ -489,7 +489,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
     }
 
     [Fact]
-    public void IndexedStore_Should_PreserveCaseVariantKeysInListAndDelete()
+    public void IndexedStore_Should_PreserveStoredSpellingAndDeleteThroughCaseVariant()
     {
         var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
         var store = new IndexedMemoryStore();
@@ -503,15 +503,14 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         var afterDelete = store.List("MyApp", "Development", null);
 
         Assert.Equal(LocalSecretResultStatus.Found, beforeDelete.Status);
-        Assert.Contains("Stripe:ApiKey", beforeDelete.Keys);
-        Assert.Contains("stripe:apikey", beforeDelete.Keys);
-        Assert.Contains("Stripe:ApiKey", afterDelete.Keys);
-        Assert.DoesNotContain("stripe:apikey", afterDelete.Keys);
-        Assert.Equal("upper-secret", store.Get(upper).Value);
+        Assert.Equal(["Stripe:ApiKey"], beforeDelete.Keys);
+        Assert.Empty(afterDelete.Keys);
+        Assert.Equal(LocalSecretResultStatus.Missing, store.Get(upper).Status);
+        Assert.Equal(LocalSecretResultStatus.Missing, store.Get(lower).Status);
     }
 
     [Fact]
-    public void IndexedStoreSet_Should_WriteCaseVariantIndexInDeterministicOrder()
+    public void IndexedStoreSet_Should_KeepFirstPhysicalSpellingForCaseVariantUpdate()
     {
         var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
         var store = new IndexedMemoryStore();
@@ -521,7 +520,45 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         store.Set(lower, "lower-secret");
         store.Set(upper, "upper-secret");
 
-        Assert.Equal(["Stripe:ApiKey", "stripe:apikey"], store.ReadIndexKeys("MyApp", "Development", null));
+        Assert.Equal(["stripe:apikey"], store.ReadIndexKeys("MyApp", "Development", null));
+        Assert.Equal("upper-secret", store.Get(lower).Value);
+        Assert.False(store.HasStoredValue(upper));
+    }
+
+    [Fact]
+    public void IndexedStoreProbe_Should_ResolveCaseVariantAndReportLogicalCollision()
+    {
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        var store = new IndexedMemoryStore();
+        var lower = normalizer.Normalize("MyApp", "Development", null, "stripe:apikey").Identity!;
+        var upper = normalizer.Normalize("MyApp", "Development", null, "Stripe:ApiKey").Identity!;
+        store.Set(lower, "probe-secret");
+
+        var caseVariantProbe = store.Probe(upper);
+        store.SeedIndex("MyApp", "Development", null, lower.Key.Value, upper.Key.Value);
+        var collisionProbe = store.Probe(upper);
+
+        Assert.Equal(LocalSecretResultStatus.Found, caseVariantProbe.Status);
+        Assert.Equal(string.Empty, caseVariantProbe.Value);
+        Assert.Equal(LocalSecretResultStatus.ProviderFailed, collisionProbe.Status);
+        Assert.Equal("config-key-collision", collisionProbe.Diagnostic?.Code);
+        ValueSafeAssert.DoesNotExpose("probe-secret", caseVariantProbe.ToString());
+    }
+
+    [Fact]
+    public void IndexedStoreProbe_Should_PreserveExactHistoricalSourceIdentity()
+    {
+        var store = new IndexedMemoryStore();
+        var source = LocalSecretMigrationIdentity.Resolve("MyApp", "Development", null,
+            "appsurface:MyApp:Development:Legacy.Key", false)!;
+        Assert.Equal("Legacy.Key", source.StoredKey);
+        store.SeedIndex("MyApp", "Development", null, "legacy.key");
+        Assert.Equal(LocalSecretResultStatus.Missing, store.Probe(source).Status);
+
+        store.SeedIndex("MyApp", "Development", null, "legacy.key", "Legacy.Key");
+        Assert.Contains("Legacy.Key", store.ReadIndexKeys("MyApp", "Development", null));
+        Assert.Contains("Legacy.Key", store.ReadIndexForMigration("MyApp", "Development", null).Keys);
+        Assert.Equal(LocalSecretResultStatus.Found, store.Probe(source).Status);
     }
 
     [Fact]
@@ -555,7 +592,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
 
         Assert.Equal(LocalSecretResultStatus.Unavailable, set.Status);
         Assert.False(store.HasStoredValue(live));
-        Assert.DoesNotContain(live.Key, store.ReadIndexKeys("MyApp", "Development", null));
+        Assert.DoesNotContain(live.Key.Value, store.ReadIndexKeys("MyApp", "Development", null));
         Assert.Equal(LocalSecretResultStatus.Missing, probe.Status);
         ValueSafeAssert.DoesNotExpose("live-secret", probe.ToString());
     }
@@ -568,7 +605,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         var live = normalizer.Normalize("MyApp", "Development", null, "Stripe:ApiKey").Identity!;
         var stale = normalizer.Normalize("MyApp", "Development", null, "SendGrid:ApiKey").Identity!;
         store.SeedStoredValue(live, "live-secret");
-        store.SeedIndex("MyApp", "Development", null, live.Key, stale.Key);
+        store.SeedIndex("MyApp", "Development", null, live.Key.Value, stale.Key.Value);
 
         var result = store.List("MyApp", "Development", null);
 
@@ -583,7 +620,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
         var store = new IndexedMemoryStore();
         var stale = normalizer.Normalize("MyApp", "Development", null, "Stripe:ApiKey").Identity!;
-        store.SeedIndex("MyApp", "Development", null, stale.Key);
+        store.SeedIndex("MyApp", "Development", null, stale.Key.Value);
 
         var result = store.Delete(stale);
 
@@ -613,7 +650,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         var locked = normalizer.Normalize("MyApp", "Development", null, "SendGrid:ApiKey").Identity!;
         store.SeedStoredValue(live, "live-secret");
         store.SeedStoredValue(locked, "locked-secret");
-        store.SeedIndex("MyApp", "Development", null, live.Key, locked.Key);
+        store.SeedIndex("MyApp", "Development", null, live.Key.Value, locked.Key.Value);
         store.FailRead(locked, LocalSecretResultStatus.Locked);
 
         var result = store.List("MyApp", "Development", null);
@@ -671,7 +708,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
         var store = new IndexedMemoryStore();
         var stale = normalizer.Normalize("MyApp", "Development", null, "Stripe:ApiKey").Identity!;
-        store.SeedIndex("MyApp", "Development", null, stale.Key);
+        store.SeedIndex("MyApp", "Development", null, stale.Key.Value);
         store.FailNextWrite(LocalSecretResultStatus.Unavailable);
 
         var result = store.List("MyApp", "Development", null);
@@ -687,7 +724,7 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
         var store = new IndexedMemoryStore();
         var live = normalizer.Normalize("MyApp", "Development", null, "Stripe:ApiKey").Identity!;
         store.SeedStoredValue(live, "live-secret");
-        store.SeedIndex("MyApp", "Development", null, live.Key, live.Key, "__appsurface_index__", null, " ");
+        store.SeedIndex("MyApp", "Development", null, live.Key.Value, live.Key.Value, "__appsurface_index__", null, " ");
 
         var result = store.List("MyApp", "Development", null);
 
@@ -790,12 +827,12 @@ public sealed class PlatformAppSurfaceLocalSecretStoreTests
 
         protected override AppSurfaceLocalSecretResult WriteStoredValue(AppSurfaceLocalSecretIdentity identity, string value)
         {
-            if (string.Equals(identity.Key, IndexKey, StringComparison.Ordinal) && _indexWriteFailure is { } indexStatus)
+            if (string.Equals(identity.Key.Value, IndexKey, StringComparison.Ordinal) && _indexWriteFailure is { } indexStatus)
             {
                 return Failure(indexStatus);
             }
 
-            if (!string.Equals(identity.Key, IndexKey, StringComparison.Ordinal) && _valueWriteFailure is { } valueStatus)
+            if (!string.Equals(identity.Key.Value, IndexKey, StringComparison.Ordinal) && _valueWriteFailure is { } valueStatus)
             {
                 return Failure(valueStatus);
             }

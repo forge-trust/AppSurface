@@ -26,8 +26,10 @@ bash examples/durable-postgresql/run-local-proof.sh
 The script checks .NET 10 and Docker, asks Docker to atomically allocate a free loopback port, starts the pinned
 PostgreSQL 16.5 image with local container-only trust authentication, creates the four restricted roles, builds with
 one MSBuild node and shared compilation disabled, explicitly applies schema 10, reruns the canonical role recipe, and
-runs both example commands. Set `APPSURFACE_DURABLE_LOCAL_PORT` only when you need a specific reviewed port; the
-preflight then fails closed if it is occupied. The whole proof defaults to a 420-second deadline and accepts an
+runs both example commands. It waits for the final server's TCP listener before creating roles; the image's temporary
+initialization server accepts Unix-socket connections and then shuts down. Set `APPSURFACE_DURABLE_LOCAL_PORT` only
+when you need a specific reviewed port; the preflight fails closed if it is occupied. The whole proof defaults to a
+420-second deadline and accepts an
 `APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS` override from 1 through 86,400 seconds. Its trap bounds Docker
 cleanup independently and removes the uniquely named container on success, failure, interruption, or termination.
 It is destructive only to that disposable container and database. Use the manual transcript below when you need to
@@ -99,11 +101,14 @@ In Terminal 2, wait at most 30 seconds before any migration operation:
 
 ```console
 for attempt in $(seq 1 30); do
-  docker exec appsurface-durable-postgres pg_isready -U postgres -d appsurface_durable_example && break
+  docker exec appsurface-durable-postgres pg_isready -h 127.0.0.1 -U postgres -d appsurface_durable_example && break
   sleep 1
 done
-docker exec appsurface-durable-postgres pg_isready -U postgres -d appsurface_durable_example || exit 1
+docker exec appsurface-durable-postgres pg_isready -h 127.0.0.1 -U postgres -d appsurface_durable_example || exit 1
 ```
+
+The TCP probe waits through the image's socket-only initialization server and its shutdown before admitting the
+final server.
 
 Create the local-only roles with the disposable container's bootstrap administrator. This disposable container binds
 only to loopback and uses Docker's local `trust` bootstrap mode, so it has no bootstrap password. The password setup

@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Config;
 
@@ -7,6 +8,21 @@ namespace ForgeTrust.AppSurface.Config;
 /// </summary>
 public sealed class ConfigAuditTextRenderer
 {
+    private readonly int _identifierLimit;
+
+    /// <summary>Creates a renderer with the documented resource defaults.</summary>
+    public ConfigAuditTextRenderer() : this(Options.Create(new ConfigResourceOptions())) { }
+
+    /// <summary>Creates a renderer that escapes and bounds identifiers using finalized resource options.</summary>
+    /// <param name="resourceOptions">Validated configuration limits, copied when this renderer is created.</param>
+    public ConfigAuditTextRenderer(IOptions<ConfigResourceOptions> resourceOptions)
+    {
+        ArgumentNullException.ThrowIfNull(resourceOptions);
+        _identifierLimit = resourceOptions.Value.Snapshot().MaxRenderedIdentifierCharacters;
+    }
+
+    private string Identifier(string? value) => ConfigDiagnosticText.Identifier(value ?? string.Empty, _identifierLimit);
+
     /// <summary>
     /// Renders <paramref name="report"/> as text.
     /// </summary>
@@ -17,7 +33,7 @@ public sealed class ConfigAuditTextRenderer
         ArgumentNullException.ThrowIfNull(report);
 
         var builder = new StringBuilder();
-        builder.AppendLine($"Environment: {report.Environment}");
+        builder.AppendLine($"Environment: {Identifier(report.Environment)}");
         if (report.Mode == ConfigAuditReportMode.ExpandKnownEntryCollections)
         {
             builder.AppendLine("Mode: ExpandKnownEntryCollections");
@@ -27,12 +43,12 @@ public sealed class ConfigAuditTextRenderer
         foreach (var provider in report.Providers.OrderBy(provider => provider.Precedence))
         {
             var suffix = provider.IsOverride ? " (override)" : $" (priority {provider.Priority})";
-            builder.AppendLine($"  {provider.Precedence}. {provider.Name}{suffix}");
+            builder.AppendLine($"  {provider.Precedence}. {Identifier(provider.Name)}{suffix}");
         }
 
         builder.AppendLine();
         builder.AppendLine("Entries:");
-        foreach (var entry in report.Entries.OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase))
+        foreach (var entry in report.Entries.OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase).ThenBy(entry => entry.Key, StringComparer.Ordinal))
         {
             RenderEntry(builder, entry, indent: "  ");
         }
@@ -43,7 +59,7 @@ public sealed class ConfigAuditTextRenderer
             builder.AppendLine(FormatDiscoveredKeysHeading(report.DiscoveredKeys));
             foreach (var discoveredKey in report.DiscoveredKeys
                          .OrderBy(key => key.Classification)
-                         .ThenBy(key => key.Key, StringComparer.OrdinalIgnoreCase))
+                         .ThenBy(key => key.Key, StringComparer.OrdinalIgnoreCase).ThenBy(key => key.Key, StringComparer.Ordinal))
             {
                 RenderDiscoveredKey(builder, discoveredKey);
             }
@@ -71,10 +87,10 @@ public sealed class ConfigAuditTextRenderer
         return allSourcesAreFileBacked ? "Discovered file keys:" : "Discovered keys:";
     }
 
-    private static void RenderEntry(StringBuilder builder, ConfigAuditEntry entry, string indent)
+    private void RenderEntry(StringBuilder builder, ConfigAuditEntry entry, string indent)
     {
-        var value = entry.DisplayValue == null ? string.Empty : $" = {entry.DisplayValue}";
-        builder.AppendLine($"{indent}{entry.Key}{value}");
+        var value = entry.DisplayValue == null ? string.Empty : $" = {ConfigDiagnosticText.Prose(entry.DisplayValue)}";
+        builder.AppendLine($"{indent}{Identifier(entry.Key)}{value}");
         builder.AppendLine($"{indent}  State: {entry.State}");
         foreach (var source in entry.Sources)
         {
@@ -83,7 +99,7 @@ public sealed class ConfigAuditTextRenderer
 
         if (entry.Element?.KeyCorrelationId != null)
         {
-            builder.AppendLine($"{indent}  Key correlation: {entry.Element.KeyCorrelationId}");
+            builder.AppendLine($"{indent}  Key correlation: {Identifier(entry.Element.KeyCorrelationId)}");
         }
 
         foreach (var diagnostic in entry.Diagnostics)
@@ -103,11 +119,11 @@ public sealed class ConfigAuditTextRenderer
         }
     }
 
-    private static void RenderDiscoveredKey(StringBuilder builder, ConfigAuditDiscoveredKey discoveredKey)
+    private void RenderDiscoveredKey(StringBuilder builder, ConfigAuditDiscoveredKey discoveredKey)
     {
         var value = FormatDiscoveredValue(discoveredKey);
         builder.AppendLine(
-            $"  {discoveredKey.Key} [{FormatDiscoveredClassification(discoveredKey.Classification)}]{value}");
+            $"  {Identifier(discoveredKey.Key)} [{FormatDiscoveredClassification(discoveredKey.Classification)}]{value}");
         if (discoveredKey.IsRedacted)
         {
             builder.AppendLine("    Redacted: true");
@@ -130,7 +146,7 @@ public sealed class ConfigAuditTextRenderer
             ConfigAuditDiscoveredValueDisplayState.OmittedInventory =>
                 $" (value omitted: {FormatInventoryOmissionReason(discoveredKey.Classification)})",
             ConfigAuditDiscoveredValueDisplayState.OmittedComplex => string.Empty,
-            _ => discoveredKey.DisplayValue == null ? string.Empty : $" = {discoveredKey.DisplayValue}"
+            _ => discoveredKey.DisplayValue == null ? string.Empty : $" = {ConfigDiagnosticText.Prose(discoveredKey.DisplayValue)}"
         };
 
     private static string FormatInventoryOmissionReason(ConfigAuditDiscoveredKeyClassification classification) =>
@@ -145,8 +161,8 @@ public sealed class ConfigAuditTextRenderer
             _ => "inventory key is not an exact audit entry"
         };
 
-    private static string FormatDiagnostic(ConfigAuditDiagnostic diagnostic) =>
-        $"[{diagnostic.Severity}] {diagnostic.Code}: {diagnostic.Message}";
+    private string FormatDiagnostic(ConfigAuditDiagnostic diagnostic) =>
+        $"[{diagnostic.Severity}] {Identifier(diagnostic.Code)}: {ConfigDiagnosticText.Prose(diagnostic.Message)}";
 
     private static IEnumerable<ConfigAuditEntry> OrderChildren(IReadOnlyList<ConfigAuditEntry> children)
     {
@@ -162,7 +178,7 @@ public sealed class ConfigAuditTextRenderer
                 .Select(item => item.Child);
         }
 
-        return children.OrderBy(child => child.Key, StringComparer.OrdinalIgnoreCase);
+        return children.OrderBy(child => child.Key, StringComparer.OrdinalIgnoreCase).ThenBy(child => child.Key, StringComparer.Ordinal);
     }
 
     private static int GetElementSortGroup(ConfigAuditEntry child)
@@ -181,16 +197,16 @@ public sealed class ConfigAuditTextRenderer
         return 1;
     }
 
-    private static string FormatSource(ConfigAuditSourceRecord source) =>
+    private string FormatSource(ConfigAuditSourceRecord source) =>
         source.Kind switch
         {
             ConfigAuditSourceKind.File when source.Location != null =>
-                $"{source.ProviderName} {Path.GetFileName(source.FilePath)}:{source.Location.LineNumber}:{source.Location.ByteColumnNumber} :: {source.ConfigPath}",
-            ConfigAuditSourceKind.File => $"{source.ProviderName} {Path.GetFileName(source.FilePath)} :: {source.ConfigPath}",
-            ConfigAuditSourceKind.EnvironmentVariable => $"Environment variable {source.EnvironmentVariableName}",
-            ConfigAuditSourceKind.Default => $"Default value on {source.ProviderName}",
+                $"{Identifier(source.ProviderName)} {Identifier(Path.GetFileName(source.FilePath))}:{source.Location.LineNumber}:{source.Location.ByteColumnNumber} :: {Identifier(source.ConfigPath)}",
+            ConfigAuditSourceKind.File => $"{Identifier(source.ProviderName)} {Identifier(Path.GetFileName(source.FilePath))} :: {Identifier(source.ConfigPath)}",
+            ConfigAuditSourceKind.EnvironmentVariable => $"Environment variable {Identifier(source.EnvironmentVariableName)}",
+            ConfigAuditSourceKind.Default => $"Default value on {Identifier(source.ProviderName)}",
             ConfigAuditSourceKind.Missing => "none",
-            _ => source.ProviderName ?? source.Kind.ToString()
+            _ => Identifier(source.ProviderName ?? source.Kind.ToString())
         };
 
     private static string FormatDiscoveredClassification(ConfigAuditDiscoveredKeyClassification classification) =>
