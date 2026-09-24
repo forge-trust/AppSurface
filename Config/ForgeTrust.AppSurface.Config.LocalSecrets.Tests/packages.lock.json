@@ -352,6 +352,12 @@
           "Microsoft.Extensions.Options": "[10.0.8, )"
         }
       },
+      "forgetrust.appsurface.config.testing": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Config": "[0.1.0, )"
+        }
+      },
       "forgetrust.appsurface.core": {
         "type": "Project",
         "dependencies": {

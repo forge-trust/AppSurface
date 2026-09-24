@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Text;
+using ForgeTrust.AppSurface.Config;
 
 namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 
@@ -10,9 +11,10 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 /// <remarks>
 /// The normalizer is the boundary between logical AppSurface config keys and platform-specific local secret names.
 /// Application, environment, and prefix segments are trimmed, capped at 128 characters, and limited to ASCII letters,
-/// digits, dash, underscore, and dot where documented. Whitespace in segments becomes <c>-</c>. Config keys are trimmed,
-/// capped at 256 characters, reject nulls and line breaks, normalize <c>__</c> to <c>:</c>, and normalize <c>\</c> to
-/// <c>/</c>. When the application name is omitted, the normalizer infers one from the entry assembly, then the current
+/// digits, dash, underscore, and dot where documented. Whitespace in segments becomes <c>-</c>. Config keys are strict
+/// logical keys: separators are preserved and no <c>__</c> or backslash rewriting occurs. Legacy spelling aliases are
+/// considered only by the provider lookup index. When the application name is omitted, the normalizer infers one from
+/// the entry assembly, then the current
 /// directory, then <c>AppSurfaceApp</c>; pin <see cref="AppSurfaceLocalSecretsOptions.ApplicationName"/> for published
 /// apps so deployment shape or working-directory changes do not move the local secret namespace.
 /// </remarks>
@@ -62,12 +64,22 @@ public sealed class AppSurfaceLocalSecretIdentityNormalizer
             return AppSurfaceLocalSecretIdentityResult.Invalid(diagnostic);
         }
 
-        if (!TryNormalizeKey(key, out var normalizedKey, out diagnostic))
+        if (!AppSurfaceConfigKey.TryParse(key, out var normalizedKey))
         {
-            return AppSurfaceLocalSecretIdentityResult.Invalid(diagnostic);
+            var hasUnsupportedCharacter = key?.Any(char.IsControl) == true;
+            return AppSurfaceLocalSecretIdentityResult.Invalid(
+                CreateInvalidIdentityDiagnostic(
+                    "local-secret-key-invalid",
+                    "Local secret key is invalid.",
+                    hasUnsupportedCharacter
+                        ? "The key contains unsupported control characters and is not a valid strict colon-delimited AppSurface logical key."
+                        : "The key is not a valid strict colon-delimited AppSurface logical key.",
+                    hasUnsupportedCharacter
+                        ? "Remove unsupported characters and use nonempty literal segments separated by colons."
+                        : "Use nonempty literal segments separated by colons."));
         }
 
-        var storageName = BuildStorageName(normalizedApp, normalizedEnvironment, normalizedPrefix, normalizedKey);
+        var storageName = BuildStorageName(normalizedApp, normalizedEnvironment, normalizedPrefix, normalizedKey.Value);
         if (storageName.Length > MaxStorageNameLength)
         {
             return AppSurfaceLocalSecretIdentityResult.Invalid(
@@ -87,49 +99,6 @@ public sealed class AppSurfaceLocalSecretIdentityNormalizer
                 storageName));
     }
 
-    private static bool TryNormalizeKey(
-        string key,
-        out string normalized,
-        out AppSurfaceLocalSecretDiagnostic diagnostic)
-    {
-        normalized = string.Empty;
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            diagnostic = CreateInvalidIdentityDiagnostic(
-                "local-secret-key-empty",
-                "Local secret key is empty.",
-                "AppSurface cannot store a local secret without a config key.",
-                "Pass a non-empty AppSurface config key such as `Stripe:ApiKey`.");
-            return false;
-        }
-
-        var trimmed = key.Trim();
-        if (trimmed.Length > MaxSegmentLength * 2)
-        {
-            diagnostic = CreateInvalidIdentityDiagnostic(
-                "local-secret-key-too-long",
-                "Local secret key is too long.",
-                "The key exceeds the AppSurface LocalSecrets key length limit.",
-                "Use a shorter logical config key.");
-            return false;
-        }
-
-        if (trimmed.Contains('\0', StringComparison.Ordinal)
-            || trimmed.Contains('\r', StringComparison.Ordinal)
-            || trimmed.Contains('\n', StringComparison.Ordinal))
-        {
-            diagnostic = CreateInvalidIdentityDiagnostic(
-                "local-secret-key-invalid-character",
-                "Local secret key contains unsupported characters.",
-                "Nulls and line breaks cannot be represented safely across platform stores.",
-                "Use config path separators such as `:` or `.` instead of control characters.");
-            return false;
-        }
-
-        normalized = trimmed.Replace("__", ":", StringComparison.Ordinal).Replace('\\', '/');
-        diagnostic = null!;
-        return true;
-    }
 
     private static bool TryNormalizeSegment(
         string? value,

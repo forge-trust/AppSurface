@@ -13,6 +13,75 @@ Acornima is used by AppSurface Docs to parse configured JavaScript source files 
 
 No endorsement is implied by AppSurface or AppSurface Docs release notes, marketing copy, package metadata, or generated documentation.
 
+## TreeSitter.DotNet
+
+- Package: `TreeSitter.DotNet`
+- Version: `1.3.0`
+- License declaration: MIT
+- Project: https://github.com/mariusgreuel/tree-sitter-dotnet-bindings
+- Pinned source revision: `8cae484bc033dac6e492ed15166877f3d784850f`
+
+TreeSitter.DotNet provides the static parser binding and bundled native grammar assets used by the opt-in Python
+docstring harvester. AppSurface Docs initializes the Python grammar only to parse policy-approved source text; it never
+imports or executes Python modules. The selected nupkg bundles multiple language grammars and native runtime assets, so
+updating this dependency requires the archive/RID and redistribution-notice review described in the
+[candidate record](https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Docs.Tests/TestData/PythonParserDecision/README.md).
+
+### MIT License Text — TreeSitter.DotNet
+
+Copyright 2025 Marius Greuel
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+### Bundled Tree-sitter runtime and grammars
+
+The native assets in TreeSitter.DotNet 1.3.0 also include the Tree-sitter runtime and multiple language grammars. The following notices were checked against the submodule revisions pinned by the [binding source](https://github.com/mariusgreuel/tree-sitter-dotnet-bindings/tree/8cae484bc033dac6e492ed15166877f3d784850f/tree-sitter-native). Each listed upstream `LICENSE` file uses the MIT permission text immediately below this list. The `tree-sitter-typescript` entry also covers its bundled TSX grammar.
+
+| Bundled component | Upstream copyright notice |
+| --- | --- |
+| tree-sitter runtime | Copyright (c) 2018 Max Brunsfeld |
+| tree-sitter-agda | Copyright (c) 2018 LUA Ting-Gan |
+| tree-sitter-bash | Copyright (c) 2017 Max Brunsfeld |
+| tree-sitter-c | Copyright (c) 2014 Max Brunsfeld |
+| tree-sitter-c-sharp | Copyright (c) 2014-2023 Max Brunsfeld, Damien Guard, Amaan Qureshi, and contributors. |
+| tree-sitter-cpp | Copyright (c) 2014 Max Brunsfeld |
+| tree-sitter-css | Copyright (c) 2018 Max Brunsfeld |
+| tree-sitter-embedded-template | Copyright (c) 2018 Max Brunsfeld |
+| tree-sitter-go | Copyright (c) 2014 Max Brunsfeld |
+| tree-sitter-haskell | Copyright (c) 2014 Max Brunsfeld |
+| tree-sitter-html | Copyright (c) 2014 Max Brunsfeld |
+| tree-sitter-java | Copyright (c) 2017 Ayman Nadeem |
+| tree-sitter-javascript | Copyright (c) 2014 Max Brunsfeld |
+| tree-sitter-jsdoc | Copyright (c) 2018 Max Brunsfeld &lt;maxbrunsfeld@gmail.com&gt; |
+| tree-sitter-json | Copyright (c) 2014 Max Brunsfeld |
+| tree-sitter-julia | Copyright (c) 2018 Max Brunsfeld, GitHub |
+| tree-sitter-ocaml | Copyright (c) 2020 Max Brunsfeld and Pieter Goetschalckx |
+| tree-sitter-php | Copyright (c) 2017 Josh Vera, GitHub; Copyright (c) 2019 Max Brunsfeld, Amaan Qureshi, Christian Frøystad, Caleb White |
+| tree-sitter-python | Copyright (c) 2016 Max Brunsfeld |
+| tree-sitter-ql | Copyright (c) 2019-2024 GitHub, Inc. |
+| tree-sitter-razor | Copyright (c) 2023 Tristan Knight |
+| tree-sitter-ruby | Copyright (c) 2016 Rob Rix |
+| tree-sitter-rust | Copyright (c) 2017 Maxim Sokolov |
+| tree-sitter-scala | Copyright (c) 2018 Max Brunsfeld and GitHub |
+| tree-sitter-toml | Copyright (c) Ika &lt;ikatyang@gmail.com&gt; (https://github.com/ikatyang) |
+| tree-sitter-tsq | Copyright (c) 2021 Douglas Creager |
+| tree-sitter-typescript | Copyright (c) 2017 Max Brunsfeld |
+| tree-sitter-verilog | Copyright (c) 2018-2023 Aliaksei Chapyzhenka |
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+The runtime also includes ICU-derived Unicode headers. Their [pinned upstream license](https://github.com/tree-sitter/tree-sitter/blob/cd4b6e2ef996d4baca12caadb78dffc8b55bc869/lib/src/unicode/LICENSE) is reproduced verbatim in the package as `THIRD-PARTY-TREE-SITTER-UNICODE-LICENSE.txt`.
+
+The bundled `tree-sitter-swift` submodule declares `MIT` in its [pinned package.json](https://github.com/tree-sitter/tree-sitter-swift/blob/db675450dcc1478ee128c96ecc61c13272431aab/package.json) and names Rob Rix as author. The MIT permission text above is included for it too, but that revision has no root `LICENSE` file and no copyright notice was found for its bundled parser. Verify its redistribution attribution separately before treating this dependency's notice review as complete.
+
 ## MiniSearch
 
 - Package: `minisearch`

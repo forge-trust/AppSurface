@@ -1,0 +1,41 @@
+@using ForgeTrust.AppSurface.Docs.Models
+@model IReadOnlyList<CSharpXmlNode>
+
+@foreach (var node in Model)
+{
+    switch (node.Kind)
+    {
+        case CSharpXmlNodeKind.Text:
+            @node.Text
+            break;
+        case CSharpXmlNodeKind.InlineCode:
+            <code>@node.Text</code>
+            break;
+        case CSharpXmlNodeKind.CodeBlock:
+            <pre><code>@node.Text</code></pre>
+            break;
+        case CSharpXmlNodeKind.Paragraph:
+            <p>@await Html.PartialAsync("/Views/Docs/CSharp/_XmlNodes.cshtml", node.Children ?? [])</p>
+            break;
+        case CSharpXmlNodeKind.List:
+            if (node.Ordered)
+            {
+                <ol>@await Html.PartialAsync("/Views/Docs/CSharp/_XmlNodes.cshtml", node.Children ?? [])</ol>
+            }
+            else
+            {
+                <ul>@await Html.PartialAsync("/Views/Docs/CSharp/_XmlNodes.cshtml", node.Children ?? [])</ul>
+            }
+            break;
+        case CSharpXmlNodeKind.ListItem:
+            <li>@await Html.PartialAsync("/Views/Docs/CSharp/_XmlNodes.cshtml", node.Children ?? [])</li>
+            break;
+        case CSharpXmlNodeKind.Cref:
+            <code data-csharp-cref="@node.Target">@node.Text</code>
+            break;
+        case CSharpXmlNodeKind.ParameterReference:
+        case CSharpXmlNodeKind.TypeParameterReference:
+            <code>@node.Text</code>
+            break;
+    }
+}

@@ -15,13 +15,29 @@ public class ConfigAuditReporterTests
     private const string CorrelationSecretA = "0123456789abcdef0123456789abcdef";
     private const string CorrelationSecretB = "abcdef0123456789abcdef0123456789";
 
+    [Fact]
+    public void GetReport_DoesNotTracePatchAfterTerminalEnvironmentResolution()
+    {
+        var environmentProvider = new TerminalAuditEnvironmentProvider();
+        var services = CreateServices("/missing", A.Fake<IEnvironmentProvider>());
+        services.AddSingleton<IEnvironmentConfigProvider>(environmentProvider);
+        services.AddConfigAuditKey<AppSettings>("MyApp:Settings");
+
+        using var provider = services.BuildServiceProvider();
+        var report = provider.GetRequiredService<IConfigAuditReporter>().GetReport("Production");
+
+        var entry = AssertEntry(report, "MyApp:Settings", ConfigAuditEntryState.Invalid, null);
+        Assert.Contains(entry.Diagnostics, diagnostic => diagnostic.Code == "environment-root-terminal");
+        Assert.False(environmentProvider.WasPatched);
+    }
+
     [ConfigKey("Region", root: true)]
     private sealed class RegionConfig : Config<string>
     {
         public override string DefaultValue => "us-east-1";
     }
 
-    [ConfigKey("Retry.Count", root: true)]
+    [ConfigKey("Retry:Count", root: true)]
     [ConfigValueRange(1, 5)]
     private sealed class RetryCountConfig : ConfigStruct<int>
     {
@@ -68,13 +84,17 @@ public class ConfigAuditReporterTests
         public readonly List<string> Endpoints;
     }
 
-    [ConfigKey("Short.Name", root: true)]
+    [ConfigKey("Short:Name", root: true)]
     [ConfigValueMinLength(3)]
     private sealed class ShortNameConfig : Config<string>
     {
     }
 
-    [ConfigKey("Throwing.Name", root: true)]
+    private sealed class MismatchedNameConfig : Config<string>
+    {
+    }
+
+    [ConfigKey("Throwing:Name", root: true)]
     private sealed class ThrowingNameConfig : Config<string>
     {
         protected override IEnumerable<ValidationResult>? ValidateValue(
@@ -83,7 +103,7 @@ public class ConfigAuditReporterTests
             throw new InvalidOperationException("string validator failed");
     }
 
-    [ConfigKey("Leaky.Name", root: true)]
+    [ConfigKey("Leaky:Name", root: true)]
     private sealed class LeakyNameConfig : Config<string>
     {
         protected override IEnumerable<ValidationResult>? ValidateValue(
@@ -92,7 +112,7 @@ public class ConfigAuditReporterTests
             [new ValidationResult($"do not leak {value}")];
     }
 
-    [ConfigKey("Leaky.Throwing", root: true)]
+    [ConfigKey("Leaky:Throwing", root: true)]
     private sealed class LeakyThrowingConfig : Config<string>
     {
         protected override IEnumerable<ValidationResult>? ValidateValue(
@@ -101,7 +121,7 @@ public class ConfigAuditReporterTests
             throw new InvalidOperationException($"do not leak {value}");
     }
 
-    [ConfigKey("Throwing.Count", root: true)]
+    [ConfigKey("Throwing:Count", root: true)]
     private sealed class ThrowingCountConfig : ConfigStruct<int>
     {
         protected override IEnumerable<ValidationResult>? ValidateValue(
@@ -110,7 +130,7 @@ public class ConfigAuditReporterTests
             throw new InvalidOperationException("int validator failed");
     }
 
-    [ConfigKey("Default.Port", root: true)]
+    [ConfigKey("Default:Port", root: true)]
     private sealed class DefaultPortConfig : ConfigStruct<int>
     {
         public override int? DefaultValue => 8080;
@@ -249,7 +269,7 @@ public class ConfigAuditReporterTests
         public string? Password { get; set; }
     }
 
-    [ConfigKey("Default.Services", root: true)]
+    [ConfigKey("Default:Services", root: true)]
     private sealed class DefaultServicesConfig : Config<List<NamedEndpoint>>
     {
         public override List<NamedEndpoint>? DefaultValue =>
@@ -309,7 +329,7 @@ public class ConfigAuditReporterTests
                 }
                 """);
 
-            var environment = A.Fake<IEnvironmentProvider>();
+            var environment = SnapshotEnvironment();
             A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
             A.CallTo(() => environment.GetEnvironmentVariable("STAGING__BILLING__ENDPOINT", A<string?>._))
                 .Returns("https://staging-billing.example");
@@ -321,15 +341,15 @@ public class ConfigAuditReporterTests
                 .Returns("super-secret");
 
             var services = CreateServices(tempDir, environment);
-            services.AddConfigAuditKey<bool>("Feature.Enabled");
-            services.AddConfigAuditKey<string>("Billing.Endpoint");
-            services.AddConfigAuditKey<AppSettings>("MyApp.Settings");
-            services.AddSingleton(new ConfigAuditKnownEntry("Region", typeof(RegionConfig), typeof(string)));
+            services.AddConfigAuditKey<bool>("Feature:Enabled");
+            services.AddConfigAuditKey<string>("Billing:Endpoint");
+            services.AddConfigAuditKey<AppSettings>("MyApp:Settings");
+            services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Region"), typeof(RegionConfig), typeof(string)));
             services.AddConfigAuditKey<string>("Region");
-            services.AddConfigAuditKey<string>("Missing.RequiredApiUrl");
-            services.AddConfigAuditKey<string>("Payment.ApiKey");
-            services.AddSingleton(new ConfigAuditKnownEntry("Retry.Count", typeof(RetryCountConfig), typeof(int)));
-            services.AddConfigAuditKey<string>("Shape.Nested");
+            services.AddConfigAuditKey<string>("Missing:RequiredApiUrl");
+            services.AddConfigAuditKey<string>("Payment:ApiKey");
+            services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Retry:Count"), typeof(RetryCountConfig), typeof(int)));
+            services.AddConfigAuditKey<string>("Shape:Nested");
 
             var provider = services.BuildServiceProvider();
             var reporter = provider.GetRequiredService<IConfigAuditReporter>();
@@ -341,54 +361,45 @@ public class ConfigAuditReporterTests
                 report.Diagnostics,
                 diagnostic => diagnostic.Message.Contains("appsettings.Development.Broken.json", StringComparison.Ordinal)
                               || diagnostic.Message.Contains("appsettings.Development.Array.json", StringComparison.Ordinal));
-            var feature = AssertEntry(report, "Feature.Enabled", ConfigAuditEntryState.Resolved, "True");
+            var feature = AssertEntry(report, "Feature:Enabled", ConfigAuditEntryState.Resolved, "True");
             var featureSource = Assert.Single(feature.Sources, source => source.Kind == ConfigAuditSourceKind.File);
             AssertLocation(featureSource, lineNumber: 3, byteColumnNumber: 5);
             Assert.DoesNotContain(
                 report.Entries.SelectMany(entry => entry.Diagnostics),
                 diagnostic => diagnostic.Code == "config-file-null-skipped");
 
-            var billing = AssertEntry(report, "Billing.Endpoint", ConfigAuditEntryState.Resolved, "https://staging-billing.example");
+            var billing = AssertEntry(report, "Billing:Endpoint", ConfigAuditEntryState.Resolved, "https://staging-billing.example");
             Assert.Contains(billing.Sources, source => source.EnvironmentVariableName == "STAGING__BILLING__ENDPOINT");
 
-            var settings = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.PartiallyResolved, null);
-            Assert.Contains(settings.Sources, source => source.FilePath?.EndsWith("appsettings.Staging.json", StringComparison.Ordinal) == true);
-            Assert.Contains(settings.Sources, source => source.EnvironmentVariableName == "MYAPP__SETTINGS__DATABASE__PORT");
-            Assert.Contains(settings.Diagnostics, diagnostic => diagnostic.Message.Contains("MYAPP__SETTINGS__DATABASE__TIMEOUTSECONDS", StringComparison.Ordinal));
-            var settingsFileSource = Assert.Single(
-                settings.Sources,
-                source => source.FilePath?.EndsWith("appsettings.Staging.json", StringComparison.Ordinal) == true);
+            var settings = AssertEntry(report, "MyApp:Settings", ConfigAuditEntryState.Invalid, null);
+            Assert.Empty(settings.Children);
+            Assert.Contains(settings.Diagnostics, diagnostic => diagnostic.Severity == ConfigAuditDiagnosticSeverity.Error);
+            Assert.DoesNotContain(settings.Diagnostics, diagnostic => diagnostic.Message.Contains("soon", StringComparison.Ordinal));
+            var settingsFileSource = Assert.Single(settings.Sources, source => source.Kind == ConfigAuditSourceKind.File);
             AssertLocation(settingsFileSource, lineNumber: 6, byteColumnNumber: 5);
-
-            var database = settings.Children
-                .Single(child => child.Key == "MyApp.Settings.Database");
-            Assert.Equal(ConfigAuditEntryState.PartiallyResolved, database.State);
-            var host = database.Children.Single(child => child.Key == "MyApp.Settings.Database.Host");
-            var hostFileSource = Assert.Single(host.Sources, source => source.Kind == ConfigAuditSourceKind.File);
-            AssertLocation(hostFileSource, lineNumber: 9, byteColumnNumber: 9);
-
-            var port = database.Children.Single(child => child.Key == "MyApp.Settings.Database.Port");
-            Assert.Equal("6543", port.DisplayValue);
-            Assert.Contains(port.Sources, source => source.EnvironmentVariableName == "MYAPP__SETTINGS__DATABASE__PORT");
+            var unchangedFileValue = provider.GetServices<IConfigProvider>().OfType<FileBasedConfigProvider>().Single()
+                .Resolve<AppSettings>(new ConfigProviderRequest("Staging", AppSurfaceConfigKey.Parse("MyApp:Settings"))).Value!;
+            Assert.Equal(5432, unchangedFileValue.Database.Port);
+            Assert.Equal(30, unchangedFileValue.Database.TimeoutSeconds);
 
             var region = AssertEntry(report, "Region", ConfigAuditEntryState.Defaulted, "us-east-1");
             Assert.Contains(region.Sources, source => source.Kind == ConfigAuditSourceKind.Default);
 
-            AssertEntry(report, "Missing.RequiredApiUrl", ConfigAuditEntryState.Missing, null);
+            AssertEntry(report, "Missing:RequiredApiUrl", ConfigAuditEntryState.Missing, null);
 
-            var apiKey = AssertEntry(report, "Payment.ApiKey", ConfigAuditEntryState.Resolved, "[redacted]");
+            var apiKey = AssertEntry(report, "Payment:ApiKey", ConfigAuditEntryState.Resolved, "[redacted]");
             Assert.True(apiKey.IsRedacted);
 
-            var retry = AssertEntry(report, "Retry.Count", ConfigAuditEntryState.Invalid, "10");
+            var retry = AssertEntry(report, "Retry:Count", ConfigAuditEntryState.Invalid, "10");
             Assert.Contains(retry.Diagnostics, diagnostic => diagnostic.Code == "config-validation-failed");
 
-            var shape = AssertEntry(report, "Shape.Nested", ConfigAuditEntryState.Resolved, "from-override");
+            var shape = AssertEntry(report, "Shape:Nested", ConfigAuditEntryState.Resolved, "from-override");
             Assert.Contains(shape.Sources, source => source.FilePath?.EndsWith("config_Override.Staging.json", StringComparison.Ordinal) == true);
 
             var rendered = provider.GetRequiredService<ConfigAuditTextRenderer>().Render(report);
             Assert.Contains("Environment: Staging", rendered, StringComparison.Ordinal);
-            Assert.Contains("appsettings.Staging.json:6:5 :: MyApp.Settings", rendered, StringComparison.Ordinal);
-            Assert.Contains("Payment.ApiKey = [redacted]", rendered, StringComparison.Ordinal);
+            Assert.Contains("appsettings.Staging.json:6:5 :: MyApp:Settings", rendered, StringComparison.Ordinal);
+            Assert.Contains("Payment:ApiKey = [redacted]", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("super-secret", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("soon", rendered, StringComparison.Ordinal);
         }
@@ -404,7 +415,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_DoesNotMutateProviderObjectWhenTracingEnvironmentPatch()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         A.CallTo(() => environment.GetEnvironmentVariable("MYAPP__SETTINGS__DATABASE__PORT", A<string?>._))
             .Returns("6543");
@@ -419,23 +430,23 @@ public class ConfigAuditReporterTests
         };
 
         var services = CreateServices("/missing", environment);
-        services.AddSingleton<IConfigProvider>(new StaticConfigProvider("MyApp.Settings", providerValue));
-        services.AddConfigAuditKey<AppSettings>("MyApp.Settings");
+        services.AddSingleton<IConfigProvider>(new StaticConfigProvider("MyApp:Settings", providerValue));
+        services.AddConfigAuditKey<AppSettings>("MyApp:Settings");
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var entry = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.PartiallyResolved, null);
+        var entry = AssertEntry(report, "MyApp:Settings", ConfigAuditEntryState.PartiallyResolved, null);
         Assert.Equal(5432, providerValue.Database.Port);
-        var database = entry.Children.Single(child => child.Key == "MyApp.Settings.Database");
-        Assert.Equal("6543", database.Children.Single(child => child.Key == "MyApp.Settings.Database.Port").DisplayValue);
+        var database = entry.Children.Single(child => child.Key == "MyApp:Settings.Database");
+        Assert.Equal("6543", database.Children.Single(child => child.Key == "MyApp:Settings.Database.Port").DisplayValue);
     }
 
     [Fact]
     public void GetReport_UsesPatchSourceForDescendantsWhenEnvironmentReplacesNestedObject()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         A.CallTo(() => environment.GetEnvironmentVariable("MYAPP__SETTINGS__DATABASE", A<string?>._))
             .Returns("""{"Host":"db.from.env","Port":6543,"TimeoutSeconds":15}""");
@@ -451,16 +462,16 @@ public class ConfigAuditReporterTests
         };
 
         var services = CreateServices("/missing", environment);
-        services.AddSingleton<IConfigProvider>(new StaticConfigProvider("MyApp.Settings", providerValue));
-        services.AddConfigAuditKey<AppSettings>("MyApp.Settings");
+        services.AddSingleton<IConfigProvider>(new StaticConfigProvider("MyApp:Settings", providerValue));
+        services.AddConfigAuditKey<AppSettings>("MyApp:Settings");
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var entry = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.PartiallyResolved, null);
-        var database = entry.Children.Single(child => child.Key == "MyApp.Settings.Database");
-        var host = database.Children.Single(child => child.Key == "MyApp.Settings.Database.Host");
+        var entry = AssertEntry(report, "MyApp:Settings", ConfigAuditEntryState.PartiallyResolved, null);
+        var database = entry.Children.Single(child => child.Key == "MyApp:Settings.Database");
+        var host = database.Children.Single(child => child.Key == "MyApp:Settings.Database.Host");
         Assert.Equal("db.from.env", host.DisplayValue);
         Assert.Contains(host.Sources, source => source.EnvironmentVariableName == "MYAPP__SETTINGS__DATABASE");
         Assert.DoesNotContain(host.Sources, source => source.ProviderName == nameof(StaticConfigProvider));
@@ -521,12 +532,12 @@ public class ConfigAuditReporterTests
         var redactor = new ConfigAuditRedactor();
 
         var explicitSensitive = redactor.FormatValue(
-            "Partner.Payload",
+            "Partner:Payload",
             "partner-assertion",
             [],
             ConfigAuditSensitivity.Sensitive);
         var nonSensitiveFragment = redactor.FormatValue(
-            "Payment.ApiKey",
+            "Payment:ApiKey",
             "not-safe",
             [],
             ConfigAuditSensitivity.NonSensitive);
@@ -538,13 +549,13 @@ public class ConfigAuditReporterTests
     }
 
     [Theory]
-    [InlineData("Partner.Passphrase")]
-    [InlineData("Partner.Dsn")]
-    [InlineData("Partner.Assertion")]
-    [InlineData("Partner.Certificate")]
-    [InlineData("Partner.ClientSecret")]
-    [InlineData("Partner.SharedAccessSignature")]
-    [InlineData("Partner.Cookie")]
+    [InlineData("Partner:Passphrase")]
+    [InlineData("Partner:Dsn")]
+    [InlineData("Partner:Assertion")]
+    [InlineData("Partner:Certificate")]
+    [InlineData("Partner:ClientSecret")]
+    [InlineData("Partner:SharedAccessSignature")]
+    [InlineData("Partner:Cookie")]
     public void Redactor_RedactsExpandedSensitiveFragments(string key)
     {
         var redactor = new ConfigAuditRedactor();
@@ -558,17 +569,17 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_RedactsExplicitSensitiveProviderOnlyKeyBeforeStructuredAndTextOutput()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         var services = CreateServices("/missing", environment);
         services.AddSingleton<IConfigProvider>(
             new DictionaryConfigProvider(
                 new Dictionary<string, object?>
                 {
-                    ["Partner.Payload"] = "partner-assertion-value"
+                    ["Partner:Payload"] = "partner-assertion-value"
                 }));
         services.AddConfigAuditKey<string>(
-            "Partner.Payload",
+            "Partner:Payload",
             options => options.Sensitivity = ConfigAuditSensitivity.Sensitive);
 
         var provider = services.BuildServiceProvider();
@@ -576,7 +587,7 @@ public class ConfigAuditReporterTests
         var rendered = provider.GetRequiredService<ConfigAuditTextRenderer>().Render(report);
         var serialized = JsonSerializer.Serialize(report);
 
-        var entry = AssertEntry(report, "Partner.Payload", ConfigAuditEntryState.Resolved, "[redacted]");
+        var entry = AssertEntry(report, "Partner:Payload", ConfigAuditEntryState.Resolved, "[redacted]");
         Assert.True(entry.IsRedacted);
         Assert.DoesNotContain("partner-assertion-value", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("partner-assertion-value", serialized, StringComparison.Ordinal);
@@ -585,7 +596,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_OmitsCollectionDisplayValuesWithoutLeakingNestedSecrets()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         var services = CreateServices("/missing", environment);
         services.AddSingleton<IConfigProvider>(
@@ -640,7 +651,7 @@ public class ConfigAuditReporterTests
                   ]
                 }
                 """);
-            var environment = A.Fake<IEnvironmentProvider>();
+            var environment = SnapshotEnvironment();
             A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
             var services = CreateServices(tempDir, environment);
             services.AddConfigAuditKey<List<NamedEndpoint>>(
@@ -657,12 +668,12 @@ public class ConfigAuditReporterTests
             Assert.Equal(2, entry.Children[2].Element?.Index);
             Assert.Null(entry.Children[2].DisplayValue);
             Assert.Empty(entry.Children[2].Children);
-            Assert.Contains(entry.Children[2].Sources, source => source.ConfigPath == "Services.2");
-            Assert.Contains(entry.Children[0].Sources, source => source.ConfigPath == "Services.0");
+            Assert.Contains(entry.Children[2].Sources, source => source.ConfigPath == "Services:2");
+            Assert.Contains(entry.Children[0].Sources, source => source.ConfigPath == "Services:0");
             Assert.Equal("billing", entry.Children[0].Children.Single(child => child.Key == "Services[0].Name").DisplayValue);
             Assert.Contains(
                 entry.Children[0].Children.Single(child => child.Key == "Services[0].Name").Sources,
-                source => source.ConfigPath == "Services.0.Name");
+                source => source.ConfigPath == "Services:0:Name");
             Assert.True(entry.Children[0].Children.Single(child => child.Key == "Services[0].Password").IsRedacted);
 
             var rendered = provider.GetRequiredService<ConfigAuditTextRenderer>().Render(report);
@@ -678,7 +689,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_RedactsSensitiveDictionaryKeysBeforePublicFields()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         var services = CreateServices("/missing", environment);
         services.AddSingleton<IConfigProvider>(
@@ -749,7 +760,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_UsesEffectiveDictionaryKeyCorrelationPolicyForRedactionMetadata()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         var services = CreateServices("/missing", environment);
         services.Configure<ConfigAuditDictionaryKeyCorrelationOptions>(options =>
@@ -1042,7 +1053,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_DictionaryKeyCorrelationOmitsIdsForUnprintableDictionaryKeys()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         var services = CreateServices("/missing", environment);
         services.Configure<ConfigAuditDictionaryKeyCorrelationOptions>(options =>
@@ -1055,7 +1066,7 @@ public class ConfigAuditReporterTests
             new DictionaryConfigProvider(
                 new Dictionary<string, object?>
                 {
-                    ["Labels.Items"] = new Hashtable
+                    ["Labels:Items"] = new Hashtable
                     {
                         [new ThrowingDictionaryKey()] = "throwing",
                         [new FormatFailingDictionaryKey()] = "format",
@@ -1064,7 +1075,7 @@ public class ConfigAuditReporterTests
                     }
                 }));
         services.AddConfigAuditKey<Hashtable>(
-            "Labels.Items",
+            "Labels:Items",
             options =>
             {
                 options.TraverseCollectionElements = true;
@@ -1075,7 +1086,7 @@ public class ConfigAuditReporterTests
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var children = AssertEntry(report, "Labels.Items", ConfigAuditEntryState.Resolved, null).Children;
+        var children = AssertEntry(report, "Labels:Items", ConfigAuditEntryState.Resolved, null).Children;
         var unprintableChildren = children
             .Where(child => child.Element?.KeyLabel == "[key]")
             .ToList();
@@ -1091,7 +1102,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_ManualOptionOverridesWrapperDictionaryCorrelationPolicy()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
@@ -1110,8 +1121,7 @@ public class ConfigAuditReporterTests
                         ["tenant-secret-token"] = "alpha-secret-value"
                     }
                 }));
-        services.AddSingleton(new ConfigAuditKnownEntry(
-            "Tenants",
+        services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Tenants"),
             typeof(object),
             typeof(Dictionary<string, string>),
             new ConfigAuditEntryOptions
@@ -1120,7 +1130,7 @@ public class ConfigAuditReporterTests
                 DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.None
             }));
         services.AddConfigAuditKey<Dictionary<string, string>>(
-            "tenants",
+            "Tenants",
             options => options.DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac);
 
         var report = services.BuildServiceProvider()
@@ -1148,7 +1158,7 @@ public class ConfigAuditReporterTests
                 }
                 """);
 
-            var environment = A.Fake<IEnvironmentProvider>();
+            var environment = SnapshotEnvironment();
             A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
             var services = CreateServices(tempDir, environment);
@@ -1164,7 +1174,7 @@ public class ConfigAuditReporterTests
             var diagnostic = Assert.Single(entry.Diagnostics, item => item.Code == "config-file-null-skipped");
             var rendered = new ConfigAuditTextRenderer().Render(report);
 
-            Assert.Equal("Tenants.[redacted-key]", diagnostic.ConfigPath);
+            Assert.Equal("Tenants:[redacted-key]", diagnostic.ConfigPath);
             Assert.DoesNotContain("password", diagnostic.ConfigPath, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("password", diagnostic.Message, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("password", rendered, StringComparison.OrdinalIgnoreCase);
@@ -1178,7 +1188,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_TraversesNonStringDictionaryKeysAndCanHideLabels()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         var services = CreateServices("/missing", environment);
         services.AddSingleton<IConfigProvider>(
@@ -1247,7 +1257,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_RedactsDictionaryLabelsForSensitiveParentSignals()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         var services = CreateServices("/missing", environment);
         services.AddSingleton<IConfigProvider>(
@@ -1258,7 +1268,7 @@ public class ConfigAuditReporterTests
                     {
                         ["tenant-a"] = "session-cookie"
                     },
-                    ["Partner.Payloads"] = new Dictionary<string, string>
+                    ["Partner:Payloads"] = new Dictionary<string, string>
                     {
                         ["tenant-b"] = "payload"
                     }
@@ -1267,7 +1277,7 @@ public class ConfigAuditReporterTests
             "CookieJar",
             options => options.TraverseCollectionElements = true);
         services.AddConfigAuditKey<Dictionary<string, string>>(
-            "Partner.Payloads",
+            "Partner:Payloads",
             options =>
             {
                 options.TraverseCollectionElements = true;
@@ -1284,8 +1294,8 @@ public class ConfigAuditReporterTests
         Assert.Equal("[redacted-key-1]", fragmentSensitiveChild.Element?.KeyLabel);
         Assert.True(fragmentSensitiveChild.Element?.IsKeyRedacted);
 
-        var entrySensitiveChild = Assert.Single(AssertEntry(report, "Partner.Payloads", ConfigAuditEntryState.Resolved, "[redacted]").Children);
-        Assert.Equal("Partner.Payloads[[redacted-key-1]]", entrySensitiveChild.Key);
+        var entrySensitiveChild = Assert.Single(AssertEntry(report, "Partner:Payloads", ConfigAuditEntryState.Resolved, "[redacted]").Children);
+        Assert.Equal("Partner:Payloads[[redacted-key-1]]", entrySensitiveChild.Key);
         Assert.Equal("[redacted-key-1]", entrySensitiveChild.Element?.KeyLabel);
         Assert.True(entrySensitiveChild.IsRedacted);
 
@@ -1296,18 +1306,18 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_RedactsSourceSensitiveDictionaryChildWhenLabelsAreHidden()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         var services = CreateServices("/missing", environment);
         services.AddSingleton<IConfigProvider>(
             new SourceSensitiveDictionaryProvider(
-                "Hidden.Payloads",
+                "Hidden:Payloads",
                 new Dictionary<string, string>
                 {
                     ["tenant-a"] = "patched-secret"
                 }));
         services.AddConfigAuditKey<Dictionary<string, string>>(
-            "Hidden.Payloads",
+            "Hidden:Payloads",
             options =>
             {
                 options.TraverseCollectionElements = true;
@@ -1319,8 +1329,8 @@ public class ConfigAuditReporterTests
             .GetReport("Production");
         var serialized = JsonSerializer.Serialize(report);
 
-        var child = Assert.Single(AssertEntry(report, "Hidden.Payloads", ConfigAuditEntryState.PartiallyResolved, "[redacted]").Children);
-        Assert.Equal("Hidden.Payloads[[key]]", child.Key);
+        var child = Assert.Single(AssertEntry(report, "Hidden:Payloads", ConfigAuditEntryState.PartiallyResolved, "[redacted]").Children);
+        Assert.Equal("Hidden:Payloads[[key]]", child.Key);
         Assert.Equal("[redacted]", child.DisplayValue);
         Assert.True(child.IsRedacted);
         Assert.DoesNotContain("patched-secret", serialized, StringComparison.Ordinal);
@@ -1330,7 +1340,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_HandlesUnsafeDictionaryKeyLabelsWithoutCrashingOrLeaking()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         var longKey = new string('a', 200);
         var services = CreateServices("/missing", environment);
@@ -1338,7 +1348,7 @@ public class ConfigAuditReporterTests
             new DictionaryConfigProvider(
                 new Dictionary<string, object?>
                 {
-                    ["Labels.Items"] = new Hashtable
+                    ["Labels:Items"] = new Hashtable
                     {
                         [new ThrowingDictionaryKey()] = "throwing",
                         [new FormatFailingDictionaryKey()] = "format",
@@ -1347,7 +1357,7 @@ public class ConfigAuditReporterTests
                     }
                 }));
         services.AddConfigAuditKey<Hashtable>(
-            "Labels.Items",
+            "Labels:Items",
             options => options.TraverseCollectionElements = true);
 
         var report = services.BuildServiceProvider()
@@ -1355,7 +1365,7 @@ public class ConfigAuditReporterTests
             .GetReport("Production");
         var serialized = JsonSerializer.Serialize(report);
 
-        var entry = AssertEntry(report, "Labels.Items", ConfigAuditEntryState.Resolved, null);
+        var entry = AssertEntry(report, "Labels:Items", ConfigAuditEntryState.Resolved, null);
         Assert.Equal(4, entry.Children.Count);
         Assert.Contains(entry.Children, child => child.Element?.KeyLabel == "[key]" && child.Element.IsKeyRedacted);
         Assert.Contains(entry.Children, child => child.Element?.KeyLabel?.Length == 131);
@@ -1367,7 +1377,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_EscapesDictionaryLabelControlCharactersBeforeTextRendering()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         const string rawLabel = "operator\r\nforged\tlabel";
         var services = CreateServices("/missing", environment);
@@ -1375,230 +1385,230 @@ public class ConfigAuditReporterTests
             new DictionaryConfigProvider(
                 new Dictionary<string, object?>
                 {
-                    ["Labels.Items"] = new Dictionary<string, string> { [rawLabel] = "visible" }
+                    ["Labels:Items"] = new Dictionary<string, string> { [rawLabel] = "visible" }
                 }));
         services.AddConfigAuditKey<Dictionary<string, string>>(
-            "Labels.Items",
+            "Labels:Items",
             options => options.TraverseCollectionElements = true);
 
         var provider = services.BuildServiceProvider();
         var report = provider.GetRequiredService<IConfigAuditReporter>().GetReport("Production");
         var rendered = provider.GetRequiredService<ConfigAuditTextRenderer>().Render(report);
 
-        var child = Assert.Single(AssertEntry(report, "Labels.Items", ConfigAuditEntryState.Resolved, null).Children);
-        Assert.Equal("Labels.Items[\"operator\\r\\nforged\\tlabel\"]", child.Key);
+        var child = Assert.Single(AssertEntry(report, "Labels:Items", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Equal("Labels:Items[\"operator\\r\\nforged\\tlabel\"]", child.Key);
         Assert.Equal("operator\\r\\nforged\\tlabel", child.Element?.KeyLabel);
-        Assert.Contains("Labels.Items[\"operator\\r\\nforged\\tlabel\"]", rendered, StringComparison.Ordinal);
+        Assert.Contains("Labels:Items[\"operator\\r\\nforged\\tlabel\"]", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain(rawLabel, rendered, StringComparison.Ordinal);
     }
 
     [Fact]
     public void GetReport_ReportsCollectionTraversalLimitsAndUnsupportedShapes()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         var services = CreateServices("/missing", environment);
         services.AddSingleton<IConfigProvider>(
             new DictionaryConfigProvider(
                 new Dictionary<string, object?>
                 {
-                    ["Array.Default"] = new[] { "opaque" },
-                    ["Array.Items"] = new[] { "one", "two" },
-                    ["Array.Deep"] = new[] { new[] { "too-deep" } },
-                    ["Array.Limited"] = new[] { "one", "two" },
-                    ["ReadOnly.Default"] = new ReadOnlyValues(),
-                    ["ReadOnly.Items"] = new ReadOnlyValues(),
-                    ["ReadOnly.Deep"] = new List<object> { new ReadOnlyValues() },
-                    ["ReadOnly.Limited"] = new ReadOnlyValues(),
-                    ["Limited.Items"] = new List<int> { 1, 2, 3 },
-                    ["Budget.Items"] = new List<int> { 1, 2, 3 },
-                    ["Deep.Items"] = new List<object> { new List<string> { "too-deep" } },
-                    ["Dictionary.Default"] = new Dictionary<string, string>
+                    ["Array:Default"] = new[] { "opaque" },
+                    ["Array:Items"] = new[] { "one", "two" },
+                    ["Array:Deep"] = new[] { new[] { "too-deep" } },
+                    ["Array:Limited"] = new[] { "one", "two" },
+                    ["ReadOnly:Default"] = new ReadOnlyValues(),
+                    ["ReadOnly:Items"] = new ReadOnlyValues(),
+                    ["ReadOnly:Deep"] = new List<object> { new ReadOnlyValues() },
+                    ["ReadOnly:Limited"] = new ReadOnlyValues(),
+                    ["Limited:Items"] = new List<int> { 1, 2, 3 },
+                    ["Budget:Items"] = new List<int> { 1, 2, 3 },
+                    ["Deep:Items"] = new List<object> { new List<string> { "too-deep" } },
+                    ["Dictionary:Default"] = new Dictionary<string, string>
                     {
                         ["one"] = "1"
                     },
-                    ["Dictionary.Deep"] = new Dictionary<string, object>
+                    ["Dictionary:Deep"] = new Dictionary<string, object>
                     {
                         ["inner"] = new Dictionary<string, string>
                         {
                             ["child"] = "too-deep"
                         }
                     },
-                    ["Dictionary.Limited"] = new Dictionary<string, string>
+                    ["Dictionary:Limited"] = new Dictionary<string, string>
                     {
                         ["one"] = "1",
                         ["two"] = "2"
                     },
-                    ["PropertyBudget.Shape"] = new PropertyBudgetShape(),
-                    ["FieldBudget.Shape"] = new FieldBudgetShape
+                    ["PropertyBudget:Shape"] = new PropertyBudgetShape(),
+                    ["FieldBudget:Shape"] = new FieldBudgetShape
                     {
                         First = "first",
                         Second = "second"
                     },
-                    ["Struct.Shape"] = new StructShape { Name = "value-type" },
-                    ["Unsupported.Default"] = new ThrowingEnumerable(),
-                    ["Unsupported.Items"] = new ThrowingEnumerable(),
-                    ["Matrix.Items"] = new int[1, 1]
+                    ["Struct:Shape"] = new StructShape { Name = "value-type" },
+                    ["Unsupported:Default"] = new ThrowingEnumerable(),
+                    ["Unsupported:Items"] = new ThrowingEnumerable(),
+                    ["Matrix:Items"] = new int[1, 1]
                 }));
-        services.AddConfigAuditKey<string[]>("Array.Default");
+        services.AddConfigAuditKey<string[]>("Array:Default");
         services.AddConfigAuditKey<string[]>(
-            "Array.Items",
+            "Array:Items",
             options => options.TraverseCollectionElements = true);
         services.AddConfigAuditKey<string[][]>(
-            "Array.Deep",
+            "Array:Deep",
             options =>
             {
                 options.TraverseCollectionElements = true;
                 options.MaxCollectionDepth = 1;
             });
         services.AddConfigAuditKey<string[]>(
-            "Array.Limited",
+            "Array:Limited",
             options =>
             {
                 options.TraverseCollectionElements = true;
                 options.MaxCollectionElements = 1;
             });
-        services.AddConfigAuditKey<ReadOnlyValues>("ReadOnly.Default");
+        services.AddConfigAuditKey<ReadOnlyValues>("ReadOnly:Default");
         services.AddConfigAuditKey<ReadOnlyValues>(
-            "ReadOnly.Items",
+            "ReadOnly:Items",
             options => options.TraverseCollectionElements = true);
         services.AddConfigAuditKey<List<object>>(
-            "ReadOnly.Deep",
+            "ReadOnly:Deep",
             options =>
             {
                 options.TraverseCollectionElements = true;
                 options.MaxCollectionDepth = 1;
             });
         services.AddConfigAuditKey<ReadOnlyValues>(
-            "ReadOnly.Limited",
+            "ReadOnly:Limited",
             options =>
             {
                 options.TraverseCollectionElements = true;
                 options.MaxCollectionElements = 1;
             });
         services.AddConfigAuditKey<List<int>>(
-            "Limited.Items",
+            "Limited:Items",
             options =>
             {
                 options.TraverseCollectionElements = true;
                 options.MaxCollectionElements = 2;
             });
         services.AddConfigAuditKey<List<int>>(
-            "Budget.Items",
+            "Budget:Items",
             options =>
             {
                 options.TraverseCollectionElements = true;
                 options.MaxReportNodes = 1;
             });
         services.AddConfigAuditKey<List<object>>(
-            "Deep.Items",
+            "Deep:Items",
             options =>
             {
                 options.TraverseCollectionElements = true;
                 options.MaxCollectionDepth = 1;
             });
-        services.AddConfigAuditKey<Dictionary<string, string>>("Dictionary.Default");
+        services.AddConfigAuditKey<Dictionary<string, string>>("Dictionary:Default");
         services.AddConfigAuditKey<Dictionary<string, object>>(
-            "Dictionary.Deep",
+            "Dictionary:Deep",
             options =>
             {
                 options.TraverseCollectionElements = true;
                 options.MaxCollectionDepth = 1;
             });
         services.AddConfigAuditKey<Dictionary<string, string>>(
-            "Dictionary.Limited",
+            "Dictionary:Limited",
             options =>
             {
                 options.TraverseCollectionElements = true;
                 options.MaxCollectionElements = 1;
             });
         services.AddConfigAuditKey<PropertyBudgetShape>(
-            "PropertyBudget.Shape",
+            "PropertyBudget:Shape",
             options => options.MaxReportNodes = 1);
         services.AddConfigAuditKey<FieldBudgetShape>(
-            "FieldBudget.Shape",
+            "FieldBudget:Shape",
             options => options.MaxReportNodes = 1);
-        services.AddConfigAuditKey<StructShape>("Struct.Shape");
-        services.AddConfigAuditKey<ThrowingEnumerable>("Unsupported.Default");
+        services.AddConfigAuditKey<StructShape>("Struct:Shape");
+        services.AddConfigAuditKey<ThrowingEnumerable>("Unsupported:Default");
         services.AddConfigAuditKey<ThrowingEnumerable>(
-            "Unsupported.Items",
+            "Unsupported:Items",
             options => options.TraverseCollectionElements = true);
         services.AddConfigAuditKey<int[,]>(
-            "Matrix.Items",
+            "Matrix:Items",
             options => options.TraverseCollectionElements = true);
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        Assert.Empty(AssertEntry(report, "Array.Default", ConfigAuditEntryState.Resolved, null).Children);
-        var array = AssertEntry(report, "Array.Items", ConfigAuditEntryState.Resolved, null);
-        Assert.Equal(["Array.Items[0]", "Array.Items[1]"], array.Children.Select(child => child.Key));
+        Assert.Empty(AssertEntry(report, "Array:Default", ConfigAuditEntryState.Resolved, null).Children);
+        var array = AssertEntry(report, "Array:Items", ConfigAuditEntryState.Resolved, null);
+        Assert.Equal(["Array:Items[0]", "Array:Items[1]"], array.Children.Select(child => child.Key));
         Assert.All(array.Children, child => Assert.Equal(ConfigAuditElementKind.ArrayItem, child.Element?.Kind));
 
-        var arrayDeep = AssertEntry(report, "Array.Deep", ConfigAuditEntryState.Resolved, null);
+        var arrayDeep = AssertEntry(report, "Array:Deep", ConfigAuditEntryState.Resolved, null);
         Assert.Contains(arrayDeep.Children[0].Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-depth-limit");
 
-        var arrayLimited = AssertEntry(report, "Array.Limited", ConfigAuditEntryState.Resolved, null);
+        var arrayLimited = AssertEntry(report, "Array:Limited", ConfigAuditEntryState.Resolved, null);
         Assert.Single(arrayLimited.Children);
         Assert.Contains(arrayLimited.Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-element-limit");
 
-        Assert.Empty(AssertEntry(report, "ReadOnly.Default", ConfigAuditEntryState.Resolved, null).Children);
-        var readOnly = AssertEntry(report, "ReadOnly.Items", ConfigAuditEntryState.Resolved, null);
+        Assert.Empty(AssertEntry(report, "ReadOnly:Default", ConfigAuditEntryState.Resolved, null).Children);
+        var readOnly = AssertEntry(report, "ReadOnly:Items", ConfigAuditEntryState.Resolved, null);
         Assert.Equal(["first", "second"], readOnly.Children.Select(child => child.DisplayValue));
         Assert.All(readOnly.Children, child => Assert.Equal(ConfigAuditElementKind.ListItem, child.Element?.Kind));
 
-        var readOnlyDeep = AssertEntry(report, "ReadOnly.Deep", ConfigAuditEntryState.Resolved, null);
+        var readOnlyDeep = AssertEntry(report, "ReadOnly:Deep", ConfigAuditEntryState.Resolved, null);
         Assert.Contains(readOnlyDeep.Children[0].Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-depth-limit");
 
-        var readOnlyLimited = AssertEntry(report, "ReadOnly.Limited", ConfigAuditEntryState.Resolved, null);
+        var readOnlyLimited = AssertEntry(report, "ReadOnly:Limited", ConfigAuditEntryState.Resolved, null);
         Assert.Single(readOnlyLimited.Children);
         Assert.Contains(readOnlyLimited.Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-element-limit");
 
-        var limited = AssertEntry(report, "Limited.Items", ConfigAuditEntryState.Resolved, null);
+        var limited = AssertEntry(report, "Limited:Items", ConfigAuditEntryState.Resolved, null);
         Assert.Equal(2, limited.Children.Count);
         Assert.Contains(limited.Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-element-limit");
 
-        var budget = AssertEntry(report, "Budget.Items", ConfigAuditEntryState.Resolved, null);
+        var budget = AssertEntry(report, "Budget:Items", ConfigAuditEntryState.Resolved, null);
         Assert.Single(budget.Children);
         Assert.Contains(budget.Diagnostics, diagnostic => diagnostic.Code == "config-audit-report-node-limit");
 
-        var deep = AssertEntry(report, "Deep.Items", ConfigAuditEntryState.Resolved, null);
+        var deep = AssertEntry(report, "Deep:Items", ConfigAuditEntryState.Resolved, null);
         Assert.Contains(deep.Children[0].Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-depth-limit");
 
-        Assert.Empty(AssertEntry(report, "Dictionary.Default", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Empty(AssertEntry(report, "Dictionary:Default", ConfigAuditEntryState.Resolved, null).Children);
 
-        var dictionaryDeep = AssertEntry(report, "Dictionary.Deep", ConfigAuditEntryState.Resolved, null);
+        var dictionaryDeep = AssertEntry(report, "Dictionary:Deep", ConfigAuditEntryState.Resolved, null);
         Assert.Contains(dictionaryDeep.Children[0].Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-depth-limit");
 
-        var dictionaryLimited = AssertEntry(report, "Dictionary.Limited", ConfigAuditEntryState.Resolved, null);
+        var dictionaryLimited = AssertEntry(report, "Dictionary:Limited", ConfigAuditEntryState.Resolved, null);
         Assert.Single(dictionaryLimited.Children);
         Assert.Contains(dictionaryLimited.Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-element-limit");
 
-        var propertyBudget = AssertEntry(report, "PropertyBudget.Shape", ConfigAuditEntryState.Resolved, null);
+        var propertyBudget = AssertEntry(report, "PropertyBudget:Shape", ConfigAuditEntryState.Resolved, null);
         Assert.Single(propertyBudget.Children);
         Assert.Contains(propertyBudget.Diagnostics, diagnostic => diagnostic.Code == "config-audit-report-node-limit");
 
-        var fieldBudget = AssertEntry(report, "FieldBudget.Shape", ConfigAuditEntryState.Resolved, null);
+        var fieldBudget = AssertEntry(report, "FieldBudget:Shape", ConfigAuditEntryState.Resolved, null);
         Assert.Single(fieldBudget.Children);
         Assert.Contains(fieldBudget.Diagnostics, diagnostic => diagnostic.Code == "config-audit-report-node-limit");
 
-        var structShape = AssertEntry(report, "Struct.Shape", ConfigAuditEntryState.Resolved, null);
-        Assert.Equal("value-type", structShape.Children.Single(child => child.Key == "Struct.Shape.Name").DisplayValue);
+        var structShape = AssertEntry(report, "Struct:Shape", ConfigAuditEntryState.Resolved, null);
+        Assert.Equal("value-type", structShape.Children.Single(child => child.Key == "Struct:Shape.Name").DisplayValue);
 
-        Assert.Empty(AssertEntry(report, "Unsupported.Default", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Empty(AssertEntry(report, "Unsupported:Default", ConfigAuditEntryState.Resolved, null).Children);
         Assert.Contains(
-            AssertEntry(report, "Unsupported.Items", ConfigAuditEntryState.Resolved, null).Diagnostics,
+            AssertEntry(report, "Unsupported:Items", ConfigAuditEntryState.Resolved, null).Diagnostics,
             diagnostic => diagnostic.Code == "config-audit-collection-kind-unsupported");
         Assert.Contains(
-            AssertEntry(report, "Matrix.Items", ConfigAuditEntryState.Resolved, null).Diagnostics,
+            AssertEntry(report, "Matrix:Items", ConfigAuditEntryState.Resolved, null).Diagnostics,
             diagnostic => diagnostic.Code == "config-audit-collection-kind-unsupported");
     }
 
     [Fact]
     public void GetReport_ExpandedModeConvertsReadOnlyListAccessorFailuresToSanitizedDiagnostics()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
@@ -1625,7 +1635,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_ExpandedModeConvertsReadOnlyListIndexerFailuresToSanitizedDiagnostics()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
@@ -1652,26 +1662,26 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_ReportsSourceUnavailableForRedactedDictionaryKeysWithoutProviderSources()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
         services.AddSingleton<IConfigProvider>(
             new NoSourceProvider(
-                "Map.Values",
+                "Map:Values",
                 new Dictionary<string, string>
                 {
                     ["password"] = "secret"
                 }));
         services.AddConfigAuditKey<Dictionary<string, string>>(
-            "Map.Values",
+            "Map:Values",
             options => options.TraverseCollectionElements = true);
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var entry = AssertEntry(report, "Map.Values", ConfigAuditEntryState.Resolved, null);
+        var entry = AssertEntry(report, "Map:Values", ConfigAuditEntryState.Resolved, null);
         var child = Assert.Single(entry.Children);
 
         Assert.Contains(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-source-unavailable");
@@ -1680,7 +1690,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_MarksDirectEnvironmentCollectionElementsCreatedWhenBaseIsMissing()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__0", A<string?>._))
             .Returns("https://one.example");
@@ -1712,7 +1722,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_DoesNotMarkDirectEnvironmentCollectionElementCreatedWhenBaseIndexExists()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__0", A<string?>._))
             .Returns("https://env.example");
@@ -1736,7 +1746,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_MarksDirectEnvironmentCollectionTailElementCreatedWhenBaseIsShorter()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__0", A<string?>._))
             .Returns("https://one.example");
@@ -1764,7 +1774,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_MarksDirectEnvironmentArrayTailElementCreatedWhenBaseIsShorter()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__0", A<string?>._))
             .Returns("https://one.example");
@@ -1792,7 +1802,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_DoesNotMarkDirectEnvironmentReadOnlyListElementCreatedWhenBaseIndexExists()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__0", A<string?>._))
             .Returns("https://env.example");
@@ -1819,7 +1829,7 @@ public class ConfigAuditReporterTests
         var services = CreateServicesWithDiagnosticEnvironment(
             "Endpoints",
             new ReadOnlyValues("first", "second", "third"),
-            "Endpoints.2");
+            "Endpoints:2");
         services.AddSingleton<IConfigProvider>(new StaticConfigProvider("Endpoints", new ReadOnlyValues()));
         services.AddConfigAuditKey<IReadOnlyList<string>>(
             "Endpoints",
@@ -1837,7 +1847,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_MarksDirectEnvironmentCollectionElementCreatedWhenBaseValueIsNull()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__0", A<string?>._))
             .Returns("https://env.example");
@@ -1866,23 +1876,23 @@ public class ConfigAuditReporterTests
     public void GetReport_DoesNotCreateFactsForEnvironmentSourcesWithoutCollectionElementPath()
     {
         var services = CreateServicesWithDiagnosticEnvironment(
-            "MyApp.Settings",
+            "MyApp:Settings",
             new EndpointSettings
             {
                 Endpoints = ["https://env.example"]
             },
-            "MyApp.Settings");
+            "MyApp:Settings");
         services.AddConfigAuditKey<EndpointSettings>(
-            "MyApp.Settings",
+            "MyApp:Settings",
             options => options.TraverseCollectionElements = true);
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var endpoint = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.Resolved, null)
-            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints")
-            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints[0]");
+        var endpoint = AssertEntry(report, "MyApp:Settings", ConfigAuditEntryState.Resolved, null)
+            .Children.Single(child => child.Key == "MyApp:Settings.Endpoints")
+            .Children.Single(child => child.Key == "MyApp:Settings.Endpoints[0]");
         Assert.DoesNotContain(endpoint.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
         Assert.DoesNotContain(endpoint.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
     }
@@ -1933,30 +1943,30 @@ public class ConfigAuditReporterTests
     public void GetReport_DoesNotMarkDirectEnvironmentObjectElementCreatedWhenBasePropertyIndexExists()
     {
         var services = CreateServicesWithDiagnosticEnvironment(
-            "MyApp.Settings",
+            "MyApp:Settings",
             new EndpointSettings
             {
                 Endpoints = ["https://env.example"]
             },
-            "MyApp.Settings.Endpoints.0");
+            "MyApp:Settings:Endpoints:0");
         services.AddSingleton<IConfigProvider>(
             new StaticConfigProvider(
-                "MyApp.Settings",
+                "MyApp:Settings",
                 new EndpointSettings
                 {
                     Endpoints = ["https://file.example"]
                 }));
         services.AddConfigAuditKey<EndpointSettings>(
-            "MyApp.Settings",
+            "MyApp:Settings",
             options => options.TraverseCollectionElements = true);
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var endpoint = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.Resolved, null)
-            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints")
-            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints[0]");
+        var endpoint = AssertEntry(report, "MyApp:Settings", ConfigAuditEntryState.Resolved, null)
+            .Children.Single(child => child.Key == "MyApp:Settings.Endpoints")
+            .Children.Single(child => child.Key == "MyApp:Settings.Endpoints[0]");
         Assert.DoesNotContain(endpoint.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
         Assert.DoesNotContain(endpoint.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
     }
@@ -1965,30 +1975,30 @@ public class ConfigAuditReporterTests
     public void GetReport_MarksDirectEnvironmentObjectElementCreatedWhenBasePropertyIsNull()
     {
         var services = CreateServicesWithDiagnosticEnvironment(
-            "MyApp.Settings",
+            "MyApp:Settings",
             new EndpointSettings
             {
                 Endpoints = ["https://env.example"]
             },
-            "MyApp.Settings.Endpoints.0");
+            "MyApp:Settings:Endpoints:0");
         services.AddSingleton<IConfigProvider>(
             new StaticConfigProvider(
-                "MyApp.Settings",
+                "MyApp:Settings",
                 new EndpointSettings
                 {
                     Endpoints = null!
                 }));
         services.AddConfigAuditKey<EndpointSettings>(
-            "MyApp.Settings",
+            "MyApp:Settings",
             options => options.TraverseCollectionElements = true);
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var endpoint = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.Resolved, null)
-            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints")
-            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints[0]");
+        var endpoint = AssertEntry(report, "MyApp:Settings", ConfigAuditEntryState.Resolved, null)
+            .Children.Single(child => child.Key == "MyApp:Settings.Endpoints")
+            .Children.Single(child => child.Key == "MyApp:Settings.Endpoints[0]");
         Assert.Contains(endpoint.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
         Assert.DoesNotContain(endpoint.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
     }
@@ -1997,27 +2007,27 @@ public class ConfigAuditReporterTests
     public void GetReport_MarksDirectEnvironmentObjectElementCreatedWhenBaseFieldCollectionIsEmpty()
     {
         var services = CreateServicesWithDiagnosticEnvironment(
-            "MyApp.Settings",
+            "MyApp:Settings",
             new FieldEndpointSettings
             {
                 Endpoints = ["https://env.example"]
             },
-            "MyApp.Settings.Endpoints.0");
+            "MyApp:Settings:Endpoints:0");
         services.AddSingleton<IConfigProvider>(
             new StaticConfigProvider(
-                "MyApp.Settings",
+                "MyApp:Settings",
                 new FieldEndpointSettings()));
         services.AddConfigAuditKey<FieldEndpointSettings>(
-            "MyApp.Settings",
+            "MyApp:Settings",
             options => options.TraverseCollectionElements = true);
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var endpoint = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.Resolved, null)
-            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints")
-            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints[0]");
+        var endpoint = AssertEntry(report, "MyApp:Settings", ConfigAuditEntryState.Resolved, null)
+            .Children.Single(child => child.Key == "MyApp:Settings.Endpoints")
+            .Children.Single(child => child.Key == "MyApp:Settings.Endpoints[0]");
         Assert.Contains(endpoint.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
         Assert.DoesNotContain(endpoint.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
     }
@@ -2026,15 +2036,15 @@ public class ConfigAuditReporterTests
     public void GetReport_MarksDirectEnvironmentObjectElementCreatedWhenBaseFieldIsReadOnly()
     {
         var services = CreateServicesWithDiagnosticEnvironment(
-            "MyApp.Settings",
+            "MyApp:Settings",
             new ReadOnlyFieldEndpointSettings("https://env.example"),
-            "MyApp.Settings.Endpoints.0");
+            "MyApp:Settings:Endpoints:0");
         services.AddSingleton<IConfigProvider>(
             new StaticConfigProvider(
-                "MyApp.Settings",
+                "MyApp:Settings",
                 new ReadOnlyFieldEndpointSettings()));
         services.AddConfigAuditKey<ReadOnlyFieldEndpointSettings>(
-            "MyApp.Settings",
+            "MyApp:Settings",
             options => options.TraverseCollectionElements = true);
 
         var report = services.BuildServiceProvider()
@@ -2042,37 +2052,37 @@ public class ConfigAuditReporterTests
             .GetReport("Production");
 
         Assert.DoesNotContain(
-            AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.Resolved, null).Children,
-            child => child.Key == "MyApp.Settings.Endpoints");
+            AssertEntry(report, "MyApp:Settings", ConfigAuditEntryState.Resolved, null).Children,
+            child => child.Key == "MyApp:Settings.Endpoints");
     }
 
     [Fact]
     public void GetReport_MarksDirectEnvironmentObjectElementCreatedWhenBaseMemberCannotBeIndexed()
     {
         var services = CreateServicesWithDiagnosticEnvironment(
-            "MyApp.Settings",
+            "MyApp:Settings",
             new ScalarEndpointSettings
             {
                 Endpoint = "https://env.example"
             },
-            "MyApp.Settings.Endpoint.0");
+            "MyApp:Settings:Endpoint:0");
         services.AddSingleton<IConfigProvider>(
             new StaticConfigProvider(
-                "MyApp.Settings",
+                "MyApp:Settings",
                 new ScalarEndpointSettings
                 {
                     Endpoint = "https://file.example"
                 }));
         services.AddConfigAuditKey<ScalarEndpointSettings>(
-            "MyApp.Settings",
+            "MyApp:Settings",
             options => options.TraverseCollectionElements = true);
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var entry = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.Resolved, null);
-        var endpoint = entry.Children.Single(child => child.Key == "MyApp.Settings.Endpoint");
+        var entry = AssertEntry(report, "MyApp:Settings", ConfigAuditEntryState.Resolved, null);
+        var endpoint = entry.Children.Single(child => child.Key == "MyApp:Settings.Endpoint");
         Assert.Equal("https://env.example", endpoint.DisplayValue);
         Assert.Empty(endpoint.Diagnostics);
     }
@@ -2080,7 +2090,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_MarksDirectEnvironmentCollectionBasePresenceUnknownForPathlessProvider()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__0", A<string?>._))
             .Returns("https://env.example");
@@ -2106,7 +2116,7 @@ public class ConfigAuditReporterTests
         var services = CreateServicesWithDiagnosticEnvironment(
             "Endpoints",
             new List<string> { "https://env.example" },
-            "Other.0");
+            "Other:0");
         services.AddSingleton<IConfigProvider>(
             new SourcePathProvider(
                 "Endpoints",
@@ -2129,7 +2139,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_MarksDirectEnvironmentCollectionBasePresenceUnknownForInvalidProvider()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__0", A<string?>._))
             .Returns("https://env.example");
@@ -2152,7 +2162,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_MarksDirectEnvironmentCollectionBasePresenceUnknownWhenLowerProviderResolvesAfterInvalidProvider()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__0", A<string?>._))
             .Returns("https://env.example");
@@ -2177,7 +2187,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_MarksNestedEnvironmentCollectionTailCreatedDuringPatch()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         A.CallTo(() => environment.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
             .Returns("https://one.example");
@@ -2187,23 +2197,23 @@ public class ConfigAuditReporterTests
         var services = CreateServices("/missing", environment);
         services.AddSingleton<IConfigProvider>(
             new StaticConfigProvider(
-                "MyApp.Settings",
+                "MyApp:Settings",
                 new EndpointSettings
                 {
                     Endpoints = ["https://file.example"]
                 }));
         services.AddConfigAuditKey<EndpointSettings>(
-            "MyApp.Settings",
+            "MyApp:Settings",
             options => options.TraverseCollectionElements = true);
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var endpoints = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.PartiallyResolved, null)
-            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints");
-        var first = endpoints.Children.Single(child => child.Key == "MyApp.Settings.Endpoints[0]");
-        var second = endpoints.Children.Single(child => child.Key == "MyApp.Settings.Endpoints[1]");
+        var endpoints = AssertEntry(report, "MyApp:Settings", ConfigAuditEntryState.PartiallyResolved, null)
+            .Children.Single(child => child.Key == "MyApp:Settings.Endpoints");
+        var first = endpoints.Children.Single(child => child.Key == "MyApp:Settings.Endpoints[0]");
+        var second = endpoints.Children.Single(child => child.Key == "MyApp:Settings.Endpoints[1]");
 
         Assert.DoesNotContain(first.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
         Assert.Contains(second.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
@@ -2212,23 +2222,23 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_MarksNestedEnvironmentCollectionBasePresenceUnknownForInvalidProviderDuringPatch()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         A.CallTo(() => environment.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
             .Returns("https://env.example");
 
         var services = CreateServices("/missing", environment);
-        services.AddSingleton<IConfigProvider>(new InvalidDiagnosticProvider("MyApp.Settings", priority: 30));
+        services.AddSingleton<IConfigProvider>(new InvalidDiagnosticProvider("MyApp:Settings", priority: 30));
         services.AddConfigAuditKey<EndpointSettings>(
-            "MyApp.Settings",
+            "MyApp:Settings",
             options => options.TraverseCollectionElements = true);
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var endpoints = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.PartiallyResolved, null)
-            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints");
+        var endpoints = AssertEntry(report, "MyApp:Settings", ConfigAuditEntryState.PartiallyResolved, null)
+            .Children.Single(child => child.Key == "MyApp:Settings.Endpoints");
         var child = Assert.Single(endpoints.Children);
         Assert.Contains(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
         Assert.DoesNotContain(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
@@ -2237,30 +2247,30 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_MarksNestedEnvironmentCollectionBasePresenceUnknownWhenLowerProviderResolvesAfterInvalidProvider()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         A.CallTo(() => environment.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
             .Returns("https://env.example");
 
         var services = CreateServices("/missing", environment);
-        services.AddSingleton<IConfigProvider>(new InvalidDiagnosticProvider("MyApp.Settings", priority: 30));
+        services.AddSingleton<IConfigProvider>(new InvalidDiagnosticProvider("MyApp:Settings", priority: 30));
         services.AddSingleton<IConfigProvider>(
             new StaticConfigProvider(
-                "MyApp.Settings",
+                "MyApp:Settings",
                 new EndpointSettings
                 {
                     Endpoints = []
                 }));
         services.AddConfigAuditKey<EndpointSettings>(
-            "MyApp.Settings",
+            "MyApp:Settings",
             options => options.TraverseCollectionElements = true);
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var endpoints = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.PartiallyResolved, null)
-            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints");
+        var endpoints = AssertEntry(report, "MyApp:Settings", ConfigAuditEntryState.PartiallyResolved, null)
+            .Children.Single(child => child.Key == "MyApp:Settings.Endpoints");
         var child = Assert.Single(endpoints.Children);
         Assert.Equal("https://env.example", child.DisplayValue);
         Assert.Contains(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
@@ -2270,26 +2280,26 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_FallsBackWhenSourcePathsAreUnavailable()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
         services.AddSingleton<IConfigProvider>(
             new PathlessSourceProvider(
-                "Pathless.Endpoint",
+                "Pathless:Endpoint",
                 new NamedEndpoint
                 {
                     Name = "billing",
                     Url = "https://example.test"
                 }));
-        services.AddConfigAuditKey<NamedEndpoint>("Pathless.Endpoint");
+        services.AddConfigAuditKey<NamedEndpoint>("Pathless:Endpoint");
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var entry = AssertEntry(report, "Pathless.Endpoint", ConfigAuditEntryState.Resolved, null);
-        var name = entry.Children.Single(child => child.Key == "Pathless.Endpoint.Name");
+        var entry = AssertEntry(report, "Pathless:Endpoint", ConfigAuditEntryState.Resolved, null);
+        var name = entry.Children.Single(child => child.Key == "Pathless:Endpoint.Name");
 
         Assert.Contains(name.Sources, source => source.ProviderName == nameof(PathlessSourceProvider));
     }
@@ -2297,22 +2307,22 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_HandlesCyclesAndUnknownElementSources()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         var cyclic = new List<object>();
         cyclic.Add(cyclic);
 
         var services = CreateServices("/missing", environment);
-        services.AddSingleton<IConfigProvider>(new NoSourceProvider("Cycle.List", cyclic));
+        services.AddSingleton<IConfigProvider>(new NoSourceProvider("Cycle:List", cyclic));
         services.AddConfigAuditKey<List<object>>(
-            "Cycle.List",
+            "Cycle:List",
             options => options.TraverseCollectionElements = true);
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var entry = AssertEntry(report, "Cycle.List", ConfigAuditEntryState.Resolved, null);
+        var entry = AssertEntry(report, "Cycle:List", ConfigAuditEntryState.Resolved, null);
         var element = Assert.Single(entry.Children);
         Assert.Empty(element.Children);
         Assert.Empty(element.Sources);
@@ -2322,7 +2332,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_ReportsInvalidOptionsAndUsesSafeTraversalDefaults()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
@@ -2330,10 +2340,10 @@ public class ConfigAuditReporterTests
             new DictionaryConfigProvider(
                 new Dictionary<string, object?>
                 {
-                    ["Invalid.Options"] = new List<int> { 1, 2 }
+                    ["Invalid:Options"] = new List<int> { 1, 2 }
                 }));
         services.AddConfigAuditKey<List<int>>(
-            "Invalid.Options",
+            "Invalid:Options",
             options =>
             {
                 options.TraverseCollectionElements = true;
@@ -2346,7 +2356,7 @@ public class ConfigAuditReporterTests
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var entry = AssertEntry(report, "Invalid.Options", ConfigAuditEntryState.Resolved, null);
+        var entry = AssertEntry(report, "Invalid:Options", ConfigAuditEntryState.Resolved, null);
         Assert.Equal(2, entry.Children.Count);
         Assert.Equal(3, entry.Diagnostics.Count(diagnostic => diagnostic.Code == "config-audit-options-invalid"));
     }
@@ -2354,7 +2364,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_ReportsInvalidSensitivityAndFailsClosed()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
@@ -2362,16 +2372,16 @@ public class ConfigAuditReporterTests
             new DictionaryConfigProvider(
                 new Dictionary<string, object?>
                 {
-                    ["Partner.Payload"] = "invalid-sensitivity-secret"
+                    ["Partner:Payload"] = "invalid-sensitivity-secret"
                 }));
         services.AddConfigAuditKey<string>(
-            "Partner.Payload",
+            "Partner:Payload",
             options => options.Sensitivity = (ConfigAuditSensitivity)999);
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
-        var entry = AssertEntry(report, "Partner.Payload", ConfigAuditEntryState.Resolved, "[redacted]");
+        var entry = AssertEntry(report, "Partner:Payload", ConfigAuditEntryState.Resolved, "[redacted]");
         var diagnostic = Assert.Single(entry.Diagnostics, diagnostic => diagnostic.Code == "config-audit-options-invalid");
 
         Assert.True(entry.IsRedacted);
@@ -2384,7 +2394,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_ReportsInvalidSensitivityWithoutRelaxingValidTraversalLimits()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
@@ -2392,10 +2402,10 @@ public class ConfigAuditReporterTests
             new DictionaryConfigProvider(
                 new Dictionary<string, object?>
                 {
-                    ["Partner.Payloads"] = new List<string> { "one", "two", "three" }
+                    ["Partner:Payloads"] = new List<string> { "one", "two", "three" }
                 }));
         services.AddConfigAuditKey<List<string>>(
-            "Partner.Payloads",
+            "Partner:Payloads",
             options =>
             {
                 options.TraverseCollectionElements = true;
@@ -2407,11 +2417,11 @@ public class ConfigAuditReporterTests
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
-        var entry = AssertEntry(report, "Partner.Payloads", ConfigAuditEntryState.Resolved, "[redacted]");
+        var entry = AssertEntry(report, "Partner:Payloads", ConfigAuditEntryState.Resolved, "[redacted]");
         var child = Assert.Single(entry.Children);
         var serialized = JsonSerializer.Serialize(report);
 
-        Assert.Equal("Partner.Payloads[0]", child.Key);
+        Assert.Equal("Partner:Payloads[0]", child.Key);
         Assert.Equal("[redacted]", child.DisplayValue);
         Assert.True(child.IsRedacted);
         Assert.Single(entry.Diagnostics, diagnostic => diagnostic.Code == "config-audit-options-invalid");
@@ -2423,7 +2433,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_RedactsDictionaryLabelsWhenInvalidSensitivityFailsClosed()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
@@ -2431,13 +2441,13 @@ public class ConfigAuditReporterTests
             new DictionaryConfigProvider(
                 new Dictionary<string, object?>
                 {
-                    ["Partner.Payloads"] = new Dictionary<string, string>
+                    ["Partner:Payloads"] = new Dictionary<string, string>
                     {
                         ["tenant-invalid"] = "invalid-sensitivity-secret"
                     }
                 }));
         services.AddConfigAuditKey<Dictionary<string, string>>(
-            "Partner.Payloads",
+            "Partner:Payloads",
             options =>
             {
                 options.TraverseCollectionElements = true;
@@ -2447,10 +2457,10 @@ public class ConfigAuditReporterTests
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
-        var child = Assert.Single(AssertEntry(report, "Partner.Payloads", ConfigAuditEntryState.Resolved, "[redacted]").Children);
+        var child = Assert.Single(AssertEntry(report, "Partner:Payloads", ConfigAuditEntryState.Resolved, "[redacted]").Children);
         var serialized = JsonSerializer.Serialize(report);
 
-        Assert.Equal("Partner.Payloads[[redacted-key-1]]", child.Key);
+        Assert.Equal("Partner:Payloads[[redacted-key-1]]", child.Key);
         Assert.Equal("[redacted-key-1]", child.Element?.KeyLabel);
         Assert.True(child.Element?.IsKeyRedacted);
         Assert.True(child.IsRedacted);
@@ -2513,7 +2523,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_ReportsWrapperInspectionFailuresAndProviderFallbackShapes()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
@@ -2521,74 +2531,74 @@ public class ConfigAuditReporterTests
             new DictionaryConfigProvider(
                 new Dictionary<string, object?>
                 {
-                    ["Short.Name"] = "no",
-                    ["Throwing.Name"] = "valid-name",
-                    ["Throwing.Count"] = 7,
-                    ["Leaky.Name"] = "super-secret",
-                    ["Leaky.Throwing"] = "super-secret",
-                    ["Mismatched.Name"] = 5,
-                    ["Mismatched.Count"] = "seven",
-                    ["Object.String"] = "plain",
-                    ["Odd.Shape"] = new OddShape()
+                    ["Short:Name"] = "no",
+                    ["Throwing:Name"] = "valid-name",
+                    ["Throwing:Count"] = 7,
+                    ["Leaky:Name"] = "super-secret",
+                    ["Leaky:Throwing"] = "super-secret",
+                    ["Mismatched:Name"] = 5,
+                    ["Mismatched:Count"] = "seven",
+                    ["Object:String"] = "plain",
+                    ["Odd:Shape"] = new OddShape()
                 }));
-        services.AddSingleton(new ConfigAuditKnownEntry("Short.Name", typeof(ShortNameConfig), typeof(string)));
-        services.AddSingleton(new ConfigAuditKnownEntry("Throwing.Name", typeof(ThrowingNameConfig), typeof(string)));
-        services.AddSingleton(new ConfigAuditKnownEntry("Throwing.Count", typeof(ThrowingCountConfig), typeof(int)));
-        services.AddSingleton(new ConfigAuditKnownEntry("Leaky.Name", typeof(LeakyNameConfig), typeof(string)));
-        services.AddSingleton(new ConfigAuditKnownEntry("Leaky.Throwing", typeof(LeakyThrowingConfig), typeof(string)));
-        services.AddSingleton(new ConfigAuditKnownEntry("Mismatched.Name", typeof(ShortNameConfig), typeof(string)));
-        services.AddSingleton(new ConfigAuditKnownEntry("Mismatched.Count", typeof(RetryCountConfig), typeof(int)));
-        services.AddSingleton(new ConfigAuditKnownEntry("Default.Port", typeof(DefaultPortConfig), typeof(int)));
-        services.AddSingleton(new ConfigAuditKnownEntry("Broken.Wrapper", typeof(UnconstructableConfig), typeof(string)));
-        services.AddSingleton(new ConfigAuditKnownEntry("Throwing.Wrapper", typeof(ThrowingConstructorConfig), typeof(string)));
-        services.AddSingleton(new ConfigAuditKnownEntry("Plain.Wrapper", typeof(object), typeof(string)));
-        services.AddConfigAuditKey<object>("Object.String");
-        services.AddConfigAuditKey<OddShape>("Odd.Shape");
+        services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Short:Name"), typeof(ShortNameConfig), typeof(string)));
+        services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Throwing:Name"), typeof(ThrowingNameConfig), typeof(string)));
+        services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Throwing:Count"), typeof(ThrowingCountConfig), typeof(int)));
+        services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Leaky:Name"), typeof(LeakyNameConfig), typeof(string)));
+        services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Leaky:Throwing"), typeof(LeakyThrowingConfig), typeof(string)));
+        services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Mismatched:Name"), typeof(MismatchedNameConfig), typeof(string)));
+        services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Mismatched:Count"), typeof(RetryCountConfig), typeof(int)));
+        services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Default:Port"), typeof(DefaultPortConfig), typeof(int)));
+        services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Broken:Wrapper"), typeof(UnconstructableConfig), typeof(string)));
+        services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Throwing:Wrapper"), typeof(ThrowingConstructorConfig), typeof(string)));
+        services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Plain:Wrapper"), typeof(object), typeof(string)));
+        services.AddConfigAuditKey<object>("Object:String");
+        services.AddConfigAuditKey<OddShape>("Odd:Shape");
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
         Assert.Contains(
-            AssertEntry(report, "Short.Name", ConfigAuditEntryState.Invalid, "no").Diagnostics,
+            AssertEntry(report, "Short:Name", ConfigAuditEntryState.Invalid, "no").Diagnostics,
             diagnostic => diagnostic.Code == "config-validation-failed");
         Assert.Contains(
-            AssertEntry(report, "Throwing.Name", ConfigAuditEntryState.Invalid, "valid-name").Diagnostics,
+            AssertEntry(report, "Throwing:Name", ConfigAuditEntryState.Invalid, "valid-name").Diagnostics,
             diagnostic => diagnostic.Code == "config-validation-threw");
         Assert.Contains(
-            AssertEntry(report, "Throwing.Count", ConfigAuditEntryState.Invalid, "7").Diagnostics,
+            AssertEntry(report, "Throwing:Count", ConfigAuditEntryState.Invalid, "7").Diagnostics,
             diagnostic => diagnostic.Code == "config-validation-threw");
         Assert.All(
-            AssertEntry(report, "Leaky.Name", ConfigAuditEntryState.Invalid, "super-secret").Diagnostics,
+            AssertEntry(report, "Leaky:Name", ConfigAuditEntryState.Invalid, "super-secret").Diagnostics,
             diagnostic => Assert.DoesNotContain("super-secret", diagnostic.Message, StringComparison.Ordinal));
         Assert.All(
-            AssertEntry(report, "Leaky.Throwing", ConfigAuditEntryState.Invalid, "super-secret").Diagnostics,
+            AssertEntry(report, "Leaky:Throwing", ConfigAuditEntryState.Invalid, "super-secret").Diagnostics,
             diagnostic => Assert.DoesNotContain("super-secret", diagnostic.Message, StringComparison.Ordinal));
         Assert.Contains(
-            AssertEntry(report, "Mismatched.Name", ConfigAuditEntryState.Invalid, null).Diagnostics,
+            AssertEntry(report, "Mismatched:Name", ConfigAuditEntryState.Invalid, null).Diagnostics,
             diagnostic => diagnostic.Code == "config-value-type-mismatch");
         Assert.Contains(
-            AssertEntry(report, "Mismatched.Count", ConfigAuditEntryState.Invalid, null).Diagnostics,
+            AssertEntry(report, "Mismatched:Count", ConfigAuditEntryState.Invalid, null).Diagnostics,
             diagnostic => diagnostic.Code == "config-value-type-mismatch");
         Assert.Contains(
-            AssertEntry(report, "Default.Port", ConfigAuditEntryState.Defaulted, "8080").Sources,
+            AssertEntry(report, "Default:Port", ConfigAuditEntryState.Defaulted, "8080").Sources,
             source => source.Kind == ConfigAuditSourceKind.Default);
         Assert.Contains(
-            AssertEntry(report, "Broken.Wrapper", ConfigAuditEntryState.Invalid, null).Diagnostics,
+            AssertEntry(report, "Broken:Wrapper", ConfigAuditEntryState.Invalid, null).Diagnostics,
             diagnostic => diagnostic.Code == "config-wrapper-create-failed");
         Assert.All(
-            AssertEntry(report, "Throwing.Wrapper", ConfigAuditEntryState.Invalid, null).Diagnostics,
+            AssertEntry(report, "Throwing:Wrapper", ConfigAuditEntryState.Invalid, null).Diagnostics,
             diagnostic => Assert.DoesNotContain("super-secret", diagnostic.Message, StringComparison.Ordinal));
-        AssertEntry(report, "Plain.Wrapper", ConfigAuditEntryState.Missing, null);
+        AssertEntry(report, "Plain:Wrapper", ConfigAuditEntryState.Missing, null);
 
-        var stringObject = AssertEntry(report, "Object.String", ConfigAuditEntryState.Resolved, "plain");
+        var stringObject = AssertEntry(report, "Object:String", ConfigAuditEntryState.Resolved, "plain");
         Assert.Empty(stringObject.Children);
 
-        var oddShape = AssertEntry(report, "Odd.Shape", ConfigAuditEntryState.Resolved, null);
-        Assert.Contains(oddShape.Children, child => child.Key == "Odd.Shape.GoodProperty");
-        Assert.Contains(oddShape.Children, child => child.Key == "Odd.Shape.MutableField");
-        Assert.DoesNotContain(oddShape.Children, child => child.Key == "Odd.Shape.BadProperty");
-        Assert.DoesNotContain(oddShape.Children, child => child.Key == "Odd.Shape.ReadOnlyField");
+        var oddShape = AssertEntry(report, "Odd:Shape", ConfigAuditEntryState.Resolved, null);
+        Assert.Contains(oddShape.Children, child => child.Key == "Odd:Shape.GoodProperty");
+        Assert.Contains(oddShape.Children, child => child.Key == "Odd:Shape.MutableField");
+        Assert.DoesNotContain(oddShape.Children, child => child.Key == "Odd:Shape.BadProperty");
+        Assert.DoesNotContain(oddShape.Children, child => child.Key == "Odd:Shape.ReadOnlyField");
 
         var rendered = new ConfigAuditTextRenderer().Render(
             new ConfigAuditReport
@@ -2600,7 +2610,7 @@ public class ConfigAuditReporterTests
                 [
                     new ConfigAuditEntry
                     {
-                        Key = "Provider.Source",
+                        Key = "Provider:Source",
                         State = ConfigAuditEntryState.Resolved,
                         Sources =
                         [
@@ -2608,8 +2618,8 @@ public class ConfigAuditReporterTests
                             {
                                 Kind = ConfigAuditSourceKind.Provider,
                                 ProviderName = "CustomProvider",
-                                ConfigPath = "Provider.Source",
-                                AppliedToPath = "Provider.Source",
+                                ConfigPath = "Provider:Source",
+                                AppliedToPath = "Provider:Source",
                                 Role = ConfigAuditSourceRole.Base
                             }
                         ]
@@ -2628,25 +2638,24 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_UsesDefaultSourceForDefaultedCollectionChildren()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
-        services.AddSingleton(new ConfigAuditKnownEntry(
-            "Default.Services",
+        services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Default:Services"),
             typeof(DefaultServicesConfig),
             typeof(List<NamedEndpoint>)));
         services.AddConfigAuditKey<List<NamedEndpoint>>(
-            "Default.Services",
+            "Default:Services",
             options => options.TraverseCollectionElements = true);
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var entry = AssertEntry(report, "Default.Services", ConfigAuditEntryState.Defaulted, null);
+        var entry = AssertEntry(report, "Default:Services", ConfigAuditEntryState.Defaulted, null);
         var service = Assert.Single(entry.Children);
-        var name = Assert.Single(service.Children, child => child.Key == "Default.Services[0].Name");
+        var name = Assert.Single(service.Children, child => child.Key == "Default:Services[0].Name");
 
         Assert.All(entry.Sources, source => Assert.Equal(ConfigAuditSourceKind.Default, source.Kind));
         Assert.All(service.Sources, source => Assert.Equal(ConfigAuditSourceKind.Default, source.Kind));
@@ -2658,52 +2667,52 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_TreatsNullFromGenericProviderAsMissing()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
         services.AddSingleton<IConfigProvider>(new MissingStringProvider());
-        services.AddConfigAuditKey<string>("Provider.Missing");
+        services.AddConfigAuditKey<string>("Provider:Missing");
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        AssertEntry(report, "Provider.Missing", ConfigAuditEntryState.Missing, null);
+        AssertEntry(report, "Provider:Missing", ConfigAuditEntryState.Missing, null);
     }
 
     [Fact]
-    public void GetReport_ContinuesAfterInvalidProviderWhenLowerPriorityProviderResolves()
+    public void GetReport_StopsAfterInvalidProviderBeforeLowerPriorityProviderResolves()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
-        services.AddSingleton<IConfigProvider>(new InvalidDiagnosticProvider("Fallback.Port", priority: 30));
-        services.AddSingleton<IConfigProvider>(new StaticConfigProvider("Fallback.Port", 443));
-        services.AddConfigAuditKey<int>("Fallback.Port");
+        services.AddSingleton<IConfigProvider>(new InvalidDiagnosticProvider("Fallback:Port", priority: 30));
+        services.AddSingleton<IConfigProvider>(new StaticConfigProvider("Fallback:Port", 443));
+        services.AddConfigAuditKey<int>("Fallback:Port");
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var entry = AssertEntry(report, "Fallback.Port", ConfigAuditEntryState.Resolved, "443");
-        Assert.Contains(entry.Sources, source => source.ProviderName == nameof(StaticConfigProvider));
+        var entry = AssertEntry(report, "Fallback:Port", ConfigAuditEntryState.Invalid, null);
+        Assert.DoesNotContain(entry.Sources, source => source.ProviderName == nameof(StaticConfigProvider));
         Assert.Contains(entry.Diagnostics, diagnostic => diagnostic.Code == "config-provider-invalid");
     }
 
     [Fact]
     public void GetReport_ConvertsProviderExceptionsToDiagnostics()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
-        services.AddSingleton<IConfigProvider>(new ThrowingConfigProvider("Provider.Throws"));
-        services.AddSingleton<IConfigProvider>(new ThrowingDiagnosticProvider("Diagnostic.Throws"));
-        services.AddConfigAuditKey<string>("Provider.Throws");
-        services.AddConfigAuditKey<string>("Diagnostic.Throws");
-        services.AddSingleton(new ConfigAuditKnownEntry("Provider.BadType", null, typeof(void)));
+        services.AddSingleton<IConfigProvider>(new ThrowingConfigProvider("Provider:Throws"));
+        services.AddSingleton<IConfigProvider>(new ThrowingDiagnosticProvider("Diagnostic:Throws"));
+        services.AddConfigAuditKey<string>("Provider:Throws");
+        services.AddConfigAuditKey<string>("Diagnostic:Throws");
+        services.AddSingleton(new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Provider:BadType"), null, typeof(void)));
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
@@ -2714,20 +2723,20 @@ public class ConfigAuditReporterTests
             report.Diagnostics.Concat(report.Entries.SelectMany(entry => entry.Diagnostics)),
             diagnostic => diagnostic.Message.Contains("super-secret", StringComparison.Ordinal));
         Assert.Contains(
-            AssertEntry(report, "Provider.Throws", ConfigAuditEntryState.Invalid, null).Diagnostics,
+            AssertEntry(report, "Provider:Throws", ConfigAuditEntryState.Invalid, null).Diagnostics,
             diagnostic => diagnostic.Code == "config-provider-get-value-threw");
         Assert.Contains(
-            AssertEntry(report, "Diagnostic.Throws", ConfigAuditEntryState.Invalid, null).Diagnostics,
+            AssertEntry(report, "Diagnostic:Throws", ConfigAuditEntryState.Invalid, null).Diagnostics,
             diagnostic => diagnostic.Code == "config-provider-resolve-threw");
         Assert.Contains(
-            AssertEntry(report, "Provider.BadType", ConfigAuditEntryState.Invalid, null).Diagnostics,
+            AssertEntry(report, "Provider:BadType", ConfigAuditEntryState.Invalid, null).Diagnostics,
             diagnostic => diagnostic.Code == "config-provider-get-value-threw");
     }
 
     [Fact]
     public void GetReport_ConvertsProviderTargetInvocationDiagnosticExceptionsToDiagnostics()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
@@ -2747,7 +2756,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_ConvertsPublicProviderDiagnosticExceptionsToDiagnostics()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
@@ -2767,7 +2776,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_ConvertsPublicProviderTargetInvocationDiagnosticExceptionsToDiagnostics()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
@@ -2787,36 +2796,36 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_UsesPublicProviderAuditResolution()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
-        services.AddSingleton<IConfigProvider>(new PublicAuditDiagnosticsProvider("Public.Resolved", "from-public-provider"));
-        services.AddConfigAuditKey<string>("Public.Resolved");
+        services.AddSingleton<IConfigProvider>(new PublicAuditDiagnosticsProvider("Public:Resolved", "from-public-provider"));
+        services.AddConfigAuditKey<string>("Public:Resolved");
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var entry = AssertEntry(report, "Public.Resolved", ConfigAuditEntryState.Resolved, "from-public-provider");
+        var entry = AssertEntry(report, "Public:Resolved", ConfigAuditEntryState.Resolved, "from-public-provider");
         Assert.Contains(entry.Sources, source => source.ProviderName == nameof(PublicAuditDiagnosticsProvider));
     }
 
     [Fact]
     public void GetReport_RejectsMismatchedPublicProviderAuditResolutionKey()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
         services.AddSingleton<IConfigProvider>(new MismatchedPublicAuditDiagnosticsProvider());
-        services.AddConfigAuditKey<string>("Public.Requested");
+        services.AddConfigAuditKey<string>("Public:Requested");
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var diagnostic = Assert.Single(AssertEntry(report, "Public.Requested", ConfigAuditEntryState.Invalid, null).Diagnostics);
+        var diagnostic = Assert.Single(AssertEntry(report, "Public:Requested", ConfigAuditEntryState.Invalid, null).Diagnostics);
         Assert.Equal("config-provider-resolve-threw", diagnostic.Code);
         Assert.DoesNotContain("wrong-secret", diagnostic.Message, StringComparison.Ordinal);
     }
@@ -2824,18 +2833,18 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_ConvertsPublicProviderAuditResolutionExceptionsToDiagnostics()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
-        services.AddSingleton<IConfigProvider>(new ThrowingPublicAuditResolutionProvider("Public.Throws"));
-        services.AddConfigAuditKey<string>("Public.Throws");
+        services.AddSingleton<IConfigProvider>(new ThrowingPublicAuditResolutionProvider("Public:Throws"));
+        services.AddConfigAuditKey<string>("Public:Throws");
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var diagnostic = Assert.Single(AssertEntry(report, "Public.Throws", ConfigAuditEntryState.Invalid, null).Diagnostics);
+        var diagnostic = Assert.Single(AssertEntry(report, "Public:Throws", ConfigAuditEntryState.Invalid, null).Diagnostics);
         Assert.Equal("config-provider-resolve-threw", diagnostic.Code);
         Assert.DoesNotContain("super-secret", diagnostic.Message, StringComparison.Ordinal);
     }
@@ -2843,14 +2852,14 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_DoesNotConvertCriticalPublicProviderAuditResolutionExceptions()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
         services.AddSingleton<IConfigProvider>(new ThrowingPublicAuditResolutionProvider(
-            "Public.Throws",
+            "Public:Throws",
             new AccessViolationException("critical public resolve failed")));
-        services.AddConfigAuditKey<string>("Public.Throws");
+        services.AddConfigAuditKey<string>("Public:Throws");
 
         var reporter = services.BuildServiceProvider().GetRequiredService<IConfigAuditReporter>();
 
@@ -2860,14 +2869,14 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_UnwrapsCriticalPublicProviderAuditResolutionTargetInvocationExceptions()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
         services.AddSingleton<IConfigProvider>(new ThrowingPublicAuditResolutionProvider(
-            "Public.Throws",
+            "Public:Throws",
             new TargetInvocationException(new AccessViolationException("critical public resolve failed"))));
-        services.AddConfigAuditKey<string>("Public.Throws");
+        services.AddConfigAuditKey<string>("Public:Throws");
 
         var reporter = services.BuildServiceProvider().GetRequiredService<IConfigAuditReporter>();
 
@@ -2877,7 +2886,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_DoesNotConvertCriticalProviderDiagnosticExceptions()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
@@ -2892,7 +2901,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_UnwrapsCriticalProviderDiagnosticTargetInvocationExceptions()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
@@ -2908,7 +2917,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_DoesNotConvertCriticalPublicProviderDiagnosticExceptions()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
@@ -2923,7 +2932,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_UnwrapsCriticalPublicProviderDiagnosticTargetInvocationExceptions()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
@@ -2942,7 +2951,7 @@ public class ConfigAuditReporterTests
         var services = new ServiceCollection();
         services.AddSingleton<IEnvironmentConfigProvider>(new ThrowingPatchEnvironmentProvider());
         services.AddSingleton<IConfigProvider>(new StaticConfigProvider(
-            "MyApp.Settings",
+            "MyApp:Settings",
             new AppSettings
             {
                 Mode = "file"
@@ -2950,13 +2959,15 @@ public class ConfigAuditReporterTests
         services.AddSingleton<IConfigAuditReporter, ConfigAuditReporter>();
         services.AddOptions<ConfigAuditDictionaryKeyCorrelationOptions>();
         services.AddSingleton<ConfigAuditRedactor>();
-        services.AddConfigAuditKey<AppSettings>("MyApp.Settings");
+        services.AddConfigAuditKey<AppSettings>("MyApp:Settings");
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var entry = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.Resolved, null);
+        var entry = AssertEntry(report, "MyApp:Settings", ConfigAuditEntryState.Invalid, null);
+        Assert.Null(entry.DisplayValue);
+        Assert.Empty(entry.Children);
         Assert.Contains(entry.Diagnostics, diagnostic => diagnostic.Code == "config-provider-patch-threw");
         Assert.DoesNotContain(
             entry.Diagnostics,
@@ -2966,22 +2977,22 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_DoesNotExpandCyclesIndefinitely()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         var options = new CyclicOptions { Name = "root" };
         options.Self = options;
 
         var services = CreateServices("/missing", environment);
-        services.AddSingleton<IConfigProvider>(new StaticConfigProvider("Cycle.Options", options));
-        services.AddConfigAuditKey<CyclicOptions>("Cycle.Options");
+        services.AddSingleton<IConfigProvider>(new StaticConfigProvider("Cycle:Options", options));
+        services.AddConfigAuditKey<CyclicOptions>("Cycle:Options");
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var entry = AssertEntry(report, "Cycle.Options", ConfigAuditEntryState.Resolved, null);
-        Assert.Equal("root", entry.Children.Single(child => child.Key == "Cycle.Options.Name").DisplayValue);
-        Assert.Empty(entry.Children.Single(child => child.Key == "Cycle.Options.Self").Children);
+        var entry = AssertEntry(report, "Cycle:Options", ConfigAuditEntryState.Resolved, null);
+        Assert.Equal("root", entry.Children.Single(child => child.Key == "Cycle:Options.Name").DisplayValue);
+        Assert.Empty(entry.Children.Single(child => child.Key == "Cycle:Options.Self").Children);
     }
 
     [Fact]
@@ -2997,7 +3008,7 @@ public class ConfigAuditReporterTests
                 [
                     new ConfigAuditEntry
                     {
-                        Key = "Located.Value",
+                        Key = "Located:Value",
                         State = ConfigAuditEntryState.Resolved,
                         Sources =
                         [
@@ -3006,8 +3017,8 @@ public class ConfigAuditReporterTests
                                 Kind = ConfigAuditSourceKind.File,
                                 ProviderName = "Files",
                                 FilePath = "/tmp/appsettings.json",
-                                ConfigPath = "Located.Value",
-                                AppliedToPath = "Located.Value",
+                                ConfigPath = "Located:Value",
+                                AppliedToPath = "Located:Value",
                                 Location = new ConfigAuditSourceLocation(4, 12),
                                 Role = ConfigAuditSourceRole.Base
                             }
@@ -3015,7 +3026,7 @@ public class ConfigAuditReporterTests
                     },
                     new ConfigAuditEntry
                     {
-                        Key = "Unlocated.Value",
+                        Key = "Unlocated:Value",
                         State = ConfigAuditEntryState.Resolved,
                         Sources =
                         [
@@ -3024,8 +3035,8 @@ public class ConfigAuditReporterTests
                                 Kind = ConfigAuditSourceKind.File,
                                 ProviderName = "Files",
                                 FilePath = "/tmp/appsettings.json",
-                                ConfigPath = "Unlocated.Value",
-                                AppliedToPath = "Unlocated.Value",
+                                ConfigPath = "Unlocated:Value",
+                                AppliedToPath = "Unlocated:Value",
                                 Role = ConfigAuditSourceRole.Base
                             }
                         ]
@@ -3039,50 +3050,50 @@ public class ConfigAuditReporterTests
                 }
             });
 
-        Assert.Contains("Files appsettings.json:4:12 :: Located.Value", rendered, StringComparison.Ordinal);
-        Assert.Contains("Files appsettings.json :: Unlocated.Value", rendered, StringComparison.Ordinal);
+        Assert.Contains("Files appsettings.json:4:12 :: Located:Value", rendered, StringComparison.Ordinal);
+        Assert.Contains("Files appsettings.json :: Unlocated:Value", rendered, StringComparison.Ordinal);
     }
 
     [Fact]
     public void GetReport_RemovesInheritedParentLocationFromChildSource()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
         services.AddSingleton<IConfigProvider>(new ParentLocatedSourceProvider());
-        services.AddConfigAuditKey<AppSettings>("Located.Parent");
+        services.AddConfigAuditKey<AppSettings>("Located:Parent");
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var entry = AssertEntry(report, "Located.Parent", ConfigAuditEntryState.Resolved, null);
+        var entry = AssertEntry(report, "Located:Parent", ConfigAuditEntryState.Resolved, null);
         var parentSource = Assert.Single(entry.Sources, source => source.ProviderName == nameof(ParentLocatedSourceProvider));
         AssertLocation(parentSource, lineNumber: 10, byteColumnNumber: 4);
 
-        var mode = Assert.Single(entry.Children, child => child.Key == "Located.Parent.Mode");
+        var mode = Assert.Single(entry.Children, child => child.Key == "Located:Parent.Mode");
         var childSource = Assert.Single(mode.Sources, source => source.ProviderName == nameof(ParentLocatedSourceProvider));
-        Assert.Equal("Located.Parent", childSource.ConfigPath);
-        Assert.Equal("Located.Parent", childSource.AppliedToPath);
+        Assert.Equal("Located:Parent", childSource.ConfigPath);
+        Assert.Equal("Located:Parent", childSource.AppliedToPath);
         Assert.Null(childSource.Location);
     }
 
     [Fact]
     public void GetReport_MarksResolvedEntryPartialWhenChildSourcesContainPatch()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
         services.AddSingleton<IConfigProvider>(new PatchSourceProvider());
-        services.AddConfigAuditKey<AppSettings>("Patch.Source");
+        services.AddConfigAuditKey<AppSettings>("Patch:Source");
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        AssertEntry(report, "Patch.Source", ConfigAuditEntryState.PartiallyResolved, null);
+        AssertEntry(report, "Patch:Source", ConfigAuditEntryState.PartiallyResolved, null);
     }
 
     [Fact]
@@ -3174,7 +3185,7 @@ public class ConfigAuditReporterTests
                 }
                 """);
 
-            var environment = A.Fake<IEnvironmentProvider>();
+            var environment = SnapshotEnvironment();
             A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
             var services = CreateServices(tempDir, environment);
@@ -3189,17 +3200,17 @@ public class ConfigAuditReporterTests
                 "NestedTree",
                 options => options.Sensitivity = ConfigAuditSensitivity.Sensitive);
             services.AddConfigAuditKey<Dictionary<string, string>>(
-                "NestedTree.Branch",
+                "NestedTree:Branch",
                 options => options.Sensitivity = ConfigAuditSensitivity.NonSensitive);
             services.AddConfigAuditKey<Dictionary<string, object?>>(
                 "SensitiveUnknownTree",
                 options => options.Sensitivity = ConfigAuditSensitivity.Sensitive);
-            services.AddConfigAuditKey<Dictionary<string, string>>("SensitiveUnknownTree.Branch");
+            services.AddConfigAuditKey<Dictionary<string, string>>("SensitiveUnknownTree:Branch");
             services.AddConfigAuditKey<AppSettings>("App");
-            services.AddConfigAuditKey<string>("App.Mode");
-            services.AddConfigAuditKey<string>("Application.Reviewed");
+            services.AddConfigAuditKey<string>("App:Mode");
+            services.AddConfigAuditKey<string>("Application:Reviewed");
             services.AddSingleton<IConfigProvider>(
-                new SourceSensitiveKeyEnumeratorProvider("SourceSensitive.Leaf", "source-sensitive-value"));
+                new SourceSensitiveKeyEnumeratorProvider("SourceSensitive:Leaf", "source-sensitive-value"));
 
             var provider = services.BuildServiceProvider();
             var report = provider.GetRequiredService<IConfigAuditReporter>().GetReport("Staging");
@@ -3219,21 +3230,21 @@ public class ConfigAuditReporterTests
             Assert.True(sensitiveExact.IsRedacted);
             var sensitiveChild = AssertDiscovered(
                 report,
-                "SensitiveTree.Child",
+                "SensitiveTree:Child",
                 ConfigAuditDiscoveredKeyClassification.KnownDescendant,
                 "[redacted]",
                 ConfigAuditDiscoveredValueDisplayState.Redacted);
             Assert.True(sensitiveChild.IsRedacted);
             var nearestParentChild = AssertDiscovered(
                 report,
-                "NestedTree.Branch.Leaf",
+                "NestedTree:Branch:Leaf",
                 ConfigAuditDiscoveredKeyClassification.KnownDescendant,
                 "[redacted]",
                 ConfigAuditDiscoveredValueDisplayState.Redacted);
             Assert.True(nearestParentChild.IsRedacted);
             var unknownChildInherited = AssertDiscovered(
                 report,
-                "SensitiveUnknownTree.Branch.Leaf",
+                "SensitiveUnknownTree:Branch:Leaf",
                 ConfigAuditDiscoveredKeyClassification.KnownDescendant,
                 "[redacted]",
                 ConfigAuditDiscoveredValueDisplayState.Redacted);
@@ -3246,92 +3257,92 @@ public class ConfigAuditReporterTests
                 ConfigAuditDiscoveredValueDisplayState.OmittedComplex);
             AssertDiscovered(
                 report,
-                "App.Mode",
+                "App:Mode",
                 ConfigAuditDiscoveredKeyClassification.Known,
                 "file",
                 ConfigAuditDiscoveredValueDisplayState.Shown);
             AssertDiscovered(
                 report,
-                "App.Enabled",
+                "App:Enabled",
                 ConfigAuditDiscoveredKeyClassification.KnownDescendant,
                 null,
                 ConfigAuditDiscoveredValueDisplayState.OmittedInventory);
             AssertDiscovered(
                 report,
-                "App.RetryCount",
+                "App:RetryCount",
                 ConfigAuditDiscoveredKeyClassification.KnownDescendant,
                 null,
                 ConfigAuditDiscoveredValueDisplayState.OmittedInventory);
             AssertDiscovered(
                 report,
-                "App.Ratio",
+                "App:Ratio",
                 ConfigAuditDiscoveredKeyClassification.KnownDescendant,
                 null,
                 ConfigAuditDiscoveredValueDisplayState.OmittedInventory);
             AssertDiscovered(
                 report,
-                "App.LongValue",
+                "App:LongValue",
                 ConfigAuditDiscoveredKeyClassification.KnownDescendant,
                 null,
                 ConfigAuditDiscoveredValueDisplayState.OmittedInventory);
             AssertDiscovered(
                 report,
-                "App.HugeValue",
+                "App:HugeValue",
                 ConfigAuditDiscoveredKeyClassification.KnownDescendant,
                 null,
                 ConfigAuditDiscoveredValueDisplayState.OmittedInventory);
             var password = AssertDiscovered(
                 report,
-                "App.Password",
+                "App:Password",
                 ConfigAuditDiscoveredKeyClassification.KnownDescendant,
                 "[redacted]",
                 ConfigAuditDiscoveredValueDisplayState.Redacted);
             Assert.True(password.IsRedacted);
             var items = AssertDiscovered(
                 report,
-                "App.Items",
+                "App:Items",
                 ConfigAuditDiscoveredKeyClassification.KnownDescendant,
                 null,
                 ConfigAuditDiscoveredValueDisplayState.OmittedComplex);
             Assert.False(items.IsRedacted);
             var tokenList = AssertDiscovered(
                 report,
-                "App.TokenList",
+                "App:TokenList",
                 ConfigAuditDiscoveredKeyClassification.KnownDescendant,
                 "[redacted]",
                 ConfigAuditDiscoveredValueDisplayState.Redacted);
             Assert.True(tokenList.IsRedacted);
             AssertDiscovered(
                 report,
-                "Application.Name",
+                "Application:Name",
                 ConfigAuditDiscoveredKeyClassification.Unknown,
                 null,
                 ConfigAuditDiscoveredValueDisplayState.OmittedInventory);
             AssertDiscovered(
                 report,
-                "Application.Reviewed",
+                "Application:Reviewed",
                 ConfigAuditDiscoveredKeyClassification.Known,
                 "display-me",
                 ConfigAuditDiscoveredValueDisplayState.Shown);
             var sourceSensitive = AssertDiscovered(
                 report,
-                "SourceSensitive.Leaf",
+                "SourceSensitive:Leaf",
                 ConfigAuditDiscoveredKeyClassification.Unknown,
                 "[redacted]",
                 ConfigAuditDiscoveredValueDisplayState.Redacted);
             Assert.True(sourceSensitive.IsRedacted);
-            Assert.DoesNotContain(report.DiscoveredKeys, key => key.Key == "App.NullValue");
+            Assert.DoesNotContain(report.DiscoveredKeys, key => key.Key == "App:NullValue");
             Assert.DoesNotContain(report.DiscoveredKeys, key => key.Key == "UnknownNull");
             Assert.DoesNotContain(report.DiscoveredKeys, key => key.Key == "OtherEnvironmentNull");
             var app = report.Entries.Single(entry => entry.Key == "App");
             Assert.Contains(
                 app.Diagnostics,
                 diagnostic => diagnostic.Code == "config-file-null-skipped"
-                              && diagnostic.ConfigPath == "App.NullValue");
+                              && diagnostic.ConfigPath == "App:NullValue");
             Assert.DoesNotContain(
                 report.Diagnostics,
                 diagnostic => diagnostic.Code == "config-file-null-skipped"
-                              && diagnostic.ConfigPath == "App.NullValue");
+                              && diagnostic.ConfigPath == "App:NullValue");
             Assert.Contains(
                 report.Diagnostics,
                 diagnostic => diagnostic.Code == "config-file-null-skipped"
@@ -3344,16 +3355,16 @@ public class ConfigAuditReporterTests
             var rendered = provider.GetRequiredService<ConfigAuditTextRenderer>().Render(report);
             Assert.Contains("Discovered file keys:", rendered, StringComparison.Ordinal);
             Assert.Contains("KnownExact [Known] = registered", rendered, StringComparison.Ordinal);
-            Assert.Contains("App.Mode [Known] = file", rendered, StringComparison.Ordinal);
+            Assert.Contains("App:Mode [Known] = file", rendered, StringComparison.Ordinal);
             Assert.Contains(
-                "Application.Name [Unknown to AppSurface audit registry] (value omitted: inventory key is not an exact audit entry; register this exact key with AddConfigAuditKey<T>() after reviewing sensitivity)",
+                "Application:Name [Unknown to AppSurface audit registry] (value omitted: inventory key is not an exact audit entry; register this exact key with AddConfigAuditKey<T>() after reviewing sensitivity)",
                 rendered,
                 StringComparison.Ordinal);
             Assert.Contains(
-                "App.Enabled [Under known entry] (value omitted: descendant is not an exact audit entry; register this exact key with AddConfigAuditKey<T>() after reviewing sensitivity)",
+                "App:Enabled [Under known entry] (value omitted: descendant is not an exact audit entry; register this exact key with AddConfigAuditKey<T>() after reviewing sensitivity)",
                 rendered,
                 StringComparison.Ordinal);
-            Assert.Contains("Application.Reviewed [Known] = display-me", rendered, StringComparison.Ordinal);
+            Assert.Contains("Application:Reviewed [Known] = display-me", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("Unused", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("lookalike", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("nearest-visible", rendered, StringComparison.Ordinal);
@@ -3412,7 +3423,7 @@ public class ConfigAuditReporterTests
                 }
                 """);
 
-            var environment = A.Fake<IEnvironmentProvider>();
+            var environment = SnapshotEnvironment();
             A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
             var report = CreateServices(tempDir, environment)
@@ -3426,7 +3437,7 @@ public class ConfigAuditReporterTests
                 source => source.FilePath?.EndsWith("config_Override.Staging.json", StringComparison.Ordinal) == true);
             var baseChild = AssertDiscovered(
                 report,
-                "Composite.Base",
+                "Composite:Base",
                 ConfigAuditDiscoveredKeyClassification.Unknown,
                 null,
                 ConfigAuditDiscoveredValueDisplayState.OmittedInventory);
@@ -3435,7 +3446,7 @@ public class ConfigAuditReporterTests
                 source => source.FilePath?.EndsWith("appsettings.Staging.json", StringComparison.Ordinal) == true);
             var overrideChild = AssertDiscovered(
                 report,
-                "Composite.Override",
+                "Composite:Override",
                 ConfigAuditDiscoveredKeyClassification.Unknown,
                 null,
                 ConfigAuditDiscoveredValueDisplayState.OmittedInventory);
@@ -3455,13 +3466,13 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_UsesPublicProviderDiscoveredKeys()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
-        services.AddConfigAuditKey<string>("Public.Known");
+        services.AddConfigAuditKey<string>("Public:Known");
         services.AddSingleton<IConfigProvider>(
-            new PublicKeyEnumeratorProvider("Public.Known", "provider-visible"));
+            new PublicKeyEnumeratorProvider("Public:Known", "provider-visible"));
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
@@ -3469,7 +3480,7 @@ public class ConfigAuditReporterTests
 
         var discovered = AssertDiscovered(
             report,
-            "Public.Known",
+            "Public:Known",
             ConfigAuditDiscoveredKeyClassification.Known,
             "provider-visible",
             ConfigAuditDiscoveredValueDisplayState.Shown);
@@ -3479,11 +3490,11 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_ConvertsPublicDiscoveredEnumerationExceptionsToDiagnostics()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
-        services.AddConfigAuditKey<string>("Public.Known");
+        services.AddConfigAuditKey<string>("Public:Known");
         services.AddSingleton<IConfigProvider>(new ThrowingPublicKeyEnumeratorProvider());
 
         var report = services.BuildServiceProvider()
@@ -3515,7 +3526,7 @@ public class ConfigAuditReporterTests
 
         var discoveredKey = Assert.Single(((IConfigAuditKeyEnumerator)provider).EnumerateKeys("Staging"));
 
-        Assert.Equal("MissingOrigin", discoveredKey.Key);
+        Assert.Equal("MissingOrigin", discoveredKey.LogicalKey.Value);
         Assert.Equal("value", discoveredKey.RawValue);
         var source = Assert.Single(discoveredKey.Sources);
         Assert.Equal(ConfigAuditSourceKind.File, source.Kind);
@@ -3559,7 +3570,7 @@ public class ConfigAuditReporterTests
 
         var discoveredKey = Assert.Single(((IConfigAuditKeyEnumerator)provider).EnumerateKeys("Staging"));
 
-        Assert.Equal("Timestamp", discoveredKey.Key);
+        Assert.Equal("Timestamp", discoveredKey.LogicalKey.Value);
         Assert.Equal(ConfigAuditDiscoveredValueKind.Scalar, discoveredKey.ValueKind);
         Assert.Null(discoveredKey.RawValue);
         Assert.Empty(discoveredKey.Diagnostics);
@@ -3593,15 +3604,14 @@ public class ConfigAuditReporterTests
                     {
                         Severity = ConfigAuditDiagnosticSeverity.Info,
                         Code = "unrelated-path",
-                        ConfigPath = "Other.Path",
+                        ConfigPath = "Other:Path",
                         Message = "Unrelated path diagnostic."
                     })
             ]);
         var provider = new FileBasedConfigProvider(snapshot);
 
         var resolution = ((IConfigDiagnosticProvider)provider).Resolve(
-            "Staging",
-            "Known",
+            new ConfigProviderRequest("Staging", AppSurfaceConfigKey.Parse("Known")),
             typeof(string),
             ConfigAuditSourceRole.Base);
 
@@ -3640,15 +3650,14 @@ public class ConfigAuditReporterTests
                     {
                         Severity = ConfigAuditDiagnosticSeverity.Info,
                         Code = "descendant-path",
-                        ConfigPath = "Known.Child",
+                        ConfigPath = "Known:Child",
                         Message = "Descendant diagnostic."
                     })
             ]);
         var provider = new FileBasedConfigProvider(snapshot);
 
         var resolution = ((IConfigDiagnosticProvider)provider).Resolve(
-            "Staging",
-            "Known",
+            new ConfigProviderRequest("Staging", AppSurfaceConfigKey.Parse("Known")),
             typeof(Dictionary<string, string>),
             ConfigAuditSourceRole.Base);
 
@@ -3662,7 +3671,7 @@ public class ConfigAuditReporterTests
         var services = new ServiceCollection();
         services.AddSingleton<IEnvironmentConfigProvider>(new EmptyEnvironmentConfigProvider());
         services.AddSingleton<IConfigProvider>(new ThrowingKeyEnumeratorProvider());
-        services.AddSingleton<IConfigProvider>(new StaticConfigProvider("Ignored.Key", "ignored"));
+        services.AddSingleton<IConfigProvider>(new StaticConfigProvider("Ignored:Key", "ignored"));
         services.AddSingleton<IConfigAuditReporter, ConfigAuditReporter>();
         services.AddOptions<ConfigAuditDictionaryKeyCorrelationOptions>();
         services.AddSingleton<ConfigAuditRedactor>();
@@ -3685,7 +3694,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_ExpandedRequest_ExpandsKnownCollectionsWithoutChangingCanonicalReport()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
@@ -3694,10 +3703,10 @@ public class ConfigAuditReporterTests
                 new Dictionary<string, object?>
                 {
                     ["Endpoints"] = new List<string> { "https://one.example", "https://two.example" },
-                    ["Credentials.Passwords"] = new List<string> { "super-secret" }
+                    ["Credentials:Passwords"] = new List<string> { "super-secret" }
                 }));
         services.AddConfigAuditKey<List<string>>("Endpoints");
-        services.AddConfigAuditKey<List<string>>("Credentials.Passwords");
+        services.AddConfigAuditKey<List<string>>("Credentials:Passwords");
 
         var reporter = services.BuildServiceProvider().GetRequiredService<IConfigAuditReporter>();
         var canonical = reporter.GetReport("Production");
@@ -3708,16 +3717,16 @@ public class ConfigAuditReporterTests
         Assert.Null(canonical.Mode);
         Assert.Null(defaultRequest.Mode);
         Assert.Empty(AssertEntry(canonical, "Endpoints", ConfigAuditEntryState.Resolved, null).Children);
-        Assert.Empty(AssertEntry(canonical, "Credentials.Passwords", ConfigAuditEntryState.Resolved, "[redacted]").Children);
+        Assert.Empty(AssertEntry(canonical, "Credentials:Passwords", ConfigAuditEntryState.Resolved, "[redacted]").Children);
         Assert.Empty(AssertEntry(defaultRequest, "Endpoints", ConfigAuditEntryState.Resolved, null).Children);
-        Assert.Empty(AssertEntry(defaultRequest, "Credentials.Passwords", ConfigAuditEntryState.Resolved, "[redacted]").Children);
+        Assert.Empty(AssertEntry(defaultRequest, "Credentials:Passwords", ConfigAuditEntryState.Resolved, "[redacted]").Children);
 
         Assert.Equal(ConfigAuditReportMode.ExpandKnownEntryCollections, expanded.Mode);
         Assert.Equal(
             ["Endpoints[0]", "Endpoints[1]"],
             AssertEntry(expanded, "Endpoints", ConfigAuditEntryState.Resolved, null).Children.Select(child => child.Key));
         var passwordChild = Assert.Single(
-            AssertEntry(expanded, "Credentials.Passwords", ConfigAuditEntryState.Resolved, "[redacted]").Children);
+            AssertEntry(expanded, "Credentials:Passwords", ConfigAuditEntryState.Resolved, "[redacted]").Children);
         Assert.Equal("[redacted]", passwordChild.DisplayValue);
         Assert.True(passwordChild.IsRedacted);
         Assert.DoesNotContain("super-secret", JsonSerializer.Serialize(expanded), StringComparison.Ordinal);
@@ -3726,7 +3735,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_ExpandedRequest_RedactsGenericDescendantValuesAndHidesDictionaryLabels()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
@@ -3765,7 +3774,7 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_ExpandedRequest_StopsAtSharedReportNodeBudgetAndRetainsKnownRoots()
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
@@ -3773,24 +3782,24 @@ public class ConfigAuditReporterTests
             new DictionaryConfigProvider(
                 new Dictionary<string, object?>
                 {
-                    ["Bulk.Items"] = Enumerable.Range(0, 16_385).Select(index => $"bulk-{index}").ToList(),
-                    ["Later.Items"] = new List<string> { "must-not-be-expanded" }
+                    ["Bulk:Items"] = Enumerable.Range(0, 16_385).Select(index => $"bulk-{index}").ToList(),
+                    ["Later:Items"] = new List<string> { "must-not-be-expanded" }
                 }));
         services.AddConfigAuditKey<List<string>>(
-            "Bulk.Items",
+            "Bulk:Items",
             options =>
             {
                 options.MaxCollectionElements = 20_000;
                 options.MaxReportNodes = 20_000;
             });
-        services.AddConfigAuditKey<List<string>>("Later.Items");
+        services.AddConfigAuditKey<List<string>>("Later:Items");
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport(new ConfigAuditReportRequest("Production", ConfigAuditReportMode.ExpandKnownEntryCollections));
 
-        var bulk = AssertEntry(report, "Bulk.Items", ConfigAuditEntryState.Resolved, null);
-        var later = AssertEntry(report, "Later.Items", ConfigAuditEntryState.Resolved, null);
+        var bulk = AssertEntry(report, "Bulk:Items", ConfigAuditEntryState.Resolved, null);
+        var later = AssertEntry(report, "Later:Items", ConfigAuditEntryState.Resolved, null);
         var diagnostic = Assert.Single(
             report.Diagnostics,
             candidate => candidate.Code == "config-audit-expanded-report-node-limit");
@@ -3850,6 +3859,55 @@ public class ConfigAuditReporterTests
         Assert.IsType<AccessViolationException>(exception.InnerException);
     }
 
+    private sealed class TerminalAuditEnvironmentProvider : IEnvironmentConfigProvider, IConfigDiagnosticPatcher
+    {
+        private static readonly ConfigProviderTerminalDiagnostic RootDiagnostic = new(
+            "environment-root-terminal", "The environment root is invalid.",
+            "The root cannot be used.", "Repair the root value.", docs: null, retryable: false);
+
+        public bool WasPatched { get; private set; }
+        public int Priority => 0;
+        public string Name => nameof(TerminalAuditEnvironmentProvider);
+        public string Environment => "Production";
+        public bool IsDevelopment => false;
+
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) =>
+            ConfigProviderValueResult<T>.Terminal(RootDiagnostic);
+
+        public ConfigPatchDiagnosticResult TracePatch(ConfigProviderRequest request, object? currentValue, Type valueType)
+        {
+            WasPatched = true;
+            return new ConfigPatchDiagnosticResult(true, new AppSettings { Mode = "should-not-publish" }, [], []);
+        }
+
+        public string? GetEnvironmentVariable(string name, string? defaultValue = null) => defaultValue;
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() => new Dictionary<string, string>();
+    }
+
+    private static IEnvironmentProvider SnapshotEnvironment()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.CaptureEnvironmentVariables()).ReturnsLazily(() =>
+        {
+            string[] names =
+            [
+                "ENDPOINTS__0",
+                "ENDPOINTS__1",
+                "MYAPP__SETTINGS__DATABASE",
+                "MYAPP__SETTINGS__DATABASE__PORT",
+                "MYAPP__SETTINGS__DATABASE__TIMEOUTSECONDS",
+                "MYAPP__SETTINGS__ENDPOINTS__0",
+                "MYAPP__SETTINGS__ENDPOINTS__1",
+                "PAYMENT__APIKEY",
+                "STAGING__BILLING__ENDPOINT",
+            ];
+            return names.Select(name => (name, value: environment.GetEnvironmentVariable(name)))
+                .Where(entry => entry.value is not null)
+                .ToDictionary(entry => entry.name, entry => entry.value!, StringComparer.Ordinal);
+        });
+        return environment;
+    }
+
     private static ServiceCollection CreateServices(string configDirectory, IEnvironmentProvider environment)
     {
         var services = new ServiceCollection();
@@ -3873,7 +3931,7 @@ public class ConfigAuditReporterTests
         object value,
         string sourcePath)
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
@@ -3903,7 +3961,7 @@ public class ConfigAuditReporterTests
         bool enableEntryCorrelation = true,
         bool displayDictionaryKeys = true)
     {
-        var environment = A.Fake<IEnvironmentProvider>();
+        var environment = SnapshotEnvironment();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
 
         var services = CreateServices("/missing", environment);
@@ -4011,6 +4069,12 @@ public class ConfigAuditReporterTests
 
         public string Name => nameof(StaticConfigProvider);
 
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request)
+        {
+            var value = GetValue<T>(request.Environment, request.Key.Value);
+            return value is null ? ConfigProviderValueResult<T>.Missing() : ConfigProviderValueResult<T>.Found(value);
+        }
+
         public T? GetValue<T>(string environment, string key)
         {
             if (!string.Equals(_key, key, StringComparison.Ordinal))
@@ -4053,6 +4117,10 @@ public class ConfigAuditReporterTests
 
         public string? GetEnvironmentVariable(string name, string? defaultValue = null) => defaultValue;
 
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() => new Dictionary<string, string>();
+
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string key) => default;
     }
 
@@ -4079,22 +4147,26 @@ public class ConfigAuditReporterTests
 
         public string? GetEnvironmentVariable(string name, string? defaultValue = null) => defaultValue;
 
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() => new Dictionary<string, string>();
+
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string key) =>
             string.Equals(_key, key, StringComparison.Ordinal) ? (T)_value : default;
 
         public ConfigValueResolution Resolve(
-            string environment,
-            string key,
+            ConfigProviderRequest request,
             Type valueType,
             ConfigAuditSourceRole role)
         {
-            if (!string.Equals(_key, key, StringComparison.Ordinal))
+            var key = request.Key.Value;
+            if (!string.Equals(_key, request.Key.Value, StringComparison.Ordinal))
             {
-                return ConfigValueResolution.Missing(key);
+                return ConfigValueResolution.Missing(request.Key);
             }
 
             return new ConfigValueResolution(
-                key,
+                request.Key,
                 ConfigAuditEntryState.Resolved,
                 _value,
                 [
@@ -4124,6 +4196,8 @@ public class ConfigAuditReporterTests
 
         public string Name => nameof(ThrowingKeyEnumeratorProvider);
 
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string key) => default;
 
         public IReadOnlyList<ConfigAuditProviderDiscoveredKey> EnumerateKeys(string environment) =>
@@ -4145,12 +4219,14 @@ public class ConfigAuditReporterTests
 
         public string Name => nameof(SourceSensitiveKeyEnumeratorProvider);
 
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string key) => default;
 
         public IReadOnlyList<ConfigAuditProviderDiscoveredKey> EnumerateKeys(string environment) =>
         [
             new ConfigAuditProviderDiscoveredKey(
-                _key,
+                AppSurfaceConfigKey.Parse(_key.Replace('.', ':')),
                 _value,
                 ConfigAuditDiscoveredValueKind.Scalar,
                 [
@@ -4176,12 +4252,14 @@ public class ConfigAuditReporterTests
 
         public string Name => nameof(PublicKeyEnumeratorProvider);
 
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string requestedKey) => default;
 
         public IReadOnlyList<ConfigProviderAuditDiscoveredKey> EnumerateKeys(string environment) =>
         [
             new ConfigProviderAuditDiscoveredKey(
-                key,
+                AppSurfaceConfigKey.Parse(key),
                 value,
                 ConfigAuditDiscoveredValueKind.Scalar,
                 [
@@ -4205,6 +4283,8 @@ public class ConfigAuditReporterTests
 
         public string Name => nameof(ThrowingPublicKeyEnumeratorProvider);
 
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string requestedKey) => default;
 
         public IReadOnlyList<ConfigProviderAuditDiscoveredKey> EnumerateKeys(string environment) =>
@@ -4224,22 +4304,24 @@ public class ConfigAuditReporterTests
 
         public string Name => nameof(DictionaryConfigProvider);
 
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string key) =>
             _values.TryGetValue(key, out var value) ? (T?)value : default;
 
         public ConfigValueResolution Resolve(
-            string environment,
-            string key,
+            ConfigProviderRequest request,
             Type valueType,
             ConfigAuditSourceRole role)
         {
-            if (!_values.TryGetValue(key, out var value))
+            var key = request.Key.Value;
+            if (!_values.TryGetValue(request.Key.Value, out var value))
             {
-                return ConfigValueResolution.Missing(key);
+                return ConfigValueResolution.Missing(request.Key);
             }
 
             return new ConfigValueResolution(
-                key,
+                request.Key,
                 ConfigAuditEntryState.Resolved,
                 value,
                 [
@@ -4274,21 +4356,23 @@ public class ConfigAuditReporterTests
 
         public string Name => nameof(NoSourceProvider);
 
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string key) =>
             string.Equals(_key, key, StringComparison.Ordinal) ? (T)_value : default;
 
         public ConfigValueResolution Resolve(
-            string environment,
-            string key,
+            ConfigProviderRequest request,
             Type valueType,
             ConfigAuditSourceRole role)
         {
-            if (!string.Equals(_key, key, StringComparison.Ordinal))
+            var key = request.Key.Value;
+            if (!string.Equals(_key, request.Key.Value, StringComparison.Ordinal))
             {
-                return ConfigValueResolution.Missing(key);
+                return ConfigValueResolution.Missing(request.Key);
             }
 
-            return new ConfigValueResolution(key, ConfigAuditEntryState.Resolved, _value, [], []);
+            return new ConfigValueResolution(request.Key, ConfigAuditEntryState.Resolved, _value, [], []);
         }
 
         public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
@@ -4309,22 +4393,24 @@ public class ConfigAuditReporterTests
 
         public string Name => nameof(SourceSensitiveDictionaryProvider);
 
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string key) =>
             string.Equals(_key, key, StringComparison.Ordinal) ? (T)_value : default;
 
         public ConfigValueResolution Resolve(
-            string environment,
-            string key,
+            ConfigProviderRequest request,
             Type valueType,
             ConfigAuditSourceRole role)
         {
-            if (!string.Equals(_key, key, StringComparison.Ordinal))
+            var key = request.Key.Value;
+            if (!string.Equals(_key, request.Key.Value, StringComparison.Ordinal))
             {
-                return ConfigValueResolution.Missing(key);
+                return ConfigValueResolution.Missing(request.Key);
             }
 
             return new ConfigValueResolution(
-                key,
+                request.Key,
                 ConfigAuditEntryState.Resolved,
                 _value,
                 [
@@ -4359,6 +4445,8 @@ public class ConfigAuditReporterTests
 
         public string Name => nameof(MissingStringProvider);
 
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string key) => default;
     }
 
@@ -4376,21 +4464,23 @@ public class ConfigAuditReporterTests
 
         public string Name => nameof(InvalidDiagnosticProvider);
 
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string key) => default;
 
         public ConfigValueResolution Resolve(
-            string environment,
-            string key,
+            ConfigProviderRequest request,
             Type valueType,
             ConfigAuditSourceRole role)
         {
-            if (!string.Equals(_key, key, StringComparison.Ordinal))
+            var key = request.Key.Value;
+            if (!string.Equals(_key, request.Key.Value, StringComparison.Ordinal))
             {
-                return ConfigValueResolution.Missing(key);
+                return ConfigValueResolution.Missing(request.Key);
             }
 
             return new ConfigValueResolution(
-                key,
+                request.Key,
                 ConfigAuditEntryState.Invalid,
                 null,
                 [
@@ -4434,18 +4524,20 @@ public class ConfigAuditReporterTests
 
         public string Name => nameof(PathlessSourceProvider);
 
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string key) =>
             string.Equals(_key, key, StringComparison.Ordinal) ? (T)_value : default;
 
         public ConfigValueResolution Resolve(
-            string environment,
-            string key,
+            ConfigProviderRequest request,
             Type valueType,
             ConfigAuditSourceRole role)
         {
-            if (!string.Equals(_key, key, StringComparison.Ordinal))
+            var key = request.Key.Value;
+            if (!string.Equals(_key, request.Key.Value, StringComparison.Ordinal))
             {
-                return ConfigValueResolution.Missing(key);
+                return ConfigValueResolution.Missing(request.Key);
             }
 
             var source = new ConfigAuditSourceRecord
@@ -4457,7 +4549,7 @@ public class ConfigAuditReporterTests
             };
 
             return new ConfigValueResolution(
-                key,
+                request.Key,
                 ConfigAuditEntryState.Resolved,
                 _value,
                 [source],
@@ -4484,18 +4576,20 @@ public class ConfigAuditReporterTests
 
         public string Name => nameof(SourcePathProvider);
 
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string key) =>
             string.Equals(_key, key, StringComparison.Ordinal) ? (T)_value : default;
 
         public ConfigValueResolution Resolve(
-            string environment,
-            string key,
+            ConfigProviderRequest request,
             Type valueType,
             ConfigAuditSourceRole role)
         {
-            if (!string.Equals(_key, key, StringComparison.Ordinal))
+            var key = request.Key.Value;
+            if (!string.Equals(_key, request.Key.Value, StringComparison.Ordinal))
             {
-                return ConfigValueResolution.Missing(key);
+                return ConfigValueResolution.Missing(request.Key);
             }
 
             var source = new ConfigAuditSourceRecord
@@ -4509,7 +4603,7 @@ public class ConfigAuditReporterTests
             };
 
             return new ConfigValueResolution(
-                key,
+                request.Key,
                 ConfigAuditEntryState.Resolved,
                 _value,
                 [source],
@@ -4531,6 +4625,12 @@ public class ConfigAuditReporterTests
         public int Priority => 30;
 
         public string Name => nameof(ThrowingConfigProvider);
+
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request)
+        {
+            var value = GetValue<T>(request.Environment, request.Key.Value);
+            return value is null ? ConfigProviderValueResult<T>.Missing() : ConfigProviderValueResult<T>.Found(value);
+        }
 
         public T? GetValue<T>(string environment, string key)
         {
@@ -4556,20 +4656,22 @@ public class ConfigAuditReporterTests
 
         public string Name => nameof(ThrowingDiagnosticProvider);
 
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string key) => default;
 
         public ConfigValueResolution Resolve(
-            string environment,
-            string key,
+            ConfigProviderRequest request,
             Type valueType,
             ConfigAuditSourceRole role)
         {
-            if (string.Equals(_key, key, StringComparison.Ordinal))
+            var key = request.Key.Value;
+            if (string.Equals(_key, request.Key.Value, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("provider resolve failed with super-secret");
             }
 
-            return ConfigValueResolution.Missing(key);
+            return ConfigValueResolution.Missing(request.Key);
         }
 
         public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) =>
@@ -4582,14 +4684,15 @@ public class ConfigAuditReporterTests
 
         public string Name => nameof(CriticalDiagnosticProvider);
 
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string key) => default;
 
         public ConfigValueResolution Resolve(
-            string environment,
-            string key,
+            ConfigProviderRequest request,
             Type valueType,
             ConfigAuditSourceRole role) =>
-            ConfigValueResolution.Missing(key);
+            ConfigValueResolution.Missing(request.Key);
 
         public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => throw exception;
     }
@@ -4600,14 +4703,15 @@ public class ConfigAuditReporterTests
 
         public string Name => nameof(ThrowingPublicAuditDiagnosticsProvider);
 
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string key) => default;
 
         public ConfigProviderAuditResolution ResolveForAudit(
-            string environment,
-            string key,
+            ConfigProviderRequest request,
             Type valueType,
             ConfigAuditSourceRole role) =>
-            ConfigProviderAuditResolution.Missing(key);
+            ConfigProviderAuditResolution.Missing(request.Key);
 
         public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => throw exception;
     }
@@ -4618,21 +4722,22 @@ public class ConfigAuditReporterTests
 
         public string Name => nameof(PublicAuditDiagnosticsProvider);
 
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string requestedKey) => default;
 
         public ConfigProviderAuditResolution ResolveForAudit(
-            string environment,
-            string requestedKey,
+            ConfigProviderRequest request,
             Type valueType,
             ConfigAuditSourceRole role)
         {
-            if (!string.Equals(key, requestedKey, StringComparison.Ordinal))
+            if (!string.Equals(key.Replace('.', ':'), request.Key.Value, StringComparison.Ordinal))
             {
-                return ConfigProviderAuditResolution.Missing(requestedKey);
+                return ConfigProviderAuditResolution.Missing(request.Key);
             }
 
             return new ConfigProviderAuditResolution(
-                requestedKey,
+                request.Key,
                 ConfigAuditEntryState.Resolved,
                 value,
                 [
@@ -4641,8 +4746,8 @@ public class ConfigAuditReporterTests
                         Kind = ConfigAuditSourceKind.Provider,
                         ProviderName = Name,
                         ProviderPriority = Priority,
-                        ConfigPath = requestedKey,
-                        AppliedToPath = requestedKey,
+                        ConfigPath = request.Key.Value,
+                        AppliedToPath = request.Key.Value,
                         Role = role
                     }
                 ],
@@ -4658,15 +4763,16 @@ public class ConfigAuditReporterTests
 
         public string Name => nameof(MismatchedPublicAuditDiagnosticsProvider);
 
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string requestedKey) => default;
 
         public ConfigProviderAuditResolution ResolveForAudit(
-            string environment,
-            string requestedKey,
+            ConfigProviderRequest request,
             Type valueType,
             ConfigAuditSourceRole role) =>
             new(
-                "Public.Other",
+                AppSurfaceConfigKey.Parse("Public:Other"),
                 ConfigAuditEntryState.Resolved,
                 "wrong-secret",
                 [
@@ -4675,8 +4781,8 @@ public class ConfigAuditReporterTests
                         Kind = ConfigAuditSourceKind.Provider,
                         ProviderName = Name,
                         ProviderPriority = Priority,
-                        ConfigPath = "Public.Other",
-                        AppliedToPath = "Public.Other",
+                        ConfigPath = "Public:Other",
+                        AppliedToPath = "Public:Other",
                         Role = role
                     }
                 ],
@@ -4691,20 +4797,21 @@ public class ConfigAuditReporterTests
 
         public string Name => nameof(ThrowingPublicAuditResolutionProvider);
 
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string requestedKey) => default;
 
         public ConfigProviderAuditResolution ResolveForAudit(
-            string environment,
-            string requestedKey,
+            ConfigProviderRequest request,
             Type valueType,
             ConfigAuditSourceRole role)
         {
-            if (string.Equals(key, requestedKey, StringComparison.Ordinal))
+            if (string.Equals(key.Replace('.', ':'), request.Key.Value, StringComparison.Ordinal))
             {
                 throw exception ?? new InvalidOperationException("public provider resolve failed with super-secret");
             }
 
-            return ConfigProviderAuditResolution.Missing(requestedKey);
+            return ConfigProviderAuditResolution.Missing(request.Key);
         }
 
         public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
@@ -4716,21 +4823,23 @@ public class ConfigAuditReporterTests
 
         public string Name => nameof(PatchSourceProvider);
 
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string key) => default;
 
         public ConfigValueResolution Resolve(
-            string environment,
-            string key,
+            ConfigProviderRequest request,
             Type valueType,
             ConfigAuditSourceRole role)
         {
-            if (!string.Equals(key, "Patch.Source", StringComparison.Ordinal))
+            var key = request.Key.Value;
+            if (!string.Equals(request.Key.Value, "Patch:Source", StringComparison.Ordinal))
             {
-                return ConfigValueResolution.Missing(key);
+                return ConfigValueResolution.Missing(request.Key);
             }
 
             return new ConfigValueResolution(
-                key,
+                request.Key,
                 ConfigAuditEntryState.Resolved,
                 new AppSettings
                 {
@@ -4742,8 +4851,8 @@ public class ConfigAuditReporterTests
                         Kind = ConfigAuditSourceKind.Provider,
                         ProviderName = Name,
                         ProviderPriority = Priority,
-                        ConfigPath = "Patch.Source.Mode",
-                        AppliedToPath = "Patch.Source.Mode",
+                        ConfigPath = "Patch:Source:Mode",
+                        AppliedToPath = "Patch:Source:Mode",
                         Role = ConfigAuditSourceRole.Patch
                     }
                 ],
@@ -4759,21 +4868,23 @@ public class ConfigAuditReporterTests
 
         public string Name => nameof(ParentLocatedSourceProvider);
 
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string key) => default;
 
         public ConfigValueResolution Resolve(
-            string environment,
-            string key,
+            ConfigProviderRequest request,
             Type valueType,
             ConfigAuditSourceRole role)
         {
-            if (!string.Equals(key, "Located.Parent", StringComparison.Ordinal))
+            var key = request.Key.Value;
+            if (!string.Equals(request.Key.Value, "Located:Parent", StringComparison.Ordinal))
             {
-                return ConfigValueResolution.Missing(key);
+                return ConfigValueResolution.Missing(request.Key);
             }
 
             return new ConfigValueResolution(
-                key,
+                request.Key,
                 ConfigAuditEntryState.Resolved,
                 new AppSettings
                 {
@@ -4810,20 +4921,22 @@ public class ConfigAuditReporterTests
 
         public string? GetEnvironmentVariable(string name, string? defaultValue = null) => defaultValue;
 
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() => new Dictionary<string, string>();
+
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) => ConfigProviderValueResult<T>.Missing();
+
         public T? GetValue<T>(string environment, string key) => default;
 
         public ConfigValueResolution Resolve(
-            string environment,
-            string key,
+            ConfigProviderRequest request,
             Type valueType,
             ConfigAuditSourceRole role) =>
-            ConfigValueResolution.Missing(key);
+            ConfigValueResolution.Missing(request.Key);
 
         public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
 
         public ConfigPatchDiagnosticResult TracePatch(
-            string environment,
-            string key,
+            ConfigProviderRequest request,
             object? currentValue,
             Type valueType) =>
             throw new InvalidOperationException("patch failed with super-secret");

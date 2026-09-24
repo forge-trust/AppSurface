@@ -28,5 +28,5 @@ public interface IConfig
     void Init(
         IConfigManager configManager,
         IEnvironmentProvider environmentProvider,
-        string key);
+        AppSurfaceConfigKey key);
 }

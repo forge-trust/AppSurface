@@ -195,6 +195,29 @@ public class CSharpDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_WithBuiltInContextShouldSkipOversizedFileAndProjectSibling()
+    {
+        var options = CreateOptionsWithCSharpMaxFileSize(128);
+        var harvester = CreateHarvester(options);
+        await WriteUtf8Async(
+            CombineUnder(_testRoot, "OversizedService.cs"),
+            CreateDocumentedClassSource("OversizedService", new string('x', 512)));
+        await WriteUtf8Async(
+            CombineUnder(_testRoot, "SiblingService.cs"),
+            CreateDocumentedClassSource("SiblingService", "Sibling semantic documentation."));
+
+        var results = await harvester.HarvestAsync(CreateContextWithDefaultPolicy());
+        var namespaceNode = Assert.Single(results, node => node.Path == "Namespaces/Product.Api");
+        var document = Assert.IsType<CSharpNamespaceDocument>(namespaceNode.CSharpNamespaceDocument);
+        var diagnostic = Assert.Single(GetDiagnostics(harvester));
+
+        Assert.Equal("SiblingService", Assert.Single(document.Types).DisplayName);
+        Assert.DoesNotContain(document.Types, type => type.DisplayName == "OversizedService");
+        Assert.Equal(DocHarvestDiagnosticCodes.CSharpFileTooLarge, diagnostic.Code);
+        Assert.Contains("OversizedService.cs", diagnostic.Problem, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GetHarvestHealthAsync_ShouldIncludeCSharpFileTooLargeWithoutStrictBlockingByDefault()
     {
         var options = CreateOptionsWithCSharpMaxFileSize(128);
@@ -374,6 +397,405 @@ public class CSharpDocHarvesterTests : IDisposable
 
         Assert.DoesNotContain(results, n => n.Title == "InternalService");
         Assert.DoesNotContain(results, n => n.Path == "Namespaces/Product.Internal");
+    }
+
+    [Fact]
+    public async Task HarvestAsync_WithBuiltInContextShouldProjectTypedNamespace_AndKeepLegacyPublicContract()
+    {
+        await File.WriteAllTextAsync(
+            CombineUnder(_testRoot, "Api.cs"),
+            """
+            namespace Product.Api;
+
+            /// <summary>Service <c>summary</c>.</summary>
+            public sealed class Service
+            {
+                /// <summary>Gets a result for <paramref name="name"/>.</summary>
+                /// <param name="name">The name.</param>
+                /// <returns>A result.</returns>
+                /// <remarks><code>/// route</code></remarks>
+                public string Get(string name) => name;
+            }
+            """);
+
+        var typedResults = await _harvester.HarvestAsync(CreateContextWithDefaultPolicy());
+        var legacyResults = await _harvester.HarvestAsync(_testRoot);
+
+        var typedNamespace = Assert.Single(typedResults, node => node.Path == "Namespaces/Product.Api");
+        var typedDocument = Assert.IsType<CSharpNamespaceDocument>(typedNamespace.CSharpNamespaceDocument);
+        Assert.Equal(string.Empty, typedNamespace.Content);
+        var type = Assert.Single(typedDocument.Types);
+        Assert.Equal("Service", type.DisplayName);
+        var overload = Assert.Single(Assert.Single(type.MethodGroups).Overloads);
+        Assert.Equal("Get", overload.Signature.Name);
+        Assert.Contains("summary", typedDocument.ReaderText, StringComparison.Ordinal);
+        Assert.Contains("name", typedDocument.ReaderText, StringComparison.Ordinal);
+        Assert.Equal(
+            "Gets a result for name.",
+            string.Concat(
+                overload.Documentation.Sections
+                    .Single(section => section.Kind == CSharpDocumentationSectionKind.Summary)
+                    .Content
+                    .Select(node => node.Text)));
+        Assert.Equal(
+            "/// route",
+            overload.Documentation.Sections
+                .Single(section => section.Kind == CSharpDocumentationSectionKind.Remarks)
+                .Content
+                .Single(node => node.Kind == CSharpXmlNodeKind.CodeBlock)
+                .Text);
+
+        var legacyNamespace = Assert.Single(legacyResults, node => node.Path == "Namespaces/Product.Api");
+        Assert.Null(legacyNamespace.CSharpNamespaceDocument);
+        Assert.Contains("doc-type", legacyNamespace.Content, StringComparison.Ordinal);
+        Assert.Contains("/// route", legacyNamespace.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_WithBuiltInContextShouldReturnNoNamespaces_WhenSourceHasNoDocumentedSymbols()
+    {
+        await File.WriteAllTextAsync(
+            CombineUnder(_testRoot, "Undocumented.cs"),
+            """
+            namespace Product.Api;
+
+            public sealed class UndocumentedService { }
+            """);
+
+        var typedResults = await _harvester.HarvestAsync(CreateContextWithDefaultPolicy());
+        var legacyResults = await _harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(typedResults);
+        Assert.Empty(legacyResults);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_WithBuiltInContextShouldSkipEmptyXmlComments_AndRetainDocumentedSibling()
+    {
+        await File.WriteAllTextAsync(
+            CombineUnder(_testRoot, "Api.cs"),
+            """
+            using System.Runtime.CompilerServices;
+
+            namespace Product.Api;
+
+            ///
+            public sealed class EmptyComment { }
+
+            /// <summary/>
+            public sealed class EmptySummary { }
+
+            /// <inheritdoc/>
+            public enum InheritedDocumentation { Value }
+
+            public sealed class EmptyMembers
+            {
+                /// <summary/>
+                public int Value { get; set; }
+
+                /// <inheritdoc/>
+                public void Inherited() { }
+
+                /// <param name="path">Caller-supplied path.</param>
+                public void CallerOnly([CallerFilePath] string path = "") { }
+            }
+
+            /// <summary>Published service.</summary>
+            public sealed class PublishedService
+            {
+                /// <summary/>
+                public int EmptyProperty { get; set; }
+
+                /// <summary/>
+                public void EmptyMethod() { }
+
+                /// <summary>Published method.</summary>
+                public void PublishedMethod() { }
+            }
+            """);
+
+        var typedResults = await _harvester.HarvestAsync(CreateContextWithDefaultPolicy());
+        var legacyResults = await _harvester.HarvestAsync(_testRoot);
+
+        var typedNamespace = Assert.Single(typedResults, node => node.Path == "Namespaces/Product.Api");
+        var typedDocument = Assert.IsType<CSharpNamespaceDocument>(typedNamespace.CSharpNamespaceDocument);
+        var type = Assert.Single(typedDocument.Types);
+        Assert.Equal("PublishedService", type.DisplayName);
+        Assert.Empty(type.Properties);
+        var methodGroup = Assert.Single(type.MethodGroups);
+        Assert.Equal("PublishedMethod", methodGroup.Name);
+        Assert.Single(methodGroup.Overloads);
+        Assert.Single(typedResults, node => node.Title == "PublishedService");
+        Assert.DoesNotContain(typedResults, node => node.Title is "EmptyComment" or "EmptySummary" or "EmptyMembers" or "InheritedDocumentation");
+
+        var legacyNamespace = Assert.Single(legacyResults, node => node.Path == "Namespaces/Product.Api");
+        Assert.Contains("Published service.", legacyNamespace.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("EmptyMethod", legacyNamespace.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("CallerOnly", legacyNamespace.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_WithBuiltInContextShouldHideCallerInfoParametersFromTypedDocumentation()
+    {
+        await File.WriteAllTextAsync(
+            CombineUnder(_testRoot, "CallerInfo.cs"),
+            """
+            using System.Runtime.CompilerServices;
+
+            namespace Product.Api;
+
+            /// <summary>Records a value.</summary>
+            public sealed class CallerInfoService
+            {
+                /// <summary>Records a value with compiler-supplied context.</summary>
+                /// <param name="value">The value to record.</param>
+                /// <param name="source">The caller source path.</param>
+                /// <param name="line">The caller source line.</param>
+                /// <param name="member">The caller member.</param>
+                public void Record(
+                    string value,
+                    [CallerFilePath] string source = "",
+                    [CallerLineNumber] int line = 0,
+                    [CallerMemberName] string member = "") { }
+            }
+            """);
+
+        var results = await _harvester.HarvestAsync(CreateContextWithDefaultPolicy());
+
+        var typedNamespace = Assert.Single(results, node => node.Path == "Namespaces/Product.Api");
+        var typedDocument = Assert.IsType<CSharpNamespaceDocument>(typedNamespace.CSharpNamespaceDocument);
+        var type = Assert.Single(typedDocument.Types);
+        var overload = Assert.Single(Assert.Single(type.MethodGroups).Overloads);
+
+        Assert.Equal(["value"], overload.Signature.Parameters.Select(parameter => parameter.Name));
+        Assert.Equal(
+            ["value"],
+            overload.Documentation.Sections
+                .Where(section => section.Kind == CSharpDocumentationSectionKind.Parameter)
+                .Select(section => section.Name));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_WithBuiltInContextShouldDeduplicateOutlineAnchorsAcrossSourceFiles()
+    {
+        await File.WriteAllTextAsync(
+            CombineUnder(_testRoot, "First.cs"),
+            """
+            namespace Product.Api;
+
+            /// <summary>First service.</summary>
+            public sealed partial class Service
+            {
+                /// <summary>First operation.</summary>
+                public void First() {}
+            }
+            """);
+        await File.WriteAllTextAsync(
+            CombineUnder(_testRoot, "Second.cs"),
+            """
+            namespace Product.Api;
+
+            /// <summary>Second service declaration.</summary>
+            public sealed partial class Service
+            {
+                /// <summary>Second operation.</summary>
+                public void Second() {}
+            }
+            """);
+
+        var results = await _harvester.HarvestAsync(CreateContextWithDefaultPolicy());
+
+        var typedNamespace = Assert.Single(results, node => node.Path == "Namespaces/Product.Api");
+        var typedDocument = Assert.IsType<CSharpNamespaceDocument>(typedNamespace.CSharpNamespaceDocument);
+        var type = Assert.Single(typedDocument.Types);
+        Assert.Equal(
+            ["First", "Second"],
+            type.MethodGroups.Select(group => group.Name).OrderBy(name => name, StringComparer.Ordinal));
+        Assert.Equal(
+            typedDocument.Outline.Count,
+            typedDocument.Outline.Select(item => item.Id).Distinct(StringComparer.Ordinal).Count());
+        Assert.Single(typedDocument.Outline, item => item.Id == "Product-Api-Service");
+        Assert.Contains("First service", typedDocument.ReaderText, StringComparison.Ordinal);
+        Assert.Contains("Second service declaration", typedDocument.ReaderText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_WithBuiltInContextShouldOmitSyntaxErrorAtomically_AndReportDiagnostic()
+    {
+        await File.WriteAllTextAsync(
+            CombineUnder(_testRoot, "Broken.cs"),
+            """
+            namespace Product.Api;
+            /// <summary>Broken.</summary>
+            public class Broken {
+            """);
+
+        var results = await _harvester.HarvestAsync(CreateContextWithDefaultPolicy());
+        var diagnostic = Assert.Single(GetDiagnostics(_harvester));
+
+        Assert.DoesNotContain(results, node => node.Path.StartsWith("Namespaces/Product.Api", StringComparison.Ordinal));
+        Assert.Equal(DocHarvestDiagnosticCodes.CSharpParseFailed, diagnostic.Code);
+        Assert.Equal(DocHarvestDiagnosticSeverity.Error, diagnostic.Severity);
+        Assert.Contains("Broken.cs", diagnostic.Problem, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_WithBuiltInContextShouldOmitUnreadableFileAtomically_AndContinueWithSibling()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var unreadablePath = CombineUnder(_testRoot, "Unreadable.cs");
+        await File.WriteAllTextAsync(
+            CombineUnder(_testRoot, "Valid.cs"),
+            CreateDocumentedClassSource("ValidService"));
+        await File.WriteAllTextAsync(
+            unreadablePath,
+            CreateDocumentedClassSource("UnreadableService"));
+        File.SetUnixFileMode(unreadablePath, UnixFileMode.None);
+
+        try
+        {
+            try
+            {
+                using var probe = File.OpenRead(unreadablePath);
+                // Privileged processes can open chmod-000 files, so this filesystem cannot verify the read-failure path.
+                return;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // The permission boundary is enforced; exercise the harvester's per-file failure handling below.
+            }
+
+            var results = await _harvester.HarvestAsync(CreateContextWithDefaultPolicy());
+            var diagnostics = GetDiagnostics(_harvester);
+
+            var typedNamespace = Assert.Single(results, node => node.Path == "Namespaces/Product.Api");
+            var typedDocument = Assert.IsType<CSharpNamespaceDocument>(typedNamespace.CSharpNamespaceDocument);
+            Assert.Single(typedDocument.Types, type => type.DisplayName == "ValidService");
+            Assert.DoesNotContain(typedDocument.Types, type => type.DisplayName == "UnreadableService");
+
+            var diagnostic = Assert.Single(diagnostics);
+            Assert.Equal(DocHarvestDiagnosticCodes.CSharpParseFailed, diagnostic.Code);
+            Assert.Equal(DocHarvestDiagnosticSeverity.Error, diagnostic.Severity);
+            Assert.Contains("Unreadable.cs", diagnostic.Problem, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.SetUnixFileMode(unreadablePath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestAsync_WithBuiltInContextShouldRetainMalformedXmlDeclarationShell_AndReportRedactedWarning()
+    {
+        await File.WriteAllTextAsync(
+            CombineUnder(_testRoot, "MalformedXml.cs"),
+            """
+            namespace Product.Api;
+
+            /// <summary>Broken <c>markup</summary>
+            public sealed class BrokenDocumentation { }
+            """);
+
+        var results = await _harvester.HarvestAsync(CreateContextWithDefaultPolicy());
+        var namespaceNode = Assert.Single(results, node => node.Path == "Namespaces/Product.Api");
+        var document = Assert.IsType<CSharpNamespaceDocument>(namespaceNode.CSharpNamespaceDocument);
+        var type = Assert.Single(document.Types);
+        var diagnostic = Assert.Single(GetDiagnostics(_harvester));
+
+        Assert.Equal("BrokenDocumentation", type.DisplayName);
+        Assert.Null(type.Documentation);
+        Assert.Contains(document.Outline, item => item.Id == type.AnchorId && item.Level == 2);
+        Assert.Equal(DocHarvestDiagnosticCodes.CSharpXmlCommentMalformed, diagnostic.Code);
+        Assert.Equal(DocHarvestDiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Contains("MalformedXml.cs", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.DoesNotContain(_testRoot, diagnostic.Problem, StringComparison.Ordinal);
+        Assert.DoesNotContain("<summary>", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("Repair", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_WithBuiltInContextShouldRetainDeeplyNestedXmlDeclarationShell_AndReportWarning()
+    {
+        var nestedXml = CreateNestedXmlDocumentation("Too deep.", CSharpDocHarvester.MaximumXmlCommentNestingDepth);
+        await File.WriteAllTextAsync(
+            CombineUnder(_testRoot, "DeeplyNestedDocumentation.cs"),
+            $$"""
+            namespace Product.Api;
+
+            /// <summary>{{nestedXml}}</summary>
+            public sealed class DeeplyNestedDocumentation { }
+            """);
+
+        var results = await _harvester.HarvestAsync(CreateContextWithDefaultPolicy());
+        var namespaceNode = Assert.Single(results, node => node.Path == "Namespaces/Product.Api");
+        var document = Assert.IsType<CSharpNamespaceDocument>(namespaceNode.CSharpNamespaceDocument);
+        var type = Assert.Single(document.Types);
+        var diagnostic = Assert.Single(GetDiagnostics(_harvester));
+
+        Assert.Equal("DeeplyNestedDocumentation", type.DisplayName);
+        Assert.Null(type.Documentation);
+        Assert.Contains(document.Outline, item => item.Id == type.AnchorId && item.Level == 2);
+        Assert.Equal(DocHarvestDiagnosticCodes.CSharpXmlCommentDepthExceeded, diagnostic.Code);
+        Assert.Equal(DocHarvestDiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Contains("DeeplyNestedDocumentation.cs", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.DoesNotContain(_testRoot, diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains(CSharpDocHarvester.MaximumXmlCommentNestingDepth.ToString(), diagnostic.Cause, StringComparison.Ordinal);
+        Assert.Contains("Reduce", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldAcceptMaximumXmlNestingDepthThroughTypedAndLegacyContracts()
+    {
+        var nestedXml = CreateNestedXmlDocumentation("Within limit.", CSharpDocHarvester.MaximumXmlCommentNestingDepth - 1);
+        await File.WriteAllTextAsync(
+            CombineUnder(_testRoot, "MaximumNestedDocumentation.cs"),
+            $$"""
+            namespace Product.Api;
+
+            /// <summary>{{nestedXml}}</summary>
+            public sealed class MaximumNestedDocumentation { }
+            """);
+
+        var typedResults = await _harvester.HarvestAsync(CreateContextWithDefaultPolicy());
+        var typedNamespace = Assert.Single(typedResults, node => node.Path == "Namespaces/Product.Api");
+        var typedDocument = Assert.IsType<CSharpNamespaceDocument>(typedNamespace.CSharpNamespaceDocument);
+        var typedType = Assert.Single(typedDocument.Types);
+        Assert.Contains(
+            typedType.Documentation!.Sections.Single().Content,
+            node => node.Kind == CSharpXmlNodeKind.Text && node.Text == "Within limit.");
+
+        var legacyResults = await _harvester.HarvestAsync(_testRoot);
+        var legacyNamespace = Assert.Single(legacyResults, node => node.Path == "Namespaces/Product.Api");
+        Assert.Contains("Within limit.", legacyNamespace.Content, StringComparison.Ordinal);
+        Assert.Empty(GetDiagnostics(_harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSkipDeeplyNestedXmlDocumentationThroughLegacyPublicContract_AndReportWarning()
+    {
+        var nestedXml = CreateNestedXmlDocumentation("Too deep.", CSharpDocHarvester.MaximumXmlCommentNestingDepth);
+        await File.WriteAllTextAsync(
+            CombineUnder(_testRoot, "DeeplyNestedLegacyDocumentation.cs"),
+            $$"""
+            namespace Product.Api;
+
+            /// <summary>{{nestedXml}}</summary>
+            public sealed class DeeplyNestedLegacyDocumentation { }
+            """);
+
+        var results = await _harvester.HarvestAsync(_testRoot);
+        var diagnostic = Assert.Single(GetDiagnostics(_harvester));
+
+        Assert.DoesNotContain(results, node => node.Path == "Namespaces/Product.Api");
+        Assert.Equal(DocHarvestDiagnosticCodes.CSharpXmlCommentDepthExceeded, diagnostic.Code);
+        Assert.Equal(DocHarvestDiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Contains("DeeplyNestedLegacyDocumentation.cs", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.DoesNotContain(_testRoot, diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains(CSharpDocHarvester.MaximumXmlCommentNestingDepth.ToString(), diagnostic.Cause, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -727,6 +1149,81 @@ public class CSharpDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldRejectInvalidPythonModuleOwnershipWithoutSuppressingCSharpDocs()
+    {
+        await File.WriteAllTextAsync(
+            Path.Join(_testRoot, "InvalidOwnership.cs"),
+            """
+            namespace Test;
+
+            /// <summary>Host docs remain available.</summary>
+            [AppSurfacePythonModule("../sidecar/worker.py")]
+            public sealed class InvalidOwnership;
+            """);
+
+        var results = await _harvester.HarvestAsync(_testRoot);
+
+        var namespacePage = Assert.Single(results, node => node.Path == "Namespaces/Test");
+        Assert.Contains("InvalidOwnership", namespacePage.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-appsurfacedocs-python-owner", namespacePage.Content, StringComparison.Ordinal);
+        var diagnostic = Assert.Single(GetDiagnostics(_harvester));
+        Assert.Equal(DocHarvestDiagnosticCodes.PythonOwnershipInvalid, diagnostic.Code);
+        Assert.Equal(nameof(CSharpDocHarvester), diagnostic.HarvesterType);
+        Assert.Contains("AppSurfacePythonModule", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldValidateEveryPythonOwnershipAttributeShape()
+    {
+        await File.WriteAllTextAsync(
+            Path.Join(_testRoot, "PythonOwnership.cs"),
+            """
+            namespace Test;
+
+            /// <summary>Valid host docs.</summary>
+            [ForgeTrust.AppSurface.Docs.AppSurfacePythonModuleAttribute("sidecar/worker.py")]
+            public sealed class ValidHost;
+
+            /// <summary>Multiple hosts are ambiguous.</summary>
+            [AppSurfacePythonModule("first.py")]
+            [AppSurfacePythonModule("second.py")]
+            public sealed class MultipleHost;
+
+            /// <summary>Named arguments are not allowed.</summary>
+            [AppSurfacePythonModule(modulePath: "sidecar/worker.py")]
+            public sealed class NamedArgumentHost;
+
+            /// <summary>Expressions are not allowed.</summary>
+            [AppSurfacePythonModule(nameof(ValidHost))]
+            public sealed class ExpressionHost;
+
+            /// <summary>Rooted paths are not allowed.</summary>
+            [AppSurfacePythonModule("/sidecar/worker.py")]
+            public sealed class RootedHost;
+
+            /// <summary>Backslash paths are not allowed.</summary>
+            [AppSurfacePythonModule("sidecar\\worker.py")]
+            public sealed class BackslashHost;
+
+            /// <summary>Dot segments are not allowed.</summary>
+            [AppSurfacePythonModule("sidecar/../worker.py")]
+            public sealed class DotSegmentHost;
+
+            /// <summary>Non-Python paths are not allowed.</summary>
+            [AppSurfacePythonModule("sidecar/worker.txt")]
+            public sealed class WrongExtensionHost;
+            """);
+
+        var results = await _harvester.HarvestAsync(_testRoot);
+
+        var namespacePage = Assert.Single(results, node => node.Path == "Namespaces/Test");
+        Assert.Contains("data-appsurfacedocs-python-owner", namespacePage.Content, StringComparison.Ordinal);
+        Assert.Equal(
+            7,
+            GetDiagnostics(_harvester).Count(diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.PythonOwnershipInvalid));
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldHandleMalformedXmlGracefully()
     {
         // Arrange
@@ -999,13 +1496,14 @@ public class RichDocs
     /// </summary>
     /// <typeparam name=""TResult"">Result type.</typeparam>
     /// <param name=""value""><para>Input value.</para></param>
-    /// <param name=""callerFilePath"">Filtered path.</param>
-    /// <param name=""callerLineNumber"">Filtered line.</param>
+    /// <param name=""source"">Filtered path.</param>
+    /// <param name=""line"">Filtered line.</param>
+    /// <param name=""member"">Filtered member.</param>
     /// <returns><code>return default;</code></returns>
     /// <exception cref=""T:System.InvalidOperationException"">Boom</exception>
     /// <remarks>Use <b>carefully</b>.</remarks>
     /// <example> </example>
-    public TResult Compute<TResult>(int value = 42, [CallerFilePath] string source = """", [CallerLineNumber] int line = 0)
+    public TResult Compute<TResult>(int value = 42, [CallerFilePath] string source = """", [CallerLineNumber] int line = 0, [CallerMemberName] string member = """")
         => default!;
 
     /// <summary>Legacy path.</summary>
@@ -1041,8 +1539,9 @@ public class RichDocs
         Assert.Contains("fallback", namespaceNode.Content);
 
         // Compiler-injected doc params are filtered from the rendered parameter table.
-        Assert.DoesNotContain("<code>callerFilePath</code>", namespaceNode.Content);
-        Assert.DoesNotContain("<code>callerLineNumber</code>", namespaceNode.Content);
+        Assert.DoesNotContain("<code>source</code>", namespaceNode.Content);
+        Assert.DoesNotContain("<code>line</code>", namespaceNode.Content);
+        Assert.DoesNotContain("<code>member</code>", namespaceNode.Content);
 
         // Display signature hides caller metadata parameters while preserving defaults.
         Assert.Contains("TResult", namespaceNode.Content);
@@ -1348,6 +1847,13 @@ public class GlobalType {}
         /// <summary>{{summary}}</summary>
         public sealed class {{className}} { }
         """;
+    }
+
+    private static string CreateNestedXmlDocumentation(string text, int nestedElementCount)
+    {
+        return string.Concat(Enumerable.Repeat("<nested>", nestedElementCount))
+               + text
+               + string.Concat(Enumerable.Repeat("</nested>", nestedElementCount));
     }
 
     private DocHarvestContext CreateContextWithDefaultPolicy()

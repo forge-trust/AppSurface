@@ -938,7 +938,7 @@ public class AppSurfaceDocsWebModuleTests
         services.AddAppSurfaceDocs();
         services.AddAppSurfaceDocs();
 
-        Assert.Equal(3, services.Count(service => service.ServiceType == typeof(IDocHarvester)));
+        Assert.Equal(4, services.Count(service => service.ServiceType == typeof(IDocHarvester)));
     }
 
     [Fact]

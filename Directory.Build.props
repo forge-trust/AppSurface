@@ -18,6 +18,8 @@
     <RepositoryType Condition="'$(RepositoryType)' == ''">git</RepositoryType>
     <RepositoryUrl Condition="'$(RepositoryUrl)' == ''">https://github.com/forge-trust/AppSurface</RepositoryUrl>
     <VersionPrefix Condition="'$(VersionPrefix)' == ''">0.1.0</VersionPrefix>
+    <!-- The logical-key SPI is a coordinated pre-1.0 binary break. NuGet release versions remain independently authored. -->
+    <AssemblyVersion>0.2.0.0</AssemblyVersion>
     <IsPackable Condition="'$(IsBenchmarkProject)' == 'true' OR '$(IsExampleProject)' == 'true'">false</IsPackable>
     <GenerateDocumentationFile Condition="'$(IsTestProject)' != 'true' AND '$(IsBenchmarkProject)' != 'true' AND '$(IsExampleProject)' != 'true'">true</GenerateDocumentationFile>
     <WarningsAsErrors Condition="'$(IsTestProject)' != 'true' AND '$(IsBenchmarkProject)' != 'true' AND '$(IsExampleProject)' != 'true'">$(WarningsAsErrors);CS1591</WarningsAsErrors>

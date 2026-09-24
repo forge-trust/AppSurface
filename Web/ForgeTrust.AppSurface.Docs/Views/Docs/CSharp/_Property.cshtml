@@ -1,0 +1,24 @@
+@using ForgeTrust.AppSurface.Docs.Models
+@model CSharpPropertyDocument
+
+<section id="@Model.AnchorId" class="doc-method-group" aria-labelledby="@(Model.AnchorId + "-heading")">
+    <header class="doc-method-group-header">
+        <span class="doc-kind">Property</span>
+        <h3 id="@(Model.AnchorId + "-heading")">@Model.Name</h3>
+    </header>
+    <article class="doc-overload doc-property">
+        <div class="doc-property-signature">
+            @await Html.PartialAsync("/Views/Docs/CSharp/_Signature.cshtml", Model.Signature)
+            @if (!string.IsNullOrWhiteSpace(Model.SourceHref))
+            {
+                <a href="@Url.PathBaseAware(Model.SourceHref)" class="doc-symbol-source-link" aria-label="View source for @Model.Name">Source</a>
+            }
+        </div>
+        <div class="doc-overload-body">
+            @await Html.PartialAsync(
+                "/Views/Docs/CSharp/_Documentation.cshtml",
+                Model.Documentation,
+                new ViewDataDictionary(ViewData) { ["CSharpDocumentationHeadingLevel"] = 4 })
+        </div>
+    </article>
+</section>

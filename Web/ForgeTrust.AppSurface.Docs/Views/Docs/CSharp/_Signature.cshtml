@@ -1,0 +1,65 @@
+@using ForgeTrust.AppSurface.Docs.Models
+@model CSharpSignature
+
+@{
+    void WriteSignatureSpan(string cssClass, string? value)
+    {
+        WriteLiteral("<span class=\"");
+        Write(cssClass);
+        WriteLiteral("\">");
+        Write(value);
+        WriteLiteral("</span>");
+    }
+}
+
+<code class="doc-signature">@{
+    if (!string.IsNullOrWhiteSpace(Model.AccessorSignature))
+    {
+        WriteSignatureSpan("sig-type", Model.Type);
+        WriteSignatureSpan("sig-operator", " ");
+        WriteSignatureSpan("sig-parameter", Model.Name);
+        WriteSignatureSpan("sig-operator", " " + Model.AccessorSignature);
+    }
+    else
+    {
+        WriteSignatureSpan("sig-return", Model.Type);
+        WriteSignatureSpan("sig-operator", " ");
+        if (!string.IsNullOrWhiteSpace(Model.ExplicitInterface))
+        {
+            WriteSignatureSpan("sig-type", Model.ExplicitInterface);
+        }
+
+        WriteSignatureSpan("sig-method", Model.Name);
+        if (Model.TypeParameters.Count > 0)
+        {
+            WriteSignatureSpan("sig-generic", "<" + string.Join(", ", Model.TypeParameters) + ">");
+        }
+
+        WriteSignatureSpan("sig-operator", "(");
+        for (var parameterIndex = 0; parameterIndex < Model.Parameters.Count; parameterIndex++)
+        {
+            var parameter = Model.Parameters[parameterIndex];
+            if (parameterIndex > 0)
+            {
+                WriteSignatureSpan("sig-operator", ", ");
+            }
+
+            if (!string.IsNullOrWhiteSpace(parameter.Modifier))
+            {
+                WriteSignatureSpan("sig-modifier", parameter.Modifier);
+                WriteSignatureSpan("sig-operator", " ");
+            }
+
+            WriteSignatureSpan("sig-type", parameter.Type);
+            WriteSignatureSpan("sig-operator", " ");
+            WriteSignatureSpan("sig-parameter", parameter.Name);
+            if (!string.IsNullOrWhiteSpace(parameter.DefaultValue))
+            {
+                WriteSignatureSpan("sig-operator", " = ");
+                WriteSignatureSpan("sig-literal", parameter.DefaultValue);
+            }
+        }
+
+        WriteSignatureSpan("sig-operator", ")");
+    }
+}</code>

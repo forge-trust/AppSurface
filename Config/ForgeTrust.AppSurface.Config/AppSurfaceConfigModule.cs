@@ -30,12 +30,28 @@ public class AppSurfaceConfigModule : IAppSurfaceModule
     /// for concrete <see cref="IConfig"/> implementations and registers each as a singleton initialized from
     /// <see cref="IConfigManager"/> and <see cref="IEnvironmentProvider"/>. Wrappers decorated with
     /// <see cref="ConfigAuditCollectionTraversalAttribute"/> also contribute audit traversal options for their key.
+    /// Each assembly is checked against the
+    /// <see href="https://appsurface.dev/guides/config-key-migration">package compatibility contract</see>
+    /// before reflecting over its types, including when callers invoke custom registration directly.
     /// </remarks>
     /// <param name="context">Startup context that supplies assemblies, dependency modules, and the custom registration log.</param>
     /// <param name="services">Service collection that receives the default configuration services.</param>
     public void ConfigureServices(StartupContext context, IServiceCollection services)
     {
         services.AddSingleton<IConfigManager, DefaultConfigManager>();
+        ConfigAuditServiceCollectionExtensions.EnsureDeclarationInfrastructure(services);
+        services.AddOptions<ConfigResourceOptions>()
+            .Validate(options =>
+            {
+                _ = options.Snapshot();
+                return true;
+            }, "Configuration resource limits must be positive.")
+            .ValidateOnStart();
+        services.AddOptions<AppSurfaceEnvironmentConfigOptions>();
+        services.AddOptions<ConfigEnvironmentStartupOptions>()
+            .Validate<IEnvironmentConfigProvider>((_, _) => true,
+                "Environment configuration mappings must have unambiguous native identities.")
+            .ValidateOnStart();
         services.AddSingleton<IConfigAuditReporter, ConfigAuditReporter>();
         services.AddOptions<ConfigAuditDictionaryKeyCorrelationOptions>();
         services.AddSingleton<ConfigDiagnosticsCommandRunner>();
@@ -67,6 +83,7 @@ public class AppSurfaceConfigModule : IAppSurfaceModule
 
     private void RegisterConfigFromAssembly(Assembly assembly, IServiceCollection services)
     {
+        ConfigPackageCompatibility.ValidateAssemblies([assembly]);
         var configTypes = assembly.DefinedTypes
             .Where(t => !t.IsAbstract && !t.IsInterface && !t.ContainsGenericParameters)
             .Where(t => typeof(IConfig).IsAssignableFrom(t.AsType()))
@@ -80,7 +97,7 @@ public class AppSurfaceConfigModule : IAppSurfaceModule
                 type,
                 sp =>
                 {
-                    var key = ConfigKeyAttribute.GetKeyPath(type);
+                    var key = sp.GetRequiredService<ConfigDeclarationRegistry>().GetForConfigType(type).LogicalKey;
                     var instance = (IConfig)ActivatorUtilities.CreateInstance(sp, type);
                     instance.Init(
                         sp.GetRequiredService<IConfigManager>(),
@@ -91,11 +108,12 @@ public class AppSurfaceConfigModule : IAppSurfaceModule
                 });
             var auditOptions = type.GetCustomAttribute<ConfigAuditCollectionTraversalAttribute>(inherit: true)
                 ?.ToOptions();
-            services.AddSingleton(new ConfigAuditKnownEntry(
-                ConfigKeyAttribute.GetKeyPath(type),
-                type,
-                GetConfigValueType(type),
-                auditOptions));
+            services.AddSingleton(new ConfigAuditRawDeclaration(
+                RawKey: null,
+                ConfigType: type,
+                ValueType: GetConfigValueType(type),
+                Options: new ConfigAuditEntryOptions(auditOptions),
+                IsAttributeDeclaration: true));
         }
     }
 
