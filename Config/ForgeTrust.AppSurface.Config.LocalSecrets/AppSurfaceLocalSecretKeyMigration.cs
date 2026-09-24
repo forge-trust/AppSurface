@@ -19,6 +19,10 @@ public enum AppSurfaceLocalSecretMigrationState
     Complete = 4,
     /// <summary>The operation cannot safely proceed and requires operator recovery.</summary>
     Unrecoverable = 5,
+    /// <summary>The unfinished operation is durably retained outside the active file-store journal slot.</summary>
+    Retained = 6,
+    /// <summary>The operator reconciled and released a retained journal's overlap guard.</summary>
+    Released = 7,
 }
 
 /// <summary>Describes a value-safe result for an exact stored-key migration.</summary>
@@ -82,6 +86,12 @@ internal interface IAppSurfaceLocalSecretMigrationBackend
     IDisposable AcquireMaintenanceLease(TimeSpan timeout, CancellationToken cancellationToken);
     /// <summary>Reads durable metadata; malformed or unreadable state must throw, never appear absent.</summary>
     AppSurfaceLocalSecretMigrationJournal? ReadJournal();
+    /// <summary>True only when a retained marker has a separately durable overlap guard.</summary>
+    bool SupportsRetainedJournal => false;
+    /// <summary>Checks that a reusable marker still has durable retained or released evidence.</summary>
+    bool CanReuseRetainedJournal(AppSurfaceLocalSecretMigrationJournal journal) => false;
+    /// <summary>Rejects overlap with durably retained unresolved journals before preparing or reading values.</summary>
+    void ValidateUnresolvedOverlap(string sourceStoredKey, string destinationStoredKey) { }
     /// <summary>Atomically replaces and flushes metadata before acknowledging the transition.</summary>
     void CommitJournal(AppSurfaceLocalSecretMigrationJournal journal);
     /// <summary>Returns the current exact record; only confirmed absence returns null.</summary>
@@ -151,7 +161,14 @@ internal static class AppSurfaceLocalSecretMigrationCoordinator
                         "Use a backend that implements the complete migration contract.", "local-secrets-migration"), sourceName);
             }
             using var lease = backend.AcquireMaintenanceLease(DefaultLeaseTimeout, cancellationToken);
+            backend.ValidateUnresolvedOverlap(sourceStoredKey, destinationStoredKey);
             journal = backend.ReadJournal();
+            if (journal?.State == AppSurfaceLocalSecretMigrationState.Retained
+                && backend.SupportsRetainedJournal
+                && backend.CanReuseRetainedJournal(journal))
+            {
+                journal = null;
+            }
             if (journal is not null)
             {
                 if (!MatchesRequest(journal, applicationName, environment, keyPrefix, sourceStoredKey, destinationStoredKey))
@@ -183,7 +200,10 @@ internal static class AppSurfaceLocalSecretMigrationCoordinator
                     return new(LocalSecretResultStatus.Found, journal.MigrationId, journal.State, sourceStoredKey, destinationKey.Value, null, sourceName);
                 }
 
-                if (journal is not null && (!Enum.IsDefined(journal.State) || journal.State == AppSurfaceLocalSecretMigrationState.Unrecoverable))
+                if (journal is not null && (!Enum.IsDefined(journal.State)
+                                            || journal.State is AppSurfaceLocalSecretMigrationState.Unrecoverable
+                                                or AppSurfaceLocalSecretMigrationState.Retained
+                                                or AppSurfaceLocalSecretMigrationState.Released))
                 {
                     return Failure(LocalSecretResultStatus.ProviderFailed, journal with { State = AppSurfaceLocalSecretMigrationState.Unrecoverable }, destinationKey,
                         "local-secret-migration-unrecoverable", "The exact-key migration requires operator recovery.",
@@ -310,6 +330,16 @@ internal static class AppSurfaceLocalSecretMigrationCoordinator
                 "A case-variant destination already exists in the same LocalSecrets namespace.",
                 "Remove or explicitly reconcile the existing case variant, then retry the same migration.", sourceName);
         }
+        catch (AppSurfaceLocalSecretMigrationRecoveryConflictException)
+        {
+            journal ??= new AppSurfaceLocalSecretMigrationJournal(
+                "unavailable", applicationName, environment, keyPrefix, sourceStoredKey, destinationStoredKey,
+                AppSurfaceLocalSecretMigrationState.Prepared);
+            return Failure(LocalSecretResultStatus.ProviderFailed, journal, destinationKey,
+                "local-secret-migration-recovery-conflict", "This migration overlaps an unresolved recovery journal.",
+                "The exact source or destination is still protected from another migration.",
+                "Reconcile and explicitly release the retained journal before retrying.", sourceName);
+        }
         catch (Exception)
         {
             journal ??= new AppSurfaceLocalSecretMigrationJournal(
@@ -361,3 +391,6 @@ internal static class AppSurfaceLocalSecretMigrationCoordinator
             status, journal.MigrationId, journal.State, journal.SourceStoredKey, destinationKey,
             new AppSurfaceLocalSecretDiagnostic(code, problem, cause, fix, "local-secrets-migration"), sourceName);
 }
+
+/// <summary>Signals an unresolved recovery identity overlap without disclosing secret values.</summary>
+internal sealed class AppSurfaceLocalSecretMigrationRecoveryConflictException : Exception;

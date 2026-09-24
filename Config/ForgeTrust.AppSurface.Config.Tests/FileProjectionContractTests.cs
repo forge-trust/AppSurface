@@ -72,6 +72,38 @@ public sealed class FileProjectionContractTests
         Assert.DoesNotContain("SENTINEL_SECRET", diagnostic.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void MixedInvalidRootPropertiesRetainValidSiblingAndEmitOneSafeFileDiagnostic()
+    {
+        using var fixture = new Files("{\"\":\"SENTINEL_SECRET\",\"Port\":7312,\"Bad:Key\":\"OTHER_SECRET\"}");
+
+        var projection = ConfigFileTokenProjection.Parse(Encoding.UTF8.GetBytes("{\"\":\"SENTINEL_SECRET\",\"Port\":7312,\"Bad:Key\":\"OTHER_SECRET\"}"));
+        Assert.True(projection.HasInvalidRootProperties);
+        Assert.Contains(AppSurfaceConfigKey.Parse("Port"), projection.Entries.Keys);
+        Assert.DoesNotContain(AppSurfaceConfigKey.Parse("Bad:Key"), projection.Entries.Keys);
+        Assert.Equal(7312, fixture.Provider.Resolve<int>(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("Port"))).Value);
+
+        var diagnostics = ((IConfigDiagnosticProvider)fixture.Provider).GetReportDiagnostics("Production");
+        var diagnostic = Assert.Single(diagnostics, item => item.Code == "config-file-invalid-root-property");
+        Assert.Equal(ConfigAuditDiagnosticSeverity.Error, diagnostic.Severity);
+        Assert.Null(diagnostic.Key);
+        Assert.Null(diagnostic.ConfigPath);
+        Assert.Equal("appsettings.json", Path.GetFileName(diagnostic.Source?.FilePath));
+        Assert.DoesNotContain("SENTINEL_SECRET", diagnostic.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("OTHER_SECRET", diagnostic.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("Bad:Key", diagnostic.Message, StringComparison.Ordinal);
+
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var known = new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Port"), null, typeof(int));
+        var reporter = new ConfigAuditReporter(new EnvironmentConfigProvider(new EmptyEnvironment()), [fixture.Provider], [known],
+            services, new ConfigAuditRedactor(), Options.Create(new ConfigAuditDictionaryKeyCorrelationOptions()));
+        var report = reporter.GetReport("Production");
+        Assert.Single(report.Diagnostics, item => item.Code == "config-file-invalid-root-property");
+        var port = Assert.Single(report.Entries);
+        Assert.Equal("7312", port.DisplayValue);
+        Assert.Equal("appsettings.json", Path.GetFileName(Assert.Single(port.Sources).FilePath));
+    }
+
     [Theory]
     [InlineData("{\"A\":{\"Bad:Key\":[{\"X\":1},[2]]},\"Sibling\":3}")]
     [InlineData("{\"A\":{\" bad\":4},\"Sibling\":3}")]

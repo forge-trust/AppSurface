@@ -90,6 +90,7 @@ instead of silently serving a risky file. `doctor` may report:
 | `local-secret-store-ready` | The fallback file can be opened and posture is already ready. |
 | `local-secret-file-posture-repaired` | `doctor` or a write tightened Unix file mode bits. |
 | `local-secret-file-posture-degraded` | The fallback can be opened and `doctor` can exit successfully, but this platform path does not prove owner-only posture in v1. |
+| `local-secret-migration-recovery-pending` | The fallback is usable, but one or more explicitly retained exact-key migrations still protect their source and destination identifiers. |
 | `local-secret-file-posture-unsupported` | The path shape or checked Unix posture is unsafe for fallback storage, such as a symbolic link, directory path, loose mode bits, or writable non-sticky ancestor. |
 
 Example deterministic file fallback check:
@@ -132,7 +133,9 @@ the destination write or source deletion, while the exact source record is exclu
 case-only source rename can copy to the requested spelling. A collision leaves the durable journal at its last safe state;
 remove or reconcile the competing record and retry the same request.
 Retained macOS migration reads and deletes the exact native source through the indexed adapter's raw operations;
-logical lookup policy is never applied to a migration source. A legacy adapter without these exact operations is
+logical lookup policy is never applied to a migration source. An exact v2 source missing from the v2 index remains
+missing even when a v1 record has the same key spelling; only an explicit v1 source probes legacy metadata.
+A legacy adapter without these exact operations is
 unsupported before journal preparation or value I/O.
 
 Platform journals and leases live under the current user's `.appsurface/local-secrets-state` directory; changing
@@ -148,6 +151,33 @@ records. A still-present source is deleted only when its current value equals th
 source after durable verification finishes index publication and `Complete`; absence before verification is an
 unrecoverable diagnostic. Failed or uncertain commits retain the last acknowledged state in the result; reopening
 the persisted journal determines the actual resume point. The destination is never removed as rollback.
+
+#### Recovering an unfinished file migration
+
+The file fallback has one active journal slot. If retrying an exact-key migration cannot finish (for example, its
+source disappeared before verification), preview the failed operation with
+`appsurface secrets migrate-key recover --app MyApp --environment Development --store-file <path> --migration-id <id>`.
+The preview reads the current journal and exact record presence under the shared maintenance lease; it does not print
+values or change files. After inspecting both identifiers, repeat with `--apply --state <previewed-state>` to durably
+retain the unfinished metadata and free the active slot. `--state` must match the journal state read again under the
+lease. An unrelated migration may then proceed, but any source or destination that case-insensitively overlaps an
+unresolved retained identifier returns `local-secret-migration-recovery-conflict` before value I/O.
+
+The [optional recovery API](IAppSurfaceLocalSecretMigrationRecoveryStore.cs) exposes the same preview, retain, and
+release behavior to programmatic callers. It stores only identifiers, namespace, operation ID, and state in a private
+`<store>.migration-recovery.json` sidecar. The sidecar is written durably before the active journal receives its
+`Retained` marker; an interruption between those steps leaves the old active journal blocking unrelated work until the
+same recovery is retried. `appsurface secrets doctor` reports retained migration IDs with
+`local-secret-migration-recovery-pending` as a successful readiness warning. It does not change application startup or
+automatically delete either secret.
+
+Once an operator has reconciled the exact records, preview with `--release` and repeat with
+`--release --apply --state <previewed-state>` to lift only that operation's overlap guard. Release does not inspect
+whether the surviving value is the intended one and does not write or delete any secret: the operator must decide
+that using the normal store or native tooling. Do not remove the sidecar by hand or roll back to a binary that ignores
+it while unresolved records remain. A malformed, unsafe, or oversized sidecar stops migration and recovery until its
+posture or contents are repaired. The inventory is limited to 4,096 records and 8 MiB; reaching the limit stops new
+retentions rather than dropping unresolved guards.
 
 ### Linux Nonstandard `secret-tool`
 

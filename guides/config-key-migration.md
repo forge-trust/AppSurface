@@ -112,8 +112,14 @@ fixed-time comparison before authorizing deletion. It never persists a value has
 | Source absent before durable verification | Stop as unrecoverable; do not alter the destination |
 | Backend cannot guarantee lease, durable journal, confirmed operations, or index publication | Return `local-secret-migration-unsupported`; do not delete |
 
-There is no rollback that deletes the destination after it has been written. A
-case-only write updates an existing logical entry without renaming its stored
+There is no rollback that deletes the destination after it has been written. A file-backed migration that cannot
+resume can be [explicitly retained for recovery](../Config/ForgeTrust.AppSurface.Config.LocalSecrets/README.md#recovering-an-unfinished-file-migration):
+preview its ID and state, apply retention under the shared lease, and let unrelated migrations continue while the
+original source and destination remain protected. Release the retained guard only after reconciling both exact
+records. Neither recovery action deletes a value, and the retained metadata must be handled before downgrading to a
+binary without the overlap guard.
+
+A case-only write updates an existing logical entry without renaming its stored
 spelling. Canonical writes preserve `__` and backslashes literally; historical
 transformations apply only to the migration aliases allowed by request origin.
 

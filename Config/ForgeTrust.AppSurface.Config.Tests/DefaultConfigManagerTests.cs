@@ -167,6 +167,41 @@ public class DefaultConfigManagerTests
     }
 
     [Fact]
+    public void GetValue_TerminalDiagnosticUsesSnapshottedIdentifierLimitInMessageAndToString()
+    {
+        const int limit = 12;
+        var environmentText = "\n" + new string('e', 30);
+        var keyText = new string('k', 30);
+        var providerText = new string('p', 30);
+        var code = new string('c', 30);
+        var docs = new string('d', 30);
+        var diagnostic = new ConfigProviderTerminalDiagnostic(code, "Problem.", "Cause.", "Fix.", docs, retryable: false);
+        var environmentProvider = A.Fake<IEnvironmentConfigProvider>();
+        A.CallTo(() => environmentProvider.Name).Returns(providerText);
+        A.CallTo(() => environmentProvider.Resolve<string>(A<ConfigProviderRequest>._))
+            .Returns(ConfigProviderValueResult<string>.Terminal(diagnostic));
+        var options = new ConfigResourceOptions { MaxRenderedIdentifierCharacters = limit };
+        var manager = new DefaultConfigManager(environmentProvider, [], A.Fake<ILogger<DefaultConfigManager>>(),
+            resourceOptions: Microsoft.Extensions.Options.Options.Create(options));
+        options.MaxRenderedIdentifierCharacters = 256;
+
+        var exception = Assert.Throws<ConfigurationResolutionException>(() =>
+            manager.GetValue<string>(environmentText, keyText));
+        var rendered = exception.ToString();
+
+        Assert.Contains("Configuration provider " + ConfigDiagnosticText.Identifier(providerText, limit), exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Code: " + ConfigDiagnosticText.Identifier(code, limit), exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Docs: " + ConfigDiagnosticText.Identifier(docs, limit), exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Environment: " + ConfigDiagnosticText.Identifier(environmentText, limit), rendered, StringComparison.Ordinal);
+        Assert.Contains("Key: " + ConfigDiagnosticText.Identifier(keyText, limit), rendered, StringComparison.Ordinal);
+        Assert.Contains("\\u000a", rendered, StringComparison.Ordinal);
+        Assert.Equal(environmentText, exception.EnvironmentName);
+        Assert.Equal(keyText, exception.Key);
+        Assert.Equal(providerText, exception.ProviderName);
+        Assert.Same(diagnostic, exception.Diagnostic);
+    }
+
+    [Fact]
     public void GetValue_PatchesProviderObjectWithNestedEnvironmentVariable()
     {
         var innerEnvironment = A.Fake<ForgeTrust.AppSurface.Core.IEnvironmentProvider>();

@@ -22,7 +22,7 @@ internal sealed partial class SecretsCommand : ICommand
     [ExcludeFromCodeCoverage(Justification = "CliFx command discovery covers root help; subcommands carry behavior tests.")]
     public async ValueTask ExecuteAsync(IConsole console)
     {
-        await console.Output.WriteLineAsync("Use 'appsurface secrets init', 'set', 'get', 'list', 'migrate', 'migrate-key', 'delete', and 'doctor' to manage local development secrets, or 'appsurface secrets transfer plan' and 'appsurface secrets transfer apply' for explicit remote transfer.");
+        await console.Output.WriteLineAsync("Use 'appsurface secrets init', 'set', 'get', 'list', 'migrate', 'migrate-key', 'migrate-key recover', 'delete', and 'doctor' to manage local development secrets, or 'appsurface secrets transfer plan' and 'appsurface secrets transfer apply' for explicit remote transfer.");
     }
 }
 
@@ -278,6 +278,8 @@ internal partial class SecretsMigrateKeyCommand : SecretsCommandBase
             context.ApplicationName, context.Environment, context.KeyPrefix, SourceStoredKey, destination);
         if (result.Status != LocalSecretResultStatus.Found)
         {
+            if (result.MigrationId.Length == 32 && result.MigrationId.All(Uri.IsHexDigit))
+                await console.Output.WriteLineAsync($"Migration id: {DisplayIdentifier(result.MigrationId)}");
             throw new CommandException(result.Diagnostic?.ToDisplayString() ?? "Exact-key migration failed.");
         }
 
@@ -292,6 +294,63 @@ internal partial class SecretsMigrateKeyCommand : SecretsCommandBase
 
     /// <summary>Uses the shared value-free renderer; displayed truncation is never reused as an executable argument.</summary>
     private static string DisplayIdentifier(string value) => ShellQuote(ConfigDiagnosticText.Identifier(value));
+}
+
+/// <summary>Inspects or explicitly retains/releases an unfinished file-backed exact-key migration.</summary>
+/// <remarks>Neither operation writes or deletes a secret value. Release is for operator reconciliation only.</remarks>
+[Command("secrets migrate-key recover", Description = "Inspect, retain, or release one stalled file LocalSecrets migration journal.")]
+internal partial class SecretsMigrateKeyRecoverCommand : SecretsCommandBase
+{
+    /// <summary>Gets or sets the exact migration identifier returned by a failed migration.</summary>
+    [CommandOption("migration-id", Description = "Exact migration journal id to inspect under the store lease.")]
+    public required string MigrationId { get; set; }
+
+    /// <summary>Gets or sets whether to perform the previewed durable metadata transition.</summary>
+    [CommandOption("apply", Description = "Confirm retention or release after inspecting the preview.")]
+    public bool Apply { get; set; }
+
+    /// <summary>Gets or sets whether to release a retained journal after operator reconciliation.</summary>
+    [CommandOption("release", Description = "Select a retained journal for explicit release after reconciliation.")]
+    public bool Release { get; set; }
+
+    /// <summary>Gets or sets the state printed by preview; required with <see cref="Apply"/>.</summary>
+    [CommandOption("state", Description = "Exact previewed journal state; required with --apply.")]
+    public string? ExpectedState { get; set; }
+
+    /// <inheritdoc />
+    public override async ValueTask ExecuteAsync(IConsole console)
+    {
+        if (string.IsNullOrWhiteSpace(MigrationId))
+            throw new CommandException("Supply the exact --migration-id from the failed migration or doctor output.");
+        AppSurfaceLocalSecretMigrationState? state = null;
+        if (Apply)
+        {
+            if (!Enum.TryParse<AppSurfaceLocalSecretMigrationState>(ExpectedState, false, out var parsed)
+                || !Enum.IsDefined(parsed))
+                throw new CommandException("Use --state with the exact state printed by the recovery preview before --apply.");
+            state = parsed;
+        }
+
+        var context = BuildContext();
+        if (context.Store is not IAppSurfaceLocalSecretMigrationRecoveryStore recovery)
+            throw new CommandException("local-secret-migration-recovery-unsupported: The selected store has no shared file migration journal to recover.");
+        var result = recovery.RecoverKeyMigration(context.ApplicationName, context.Environment, context.KeyPrefix,
+            MigrationId, Apply, Release, state);
+        if (result.Status != LocalSecretResultStatus.Found)
+            throw new CommandException(result.Diagnostic?.ToDisplayString() ?? "Migration recovery failed.");
+
+        await console.Output.WriteLineAsync($"Migration id: {DisplayIdentifier(result.MigrationId)}");
+        await console.Output.WriteLineAsync($"State: {result.State}");
+        await console.Output.WriteLineAsync($"Source stored identifier: {DisplayIdentifier(result.SourceStoredKey!)}");
+        await console.Output.WriteLineAsync($"Destination stored identifier: {DisplayIdentifier(result.DestinationStoredKey!)}");
+        await console.Output.WriteLineAsync($"Source present: {result.SourcePresent}");
+        await console.Output.WriteLineAsync($"Destination present: {result.DestinationPresent}");
+        await console.Output.WriteLineAsync($"Retained unresolved guard: {result.Retained}");
+        if (!Apply)
+            await console.Output.WriteLineAsync("Preview only. Repeat with --apply --state <the state above> after inspecting both exact identifiers.");
+    }
+
+    private static string DisplayIdentifier(string value) => $"'{ConfigDiagnosticText.Identifier(value).Replace("'", "'\\''", StringComparison.Ordinal)}'";
 }
 
 /// <summary>
@@ -453,7 +512,8 @@ internal abstract class SecretsCommandBase : ICommand
     private static bool IsDoctorSuccessDiagnostic(string? code) =>
         code is "local-secret-store-ready"
             or "local-secret-file-posture-repaired"
-            or "local-secret-file-posture-degraded";
+            or "local-secret-file-posture-degraded"
+            or "local-secret-migration-recovery-pending";
 }
 
 /// <summary>

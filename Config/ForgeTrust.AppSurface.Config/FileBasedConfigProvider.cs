@@ -368,6 +368,24 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
                 projections[file] = projection;
                 sourceLocationMaps[file] = new Lazy<ConfigFileSourceLocationMap>(() => projection.Locations, true);
 
+                if (projection.HasInvalidRootProperties)
+                {
+                    diagnostics.Add(new ConfigFileProviderDiagnostic(environment, new ConfigAuditDiagnostic
+                    {
+                        Severity = ConfigAuditDiagnosticSeverity.Error,
+                        Code = "config-file-invalid-root-property",
+                        Source = new ConfigAuditSourceRecord
+                        {
+                            Kind = ConfigAuditSourceKind.File,
+                            ProviderName = Name,
+                            ProviderPriority = Priority,
+                            FilePath = displayFileName,
+                            Role = ConfigAuditSourceRole.Base
+                        },
+                        Message = "One or more root properties in the configuration file were ignored because they could not be represented as logical keys."
+                    }));
+                }
+
                 var obj = (JsonObject)root;
 
                 if (!environments.TryGetValue(environment, out var existing))

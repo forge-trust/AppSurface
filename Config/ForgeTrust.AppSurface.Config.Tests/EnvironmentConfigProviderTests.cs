@@ -723,7 +723,6 @@ public class EnvironmentConfigProviderTests
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
         SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__MODE", "environment");
         SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__DATABASE__PORT", "6543");
-        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__READONLYMODE", "environment-readonly");
 
         var provider = new EnvironmentConfigProvider(innerProvider);
         var current = new FieldBackedOptions();
@@ -739,6 +738,26 @@ public class EnvironmentConfigProviderTests
         Assert.Equal("file-readonly", value.ReadOnlyMode);
         Assert.Equal("db.from.file", value.Database.Host);
         Assert.Equal(6543, value.Database.Port);
+    }
+
+    [Fact]
+    public void TryPatch_RejectsConfiguredReadOnlyFieldWithoutMutatingOriginal()
+    {
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__MODE", "environment");
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__READONLYMODE", "environment-readonly");
+        var provider = new EnvironmentConfigProvider(innerProvider);
+        var current = new FieldBackedOptions();
+
+        var result = ((IConfigValuePatcher)provider).Patch(
+            new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), current);
+
+        Assert.Equal(ConfigPatchStatus.Terminal, result.Status);
+        Assert.Equal("config-patch-failed", result.Diagnostic?.Code);
+        Assert.Contains("MyApp:Settings:ReadOnlyMode", result.Diagnostic!.Cause, StringComparison.Ordinal);
+        Assert.Null(result.Value);
+        Assert.Equal("file", current.Mode);
+        Assert.Equal("file-readonly", current.ReadOnlyMode);
     }
 
     [Fact]
@@ -893,7 +912,7 @@ public class EnvironmentConfigProviderTests
     }
 
     [Fact]
-    public void TracePatch_DoesNotReportSourceForReadableButUnpatchableMembers()
+    public void TracePatch_RejectsDirectValueForReadableButUnpatchableMember()
     {
         var innerProvider = SnapshotFake();
         A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
@@ -905,12 +924,19 @@ public class EnvironmentConfigProviderTests
         var patch = ((IConfigDiagnosticPatcher)provider)
             .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), null, typeof(GetterOnlyScalarWithWritableChildOptions));
 
-        var value = Assert.IsType<GetterOnlyScalarWithWritableChildOptions>(patch.Value);
-        Assert.True(patch.Patched);
+        Assert.Null(patch.Value);
+        Assert.False(patch.Patched);
+        Assert.Contains(patch.Diagnostics, diagnostic => diagnostic.Code == "config-patch-failed"
+            && diagnostic.ConfigPath == "MyApp:Settings:Mode");
+        Assert.Empty(patch.Sources);
+
+        SetSnapshotValue(innerProvider, "MYAPP__SETTINGS__MODE", null);
+        var noDirectValue = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch(new ConfigProviderRequest("Production", AppSurfaceConfigKey.Parse("MyApp:Settings")), null, typeof(GetterOnlyScalarWithWritableChildOptions));
+        var value = Assert.IsType<GetterOnlyScalarWithWritableChildOptions>(noDirectValue.Value);
+        Assert.True(noDirectValue.Patched);
         Assert.Equal("file", value.Mode);
         Assert.Equal(6543, value.Database.Port);
-        Assert.DoesNotContain(patch.Sources, source => source.ConfigPath == "MyApp:Settings:Mode");
-        Assert.Contains(patch.Sources, source => source.ConfigPath == "MyApp:Settings:Database:Port");
     }
 
     [Fact]

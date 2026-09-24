@@ -334,9 +334,13 @@ public sealed partial class PlatformAppSurfaceLocalSecretStore
             }
 
             if (identity.MigrationStoredKey is not null)
-                return v2Index.Keys.Contains(identity.StoredKey, StringComparer.Ordinal)
-                    ? AppSurfaceLocalSecretResult.Found(string.Empty, Name)
+            {
+                if (v2Index.Keys.Contains(identity.StoredKey, StringComparer.Ordinal))
+                    return AppSurfaceLocalSecretResult.Found(string.Empty, Name);
+                return identity.StorageName.StartsWith("appsurface:v2:", StringComparison.Ordinal)
+                    ? AppSurfaceLocalSecretResult.Missing(Name)
                     : _legacyMetadata?.Probe(identity) ?? AppSurfaceLocalSecretResult.Missing(Name);
+            }
 
             var matches = v2Index.Keys.Where(key => StringComparer.OrdinalIgnoreCase.Equals(key, identity.StoredKey)).ToArray();
             if (matches.Length > 1)

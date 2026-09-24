@@ -51,6 +51,15 @@ failure suppresses lower providers. An invalid direct environment value cannot b
 valid child variables may still rescue a terminal result from a lower-priority provider through one transactional
 patch attempt. A missing key alone permits fallback.
 
+When a manager throws `ConfigurationResolutionException` for a terminal result, its `Message` and `ToString()` use the
+snapshotted `ConfigResourceOptions.MaxRenderedIdentifierCharacters` limit for provider, code, docs, environment,
+and key identifiers. Configure a positive limit to bound displayed identifiers; escaping and stable digest suffixes
+remain display-only, while the exception's structured properties retain their full identities for debugging.
+`ConfigProviderTerminalDiagnostic.ToDisplayString(int)` applies an explicit limit to standalone diagnostics; the
+parameterless method and directly constructed exceptions retain the 256-character default. Prose retains its
+separate display cap, and no renderer includes raw configuration values. See the
+[provider-author guide](../../guides/config-provider-authors.md) for terminal-result behavior.
+
 Run the [nine-stage provider proof](../../examples/config-key-contract/README.md):
 
 ```bash
@@ -242,6 +251,12 @@ A duplicate or case collision makes the affected key and its aggregates terminal
 No selected value or exact coordinate is published for an ambiguous key. Dots, slashes, and brackets inside a valid
 property segment retain exact locations. Inherited parent sources and providers without file coordinates can still
 have `Location: null`.
+
+A file with both valid roots and root properties that cannot be represented as logical keys still supplies its valid
+values and provenance. The file provider also emits one file-level `Error` named `config-file-invalid-root-property`
+per affected file, with no key/path or rejected property content. This is audit evidence, not a blanket runtime
+terminal result: normal required-key validation determines whether startup fails. An all-invalid root or malformed
+file continues to make that file layer invalid.
 
 Ordered files retain all participating root sources, with the winning file first. Objects merge recursively; arrays
 replace as a unit; scalar/object replacements discard obsolete descendant origins. Null members do not replace an
@@ -907,7 +922,8 @@ APP__SETTINGS__ENDPOINTS__1=https://two.example
 - A direct object environment variable replaces the whole object; use child variables for partial overrides.
 - Child patching targets public settable properties, initialized getter-only mutable collections or nested objects, and
   public writable fields. Types that cannot be instantiated need a lower-priority provider value or an already-initialized
-  nested member to patch.
+  nested member to patch. A present child value aimed at a getter-only scalar, private setter, or other member that
+  cannot publish the value fails the patch with `config-patch-failed`; an unconfigured member does not block other children.
 - Invalid child values are ignored instead of wiping out the lower-priority provider value. For example, a non-numeric
   `APP__SETTINGS__DATABASE__PORT` leaves the existing `Port` unchanged.
 - Child environment variables patch provider-supplied values or construct an instantiable missing value; they do not patch

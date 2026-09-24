@@ -91,14 +91,16 @@ internal sealed class DefaultConfigManager : IConfigManager
             if (patch.Status == ConfigPatchStatus.Terminal)
             {
                 ConfigDiagnosticMetrics.Terminal(patch.Diagnostic!.Code, _environmentProvider.Name);
-                throw new ConfigurationResolutionException(environment, key, _environmentProvider.Name, patch.Diagnostic!);
+                throw new ConfigurationResolutionException(environment, key, _environmentProvider.Name, patch.Diagnostic!,
+                    _limits.MaxRenderedIdentifierCharacters);
             }
         }
 
         if (result.Status == ConfigProviderValueStatus.Terminal)
         {
             ConfigDiagnosticMetrics.Terminal(result.Diagnostic!.Code, providerName);
-            throw new ConfigurationResolutionException(environment, key, providerName, result.Diagnostic!);
+            throw new ConfigurationResolutionException(environment, key, providerName, result.Diagnostic!,
+                _limits.MaxRenderedIdentifierCharacters);
         }
 
         if (result.Status == ConfigProviderValueStatus.Found)

@@ -80,7 +80,11 @@ public sealed class MacOsV2CompatibilityLocalSecretStoreTests
     public void Probe_Should_PreserveExactV2MigrationSourceIdentity()
     {
         var interop = new FakeSecItemInterop();
-        var store = CreateStore(new InMemoryAppSurfaceLocalSecretStore(), interop);
+        var legacy = new InMemoryAppSurfaceLocalSecretStore();
+        var historicalSource = LocalSecretMigrationIdentity.Resolve("MyApp", "Development", null,
+            "appsurface:MyApp:Development:Legacy.Key", false)!;
+        Assert.Equal(LocalSecretResultStatus.Found, legacy.Set(historicalSource, "sentinel-legacy-value").Status);
+        var store = CreateStore(legacy, interop);
         var source = LocalSecretMigrationIdentity.Resolve("MyApp", "Development", null,
             "appsurface:v2:MyApp:Development::Legacy.Key", true)!;
         interop.Seed(V2Query("__appsurface_index__"), "[\"legacy.key\"]");

@@ -412,7 +412,8 @@ internal sealed class EnvironmentConfigProvider : IEnvironmentConfigProvider, IC
                 : candidates.Select(candidate => candidate with { Name = candidate.Name + "__" + member.NativeName }).ToArray();
             if (!member.CanWrite && !canMutateCollection && (prior is null || !EnvironmentBindingPlan.IsComplex(member.Type)))
             {
-                if (PresentChildren(request, snapshot, childCandidates, childKey).Any())
+                if (childCandidates.Any(candidate => snapshot.GetMatchingNames(candidate.Name).Count != 0)
+                    || PresentChildren(request, snapshot, childCandidates, childKey).Any())
                     Fail(outcome, "config-patch-failed", childKey);
                 if (outcome.Code is not null) break;
                 continue;

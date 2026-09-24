@@ -19,11 +19,11 @@ internal enum ConfigSourceProjectionStatus
     Unique,
     /// <summary>Multiple sources provide the same identity in explicit precedence order.</summary>
     IntentionalOverride,
-    /// <summary>The same identity occurs more than once within one layer.</summary>
+    /// <summary>One layer repeats the same native identifier for a key; resolution fails closed.</summary>
     Duplicate,
-    /// <summary>Distinct logical identities claim the same native identifier.</summary>
+    /// <summary>Source spellings differ, or one layer supplies distinct native identifiers for a key; resolution fails closed.</summary>
     Collision,
-    /// <summary>The logical identity cannot be represented by the provider's native naming rules.</summary>
+    /// <summary>Distinct logical keys share a native identifier under the provider's comparer; resolution fails closed.</summary>
     Unrepresentable
 }
 

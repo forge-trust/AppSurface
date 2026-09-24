@@ -352,14 +352,25 @@ and command context without reading or changing values. Include the same optiona
 `--prefix`, `--store-file`, or `--secret-tool-path` selection on both invocations.
 With `--apply`, the store holds its shared maintenance lease while copying, verifying,
 publishing its index, and deleting the source through durable journal transitions.
-Success prints the migration ID and `Complete`; a failure preserves its safe recovery
-state for a retry of the identical command. A backend without this capability returns
+Success prints the migration ID and `Complete`; a failure prints its durable 32-digit
+migration ID when known, then preserves its safe recovery state for a retry of the
+identical command. Fixed sentinel IDs from failures before journal creation are not
+recovery IDs; retry the same exact command to discover any persisted journal. A backend without this capability returns
 `local-secret-migration-unsupported`. Invalid destination syntax returns `config-key-invalid`
 before store access. Neither preview nor apply prints secret values. Displayed
 identifiers escape controls and stop at 256 characters plus a stable digest. If any
 argument needs escaping or truncation, the command preview is omitted; repeat the
 original invocation with `--apply`. Display-only truncation is never used as a
 source or destination argument.
+
+For a stalled file-backed migration, use
+[`migrate-key recover`](../../Config/ForgeTrust.AppSurface.Config.LocalSecrets/README.md#recovering-an-unfinished-file-migration)
+with the same namespace and `--store-file` path. Preview the failed `--migration-id` first, then pass
+`--apply --state <previewed-state>` to retain its journal and let unrelated migrations proceed. The retained source
+and destination remain protected, including case-only spellings. After reconciling the exact records, preview with
+`--release` and confirm with `--release --apply --state <previewed-state>`. Recovery changes journal metadata only;
+it never reconstructs, writes, or deletes a secret. `doctor` reports unresolved retained IDs as a successful
+readiness warning. Do not remove the recovery sidecar or downgrade to a binary that ignores it before release.
 
 `get` verifies presence and source without printing the secret value. `list` prints currently retrievable names only:
 platform-backed stores validate indexed names against live values and silently remove stale names when validation and

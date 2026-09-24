@@ -37,7 +37,7 @@ internal sealed class ConfigFileTokenProjection
 {
     private ConfigFileTokenProjection(IReadOnlyDictionary<AppSurfaceConfigKey, ConfigFileProjectedEntry> entries,
         IReadOnlyList<ConfigFileProjectedEntry> occurrences, IReadOnlySet<AppSurfaceConfigKey> terminalKeys, IReadOnlySet<AppSurfaceConfigKey> invalidKeys,
-        ConfigFileSourceLocationMap locations, JsonObject materializedRoot)
+        ConfigFileSourceLocationMap locations, JsonObject materializedRoot, bool hasInvalidRootProperties)
     {
         Entries = entries;
         Occurrences = occurrences;
@@ -45,6 +45,7 @@ internal sealed class ConfigFileTokenProjection
         InvalidKeys = invalidKeys;
         Locations = locations;
         MaterializedRoot = materializedRoot;
+        HasInvalidRootProperties = hasInvalidRootProperties;
     }
 
     /// <summary>Gets the first occurrence per identity; callers must check terminal domains before selecting values.</summary>
@@ -59,6 +60,8 @@ internal sealed class ConfigFileTokenProjection
     internal ConfigFileSourceLocationMap Locations { get; }
     /// <summary>Gets the tree materialized from these same tokens; terminal paths are never safe lookup results.</summary>
     internal JsonObject MaterializedRoot { get; }
+    /// <summary>Gets whether one or more root properties could not be represented as logical keys.</summary>
+    internal bool HasInvalidRootProperties { get; }
 
     /// <summary>Captures and projects one document without discarding duplicate evidence in a DOM parser.</summary>
     /// <param name="input">UTF-8 JSON with an optional BOM. Empty input represents an empty file layer.</param>
@@ -73,7 +76,7 @@ internal sealed class ConfigFileTokenProjection
         var locations = new Dictionary<string, ConfigAuditSourceLocation?>(StringComparer.OrdinalIgnoreCase);
         var root = new JsonObject();
         var occurrences = new List<ConfigFileProjectedEntry>();
-        if (bytes.Length == 0) return new(entries, occurrences, terminals, invalidKeys, new(locations), root);
+        if (bytes.Length == 0) return new(entries, occurrences, terminals, invalidKeys, new(locations), root, false);
 
         var starts = BuildLineStarts(bytes);
         var reader = new Utf8JsonReader(bytes, true, default);
@@ -86,7 +89,7 @@ internal sealed class ConfigFileTokenProjection
         // The final-block reader validates termination and rejects trailing data itself.
         reader.Read();
         foreach (var terminal in terminals) locations[terminal.Value] = null;
-        return new(entries, occurrences, terminals, invalidKeys, new(locations), root);
+        return new(entries, occurrences, terminals, invalidKeys, new(locations), root, invalidRootProperty);
     }
 
     private static bool ReadObject(ref Utf8JsonReader reader, IReadOnlyList<string> parent, byte[] bytes, int[] starts,

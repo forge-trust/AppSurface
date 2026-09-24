@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Text;
 using System.Text.Json;
 
 namespace ForgeTrust.AppSurface.Config.LocalSecrets;
@@ -14,7 +15,7 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 /// store and should not be used as a production vault. The file contains secret values and must stay outside source
 /// control.
 /// </remarks>
-public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore, IAppSurfaceLocalSecretMigrationStore
+public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore, IAppSurfaceLocalSecretMigrationStore, IAppSurfaceLocalSecretMigrationRecoveryStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
@@ -117,6 +118,40 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
                 destinationKey,
                 new AppSurfaceLocalSecretDiagnostic("local-secret-migration-unavailable", "Exact-key migration could not access the file store.", "The durable file store could not be read or written.", "Fix file permissions or close competing processes and retry.", "local-secrets-migration", true),
                 Name);
+        }
+    }
+
+    /// <inheritdoc />
+    public AppSurfaceLocalSecretMigrationRecoveryResult RecoverKeyMigration(
+        string applicationName, string environment, string? keyPrefix, string migrationId, bool apply, bool release,
+        AppSurfaceLocalSecretMigrationState? expectedState = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(applicationName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(environment);
+        ArgumentException.ThrowIfNullOrWhiteSpace(migrationId);
+
+        try
+        {
+            var backend = new FileMigrationBackend(this, applicationName, environment, keyPrefix, null, string.Empty);
+            using var lease = backend.AcquireMaintenanceLease(AppSurfaceLocalSecretMigrationCoordinator.DefaultLeaseTimeout, CancellationToken.None);
+            return backend.Recover(migrationId, apply, release, expectedState);
+        }
+        catch (JsonException)
+        {
+            return new(LocalSecretResultStatus.ProviderFailed, migrationId, null, null, null, null, null, false,
+                new AppSurfaceLocalSecretDiagnostic("local-secret-store-invalid",
+                    "Migration recovery cannot inspect the local secret store.",
+                    "The private local secret file could not be parsed.",
+                    "Restore a valid private store backup, then retry without removing the migration journals.",
+                    "local-secrets-migration"));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return new(LocalSecretResultStatus.Unavailable, migrationId, null, null, null, null, null, false,
+                new AppSurfaceLocalSecretDiagnostic("local-secret-migration-recovery-unavailable",
+                    "Migration recovery could not inspect durable state.",
+                    "The file store, journal, or maintenance lease was unavailable or unsafe.",
+                    "Restore private file posture or close competing processes and retry.", "local-secrets-migration", true));
         }
     }
 
@@ -377,6 +412,23 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
                         CollisionDiagnostic(collision.Key),
                         Name);
                 }
+            }
+
+            var unresolved = new FileMigrationBackend(this, applicationName, environment, keyPrefix, null, string.Empty)
+                .ReadRetainedJournals()
+                .Where(journal => StringComparer.Ordinal.Equals(journal.ApplicationName, applicationName)
+                                  && StringComparer.Ordinal.Equals(journal.Environment, environment)
+                                  && StringComparer.Ordinal.Equals(journal.KeyPrefix, keyPrefix))
+                .ToList();
+            if (unresolved.Count > 0)
+            {
+                var ids = string.Join(", ", unresolved.Take(3).Select(journal => journal.MigrationId));
+                return AppSurfaceLocalSecretResult.NotFound(LocalSecretResultStatus.Missing,
+                    new AppSurfaceLocalSecretDiagnostic("local-secret-migration-recovery-pending",
+                        "The local secret store is ready with unresolved migration recovery evidence.",
+                        $"{unresolved.Count} retained journal(s) remain; first migration IDs: {ids}.",
+                        "Use `appsurface secrets migrate-key recover` to inspect or release them after reconciliation.",
+                        "local-secrets-migration"), Name);
             }
 
             var finalPosture = preparation.Kind == FileSecretPostureKind.Repaired || posture.Kind == FileSecretPostureKind.Repaired
@@ -1166,13 +1218,25 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
         string applicationName,
         string environment,
         string? keyPrefix,
-        AppSurfaceLocalSecretIdentity destination,
+        AppSurfaceLocalSecretIdentity? destination,
         string sourceStoredKey)
         : IAppSurfaceLocalSecretMigrationBackend
     {
         private readonly string _journalPath = owner._path + ".migration-journal.json";
+        private readonly string _retainedPath = owner._path + ".migration-recovery.json";
+        private const int MaxRecoveryRecords = 4096;
+        private const int MaxRecoveryBytes = 8 * 1024 * 1024;
 
         public bool SupportsDurableMigration => owner._fileSystem.SupportsDurableMigration;
+        public bool SupportsRetainedJournal => true;
+        public bool CanReuseRetainedJournal(AppSurfaceLocalSecretMigrationJournal journal) =>
+            ReadRecoveryRecords().Any(record =>
+                StringComparer.Ordinal.Equals(record.MigrationId, journal.MigrationId)
+                && StringComparer.Ordinal.Equals(record.ApplicationName, journal.ApplicationName)
+                && StringComparer.Ordinal.Equals(record.Environment, journal.Environment)
+                && StringComparer.Ordinal.Equals(record.KeyPrefix, journal.KeyPrefix)
+                && StringComparer.Ordinal.Equals(record.SourceStoredKey, journal.SourceStoredKey)
+                && StringComparer.Ordinal.Equals(record.DestinationStoredKey, journal.DestinationStoredKey));
 
         public IDisposable AcquireMaintenanceLease(TimeSpan timeout, CancellationToken cancellationToken)
         {
@@ -1211,6 +1275,142 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
             }
         }
 
+        public void ValidateUnresolvedOverlap(string source, string target)
+        {
+            foreach (var journal in ReadRetainedJournals())
+            {
+                if (Overlaps(journal.SourceStoredKey, source, target) || Overlaps(journal.DestinationStoredKey, source, target))
+                    throw new AppSurfaceLocalSecretMigrationRecoveryConflictException();
+            }
+        }
+
+        internal AppSurfaceLocalSecretMigrationRecoveryResult Recover(string migrationId, bool apply, bool release,
+            AppSurfaceLocalSecretMigrationState? expectedState)
+        {
+            var retained = ReadRetainedJournals().FirstOrDefault(journal =>
+                string.Equals(journal.MigrationId, migrationId, StringComparison.Ordinal));
+            var active = ReadJournal();
+            var journal = release || active?.State == AppSurfaceLocalSecretMigrationState.Retained
+                ? retained : active;
+            if (journal is null || !string.Equals(journal.MigrationId, migrationId, StringComparison.Ordinal)
+                                || !InNamespace(journal))
+                return RecoveryFailure(migrationId, "local-secret-migration-recovery-id-mismatch",
+                    "No migration journal in this namespace matches the supplied identifier.");
+            if (!release && journal.State == AppSurfaceLocalSecretMigrationState.Complete)
+                return RecoveryFailure(migrationId, "local-secret-migration-recovery-not-needed",
+                    "The active journal is already complete.");
+            if (!ValidRecoveryRecord(journal))
+                throw new IOException("The migration journal cannot be used for recovery.");
+            if (apply && (expectedState is null || expectedState != journal.State))
+                return RecoveryFailure(migrationId, "local-secret-migration-recovery-state-changed",
+                    "The migration journal no longer matches the previewed state.");
+            if (release && active is not null && active.State != AppSurfaceLocalSecretMigrationState.Complete
+                        && active.State != AppSurfaceLocalSecretMigrationState.Retained
+                        && Overlaps(journal, active))
+                return RecoveryFailure(migrationId, "local-secret-migration-recovery-active-overlap",
+                    "An active migration still uses an unresolved identifier.");
+            if (!release && journal.State is AppSurfaceLocalSecretMigrationState.Complete or AppSurfaceLocalSecretMigrationState.Retained)
+                return RecoveryFailure(migrationId, "local-secret-migration-recovery-not-needed",
+                    "The active journal is not an unfinished migration.");
+
+            var sourcePresent = ReadExact(journal.SourceStoredKey) is not null;
+            var destinationPresent = ReadExact(journal.DestinationStoredKey) is not null;
+            if (apply)
+            {
+                if (release)
+                {
+                    // A Released tombstone is durable and no longer contributes to overlap checks.
+                    WriteRetained(journal with { State = AppSurfaceLocalSecretMigrationState.Released });
+                }
+                else
+                {
+                    // The retained guard is durable before the active slot becomes reusable.
+                    WriteRetained(journal);
+                    CommitJournal(journal with { State = AppSurfaceLocalSecretMigrationState.Retained });
+                }
+            }
+
+            return new(LocalSecretResultStatus.Found, migrationId, journal.State, journal.SourceStoredKey,
+                journal.DestinationStoredKey, sourcePresent, destinationPresent, release ? !apply : apply || retained is not null,
+                null);
+        }
+
+        internal IReadOnlyList<AppSurfaceLocalSecretMigrationJournal> ReadRetainedJournals()
+        {
+            return ReadRecoveryRecords().Where(journal => journal.State != AppSurfaceLocalSecretMigrationState.Released).ToList();
+        }
+
+        private void WriteRetained(AppSurfaceLocalSecretMigrationJournal journal)
+        {
+            var records = ReadRecoveryRecords();
+            var existing = records.FindIndex(candidate => StringComparer.Ordinal.Equals(candidate.MigrationId, journal.MigrationId));
+            if (existing >= 0) records[existing] = journal;
+            else if (records.Count < MaxRecoveryRecords) records.Add(journal);
+            else throw new IOException("The recovery journal inventory reached its configured bound.");
+            var contents = JsonSerializer.Serialize(records, JsonOptions);
+            if (Encoding.UTF8.GetByteCount(contents) > MaxRecoveryBytes)
+                throw new IOException("The recovery journal inventory would exceed its byte bound.");
+            if (owner._fileSystem.WriteAllTextWithPosture(_retainedPath, contents).Kind == FileSecretPostureKind.Unsupported)
+                throw new IOException("The recovery journal cannot be durably written.");
+        }
+
+        private List<AppSurfaceLocalSecretMigrationJournal> ReadRecoveryRecords()
+        {
+            if (owner._fileSystem.InspectExistingFilePosture(_retainedPath).Kind == FileSecretPostureKind.Unsupported)
+                throw new IOException("The recovery journal path is unsafe.");
+            if (!owner._fileSystem.FileExists(_retainedPath)) return [];
+            if (new FileInfo(_retainedPath).Length > MaxRecoveryBytes)
+                throw new IOException("The recovery journal inventory exceeds its byte bound.");
+            List<AppSurfaceLocalSecretMigrationJournal> records;
+            try
+            {
+                records = JsonSerializer.Deserialize<List<AppSurfaceLocalSecretMigrationJournal>>(
+                    owner._fileSystem.ReadAllText(_retainedPath), JsonOptions)
+                    ?? throw new IOException("The recovery journal inventory is empty.");
+            }
+            catch (JsonException exception)
+            {
+                throw new IOException("The recovery journal inventory is invalid.", exception);
+            }
+            if (records.Count > MaxRecoveryRecords || records.Any(journal => !ValidRecoveryRecord(journal))
+                || records.Select(journal => journal.MigrationId).Distinct(StringComparer.Ordinal).Count() != records.Count)
+                throw new IOException("The recovery journal inventory has invalid records.");
+            return records;
+        }
+
+        private static bool ValidRecoveryRecord(AppSurfaceLocalSecretMigrationJournal? journal) =>
+            journal is not null
+            && journal.MigrationId is { Length: 32 }
+            && journal.MigrationId.All(Uri.IsHexDigit)
+            && !string.IsNullOrWhiteSpace(journal.ApplicationName)
+            && !string.IsNullOrWhiteSpace(journal.Environment)
+            && !string.IsNullOrWhiteSpace(journal.SourceStoredKey)
+            && !string.IsNullOrWhiteSpace(journal.DestinationStoredKey)
+            && (journal.State is AppSurfaceLocalSecretMigrationState.Prepared
+                or AppSurfaceLocalSecretMigrationState.DestinationWritten
+                or AppSurfaceLocalSecretMigrationState.DestinationVerified
+                or AppSurfaceLocalSecretMigrationState.SourceDeletePending
+                or AppSurfaceLocalSecretMigrationState.Unrecoverable
+                or AppSurfaceLocalSecretMigrationState.Released);
+
+        private bool InNamespace(AppSurfaceLocalSecretMigrationJournal journal) =>
+            StringComparer.Ordinal.Equals(journal.ApplicationName, applicationName) &&
+            StringComparer.Ordinal.Equals(journal.Environment, environment) &&
+            StringComparer.Ordinal.Equals(journal.KeyPrefix, keyPrefix);
+
+        private static bool Overlaps(AppSurfaceLocalSecretMigrationJournal journal, AppSurfaceLocalSecretMigrationJournal other) =>
+            Overlaps(journal.SourceStoredKey, other.SourceStoredKey, other.DestinationStoredKey)
+            || Overlaps(journal.DestinationStoredKey, other.SourceStoredKey, other.DestinationStoredKey);
+
+        private static bool Overlaps(string protectedKey, string source, string target) =>
+            StringComparer.OrdinalIgnoreCase.Equals(protectedKey, source)
+            || StringComparer.OrdinalIgnoreCase.Equals(protectedKey, target);
+
+        private static AppSurfaceLocalSecretMigrationRecoveryResult RecoveryFailure(string migrationId, string code, string problem) =>
+            new(LocalSecretResultStatus.ProviderFailed, migrationId, null, null, null, null, null, false,
+                new AppSurfaceLocalSecretDiagnostic(code, problem, "The durable journal state did not match this recovery request.",
+                    "Preview the current journal and retry with its exact migration id.", "local-secrets-migration"));
+
         public void ValidateDestination()
         {
             lock (owner._gate)
@@ -1218,7 +1418,7 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
                 var data = ReadChecked();
                 if (data.Any(pair => InNamespace(pair.Value)
                                      && !StringComparer.Ordinal.Equals(pair.Key, sourceStoredKey)
-                                     && !StringComparer.Ordinal.Equals(pair.Key, destination.StorageName)
+                                     && !StringComparer.Ordinal.Equals(pair.Key, destination!.StorageName)
                                      && StringComparer.OrdinalIgnoreCase.Equals(pair.Value.Key, destination.Key.Value)))
                 {
                     throw new AppSurfaceLocalSecretMigrationCollisionException();
@@ -1240,7 +1440,7 @@ public sealed class FileAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore
             lock (owner._gate)
             {
                 var data = ReadChecked();
-                data[destination.StorageName] = new FileSecretEntry(applicationName, environment, keyPrefix, destination.Key.Value, value);
+                data[destination!.StorageName] = new FileSecretEntry(applicationName, environment, keyPrefix, destination.Key.Value, value);
                 var posture = owner.Write(data);
                 if (posture.Kind == FileSecretPostureKind.Unsupported)
                 {
