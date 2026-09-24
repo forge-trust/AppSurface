@@ -217,7 +217,7 @@ internal static class Program
                     var manifest = await new PackageArtifactManifestReader().ReadAsync(general.ArtifactManifestPath, cancellationToken);
                     var planned = PackageArtifactManifestPlanValidator.Validate(plan, manifest, general.ArtifactsInputPath);
                     var preflight = await TailwindEvidenceWorkflow.PreparePublicationAsync(request, manifest, planned, cancellationToken);
-                    await standardOut.WriteLineAsync($"Tailwind publication preflight succeeded for {preflight.Packages.Count} packages; upload {Path.Combine(request.ReportDirectory, "publication-start-receipt.json")} before requesting credentials.");
+                    await standardOut.WriteLineAsync($"Tailwind publication preflight succeeded for {preflight.Packages.Count} packages; upload {Path.Join(request.ReportDirectory, "publication-start-receipt.json")} before requesting credentials.");
                     return 0;
                 }
                 if (mode == "validate-publication-start")

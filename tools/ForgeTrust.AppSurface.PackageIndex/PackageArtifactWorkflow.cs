@@ -184,7 +184,6 @@ internal sealed class PackageArtifactWorkflow
             entry.PackageId,
             TailwindMainPackageId,
             StringComparison.OrdinalIgnoreCase));
-        var tailwindProofSucceeded = false;
         if (hasTailwindPackage)
         {
             DeleteFileIfPresent(tailwindProofReportPath);
@@ -195,7 +194,6 @@ internal sealed class PackageArtifactWorkflow
                     tailwindProofWorkDirectory,
                     tailwindProofReportPath,
                     cancellationToken);
-                tailwindProofSucceeded = true;
             }
             catch (PackageIndexException ex)
             {
@@ -280,10 +278,9 @@ internal sealed class PackageArtifactWorkflow
         {
             try
             {
-                if (!tailwindProofSucceeded) throw new PackageIndexException("Producer subject cannot be written because the local Tailwind consumer proof did not complete.");
                 var finalManifest = await new PackageArtifactManifestReader().ReadAsync(request.ArtifactManifestPath, cancellationToken);
                 var tailwindResolvedClosure = TailwindProofSubjectService.ReadResolvedClosure(
-                    Path.Combine(tailwindProofWorkDirectory, "consumer", "obj", "project.assets.json"), finalManifest);
+                    Path.Join(tailwindProofWorkDirectory, "consumer", "obj", "project.assets.json"), finalManifest);
                 var subject = await TailwindProofSubjectService.CreateAsync(
                     request.ArtifactsOutputPath,
                     request.ArtifactManifestPath,
@@ -296,7 +293,7 @@ internal sealed class PackageArtifactWorkflow
                 TryDeleteProofWorkspace(tailwindProofWorkDirectory);
             }
         }
-        else if (hasTailwindPackage && tailwindProofSucceeded)
+        else if (hasTailwindPackage)
         {
             TryDeleteProofWorkspace(tailwindProofWorkDirectory);
         }

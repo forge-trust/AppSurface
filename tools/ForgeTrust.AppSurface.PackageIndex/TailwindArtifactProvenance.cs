@@ -288,9 +288,9 @@ internal static partial class TailwindProofSubjectService
                 foreach (var dependency in dependencies.EnumerateObject())
                 {
                     if (!dependency.Name.StartsWith("ForgeTrust.", StringComparison.OrdinalIgnoreCase)) continue;
-                    if (!expected.ContainsKey(dependency.Name) || !targetIds.ContainsKey(dependency.Name))
+                    if (!expected.ContainsKey(dependency.Name) || !targetIds.TryGetValue(dependency.Name, out var resolvedDependencyVersion))
                         throw new PackageIndexException($"First-party dependency '{dependency.Name}' referenced by '{nodeId}' is missing from the resolved graph or producer plan.");
-                    if (dependency.Value.ValueKind != JsonValueKind.String || !string.Equals(dependency.Value.GetString(), targetIds[dependency.Name], StringComparison.Ordinal))
+                    if (dependency.Value.ValueKind != JsonValueKind.String || !string.Equals(dependency.Value.GetString(), resolvedDependencyVersion, StringComparison.Ordinal))
                         throw new PackageIndexException($"First-party dependency version metadata for '{dependency.Name}' in '{nodeId}' differs from the resolved package node.");
                 }
             }
