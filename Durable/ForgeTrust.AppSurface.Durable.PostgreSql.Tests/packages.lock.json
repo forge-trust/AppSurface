@@ -452,6 +452,13 @@
           "ForgeTrust.AppSurface.Durable": "[0.1.0, )"
         }
       },
+      "forgetrust.appsurface.durable.testing": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Durable": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Durable.Provider": "[0.1.0, )"
+        }
+      },
       "forgetrust.appsurface.flow": {
         "type": "Project",
         "dependencies": {
