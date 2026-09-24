@@ -6,6 +6,8 @@ BASELINE_COMMIT="${1:-e55c549ed23a9da9abb747c87bd202b504d1c736}"
 CURRENT_VERSION="${CURRENT_VERSION:-0.0.0-file-secret-smoke}"
 BASELINE_VERSION="${BASELINE_VERSION:-0.0.0-baseline-${BASELINE_COMMIT:0:12}}"
 WORK_DIR="${WORK_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/appsurface-file-secret-smoke.XXXXXX")}"
+mkdir -p "$WORK_DIR"
+WORK_DIR="$(cd "$WORK_DIR" && pwd -P)"
 CURRENT_SOURCE="$WORK_DIR/current-source"
 PREVIOUS_SOURCE="$WORK_DIR/previous-source"
 CURRENT_FEED="$WORK_DIR/current-feed"
@@ -95,13 +97,16 @@ import hashlib
 from pathlib import Path
 import sys
 root = Path(sys.argv[1])
-print('\n'.join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(root).as_posix()}" for p in sorted(x for x in root.rglob('*') if x.is_file() and not ({'obj', 'bin', '.obj', '.bin'} & set(x.parts)))))
+print('\n'.join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(root).as_posix()}" for p in sorted(x for x in root.rglob('*') if x.is_file() and not ({'obj', 'bin', '.obj', '.bin', 'packages.lock.json'} & set(x.parts)))))
 PY
 )"
   for project in "${PACK_PROJECTS[@]}"; do
+    # The historical Config project omitted Hosting/Logging references. The external targets overlay
+    # supplies them for this build without changing any file in the archived source.
     if ! run_logged "baseline-pack-$(basename "$project" .csproj)" 300 \
       dotnet pack "$PREVIOUS_SOURCE/$project" --configuration Release --output "$BASELINE_FEED" \
       -p:Version="$BASELINE_VERSION" -p:PackageVersion="$BASELINE_VERSION" \
+      -p:DirectoryBuildTargetsPath="$ROOT_DIR/tests/config-key-compatibility/old-build/Directory.Build.targets" \
       -p:UseSharedCompilation=false -nodeReuse:false; then
       printf 'BASELINE PACKAGING FAILED WITHOUT SOURCE MUTATION.\n' >&2
       printf 'The archived baseline source kept its original project dependency graph.\n' >&2
@@ -114,7 +119,7 @@ import hashlib
 from pathlib import Path
 import sys
 root = Path(sys.argv[1])
-print('\n'.join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(root).as_posix()}" for p in sorted(x for x in root.rglob('*') if x.is_file() and not ({'obj', 'bin', '.obj', '.bin'} & set(x.parts)))))
+print('\n'.join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(root).as_posix()}" for p in sorted(x for x in root.rglob('*') if x.is_file() and not ({'obj', 'bin', '.obj', '.bin', 'packages.lock.json'} & set(x.parts)))))
 PY
 )"
   [[ "$before" == "$after" ]] || { echo "Baseline archive changed during packaging" >&2; return 1; }
