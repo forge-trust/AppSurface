@@ -1,5 +1,7 @@
 # Portable durable execution
 
+The [schema-11 heartbeat retention guide](heartbeat-retention-operations.md) is the start page for automatic cleanup of stale runtime identities, its 24-hour default, migration, release proof, and recovery.
+
 AppSurface Durable is a public-preview package family for portable durable contracts. It is split by audience:
 
 - [`ForgeTrust.AppSurface.Durable`](ForgeTrust.AppSurface.Durable/README.md) is the application and reusable-module API
@@ -64,10 +66,11 @@ The forward-only deployment order is:
 8. `0008_flow_repair.sql`
 9. `0009_work_contract_discovery.sql`
 10. `0010_runtime_health_observation.sql`
-11. [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
+11. `0011_runtime_heartbeat_retention.sql`
+12. [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
 
 The preferred production flow is to generate and review the Durable schema script offline, drain and stop every pre-`0009`
-worker, apply the reviewed migrations in the order above (including `0010_runtime_health_observation.sql`), apply the canonical
+worker, apply the reviewed migrations in the order above (including `0011_runtime_heartbeat_retention.sql`), apply the canonical
 role recipe, and run schema status/preflight before enabling the
 worker host. The [`durable schema` CLI commands](../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands)
 make those checks discoverable. `apply --apply` is an explicit migration-owner operation only; deployments normally

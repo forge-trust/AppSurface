@@ -522,6 +522,12 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
                 (SELECT count(*) FROM appsurface_durable.flow_trace_context) AS trace_context_count,
                 (SELECT count(*) FROM appsurface_durable.runtime_heartbeat) AS heartbeat_count,
                 (SELECT count(*) FROM appsurface_durable.runtime_heartbeat
+                    WHERE worker_id = 'durable-local-proof-current') AS current_heartbeat_count,
+                (SELECT count(*) FROM appsurface_durable.runtime_heartbeat
+                    WHERE worker_id = 'durable-local-proof-recent') AS recent_heartbeat_count,
+                (SELECT count(*) FROM appsurface_durable.runtime_heartbeat
+                    WHERE worker_id LIKE 'durable-local-proof-stale-%') AS remaining_stale_heartbeat_count,
+                (SELECT count(*) FROM appsurface_durable.runtime_heartbeat
                     WHERE last_failed = 0 AND last_successful_sweep_at IS NOT NULL) AS successful_heartbeat_count;
             """);
         await using var reader = await command.ExecuteReaderAsync();
@@ -534,8 +540,11 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
         Assert.Equal(0, reader.GetInt64(5));
         Assert.Equal(1, reader.GetInt64(6));
         Assert.True(reader.GetInt64(7) > 0, "The local proof should persist W3C Flow trace context.");
-        Assert.Equal(1, reader.GetInt64(8));
+        Assert.Equal(3, reader.GetInt64(8));
         Assert.Equal(1, reader.GetInt64(9));
+        Assert.Equal(1, reader.GetInt64(10));
+        Assert.Equal(1, reader.GetInt64(11));
+        Assert.Equal(1, reader.GetInt64(12));
         Assert.False(await reader.ReadAsync());
     }
 }

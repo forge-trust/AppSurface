@@ -344,7 +344,7 @@ jobs:
       - name: Restore PostgreSQL compatibility tests
         run: dotnet restore Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/ForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj --locked-mode
 
-      - name: Verify the current provider and exact v0.2.0-preview.8 package
+      - name: Verify the current provider and exact immediately previous PostgreSQL package
         run: ./Durable/verify-postgresql.sh --ci
 
       - name: Run the one-command operational assessment proof

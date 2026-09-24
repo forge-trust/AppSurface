@@ -382,11 +382,11 @@ public sealed class PostgreSqlDurableWorkStoreTests
             (
                 Mutation: """
                     UPDATE appsurface_durable.store_metadata
-                    SET schema_version = 11,
-                        minimum_reader_version = 11,
-                        maximum_reader_version = 11,
-                        minimum_writer_version = 11,
-                        maximum_writer_version = 11
+                    SET schema_version = 12,
+                        minimum_reader_version = 12,
+                        maximum_reader_version = 12,
+                        minimum_writer_version = 12,
+                        maximum_writer_version = 12
                     WHERE singleton;
                     """,
                 Expected: DurableRuntimeSchemaCompatibility.StoreTooNew),
@@ -402,11 +402,11 @@ public sealed class PostgreSqlDurableWorkStoreTests
                 await using var restore = database.DataSource.CreateCommand(
                     """
                     UPDATE appsurface_durable.store_metadata
-                    SET schema_version = 10,
+                    SET schema_version = 11,
                         minimum_reader_version = 1,
-                        maximum_reader_version = 10,
+                        maximum_reader_version = 11,
                         minimum_writer_version = 1,
-                        maximum_writer_version = 10
+                        maximum_writer_version = 11
                     WHERE singleton;
                     """);
                 await restore.ExecuteNonQueryAsync();

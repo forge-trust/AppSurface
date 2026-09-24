@@ -58,6 +58,47 @@ public sealed class DurableSchemaCommandTests
     }
 
     [Fact]
+    public async Task Preflight_reports_pending_0011_as_an_expected_downtime_finding()
+    {
+        var service = new FakeDurableSchemaCommandService
+        {
+            Status = new DurableSchemaStatusView(DurableRuntimeSchemaCompatibility.UpgradeRequired, 10, 11, [11]),
+        };
+        using var environment = new EnvironmentVariableScope("APPSURFACE_DURABLE_CONNECTION", "Host=localhost;Password=do-not-print");
+        var command = new DurableSchemaPreflightCommand(service);
+        using var console = new FakeInMemoryConsole();
+
+        var error = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
+
+        Assert.Contains("pending migration 0011", error.Message, StringComparison.Ordinal);
+        Assert.Contains("requires a drained maintenance window", error.Message, StringComparison.Ordinal);
+        Assert.Contains("not a passing gate", error.Message, StringComparison.Ordinal);
+        Assert.Contains("runtime role", error.Message, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("do-not-print", error.Message);
+    }
+
+    [Fact]
+    public async Task Preflight_fails_closed_on_installed_retention_structure_drift()
+    {
+        var service = new FakeDurableSchemaCommandService
+        {
+            Status = new DurableSchemaStatusView(DurableRuntimeSchemaCompatibility.Compatible, 11, 11, []),
+            RetentionStructureFailures = ["function_acl", "retention_index"],
+        };
+        using var environment = new EnvironmentVariableScope("APPSURFACE_DURABLE_CONNECTION", "Host=localhost;Password=do-not-print");
+        var command = new DurableSchemaPreflightCommand(service);
+        using var console = new FakeInMemoryConsole();
+
+        var error = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
+
+        Assert.Contains("structural preflight failed", error.Message, StringComparison.Ordinal);
+        Assert.Contains("function, runtime grants, role membership, or index", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Failed checks: function_acl, retention_index", error.Message, StringComparison.Ordinal);
+        Assert.True(service.RetentionPreflightCalled);
+        ValueSafeAssert.DoesNotExpose("do-not-print", error.Message);
+    }
+
+    [Fact]
     public async Task Apply_requires_explicit_confirmation_before_reading_the_connection_variable()
     {
         var service = new FakeDurableSchemaCommandService
@@ -283,9 +324,28 @@ public sealed class DurableSchemaCommandTests
         ValueSafeAssert.DoesNotExpose(secretConnection, console.ReadOutputString());
     }
 
+    [Fact]
+    public async Task Apply_uses_the_bounded_window_required_by_schema_11()
+    {
+        using var environment = new EnvironmentVariableScope("APPSURFACE_DURABLE_CONNECTION", "Host=localhost;Password=do-not-print");
+        var service = new FakeDurableSchemaCommandService
+        {
+            ApplyException = new TimeoutException("provider details are private"),
+        };
+        var command = new DurableSchemaApplyCommand(service) { Apply = true };
+        using var console = new FakeInMemoryConsole();
+
+        var error = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
+
+        Assert.Equal(TimeSpan.FromSeconds(390), DurableSchemaApplyCommand.ApplyOperationTimeout);
+        Assert.Contains("390-second deadline", error.Message, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("do-not-print", error.Message);
+        ValueSafeAssert.DoesNotExpose("provider details are private", error.Message);
+    }
+
     [Theory]
     [InlineData(-1)]
-    [InlineData(11)]
+    [InlineData(12)]
     public async Task Script_rejects_versions_outside_the_current_catalog(int fromVersion)
     {
         var command = new DurableSchemaScriptCommand(new DurableSchemaCommandService()) { FromVersion = fromVersion };
@@ -300,7 +360,7 @@ public sealed class DurableSchemaCommandTests
     public async Task Script_at_the_current_version_contains_only_the_deterministic_advisory_lock_boundary()
     {
         var service = new DurableSchemaCommandService();
-        var command = new DurableSchemaScriptCommand(service) { FromVersion = 10 };
+        var command = new DurableSchemaScriptCommand(service) { FromVersion = 11 };
         using var console = new FakeInMemoryConsole();
 
         await command.ExecuteAsync(console);
@@ -617,8 +677,54 @@ public sealed class DurableSchemaCommandTests
         var compatible = await service.GetStatusAsync(connectionString, CancellationToken.None);
 
         Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missing.Compatibility);
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], applied.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], applied.AppliedVersions);
         Assert.Equal(DurableRuntimeSchemaCompatibility.Compatible, compatible.Compatibility);
+    }
+
+    [Fact]
+    public async Task Retention_structural_preflight_passes_for_migration_owner_and_runtime_credentials()
+    {
+        await using var container = new PostgreSqlBuilder(
+                "postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877")
+            .WithDatabase("appsurface_durable")
+            .WithUsername("appsurface")
+            .WithPassword("appsurface-test-password")
+            .Build();
+        await container.StartAsync();
+
+        await using var ownerDataSource = NpgsqlDataSource.Create(container.GetConnectionString());
+        await new PostgreSqlDurableRuntimeSchemaManager(ownerDataSource).ApplyAsync();
+        await using (var configure = ownerDataSource.CreateCommand(
+            """
+            CREATE ROLE durable_preflight_owner NOLOGIN;
+            CREATE ROLE durable_preflight_runtime LOGIN PASSWORD 'durable-preflight-test-password';
+            ALTER SCHEMA appsurface_durable OWNER TO durable_preflight_owner;
+            ALTER TABLE appsurface_durable.runtime_heartbeat OWNER TO durable_preflight_owner;
+            ALTER FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)
+                OWNER TO durable_preflight_owner;
+            ALTER POLICY runtime_heartbeat_runtime_role ON appsurface_durable.runtime_heartbeat
+                TO durable_preflight_runtime;
+            DROP POLICY runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat;
+            CREATE POLICY runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat
+                FOR ALL TO durable_preflight_owner USING (true) WITH CHECK (true);
+            REVOKE ALL ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)
+                FROM PUBLIC;
+            GRANT EXECUTE ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)
+                TO durable_preflight_runtime;
+            """))
+        {
+            await configure.ExecuteNonQueryAsync();
+        }
+
+        var runtimeConnection = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
+        {
+            Username = "durable_preflight_runtime",
+            Password = "durable-preflight-test-password",
+        };
+        var service = new DurableSchemaCommandService();
+
+        Assert.Empty(await service.VerifyRetentionPreflightAsync(container.GetConnectionString(), CancellationToken.None));
+        Assert.Empty(await service.VerifyRetentionPreflightAsync(runtimeConnection.ConnectionString, CancellationToken.None));
     }
 
     [Theory]
@@ -662,6 +768,7 @@ public sealed class DurableSchemaCommandTests
         Assert.Contains("0001", first, StringComparison.Ordinal);
         Assert.Contains("0007", first, StringComparison.Ordinal);
         Assert.Contains("0009", first, StringComparison.Ordinal);
+        Assert.Contains("0011_runtime_heartbeat_retention", first, StringComparison.Ordinal);
     }
 
     private sealed class FakeDurableSchemaCommandService : IDurableSchemaCommandService
@@ -674,6 +781,12 @@ public sealed class DurableSchemaCommandTests
         internal string Script { get; set; } = string.Empty;
 
         internal Exception? StatusException { get; set; }
+
+        internal Exception? ApplyException { get; set; }
+
+        internal IReadOnlyList<string> RetentionStructureFailures { get; set; } = [];
+
+        internal bool RetentionPreflightCalled { get; private set; }
 
         internal string? ConnectionString { get; private set; }
 
@@ -699,12 +812,22 @@ public sealed class DurableSchemaCommandTests
             return Script;
         }
 
+        public ValueTask<IReadOnlyList<string>> VerifyRetentionPreflightAsync(string connectionString, CancellationToken cancellationToken)
+        {
+            ConnectionString = connectionString;
+            CancellationToken = cancellationToken;
+            RetentionPreflightCalled = true;
+            return ValueTask.FromResult(RetentionStructureFailures);
+        }
+
         public ValueTask<DurableSchemaApplyView> ApplyAsync(string connectionString, CancellationToken cancellationToken)
         {
             ConnectionString = connectionString;
             CancellationToken = cancellationToken;
             OnlineOperationCalled = true;
-            return ValueTask.FromResult(ApplyResult);
+            return ApplyException is null
+                ? ValueTask.FromResult(ApplyResult)
+                : ValueTask.FromException<DurableSchemaApplyView>(ApplyException);
         }
     }
 

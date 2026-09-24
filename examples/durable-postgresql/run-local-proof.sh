@@ -217,6 +217,13 @@ run_foreground docker exec -i "$CONTAINER_NAME" \
   -f - < "$ROOT_DIR/Durable/configure-postgresql-roles.sql" >/dev/null
 printf '[ok] canonical PostgreSQL roles reconciled\n'
 
+run_foreground dotnet run --project "$ROOT_DIR/Cli/ForgeTrust.AppSurface.Cli" \
+  --configuration Release \
+  --no-build \
+  -- durable schema preflight \
+  --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION
+printf '[ok] schema 11 runtime-role structural preflight passed\n'
+
 run_foreground docker exec "$CONTAINER_NAME" \
   psql -Aqt -U postgres -d "$DATABASE_NAME" -c 'SELECT gen_random_uuid();' > "$RUNTIME_EPOCH_FILE"
 APPSURFACE_DURABLE_RUNTIME_EPOCH="$(<"$RUNTIME_EPOCH_FILE")"

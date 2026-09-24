@@ -36,6 +36,8 @@ internal static class DurablePostgreSqlLocalExample
     private const string MigrationOwnerRole = "appsurface_durable_owner";
     private const string DispatcherRole = "appsurface_durable_dispatcher";
     private const string RuntimeRole = "appsurface_durable_runtime";
+    private const string LocalProofWorkerId = "durable-local-proof-current";
+    private const int LocalProofStaleHeartbeatCount = 501;
 
     /// <summary>Executes the local-proof command line and returns its process-compatible exit code.</summary>
     internal static async Task<int> RunAsync(string[] args, CancellationToken cancellationToken)
@@ -139,6 +141,7 @@ internal static class DurablePostgreSqlLocalExample
 
         Console.WriteLine("[verify-local] schema compatible");
         Console.WriteLine("[verify-local] active epoch matches configured epoch");
+        await SeedRetentionProofAsync(runtimeDataSource, runtimeEpoch, cancellationToken);
 
         var workCodec = DurableExampleContracts.CreateWorkCodec();
         var resultCodec = DurableExampleContracts.CreateResultCodec();
@@ -160,7 +163,8 @@ internal static class DurablePostgreSqlLocalExample
             dispatcherDataSource,
             runtimeDataSource,
             workOptions,
-            scheduleOptions)
+            scheduleOptions,
+            options => options.WorkerId = LocalProofWorkerId)
             .AddWorkerHost();
 
         using var host = hostBuilder.Build();
@@ -224,6 +228,8 @@ internal static class DurablePostgreSqlLocalExample
             flowInstanceId,
             cancellationToken);
         Console.WriteLine("[verify-local] direct pass completed Work and Flow with zero failures");
+        await VerifyRetentionProofAsync(runtimeDataSource, cancellationToken);
+        Console.WriteLine("[verify-local] heartbeat maintenance removed one bounded batch of 500 stale identities; one stale row, the recent row, and the current worker survived");
         var health = await services.GetRequiredService<IDurableRuntimeHealth>().GetAsync(cancellationToken);
         EnsureRuntimeHealthIsCompatible(health);
         Console.WriteLine(
@@ -260,6 +266,89 @@ internal static class DurablePostgreSqlLocalExample
 
         Console.WriteLine("[verify-local] AddWorkerHost started under the restricted roles; no startup DDL was performed");
         return 0;
+    }
+
+    /// <summary>Seeds more eligible identities than one configured maintenance batch.</summary>
+    private static async Task SeedRetentionProofAsync(
+        NpgsqlDataSource runtimeDataSource,
+        Guid runtimeEpoch,
+        CancellationToken cancellationToken)
+    {
+        await using var command = runtimeDataSource.CreateCommand(
+            """
+            INSERT INTO appsurface_durable.runtime_heartbeat
+                (worker_id, worker_instance_id, runtime_epoch, hosted_surfaces,
+                 started_at, last_heartbeat_at, updated_at)
+            SELECT 'durable-local-proof-stale-' || value::text,
+                   gen_random_uuid(), @runtime_epoch, 1,
+                   clock_timestamp() - interval '2 days',
+                   clock_timestamp() - interval '2 days',
+                   clock_timestamp() - interval '2 days'
+            FROM generate_series(1, @stale_count) AS value;
+
+            INSERT INTO appsurface_durable.runtime_heartbeat
+                (worker_id, worker_instance_id, runtime_epoch, hosted_surfaces)
+            VALUES ('durable-local-proof-recent', gen_random_uuid(), @runtime_epoch, 1);
+            """);
+        command.Parameters.AddWithValue("runtime_epoch", runtimeEpoch);
+        command.Parameters.AddWithValue("stale_count", LocalProofStaleHeartbeatCount);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>Waits for one asynchronous batch and proves the bounded deletion and protected rows.</summary>
+    private static async Task VerifyRetentionProofAsync(
+        NpgsqlDataSource runtimeDataSource,
+        CancellationToken cancellationToken)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(15));
+        try
+        {
+            while (true)
+            {
+                long stale;
+                long recent;
+                long current;
+                await using (var command = runtimeDataSource.CreateCommand(
+                    """
+                    SELECT
+                        count(*) FILTER (WHERE worker_id LIKE 'durable-local-proof-stale-%'),
+                        count(*) FILTER (WHERE worker_id = 'durable-local-proof-recent'),
+                        count(*) FILTER (WHERE worker_id = @current_worker_id)
+                    FROM appsurface_durable.runtime_heartbeat
+                    WHERE worker_id LIKE 'durable-local-proof-%';
+                    """))
+                {
+                    command.Parameters.AddWithValue("current_worker_id", LocalProofWorkerId);
+                    await using var reader = await command.ExecuteReaderAsync(deadline.Token);
+                    if (!await reader.ReadAsync(deadline.Token))
+                    {
+                        throw new InvalidOperationException("The heartbeat maintenance proof returned no count row.");
+                    }
+
+                    stale = reader.GetInt64(0);
+                    recent = reader.GetInt64(1);
+                    current = reader.GetInt64(2);
+                }
+
+                if (stale == 1 && recent == 1 && current == 1)
+                {
+                    return;
+                }
+
+                if (stale != LocalProofStaleHeartbeatCount || recent != 1 || current != 1)
+                {
+                    throw new InvalidOperationException(
+                        "Heartbeat maintenance changed a protected row or deleted outside one 500-row batch.");
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(100), deadline.Token);
+            }
+        }
+        catch (OperationCanceledException exception) when (deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException("The admitted pass did not complete its first bounded heartbeat cleanup within 15 seconds.", exception);
+        }
     }
 
     /// <summary>Requires the direct admission proof to have entered and completed useful provider work.</summary>
