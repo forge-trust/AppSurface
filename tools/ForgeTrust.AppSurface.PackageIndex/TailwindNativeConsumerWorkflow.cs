@@ -272,6 +272,17 @@ internal static class TailwindNativeConsumerWorkflow
             .ResolveAsync(repositoryRoot, Path.Combine(repositoryRoot, "packages", "package-index.yml"), cancellationToken);
         var planned = PackageArtifactManifestPlanValidator.Validate(plan, manifest, artifactsInputPath);
         _ = new PackageArtifactValidator().Validate(plan, artifactsInputPath, manifest.PackageVersion, repositoryRoot);
+        ValidatePlannedProducerClosure(planned, producerClosure);
+    }
+
+    /// <summary>Checks that each bound producer package has the same filename and SHA-512 as the validated package plan.</summary>
+    /// <param name="planned">Manifest entries already validated against the checked-in package plan.</param>
+    /// <param name="producerClosure">The subset of first-party packages bound by the producer subject.</param>
+    /// <exception cref="PackageIndexException">A closure package is missing from the plan or has different bytes or identity.</exception>
+    internal static void ValidatePlannedProducerClosure(
+        IReadOnlyList<PlannedPackageArtifact> planned,
+        IReadOnlyList<TailwindSubjectPackage> producerClosure)
+    {
         foreach (var package in producerClosure)
         {
             var match = planned.SingleOrDefault(item => item.ManifestEntry.PackageId.Equals(package.PackageId, StringComparison.OrdinalIgnoreCase));
@@ -367,7 +378,12 @@ internal static class TailwindNativeConsumerWorkflow
         return (rid!, os, arch, process);
     }
 
-    private static (string Name, string Sha256, string Version) ReadRidAsset(string packageArchive, string rid)
+    /// <summary>Reads the selected host binary identity from a restored Tailwind archive's release manifest.</summary>
+    /// <param name="packageArchive">Path to the restored Tailwind NuGet archive.</param>
+    /// <param name="rid">Expected host RID, which must identify exactly one manifest asset.</param>
+    /// <returns>The binary filename, SHA-256, and Tailwind version recorded by the package.</returns>
+    /// <exception cref="PackageIndexException">The archive lacks a usable internal release manifest or selected asset.</exception>
+    internal static (string Name, string Sha256, string Version) ReadRidAsset(string packageArchive, string rid)
     {
         using var archive = ZipFile.OpenRead(packageArchive);
         var entries = archive.Entries.Where(item => string.Equals(item.FullName, "build/tailwind.release.json", StringComparison.OrdinalIgnoreCase)).ToArray();
@@ -386,7 +402,11 @@ internal static class TailwindNativeConsumerWorkflow
         return (name.GetString()!, sha.GetString()!, version);
     }
 
-    private static void RequireSameClosure(IReadOnlyList<TailwindSubjectPackage> expected, IReadOnlyList<TailwindSubjectPackage> actual)
+    /// <summary>Requires the restored first-party closure to have exactly the producer's packages and package hashes.</summary>
+    /// <param name="expected">Packages from the bound producer subject.</param>
+    /// <param name="actual">Packages resolved by the native consumer's NuGet assets graph.</param>
+    /// <exception cref="PackageIndexException">The closure count or any package identity differs.</exception>
+    internal static void RequireSameClosure(IReadOnlyList<TailwindSubjectPackage> expected, IReadOnlyList<TailwindSubjectPackage> actual)
     {
         if (expected.Count != actual.Count) throw new PackageIndexException("Restored first-party package closure differs from producer subject.");
         foreach (var item in expected)

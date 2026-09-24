@@ -8,7 +8,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 /// <summary>Verifies bounded proof input and create-new output at the evidence boundary.</summary>
 public sealed class TailwindEvidenceBoundsTests : IDisposable
 {
-    private readonly string _root = TestPathUtils.PathUnder("/private/tmp", "tailwind-evidence-bounds", Guid.NewGuid().ToString("N"));
+    private readonly string _root = TestPathUtils.PathUnder(TailwindTestPaths.TemporaryRoot, "tailwind-evidence-bounds", Guid.NewGuid().ToString("N"));
 
     [Fact]
     public void StrictJson_RejectsNestedDuplicateFieldsAndOversizedDocuments()

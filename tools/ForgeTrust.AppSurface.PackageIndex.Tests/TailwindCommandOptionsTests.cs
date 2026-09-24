@@ -2,7 +2,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 
 public sealed class TailwindCommandOptionsTests
 {
-    private readonly string _root = TestPathUtils.PathUnder("/private/tmp", "tailwind-command-options", Guid.NewGuid().ToString("N"));
+    private readonly string _root = TestPathUtils.PathUnder(TailwindTestPaths.TemporaryRoot, "tailwind-command-options", Guid.NewGuid().ToString("N"));
 
     [Fact]
     public void Extract_PreservesGeneralFlagsAndBindsReleaseIdentity()

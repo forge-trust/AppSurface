@@ -4,7 +4,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 
 public sealed class TailwindSourceIdentityTests : IDisposable
 {
-    private readonly string _root = TestPathUtils.PathUnder("/private/tmp", "tailwind-source-identity", Guid.NewGuid().ToString("N"));
+    private readonly string _root = TestPathUtils.PathUnder(TailwindTestPaths.TemporaryRoot, "tailwind-source-identity", Guid.NewGuid().ToString("N"));
 
     [Fact]
     public async Task ExactCommittedCheckoutAndVerifierStamp_AreAccepted()

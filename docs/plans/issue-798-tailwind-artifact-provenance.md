@@ -1,4 +1,3 @@
-<!-- /autoplan restore point: /Users/andrew/.gstack/projects/forge-trust-Runnable/HEAD-autoplan-restore-20260915-052948.md -->
 # Implementation Plan: #798 Tailwind Artifact Provenance
 
 Status: APPROVED

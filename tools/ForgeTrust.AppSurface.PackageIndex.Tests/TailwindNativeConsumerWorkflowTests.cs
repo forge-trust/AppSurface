@@ -8,7 +8,92 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 
 public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
 {
-    private readonly string _root = TestPathUtils.PathUnder("/private/tmp", "tailwind-native-consumer-workflow", Guid.NewGuid().ToString("N"));
+    private readonly string _root = TestPathUtils.PathUnder(TailwindTestPaths.TemporaryRoot, "tailwind-native-consumer-workflow", Guid.NewGuid().ToString("N"));
+
+    [Fact]
+    public void ProducerClosure_MustMatchTheValidatedPackagePlan()
+    {
+        var entry = new PackageArtifactManifestEntry("ForgeTrust.AppSurface.Web.Tailwind", "Web/Tailwind.csproj", "publish",
+            "ForgeTrust.AppSurface.Web.Tailwind.1.2.3.nupkg", new string('a', 128), false);
+        var planned = new PlannedPackageArtifact(entry, TestPathUtils.PathUnder(_root, entry.ArtifactFileName));
+        var package = new TailwindSubjectPackage(entry.PackageId, "1.2.3", entry.ArtifactFileName, entry.Sha512);
+
+        TailwindNativeConsumerWorkflow.ValidatePlannedProducerClosure([planned], [package]);
+
+        foreach (var invalid in new[]
+        {
+            package with { PackageId = "ForgeTrust.Other" },
+            package with { ArtifactFileName = "substituted.nupkg" },
+            package with { PackageSha512 = new string('b', 128) }
+        })
+        {
+            var error = Assert.Throws<PackageIndexException>(() =>
+                TailwindNativeConsumerWorkflow.ValidatePlannedProducerClosure([planned], [invalid]));
+            Assert.Contains("does not match the validated package plan", error.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void RestoredClosure_MustMatchTheBoundProducerSubject()
+    {
+        var package = new TailwindSubjectPackage("ForgeTrust.AppSurface.Web.Tailwind", "1.2.3", "tailwind.nupkg", new string('a', 128));
+
+        TailwindNativeConsumerWorkflow.RequireSameClosure([package], [package]);
+
+        var countError = Assert.Throws<PackageIndexException>(() => TailwindNativeConsumerWorkflow.RequireSameClosure([package], []));
+        Assert.Contains("closure differs", countError.Message, StringComparison.Ordinal);
+        var hashError = Assert.Throws<PackageIndexException>(() => TailwindNativeConsumerWorkflow.RequireSameClosure(
+            [package], [package with { PackageSha512 = new string('b', 128) }]));
+        Assert.Contains("differs from producer subject", hashError.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("missing-assets", "has no assets array")]
+    [InlineData("missing-version", "version is absent")]
+    [InlineData("missing-binary", "missing its binary identity")]
+    public void RestoredReleaseManifest_RequiresSelectedHostBinaryIdentity(string mutation, string expectedDiagnostic)
+    {
+        var selected = $"{{\"rid\":\"{CurrentRid()}\",\"binaryName\":\"tailwindcss\",\"sha256\":\"{new string('a', 64)}\"}}";
+        var manifest = mutation switch
+        {
+            "missing-assets" => "{\"version\":\"4.1.18\"}",
+            "missing-version" => $"{{\"assets\":[{selected}]}}",
+            "missing-binary" => $"{{\"version\":\"4.1.18\",\"assets\":[{{\"rid\":\"{CurrentRid()}\"}}]}}",
+            _ => throw new ArgumentOutOfRangeException(nameof(mutation), mutation, "Unknown release-manifest mutation.")
+        };
+        var archivePath = WriteManifestArchive("restored-" + mutation, manifest);
+
+        var error = Assert.Throws<PackageIndexException>(() => TailwindNativeConsumerWorkflow.ReadRidAsset(archivePath, CurrentRid()));
+
+        Assert.Contains(expectedDiagnostic, error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("missing-assets", "has no assets array")]
+    [InlineData("missing-binary", "does not define exactly one binary identity")]
+    public void ProducerReleaseManifest_RequiresSelectedHostBinaryIdentity(string mutation, string expectedDiagnostic)
+    {
+        var manifest = mutation switch
+        {
+            "missing-assets" => "{\"version\":\"4.1.18\"}",
+            "missing-binary" => $"{{\"assets\":[{{\"rid\":\"{CurrentRid()}\"}}]}}",
+            _ => throw new ArgumentOutOfRangeException(nameof(mutation), mutation, "Unknown release-manifest mutation.")
+        };
+        var archivePath = WriteManifestArchive("producer-" + mutation, manifest);
+
+        var error = Assert.Throws<PackageIndexException>(() => TailwindEvidenceWorkflow.ReadExpectedBinary(archivePath, CurrentRid()));
+
+        Assert.Contains(expectedDiagnostic, error.Message, StringComparison.Ordinal);
+    }
+
+    private string WriteManifestArchive(string name, string manifest)
+    {
+        Directory.CreateDirectory(_root);
+        var path = TestPathUtils.PathUnder(_root, name + ".nupkg");
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+        AddEntry(archive, "build/tailwind.release.json", Encoding.UTF8.GetBytes(manifest));
+        return path;
+    }
 
     [Fact]
     public async Task LocalMode_UsesCompatibilityProofAndMarksEvidenceIneligibleForRelease()

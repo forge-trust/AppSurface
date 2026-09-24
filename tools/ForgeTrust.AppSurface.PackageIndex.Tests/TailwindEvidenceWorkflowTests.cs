@@ -5,10 +5,32 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 public sealed class TailwindEvidenceWorkflowTests : IDisposable
 {
     private readonly string _root = TestPathUtils.PathUnder(
-        OperatingSystem.IsMacOS() && Path.GetTempPath().StartsWith("/var/", StringComparison.Ordinal)
-            ? "/private" + Path.GetTempPath()
-            : Path.GetTempPath(),
+        TailwindTestPaths.TemporaryRoot,
         "tailwind-evidence-workflow-tests", Guid.NewGuid().ToString("N"));
+
+    [Fact]
+    public void PublicationFile_MustBeADirectChildOfItsTrustedDirectory()
+    {
+        var direct = TestPathUtils.PathUnder(_root, "publication-start-receipt.json");
+        var nested = TestPathUtils.PathUnder(_root, "subdirectory", "publication-start-receipt.json");
+
+        TailwindEvidenceWorkflow.RequireDirectChild(_root, direct);
+
+        var error = Assert.Throws<PackageIndexException>(() => TailwindEvidenceWorkflow.RequireDirectChild(_root, nested));
+        Assert.Contains("direct child", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HostArtifactDirectory_MustBeAnExistingUnlinkedChild()
+    {
+        var child = TestPathUtils.PathUnder(_root, "linux-x64");
+        Directory.CreateDirectory(child);
+
+        Assert.Equal(child, TailwindEvidenceWorkflow.ResolveChildDirectory(_root, "linux-x64"));
+
+        var error = Assert.Throws<PackageIndexException>(() => TailwindEvidenceWorkflow.ResolveChildDirectory(_root, "../outside"));
+        Assert.Contains("Unsafe host artifact directory", error.Message, StringComparison.Ordinal);
+    }
 
     [Fact]
     public async Task ReadHostArtifactMap_AcceptsExactlyTheOrderedFiveDistinctHosts()

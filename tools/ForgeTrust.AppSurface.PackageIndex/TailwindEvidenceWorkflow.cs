@@ -686,7 +686,12 @@ internal static class TailwindEvidenceWorkflow
         return matches[0].Value.Clone();
     }
 
-    private static (string Name, string Sha256) ReadExpectedBinary(string archivePath, string rid)
+    /// <summary>Reads the expected host binary identity from the producer Tailwind archive's release manifest.</summary>
+    /// <param name="archivePath">Path to the producer Tailwind NuGet archive.</param>
+    /// <param name="rid">Host RID, which must identify exactly one asset in the manifest.</param>
+    /// <returns>The selected binary filename and SHA-256.</returns>
+    /// <exception cref="PackageIndexException">The archive has no usable manifest or selected binary identity.</exception>
+    internal static (string Name, string Sha256) ReadExpectedBinary(string archivePath, string rid)
     {
         using var zip = System.IO.Compression.ZipFile.OpenRead(archivePath);
         var entry = zip.Entries.SingleOrDefault(item => string.Equals(item.FullName, "build/tailwind.release.json", StringComparison.OrdinalIgnoreCase))
@@ -909,7 +914,11 @@ internal static class TailwindEvidenceWorkflow
         return path;
     }
 
-    private static void RequireDirectChild(string directory, string file)
+    /// <summary>Requires a bound evidence or publication file to live directly in its trusted directory.</summary>
+    /// <param name="directory">Expected parent directory.</param>
+    /// <param name="file">Path to check without following a different parent path.</param>
+    /// <exception cref="PackageIndexException">The file's normalized parent is not <paramref name="directory"/>.</exception>
+    internal static void RequireDirectChild(string directory, string file)
     {
         if (!string.Equals(Path.GetDirectoryName(Path.GetFullPath(file)), Path.GetFullPath(directory), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
             throw new PackageIndexException("Bound document must be a direct child of its downloaded artifact directory.");
@@ -988,7 +997,12 @@ internal static class TailwindEvidenceWorkflow
         }
     }
 
-    private static string ResolveChildDirectory(string root, string relative)
+    /// <summary>Resolves an existing host artifact directory beneath the evidence root without traversal or links.</summary>
+    /// <param name="root">Downloaded evidence root.</param>
+    /// <param name="relative">Single safe directory name supplied by the validated host map.</param>
+    /// <returns>The absolute child directory path.</returns>
+    /// <exception cref="PackageIndexException">The child is unsafe, missing, outside the root, or a link.</exception>
+    internal static string ResolveChildDirectory(string root, string relative)
     {
         if (Path.IsPathRooted(relative) || relative.Contains('\\') || relative.Split('/').Any(part => part is "" or "." or ".."))
             throw new PackageIndexException($"Unsafe host artifact directory '{relative}'.");

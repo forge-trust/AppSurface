@@ -3,7 +3,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 /// <summary>Checks the public command boundary for release proof modes and missing authority.</summary>
 public sealed class TailwindCliDispatchTests : IDisposable
 {
-    private readonly string _root = TestPathUtils.PathUnder("/private/tmp", "tailwind-cli-dispatch", Guid.NewGuid().ToString("N"));
+    private readonly string _root = TestPathUtils.PathUnder(TailwindTestPaths.TemporaryRoot, "tailwind-cli-dispatch", Guid.NewGuid().ToString("N"));
 
     [Theory]
     [InlineData("verify-tailwind-consumer", "invalid", "must be local or release")]

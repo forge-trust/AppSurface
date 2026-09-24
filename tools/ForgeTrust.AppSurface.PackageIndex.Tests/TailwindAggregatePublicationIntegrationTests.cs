@@ -14,7 +14,7 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
     private const string PackageId = "ForgeTrust.AppSurface.Web.Tailwind";
     private const string Version = "1.2.3-ci.798";
     private static readonly string[] Rids = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64"];
-    private readonly string _root = TestPathUtils.PathUnder("/private/tmp", "tailwind-aggregate-publication", Guid.NewGuid().ToString("N"));
+    private readonly string _root = TestPathUtils.PathUnder(TailwindTestPaths.TemporaryRoot, "tailwind-aggregate-publication", Guid.NewGuid().ToString("N"));
 
     [Fact]
     public async Task Aggregate_ValidatesRealProducerBundleAndFiveReceipts_AndRejectsEvidenceMutations()
