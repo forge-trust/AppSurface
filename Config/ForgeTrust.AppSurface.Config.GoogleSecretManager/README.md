@@ -201,7 +201,9 @@ services.ConfigureAppSurfaceGoogleSecretManager(options =>
 
 Only successful payload reads are cached. The TTL uses elapsed monotonic time, so wall-clock corrections do not extend
 or shorten a cached payload's lifetime. Failures are evicted after the shared fetch completes, so a later caller can
-retry. Invalid UTF-8, failed typed conversion, and null conversion results evict their exact cached payload generation;
+retry. Child-reference payloads are decoded before entering their cache, so invalid UTF-8 is retried on the next
+request. For mapped legacy lookups, invalid UTF-8, failed typed conversion, and null conversion results evict their
+exact cached payload generation;
 a slow failed conversion cannot remove a newer successful entry. Concurrent misses for one exact resource share a
 side-effect-free `Lazy` fetch. Cancelling one request stops its waiter while the shared fetch continues for other callers.
 Already-cancelled callers throw before native claims, cached reads or client access; an expired audit deadline instead

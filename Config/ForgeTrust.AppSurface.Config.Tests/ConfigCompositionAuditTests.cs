@@ -393,6 +393,24 @@ public sealed class ConfigCompositionAuditTests
     }
 
     [Fact]
+    public void Traversal_ComposedObjectReportsRecoverableMemberGetterFailureAndContinues()
+    {
+        var model = new ComposedGetterFailureProbe();
+        var slot = new ConfigSecretSlotTrace("Service:access", false, false, null, null,
+            "secret-declared-disabled", [], [], null);
+        var result = new ConfigAuditValueTraverser(new ConfigAuditRedactor(), [slot]).BuildChildren(
+            ConfigAuditPath.Root("Service"), model, [], ConfigAuditFactContext.Empty,
+            new ConfigAuditEntryOptions(), new HashSet<object>(ReferenceEqualityComparer.Instance),
+            new ConfigAuditDictionaryLabelSet(), ConfigAuditDictionaryKeyCorrelationContext.Unavailable("test"));
+
+        Assert.Equal(1, model.Reads);
+        AssertOpaqueSlot(Assert.Single(result.Children, child => child.Key == "Service.access"),
+            "secret-declared-disabled", hasValue: false);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "config-audit-member-read-threw");
+        Assert.DoesNotContain(result.Children, child => child.Key == "Service.region");
+    }
+
+    [Fact]
     public void OrdinaryRoot_DoesNotInvokeSecretCompositionProviders()
     {
         using var host = new HostingEnvironment("""{"Region":"us-east-1"}""");
@@ -497,6 +515,25 @@ public sealed class ConfigCompositionAuditTests
                 throw new InvalidOperationException("The secret destination getter must not run during audit.");
             }
         }
+    }
+
+    private sealed class ComposedGetterFailureProbe
+    {
+        [JsonPropertyName("region")]
+        public string Region
+        {
+            get
+            {
+                Reads++;
+                throw new InvalidOperationException("A recoverable audit member read failure.");
+            }
+        }
+
+        [JsonPropertyName("access")]
+        public Secret<string> Access { get; } = new();
+
+        [JsonIgnore]
+        public int Reads { get; private set; }
     }
 
     private sealed class InspectionCounts

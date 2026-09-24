@@ -175,6 +175,30 @@ public sealed class GoogleSecretManagerCompositionRegressionTests
         Assert.Equal(3, client.Calls.Count); // No TTL: the recovered raw and typed reads each fetch again.
     }
 
+    [Theory]
+    [InlineData(true, ConfigCompositionValueResolutionStatus.TerminalFailure)]
+    [InlineData(false, ConfigCompositionValueResolutionStatus.Missing)]
+    public void ResolveRaw_InvalidUtf8HonorsFailurePolicyAndEvictsCachedPayload(
+        bool failClosed,
+        ConfigCompositionValueResolutionStatus expected)
+    {
+        var options = OptionsWithDefaults();
+        options.FailClosedOnProviderFailure = failClosed;
+        options.CacheTtl = TimeSpan.FromMinutes(1);
+        options.MapSecret("Service", "root");
+        var client = new TestClient((_, call) => call == 1 ? [0xff, 0xfe] : Encoding.UTF8.GetBytes("repaired"));
+        var provider = CreateProvider(options, client);
+
+        var invalid = provider.ResolveRaw("Production", "Service");
+        var repaired = provider.ResolveRaw("Production", "Service");
+
+        Assert.Equal(expected, invalid.Status);
+        Assert.Null(invalid.ReadRaw());
+        Assert.Equal(ConfigCompositionValueResolutionStatus.Resolved, repaired.Status);
+        Assert.Equal("repaired", repaired.ReadRaw());
+        Assert.Equal(2, client.Calls.Count);
+    }
+
     [Fact]
     public void Cache_SeparatesChildFromLegacyAndRawButSharesEquivalentChildResources()
     {
@@ -224,6 +248,56 @@ public sealed class GoogleSecretManagerCompositionRegressionTests
         Assert.Equal("payload-3", Resolve(provider, reference, time).ReadSensitiveValue());
         Assert.Equal("payload-3", Resolve(provider, reference, time).ReadSensitiveValue());
         Assert.Equal(3, client.Calls.Count);
+    }
+
+    [Fact]
+    public void Cache_DoesNotRetainInvalidChildPayload()
+    {
+        var options = OptionsWithDefaults();
+        options.CacheTtl = TimeSpan.FromMinutes(1);
+        var client = new TestClient((_, call) => call == 1 ? [0xff, 0xfe] : Encoding.UTF8.GetBytes("repaired"));
+        var provider = CreateProvider(options, client);
+        var reference = Reference("api-key", "4");
+
+        Assert.Equal(ConfigSecretProviderResolutionStatus.ProviderFailed, Resolve(provider, reference).Status);
+        Assert.Equal("repaired", Resolve(provider, reference).ReadSensitiveValue());
+        Assert.Equal("repaired", Resolve(provider, reference).ReadSensitiveValue());
+        Assert.Equal(2, client.Calls.Count);
+    }
+
+    [Fact]
+    public void Cache_EvictsOldestChildWhenCapacityIsReached()
+    {
+        var options = OptionsWithDefaults();
+        options.CacheTtl = TimeSpan.FromMinutes(1);
+        options.CacheCapacity = 1;
+        var client = new TestClient();
+        var time = new ManualTimeProvider();
+        var provider = CreateProvider(options, client, time);
+
+        Assert.Equal("payload-1", Resolve(provider, Reference("first", "4"), time).ReadSensitiveValue());
+        time.Advance(TimeSpan.FromTicks(1));
+        Assert.Equal("payload-2", Resolve(provider, Reference("second", "4"), time).ReadSensitiveValue());
+        Assert.Equal("payload-2", Resolve(provider, Reference("second", "4"), time).ReadSensitiveValue());
+        Assert.Equal("payload-3", Resolve(provider, Reference("first", "4"), time).ReadSensitiveValue());
+        Assert.Equal(3, client.Calls.Count);
+    }
+
+    [Fact]
+    public void ChildResolution_RejectsMismatchedResourceWithoutCachingIt()
+    {
+        var options = OptionsWithDefaults();
+        options.CacheTtl = TimeSpan.FromMinutes(1);
+        var client = new TestClient((_, call) => Encoding.UTF8.GetBytes($"payload-{call}"));
+        var provider = CreateProvider(options, client);
+        var reference = Reference("api-key", "4");
+        var requested = "projects/project/secrets/api-key/versions/4";
+        client.ResolvedResourceName = "projects/project/secrets/other/versions/4";
+
+        Assert.Equal(ConfigSecretProviderResolutionStatus.ProviderFailed, Resolve(provider, reference).Status);
+        client.ResolvedResourceName = requested;
+        Assert.Equal("payload-2", Resolve(provider, reference).ReadSensitiveValue());
+        Assert.Equal(2, client.Calls.Count);
     }
 
     [Theory]
@@ -393,11 +467,12 @@ public sealed class GoogleSecretManagerCompositionRegressionTests
     {
         public List<(string Resource, TimeSpan Timeout)> Calls { get; } = [];
         public Func<string, int, byte[]> Handler { get; set; } = handler ?? ((_, call) => Encoding.UTF8.GetBytes($"payload-{call}"));
+        public string? ResolvedResourceName { get; set; }
 
         public AppSurfaceGoogleSecretPayload AccessSecretVersion(string resourceName, TimeSpan timeout)
         {
             Calls.Add((resourceName, timeout));
-            return new(Handler(resourceName, Calls.Count), resourceName);
+            return new(Handler(resourceName, Calls.Count), ResolvedResourceName ?? resourceName);
         }
     }
 

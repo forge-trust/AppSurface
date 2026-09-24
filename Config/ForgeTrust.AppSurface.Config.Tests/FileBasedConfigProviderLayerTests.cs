@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using FakeItEasy;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Config.Tests;
 
@@ -322,6 +323,70 @@ public sealed class FileBasedConfigProviderLayerTests
     }
 
     [Fact]
+    public void Snapshot_RecordsOversizedEmptyAndMalformedFilesWithoutDroppingValidLayer()
+    {
+        var directory = VirtualDirectory();
+        var paths = new[]
+        {
+            Path.Join(directory, "appsettings.json"),
+            Path.Join(directory, "config_big.json"),
+            Path.Join(directory, "config_empty.json"),
+            Path.Join(directory, "config_malformed.json")
+        };
+        var contents = new Dictionary<string, byte[]>(StringComparer.Ordinal)
+        {
+            [paths[0]] = Encoding.UTF8.GetBytes("{\"Keep\":7}"),
+            [paths[1]] = Encoding.UTF8.GetBytes($"{{\"TooLarge\":\"{new string('x', 80)}\"}}"),
+            [paths[2]] = [],
+            [paths[3]] = Encoding.UTF8.GetBytes("{\"A\":}")
+        };
+        var provider = CreateProvider(directory,
+            (_, pattern, _) => pattern == "appsettings*.json" ? [paths[0]] : paths.Skip(1),
+            path => contents[path],
+            resourceOptions: Options.Create(new ConfigResourceOptions { MaxFileBytes = 64 }));
+
+        var events = provider.Snapshot.LoadEvents;
+
+        var validLayer = Assert.IsType<ConfigFileLayer>(events[0]);
+        Assert.Equal(7, validLayer.Document["Keep"]?.GetValue<int>());
+        Assert.Collection(events.Skip(1),
+            oversized => Assert.Equal("config-file-byte-limit", Assert.IsType<ConfigFileLoadFailure>(oversized).Code),
+            empty => Assert.Equal("config-file-empty", Assert.IsType<ConfigFileLoadFailure>(empty).Code),
+            malformed => Assert.Equal("config-file-malformed", Assert.IsType<ConfigFileLoadFailure>(malformed).Code));
+        Assert.Contains(provider.Snapshot.Diagnostics, item => item.Diagnostic.Code == "config-file-byte-limit");
+    }
+
+    [Fact]
+    public void ResolveRaw_SkipsUnrepresentableMembersAndInvalidLocationPaths()
+    {
+        var provider = CreateRawProvider("{\"Bad::Member\":1,\"Valid\":{\"Value\":2}}");
+        var raw = provider.ResolveRaw(Environments.Production, ConfigLogicalPath.Parse("Valid"));
+        var locationMap = Assert.Single(provider.Snapshot.Layers).SourceLocationMap.Value;
+
+        Assert.Equal(ConfigCompositionValueResolutionStatus.Resolved, raw.Status);
+        Assert.Equal(2, JsonNode.Parse(raw.ReadRaw()!)!["Value"]!.GetValue<int>());
+        Assert.Null(locationMap.GetLocation("Valid::Value"));
+    }
+
+    [Fact]
+    public void Snapshot_DetectsDuplicateMembersNestedInsideLegacyEncodedArrays()
+    {
+        var directory = VirtualDirectory();
+        var path = Path.Join(directory, "appsettings.json");
+        var json = "{\"Items\":[{\"Key\":1,\"key\":2}]}";
+        var bytes = Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes(json)).ToArray();
+        var provider = CreateProvider(directory,
+            (_, pattern, _) => pattern == "appsettings*.json" ? [path] : [],
+            _ => bytes);
+
+        var failure = Assert.IsType<ConfigFileLoadFailure>(Assert.Single(provider.Snapshot.LoadEvents));
+
+        Assert.Equal("config-file-duplicate-member", failure.Code);
+        Assert.Equal(ConfigFileLoadFailureClassification.Parse, failure.Classification);
+        Assert.Empty(provider.Snapshot.Layers);
+    }
+
+    [Fact]
     public void ResolveRaw_ReturnsMergedRootAndPreservesFoundJsonNullAsResolved()
     {
         var environment = new JsonObject
@@ -341,11 +406,15 @@ public sealed class FileBasedConfigProviderLayerTests
 
         var nullResult = rawProvider.ResolveRaw(Environments.Production, "PresentNull");
         var rootResult = rawProvider.ResolveRaw(Environments.Production, string.Empty);
+        var missingEnvironment = rawProvider.ResolveRaw("Staging", "PresentNull");
+        var missingPath = rawProvider.ResolveRaw(Environments.Production, "Absent");
 
         Assert.Equal(ConfigCompositionValueResolutionStatus.Resolved, nullResult.Status);
         Assert.Equal(ConfigCompositionValueResolutionStatus.Resolved, rootResult.Status);
         Assert.False(nullResult.IsSensitive);
         Assert.False(rootResult.IsSensitive);
+        Assert.Equal(ConfigCompositionValueResolutionStatus.Missing, missingEnvironment.Status);
+        Assert.Equal(ConfigCompositionValueResolutionStatus.Missing, missingPath.Status);
     }
 
     [Theory]
@@ -469,12 +538,13 @@ public sealed class FileBasedConfigProviderLayerTests
         Func<string, string, SearchOption, IEnumerable<string>> enumerateFiles,
         Func<string, byte[]> readAllBytes,
         ILogger<FileBasedConfigProvider>? logger = null,
-        Func<string, bool>? directoryExists = null)
+        Func<string, bool>? directoryExists = null,
+        IOptions<ConfigResourceOptions>? resourceOptions = null)
     {
         var locationProvider = A.Fake<IConfigFileLocationProvider>();
         A.CallTo(() => locationProvider.Directory).Returns(directory);
         return new FileBasedConfigProvider(locationProvider, logger ?? A.Fake<ILogger<FileBasedConfigProvider>>(),
-            directoryExists ?? (_ => true), enumerateFiles, readAllBytes);
+            directoryExists ?? (_ => true), enumerateFiles, readAllBytes, resourceOptions);
     }
 
     private static string VirtualDirectory() => Path.Join(Path.GetTempPath(), "appsurface-virtual-config");

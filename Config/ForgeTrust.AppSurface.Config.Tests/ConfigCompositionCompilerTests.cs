@@ -1029,6 +1029,27 @@ public sealed class ConfigCompositionCompilerTests
         AssertNoIo(raw, secret);
     }
 
+    [Fact]
+    public void Compile_FatalReferenceValidationFailuresEscapeWithoutProviderIo()
+    {
+        Exception[] fatal =
+        [
+            new OutOfMemoryException(), new StackOverflowException(), new AccessViolationException(),
+            new AppDomainUnloadedException(), new BadImageFormatException(), new CannotUnloadAppDomainException(),
+            new InvalidProgramException()
+        ];
+        foreach (var exception in fatal)
+        {
+            using var fixture = FileFixture.Create(Wrap("""{"key":"key"}"""), null, "Production");
+            var raw = new FakeRawProvider();
+            var secret = new FakeSecretProvider("provider-a") { Validation = _ => throw exception };
+
+            Assert.Same(exception, Record.Exception(() =>
+                Compiler([fixture.Provider, raw], [secret]).Compile("Production", "Service", typeof(FlatOptions))));
+            AssertNoIo(raw, secret);
+        }
+    }
+
     private static ConfigSecretReferenceValidation ValidationResult(string outcome) => outcome switch
     {
         "invalid" => ConfigSecretReferenceValidation.Invalid(),

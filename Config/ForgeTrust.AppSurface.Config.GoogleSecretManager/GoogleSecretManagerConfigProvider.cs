@@ -179,6 +179,8 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
             }
             if (!IsCompatibleResolvedResource(secret.ResourceName, response.ResolvedResourceName))
                 return ConfigSecretProviderResolution.ProviderFailed(ProviderId);
+            // Reject malformed payloads before adding them to the child cache.
+            var value = StrictUtf8.GetString(response.Data);
             if (_options.CacheTtl != null && !_childCache.ContainsKey(cacheKey))
             {
                 lock (_cacheGate)
@@ -191,7 +193,7 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
                     }
                 }
             }
-            return ConfigSecretProviderResolution.Resolved(StrictUtf8.GetString(response.Data), ConfigSecretSourceMetadata.Create(ProviderId, "remote"));
+            return ConfigSecretProviderResolution.Resolved(value, ConfigSecretSourceMetadata.Create(ProviderId, "remote"));
         }
         catch (DecoderFallbackException) { return ConfigSecretProviderResolution.ProviderFailed(ProviderId); }
         catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound) { return ConfigSecretProviderResolution.Missing(ProviderId); }

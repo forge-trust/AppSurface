@@ -246,7 +246,10 @@ internal sealed class ConfigCompositionPlanCompiler
                     else if (validation.Status != ConfigSecretReferenceValidationStatus.Unclaimed)
                         failures.Add(new(slot.Path.Canonical, "secret-reference-invalid", registration.Id, source: slot.Source));
                 }
-                catch { failures.Add(new(slot.Path.Canonical, "secret-reference-invalid", registration.Id, source: slot.Source)); }
+                catch (Exception ex) when (!IsFatalInspectionException(ex))
+                {
+                    failures.Add(new(slot.Path.Canonical, "secret-reference-invalid", registration.Id, source: slot.Source));
+                }
             }
             if (compatible.Count == 0 && !failures.Any(f => f.Path == slot.Path.Canonical))
                 failures.Add(new(slot.Path.Canonical, "secret-reference-unsupported", source: slot.Source));
@@ -273,7 +276,7 @@ internal sealed class ConfigCompositionPlanCompiler
         }
     }
 
-    /// <summary>Identifies process-level failures that claim inspection must not turn into plan diagnostics.</summary>
+    /// <summary>Identifies process-level failures that provider callbacks must not turn into plan diagnostics.</summary>
     private static bool IsFatalInspectionException(Exception exception) =>
         exception is OutOfMemoryException or StackOverflowException or AccessViolationException
             or AppDomainUnloadedException or BadImageFormatException or CannotUnloadAppDomainException

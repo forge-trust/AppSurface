@@ -71,6 +71,49 @@ public sealed class ConfigCompositionBoundaryTests
     }
 
     [Fact]
+    public void GetSecretPaths_PreservesTypedDotsAndRedactsWholeRootForUnsupportedShape()
+    {
+        var environment = new BasicEnvironmentProvider([]);
+        var engine = new ConfigCompositionEngine(environment, [], [], [], new(), TimeProvider.System);
+
+        Assert.Equal(new[] { "Service.Token:Token" },
+            engine.GetSecretPaths(AppSurfaceConfigKey.Parse("Service.Token"), typeof(ScalarOptions<int>)));
+        Assert.Equal(new[] { "Service" }, engine.GetSecretPaths("Service", typeof(DuplicateNames)));
+        Assert.Empty(engine.GetSecretPaths((AppSurfaceConfigKey)null!, typeof(ScalarOptions<int>)));
+        Assert.Equal(0, environment.Reads);
+    }
+
+    [Fact]
+    public void ValidatePlan_InvalidRootThrowsSafeCompositionFailureWithoutProviderReads()
+    {
+        var environment = new BasicEnvironmentProvider([]);
+        var engine = new ConfigCompositionEngine(environment, [], [], [], new(), TimeProvider.System);
+
+        var error = Assert.Throws<ConfigurationCompositionException>(() =>
+            engine.ValidatePlan("Production", "Service..Token", typeof(ScalarOptions<int>)));
+
+        Assert.Contains(error.Failures, failure => failure.Code == "secret-path-invalid");
+        Assert.Equal(0, environment.Reads);
+    }
+
+    [Fact]
+    public void DirectRoot_WithUnsupportedSecretShapeFallsThroughToStructuralFailure()
+    {
+        var environment = new BasicEnvironmentProvider(new()
+        {
+            ["SERVICE"] = "{\"Token\":\"direct-secret-sentinel\"}"
+        });
+        var engine = new ConfigCompositionEngine(environment, [], [], [], new(), TimeProvider.System);
+
+        var result = engine.Execute("Production", "Service", typeof(DuplicateNames));
+
+        Assert.Equal(ConfigCompositionRootState.Failed, result.State);
+        Assert.Contains(result.Failures, failure => failure.Code == "secret-destination-type-unsupported");
+        Assert.DoesNotContain("direct-secret-sentinel", JsonSerializer.Serialize(result.Failures));
+        Assert.True(environment.Reads > 0);
+    }
+
+    [Fact]
     public void Engine_RejectsInvalidLimitsBeforeReadingEnvironment()
     {
         var environment = new BasicEnvironmentProvider([]);

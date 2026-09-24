@@ -5,6 +5,24 @@ namespace ForgeTrust.AppSurface.Config.Tests;
 
 public sealed class ConfigSecretContractTests
 {
+    [Fact]
+    public void RawResolution_RejectsOversizedAndControlCharacterProviderNames()
+    {
+        Assert.Throws<ArgumentException>(() => ConfigCompositionValueResolution.Missing(new string('p', 129), 1));
+        Assert.Throws<ArgumentException>(() => ConfigCompositionValueResolution.Unclaimed("bad\nname", 1));
+        Assert.Equal(ConfigCompositionValueResolutionStatus.Missing,
+            ConfigCompositionValueResolution.Missing(new string('p', 128), 1).Status);
+    }
+
+    [Fact]
+    public void LogicalPath_DottedSpellingJoinsParsedSegments()
+    {
+        var path = ConfigLogicalPath.Parse("Service:Nested.Token");
+
+        Assert.Equal("Service.Nested.Token", path.Dotted);
+        Assert.Equal("Service:Nested:Token", path.Canonical);
+    }
+
     [Theory]
     [InlineData(ConfigSecretReferenceValidationStatus.Supported, "secret-reference-supported")]
     [InlineData(ConfigSecretReferenceValidationStatus.Unclaimed, "secret-reference-unsupported")]
