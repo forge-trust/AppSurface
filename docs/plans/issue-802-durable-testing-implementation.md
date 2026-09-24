@@ -40,6 +40,14 @@ Do not add fake Work/Flow/Schedule persistence, an assertion DSL, HTTP adapter, 
 - Add one packed external-host adopter example asserting the exact four-kind admission outcome and package graph.
 - Document call-history retention and privacy boundaries without serializing durable payloads.
 <!-- /autoplan-accepted:ceo -->
+
+<!-- autoplan-accepted:dx -->
+- Define and document scenario behavior for missing assessment, repeated pump calls after one assessment, concurrently completed assessments, and stale assessment versus authoritative provider admission; test all cases.
+- Name observation and overall timeout outcomes and caller-cancellation exceptions in the public contract; retain invocation-started/status-unknown evidence and link to recovery guidance.
+- Publish a six-state default-field and valid-override matrix, explicit contradictory-fixture errors, and a complete packed xUnit quick start with install/run commands; measure its TTHW against a five-minute target.
+- Specify an atomic immutable call-history snapshot API and a retention/clear mechanism; document default behavior, payload-reference privacy, and customization limits.
+- Add API-specific problem/cause/fix/error-link guidance and coordinated preview-package upgrade instructions.
+<!-- /autoplan-accepted:dx -->
 ## Review record
 
 ### CEO review (Phase 1, selective expansion)
@@ -183,6 +191,68 @@ The unresolved health-gate row is a critical gap until the final gate. All other
 - Document call-history retention and privacy boundaries without serializing durable payloads.
 <!-- /autoplan-accepted:ceo -->
 
+### DX review (Phase 2.5, DX polish)
+
+**Scope and persona.** This is a .NET library and package for backend or platform engineers testing external Durable activators. They know xUnit and the production Provider contracts, but should not need a live database to assert a host's response to health and admission. They expect one install step, a complete first test, API reference, deterministic time, and a separate real-provider proof path. The initial DX completeness is 5/10: package discovery is planned, but no concrete first-use sequence or exception table exists.
+
+**Developer perspective.** “I find the Durable package chooser and see separate adopter, Provider, and PostgreSQL packages. The Provider README gives me a useful warning: health is advisory and admission is authoritative. I want to test the small activation wrapper in my app, so I reach for a Testing package. Today that package is absent and I have to assemble a twenty-argument health snapshot and remember which refusal outcomes have null results. A broad Testing API could solve that, but only if I can install it and copy one test that compiles against the packed artifact. I will start with a healthy assessment, then make the pump refuse the call, and assert that no empty pass is invented. If the sample instead requires a large scenario setup or hides the refusal behind a timeout, I will write my own fake. When I later test a real claim or a post-permit failure, I need the docs to tell me clearly that the fake cannot prove those storage facts and point me to PostgreSQL conformance. I also need errors to say whether my fixture is invalid, the caller canceled, or provider execution is unknown.”
+
+**Competitive benchmark and target.** A general-purpose test-local fake has no new package install but repeats contract knowledge. A mocking library can stub `IDurableRuntimeHealth` and `IDurableRuntimePumpAdmission`, but the developer still must create valid production snapshots and distinguish four attempt kinds. The planned Testing package wins only if its first assertion is easier and contract-correct. No reliable comparable product-specific TTHW measurements were found; do not borrow Stripe/Vercel times as evidence. Current TTHW is unmeasured because this package does not yet exist. Target: a new xUnit test project reaches one meaningful health-plus-admission assertion within five minutes from package installation, measured in a packed consumer trial.
+
+**Magical moment.** A copyable test makes a healthy snapshot, records one exact request, returns `Refused`, and shows `Result == null` while a completed empty pass produces a non-null result. Delivery vehicle: a three-step README path (install, copy one test, run `dotnet test`) compiled as the packed consumer. The first sample must keep health advisory until the final user challenge is resolved.
+
+| Journey stage | Developer action and current evidence | Friction / planned repair |
+| --- | --- | --- |
+| 1 Discover | Opens `packages/README.md` or `Durable/README.md` | Add a Testing row and a start-here link |
+| 2 Evaluate | Reads Provider's operational assessment warning | Explain fake limits and real-provider boundary |
+| 3 Install | Adds `ForgeTrust.AppSurface.Durable.Testing` to a .NET 10 test project | Show exact NuGet command and compatible version |
+| 4 First assertion | Builds health and asks fake pump to refuse | Provide one complete, compiled xUnit example |
+| 5 Integrate | Passes explicit interfaces and request to own host tests | Explain customization and scenario state rules |
+| 6 Debug | Sees invalid fixture, timeout, or propagated provider error | Add problem/cause/fix table and exact exception policy |
+| 7 Verify real provider | Runs PostgreSQL claim/recovery/permitted-effect tests | Link to real-provider conformance; no fake-storage claims |
+| 8 Upgrade | Updates coordinated Durable/Provider/Testing preview versions | Show package compatibility and release note |
+| 9 Extend | Adds own delegate and `TimeProvider` | Document overrides, immutable history access, retention |
+
+**First-time confusion report.** T+0:00 the engineer finds Provider but no Testing row. T+0:30 they see a twenty-argument snapshot constructor. T+1:00 they inspect `DurableRuntimePumpAttempt` to learn that refused has no result. T+2:00 they search for a copyable host test and find only provider-oriented operational prose. The planned quick start addresses this; its actual completion time remains to be measured after the package exists.
+
+**Native DX voice.** The `combo/sub` reviewer read the exact DX input hash and found seven issues: unspecified scenario call order/reuse, timeout evidence, state defaults, history access/retention, quick start, API error guidance, and escape-hatch docs. The outside Codex pass is unavailable from this host, so all six DX dual-voice consensus cells are N/A. The primary review accepts the documentation and error-shape remedies; the advisory health gate remains the CEO user challenge.
+
+| DX pass | Initial / plan after remedies | Evidence and specific remedy |
+| --- | --- | --- |
+| 1 Getting started | 4/10 → 8/10 | Package absent today; add a compiled three-step path and time it with the packed consumer. |
+| 2 API design | 5/10 → 8/10 | Six named states are useful; define state/default matrix, missing-assessment behavior, assessment reuse, and history snapshot API. |
+| 3 Errors | 4/10 → 8/10 | Production constructor errors exist; document builder, scenario, deadline, cancellation, and provider exceptions with causes and fixes. |
+| 4 Documentation | 5/10 → 8/10 | Durable guide is detailed; add start-here and real-provider cross-links plus complete examples. |
+| 5 Upgrade | 6/10 → 8/10 | Additive preview package; show coordinated version and release guidance. |
+| 6 Environment | 7/10 → 8/10 | Existing packed harness and xUnit are reusable; add Testing to the harness and keep fake clock test-only. |
+| 7 Ecosystem | 6/10 → 7/10 | Existing repo/package chooser offers discovery; no separate community channel or SDK language expansion is justified. |
+| 8 Measurement | 3/10 → 7/10 | Constructor counts are not adoption data; time one clean packed-consumer journey and retain the result. |
+
+Overall plan score: 5/10 initially, 8/10 after the accepted DX obligations are implemented. These are review scores, not a measured product evaluation. TTHW: unmeasured now, target ≤5 minutes. No additional community platform, video, playground, or telemetry service is in scope; the published package and compiled example are the appropriate delivery path.
+
+**Error examples.** Invalid `Build()` state: name the contradictory fields and suggest `BuildContradictoryForTest()` only for deliberate contradiction tests. Missing assessment: an explicit `InvalidOperationException` with “call AssessHealthAsync first”; document whether one assessment may back multiple pump calls. Observation timeout: distinct from caller `OperationCanceledException`, with invocation-started/unknown-status facts and a link to [operational assessment recovery](../../Durable/operational-assessments.md#operational-triage). Provider exception: propagate unchanged and document that retry is host policy. Messages must contain no durable payload values.
+
+**DX implementation checklist.**
+
+- [ ] A .NET 10 test project installs Testing in one package command and runs a complete xUnit assertion within five measured minutes.
+- [ ] The package README shows exact commands, a compiled refusal-versus-empty-pass test, defaults, overrides, and limits.
+- [ ] Public XML docs and the README define missing assessment, assessment reuse, timeout, cancellation, and provider-error behavior.
+- [ ] Every new error description gives problem, cause, fix, and the best local docs link without serializing payloads.
+- [ ] The state/default matrix and `BuildContradictoryForTest()` escape are documented and tested.
+- [ ] Fake history snapshots are atomic immutable copies with an explicit test-process retention/clear story.
+- [ ] The package chooser, start page, version guidance, packed proof, and real-provider conformance guide link together.
+- [ ] The packed consumer captures TTHW evidence and proves the forbidden transitive packages are absent.
+
+**DX tasks.** D1 (P1): specify public scenario call-order/reuse and timeout exceptions before API snapshot. D2 (P1): compile a three-step packed quick start and record TTHW. D3 (P2): add state/default and API error tables. D4 (P2): specify atomic history snapshot and retention/clear behavior. No new TODO is required; the scope remains the confirmed package.
+
+<!-- autoplan-accepted:dx -->
+- Define and document scenario behavior for missing assessment, repeated pump calls after one assessment, concurrently completed assessments, and stale assessment versus authoritative provider admission; test all cases.
+- Name observation and overall timeout outcomes and caller-cancellation exceptions in the public contract; retain invocation-started/status-unknown evidence and link to recovery guidance.
+- Publish a six-state default-field and valid-override matrix, explicit contradictory-fixture errors, and a complete packed xUnit quick start with install/run commands; measure its TTHW against a five-minute target.
+- Specify an atomic immutable call-history snapshot API and a retention/clear mechanism; document default behavior, payload-reference privacy, and customization limits.
+- Add API-specific problem/cause/fix/error-link guidance and coordinated preview-package upgrade instructions.
+<!-- /autoplan-accepted:dx -->
+
 <!-- AUTONOMOUS DECISION LOG -->
 ## Decision Audit Trail
 
@@ -193,3 +263,6 @@ The unresolved health-gate row is a critical gap until the final gate. All other
 | 3 | CEO | Serialize latest-assessment publication | Mechanical | Completeness | Makes concurrent scenario observations deterministic | unsynchronized last-writer field |
 | 4 | CEO | Add packed adopter comparison and privacy documentation | Mechanical | Boil lakes | Tests real consumer value and prevents payload-bearing diagnostic leakage | count constructors as proof |
 | 5 | CEO | Carry advisory-health-gate contradiction to final approval | User Challenge | Explicit over clever | Confirmed spec conflicts with canonical provider admission guidance | silently change the spec |
+| 6 | DX | Target a measured five-minute packed first assertion | Mechanical | Pragmatic | A compiled consumer proves the package can be adopted with one install | unmeasured speed claim |
+| 7 | DX | Specify scenario errors, assessment reuse, and history snapshot API | Mechanical | Completeness | New public types must be predictable under cancellation and concurrency | document only happy path |
+| 8 | DX | Keep the copyable xUnit test as the first-use vehicle | Mechanical | Explicit over clever | Reuses the existing packed harness without new hosted infrastructure | playground or video |
