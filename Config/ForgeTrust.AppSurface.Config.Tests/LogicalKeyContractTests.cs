@@ -247,4 +247,3 @@ public sealed class LogicalKeyContractTests
             "config-logical-key-contract",
             retryable: false);
 }
-
