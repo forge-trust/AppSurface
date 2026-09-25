@@ -670,7 +670,7 @@ AppSurface Docs starts the initial harvest in the background by default. If a us
 `AppSurfaceDocs:Harvest:StartupMode` accepts:
 
 - `Background`: default. Startup schedules the memoized initial harvest and returns immediately unless strict failure mode is enabled.
-- `Blocking`: startup waits for the initial harvest to complete.
+- `Blocking`: startup waits for the initial harvest to complete. Requests share that completed warmup, so the first request serves content even when its wait budget is `0`.
 - `Disabled`: startup does not pre-warm the docs cache; the first docs request starts harvest work.
 
 `InitialRequestWaitBudgetMilliseconds` controls how long a docs request waits for the initial harvest before showing the observatory. The default is `350`. Set it to `0` when you want the observatory immediately for any pending first harvest. Set it higher when a host usually harvests quickly and you prefer to avoid showing the progress page for sub-second starts.
@@ -1064,7 +1064,7 @@ Set `AppSurfaceDocs:Harvest:FailOnFailure` to `true` when a host should fail dur
 
 Strict mode is built for CI and export hosts that publish docs artifacts. It prevents an all-failed harvest from becoming an empty or untrustworthy release tree. Leave it off for general public runtime hosts unless failing the whole application is the right operational posture for that host.
 
-The startup preflight calls `DocAggregator.GetHarvestHealthAsync(CancellationToken)` and reuses the normal cached docs snapshot. It does not run a second harvester pipeline. `Healthy`, `Empty`, and `Degraded` snapshots continue startup; only aggregate `Failed` throws `AppSurfaceDocsHarvestFailedException`.
+The startup preflight shares the initial harvest task with docs requests through [AppSurfaceDocsHarvestCoordinator](Services/AppSurfaceDocsHarvestCoordinator.cs). Hosts that remove this optional coordinator continue to warm the normal cached snapshot through `DocAggregator.GetHarvestHealthAsync(CancellationToken)`. Neither path runs a second harvester pipeline. `Healthy`, `Empty`, and `Degraded` snapshots continue startup; only aggregate `Failed` throws `AppSurfaceDocsHarvestFailedException`.
 
 Disabled optional harvesters do not count as successful empty harvesters for strict mode. For example, a disabled JavaScript harvester cannot mask Markdown and C# harvesters that both failed.
 

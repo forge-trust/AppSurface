@@ -18,8 +18,16 @@ public sealed class AppSurfaceGoogleSecretManagerModule : IAppSurfaceModule
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<AppSurfaceGoogleSecretManagerOptions>, AppSurfaceGoogleSecretManagerDeclarationValidator>());
         services.TryAddSingleton<IAppSurfaceGoogleSecretManagerClient, GoogleSecretManagerClientAdapter>();
         services.TryAddSingleton<IAppSurfaceGoogleSecretTransferClient, GoogleSecretManagerTransferClientAdapter>();
-        services.AddSingleton<GoogleSecretManagerConfigProvider>();
+        services.TryAddSingleton(sp => new GoogleSecretManagerConfigProvider(
+            sp.GetRequiredService<IOptions<AppSurfaceGoogleSecretManagerOptions>>(),
+            sp.GetRequiredService<IAppSurfaceGoogleSecretManagerClient>(),
+            sp,
+            sp.GetService<TimeProvider>() ?? TimeProvider.System));
         services.AddSingleton<IConfigProvider>(sp => sp.GetRequiredService<GoogleSecretManagerConfigProvider>());
+        services.AddSingleton<IConfigSecretProvider>(sp => sp.GetRequiredService<GoogleSecretManagerConfigProvider>());
+        services.AddSingleton<IConfigSecretDeclarationSource>(sp => sp.GetRequiredService<GoogleSecretManagerConfigProvider>());
+        services.AddSingleton<IConfigCompositionValueProvider>(sp => sp.GetRequiredService<GoogleSecretManagerConfigProvider>());
+        services.AddSingleton<IConfigProviderClaimInspector>(sp => sp.GetRequiredService<GoogleSecretManagerConfigProvider>());
     }
 
     /// <inheritdoc />

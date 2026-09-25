@@ -88,6 +88,24 @@ internal sealed class EnvironmentConfigProvider : IEnvironmentConfigProvider, IC
             : new(request.Key, ConfigAuditEntryState.Resolved, outcome.Value, outcome.Sources, outcome.Diagnostics);
     }
 
+    // Compatibility bridge used by type-aware composition for ordinary, non-secret descendants.
+    // Dot-separated member paths are translated to logical segments before entering the canonical resolver.
+    internal ConfigValueResolution Resolve(string environment, string dottedKey, Type valueType, ConfigAuditSourceRole role)
+    {
+        ArgumentNullException.ThrowIfNull(dottedKey);
+        var key = AppSurfaceConfigKey.FromSegments(dottedKey.Split('.', StringSplitOptions.None))
+            .WithInput(ConfigKeyInputOrigin.TranslatedDot, dottedKey);
+        using var scope = new ConfigResolutionScope();
+        var request = new ConfigProviderRequest(environment, key, scope);
+        var outcome = ResolveCore(request, valueType, role);
+        PublishNotices(scope, outcome);
+        return outcome.Code is not null
+            ? new ConfigValueResolution(key, ConfigAuditEntryState.Invalid, null, outcome.Sources, outcome.Diagnostics)
+            : outcome.Value is null
+                ? ConfigValueResolution.Missing(key) with { Diagnostics = outcome.Diagnostics }
+                : new ConfigValueResolution(key, ConfigAuditEntryState.Resolved, outcome.Value, outcome.Sources, outcome.Diagnostics);
+    }
+
     IReadOnlyList<ConfigAuditDiagnostic> IConfigDiagnosticProvider.GetReportDiagnostics(string environment) => [];
 
     /// <summary>Inventories only declared and explicitly mapped keys, never arbitrary process variables.</summary>
@@ -535,7 +553,7 @@ internal sealed class EnvironmentConfigProvider : IEnvironmentConfigProvider, IC
         internal List<ConfigAuditDiagnostic> Diagnostics { get; } = [];
         internal List<ConfigPatchProvenanceFact> Facts { get; } = [];
     }
-    private static bool TryConvertStringToType(string value, Type targetType, out object? parsed)
+    internal static bool TryConvertStringToType(string value, Type targetType, out object? parsed)
     {
         var nullableUnderlying = Nullable.GetUnderlyingType(targetType);
         if (nullableUnderlying != null)

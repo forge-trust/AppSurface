@@ -328,7 +328,37 @@ public class AppSurfaceConfigModuleTests
                  && d.ImplementationType == typeof(DefaultConfigFileLocationProvider));
         Assert.Contains(
             services,
-            d => d.ServiceType == typeof(IConfigProvider) && d.ImplementationType == typeof(FileBasedConfigProvider));
+            d => d.ServiceType == typeof(FileBasedConfigProvider)
+                 && d.ImplementationType == typeof(FileBasedConfigProvider)
+                 && d.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            d => d.ServiceType == typeof(IConfigProvider)
+                 && d.ImplementationFactory is not null
+                 && d.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            d => d.ServiceType == typeof(IConfigCompositionValueProvider)
+                 && d.ImplementationFactory is not null
+                 && d.Lifetime == ServiceLifetime.Singleton);
+
+        // The core host normally supplies these dependencies; only the file aliases are activated here.
+        services.AddSingleton(A.Fake<IEnvironmentProvider>());
+        using (var provider = services.AddLogging().BuildServiceProvider())
+        {
+            var concrete = provider.GetRequiredService<FileBasedConfigProvider>();
+            Assert.Same(
+                concrete,
+                provider.GetRequiredService<IConfigProvider>());
+            Assert.Same(
+                concrete,
+                provider.GetRequiredService<IConfigCompositionValueProvider>());
+            using var scope = provider.CreateScope();
+            Assert.Same(concrete, scope.ServiceProvider.GetRequiredService<FileBasedConfigProvider>());
+            Assert.Same(concrete, scope.ServiceProvider.GetRequiredService<IConfigProvider>());
+            Assert.Same(concrete, scope.ServiceProvider.GetRequiredService<IConfigCompositionValueProvider>());
+        }
+
         Assert.Contains(
             services,
             d => d.ServiceType == typeof(ConfigDiagnosticsCommandRunner)

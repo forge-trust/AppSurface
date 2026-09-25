@@ -21,6 +21,132 @@ public sealed class AppSurfaceLocalSecretProviderTests
         Assert.Equal("normalizer", normalizerError.ParamName);
     }
 
+    [Theory]
+    [InlineData("raw-secret")]
+    [InlineData("")]
+    [InlineData("{\"Name\":\"Stripe\",\"Retries\":3}")]
+    public void ResolveRaw_Should_ResolveRawTextShapesBeforeTypedConversion(string rawValue)
+    {
+        var store = new CountingStore(AppSurfaceLocalSecretResult.Found(rawValue, "Fixed"));
+        var provider = CreateProvider(store);
+
+        var resolution = provider.ResolveRaw("Development", "Payload");
+
+        Assert.Equal(ConfigCompositionValueResolutionStatus.Resolved, resolution.Status);
+        Assert.True(resolution.IsSensitive);
+        Assert.Equal(1, store.ReadCount);
+    }
+
+    [Fact]
+    public void ResolveRaw_Should_MapFoundNullToEmptyTextAndReadOnce()
+    {
+        var store = new CountingStore(new AppSurfaceLocalSecretResult(LocalSecretResultStatus.Found, null, null, "Fixed"));
+        var provider = CreateProvider(store);
+
+        var resolution = provider.ResolveRaw("Development", "Payload");
+
+        Assert.Equal(ConfigCompositionValueResolutionStatus.Resolved, resolution.Status);
+        Assert.Equal(1, store.ReadCount);
+    }
+
+    [Fact]
+    public void ResolveRaw_Should_PreserveMissingAndTerminalSemantics()
+    {
+        var missingStore = new CountingStore(AppSurfaceLocalSecretResult.Missing("Fixed"));
+        var terminalStore = new CountingStore(AppSurfaceLocalSecretResult.NotFound(
+            LocalSecretResultStatus.Locked,
+            new AppSurfaceLocalSecretDiagnostic("locked", "Locked.", "Store locked.", "Unlock it.", retryable: true),
+            "Fixed"));
+        var missing = CreateProvider(missingStore).ResolveRaw("Development", "Payload");
+        var terminal = CreateProvider(terminalStore).ResolveRaw("Development", "Payload");
+
+        Assert.Equal(ConfigCompositionValueResolutionStatus.Missing, missing.Status);
+        Assert.True(missing.IsSensitive);
+        Assert.Equal(1, missingStore.ReadCount);
+        Assert.Equal(ConfigCompositionValueResolutionStatus.TerminalFailure, terminal.Status);
+        Assert.True(terminal.IsSensitive);
+        Assert.True(terminal.Retryable);
+        Assert.Equal(1, terminalStore.ReadCount);
+    }
+
+    [Fact]
+    public void ResolveRaw_Should_FailClosedWhenCustomStoreOmitsFailureDiagnostic()
+    {
+        var store = new CountingStore(new AppSurfaceLocalSecretResult(
+            LocalSecretResultStatus.ProviderFailed, null, null, "Custom"));
+
+        var result = CreateProvider(store).ResolveRaw("Development", "Payload");
+
+        Assert.Equal(ConfigCompositionValueResolutionStatus.TerminalFailure, result.Status);
+        Assert.False(result.Retryable);
+        Assert.True(result.IsSensitive);
+        Assert.Equal(1, store.ReadCount);
+    }
+
+    [Fact]
+    public void ResolveRaw_Should_RejectInvalidIdentityWithoutReadingStore()
+    {
+        var store = new CountingStore(AppSurfaceLocalSecretResult.Found("secret", "Fixed"));
+        var provider = CreateProvider(store);
+        var invalidKey = new string('a', 600);
+
+        var resolution = provider.ResolveRaw("Development", invalidKey);
+        var typed = provider.Resolve<string>(new ConfigProviderRequest("Development", AppSurfaceConfigKey.Parse(invalidKey)));
+
+        Assert.Equal(ConfigCompositionValueResolutionStatus.TerminalFailure, resolution.Status);
+        Assert.Equal(ConfigProviderValueStatus.Terminal, typed.Status);
+        Assert.Equal("local-secret-identity-too-long", typed.Diagnostic?.Code);
+        Assert.Equal(0, store.ReadCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ResolveRaw_Should_ApplySameConfiguredFailClosedPolicyAsLegacy(bool failClosed)
+    {
+        var provider = CreateProvider(new ThrowingStore(), options => options.FailClosedOnStoreFailure = failClosed);
+
+        var raw = provider.ResolveRaw("Development", "Payload");
+        Assert.Equal(failClosed ? ConfigCompositionValueResolutionStatus.TerminalFailure
+            : ConfigCompositionValueResolutionStatus.Missing, raw.Status);
+        var typed = provider.Resolve<string>(new ConfigProviderRequest(
+            "Development", AppSurfaceConfigKey.Parse("Payload")));
+
+        Assert.Equal(ConfigProviderValueStatus.Terminal, typed.Status);
+        Assert.Equal("local-secret-provider-threw", typed.Diagnostic?.Code);
+        Assert.True(typed.Diagnostic?.Retryable);
+        var exception = Assert.Throws<ConfigurationResolutionException>(() =>
+            provider.GetValue<string>("Development", "Payload"));
+        Assert.Equal("local-secret-provider-threw", exception.Diagnostic.Code);
+    }
+
+    [Fact]
+    public void ResolveRaw_Should_PreserveDisabledPostureFallbackWhenFailClosedIsDisabled()
+    {
+        var store = new CountingStore(AppSurfaceLocalSecretResult.Found("unused", "Fixed"));
+        var provider = CreateProvider(store, options =>
+        {
+            options.Posture = LocalSecretsPostureMode.Disabled;
+            options.FailClosedOnStoreFailure = false;
+        });
+
+        Assert.Equal(ConfigCompositionValueResolutionStatus.Missing, provider.ResolveRaw("Development", "Payload").Status);
+        var typed = provider.Resolve<string>(new ConfigProviderRequest(
+            "Development", AppSurfaceConfigKey.Parse("Payload")));
+
+        Assert.Equal(ConfigProviderValueStatus.Terminal, typed.Status);
+        Assert.Equal("local-secret-posture-disabled", typed.Diagnostic?.Code);
+        Assert.Equal(0, store.ReadCount);
+    }
+
+    [Fact]
+    public void ResolveRaw_Should_ClaimEveryLogicalKey()
+    {
+        var provider = CreateProvider(new InMemoryAppSurfaceLocalSecretStore());
+
+        Assert.Equal(ConfigProviderClaim.MayClaim, provider.InspectClaim("Development", "Payload"));
+    }
+
     [Fact]
     public void GetValue_Should_ReturnSecretWhenStoreFindsValue()
     {
@@ -417,6 +543,28 @@ public sealed class AppSurfaceLocalSecretProviderTests
         public string Name => "Fixed";
 
         public AppSurfaceLocalSecretResult Get(AppSurfaceLocalSecretIdentity identity) => result;
+
+        public AppSurfaceLocalSecretResult Set(AppSurfaceLocalSecretIdentity identity, string value) => result;
+
+        public AppSurfaceLocalSecretResult Delete(AppSurfaceLocalSecretIdentity identity) => result;
+
+        public AppSurfaceLocalSecretListResult List(string applicationName, string environment, string? keyPrefix) =>
+            AppSurfaceLocalSecretListResult.Failed(result.Status, result.Diagnostic!, Name);
+
+        public AppSurfaceLocalSecretResult Doctor(string applicationName, string environment, string? keyPrefix) => result;
+    }
+
+    private sealed class CountingStore(AppSurfaceLocalSecretResult result) : IAppSurfaceLocalSecretStore
+    {
+        public string Name => "Fixed";
+
+        public int ReadCount { get; private set; }
+
+        public AppSurfaceLocalSecretResult Get(AppSurfaceLocalSecretIdentity identity)
+        {
+            ReadCount++;
+            return result;
+        }
 
         public AppSurfaceLocalSecretResult Set(AppSurfaceLocalSecretIdentity identity, string value) => result;
 

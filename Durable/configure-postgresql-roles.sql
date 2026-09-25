@@ -159,6 +159,10 @@ SELECT format(
 SELECT format(
     'ALTER POLICY runtime_heartbeat_runtime_role ON appsurface_durable.runtime_heartbeat TO %I',
     :'runtime_role') \gexec
+DROP POLICY IF EXISTS runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat;
+SELECT format(
+    'CREATE POLICY runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat FOR ALL TO %I USING (true) WITH CHECK (true)',
+    :'migration_owner_role') \gexec
 DROP POLICY IF EXISTS flow_dispatch_runtime_scope_select ON appsurface_durable.flow_dispatch;
 SELECT format(
     'CREATE POLICY flow_dispatch_runtime_scope_select ON appsurface_durable.flow_dispatch FOR SELECT TO %I USING (scope_id = nullif(current_setting(''appsurface_durable.scope_id'', true), ''''))',
@@ -190,6 +194,10 @@ REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) F
 SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM %I', :'dispatcher_role') \gexec
 SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM %I', :'runtime_role') \gexec
 SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM %I', :'retention_operator_role') \gexec
+REVOKE ALL ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) FROM PUBLIC;
+SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) FROM %I', :'dispatcher_role') \gexec
+SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) FROM %I', :'runtime_role') \gexec
+SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) FROM %I', :'retention_operator_role') \gexec
 SELECT format('REVOKE ALL ON TABLE appsurface_durable.dispatch FROM %I', :'dispatcher_role') \gexec
 
 SELECT NOT EXISTS
@@ -350,6 +358,7 @@ WITH expected_policy(relation_name, policy_name, command_name, using_expression,
     ('flow_instance', 'flow_instance_scope_isolation', '*',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))'),
+    ('runtime_heartbeat', 'runtime_heartbeat_migration_owner', '*', 'true', 'true'),
     ('runtime_heartbeat', 'runtime_heartbeat_runtime_role', '*', 'true', 'true'),
     ('flow_timer', 'flow_timer_scope_isolation', '*',
       '(scope_id = NULLIF(current_setting(''appsurface_durable.scope_id''::text, true), ''''::text))',
@@ -460,6 +469,8 @@ SELECT NOT EXISTS
                 (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'runtime_role')]
                 AND actual.polroles <@ ARRAY[
                 (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'runtime_role')]
+            WHEN actual.policy_name = 'runtime_heartbeat_migration_owner' THEN actual.polroles = ARRAY[
+                (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'migration_owner_role')]
             ELSE actual.polroles = ARRAY[0]::oid[]
         END
     )
@@ -788,7 +799,11 @@ SELECT NOT EXISTS
       )
       AND privilege.privilege_name = 'EXECUTE'
       OR service.role_name = :'runtime_role'
-      AND routine.oid = 'appsurface_durable.runtime_due_dispatch_health(integer)'::pg_catalog.regprocedure
+      AND routine.oid IN
+      (
+        'appsurface_durable.runtime_due_dispatch_health(integer)'::pg_catalog.regprocedure,
+        'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)'::pg_catalog.regprocedure
+      )
       AND privilege.privilege_name = 'EXECUTE'
       OR service.role_name = :'retention_operator_role'
       AND routine.oid IN
@@ -825,6 +840,7 @@ SELECT format(
     :'retention_operator_role') \gexec
 SELECT format('GRANT USAGE ON SCHEMA appsurface_durable TO %I', :'runtime_role') \gexec
 SELECT format('GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO %I', :'runtime_role') \gexec
+SELECT format('GRANT EXECUTE ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) TO %I', :'runtime_role') \gexec
 SELECT has_function_privilege(
            :'runtime_role',
            'appsurface_durable.runtime_due_dispatch_health(integer)',
@@ -867,6 +883,46 @@ SELECT has_function_privilege(
 \if :runtime_due_dispatch_health_acl_is_exact
 \else
   \echo 'runtime_due_dispatch_health(integer) must be executable only by the scoped runtime role (apart from its owner).'
+  SELECT 1 / 0;
+\endif
+SELECT has_function_privilege(
+           :'runtime_role',
+           'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)',
+           'EXECUTE')
+       AND NOT has_function_privilege(
+           :'runtime_role',
+           'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)',
+           'EXECUTE WITH GRANT OPTION')
+       AND NOT has_function_privilege(
+           'public',
+           'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)',
+           'EXECUTE')
+       AND NOT has_function_privilege(
+           :'dispatcher_role',
+           'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)',
+           'EXECUTE')
+       AND NOT has_function_privilege(
+           :'retention_operator_role',
+           'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)',
+           'EXECUTE')
+       AND NOT EXISTS
+       (
+           SELECT 1
+           FROM pg_catalog.pg_proc AS routine
+           CROSS JOIN LATERAL pg_catalog.aclexplode(routine.proacl) AS privilege
+           WHERE routine.oid =
+               'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)'::pg_catalog.regprocedure
+             AND privilege.privilege_type = 'EXECUTE'
+             AND privilege.grantee NOT IN
+             (
+                 routine.proowner,
+                 (SELECT role_value.oid FROM pg_catalog.pg_roles AS role_value WHERE role_value.rolname = :'runtime_role')
+             )
+       )
+    AS runtime_heartbeat_prune_acl_is_exact \gset
+\if :runtime_heartbeat_prune_acl_is_exact
+\else
+  \echo 'prune_runtime_heartbeats(interval, integer, text, uuid) must be executable only by the scoped runtime role (apart from its owner).'
   SELECT 1 / 0;
 \endif
 SELECT format(

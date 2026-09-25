@@ -20,6 +20,12 @@
         "resolved": "8.0.0",
         "contentHash": "rO2ugKcbVy8SHNKeqfX/DshUcTtolnEUwMKehVB6gh5/YoL+U07zoACCyGRvgMtzq7fr9o6GLkXOmVj9WMgx+w=="
       },
+      "Microsoft.Extensions.TimeProvider.Testing": {
+        "type": "Direct",
+        "requested": "[10.9.0, )",
+        "resolved": "10.9.0",
+        "contentHash": "0If8xc915BgRpYmKB9tOOOprvHMt8Tue6kiD8ARgVf8Ok6PNUxkJScKT7QUp7+RllR4RN2DNACgaxioy9BJxeQ=="
+      },
       "Microsoft.NET.Test.Sdk": {
         "type": "Direct",
         "requested": "[18.5.1, )",
@@ -450,6 +456,13 @@
         "type": "Project",
         "dependencies": {
           "ForgeTrust.AppSurface.Durable": "[0.1.0, )"
+        }
+      },
+      "forgetrust.appsurface.durable.testing": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Durable": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Durable.Provider": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.flow": {

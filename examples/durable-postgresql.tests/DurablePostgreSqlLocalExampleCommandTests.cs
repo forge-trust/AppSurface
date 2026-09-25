@@ -3,6 +3,85 @@
 public sealed class DurablePostgreSqlLocalExampleCommandTests
 {
     [Fact]
+    public async Task RetentionProof_waits_for_one_bounded_batch_and_preserves_protected_rows()
+    {
+        var reads = 0;
+
+        await DurablePostgreSqlLocalExample.WaitForRetentionProofAsync(
+            _ => Task.FromResult(++reads == 1
+                ? (Stale: 501L, Recent: 1L, Current: 1L)
+                : (Stale: 1L, Recent: 1L, Current: 1L)),
+            TimeSpan.FromSeconds(2),
+            CancellationToken.None);
+
+        Assert.Equal(2, reads);
+    }
+
+    [Theory]
+    [InlineData(500, 1, 1)]
+    [InlineData(0, 1, 1)]
+    [InlineData(501, 0, 1)]
+    [InlineData(501, 1, 0)]
+    [InlineData(1, 0, 1)]
+    [InlineData(1, 1, 0)]
+    public async Task RetentionProof_rejects_unexpected_deletion_or_a_missing_protected_row(
+        long stale,
+        long recent,
+        long current)
+    {
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            DurablePostgreSqlLocalExample.WaitForRetentionProofAsync(
+                _ => Task.FromResult((stale, recent, current)),
+                TimeSpan.FromSeconds(2),
+                CancellationToken.None));
+
+        Assert.Contains("protected row or deleted outside one 500-row batch", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RetentionProof_reports_a_deadline_when_cleanup_never_completes()
+    {
+        var exception = await Assert.ThrowsAsync<TimeoutException>(() =>
+            DurablePostgreSqlLocalExample.WaitForRetentionProofAsync(
+                async cancellationToken =>
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                    return (Stale: 501L, Recent: 1L, Current: 1L);
+                },
+                TimeSpan.FromMilliseconds(20),
+                CancellationToken.None));
+
+        Assert.IsAssignableFrom<OperationCanceledException>(exception.InnerException);
+    }
+
+    [Fact]
+    public async Task RetentionProof_propagates_caller_cancellation_without_misreporting_a_deadline()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            DurablePostgreSqlLocalExample.WaitForRetentionProofAsync(
+                async cancellationToken =>
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                    return (Stale: 501L, Recent: 1L, Current: 1L);
+                },
+                TimeSpan.FromSeconds(2),
+                cancellation.Token));
+    }
+
+    [Fact]
+    public async Task RetentionProof_rejects_a_missing_count_reader()
+    {
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            DurablePostgreSqlLocalExample.WaitForRetentionProofAsync(
+                null!,
+                TimeSpan.FromSeconds(2),
+                CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Commands_ProvideHelpAndRejectUnknownArguments()
     {
         Assert.Equal(0, await DurablePostgreSqlLocalExample.RunAsync(["--help"], CancellationToken.None));
