@@ -313,7 +313,7 @@ internal sealed class DurableSchemaCommandService : IDurableSchemaCommandService
         """
         WITH heartbeat AS
         (
-            SELECT relation.oid, relation.relforcerowsecurity, relation.relowner, namespace.nspowner
+            SELECT relation.oid, relation.relrowsecurity, relation.relforcerowsecurity, relation.relowner, namespace.nspowner
             FROM pg_catalog.pg_class AS relation
             JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
             WHERE namespace.nspname = 'appsurface_durable'
@@ -330,6 +330,8 @@ internal sealed class DurableSchemaCommandService : IDurableSchemaCommandService
             WHERE cardinality(policy.polroles) = 1
               AND policy.polname = 'runtime_heartbeat_runtime_role'
               AND role.rolname <> 'public'
+              AND NOT role.rolsuper
+              AND NOT role.rolbypassrls
             GROUP BY role.oid
             HAVING count(*) = 1
         ),
@@ -341,6 +343,9 @@ internal sealed class DurableSchemaCommandService : IDurableSchemaCommandService
             JOIN heartbeat ON namespace.nspowner = heartbeat.nspowner
             WHERE namespace.nspname = 'appsurface_durable'
               AND procedure.proname = 'prune_runtime_heartbeats'
+              AND procedure.prokind = 'f'
+              AND procedure.prorettype = 'pg_catalog.int4'::pg_catalog.regtype::oid
+              AND NOT procedure.proretset
               AND procedure.pronargs = 4
               AND procedure.proargtypes[0] = 'pg_catalog.interval'::pg_catalog.regtype::oid
               AND procedure.proargtypes[1] = 'pg_catalog.int4'::pg_catalog.regtype::oid
@@ -363,6 +368,9 @@ internal sealed class DurableSchemaCommandService : IDurableSchemaCommandService
               AND index_meta.indnatts = 2
               AND index_meta.indpred IS NULL
               AND index_meta.indexprs IS NULL
+              -- B-tree indoption 0 is ASC NULLS LAST, matching the pruning query's ORDER BY.
+              AND index_meta.indoption[0] = 0
+              AND index_meta.indoption[1] = 0
               AND
               (
                   SELECT array_agg(attribute.attname ORDER BY key.ordinality)
@@ -384,7 +392,7 @@ internal sealed class DurableSchemaCommandService : IDurableSchemaCommandService
         , checks AS
         (
             SELECT
-                (SELECT count(*) = 1 FROM heartbeat WHERE relforcerowsecurity) AS forced_rls,
+                (SELECT count(*) = 1 FROM heartbeat WHERE relrowsecurity AND relforcerowsecurity) AS forced_rls,
                 (SELECT count(*) = 1 FROM runtime_role) AS runtime_role,
                 (SELECT count(*) = 1 FROM retention_function) AS function_signature,
                 EXISTS (SELECT 1 FROM heartbeat, retention_function AS routine WHERE routine.proowner = heartbeat.nspowner) AS function_owner,
@@ -450,6 +458,12 @@ internal sealed class DurableSchemaCommandService : IDurableSchemaCommandService
                 ) AS function_acl,
                 (SELECT count(*) = 0 FROM runtime_role, pg_catalog.pg_auth_members AS membership
                  WHERE membership.roleid = runtime_role.oid OR membership.member = runtime_role.oid) AS role_membership,
+                EXISTS
+                (
+                    SELECT 1 FROM heartbeat, runtime_role
+                    WHERE NOT pg_catalog.has_table_privilege(runtime_role.oid, heartbeat.oid, 'DELETE')
+                      AND NOT pg_catalog.has_table_privilege(runtime_role.oid, heartbeat.oid, 'TRUNCATE')
+                ) AS runtime_table_privileges,
                 (SELECT count(*) = 1 FROM retention_index) AS retention_index
         )
         SELECT array_remove(ARRAY[
@@ -462,6 +476,7 @@ internal sealed class DurableSchemaCommandService : IDurableSchemaCommandService
             CASE WHEN NOT heartbeat_policies THEN 'heartbeat_policies' END,
             CASE WHEN NOT function_acl THEN 'function_acl' END,
             CASE WHEN NOT role_membership THEN 'role_membership' END,
+            CASE WHEN NOT runtime_table_privileges THEN 'runtime_table_privileges' END,
             CASE WHEN NOT retention_index THEN 'retention_index' END
         ]::text[], NULL)
         FROM checks;

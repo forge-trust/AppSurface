@@ -789,6 +789,103 @@ public sealed class DurableSchemaCommandTests
     }
 
     [Theory]
+    [InlineData("DROP FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid); CREATE PROCEDURE appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) LANGUAGE sql AS 'SELECT 0;'; ALTER PROCEDURE appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) OWNER TO durable_preflight_owner; GRANT EXECUTE ON PROCEDURE appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) TO durable_preflight_runtime;", "function_signature")]
+    [InlineData("DROP FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid); CREATE FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) RETURNS bigint LANGUAGE sql AS 'SELECT 0::bigint;' SECURITY DEFINER SET search_path = pg_catalog, appsurface_durable, pg_temp; ALTER FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) OWNER TO durable_preflight_owner; GRANT EXECUTE ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) TO durable_preflight_runtime;", "function_signature")]
+    [InlineData("DROP FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid); CREATE FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) RETURNS SETOF integer LANGUAGE sql AS 'SELECT 0;' SECURITY DEFINER SET search_path = pg_catalog, appsurface_durable, pg_temp; ALTER FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) OWNER TO durable_preflight_owner; GRANT EXECUTE ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) TO durable_preflight_runtime;", "function_signature")]
+    public async Task Retention_preflight_rejects_prune_routine_signature_drift(string mutation, string expectedFailure)
+    {
+        await AssertRetentionPreflightRejectsAsync(mutation, expectedFailure);
+    }
+
+    [Theory]
+    [InlineData("last_heartbeat_at ASC, worker_id DESC")]
+    [InlineData("last_heartbeat_at DESC, worker_id ASC")]
+    public async Task Retention_preflight_rejects_descending_index_key(string keyOrder)
+    {
+        await AssertRetentionPreflightRejectsAsync(
+            $"DROP INDEX appsurface_durable.ix_runtime_heartbeat_retention; CREATE INDEX ix_runtime_heartbeat_retention ON appsurface_durable.runtime_heartbeat ({keyOrder});",
+            "retention_index");
+    }
+
+    [Fact]
+    public async Task Retention_preflight_rejects_rls_disabled_even_when_force_remains_enabled()
+    {
+        await AssertRetentionPreflightRejectsAsync(
+            "ALTER TABLE appsurface_durable.runtime_heartbeat DISABLE ROW LEVEL SECURITY;",
+            "forced_rls");
+    }
+
+    [Theory]
+    [InlineData("ALTER ROLE durable_preflight_runtime SUPERUSER;", "runtime_role")]
+    [InlineData("ALTER ROLE durable_preflight_runtime BYPASSRLS;", "runtime_role")]
+    public async Task Retention_preflight_rejects_elevated_runtime_role(string mutation, string expectedFailure)
+    {
+        await AssertRetentionPreflightRejectsAsync(mutation, expectedFailure);
+    }
+
+    [Theory]
+    [InlineData("GRANT DELETE ON appsurface_durable.runtime_heartbeat TO durable_preflight_runtime;", "runtime_table_privileges")]
+    [InlineData("GRANT TRUNCATE ON appsurface_durable.runtime_heartbeat TO durable_preflight_runtime;", "runtime_table_privileges")]
+    [InlineData("GRANT DELETE ON appsurface_durable.runtime_heartbeat TO PUBLIC;", "runtime_table_privileges")]
+    [InlineData("GRANT TRUNCATE ON appsurface_durable.runtime_heartbeat TO PUBLIC;", "runtime_table_privileges")]
+    public async Task Retention_preflight_rejects_effective_runtime_delete_or_truncate_privilege(string mutation, string expectedFailure)
+    {
+        await AssertRetentionPreflightRejectsAsync(mutation, expectedFailure);
+    }
+
+    private static async Task AssertRetentionPreflightRejectsAsync(string mutation, string expectedFailure)
+    {
+        await using var container = new PostgreSqlBuilder(
+                "postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877")
+            .WithDatabase("appsurface_durable")
+            .WithUsername("appsurface")
+            .WithPassword("appsurface-test-password")
+            .Build();
+        await container.StartAsync();
+
+        await using var ownerDataSource = NpgsqlDataSource.Create(container.GetConnectionString());
+        await new PostgreSqlDurableRuntimeSchemaManager(ownerDataSource).ApplyAsync();
+        await using (var configure = ownerDataSource.CreateCommand(
+            """
+            CREATE ROLE durable_preflight_owner NOLOGIN;
+            CREATE ROLE durable_preflight_runtime LOGIN PASSWORD 'durable-preflight-test-password';
+            ALTER SCHEMA appsurface_durable OWNER TO durable_preflight_owner;
+            ALTER TABLE appsurface_durable.runtime_heartbeat OWNER TO durable_preflight_owner;
+            ALTER FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)
+                OWNER TO durable_preflight_owner;
+            ALTER POLICY runtime_heartbeat_runtime_role ON appsurface_durable.runtime_heartbeat
+                TO durable_preflight_runtime;
+            DROP POLICY runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat;
+            CREATE POLICY runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat
+                FOR ALL TO durable_preflight_owner USING (true) WITH CHECK (true);
+            REVOKE ALL ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)
+                FROM PUBLIC;
+            GRANT EXECUTE ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)
+                TO durable_preflight_runtime;
+            """))
+        {
+            await configure.ExecuteNonQueryAsync();
+        }
+
+        await using (var mutate = ownerDataSource.CreateCommand(mutation))
+        {
+            await mutate.ExecuteNonQueryAsync();
+        }
+
+        var service = new DurableSchemaCommandService();
+        var ownerFailures = await service.VerifyRetentionPreflightAsync(container.GetConnectionString(), CancellationToken.None);
+        var runtimeConnection = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
+        {
+            Username = "durable_preflight_runtime",
+            Password = "durable-preflight-test-password",
+        };
+        var runtimeFailures = await service.VerifyRetentionPreflightAsync(runtimeConnection.ConnectionString, CancellationToken.None);
+
+        Assert.Contains(expectedFailure, ownerFailures);
+        Assert.Contains(expectedFailure, runtimeFailures);
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]

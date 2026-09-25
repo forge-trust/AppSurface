@@ -69,6 +69,11 @@ publication protects readers from partial content, but it cannot make a director
 principal safe from path replacement. `apply --apply` has a 45-minute overall deadline for the current migration
 chain; migrations 0010 and 0011 each retain a 330-second command deadline. Plan the maintenance window with the
 [heartbeat retention operations guide](../../Durable/heartbeat-retention-operations.md).
+After migration 0011, `preflight` checks the pruning function's integer result and security settings, the
+ascending retention index, enabled and forced row level security, and the runtime role's isolation and lack of
+effective `DELETE`/`TRUNCATE` rights on the heartbeat table. Treat any named failed check as schema or role drift;
+repair it and rerun preflight before activating workers. The
+[operations guide](../../Durable/heartbeat-retention-operations.md#deploy-schema-11) describes the deployment order.
 
 The preferred production flow remains: generate and review the offline schema script, apply all pending numbered
 migrations (currently through `0011`) in order, apply the canonical role recipe, run status and preflight, then
