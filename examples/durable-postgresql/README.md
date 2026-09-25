@@ -91,7 +91,7 @@ requiring optional host PostgreSQL tools.
 
 ## Version-1 role-pair walkthrough
 
-The fictional [manifest file](role-pairs.example.json) is the complete authorized pair set for every recipe run. It
+The fictional [manifest file](https://github.com/forge-trust/AppSurface/blob/main/examples/durable-postgresql/role-pairs.example.json) is the complete authorized pair set for every recipe run. It
 has exactly `version` and `pairs` at top level; version 1 requires 1–32 entries with exactly `dispatcher`, `runtime`,
 and `dispatcher_profile`. The forwarding pair is `full`; the Source example is `work_only`. There is no implicit
 profile. Keep this non-secret file with reviewed deployment configuration, compare it with the prior release record,

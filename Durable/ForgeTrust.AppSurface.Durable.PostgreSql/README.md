@@ -305,12 +305,12 @@ restore the broad grant as a rollback shortcut.
 Run the canonical [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
 with `psql` as a principal that can transfer ownership and grant privileges. Every invocation supplies the complete,
 reviewed version-1 manifest; it is not an add-pair command. The checked-in
-[fictional two-pair manifest](../../examples/durable-postgresql/role-pairs.example.json) contains role names only,
+[fictional two-pair manifest](https://github.com/forge-trust/AppSurface/blob/main/examples/durable-postgresql/role-pairs.example.json) contains role names only,
 never passwords or connection strings:
 
 For deployments, use the matching released provider NuGet package's
 `contentFiles/any/any/configure-postgresql-roles.sql` after applying that release's migrations. The repository
-verification gate [`Durable/verify-packed-consumers.sh`](../verify-packed-consumers.sh) checks that this packaged file
+verification gate [`Durable/verify-packed-consumers.sh`](https://github.com/forge-trust/AppSurface/blob/main/Durable/verify-packed-consumers.sh) checks that this packaged file
 is byte-identical to the canonical source recipe. Record the exact package version with the manifest evidence; do not
 extract the recipe from an unrelated package version or run a workspace recipe against a database at another schema
 version. The source-checkout path is for the disposable local proof only.

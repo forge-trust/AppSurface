@@ -9,7 +9,7 @@ Repo: `forge-trust/AppSurface`
 Status: APPROVED
 Mode: Builder
 
-Builds on the approved [Work discovery design for #747](https://github.com/forge-trust/AppSurface/issues/747), the current [PostgreSQL role recipe](../../Durable/configure-postgresql-roles.sql), and the [#823 support request](https://github.com/forge-trust/AppSurface/issues/823). Coordinate the schema preflight in [#795](https://github.com/forge-trust/AppSurface/issues/795) before publishing multi-pair support.
+Builds on the approved [Work discovery design for #747](https://github.com/forge-trust/AppSurface/issues/747), the current [PostgreSQL role recipe](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql), and the [#823 support request](https://github.com/forge-trust/AppSurface/issues/823). Coordinate the schema preflight in [#795](https://github.com/forge-trust/AppSurface/issues/795) before publishing multi-pair support.
 
 ## Problem and boundary
 

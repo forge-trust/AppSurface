@@ -73,7 +73,7 @@ package's `contentFiles/any/any/configure-postgresql-roles.sql`, run status and 
 check status, correct and review the forward-only script, then retry; never delete migration history. The
 [`durable-postgresql` example](../../examples/durable-postgresql/README.md) is a local proof, not production
 operations guidance. The provider package's packaged recipe is checked byte-identical to the canonical source by
-[`verify-packed-consumers.sh`](../../Durable/verify-packed-consumers.sh); keep the package release/schema version
+[`verify-packed-consumers.sh`](https://github.com/forge-trust/AppSurface/blob/main/Durable/verify-packed-consumers.sh); keep the package release/schema version
 matched to the migration and hash the exact reviewed manifest file used for certificate evidence. See the
 [role manifest, grant profiles, and rollout contract](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#role-recipe-contract)
 and the [operator migration/rollback sequence](../../Durable/operational-assessments.md#migration-and-role-reconciliation).
