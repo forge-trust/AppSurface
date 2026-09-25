@@ -383,7 +383,7 @@ public sealed class DurableSchemaCommandTests
     }
 
     [Fact]
-    public async Task Apply_uses_the_bounded_window_required_by_schema_11()
+    public async Task Apply_allows_both_extended_migrations_within_a_bounded_window()
     {
         using var environment = new EnvironmentVariableScope("APPSURFACE_DURABLE_CONNECTION", "Host=localhost;Password=do-not-print");
         var service = new FakeDurableSchemaCommandService
@@ -395,8 +395,9 @@ public sealed class DurableSchemaCommandTests
 
         var error = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
 
-        Assert.Equal(TimeSpan.FromSeconds(390), DurableSchemaApplyCommand.ApplyOperationTimeout);
-        Assert.Contains("390-second deadline", error.Message, StringComparison.Ordinal);
+        Assert.Equal(TimeSpan.FromMinutes(20), DurableSchemaApplyCommand.ApplyOperationTimeout);
+        Assert.True(DurableSchemaApplyCommand.ApplyOperationTimeout > TimeSpan.FromSeconds(30 + (9 * 30) + (2 * 330)));
+        Assert.Contains("1200-second deadline", error.Message, StringComparison.Ordinal);
         ValueSafeAssert.DoesNotExpose("do-not-print", error.Message);
         ValueSafeAssert.DoesNotExpose("provider details are private", error.Message);
     }

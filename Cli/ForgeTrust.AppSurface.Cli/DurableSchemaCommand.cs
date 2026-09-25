@@ -104,8 +104,11 @@ internal sealed partial class DurableSchemaScriptCommand(IDurableSchemaCommandSe
 [Command("durable schema apply", Description = "Apply pending numbered durable migrations under the package advisory lock.")]
 internal sealed partial class DurableSchemaApplyCommand(IDurableSchemaCommandService service) : DurableSchemaOnlineCommandBase(service)
 {
-    /// <summary>The apply deadline covers the package lock wait and schema-11's bounded migration command.</summary>
-    internal static readonly TimeSpan ApplyOperationTimeout = TimeSpan.FromSeconds(390);
+    /// <summary>
+    /// The apply deadline covers the package lock wait, all earlier pending migrations, and the two migrations
+    /// with 330-second command deadlines (0010 and 0011), with time for migration metadata updates.
+    /// </summary>
+    internal static readonly TimeSpan ApplyOperationTimeout = TimeSpan.FromMinutes(20);
 
     /// <summary>Gets or sets the required mutation confirmation.</summary>
     [CommandOption("apply", Description = "Required confirmation that reviewed migrations may be applied with the migration-owner connection.")]
