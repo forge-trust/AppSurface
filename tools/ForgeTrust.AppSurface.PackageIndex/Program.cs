@@ -202,10 +202,10 @@ internal static class Program
                 }
                 if (mode == "producer-binding")
                 {
-                    var binding = await TailwindEvidenceWorkflow.ValidateProducerBindingAsync(
-                        general.Request.RepositoryRoot, general.ArtifactsInputPath, general.ArtifactManifestPath, tailwindOptions, cancellationToken);
                     var output = Path.GetFullPath(TailwindCommandOptions.Require(tailwindOptions.ResolvedBindingOutput, "--resolved-binding-output"));
-                    await TailwindEvidenceWorkflow.WriteResolvedProducerBindingAsync(binding, output, cancellationToken);
+                    await TailwindEvidenceWorkflow.ValidateAndWriteProducerBindingAsync(
+                        general.Request.RepositoryRoot, general.ArtifactsInputPath, general.ArtifactManifestPath,
+                        tailwindOptions, output, cancellationToken);
                     await standardOut.WriteLineAsync($"Validated frozen producer binding; report: {Path.GetFullPath(TailwindCommandOptions.Require(tailwindOptions.ReportDirectory, "--report-directory"))}.");
                     return 0;
                 }

@@ -66,12 +66,17 @@ public sealed class TailwindCommandOptionsTests
 
         Assert.Equal("501", preflight.ProducerArtifactId);
         Assert.Equal("702", preflight.AggregateArtifactId);
+        Assert.Equal(TestPathUtils.PathUnder(_root, "aggregate"), preflight.AggregateInputPath);
         Assert.Equal(string.Empty, preflight.PublicationStartArtifactId);
         Assert.Equal(TestPathUtils.PathUnder(_root, "report", "publication-start-receipt.json"), preflight.PublicationStartReceiptPath);
         Assert.Equal("703", start.PublicationStartArtifactId);
         Assert.Equal(TestPathUtils.PathUnder(_root, "downloaded", "publication-start-receipt.json"), start.PublicationStartReceiptPath);
         Assert.Equal(TestPathUtils.PathUnder(_root, "prepared"), start.PublicationDirectory);
         Assert.Equal("703", publish.PublicationStartArtifactId);
+        Assert.Equal(TestPathUtils.PathUnder(_root, "aggregate"), publish.AggregateInputPath);
+        Assert.Equal(TestPathUtils.PathUnder(_root, "prepared"), publish.PublicationDirectory);
+        Assert.Equal(TestPathUtils.PathUnder(_root, "downloaded", "publication-start-receipt.json"), publish.PublicationStartReceiptPath);
+        Assert.Equal(TestPathUtils.PathUnder(_root, "report"), publish.ReportDirectory);
     }
 
     [Fact]

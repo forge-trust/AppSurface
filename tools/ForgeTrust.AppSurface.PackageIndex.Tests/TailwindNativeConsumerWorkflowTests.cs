@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 
@@ -248,7 +249,7 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
 
         var result = await TailwindNativeConsumerWorkflow.RunAsync(producer.Repository, producer.Bundle, producer.ManifestPath,
             ReleaseOptions(producer, CurrentRid(), "malformed-manifest", report), runner, CancellationToken.None,
-            ValidateFixtureProducerArtifactsAsync);
+            ValidateFixtureProducerArtifactsAsync, producer.LockTemplatePath);
 
         Assert.False(result.Succeeded);
         Assert.Equal("failed", result.Status);
@@ -267,7 +268,7 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
 
         var result = await TailwindNativeConsumerWorkflow.RunAsync(producer.Repository, producer.Bundle, producer.ManifestPath,
             ReleaseOptions(producer, CurrentRid(), "release-success", report), runner, CancellationToken.None,
-            ValidateFixtureProducerArtifactsAsync);
+            ValidateFixtureProducerArtifactsAsync, producer.LockTemplatePath);
 
         Assert.True(result.Succeeded, await File.ReadAllTextAsync(TestPathUtils.PathUnder(report, "summary.md")));
         Assert.Equal("succeeded", result.Status);
@@ -297,6 +298,24 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
     }
 
     [Fact]
+    public async Task ReleaseMode_RejectsProducerClosureAbsentFromReviewedLockBeforeRestore()
+    {
+        var producer = await CreateProducerBundleAsync();
+        var runner = new NativeReleaseRunner(producer, CurrentRid());
+        var report = TestPathUtils.PathUnder(_root, "lock-closure-report");
+
+        var result = await TailwindNativeConsumerWorkflow.RunAsync(producer.Repository, producer.Bundle, producer.ManifestPath,
+            ReleaseOptions(producer, CurrentRid(), "lock-closure", report), runner, CancellationToken.None,
+            ValidateFixtureProducerArtifactsAsync, TestPathUtils.PathUnder(FindRepositoryRoot(), TailwindConsumerLock.RelativeTemplatePath));
+
+        Assert.False(result.Succeeded);
+        Assert.Empty(runner.Requests);
+        using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(report, "diagnostics.json")));
+        Assert.Equal("consumer-lock-preparation", diagnostics.RootElement.GetProperty("stage").GetString());
+        Assert.Contains("first-party closure", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString());
+    }
+
+    [Fact]
     public async Task ReleaseMode_RejectsProtectedPayloadMutationAfterBuildWithoutReceipt()
     {
         var producer = await CreateProducerBundleAsync();
@@ -305,7 +324,7 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
 
         var result = await TailwindNativeConsumerWorkflow.RunAsync(producer.Repository, producer.Bundle, producer.ManifestPath,
             ReleaseOptions(producer, CurrentRid(), "release-mutation", report), runner, CancellationToken.None,
-            ValidateFixtureProducerArtifactsAsync);
+            ValidateFixtureProducerArtifactsAsync, producer.LockTemplatePath);
 
         Assert.False(result.Succeeded);
         Assert.Equal("failed", result.Status);
@@ -318,7 +337,7 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
 
     [Theory]
     [InlineData("empty-sdk", "sdk-version", "Native host .NET SDK version is empty")]
-    [InlineData("missing-lock", "restored-graph-and-payload", "did not produce packages.lock.json")]
+    [InlineData("missing-lock", "initial-restore", "missing or is not a regular file")]
     [InlineData("missing-css", "native-build", "did not generate fresh nonempty")]
     [InlineData("empty-css", "native-build", "did not generate fresh nonempty")]
     [InlineData("missing-binary", "native-build", "did not acquire the expected host cache binary")]
@@ -332,7 +351,7 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
 
         var result = await TailwindNativeConsumerWorkflow.RunAsync(producer.Repository, producer.Bundle, producer.ManifestPath,
             ReleaseOptions(producer, CurrentRid(), failure, report), runner, CancellationToken.None,
-            ValidateFixtureProducerArtifactsAsync);
+            ValidateFixtureProducerArtifactsAsync, producer.LockTemplatePath);
 
         Assert.False(result.Succeeded);
         Assert.Equal("failed", result.Status);
@@ -344,11 +363,13 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
 
     [Theory]
     [InlineData("restore-failed", "initial-restore", "simulated initial restore failure", "sdk-version,restore")]
+    [InlineData("changed-lock", "initial-restore", "changed during locked restore", "sdk-version,restore")]
     [InlineData("locked-restore-failed", "locked-restore", "simulated locked restore failure", "sdk-version,restore,locked restore")]
     [InlineData("unsafe-package-path", "restored-graph-and-payload", "unsafe package path", "sdk-version,restore,locked restore")]
     [InlineData("external-package-folder", "restored-graph-and-payload", "designated fresh private NuGet cache", "sdk-version,restore,locked restore")]
     [InlineData("multiple-package-folders", "restored-graph-and-payload", "designated fresh private NuGet cache", "sdk-version,restore,locked restore")]
     [InlineData("missing-package-path", "restored-graph-and-payload", "no package path", "sdk-version,restore,locked restore")]
+    [InlineData("missing-package-folders", "restored-graph-and-payload", "given key was not present", "sdk-version,restore,locked restore")]
     [InlineData("missing-package-directory", "restored-graph-and-payload", "escapes the private cache or is absent", "sdk-version,restore,locked restore")]
     [InlineData("missing-cache-archive", "restored-graph-and-payload", "does not contain exactly the expected archive", "sdk-version,restore,locked restore")]
     [InlineData("extra-cache-archive", "restored-graph-and-payload", "does not contain exactly the expected archive", "sdk-version,restore,locked restore")]
@@ -384,7 +405,7 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
 
         var result = await TailwindNativeConsumerWorkflow.RunAsync(producer.Repository, producer.Bundle, producer.ManifestPath,
             ReleaseOptions(producer, CurrentRid(), failure, report), runner, CancellationToken.None,
-            ValidateFixtureProducerArtifactsAsync);
+            ValidateFixtureProducerArtifactsAsync, producer.LockTemplatePath);
 
         Assert.False(result.Succeeded);
         Assert.Equal("failed", result.Status);
@@ -436,6 +457,25 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
         }
 
         var packageHash = PackageHash.ComputeSha512(archivePath);
+        var lockTemplatePath = TestPathUtils.PathUnder(bundle, "fixture-consumer.lock.json");
+        var lockTemplate = new
+        {
+            version = 1,
+            dependencies = new Dictionary<string, object>
+            {
+                ["net10.0"] = new Dictionary<string, object>
+                {
+                    [packageId] = new
+                    {
+                        type = "Direct",
+                        requested = "[1.2.3, )",
+                        resolved = "1.2.3",
+                        contentHash = Convert.ToBase64String(Convert.FromHexString(packageHash))
+                    }
+                }
+            }
+        };
+        await File.WriteAllBytesAsync(lockTemplatePath, JsonSerializer.SerializeToUtf8Bytes(lockTemplate));
         var entry = new PackageArtifactManifestEntry(packageId,
             "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
             "publish", fileName, packageHash, false);
@@ -446,7 +486,7 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
         var subject = await TailwindProofSubjectService.CreateAsync(bundle, manifestPath, "12345", "901", "1", commit,
             closure, CancellationToken.None);
         var subjectHash = await TailwindProofSubjectService.WriteAsync(subject, bundle, CancellationToken.None);
-        return new ProducerBundle(repository, bundle, manifestPath, commit, subjectHash);
+        return new ProducerBundle(repository, bundle, manifestPath, commit, subjectHash, lockTemplatePath);
     }
 
     private static byte[] CreateSyntheticReleaseManifest()
@@ -566,7 +606,7 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
         }
     }
 
-    private sealed record ProducerBundle(string Repository, string Bundle, string ManifestPath, string SourceCommit, string SubjectSha256);
+    private sealed record ProducerBundle(string Repository, string Bundle, string ManifestPath, string SourceCommit, string SubjectSha256, string LockTemplatePath);
 
     private sealed class NativeReleaseRunner(ProducerBundle producer, string rid, bool mutateProtectedPayloadAfterBuild = false,
         string? failure = null) : ICommandRunner
@@ -589,6 +629,8 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
             if (request.FailureVerb == "sdk-version") return new CommandRunResult(failure == "empty-sdk" ? string.Empty : "10.0.100", string.Empty);
             if (request.FailureVerb is "restore" or "locked restore")
             {
+                Assert.Contains("--locked-mode", request.Arguments);
+                Assert.DoesNotContain("--force-evaluate", request.Arguments);
                 if (failure == "restore-failed" && request.FailureVerb == "restore")
                     throw new PackageIndexException("simulated initial restore failure");
                 if (request.FailureVerb == "restore") await CreateRestoreOutputsAsync(request, cancellationToken);
@@ -710,15 +752,26 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
             };
             _assetsPath = TestPathUtils.PathUnder(request.WorkingDirectory, "obj", "project.assets.json");
             Directory.CreateDirectory(Path.GetDirectoryName(_assetsPath)!);
-            await File.WriteAllBytesAsync(_assetsPath, JsonSerializer.SerializeToUtf8Bytes(assets), cancellationToken);
+            if (failure == "missing-package-folders")
+            {
+                var missingFolders = JsonNode.Parse(JsonSerializer.SerializeToUtf8Bytes(assets))!.AsObject();
+                missingFolders.Remove("packageFolders");
+                await File.WriteAllTextAsync(_assetsPath, missingFolders.ToJsonString(), cancellationToken);
+            }
+            else
+            {
+                await File.WriteAllBytesAsync(_assetsPath, JsonSerializer.SerializeToUtf8Bytes(assets), cancellationToken);
+            }
             if (failure == "linked-assets-file")
             {
                 var linkedAssetsTarget = TestPathUtils.PathUnder(Directory.GetParent(request.WorkingDirectory)!.FullName, "linked-project.assets.json");
                 File.Move(_assetsPath, linkedAssetsTarget);
                 File.CreateSymbolicLink(_assetsPath, linkedAssetsTarget);
             }
-            if (failure != "missing-lock")
-                await File.WriteAllTextAsync(TestPathUtils.PathUnder(request.WorkingDirectory, "packages.lock.json"), "{\"version\":1,\"dependencies\":{}}", cancellationToken);
+            if (failure == "missing-lock")
+                File.Delete(TestPathUtils.PathUnder(request.WorkingDirectory, "packages.lock.json"));
+            if (failure == "changed-lock")
+                await File.AppendAllTextAsync(TestPathUtils.PathUnder(request.WorkingDirectory, "packages.lock.json"), " ", cancellationToken);
         }
     }
 

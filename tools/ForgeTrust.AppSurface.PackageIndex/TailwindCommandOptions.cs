@@ -71,13 +71,13 @@ internal sealed record TailwindCommandOptions(
             Require(RepositoryId, "--repository-id"),
             Require(ProducerRunId, "--producer-run-id"),
             Require(SourceCommit, "--source-commit"),
-            Require(AggregateInput, "--aggregate-input"),
+            ResolveRequiredPath(AggregateInput, repositoryRoot, "--aggregate-input"),
             Require(AggregateArtifactId, "--aggregate-artifact-id"),
             Require(ExpectedAggregateSha256, "--expected-aggregate-sha256"),
-            Require(PublicationDirectory, "--publication-directory"),
-            Require(PublicationStartReceipt, "--publication-start-receipt"),
+            ResolveRequiredPath(PublicationDirectory, repositoryRoot, "--publication-directory"),
+            ResolveRequiredPath(PublicationStartReceipt, repositoryRoot, "--publication-start-receipt"),
             Require(PublicationStartArtifactId, "--publication-start-artifact-id"),
-            Require(ReportDirectory, "--report-directory"));
+            ResolveRequiredPath(ReportDirectory, repositoryRoot, "--report-directory"));
     }
 
     internal TailwindPublicationRequest CreatePreflightRequest(
@@ -91,7 +91,7 @@ internal sealed record TailwindCommandOptions(
             Require(ProducerSubject, "--producer-subject"), Require(ProducerArtifactId, "--producer-artifact-id"),
             Require(ExpectedSubjectSha256, "--expected-subject-sha256"), Require(RepositoryId, "--repository-id"),
             Require(ProducerRunId, "--producer-run-id"), Require(SourceCommit, "--source-commit"),
-            Require(AggregateInput, "--aggregate-input"), Require(AggregateArtifactId, "--aggregate-artifact-id"),
+            ResolveRequiredPath(AggregateInput, repositoryRoot, "--aggregate-input"), Require(AggregateArtifactId, "--aggregate-artifact-id"),
             Require(ExpectedAggregateSha256, "--expected-aggregate-sha256"),
             ResolveRequiredPath(PublicationDirectory, repositoryRoot, "--publication-directory"),
             Path.Combine(reportDirectory, "publication-start-receipt.json"), string.Empty, reportDirectory);

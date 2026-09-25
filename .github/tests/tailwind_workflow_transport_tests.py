@@ -137,13 +137,16 @@ class WorkflowTransportTests(unittest.TestCase):
         self.assertIn("expired", expired.stderr)
 
     def test_partial_api_pagination_failure_cannot_select_an_early_match(self) -> None:
-        self.fail_after_page = 0
+        self.fail_after_page = 1
+        first_page = [artifact(100 + index, f"unrelated-{index}") for index in range(99)]
+        first_page.append(artifact(77, "producer"))
         result = self.run_resolver(
             "resolve-producer", "--repository", "org/repo", "--run-id", "7", "--run-attempt", "1",
             "--name", "producer", "--output", str(self.root / "incomplete"),
-            pages=[{"artifacts": [artifact(77, "producer")]}, {"artifacts": []}],
+            pages=[{"artifacts": first_page}, {"artifacts": []}],
         )
         self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(any("page=2" in " ".join(call) for call in self.calls_read()))
         self.assertFalse((self.root / "incomplete").exists())
 
     def test_later_attempt_repack_requires_every_prior_upload_and_start_to_be_skipped(self) -> None:
@@ -531,6 +534,10 @@ class WorkflowTransportTests(unittest.TestCase):
         aggregate = source[source.index("  aggregate-evidence:"):]
         self.assertIn("producer_artifact_id: ${{ inputs.producer_artifact_id }}", aggregate)
         self.assertIn("expected_subject_sha256: ${{ inputs.expected_subject_sha256 }}", aggregate)
+        self.assertIn("PRODUCER_ARTIFACT_ID: ${{ inputs.producer_artifact_id }}", aggregate)
+        self.assertIn("EXPECTED_SUBJECT_SHA256: ${{ inputs.expected_subject_sha256 }}", aggregate)
+        self.assertIn('--producer-artifact-id "$PRODUCER_ARTIFACT_ID"', aggregate)
+        self.assertIn('--expected-subject-sha256 "$EXPECTED_SUBJECT_SHA256"', aggregate)
         self.assertIn("aggregate_artifact_id: ${{ steps.upload-aggregate.outputs.artifact-id }}", aggregate)
         self.assertLess(aggregate.index("--host-artifacts-map \"$HOST_MAP\""), aggregate.index("- name: Upload aggregate and bound host evidence"))
 
@@ -548,6 +555,17 @@ class WorkflowTransportTests(unittest.TestCase):
         self.assertIn("artifact-ids: ${{ steps.upload-rehearsal-start.outputs.artifact-id }}", package)
         self.assertIn("--mode validate-publication-start", package)
         self.assertIn("for pass in initial replay; do", package)
+        step_start = package.index("- name: Validate original receipt and credential-free replay")
+        step_end = package.index("\n      - name:", step_start + 1)
+        step = package[step_start:step_end]
+        run_marker = "        run: |\n"
+        self.assertIn(run_marker, step)
+        script = "\n".join(
+            line[10:] if line.startswith("          ") else ""
+            for line in step.split(run_marker, 1)[1].splitlines()
+        )
+        syntax = subprocess.run(["bash", "-n"], input=script, text=True, capture_output=True, check=False)
+        self.assertEqual(0, syntax.returncode, syntax.stderr)
         self.assertIn('TAILWIND_REHEARSAL_ENABLED: "true"', package)
         self.assertIn("TAILWIND_REHEARSAL_PRODUCER_ARTIFACT_ID: ${{ env.PRODUCER_ARTIFACT_ID }}", package)
         self.assertIn("TAILWIND_REHEARSAL_AGGREGATE_ARTIFACT_ID: ${{ env.AGGREGATE_ARTIFACT_ID }}", package)

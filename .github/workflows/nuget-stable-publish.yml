@@ -614,11 +614,12 @@ jobs:
           RECOVERED_ID: ${{ steps.start-recovery.outputs.publication_artifact_id }}
           UPLOADED_ID: ${{ steps.upload-start.outputs.artifact-id }}
           RECOVERED: ${{ steps.start-recovery.outputs.publication_found }}
+          RECOVERED_RECEIPT: ${{ steps.candidate.outputs.start_receipt_path }}
           FRESH_RECEIPT: ${{ runner.temp }}/tailwind-publish-preflight-report/publication-start-receipt.json
         run: |
           set -euo pipefail
           start_id="$RECOVERED_ID"
-          receipt="${{ steps.candidate.outputs.start_receipt_path }}"
+          receipt="$RECOVERED_RECEIPT"
           if [[ "$RECOVERED" != true ]]; then start_id="$UPLOADED_ID"; receipt="$FRESH_RECEIPT"; fi
           [[ "$start_id" =~ ^[1-9][0-9]*$ && -f "$receipt" ]]
           echo "artifact_id=$start_id" >> "$GITHUB_OUTPUT"

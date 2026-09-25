@@ -185,8 +185,8 @@ jobs:
             echo "Mutated producer subject unexpectedly passed typed verification." >&2
             exit 1
           fi
-          if ! grep -Eqi 'subject|sha.?256|digest' "$log"; then
-            cat "$log" >&2
+          if ! grep -Eqi 'subject|sha.?256|digest' "$RUNNER_TEMP/tailwind-mutation-report/diagnostics.json"; then
+            cat "$RUNNER_TEMP/tailwind-mutation-report/diagnostics.json" >&2
             echo "Mutation probe failed for an unrelated reason; expected a subject integrity rejection." >&2
             exit 1
           fi
@@ -219,6 +219,8 @@ jobs:
     env:
       SOURCE_COMMIT: ${{ inputs.source_commit }}
       PACKAGE_VERSION: ${{ inputs.package_version }}
+      PRODUCER_ARTIFACT_ID: ${{ inputs.producer_artifact_id }}
+      EXPECTED_SUBJECT_SHA256: ${{ inputs.expected_subject_sha256 }}
       NATIVE_INVOCATION_ID: ${{ inputs.producer_artifact_id }}-${{ github.run_id }}-${{ github.run_attempt }}-tailwind-native
     steps:
       - name: Initialize aggregate paths
@@ -297,8 +299,8 @@ jobs:
             --repo-root "$GITHUB_WORKSPACE" --mode aggregate \
             --artifacts-input "$PRODUCER_ROOT" --artifact-manifest "$PRODUCER_ROOT/package-artifact-manifest.json" \
             --producer-subject "$PRODUCER_ROOT/tailwind-proof-subject.json" \
-            --producer-artifact-id "${{ inputs.producer_artifact_id }}" \
-            --expected-subject-sha256 "${{ inputs.expected_subject_sha256 }}" \
+            --producer-artifact-id "$PRODUCER_ARTIFACT_ID" \
+            --expected-subject-sha256 "$EXPECTED_SUBJECT_SHA256" \
             --repository-id "$GITHUB_REPOSITORY_ID" --producer-run-id "$GITHUB_RUN_ID" \
             --source-commit "$SOURCE_COMMIT" --native-invocation-id "$NATIVE_INVOCATION_ID" \
             --evidence-input "$HOST_ROOT" --host-artifacts-map "$HOST_MAP" \

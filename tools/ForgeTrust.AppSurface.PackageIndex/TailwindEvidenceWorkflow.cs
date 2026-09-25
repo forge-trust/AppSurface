@@ -265,9 +265,9 @@ internal static class TailwindEvidenceWorkflow
     {
         var reportDirectory = Path.GetFullPath(TailwindCommandOptions.Require(options.ReportDirectory, "--report-directory"));
         var reportPath = Path.Combine(reportDirectory, AggregateFile);
+        RequireFreshDirectory(reportDirectory, "aggregate report");
         try
         {
-            RequireFreshDirectory(reportDirectory, "aggregate report");
             var binding = await ValidateProducerBindingAsync(repositoryRoot, artifactsInputPath, artifactManifestPath, options, cancellationToken);
             var invocation = TailwindCommandOptions.Require(options.NativeInvocationId, "--native-invocation-id");
             var evidenceRoot = Path.GetFullPath(TailwindCommandOptions.Require(options.EvidenceInput, "--evidence-input"));

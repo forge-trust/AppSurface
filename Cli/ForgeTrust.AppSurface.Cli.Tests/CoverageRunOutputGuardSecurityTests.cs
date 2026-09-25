@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Text;
 using ForgeTrust.AppSurface.Cli;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Testing;
@@ -351,6 +352,36 @@ public sealed class CoverageRunOutputGuardSecurityTests
     }
 
     [Fact]
+    public void Validate_ShouldAcceptMarkerWithWindowsLineEndings()
+    {
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        root.WriteFile("coverage/.appsurface-coverage-output", MarkerContents.Replace("\n", "\r\n", StringComparison.Ordinal));
+
+        CoverageRunOutputGuard.Validate(output, root.Path, []);
+
+        Assert.Equal(
+            MarkerContents.Replace("\n", "\r\n", StringComparison.Ordinal),
+            File.ReadAllText(Path.Join(output, ".appsurface-coverage-output")));
+    }
+
+    [Fact]
+    public void Validate_ShouldRejectMarkerWithInvalidUtf8WithoutTouchingOtherFiles()
+    {
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        var marker = Path.Join(output, ".appsurface-coverage-output");
+        File.WriteAllBytes(marker, [0xFF, 0xFE, 0xFA]);
+        var sentinel = root.WriteFile("coverage/summary.txt", "must remain");
+
+        Assert.Throws<DecoderFallbackException>(
+            () => CoverageRunOutputGuard.Validate(output, root.Path, []));
+
+        Assert.Equal(new byte[] { 0xFF, 0xFE, 0xFA }, File.ReadAllBytes(marker));
+        Assert.Equal("must remain", File.ReadAllText(sentinel));
+    }
+
+    [Fact]
     public void Validate_ShouldNotCreateMissingOutput()
     {
         using var root = TestDirectory.Create();
@@ -676,6 +707,27 @@ public sealed class CoverageRunOutputGuardSecurityTests
         Directory.CreateDirectory(Path.Join(output, CoverageGateArtifactNames.Markdown));
         Assert.Throws<IOException>(() => lease.ValidateOwnedGateArtifacts([CoverageGateArtifactNames.Markdown]));
         Assert.Throws<IOException>(() => lease.DeleteOwnedGateArtifact(CoverageGateArtifactNames.Markdown));
+    }
+
+    [Fact]
+    public void ValidateOwnedGateArtifacts_ShouldRejectSymbolicLinkWithoutTouchingTarget()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var root = TestDirectory.Create();
+        var output = root.CreateDirectory("coverage");
+        var external = root.WriteFile("external-report.json", "external sentinel");
+        File.CreateSymbolicLink(Path.Join(output, CoverageGateArtifactNames.Json), external);
+        using var lease = CoverageRunOutputLease.Acquire(output);
+
+        var exception = Assert.Throws<IOException>(
+            () => lease.ValidateOwnedGateArtifacts([CoverageGateArtifactNames.Json]));
+
+        Assert.Equal("external sentinel", File.ReadAllText(external));
+        Assert.True(File.Exists(Path.Join(output, CoverageGateArtifactNames.Json)));
     }
 
     [Fact]

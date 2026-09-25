@@ -36,10 +36,16 @@ internal static class TailwindNativeConsumerWorkflow
         => RunAsync(repositoryRoot, artifactsInputPath, artifactManifestPath, options,
             new TailwindBoundedCommandRunner(new CliWrapCommandRunner()), cancellationToken);
 
+    /// <summary>
+    /// Runs the native proof with an injectable runner and producer validator for focused tests. Production uses the
+    /// source-stamped <see cref="TailwindConsumerLock.RelativeTemplatePath"/>; a test may supply a fixture template
+    /// for its deliberately smaller producer closure.
+    /// </summary>
     internal static async Task<TailwindEvidenceCommandResult> RunAsync(
         string repositoryRoot, string artifactsInputPath, string artifactManifestPath,
         TailwindCommandOptions options, ICommandRunner runner, CancellationToken cancellationToken,
-        TailwindNativeProducerArtifactValidator? producerArtifactValidator = null)
+        TailwindNativeProducerArtifactValidator? producerArtifactValidator = null,
+        string? consumerLockTemplatePath = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(runner);
@@ -80,6 +86,10 @@ internal static class TailwindNativeConsumerWorkflow
             Directory.CreateDirectory(Path.Combine(consumer, "wwwroot", "css"));
             Directory.CreateDirectory(tailwindCache);
             WriteConsumerFiles(consumer, artifactsInputPath, producerManifest.PackageVersion, tailwindCache);
+            failedStage = "consumer-lock-preparation";
+            var lockPath = Path.Combine(consumer, "packages.lock.json");
+            var templatePath = consumerLockTemplatePath ?? Path.Combine(repositoryRoot, TailwindConsumerLock.RelativeTemplatePath);
+            var expectedLock = TailwindConsumerLock.Materialize(templatePath, lockPath, binding.Subject.FirstPartyPackages);
             var environment = new Dictionary<string, string?>
             {
                 ["NUGET_PACKAGES"] = packageCache,
@@ -99,10 +109,12 @@ internal static class TailwindNativeConsumerWorkflow
             var sdkVersion = sdk.StandardOutput.Trim();
             if (string.IsNullOrWhiteSpace(sdkVersion)) throw new PackageIndexException("Native host .NET SDK version is empty.");
             failedStage = "initial-restore";
-            await RunCommand(runner, "restore", [project, "--configfile", Path.Combine(consumer, "NuGet.config"), "--force-evaluate"], consumer, environment, cancellationToken);
+            await RunCommand(runner, "restore", [project, "--configfile", Path.Combine(consumer, "NuGet.config"), "--locked-mode"], consumer, environment, cancellationToken);
+            TailwindConsumerLock.RequireUnchanged(lockPath, expectedLock);
             completed.Add("restore");
             failedStage = "locked-restore";
             await RunCommand(runner, "locked restore", [project, "--configfile", Path.Combine(consumer, "NuGet.config"), "--locked-mode"], consumer, environment, cancellationToken);
+            TailwindConsumerLock.RequireUnchanged(lockPath, expectedLock);
             completed.Add("locked-restore");
 
             failedStage = "restored-graph-and-payload";
@@ -170,8 +182,6 @@ internal static class TailwindNativeConsumerWorkflow
             if (string.IsNullOrWhiteSpace(binaryName) || string.IsNullOrWhiteSpace(binaryHash) || string.IsNullOrWhiteSpace(internalManifestHash))
                 throw new PackageIndexException("Restored Tailwind package did not yield the expected host binary and internal manifest evidence.");
             CopyRegularFile(assetsPath, Path.Combine(report, "consumer", "project.assets.json"));
-            var lockPath = Path.Combine(consumer, "packages.lock.json");
-            if (!File.Exists(lockPath)) throw new PackageIndexException("Locked consumer restore did not produce packages.lock.json.");
             CopyRegularFile(lockPath, Path.Combine(report, "consumer", "packages.lock.json"));
 
             failedStage = "native-build";
@@ -252,7 +262,8 @@ internal static class TailwindNativeConsumerWorkflow
             await TailwindEvidenceWorkflow.WriteAtomicCreateNewJsonAsync(receiptPath, receipt, cancellationToken);
             return new TailwindEvidenceCommandResult(true, "succeeded", receiptPath);
         }
-        catch (Exception ex) when (ex is PackageIndexException or IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or OperationCanceledException)
+        catch (Exception ex) when (ex is PackageIndexException or IOException or UnauthorizedAccessException or JsonException
+            or InvalidOperationException or OperationCanceledException or KeyNotFoundException or InvalidDataException or ArgumentException)
         {
             await TailwindEvidenceWorkflow.WriteFailureReportBestEffortAsync(report, failedStage ?? "prerequisites", ex, cancellationToken,
                 new { failedStage, completedStages = completed, expectedRid = options.ExpectedRid, observedHost = ObserveHost() });

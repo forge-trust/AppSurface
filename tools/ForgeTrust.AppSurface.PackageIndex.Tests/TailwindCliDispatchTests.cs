@@ -36,8 +36,27 @@ public sealed class TailwindCliDispatchTests : IDisposable
                 "--report-directory", report], stdout, stderr, _root);
 
         Assert.Equal(1, exit);
-        Assert.False(File.Exists(TestPathUtils.PathUnder(report, "tailwind-native-host-evidence.json")));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(report, "tailwind-native-aggregate.json")));
         Assert.True(stderr.ToString().Length > 0 || stdout.ToString().Contains("failed", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ProducerBindingCli_WritesDiagnosticsWhenValidationFails()
+    {
+        Directory.CreateDirectory(_root);
+        var report = TestPathUtils.PathUnder(_root, "binding-report");
+        var binding = TestPathUtils.PathUnder(_root, "binding.json");
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exit = await Program.RunAsync(
+            ["verify-tailwind-evidence", "--repo-root", _root, "--mode", "producer-binding",
+                "--report-directory", report, "--resolved-binding-output", binding], stdout, stderr, _root);
+
+        Assert.Equal(1, exit);
+        Assert.False(File.Exists(binding));
+        Assert.True(File.Exists(TestPathUtils.PathUnder(report, "diagnostics.json")));
+        Assert.True(File.Exists(TestPathUtils.PathUnder(report, "summary.md")));
     }
 
     [Fact]

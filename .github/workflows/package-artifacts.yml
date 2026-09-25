@@ -270,6 +270,7 @@ jobs:
               --publication-directory "$PUBLICATION_DIRECTORY" --publication-start-receipt "$START_RECEIPT_PATH" \
               --publication-start-artifact-id "$START_ARTIFACT_ID" \
               --report-directory "$RUNNER_TEMP/rehearsal-start-validation-$pass"
+          done
       - name: Exercise recording publisher credential and push boundaries
         env:
           SOURCE_REVISION_ID: ${{ env.SOURCE_COMMIT }}

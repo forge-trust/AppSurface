@@ -21,6 +21,27 @@ public sealed class TailwindEvidenceWorkflowTests : IDisposable
     }
 
     [Fact]
+    public async Task Aggregate_RejectsStaleReportWithoutChangingPriorEvidence()
+    {
+        var report = TestPathUtils.PathUnder(_root, "stale-aggregate");
+        Directory.CreateDirectory(report);
+        var diagnostics = TestPathUtils.PathUnder(report, "diagnostics.json");
+        var summary = TestPathUtils.PathUnder(report, "summary.md");
+        var aggregate = TestPathUtils.PathUnder(report, "tailwind-native-aggregate.json");
+        await File.WriteAllTextAsync(diagnostics, "prior diagnostics");
+        await File.WriteAllTextAsync(summary, "prior summary");
+        await File.WriteAllTextAsync(aggregate, "prior aggregate");
+        var options = TailwindCommandOptions.Extract(["--report-directory", report]);
+
+        await Assert.ThrowsAsync<PackageIndexException>(() => TailwindEvidenceWorkflow.AggregateAsync(
+            _root, _root, aggregate, options, CancellationToken.None));
+
+        Assert.Equal("prior diagnostics", await File.ReadAllTextAsync(diagnostics));
+        Assert.Equal("prior summary", await File.ReadAllTextAsync(summary));
+        Assert.Equal("prior aggregate", await File.ReadAllTextAsync(aggregate));
+    }
+
+    [Fact]
     public void HostArtifactDirectory_MustBeAnExistingUnlinkedChild()
     {
         var child = TestPathUtils.PathUnder(_root, "linux-x64");
