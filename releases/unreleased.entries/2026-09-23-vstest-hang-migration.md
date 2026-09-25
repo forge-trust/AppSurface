@@ -1,0 +1,4 @@
+<!-- appsurface:unreleased-entry section="migration-watch" -->
+### Coverage watchdog default
+
+- The [`coverage run` watchdog](../../Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog) now defaults to `fail` with the existing 10-minute no-progress limit. Fail mode may end a healthy individual test that exceeds its computed VSTest hang timeout. Increase `--no-progress-timeout` to give that test headroom, or explicitly select `--watchdog warn` or `off` to disable automatic hang blame. An [Evidence coverage declaration](../../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md) can increase `TimeoutSeconds` only when the remaining producer deadline shortens the automatic timer; Evidence's fixed watchdog caps that timer at 9 minutes and its producer deadline remains authoritative. The [#815 migration guide](../issue-815-vstest-hang.md#migration-choices) gives the choices and outcome codes.

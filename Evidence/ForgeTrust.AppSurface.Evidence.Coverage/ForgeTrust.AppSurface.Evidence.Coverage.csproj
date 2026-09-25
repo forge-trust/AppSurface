@@ -31,6 +31,7 @@
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunDrivers.cs" Link="CoverageRunDrivers.cs" />
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunWatchdog.cs" Link="CoverageRunWatchdog.cs" />
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunArtifactReader.cs" Link="CoverageRunArtifactReader.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunHangDiagnosticsReader.cs" Link="CoverageRunHangDiagnosticsReader.cs" />
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunOutputLease.cs" Link="CoverageRunOutputLease.cs" />
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageProjectManifest.cs" Link="CoverageProjectManifest.cs" />
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunSlowTestDiagnostics.cs" Link="CoverageRunSlowTestDiagnostics.cs" />

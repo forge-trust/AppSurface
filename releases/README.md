@@ -19,6 +19,7 @@ and package consumer proof.
 - [v0.1.0](./v0.1.0.md) is the canonical archive for the first coordinated stable AppSurface release.
 - The `v0.1.0` release-candidate routes redirect to [v0.1.0](./v0.1.0.md), where the RC dates are recorded.
 - [Unreleased](./unreleased.md) is the living proof artifact for the next coordinated AppSurface version: the current merged-work ledger, not the final tagged narrative.
+- [Issue #815 VSTest hang diagnostics](./issue-815-vstest-hang.md) records the coverage-run behavior change, migration choices, and timing model.
 - [Changelog](../CHANGELOG.md) is the compact ledger that points to unreleased and tagged stories.
 - [Pre-1.0 upgrade policy](./upgrade-policy.md) explains the stability contract before `v1.0.0`.
 - [Release authoring checklist](./release-authoring-checklist.md) is the maintainer workflow for turning the unreleased page into a tagged release.
