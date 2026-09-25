@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using ForgeTrust.AppSurface.Durable.Provider;
 using ForgeTrust.AppSurface.Durable.Testing;
+using Microsoft.Extensions.Time.Testing;
 
 namespace ForgeTrust.AppSurface.Durable.Testing.Tests;
 
@@ -374,18 +375,15 @@ public sealed class DurableHostScenarioTests
     }
 
     [Fact]
-    public async Task Pump_handle_keeps_exact_request_and_shallow_payload_reference_across_reuse_and_clear()
+    public async Task Pump_handle_keeps_exact_request_across_reuse_and_clear()
     {
-        var payload = new MutablePayload { Value = "before" };
         var request = new DurableRuntimePumpRequest();
         var admission = new QueuedAdmission(_ => ValueTask.FromResult(Attempt(DurableRuntimePumpAttemptKind.Completed)));
         var scenario = Create(new QueuedHealth(Snapshot(DurableRuntimeHealthState.Healthy)), admission, new MonotonicTimeProvider(), request);
         await scenario.AssessHealthAsync();
         await scenario.RunDirectPumpOnceAsync();
         var invocation = Assert.Single(scenario.PumpInvocations);
-        payload.Value = "after";
         Assert.Same(request, invocation.Request);
-        Assert.Equal("after", payload.Value);
         Assert.Equal(1, scenario.ClearCompletedPumpInvocations());
         await scenario.RunDirectPumpOnceAsync();
         Assert.Equal(2, admission.Calls);
@@ -410,7 +408,6 @@ public sealed class DurableHostScenarioTests
 
     private static TaskCompletionSource<T> NewSource<T>() => new(TaskCreationOptions.RunContinuationsAsynchronously);
     private static TaskCompletionSource NewSource() => new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private sealed class MutablePayload { public string Value { get; set; } = string.Empty; }
 
     private sealed class QueuedHealth(params object[] responses) : IDurableRuntimeHealth
     {
@@ -454,28 +451,26 @@ public sealed class DurableHostScenarioTests
     private sealed class MonotonicTimeProvider : TimeProvider
     {
         private readonly object _gate = new();
-        private readonly List<FakeTimer> _timers = [];
+        private readonly FakeTimeProvider _clock = new(DateTimeOffset.UnixEpoch);
         private readonly TaskCompletionSource _firstTimerCreated = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private long _ticks;
-        private DateTimeOffset _utcNow = DateTimeOffset.UnixEpoch;
+        private TimeSpan _utcAdjustment;
         private int _timestampReadsUntilAdvance = -1;
         private TimeSpan _advanceOnElapsedRead;
-        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long TimestampFrequency => _clock.TimestampFrequency;
         public override long GetTimestamp()
         {
             lock (_gate)
             {
                 if (_timestampReadsUntilAdvance > 0 && --_timestampReadsUntilAdvance == 0)
                 {
-                    _ticks = checked(_ticks + _advanceOnElapsedRead.Ticks);
-                    _utcNow += _advanceOnElapsedRead;
+                    _clock.Advance(_advanceOnElapsedRead);
                     _timestampReadsUntilAdvance = -1;
                 }
-                return _ticks;
+                return _clock.GetTimestamp();
             }
         }
-        public override DateTimeOffset GetUtcNow() { lock (_gate) return _utcNow; }
-        public void AdjustUtc(TimeSpan amount) { lock (_gate) _utcNow += amount; }
+        public override DateTimeOffset GetUtcNow() { lock (_gate) return _clock.GetUtcNow() + _utcAdjustment; }
+        public void AdjustUtc(TimeSpan amount) { lock (_gate) _utcAdjustment += amount; }
         public void AdvanceOnThirdTimestampRead(TimeSpan amount)
         {
             lock (_gate)
@@ -486,47 +481,12 @@ public sealed class DurableHostScenarioTests
             }
         }
         public Task WaitForTimerAsync() => _firstTimerCreated.Task;
-        public void Advance(TimeSpan amount)
-        {
-            FakeTimer[] due;
-            lock (_gate)
-            {
-                _ticks = checked(_ticks + amount.Ticks);
-                _utcNow += amount;
-                due = _timers.Where(timer => timer.IsDue(_ticks)).ToArray();
-            }
-            foreach (var timer in due) timer.Fire();
-        }
+        public void Advance(TimeSpan amount) => _clock.Advance(amount);
         public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
         {
-            var timer = new FakeTimer(this, callback, state);
-            timer.Change(dueTime, period);
-            lock (_gate) _timers.Add(timer);
+            var timer = _clock.CreateTimer(callback, state, dueTime, period);
             _firstTimerCreated.TrySetResult();
             return timer;
-        }
-        private sealed class FakeTimer(MonotonicTimeProvider owner, TimerCallback callback, object? state) : ITimer
-        {
-            private long _due = long.MaxValue;
-            private TimeSpan _period = Timeout.InfiniteTimeSpan;
-            private bool _disposed;
-            public bool IsDue(long now) => !_disposed && now >= _due;
-            public void Fire()
-            {
-                if (_disposed) return;
-                callback(state);
-                if (_period == Timeout.InfiniteTimeSpan) _due = long.MaxValue;
-                else _due = checked(_due + _period.Ticks);
-            }
-            public bool Change(TimeSpan dueTime, TimeSpan period)
-            {
-                if (_disposed) return false;
-                _period = period;
-                _due = dueTime == Timeout.InfiniteTimeSpan ? long.MaxValue : checked(owner.GetTimestamp() + Math.Max(0, dueTime.Ticks));
-                return true;
-            }
-            public void Dispose() => _disposed = true;
-            public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
         }
     }
 }

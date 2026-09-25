@@ -4,6 +4,7 @@ using ForgeTrust.AppSurface.Flow;
 using ForgeTrust.AppSurface.Workers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Npgsql;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
@@ -1264,8 +1265,11 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.Equal(1, result.Deferred);
         Assert.Equal(0, result.Failed);
         Assert.False(result.HasMore);
-        Assert.Equal(SuccessfulWorkRegistration.Name, registrationObservation.WorkName);
-        Assert.Equal("v1", registrationObservation.WorkVersion);
+        var snapshot = await provider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
+            new DurableWorkGetRequest(scope, accepted.Value!.WorkId));
+        Assert.True(snapshot.IsSuccess);
+        Assert.Equal(registrationObservation.WorkName, snapshot.Value!.WorkName);
+        Assert.Equal(registrationObservation.WorkVersion, snapshot.Value.WorkVersion);
     }
 
     [Fact]
@@ -1955,8 +1959,11 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.Equal(0, result.Processed);
         Assert.Equal(1, result.Deferred);
         Assert.Equal(0, result.Failed);
-        Assert.Equal(BlockingWorkRegistration.Name, registrationObservation.WorkName);
-        Assert.Equal("v1", registrationObservation.WorkVersion);
+        var snapshot = await provider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
+            new DurableWorkGetRequest(scope, accepted.Value!.WorkId));
+        Assert.True(snapshot.IsSuccess);
+        Assert.Equal(registrationObservation.WorkName, snapshot.Value!.WorkName);
+        Assert.Equal(registrationObservation.WorkVersion, snapshot.Value.WorkVersion);
     }
 
     [Fact]
@@ -3119,91 +3126,17 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             throw new InvalidOperationException("Idempotent test Work does not reconcile.");
     }
 
-    private sealed class MonotonicTimeProvider : TimeProvider
+    private sealed class MonotonicTimeProvider : FakeTimeProvider
     {
-        private readonly object _gate = new();
-        private readonly List<FakeTimer> _timers = [];
         private readonly TaskCompletionSource _firstTimerCreated = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private long _ticks;
-
-        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
-
-        public override long GetTimestamp()
-        {
-            lock (_gate)
-            {
-                return _ticks;
-            }
-        }
 
         internal Task WaitForTimerAsync() => _firstTimerCreated.Task;
 
-        internal void Advance(TimeSpan amount)
-        {
-            FakeTimer[] due;
-            lock (_gate)
-            {
-                _ticks = checked(_ticks + amount.Ticks);
-                due = _timers.Where(timer => timer.IsDue(_ticks)).ToArray();
-            }
-
-            foreach (var timer in due)
-            {
-                timer.Fire();
-            }
-        }
-
         public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
         {
-            var timer = new FakeTimer(this, callback, state);
-            timer.Change(dueTime, period);
-            lock (_gate)
-            {
-                _timers.Add(timer);
-            }
-
+            var timer = base.CreateTimer(callback, state, dueTime, period);
             _firstTimerCreated.TrySetResult();
             return timer;
-        }
-
-        private sealed class FakeTimer(MonotonicTimeProvider owner, TimerCallback callback, object? state) : ITimer
-        {
-            private long _due = long.MaxValue;
-            private bool _disposed;
-
-            internal bool IsDue(long now) => !_disposed && now >= _due;
-
-            internal void Fire()
-            {
-                if (_disposed)
-                {
-                    return;
-                }
-
-                callback(state);
-                _due = long.MaxValue;
-            }
-
-            public bool Change(TimeSpan dueTime, TimeSpan period)
-            {
-                if (_disposed)
-                {
-                    return false;
-                }
-
-                _due = dueTime == Timeout.InfiniteTimeSpan
-                    ? long.MaxValue
-                    : checked(owner.GetTimestamp() + Math.Max(0, dueTime.Ticks));
-                return true;
-            }
-
-            public void Dispose() => _disposed = true;
-
-            public ValueTask DisposeAsync()
-            {
-                Dispose();
-                return ValueTask.CompletedTask;
-            }
         }
     }
 

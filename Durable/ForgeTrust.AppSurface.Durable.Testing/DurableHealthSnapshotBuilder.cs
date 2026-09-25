@@ -88,7 +88,7 @@ public sealed class DurableHealthSnapshotBuilder
         var draining = _isDraining ?? state == DurableRuntimeHealthState.Draining;
         var configuredEpoch = _configuredRuntimeEpoch ?? Guid.Parse("11111111-1111-1111-1111-111111111111");
         var activeEpoch = _hasActiveRuntimeEpochOverride ? _activeRuntimeEpoch : unavailable ? null : configuredEpoch;
-        var started = _hasStartedAtUtcOverride ? _startedAtUtc : state == DurableRuntimeHealthState.NotStarted ? null : DateTimeOffset.UnixEpoch;
+        var started = _hasStartedAtUtcOverride ? _startedAtUtc : state is DurableRuntimeHealthState.NotStarted or DurableRuntimeHealthState.Unavailable ? null : DateTimeOffset.UnixEpoch;
         var heartbeat = _hasLastHeartbeatAtUtcOverride ? _lastHeartbeatAtUtc : state is DurableRuntimeHealthState.NotStarted or DurableRuntimeHealthState.Unavailable ? null : DateTimeOffset.UnixEpoch;
         if (!contradictory)
         {

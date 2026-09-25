@@ -84,6 +84,9 @@ into an empty successful pass.
 Use builder overrides for a single field at a time where possible. Production constructors remain the validation
 authority, so malformed identifiers, bounds, surfaces, counts, codec metadata, or identity still fail during `Build()`.
 The contradictory path is intentionally conspicuous; ordinary `Build()` does not silently create impossible fixtures.
+`DurableRuntimePumpAttemptBuilder.WithResult` preserves an explicit result, including `null`, regardless of whether
+`WithKind` is called before or after it. Without an explicit result, `Completed` supplies an empty pass and other kinds
+supply no result; `Build()` passes contradictory combinations to the production constructor for validation.
 
 ## Six health-state defaults
 
@@ -97,7 +100,7 @@ production `DurableRuntimeHealthSnapshot`, not by the builder. `Observed` means 
 | `Stale` | compatible / compatible | present / present (representative timestamps) | no | yes | yes | yes | no |
 | `Draining` | compatible / compatible | present / present | yes | yes | yes | no | no |
 | `Incompatible` | incompatible / incompatible | present / present | no | yes | no | no | no |
-| `Unavailable` | incompatible / incompatible | start / heartbeat absent; active epoch absent | no | no | no | no | no |
+| `Unavailable` | incompatible / incompatible | absent / absent; active epoch absent | no | no | no | no | no |
 
 `Stale` represents the state, not an elapsed-time calculation performed by this test builder. Override timestamps or
 compatibility fields to exercise a particular consumer case; the production constructor validates the resulting

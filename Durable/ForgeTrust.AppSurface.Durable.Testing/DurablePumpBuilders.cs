@@ -42,21 +42,21 @@ public sealed class DurableRuntimePumpResultBuilder
 public sealed class DurableRuntimePumpAttemptBuilder
 {
     private DurableRuntimePumpAttemptKind _kind = DurableRuntimePumpAttemptKind.Completed;
-    private DurableRuntimePumpResult? _result = new DurableRuntimePumpResultBuilder().Build();
+    private DurableRuntimePumpResult? _result;
+    private bool _hasResultOverride;
     private string? _problemCode;
-    /// <summary>Selects the attempt kind and its valid default result shape.</summary>
+    /// <summary>Selects the attempt kind; an explicit result override is preserved regardless of call order.</summary>
     public DurableRuntimePumpAttemptBuilder WithKind(DurableRuntimePumpAttemptKind value)
     {
         _kind = value;
-        _result = value == DurableRuntimePumpAttemptKind.Completed
-            ? new DurableRuntimePumpResultBuilder().Build()
-            : null;
         return this;
     }
-    /// <summary>Sets the completed pass result.</summary>
-    public DurableRuntimePumpAttemptBuilder WithResult(DurableRuntimePumpResult? value) { _result = value; return this; }
+    /// <summary>Overrides the completed pass result, including with null; production validation rejects contradictions.</summary>
+    public DurableRuntimePumpAttemptBuilder WithResult(DurableRuntimePumpResult? value) { _result = value; _hasResultOverride = true; return this; }
     /// <summary>Sets the provider problem code.</summary>
     public DurableRuntimePumpAttemptBuilder WithProblemCode(string? value) { _problemCode = value; return this; }
     /// <summary>Creates the production attempt, preserving its validation exceptions.</summary>
-    public DurableRuntimePumpAttempt Build() => new(_kind, _result, _problemCode);
+    public DurableRuntimePumpAttempt Build() => new(_kind,
+        _hasResultOverride ? _result : _kind == DurableRuntimePumpAttemptKind.Completed ? new DurableRuntimePumpResultBuilder().Build() : null,
+        _problemCode);
 }

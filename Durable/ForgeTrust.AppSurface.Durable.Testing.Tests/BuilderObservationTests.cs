@@ -11,20 +11,21 @@ namespace ForgeTrust.AppSurface.Durable.Testing.Tests;
 public sealed class BuilderObservationTests
 {
     [Theory]
-    [InlineData(DurableRuntimeHealthState.Healthy, true, true, true, true)]
-    [InlineData(DurableRuntimeHealthState.NotStarted, true, true, true, false)]
-    [InlineData(DurableRuntimeHealthState.Stale, true, true, true, false)]
-    [InlineData(DurableRuntimeHealthState.Draining, true, true, false, false)]
-    [InlineData(DurableRuntimeHealthState.Incompatible, true, false, false, false)]
-    [InlineData(DurableRuntimeHealthState.Unavailable, false, false, false, false)]
+    [InlineData(DurableRuntimeHealthState.Healthy, true, true, true, true, true)]
+    [InlineData(DurableRuntimeHealthState.NotStarted, true, true, true, false, false)]
+    [InlineData(DurableRuntimeHealthState.Stale, true, true, true, false, true)]
+    [InlineData(DurableRuntimeHealthState.Draining, true, true, false, false, true)]
+    [InlineData(DurableRuntimeHealthState.Incompatible, true, false, false, false, true)]
+    [InlineData(DurableRuntimeHealthState.Unavailable, false, false, false, false, false)]
     public void NamedHealthStatesHaveExpectedProductionPredicates(DurableRuntimeHealthState state,
-        bool observed, bool activation, bool pump, bool ready)
+        bool observed, bool activation, bool pump, bool ready, bool started)
     {
         var snapshot = new DurableHealthSnapshotBuilder().ForState(state).Build();
         Assert.Equal(observed, snapshot.WasStoreObserved);
         Assert.Equal(activation, snapshot.CanEnableActivation);
         Assert.Equal(pump, snapshot.CanAttemptPump);
         Assert.Equal(ready, snapshot.IsReady);
+        Assert.Equal(started, snapshot.StartedAtUtc.HasValue);
     }
 
     [Fact]
@@ -64,6 +65,8 @@ public sealed class BuilderObservationTests
             .ForState(DurableRuntimeHealthState.Draining).WithStartedAtUtc(null).Build());
         var epoch = Guid.NewGuid();
         Assert.Equal(epoch, new DurableHealthSnapshotBuilder().WithConfiguredRuntimeEpoch(epoch).Build().ActiveRuntimeEpoch);
+        Assert.Equal(DateTimeOffset.UnixEpoch, new DurableHealthSnapshotBuilder()
+            .ForState(DurableRuntimeHealthState.Unavailable).WithStartedAtUtc(DateTimeOffset.UnixEpoch).Build().StartedAtUtc);
     }
 
     [Fact]
@@ -180,6 +183,12 @@ public sealed class BuilderObservationTests
             .WithKind(DurableRuntimePumpAttemptKind.Incompatible).WithProblemCode(DurableProblemCodes.SchemaMissing).Build().Kind);
         Assert.Throws<ArgumentException>(() => new DurableRuntimePumpAttemptBuilder()
             .WithKind(DurableRuntimePumpAttemptKind.Refused).WithResult(result).Build());
+        Assert.Throws<ArgumentException>(() => new DurableRuntimePumpAttemptBuilder()
+            .WithResult(result).WithKind(DurableRuntimePumpAttemptKind.Refused).Build());
+        Assert.Throws<ArgumentException>(() => new DurableRuntimePumpAttemptBuilder()
+            .WithResult(null).WithKind(DurableRuntimePumpAttemptKind.Completed).Build());
+        Assert.Same(result, new DurableRuntimePumpAttemptBuilder()
+            .WithResult(result).WithKind(DurableRuntimePumpAttemptKind.Completed).Build().Result);
     }
 
     [Fact]
@@ -289,6 +298,25 @@ public sealed class BuilderObservationTests
     }
 
     [Fact]
+    public void NativeEnvelopeRetainsShallowPayloadReference()
+    {
+        var payload = new MutablePayload { Value = "before" };
+        var identity = DurableWorkerExecutionIdentity.CreateInitial("activity-1", 3, 2, "epoch-a");
+        var envelope = new DurableWorkerEnvelopeBuilder<MutablePayload>()
+            .WithOutcome(DurableWorkerProjectionOutcome.Completed)
+            .WithReasonCode("ok")
+            .WithRetryability(DurableWorkerRetryability.Terminal)
+            .WithCorrelation(new DurableWorkerCorrelation("worker", "command", "scope", "attempt-1"))
+            .WithExecutionIdentity(identity)
+            .WithPayload(payload)
+            .Build();
+
+        payload.Value = "after";
+        Assert.Same(payload, envelope.Payload);
+        Assert.Equal("after", envelope.Payload!.Value);
+    }
+
+    [Fact]
     public async Task FakeHealthReturnsTheCurrentSnapshotAndRejectsNullOrCancellation()
     {
         var first = new DurableHealthSnapshotBuilder().Build();
@@ -304,6 +332,8 @@ public sealed class BuilderObservationTests
         canceled.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await health.GetAsync(canceled.Token));
     }
+
+    private sealed class MutablePayload { public string Value { get; set; } = string.Empty; }
 
     private sealed class TestExecutor : IDurableWorkerExecutor<string, string>
     {
