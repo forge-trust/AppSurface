@@ -35,6 +35,9 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
         Assert.Contains("PASSWORD '$RETENTION_PASSWORD'", script, StringComparison.Ordinal);
         Assert.Contains("printf '%s\\n' \"$ROLE_SQL\" > \"$ROLE_SQL_FILE\"", script, StringComparison.Ordinal);
         Assert.Contains("docker exec -i", script, StringComparison.Ordinal);
+        Assert.Contains("PGPASSWORD=\"$POSTGRES_PASSWORD\" exec psql", script, StringComparison.Ordinal);
+        Assert.Contains("-h 127.0.0.1 -U postgres -d \"$1\"", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("pg_isready -U postgres -d \"$DATABASE_NAME\"", script, StringComparison.Ordinal);
         Assert.Contains("unset ROLE_SQL", script, StringComparison.Ordinal);
         Assert.DoesNotContain("-c \"$ROLE_SQL\"", script, StringComparison.Ordinal);
         Assert.Contains("APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS=420", script, StringComparison.Ordinal);
@@ -55,7 +58,7 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
     }
 
     [Fact]
-    public async Task Script_waits_for_the_final_tcp_server_before_creating_roles()
+    public async Task Script_waits_for_the_target_database_after_server_readiness_is_reported()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -71,8 +74,8 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
             "run-local-proof.sh");
         var temporaryRoot = Directory.CreateTempSubdirectory("appsurface-durable-proof-readiness-").FullName;
         var fakeBin = Directory.CreateDirectory(Path.Join(temporaryRoot, "bin")).FullName;
-        var probeCountFile = Path.Join(temporaryRoot, "probe-count");
-        await File.WriteAllTextAsync(probeCountFile, "0");
+        var readinessAttemptsFile = Path.Join(temporaryRoot, "readiness-attempts");
+        var socketReadinessFile = Path.Join(temporaryRoot, "socket-readiness");
 
         try
         {
@@ -82,7 +85,9 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
                 """
                 #!/bin/sh
                 case "${1:-}" in
-                  */examples/durable-postgresql/check-prerequisites.sh) exit 0 ;;
+                  */examples/durable-postgresql/check-prerequisites.sh)
+                    exit 0
+                    ;;
                 esac
                 exec /bin/bash "$@"
                 """);
@@ -92,36 +97,31 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
                 """
                 #!/bin/sh
                 case "${1:-}" in
-                  run|rm) exit 0 ;;
+                  info|run|rm)
+                    exit 0
+                    ;;
                   exec)
-                    shift
-                    while [ "${1#-}" != "$1" ]; do shift; done
-                    shift
-                    case "${1:-}" in
-                      pg_isready)
-                        count=$(cat "$APPSURFACE_TEST_PROBE_COUNT_FILE")
-                        count=$((count + 1))
-                        printf '%s\n' "$count" > "$APPSURFACE_TEST_PROBE_COUNT_FILE"
-                        case " $* " in
-                          *' -h 127.0.0.1 '*)
-                            if [ "$count" -ge 3 ]; then exit 0; fi
-                            exit 1
-                            ;;
-                          *) exit 0 ;;
-                        esac
-                        ;;
-                      psql)
-                        count=$(cat "$APPSURFACE_TEST_PROBE_COUNT_FILE")
-                        if [ "$count" -lt 3 ]; then
-                          printf '%s\n' 'database system is shutting down' >&2
+                    case "$*" in
+                      *"psql"*"-h 127.0.0.1"*"SELECT 1;"*)
+                        attempts=0
+                        if [ -f "$APPSURFACE_TEST_READINESS_ATTEMPTS_FILE" ]; then
+                          attempts=$(cat "$APPSURFACE_TEST_READINESS_ATTEMPTS_FILE")
+                        fi
+                        attempts=$((attempts + 1))
+                        printf '%s\n' "$attempts" > "$APPSURFACE_TEST_READINESS_ATTEMPTS_FILE"
+                        if [ "$attempts" -eq 1 ]; then
                           exit 2
                         fi
-                        case "$*" in
-                          *gen_random_uuid*) printf '%s\n' '00000000-0000-0000-0000-000000000001' ;;
-                        esac
+                        ;;
+                      *"psql"*"SELECT 1;"*)
+                        printf '%s\n' socket > "$APPSURFACE_TEST_SOCKET_READINESS_FILE"
                         exit 0
                         ;;
+                      *gen_random_uuid*)
+                        printf '%s\n' '00000000-0000-0000-0000-000000000001'
+                        ;;
                     esac
+                    exit 0
                     ;;
                 esac
                 exit 0
@@ -132,7 +132,7 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
                 """
                 #!/bin/sh
                 if [ "${1:-}" = "--version" ]; then
-                  printf '%s\n' '10.0.401'
+                  printf '%s\n' '10.0.0'
                 fi
                 exit 0
                 """);
@@ -150,13 +150,14 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
                 fakeBin,
                 Environment.GetEnvironmentVariable("PATH") ?? string.Empty);
             startInfo.Environment["APPSURFACE_DURABLE_LOCAL_PORT"] = "54349";
-            startInfo.Environment["APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS"] = "20";
-            startInfo.Environment["APPSURFACE_TEST_PROBE_COUNT_FILE"] = probeCountFile;
+            startInfo.Environment["APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS"] = "30";
+            startInfo.Environment["APPSURFACE_TEST_READINESS_ATTEMPTS_FILE"] = readinessAttemptsFile;
+            startInfo.Environment["APPSURFACE_TEST_SOCKET_READINESS_FILE"] = socketReadinessFile;
 
             using var process = Process.Start(startInfo)!;
             try
             {
-                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(8));
             }
             catch
             {
@@ -168,13 +169,12 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
 
                 throw;
             }
-
-            var standardOutput = await process.StandardOutput.ReadToEndAsync();
             var standardError = await process.StandardError.ReadToEndAsync();
-            Assert.True(
-                process.ExitCode == 0,
-                $"Exit {process.ExitCode} after {await File.ReadAllTextAsync(probeCountFile)} readiness probes. stdout: {standardOutput} stderr: {standardError}");
-            Assert.Equal("3", (await File.ReadAllTextAsync(probeCountFile)).Trim());
+            var standardOutput = await process.StandardOutput.ReadToEndAsync();
+
+            Assert.True(process.ExitCode == 0, standardError);
+            Assert.Equal("2\n", await File.ReadAllTextAsync(readinessAttemptsFile));
+            Assert.False(File.Exists(socketReadinessFile));
             Assert.Contains("[ok] local operational-assessment proof completed", standardOutput, StringComparison.Ordinal);
         }
         finally

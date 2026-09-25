@@ -97,18 +97,23 @@ docker run --rm --name appsurface-durable-postgres \
   -p "127.0.0.1:${APPSURFACE_DURABLE_LOCAL_PORT}:5432" postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877
 ```
 
-In Terminal 2, wait at most 30 seconds before any migration operation:
+In Terminal 2, wait at most 30 seconds for the final server before any migration operation. The image entrypoint
+uses a temporary socket-only server while it creates `POSTGRES_DB`, so a socket query can pass before that server
+has shut down. Require a successful TCP query against the target database. This manual container uses local
+`trust` authentication, as configured above:
 
 ```console
 for attempt in $(seq 1 30); do
-  docker exec appsurface-durable-postgres pg_isready -h 127.0.0.1 -U postgres -d appsurface_durable_example && break
+  docker exec appsurface-durable-postgres \
+    psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d appsurface_durable_example -c 'SELECT 1;' && break
   sleep 1
 done
-docker exec appsurface-durable-postgres pg_isready -h 127.0.0.1 -U postgres -d appsurface_durable_example || exit 1
+docker exec appsurface-durable-postgres \
+  psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d appsurface_durable_example -c 'SELECT 1;' || exit 1
 ```
 
 The TCP probe waits through the image's socket-only initialization server and its shutdown before admitting the
-final server.
+final server. It also verifies that the target database accepts a query before the script creates roles.
 
 Create the local-only roles with the disposable container's bootstrap administrator. This disposable container binds
 only to loopback and uses Docker's local `trust` bootstrap mode, so it has no bootstrap password. The password setup
