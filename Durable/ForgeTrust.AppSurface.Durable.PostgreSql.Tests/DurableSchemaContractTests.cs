@@ -534,13 +534,19 @@ public sealed class DurableSchemaContractTests
         var recipe = File.ReadAllText(TestPathUtils.PathUnder(
             repositoryRoot,
             "Durable/configure-postgresql-roles.sql"));
+        var providerProject = File.ReadAllText(TestPathUtils.PathUnder(
+            repositoryRoot,
+            "Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj"));
 
+        Assert.Contains("contentFiles/any/any/configure-postgresql-roles.sql", providerProject, StringComparison.Ordinal);
+        Assert.Contains(":'role_pairs_json'", recipe, StringComparison.Ordinal);
+        Assert.Contains("dispatcher_profile", recipe, StringComparison.Ordinal);
+        Assert.Contains("work_only", recipe, StringComparison.Ordinal);
+        Assert.Contains("full", recipe, StringComparison.Ordinal);
         Assert.DoesNotContain("to_regrole", recipe, StringComparison.Ordinal);
-        Assert.Equal(4, CountOccurrences(recipe, "WHERE rolname = :"));
-        Assert.Contains("AS roles_are_distinct", recipe, StringComparison.Ordinal);
-        Assert.Contains("AS service_roles_are_restricted_login_leaves", recipe, StringComparison.Ordinal);
-        Assert.Contains("AS service_roles_are_membership_free", recipe, StringComparison.Ordinal);
-        Assert.Contains("AS service_roles_do_not_own_database", recipe, StringComparison.Ordinal);
+        Assert.Contains("role_pairs_json", recipe, StringComparison.Ordinal);
+        Assert.Contains("AS fixed_roles_valid", recipe, StringComparison.Ordinal);
+        Assert.Contains("AS pair_roles_valid", recipe, StringComparison.Ordinal);
         Assert.Contains("AS durable_objects_owned_by_migration_role", recipe, StringComparison.Ordinal);
         Assert.Contains("AS durable_rls_flags_are_exact", recipe, StringComparison.Ordinal);
         Assert.Contains("AS durable_rls_policies_are_exact", recipe, StringComparison.Ordinal);
@@ -549,7 +555,7 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("pg_catalog.pg_policy", recipe, StringComparison.Ordinal);
         Assert.Contains("pg_catalog.pg_get_expr", recipe, StringComparison.Ordinal);
         Assert.Contains(
-            "ALTER POLICY flow_dispatch_global_discovery ON appsurface_durable.flow_dispatch TO %I, %I",
+            "ALTER POLICY flow_dispatch_global_discovery ON appsurface_durable.flow_dispatch TO %s",
             recipe,
             StringComparison.Ordinal);
         Assert.Contains("flow_dispatch_runtime_scope_select", recipe, StringComparison.Ordinal);
@@ -567,7 +573,7 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("pg_catalog.pg_auth_members", recipe, StringComparison.Ordinal);
         Assert.DoesNotContain("pg_catalog.pg_has_role", recipe, StringComparison.Ordinal);
         Assert.Contains(
-            "pg_catalog.pg_advisory_xact_lock(4707181168775217740)",
+            "pg_try_advisory_xact_lock(4707181168775217740)",
             recipe,
             StringComparison.Ordinal);
         Assert.Contains("AS service_roles_have_safe_schema_privileges", recipe, StringComparison.Ordinal);
@@ -593,11 +599,11 @@ public sealed class DurableSchemaContractTests
             recipe,
             StringComparison.Ordinal);
         Assert.Contains(
-            "REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM %I",
+            "REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM %s",
             recipe,
             StringComparison.Ordinal);
         Assert.Contains(
-            "GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO %I",
+            "GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO %s",
             recipe,
             StringComparison.Ordinal);
         Assert.Contains("pg_catalog.aclexplode(routine.proacl)", recipe, StringComparison.Ordinal);
@@ -610,11 +616,11 @@ public sealed class DurableSchemaContractTests
             recipe,
             StringComparison.Ordinal);
         Assert.Contains(
-            "REVOKE ALL ON TABLE appsurface_durable.dispatch FROM %I",
+            "REVOKE ALL ON TABLE appsurface_durable.dispatch FROM %s",
             recipe,
             StringComparison.Ordinal);
         Assert.Contains(
-            "GRANT EXECUTE ON FUNCTION appsurface_durable.discover_work_dispatch(text[], text[], integer) TO %I",
+            "GRANT EXECUTE ON FUNCTION appsurface_durable.discover_work_dispatch(text[], text[], integer) TO %s",
             recipe,
             StringComparison.Ordinal);
         Assert.Contains(

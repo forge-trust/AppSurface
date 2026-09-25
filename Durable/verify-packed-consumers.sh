@@ -83,6 +83,29 @@ verify_assets_package() {
     || fail "$assets_file does not contain the expected $package_id/$PACKAGE_VERSION package"
 }
 
+verify_packaged_role_recipe() {
+  local package_file="$FEED_DIR/ForgeTrust.AppSurface.Durable.PostgreSql.$PACKAGE_VERSION.nupkg"
+  local source_recipe="$ROOT_DIR/Durable/configure-postgresql-roles.sql"
+  local packaged_recipe="$WORK_DIR/configure-postgresql-roles.packaged.sql"
+  local recipe_path="contentFiles/any/any/configure-postgresql-roles.sql"
+
+  [[ -f "$source_recipe" ]] || fail "the canonical PostgreSQL role recipe is missing"
+  python3 - "$package_file" "$recipe_path" "$packaged_recipe" <<'PY'
+import pathlib
+import sys
+import zipfile
+
+package_path, recipe_path, output_path = sys.argv[1:]
+with zipfile.ZipFile(package_path) as package:
+    matches = [name for name in package.namelist() if name == recipe_path]
+    if len(matches) != 1:
+        raise SystemExit(f"expected exactly one packaged role recipe at {recipe_path}; found {len(matches)}")
+    pathlib.Path(output_path).write_bytes(package.read(matches[0]))
+PY
+  cmp -s "$source_recipe" "$packaged_recipe" \
+    || fail "the packaged PostgreSQL role recipe differs from the canonical source bytes"
+}
+
 for project in "${projects[@]}"; do
   dotnet restore "$ROOT_DIR/$project" \
     --locked-mode \
@@ -102,6 +125,8 @@ for project in "${projects[@]}"; do
   [[ -f "$FEED_DIR/$package_id.$PACKAGE_VERSION.nupkg" ]] \
     || fail "packing did not produce the expected $package_id/$PACKAGE_VERSION artifact"
 done
+
+verify_packaged_role_recipe
 
 sed "s|__LOCAL_FEED__|$FEED_DIR|g" > "$CONFIG_FILE" <<'EOF'
 <?xml version="1.0" encoding="utf-8"?>

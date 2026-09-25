@@ -67,11 +67,16 @@ publication protects readers from partial content, but it cannot make a director
 principal safe from path replacement.
 
 The preferred production flow remains: generate and review the offline schema script, apply migrations `0001` through
-`0007` in order, apply the canonical role recipe, run status and preflight, then explicitly enable
+`0010` in order, apply the complete version-1 role-pair manifest with the matching released PostgreSQL provider
+package's `contentFiles/any/any/configure-postgresql-roles.sql`, run status and preflight, then explicitly enable
 [`AddWorkerHost()`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host). For recovery,
 check status, correct and review the forward-only script, then retry; never delete migration history. The
 [`durable-postgresql` example](../../examples/durable-postgresql/README.md) is a local proof, not production
-operations guidance.
+operations guidance. The provider package's packaged recipe is checked byte-identical to the canonical source by
+[`verify-packed-consumers.sh`](../../Durable/verify-packed-consumers.sh); keep the package release/schema version
+matched to the migration and hash the exact reviewed manifest file used for certificate evidence. See the
+[role manifest, grant profiles, and rollout contract](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#role-recipe-contract)
+and the [operator migration/rollback sequence](../../Durable/operational-assessments.md#migration-and-role-reconciliation).
 
 Future CLI authentication is design-only today. The [authenticated command design](docs/authenticated-command-design.md) keeps auth centered on protected command execution, uses `appsurface docs publish --archive ./dist/docs --site <site>` as the first protected command wedge, and requires browser/loopback PKCE, RFC 8628 device flow, CI no-prompt behavior, secure token-cache boundaries, `ASCLI1xx` diagnostics, and packed-tool readiness proof before auth commands ship.
 

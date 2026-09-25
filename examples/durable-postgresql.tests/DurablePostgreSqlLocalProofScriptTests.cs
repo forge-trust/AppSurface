@@ -111,6 +111,17 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
                         esac
                         ;;
                       psql)
+                        case " $* " in
+                          *role_pairs_json=*source_dispatcher*)
+                            printf '%s\n' 'full role-pairs manifest accepted'
+                            exit 0
+                            ;;
+                          *role_pairs_json=*appsurface_durable_dispatcher*)
+                            printf '%s\n' 'Rejected unmanifested Durable role principal(s): appsurface_durable_source_dispatcher, appsurface_durable_source_runtime' >&2
+                            exit 3
+                            ;;
+                          *) : ;;
+                        esac
                         count=$(cat "$APPSURFACE_TEST_PROBE_COUNT_FILE")
                         if [ "$count" -lt 3 ]; then
                           printf '%s\n' 'database system is shutting down' >&2
@@ -236,6 +247,13 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
                     ;;
                   exec)
                     case "$*" in
+                      *role_pairs_json=*source_dispatcher*)
+                        exit 0
+                        ;;
+                      *role_pairs_json=*appsurface_durable_dispatcher*)
+                        printf '%s\n' 'Rejected unmanifested Durable role principal(s): appsurface_durable_source_dispatcher, appsurface_durable_source_runtime' >&2
+                        exit 3
+                        ;;
                       *gen_random_uuid*)
                         printf '%s\n' '00000000-0000-0000-0000-000000000001'
                         ;;
@@ -311,7 +329,7 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
             // The deadline diagnostic and descendant-cleanup assertions below are the portable contract.
             Assert.True(
                 process.ExitCode is 130 or 143,
-                $"Expected an interrupted exit (130 or 143), but received {process.ExitCode}.");
+                $"Expected an interrupted exit (130 or 143), but received {process.ExitCode}. stderr: {standardError}");
             Assert.Contains("exceeded its 2-second deadline", standardError, StringComparison.Ordinal);
             Assert.InRange(stopwatch.Elapsed, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(7));
 

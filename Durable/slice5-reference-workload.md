@@ -7,15 +7,18 @@ acceptance; external provider effects remain governed by the Work registration's
 ## Prerequisites
 
 - PostgreSQL 16+ through Docker/Testcontainers, or `APPSURFACE_POSTGRES_TEST_CONNECTION` pointing to PostgreSQL 16+.
-- A migration-owner applies `0001` through `0010`, then runs
-  [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) with distinct migration-owner, dispatcher, and
-  runtime roles.
+- A migration owner applies `0001` through `0010`, then runs the complete reviewed version-1 role-pair manifest with
+  the matching released PostgreSQL provider package's
+  [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
+  at `contentFiles/any/any/configure-postgresql-roles.sql`. Use the `full` dispatcher profile for this Work-first
+  Schedule workload; profile selection is explicit for every pair. See the [provider manifest and grant reference](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#role-recipe-contract).
 - The Schedule processor receives a dispatcher data source, a separate runtime data source, immutable Work registry,
   validated `PostgreSqlDurableWorkOptions`, and
   `PostgreSqlDurableScheduleOptions` containing the exact runtime role name.
 - The schedule processor must use the same dispatcher/runtime role transition as production: apply migrations through
-  `0010_runtime_health_observation.sql` and run the role recipe before enabling the hosted host; keep worker host
-  disabled during this reference workload and use only a manually bounded pass.
+  `0010_runtime_health_observation.sql` and rerun the complete manifest with the matching package recipe before
+  enabling the hosted host; keep worker host disabled during this reference workload and use only a manually bounded
+  pass.
 
 Historically, this workload also executes against
 `postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302` for preserved proof evidence.

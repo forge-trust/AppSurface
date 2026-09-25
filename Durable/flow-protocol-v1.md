@@ -125,7 +125,7 @@ PostgreSQL Flow schema requires applying migrations strictly in order:
 10. `0010_runtime_health_observation.sql`: Corrects due Schedule lease observation, adds the supporting partial index,
     and preserves the schema-9 health-function signature for mixed-version readers.
 
-After applying any migration that adds package relations, run [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) again: migrations must run first, then the role recipe grants the reviewed Flow privileges to existing dispatcher and scoped-runtime roles.
+After applying any migration that adds package relations, rerun the complete reviewed version-1 role-pair manifest after the migration. Deployments use the matching released provider package's `contentFiles/any/any/configure-postgresql-roles.sql`; the packaged-consumer gate verifies that file is byte-identical to the canonical [role recipe](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql). See the [provider manifest and grant reference](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#role-recipe-contract) for the required `full`/`work_only` profile on every pair.
 
 ### Rollback posture
 
@@ -141,14 +141,16 @@ After applying any migration that adds package relations, run [`configure-postgr
 All scoped Flow relations, including the original six Flow tables, payload-free `flow_dispatch`, and the
 `flow_repair_command`/`flow_repair_collision` ledgers, have Row Level Security enabled and forced:
 
-The dispatcher credential normally receives global `flow_dispatch` discovery. Run `configure-postgresql-roles.sql`
-immediately after applying `0003` and before granting `SELECT` on `flow_dispatch`: the migration's
+Each `full` dispatcher receives global `flow_dispatch` discovery. Run the matching package role recipe after applying
+the relevant migration and before enabling its dispatcher: the migration's
 `flow_dispatch_global_discovery` policy is initially `PUBLIC`, because it has
-no scope-restricted discovery fallback. The role recipe narrows that policy to the dispatcher credential and migration
-owner; the latter is required only for the migration-owner `SECURITY DEFINER` aggregate-health function introduced by
+no scope-restricted discovery fallback. The role recipe narrows that policy to every manifest-listed `full`
+dispatcher and the migration owner; the latter is required only for the migration-owner `SECURITY DEFINER`
+aggregate-health function introduced by
 [`0005_runtime_heartbeat.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable.PostgreSql/Migrations/0005_runtime_heartbeat.sql). The recipe also
-adds the runtime-role scope predicate. The scoped runtime credential then retains `SELECT` and column-scoped `UPDATE`
-privileges but sees Flow dispatch rows directly only after its transaction sets the matching
+adds the runtime-role scope predicate for every manifest-listed runtime. Each scoped runtime credential then retains
+`SELECT` and column-scoped `UPDATE` privileges but sees Flow dispatch rows directly only after its transaction sets
+the matching
 `appsurface_durable.scope_id`.
 
 ```sql

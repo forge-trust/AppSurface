@@ -27,10 +27,12 @@ applies DDL or advances migration history.
 The production migration order is `0001_work_shared.sql`, `0002_forced_rls.sql`, `0003_flow_protocol.sql`,
 `0004_schedule_protocol.sql`, `0005_runtime_heartbeat.sql`, `0006_flow_trace_context.sql`,
 `0007_flow_retention.sql`, `0008_flow_repair.sql`, `0009_work_contract_discovery.sql`, and
-`0010_runtime_health_observation.sql`, followed by the
+`0010_runtime_health_observation.sql`, followed by the matching released provider package's
+`contentFiles/any/any/configure-postgresql-roles.sql` role recipe. The package recipe is byte-identical to the
 canonical [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
-role recipe. Prefer generating the Durable schema script offline, reviewing it, applying the forward-only migrations,
-running the role recipe, and completing schema status/preflight before enabling the worker host. The
+source, as checked by packed-consumer verification. Prefer generating the Durable schema script offline, reviewing it,
+applying the forward-only migrations, running that package recipe with the complete reviewed manifest, and completing
+schema status/preflight before enabling the worker host. The
 [`durable schema` command family](../../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands)
 keeps scripts offline while its online commands accept no connection-string argument and never print connection
 strings. Its explicit `apply --apply` path resolves only a named migration-owner environment variable, normally
@@ -182,8 +184,9 @@ Create host principals outside migrations. Use [`configure-postgresql-roles.sql`
 grant the migration-owner, payload-free dispatcher, scoped-runtime, and scoped-retention-operator capabilities. Service roles must not receive
 ownership or `BYPASSRLS`. Transaction-local scope context is defense in depth, not a replacement for application
 authorization. The recipe fails before granting privileges when role names alias each other or a service role can
-inherit the migration owner, `SUPERUSER`, or `BYPASSRLS`. It also transfers every package table, sequence, and view to
-the migration owner so pre-existing object ownership cannot preserve runtime DDL authority. Existing direct,
+inherit the migration owner, `SUPERUSER`, or `BYPASSRLS`. It refuses any manifest service role that already owns a
+package schema object before transferring package ownership to the migration owner; repair that ownership through a
+separately reviewed administrator operation, then rerun the complete manifest. Existing direct,
 inherited, or `PUBLIC` schema, relation, column, and sequence privileges outside the documented allowlist cause the
 transactional recipe to fail and roll back; remove those host-managed grants before retrying. The runtime role is
 deliberately fully trusted for the unscoped `runtime_heartbeat` table: the health component owns the
@@ -235,6 +238,38 @@ services.AddAppSurfaceDurablePostgreSql(
     .AddWorkerHost();
 ```
 
+For the Source Lifecycle lane, bind its own `work_only` dispatcher and runtime data sources, and restrict both its
+continuous host and every direct pump request to Work. `HostedSurfaces` defaults to `All`, so set it explicitly:
+
+```csharp
+services.AddAppSurfaceDurablePostgreSql(
+        sourceDispatcherDataSource,
+        sourceRuntimeDataSource,
+        sourceWorkOptions,
+        sourceScheduleOptions,
+        options =>
+        {
+            options.WorkerId = "source-worker-01";
+            options.HostedSurfaces = DurableRuntimeSurface.Work;
+        })
+    .AddWorkerHost();
+
+// Resolve from the built host, after service registration is complete.
+var sourceAttempt = await host.Services
+    .GetRequiredService<IDurableRuntimePumpAdmission>()
+    .TryRunOnceAsync(
+        new DurableRuntimePumpRequest(
+            maximumItems: 32,
+            timeBudget: TimeSpan.FromSeconds(10),
+            surfaces: DurableRuntimeSurface.Work),
+        cancellationToken);
+```
+
+Use the same Work-only selection for direct calls and recovery passes; never rely on the hosted setting to constrain an
+independently constructed `DurableRuntimePumpRequest`. Flow or Schedule selection fails closed under the source
+dispatcher profile. This prevents accidental cross-surface execution, while still not making contract selectors or
+runtime `scope_id` values lane authorization.
+
 `AddAppSurfaceDurablePostgreSql` resolves Work, Flow, Schedule, schema, pump, health, drain, and
 `IFlowRepairOperatorClient` services but installs no `IHostedService`, opens no connection, and applies no migration.
 `AddWorkerHost()` is the standard continuous activation path. On startup it validates schema compatibility and the
@@ -259,31 +294,79 @@ scope, aggregate, connection, or trace values. At shutdown, local admission clos
 persists drain; already-permitted Work follows its ordinary cancellation/recovery path rather than inventing a result.
 
 For a cold path, first drain and stop every pre-`0009` worker because the role recipe intentionally removes its raw
-`dispatch` access. Apply every pending forward-only migration through `0010_runtime_health_observation.sql` with the migration owner, rerun
-the role recipe, verify the active epoch and StoreId, deploy with `AddWorkerHost()` disabled, then enable it. Never destructively roll
+`dispatch` access. Apply every pending forward-only migration through `0010_runtime_health_observation.sql` with the migration owner, then use the matching released provider package's
+`contentFiles/any/any/configure-postgresql-roles.sql` with the complete reviewed manifest. Verify the active epoch and StoreId, deploy with `AddWorkerHost()` disabled, then enable it. Never destructively roll
 back a migration. After the role recipe runs, a pre-`0009` worker is not a compatible application rollback target because its dispatcher
 credential no longer has raw `dispatch` access; keep that worker stopped and roll forward to a `0009`-compatible binary instead. Do not
 restore the broad grant as a rollback shortcut.
 
 ### Role recipe contract
 
-Run the recipe with `psql` as a principal that can transfer ownership and grant privileges:
+Run the canonical [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
+with `psql` as a principal that can transfer ownership and grant privileges. Every invocation supplies the complete,
+reviewed version-1 manifest; it is not an add-pair command. The checked-in
+[fictional two-pair manifest](../../examples/durable-postgresql/role-pairs.example.json) contains role names only,
+never passwords or connection strings:
 
-```console
-psql -v ON_ERROR_STOP=1 \
-  -v migration_owner_role=appsurface_durable_owner \
-  -v dispatcher_role=appsurface_durable_dispatcher \
-  -v runtime_role=appsurface_durable_runtime \
-  -v retention_operator_role=appsurface_durable_retention \
-  -f Durable/configure-postgresql-roles.sql "$CONNECTION_STRING"
+For deployments, use the matching released provider NuGet package's
+`contentFiles/any/any/configure-postgresql-roles.sql` after applying that release's migrations. The repository
+verification gate [`Durable/verify-packed-consumers.sh`](../verify-packed-consumers.sh) checks that this packaged file
+is byte-identical to the canonical source recipe. Record the exact package version with the manifest evidence; do not
+extract the recipe from an unrelated package version or run a workspace recipe against a database at another schema
+version. The source-checkout path is for the disposable local proof only.
+
+```json
+{
+  "version": 1,
+  "pairs": [
+    { "dispatcher": "forwarding_dispatcher", "runtime": "forwarding_runtime", "dispatcher_profile": "full" },
+    { "dispatcher": "source_dispatcher", "runtime": "source_runtime", "dispatcher_profile": "work_only" }
+  ]
+}
 ```
 
-The dispatcher, runtime, and retention-operator values identify exact non-human credentials used to connect, not reusable capability
-groups. All three must be distinct `LOGIN` leaf roles with no memberships in either direction and without `SUPERUSER`,
-`CREATEDB`, `CREATEROLE`, `REPLICATION`, or `BYPASSRLS` and no grant options. Create and rotate their credentials through
-the deployment secret system; the recipe never accepts or changes passwords. Neither service credential may own
-any database or hold grant options on the `appsurface_durable` schema or its objects. The migration owner remains
-separate and may be `NOLOGIN`.
+Version 1 has exactly `version` and `pairs` at the top level, with `version: 1` and 1–32 entries. Each pair has exactly
+`dispatcher`, `runtime`, and explicit `dispatcher_profile` (`full` or `work_only`); there is no default. Unknown or
+duplicate JSON properties, unknown fields, malformed types, empty or over-limit sets, invalid/aliased roles, and names
+that resolve with PostgreSQL truncation are rejected before mutation. Names are data and the recipe quotes resolved
+identifiers. Pair roles and the explicitly supplied migration owner and retention operator are all distinct.
+
+Store the reviewed manifest in deployment configuration with the role declarations and hash the exact UTF-8 bytes of
+the file passed to `psql`. Record its path, SHA-256 digest, pair names, and profiles in release/certificate evidence;
+whitespace and pair-order changes alter the digest and require review. Compare the supplied file with the prior reviewed
+release record on every deployment. The locked catalog check rejects omitted roles still visible in managed policy
+targets or package ACLs and refuses contradictory or ambiguous catalog state. Catalog inference cannot detect a former
+pair after a privileged actor has erased every trace; the previous deployment manifest is independent evidence for that
+case. A separately designed database registry would be needed for database-only historical proof.
+
+Every pair role must be a distinct restricted `LOGIN` leaf: no membership edge, ownership, grant option,
+`SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION`, or `BYPASSRLS`. Create and rotate credentials through the
+deployment secret system; the recipe never accepts or changes passwords. The migration owner remains separate and may
+be `NOLOGIN`.
+
+| Dispatcher profile | Direct privileges | Intended lane |
+| --- | --- | --- |
+| `full` | Schema `USAGE`; Work discovery and Schedule claim `EXECUTE`; direct `SELECT` on payload-free `flow_dispatch` | Existing forwarding pair; preserves Work, Flow, and Schedule discovery behavior. |
+| `work_only` | Schema `USAGE`; Work discovery `EXECUTE` only | Source lane; no direct Durable table, column, or sequence access and no Flow/Schedule function execution. |
+
+Both profiles retain the established runtime grant set for their paired runtime. That runtime grant set, transaction-local
+`scope_id` checks, shared StoreId/epoch, and Work registration selection do not create a database-enforced lane row
+partition. The Work discovery function's caller-supplied contract arrays select routing candidates; they do not
+authenticate a contract or prevent a credential holder from requesting another valid Work contract's routing metadata.
+Use a separate store or a separately designed PostgreSQL partition when independent row-level authorization or a
+separate failure domain is required. The three operational choices and their costs are summarized in the
+[adoption guide](../operational-assessments.md#shared-store-role-pair-choice).
+
+Omitting an installed pair is an error, never retirement. The recipe preserves healthy policy OIDs, targets,
+expressions, ACLs, owners, and effective grants on an identical rerun; it rejects unexpected extra principals and broader
+privilege drift. Missing narrow grants for a listed profile may be restored. Narrowing `full` to `work_only` is refused;
+an explicitly reviewed `work_only` to `full` expansion requires renewed privilege proof and a new certificate. Pair
+retirement and profile narrowing need a separately reviewed procedure. A failure rolls back recipe changes. The advisory
+lock serializes catalog reconciliation, while policy DDL may briefly wait on active work; use the bounded drain and
+maintenance procedure in the [adoption guide](../operational-assessments.md#migration-and-role-reconciliation).
+
+For the runnable two-pair psql command, identical rerun, omission refusal, and source privilege check, see the
+[version-1 local walkthrough](../../examples/durable-postgresql/README.md#version-1-role-pair-walkthrough).
 
 The `appsurface_durable` schema is package-reserved. The recipe serializes with migrations and runtime transactions,
 then transfers every table, partition, sequence, view, materialized view, foreign table, and package function in that
@@ -291,13 +374,16 @@ schema to the migration owner. Do not place application-owned objects there.
 
 | Principal | Allowed privileges |
 | --- | --- |
-| Dispatcher | Schema `USAGE`; table `SELECT` on payload-free Flow discovery tables; `EXECUTE` only on constrained Schedule and Work discovery functions. It calls `appsurface_durable.discover_work_dispatch(text[], text[], integer)` for Work contracts and `appsurface_durable.claim_schedule_dispatch(text, interval)` for Schedule candidates. It receives routing IDs, due time, priority, and revision only, never raw `dispatch` columns. |
+| Migration owner | Owns package schema and package objects and retains the resulting owner authority needed for reviewed migrations/reconciliation. It remains separate from every service role and retention operator. |
+| `full` dispatcher | Schema `USAGE`; `SELECT` on the payload-free `flow_dispatch` relation; `EXECUTE` on Work discovery and Schedule claim functions. It receives routing IDs, due time, priority, and revision only, never raw `dispatch` columns. |
+| `work_only` dispatcher | Schema `USAGE` and `EXECUTE` only on `discover_work_dispatch(text[], text[], integer)`; no direct Durable table, column, or sequence privilege, and no Flow/Schedule function execution. |
 | Runtime reads | Schema `USAGE`; table `SELECT` on package metadata, scoped Work, Flow, Schedule, and Flow trace-context relations. Work/Flow `discovery` reads are scope-filtered by transaction-local RLS or dispatcher function policy. |
 | Runtime inserts | Table `INSERT` on scoped Work, Flow, Schedule, and Flow trace-context relations. |
 | Runtime updates | Reviewed column-level `UPDATE` on mutable Work, Flow instance/wait/timer, Schedule definition/occurrence/dispatch, and dispatch fields; no table-wide update grant. |
 | Runtime sequences | `USAGE` and `SELECT` on every sequence in the package schema. |
 | Runtime heartbeat | Unscoped `SELECT` and `INSERT`, plus reviewed column-level `UPDATE`, on `runtime_heartbeat` for `IDurableRuntimeHealth`. Its forced RLS policy intentionally uses `USING (true)` and `WITH CHECK (true)`; keep this fully trusted runtime credential out of untrusted callers. |
 | Retention operator | Scope-filtered Flow/Work-reference and retention-evidence reads; `EXECUTE` only on the owner-run manifest and lifecycle capabilities. It has no direct lifecycle/source `INSERT`, `UPDATE`, `DELETE`, sequence, dispatcher-discovery, Schedule, worker-host, or migration access. |
+| `PUBLIC` | No effective privilege on the package schema, relations, columns, sequences, or functions. Canonical revokes are reapplied and verified in the recipe transaction. |
 
 Neither service credential receives schema `CREATE`, table-wide `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES`,
 `TRIGGER`, or `MAINTAIN`; the dispatcher receives no sequence privileges. Forced RLS remains an additional scope fence,
@@ -310,7 +396,7 @@ partitions and reapplies their forced RLS policy. Runtime and dispatcher roles c
 
 ## Verified Flow retention
 
-Register retention only after the schema is current and the four-role recipe has completed. Supply a dedicated
+Register retention only after the schema is current and the complete role-pair manifest recipe has completed. Supply a dedicated
 retention-operator data source; it must not be the dispatcher or runtime source:
 
 ```csharp
