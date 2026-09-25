@@ -2,6 +2,8 @@ using ForgeTrust.AppSurface.Config;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
+#pragma warning disable CS0618
+
 namespace ForgeTrust.AppSurface.Config.LocalSecrets.Tests;
 
 public sealed class AppSurfaceLocalSecretProviderTests
@@ -31,7 +33,46 @@ public sealed class AppSurfaceLocalSecretProviderTests
         var value = provider.GetValue<string>("Development", "Stripe:ApiKey");
 
         Assert.Equal("sk_test_secret", value);
-        Assert.False(provider.TryGetTerminalDiagnostic("Development", "Stripe:ApiKey", out _));
+    }
+
+    [Fact]
+    public void Resolve_Should_ReadHistoricalUnderscoreAliasAndReturnNotice()
+    {
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        store.Set(normalizer.Normalize("MyApp", "Development", null, "Payments:ApiKey").Identity!, "legacy-secret");
+        var provider = CreateProvider(store);
+        var request = new ConfigProviderRequest(
+            "Development",
+            AppSurfaceConfigKey.Parse("Payments__ApiKey").WithInput(
+                ConfigKeyInputOrigin.StrictString, "Payments__ApiKey"));
+
+        var result = provider.Resolve<string>(request);
+
+        Assert.Equal(ConfigProviderValueStatus.Found, result.Status);
+        Assert.Equal("legacy-secret", result.Value);
+        Assert.Equal("config-key-legacy-provider-alias", Assert.Single(result.Notices).Code);
+    }
+
+    [Fact]
+    public void Resolve_Should_ReturnTerminalCollisionWhenCanonicalAndHistoricalAliasExist()
+    {
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        store.Set(normalizer.Normalize("MyApp", "Development", null, "Payments__ApiKey").Identity!, "canonical-secret");
+        store.Set(normalizer.Normalize("MyApp", "Development", null, "Payments:ApiKey").Identity!, "legacy-secret");
+        var provider = CreateProvider(store);
+        var request = new ConfigProviderRequest(
+            "Development",
+            AppSurfaceConfigKey.Parse("Payments__ApiKey").WithInput(
+                ConfigKeyInputOrigin.StrictString, "Payments__ApiKey"));
+
+        var result = provider.Resolve<string>(request);
+
+        Assert.Equal(ConfigProviderValueStatus.Terminal, result.Status);
+        Assert.Equal("local-secret-key-collision", result.Diagnostic?.Code);
+        ValueSafeAssert.DoesNotExpose("canonical-secret", result.Diagnostic?.ToString());
+        ValueSafeAssert.DoesNotExpose("legacy-secret", result.Diagnostic?.ToString());
     }
 
     [Fact]
@@ -44,7 +85,6 @@ public sealed class AppSurfaceLocalSecretProviderTests
 
         Assert.Null(value);
         Assert.Equal(LocalSecretResultStatus.Missing, resolution.Status);
-        Assert.False(provider.TryGetTerminalDiagnostic("Development", "Stripe:ApiKey", out _));
     }
 
     [Theory]
@@ -67,12 +107,12 @@ public sealed class AppSurfaceLocalSecretProviderTests
             "Fixed"));
         var provider = CreateProvider(store);
 
-        var value = provider.GetValue<string>("Development", "Stripe:ApiKey");
+        var exception = Assert.Throws<ConfigurationResolutionException>(() =>
+            provider.GetValue<string>("Development", "Stripe:ApiKey"));
+        var resolution = provider.ResolveValue<string>("Development", "Stripe:ApiKey");
 
-        Assert.Null(value);
-        Assert.True(provider.TryGetTerminalDiagnostic("Development", "Stripe:ApiKey", out var diagnostic));
-        Assert.Equal("local-secret-terminal", diagnostic.Code);
-        ValueSafeAssert.DoesNotExpose("raw-secret", diagnostic.ToDisplayString());
+        Assert.Equal("local-secret-terminal", exception.Diagnostic.Code);
+        ValueSafeAssert.DoesNotExpose("raw-secret", resolution.Diagnostic!.ToDisplayString());
     }
 
     [Fact]
@@ -80,13 +120,12 @@ public sealed class AppSurfaceLocalSecretProviderTests
     {
         var provider = CreateProvider(new InMemoryAppSurfaceLocalSecretStore());
 
-        var value = provider.GetValue<string>("Production", "Stripe:ApiKey");
+        var exception = Assert.Throws<ConfigurationResolutionException>(() =>
+            provider.GetValue<string>("Production", "Stripe:ApiKey"));
         var resolution = provider.ResolveValue<string>("Production", "Stripe:ApiKey");
 
-        Assert.Null(value);
+        Assert.Equal("local-secret-posture-disabled", exception.Diagnostic.Code);
         Assert.Equal(LocalSecretResultStatus.DisabledByPosture, resolution.Status);
-        Assert.True(provider.TryGetTerminalDiagnostic("Production", "Stripe:ApiKey", out var diagnostic));
-        Assert.Equal("local-secret-posture-disabled", diagnostic.Code);
     }
 
     [Fact]
@@ -100,11 +139,11 @@ public sealed class AppSurfaceLocalSecretProviderTests
 
         Assert.Equal(LocalSecretResultStatus.DisabledByPosture, resolution.Status);
         Assert.Equal("local-secret-posture-disabled", resolution.Diagnostic?.Code);
-        Assert.Contains("Disabled", resolution.Diagnostic?.Cause, StringComparison.Ordinal);
+        Assert.Contains("does not permit", resolution.Diagnostic?.Cause, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TryGetTerminalDiagnostic_Should_ReturnFalse_WhenFailClosedIsDisabled()
+    public void ResolveValue_Should_RetainTerminalStatus_WhenFailClosedIsDisabled()
     {
         var store = new FixedResultStore(AppSurfaceLocalSecretResult.NotFound(
             LocalSecretResultStatus.Locked,
@@ -119,7 +158,6 @@ public sealed class AppSurfaceLocalSecretProviderTests
         var resolution = provider.ResolveValue<string>("Development", "Stripe:ApiKey");
 
         Assert.Equal(LocalSecretResultStatus.Locked, resolution.Status);
-        Assert.False(provider.TryGetTerminalDiagnostic("Development", "Stripe:ApiKey", out _));
     }
 
     [Fact]
@@ -207,15 +245,14 @@ public sealed class AppSurfaceLocalSecretProviderTests
         store.Set(normalizer.Normalize("MyApp", "Development", null, "Port").Identity!, "not-the-port-secret");
         var provider = CreateProvider(store);
 
-        var value = provider.GetValue<int?>("Development", "Port");
+        var exception = Assert.Throws<ConfigurationResolutionException>(() =>
+            provider.GetValue<int?>("Development", "Port"));
         var resolution = provider.ResolveValue<int?>("Development", "Port");
 
-        Assert.Null(value);
+        Assert.Equal("local-secret-conversion-failed", exception.Diagnostic.Code);
         Assert.Equal(LocalSecretResultStatus.ConversionFailed, resolution.Status);
-        Assert.True(provider.TryGetTerminalDiagnostic("Development", "Port", out var diagnostic));
-        Assert.Equal("local-secret-conversion-failed", diagnostic.Code);
-        ValueSafeAssert.DoesNotExpose("not-the-port-secret", diagnostic.ToDisplayString());
-        ValueSafeAssert.DoesNotExpose("not-the-port-secret", diagnostic.ToString());
+        ValueSafeAssert.DoesNotExpose("not-the-port-secret", resolution.Diagnostic!.ToDisplayString());
+        ValueSafeAssert.DoesNotExpose("not-the-port-secret", resolution.Diagnostic.ToString());
     }
 
     [Theory]
@@ -228,16 +265,15 @@ public sealed class AppSurfaceLocalSecretProviderTests
         store.Set(normalizer.Normalize("MyApp", "Development", null, "Payload").Identity!, rawValue);
         var provider = CreateProvider(store);
 
-        var value = provider.GetValue<SecretPayload>("Development", "Payload");
+        var exception = Assert.Throws<ConfigurationResolutionException>(() =>
+            provider.GetValue<SecretPayload>("Development", "Payload"));
         var resolution = provider.ResolveValue<SecretPayload>("Development", "Payload");
 
-        Assert.Null(value);
+        Assert.Equal("local-secret-conversion-failed", exception.Diagnostic.Code);
         Assert.Equal(LocalSecretResultStatus.ConversionFailed, resolution.Status);
-        Assert.True(provider.TryGetTerminalDiagnostic("Development", "Payload", out var diagnostic));
-        Assert.Equal("local-secret-conversion-failed", diagnostic.Code);
         if (rawValue.Length > 0)
         {
-            ValueSafeAssert.DoesNotExpose(rawValue, diagnostic.ToDisplayString());
+            ValueSafeAssert.DoesNotExpose(rawValue, resolution.Diagnostic!.ToDisplayString());
         }
     }
 
@@ -271,14 +307,13 @@ public sealed class AppSurfaceLocalSecretProviderTests
         store.Set(normalizer.Normalize("MyApp", "Development", null, "Port").Identity!, overflowingSecret);
         var provider = CreateProvider(store);
 
-        var value = provider.GetValue<int?>("Development", "Port");
+        var exception = Assert.Throws<ConfigurationResolutionException>(() =>
+            provider.GetValue<int?>("Development", "Port"));
         var resolution = provider.ResolveValue<int?>("Development", "Port");
 
-        Assert.Null(value);
+        Assert.Equal("local-secret-conversion-failed", exception.Diagnostic.Code);
         Assert.Equal(LocalSecretResultStatus.ConversionFailed, resolution.Status);
-        Assert.True(provider.TryGetTerminalDiagnostic("Development", "Port", out var diagnostic));
-        Assert.Equal("local-secret-conversion-failed", diagnostic.Code);
-        ValueSafeAssert.DoesNotExpose(overflowingSecret, diagnostic.ToDisplayString());
+        ValueSafeAssert.DoesNotExpose(overflowingSecret, resolution.Diagnostic!.ToDisplayString());
         ValueSafeAssert.DoesNotExpose(overflowingSecret, resolution.ToString());
     }
 
@@ -287,12 +322,9 @@ public sealed class AppSurfaceLocalSecretProviderTests
     {
         var provider = CreateProvider(new InMemoryAppSurfaceLocalSecretStore());
 
-        var resolution = provider.ResolveValue<string>("Development", "");
+        var exception = Assert.Throws<FormatException>(() => provider.ResolveValue<string>("Development", ""));
 
-        Assert.Equal(LocalSecretResultStatus.InvalidIdentity, resolution.Status);
-        Assert.Equal("local-secret-key-empty", resolution.Diagnostic?.Code);
-        Assert.True(provider.TryGetTerminalDiagnostic("Development", "", out var diagnostic));
-        Assert.Equal("local-secret-key-empty", diagnostic.Code);
+        Assert.Contains("config-key-invalid", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -334,12 +366,34 @@ public sealed class AppSurfaceLocalSecretProviderTests
             [fileProvider, localSecrets],
             NullLogger<DefaultConfigManager>.Instance);
 
-        var exception = Assert.Throws<ConfigurationResolutionException>(() =>
+        var exception = Assert.Throws<ArgumentException>(() =>
             manager.GetValue<string>("Development", ""));
 
-        Assert.Equal("local-secret-key-empty", exception.Diagnostic.Code);
-        Assert.Equal("", exception.Key);
         Assert.False(fileProvider.WasCalled);
+    }
+
+    [Fact]
+    public void Resolve_ShouldReturnTerminalForInvalidApplicationIdentity()
+    {
+        var provider = CreateProvider(new ThrowingStore(), options => options.ApplicationName = "invalid/app");
+        var result = provider.Resolve<string>(new ConfigProviderRequest("Development", AppSurfaceConfigKey.Parse("Payments:ApiKey")));
+        Assert.Equal(ConfigProviderValueStatus.Terminal, result.Status);
+        Assert.Equal("local-secret-applicationName-invalid-character", result.Diagnostic?.Code);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ResolveTyped_ShouldNotProbeCompatibilityAliases(bool canonicalPresent)
+    {
+        var store = new InMemoryAppSurfaceLocalSecretStore();
+        var normalizer = new AppSurfaceLocalSecretIdentityNormalizer();
+        store.Set(normalizer.Normalize("MyApp", "Development", null, "Payments:ApiKey").Identity!, "alias-marker");
+        if (canonicalPresent) store.Set(normalizer.Normalize("MyApp", "Development", null, "Payments__ApiKey").Identity!, "canonical-marker");
+        var result = CreateProvider(store).Resolve<string>(new ConfigProviderRequest("Development", AppSurfaceConfigKey.Parse("Payments__ApiKey")));
+        Assert.Equal(canonicalPresent ? ConfigProviderValueStatus.Found : ConfigProviderValueStatus.Missing, result.Status);
+        Assert.Equal(canonicalPresent ? "canonical-marker" : null, result.Value);
+        Assert.Empty(result.Notices);
     }
 
     private static AppSurfaceLocalSecretProvider CreateProvider(
@@ -402,13 +456,19 @@ public sealed class AppSurfaceLocalSecretProviderTests
 
         public string Name => nameof(StaticProvider);
 
-        public bool WasCalled { get; private set; }
-
-        public T? GetValue<T>(string environment, string key)
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request)
         {
             WasCalled = true;
-            return typeof(T) == typeof(string) ? (T)(object)value : default;
+            return typeof(T) == typeof(string)
+                ? ConfigProviderValueResult<T>.Found((T)(object)value)
+                : ConfigProviderValueResult<T>.Missing();
         }
+
+        public bool WasCalled { get; private set; }
+
+        [Obsolete]
+        public T? GetValue<T>(string environment, string key) =>
+            Resolve<T>(new ConfigProviderRequest(environment, AppSurfaceConfigKey.Parse(key))).Value;
     }
 
     private sealed class NullEnvironmentProvider : IEnvironmentConfigProvider
@@ -423,6 +483,15 @@ public sealed class AppSurfaceLocalSecretProviderTests
 
         public string? GetEnvironmentVariable(string name, string? defaultValue = null) => defaultValue;
 
+        public IReadOnlyDictionary<string, string> CaptureEnvironmentVariables() =>
+            new Dictionary<string, string>(StringComparer.Ordinal);
+
+        public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request) =>
+            ConfigProviderValueResult<T>.Missing();
+
+        [Obsolete]
         public T? GetValue<T>(string environment, string key) => default;
     }
 }
+
+#pragma warning restore CS0618

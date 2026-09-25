@@ -14,6 +14,6 @@ public interface IConfigProviderAuditKeyEnumerator
     /// Enumerates effective provider keys for <paramref name="environment"/>.
     /// </summary>
     /// <param name="environment">The environment being audited.</param>
-    /// <returns>Discovered keys with redaction-ready values and source metadata.</returns>
+    /// <returns>Discovered keys with typed logical identity, redaction-ready values, and source metadata.</returns>
     IReadOnlyList<ConfigProviderAuditDiscoveredKey> EnumerateKeys(string environment);
 }

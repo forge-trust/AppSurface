@@ -140,11 +140,11 @@ public static class AppSurfaceDocsServiceCollectionExtensions
             ServiceDescriptor.Singleton<IValidateOptions<AppSurfaceDocsOptions>, AppSurfaceDocsOptionsValidator>());
         EnsureThemePairServices(services);
         services.TryAddSingleton(sp => sp.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value);
-        services.AddConfigAuditKey<AppSurfaceDocsOptions>(AppSurfaceDocsOptions.SectionName);
-        services.AddConfigAuditKey<AppSurfaceDocsIdentityOptions>($"{AppSurfaceDocsOptions.SectionName}.Identity");
-        services.AddConfigAuditKey<AppSurfaceDocsThemeOptions>($"{AppSurfaceDocsOptions.SectionName}.Theme");
-        services.AddConfigAuditKey<AppSurfaceDocsThemeColorOptions>($"{AppSurfaceDocsOptions.SectionName}.Theme.Colors");
-        services.AddConfigAuditKey<AppSurfaceDocsThemeLayoutOptions>($"{AppSurfaceDocsOptions.SectionName}.Theme.Layout");
+        services.AddConfigAuditKey<AppSurfaceDocsOptions>(AppSurfaceConfigKey.FromSegments(AppSurfaceDocsOptions.SectionName));
+        services.AddConfigAuditKey<AppSurfaceDocsIdentityOptions>(AppSurfaceConfigKey.FromSegments(AppSurfaceDocsOptions.SectionName, "Identity"));
+        services.AddConfigAuditKey<AppSurfaceDocsThemeOptions>(AppSurfaceConfigKey.FromSegments(AppSurfaceDocsOptions.SectionName, "Theme"));
+        services.AddConfigAuditKey<AppSurfaceDocsThemeColorOptions>(AppSurfaceConfigKey.FromSegments(AppSurfaceDocsOptions.SectionName, "Theme", "Colors"));
+        services.AddConfigAuditKey<AppSurfaceDocsThemeLayoutOptions>(AppSurfaceConfigKey.FromSegments(AppSurfaceDocsOptions.SectionName, "Theme", "Layout"));
         services.TryAddSingleton(AppSurfaceDocsAssetPathResolver.CreateDefault());
         services.TryAddSingleton<AppSurfaceDocsAssetVersioner>();
         services.TryAddSingleton<DocsUrlBuilder>();

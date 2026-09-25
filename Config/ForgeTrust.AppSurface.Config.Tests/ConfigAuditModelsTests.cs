@@ -48,43 +48,34 @@ public class ConfigAuditModelsTests
     [Fact]
     public void ConfigAuditKnownEntry_RejectsInvalidConstructorArguments()
     {
-        Assert.Throws<ArgumentException>(() => new ConfigAuditKnownEntry("", null, typeof(string)));
-        Assert.Throws<ArgumentNullException>(() => new ConfigAuditKnownEntry("Valid.Key", null, null!));
+        Assert.Throws<ArgumentNullException>(() => new ConfigAuditKnownEntry((AppSurfaceConfigKey)null!, null, typeof(string)));
+        Assert.Throws<ArgumentNullException>(() => new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Valid.Key"), null, null!));
     }
 
     [Fact]
     public void ConfigProviderAuditDiscoveredKey_RejectsInvalidConstructorArguments()
     {
-        Assert.Throws<ArgumentException>(() =>
-            new ConfigProviderAuditDiscoveredKey("", "value", ConfigAuditDiscoveredValueKind.Scalar, [], []));
+        var key = AppSurfaceConfigKey.Parse("Valid:Key");
         Assert.Throws<ArgumentNullException>(() =>
-            new ConfigProviderAuditDiscoveredKey("Valid.Key", "value", ConfigAuditDiscoveredValueKind.Scalar, null!, []));
+            new ConfigProviderAuditDiscoveredKey(null!, "value", ConfigAuditDiscoveredValueKind.Scalar, [], []));
         Assert.Throws<ArgumentNullException>(() =>
-            new ConfigProviderAuditDiscoveredKey("Valid.Key", "value", ConfigAuditDiscoveredValueKind.Scalar, [], null!));
+            new ConfigProviderAuditDiscoveredKey(key, "value", ConfigAuditDiscoveredValueKind.Scalar, null!, []));
+        Assert.Throws<ArgumentNullException>(() =>
+            new ConfigProviderAuditDiscoveredKey(key, "value", ConfigAuditDiscoveredValueKind.Scalar, [], null!));
     }
 
     [Fact]
     public void ConfigProviderAuditDiscoveredKey_RejectsInvalidInitAssignments()
     {
-        var valid = new ConfigProviderAuditDiscoveredKey(
-            "Valid.Key",
-            "value",
-            ConfigAuditDiscoveredValueKind.Scalar,
-            [],
-            []);
-
-        Assert.Throws<ArgumentException>(() => valid with { Key = "" });
+        var key = AppSurfaceConfigKey.Parse("Valid:Key");
+        var valid = new ConfigProviderAuditDiscoveredKey(key, "value", ConfigAuditDiscoveredValueKind.Scalar, [], []);
+        Assert.Same(key, valid.Key);
+        Assert.Throws<ArgumentNullException>(() => valid with { Key = null! });
         Assert.Throws<ArgumentNullException>(() => valid with { Sources = null! });
         Assert.Throws<ArgumentNullException>(() => valid with { Diagnostics = null! });
-        Assert.Throws<ArgumentException>(() => new ConfigProviderAuditDiscoveredKey(
-            "Valid.Key",
-            "value",
-            ConfigAuditDiscoveredValueKind.Scalar,
-            [],
-            [])
-        {
-            Key = " "
-        });
+        var replacement = AppSurfaceConfigKey.Parse("Replacement");
+        Assert.Same(replacement, (valid with { Key = replacement }).Key);
+        Assert.Same(key, valid.Key);
     }
 
     [Fact]
@@ -160,7 +151,7 @@ public class ConfigAuditModelsTests
             DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac
         };
 
-        var entry = new ConfigAuditKnownEntry("Valid.Key", null, typeof(string), options);
+        var entry = new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Valid.Key"), null, typeof(string), options);
 
         Assert.True(entry.Options.TraverseCollectionElements);
         Assert.Equal(2, entry.Options.MaxCollectionDepth);
@@ -280,7 +271,7 @@ public class ConfigAuditModelsTests
     [Fact]
     public void ConfigAuditKnownEntry_WithOptionsReturnsIndependentEntry()
     {
-        var entry = new ConfigAuditKnownEntry("Valid.Key", null, typeof(string));
+        var entry = new ConfigAuditKnownEntry(AppSurfaceConfigKey.Parse("Valid.Key"), null, typeof(string));
         var updated = entry.WithOptions(
             new ConfigAuditEntryOptions
             {
@@ -504,14 +495,14 @@ public class ConfigAuditModelsTests
         var inherited = empty.AppendDictionaryKey("safe", new ConfigAuditEntryOptions(), labels, correlation);
 
         Assert.Equal("Root[\"tenant-1\"]", safe.DisplayPath);
-        Assert.Equal("Root.tenant-1", safe.SourcePath);
+        Assert.Equal("Root:tenant-1", safe.SourcePath.Value);
         Assert.False(safe.RequiresInheritedSource);
 
         Assert.Equal("Root[\"\"]", empty.DisplayPath);
-        Assert.Equal("Root", empty.SourcePath);
+        Assert.Equal("Root", empty.SourcePath.Value);
         Assert.True(empty.RequiresInheritedSource);
 
-        Assert.Equal("Root.safe", inherited.SourcePath);
+        Assert.Equal("Root:safe", inherited.SourcePath.Value);
         Assert.True(inherited.RequiresInheritedSource);
     }
 
@@ -771,7 +762,7 @@ public class ConfigAuditModelsTests
         Assert.Equal(4, (int)ConfigAuditDiffFailureStage.Render);
 
         var providerKey = new ConfigAuditProviderDiscoveredKey(
-            "Discovered.Value",
+            AppSurfaceConfigKey.Parse("Discovered.Value"),
             RawValue: null,
             ConfigAuditDiscoveredValueKind.Array,
             Sources: [],

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj/**;bin/**</DefaultItemExcludes>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+    <AppSurfacePackageVersion Condition="'$(AppSurfacePackageVersion)' == ''">0.1.0-previous.540b59f7</AppSurfacePackageVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ForgeTrust.AppSurface.Core" Version="$(AppSurfacePackageVersion)" />
+    <PackageReference Include="ForgeTrust.AppSurface.Config" Version="$(AppSurfacePackageVersion)" />
+    <PackageReference Include="ForgeTrust.AppSurface.Config.LocalSecrets" Version="$(AppSurfacePackageVersion)" />
+    <PackageReference Include="ForgeTrust.AppSurface.Config.GoogleSecretManager" Version="$(AppSurfacePackageVersion)" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PackageDescription>Test-framework-neutral logical-key conformance harness for .NET 10 AppSurface configuration providers.</PackageDescription>
+    <PackageTags>appsurface;dotnet;configuration;testing;providers</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj" />
+  </ItemGroup>
+</Project>

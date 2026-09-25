@@ -5,7 +5,7 @@ namespace ForgeTrust.AppSurface.Config;
 /// </summary>
 /// <remarks>
 /// Implement this interface when a provider can resolve a known audit key with richer provenance or diagnostics than the
-/// generic <see cref="IConfigProvider.GetValue{T}"/> fallback can provide, or when calling the generic path would lose
+/// generic <see cref="IConfigProvider.Resolve{T}"/> fallback can provide, or when calling the generic path would lose
 /// provider-specific source records. Providers with ordinary scalar values and no custom diagnostics should rely on the
 /// generic audit path instead. Return display-safe diagnostics only: messages, source records, and metadata must not
 /// include raw configuration values, secret payloads, credentials, or raw provider exception messages.
@@ -21,19 +21,17 @@ public interface IConfigProviderAuditDiagnostics
     /// Resolves a known audit key with source metadata for a configuration audit report.
     /// </summary>
     /// <remarks>
-    /// Return a <see cref="ConfigProviderAuditResolution"/> whose key matches <paramref name="key"/>. Failed claimed-key
+    /// Return a <see cref="ConfigProviderAuditResolution"/> whose logical key matches <c>request.Key</c>. Failed claimed-key
     /// lookups should use <see cref="ConfigAuditEntryState.Invalid"/> with display-safe diagnostics instead of throwing
     /// when the failure is an expected provider outcome. Do not include raw secret values in diagnostics or source
     /// metadata.
     /// </remarks>
-    /// <param name="environment">The environment being audited.</param>
-    /// <param name="key">The logical AppSurface configuration key.</param>
+    /// <param name="request">The request carrying the environment, typed logical key, and shared audit scope.</param>
     /// <param name="valueType">The expected value type.</param>
     /// <param name="role">The role the provider plays in final resolution.</param>
     /// <returns>The provider audit resolution.</returns>
     ConfigProviderAuditResolution ResolveForAudit(
-        string environment,
-        string key,
+        ConfigProviderRequest request,
         Type valueType,
         ConfigAuditSourceRole role);
 

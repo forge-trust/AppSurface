@@ -12,7 +12,7 @@ namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 public sealed class InMemoryAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretStore, IAppSurfaceLocalSecretMetadataStore
 {
     private readonly ConcurrentDictionary<string, (AppSurfaceLocalSecretIdentity Identity, string Value)> _values =
-        new(StringComparer.Ordinal);
+        new(StringComparer.OrdinalIgnoreCase);
 
     /// <inheritdoc />
     public string Name => nameof(InMemoryAppSurfaceLocalSecretStore);
@@ -64,7 +64,7 @@ public sealed class InMemoryAppSurfaceLocalSecretStore : IAppSurfaceLocalSecretS
             .Where(entry => string.Equals(entry.Identity.ApplicationName, applicationName, StringComparison.Ordinal)
                             && string.Equals(entry.Identity.Environment, environment, StringComparison.Ordinal)
                             && string.Equals(entry.Identity.KeyPrefix, keyPrefix, StringComparison.Ordinal))
-            .Select(entry => entry.Identity.Key);
+            .Select(entry => entry.Identity.Key.Value);
 
         return AppSurfaceLocalSecretListResult.Found(keys, Name);
     }

@@ -808,7 +808,7 @@ public sealed class ProgramEntryPointTests
             ["secrets", "get", "Stripe\nApiKey", "--store-file", storePath]);
 
         Assert.NotEqual(0, result.ExitCode);
-        Assert.Contains("local-secret-key-invalid-character", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("local-secret-key-invalid", result.AllText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -845,7 +845,8 @@ public sealed class ProgramEntryPointTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("--watchdog", result.AllText, StringComparison.Ordinal);
-        Assert.Contains("Stall handling mode: warn, fail, or off. Defaults to warn.", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("Stall handling: fail (default), warn, or off.", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("healthy long tests", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--heartbeat-interval", result.AllText, StringComparison.Ordinal);
         Assert.Contains("Heartbeat interval using 500ms, 30s, 10m, or 1h syntax. Defaults to 30s; 0 disables heartbeats.", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--no-progress-timeout", result.AllText, StringComparison.Ordinal);
