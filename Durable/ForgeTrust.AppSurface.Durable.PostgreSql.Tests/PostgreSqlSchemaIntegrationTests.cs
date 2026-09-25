@@ -2551,6 +2551,65 @@ public sealed class PostgreSqlSchemaIntegrationTests
         Assert.NotEqual(0, invalidProfile.ExitCode);
         Assert.Equal(beforeRejectedRun, await ReadRoleRecipeCatalogSnapshotAsync(dataSource));
 
+        var malformedManifests = new[]
+        {
+            (Json: "{", Expected: "Invalid role_pairs_json"),
+            (Json: "{\"version\":1,\"pairs\":[]}", Expected: "Invalid role_pairs_json"),
+            (Json: "{\"version\":1,\"pairs\":[" + string.Join(",", Enumerable.Repeat("{}", 33)) + "]}", Expected: "Invalid role_pairs_json"),
+            (Json: fullManifest.Replace("\"version\":1", "\"version\":1,\"extra\":true", StringComparison.Ordinal), Expected: "Invalid role_pairs_json"),
+            (Json: fullManifest.Replace("\"version\":1", "\"version\":1,\"version\":1", StringComparison.Ordinal), Expected: "Invalid role_pairs_json"),
+            (Json: fullManifest.Replace("\"dispatcher_profile\":\"work_only\"", "\"dispatcher_profile\":\"work_only\",\"dispatcher_profile\":\"work_only\"", StringComparison.Ordinal), Expected: "Invalid role_pairs_json entry"),
+            (Json: fullManifest.Replace(",\"dispatcher_profile\":\"work_only\"", string.Empty, StringComparison.Ordinal), Expected: "Invalid role_pairs_json entry"),
+            (Json: fullManifest.Replace("\"dispatcher_profile\":\"work_only\"", "\"dispatcher_profile\":\"work_only\",\"unknown\":true", StringComparison.Ordinal), Expected: "Invalid role_pairs_json entry"),
+            (Json: fullManifest.Replace("source_dispatcher", "source\\ndispatcher", StringComparison.Ordinal), Expected: "Invalid role_pairs_json entry"),
+            (Json: fullManifest.Replace("source_dispatcher", new string('x', 64), StringComparison.Ordinal), Expected: "Invalid role_pairs_json entry"),
+            (Json: fullManifest.Replace("source_dispatcher", "missing_source_dispatcher", StringComparison.Ordinal), Expected: "Manifest roles must resolve to distinct restricted"),
+            (Json: CreateRolePairsManifest(
+                ("durable_dispatcher", "durable_runtime", "full"),
+                ("durable_dispatcher", "source_runtime", "work_only")), Expected: "Manifest roles must resolve to distinct restricted"),
+        };
+        foreach (var malformed in malformedManifests)
+        {
+            var rejectedManifest = await RunRoleRecipeAsync(
+                container,
+                containerRecipePath,
+                "durable_owner",
+                malformed.Json);
+            Assert.NotEqual(0, rejectedManifest.ExitCode);
+            Assert.Contains(
+                malformed.Expected,
+                $"{rejectedManifest.Stdout}\n{rejectedManifest.Stderr}",
+                StringComparison.Ordinal);
+            Assert.Equal(beforeRejectedRun, await ReadRoleRecipeCatalogSnapshotAsync(dataSource));
+        }
+
+        var narrowedManifest = CreateRolePairsManifest(
+            ("durable_dispatcher", "durable_runtime", "work_only"),
+            ("source_dispatcher", "source_runtime", "work_only"));
+        var narrowed = await RunRoleRecipeAsync(container, containerRecipePath, "durable_owner", narrowedManifest);
+        Assert.NotEqual(0, narrowed.ExitCode);
+        Assert.Equal(beforeRejectedRun, await ReadRoleRecipeCatalogSnapshotAsync(dataSource));
+
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "REVOKE EXECUTE ON FUNCTION appsurface_durable.discover_work_dispatch(text[], text[], integer) FROM source_dispatcher;");
+        var beforeForcedRollback = await ReadRoleRecipeCatalogSnapshotAsync(dataSource);
+        var forcedRollback = await RunRoleRecipeAsync(
+            container,
+            containerRecipePath,
+            "durable_owner",
+            fullManifest,
+            forceFailure: true);
+        Assert.NotEqual(0, forcedRollback.ExitCode);
+        Assert.Contains(
+            "Forced role-recipe test failure immediately before COMMIT",
+            $"{forcedRollback.Stdout}\n{forcedRollback.Stderr}",
+            StringComparison.Ordinal);
+        Assert.Equal(beforeForcedRollback, await ReadRoleRecipeCatalogSnapshotAsync(dataSource));
+        var restoredNarrowGrant = await RunRoleRecipeAsync(container, containerRecipePath, "durable_owner", fullManifest);
+        Assert.Equal(0, restoredNarrowGrant.ExitCode);
+        Assert.True(await HasSourceWorkDiscoveryAsync(dataSource));
+
         await ExecuteNonQueryAsync(
             dataSource,
             "GRANT SELECT ON appsurface_durable.flow_dispatch TO source_dispatcher;");
@@ -2562,6 +2621,30 @@ public sealed class PostgreSqlSchemaIntegrationTests
             fullManifest);
         Assert.NotEqual(0, drifted.ExitCode);
         Assert.Equal(driftedSnapshot, await ReadRoleRecipeCatalogSnapshotAsync(dataSource));
+
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "REVOKE SELECT ON appsurface_durable.flow_dispatch FROM source_dispatcher;");
+        var expandedManifest = CreateRolePairsManifest(
+            ("durable_dispatcher", "durable_runtime", "full"),
+            ("source_dispatcher", "source_runtime", "full"));
+        var expanded = await RunRoleRecipeAsync(container, containerRecipePath, "durable_owner", expandedManifest);
+        Assert.True(
+            expanded.ExitCode == 0,
+            $"Reviewed work_only-to-full expansion failed. stdout: {expanded.Stdout} stderr: {expanded.Stderr}");
+        await using var expandedCapabilities = dataSource.CreateCommand(
+            "SELECT has_table_privilege('source_dispatcher', 'appsurface_durable.flow_dispatch', 'SELECT') " +
+            "AND has_function_privilege('source_dispatcher', " +
+            "'appsurface_durable.claim_schedule_dispatch(text, interval)', 'EXECUTE');");
+        Assert.True((bool)(await expandedCapabilities.ExecuteScalarAsync())!);
+    }
+
+    private static async Task<bool> HasSourceWorkDiscoveryAsync(NpgsqlDataSource dataSource)
+    {
+        await using var command = dataSource.CreateCommand(
+            "SELECT has_function_privilege('source_dispatcher', " +
+            "'appsurface_durable.discover_work_dispatch(text[], text[], integer)', 'EXECUTE');");
+        return (bool)(await command.ExecuteScalarAsync())!;
     }
 
     private static async Task AssertForwardingDispatcherCapabilitiesAsync(NpgsqlDataSource dataSource)
@@ -3495,19 +3578,28 @@ public sealed class PostgreSqlSchemaIntegrationTests
         string recipePath,
         string owner,
         string rolePairsJson,
-        string retention = "durable_retention") =>
-        container.ExecAsync(
-            [
-                "env",
-                $"PGAPPNAME={RoleRecipeApplicationName}",
-                "psql",
-                "-U", RoleRecipeUsername,
-                "-d", RoleRecipeDatabase,
-                "-v", $"migration_owner_role={owner}",
-                "-v", $"role_pairs_json={rolePairsJson}",
-                "-v", $"retention_operator_role={retention}",
-                "-f", recipePath,
-            ]);
+        string retention = "durable_retention",
+        bool forceFailure = false)
+    {
+        var arguments = new List<string>
+        {
+            "env",
+            $"PGAPPNAME={RoleRecipeApplicationName}",
+            "psql",
+            "-U", RoleRecipeUsername,
+            "-d", RoleRecipeDatabase,
+            "-v", $"migration_owner_role={owner}",
+            "-v", $"role_pairs_json={rolePairsJson}",
+            "-v", $"retention_operator_role={retention}",
+        };
+        if (forceFailure)
+        {
+            arguments.AddRange(["-v", "role_recipe_test_force_failure=true"]);
+        }
+
+        arguments.AddRange(["-f", recipePath]);
+        return container.ExecAsync(arguments);
+    }
 
     private static string CreateRolePairsManifest(params (string Dispatcher, string Runtime, string Profile)[] pairs) =>
         JsonSerializer.Serialize(new
