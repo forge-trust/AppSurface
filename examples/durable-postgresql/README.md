@@ -17,6 +17,9 @@ Application startup never applies DDL. Generate, review, and apply migrations th
   completes a hosted pass, verifies the durable catalog and migration metadata are unchanged, then stops it without
   doing DDL.
 
+The heartbeat proof seed can be retried after a partial run. A completed `verify-local` uses fixed Work and Flow
+command IDs, so recreate the disposable local proof database before running the full proof again.
+
 ## One-command local proof
 
 From the repository root:
