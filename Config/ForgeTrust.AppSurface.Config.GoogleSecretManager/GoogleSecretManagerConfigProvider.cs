@@ -12,9 +12,12 @@ using Microsoft.Extensions.Options;
 namespace ForgeTrust.AppSurface.Config.GoogleSecretManager;
 
 /// <summary>Resolves explicitly claimed AppSurface keys from Google Secret Manager.</summary>
-public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfigProviderAuditDiagnostics
+public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfigProviderAuditDiagnostics,
+    IConfigSecretProvider, IConfigSecretDeclarationSource, IConfigCompositionValueProvider, IConfigProviderClaimInspector
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+    /// <summary>Stable provider identifier used by file declarations and audit claims.</summary>
+    public const string ProviderId = "google-secret-manager";
     private readonly AppSurfaceGoogleSecretManagerOptions _options;
     private readonly IAppSurfaceGoogleSecretManagerClient _client;
     private readonly FrozenDictionary<AppSurfaceConfigKey, GoogleSecretManagerSecretReference> _explicit;
@@ -25,6 +28,9 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
     private int _adHocClaimCount;
     private readonly ConcurrentDictionary<string, Lazy<Task<PayloadResult>>> _inFlight = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, CachedSecret> _cache = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, CachedSecret> _childCache = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, ConfigProviderTerminalDiagnostic> _terminalDiagnostics = new(StringComparer.Ordinal);
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>Creates a provider using the registered Google Secret Manager client.</summary>
     /// <param name="options">Provider configuration.</param>
@@ -32,7 +38,7 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
     public GoogleSecretManagerConfigProvider(
         IOptions<AppSurfaceGoogleSecretManagerOptions> options,
         IAppSurfaceGoogleSecretManagerClient client)
-        : this(options, client, serviceProvider: null)
+        : this(options, client, serviceProvider: null, timeProvider: null)
     {
     }
 
@@ -44,6 +50,24 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
         IOptions<AppSurfaceGoogleSecretManagerOptions> options,
         IAppSurfaceGoogleSecretManagerClient client,
         IServiceProvider? serviceProvider)
+        : this(options, client, serviceProvider, timeProvider: null)
+    {
+    }
+
+    /// <summary>Creates a provider with a testable clock for file-reference deadline and cache behavior.</summary>
+    public GoogleSecretManagerConfigProvider(
+        IOptions<AppSurfaceGoogleSecretManagerOptions> options,
+        IAppSurfaceGoogleSecretManagerClient client,
+        TimeProvider timeProvider)
+        : this(options, client, serviceProvider: null, timeProvider)
+    {
+    }
+
+    internal GoogleSecretManagerConfigProvider(
+        IOptions<AppSurfaceGoogleSecretManagerOptions> options,
+        IAppSurfaceGoogleSecretManagerClient client,
+        IServiceProvider? serviceProvider,
+        TimeProvider? timeProvider)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(client);
@@ -55,6 +79,7 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
         }
 
         _client = client;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         var entries = _options.Mappings.Select(mapping =>
         {
             var reference = GoogleSecretManagerSecretReference.FromMapping(_options, mapping);
@@ -115,6 +140,149 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
     public string Name => nameof(GoogleSecretManagerConfigProvider);
 
     /// <inheritdoc />
+    public string Id => ProviderId;
+
+    /// <inheritdoc />
+    public ConfigSecretReferenceValidation ValidateReference(ConfigSecretReference reference)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        return TryCreateReference(reference.LogicalPath, reference.Key, reference.Version, out _)
+            ? ConfigSecretReferenceValidation.Supported() : ConfigSecretReferenceValidation.Invalid();
+    }
+
+    /// <inheritdoc />
+    public ConfigSecretProviderResolution Resolve(ConfigSecretReference reference, ConfigSecretResolutionContext context)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        ArgumentNullException.ThrowIfNull(context);
+        if (!TryCreateReference(reference.LogicalPath, reference.Key, reference.Version, out var secret))
+            return ConfigSecretProviderResolution.InvalidReference(ProviderId);
+        if (context.Remaining <= TimeSpan.Zero) return ConfigSecretProviderResolution.Unavailable(ProviderId);
+        try
+        {
+            var timeout = context.Remaining < _options.LookupTimeout ? context.Remaining : _options.LookupTimeout;
+            AppSurfaceGoogleSecretPayload response;
+            var cacheKey = ChildCacheKey(reference.Environment, secret.ResourceName);
+            if (_options.CacheTtl is { } ttl && _childCache.TryGetValue(cacheKey, out var cached))
+            {
+                if (_timeProvider.GetElapsedTime(cached.CachedAtTimestamp) <= ttl)
+                    response = new AppSurfaceGoogleSecretPayload(cached.Payload, cached.ResolvedResourceName);
+                else
+                {
+                    _childCache.TryRemove(new KeyValuePair<string, CachedSecret>(cacheKey, cached));
+                    response = _client.AccessSecretVersion(secret.ResourceName, timeout);
+                }
+            }
+            else
+            {
+                response = _client.AccessSecretVersion(secret.ResourceName, timeout);
+            }
+            if (!IsCompatibleResolvedResource(secret.ResourceName, response.ResolvedResourceName))
+                return ConfigSecretProviderResolution.ProviderFailed(ProviderId);
+            // Reject malformed payloads before adding them to the child cache.
+            var value = StrictUtf8.GetString(response.Data);
+            if (_options.CacheTtl != null && !_childCache.ContainsKey(cacheKey))
+            {
+                lock (_cacheGate)
+                {
+                    _childCache[cacheKey] = new CachedSecret(response.Data, response.ResolvedResourceName!, _timeProvider.GetTimestamp());
+                    while (_childCache.Count > _options.CacheCapacity)
+                    {
+                        var oldest = _childCache.OrderBy(pair => pair.Value.CachedAtTimestamp).ThenBy(pair => pair.Key, StringComparer.Ordinal).First();
+                        _childCache.TryRemove(oldest.Key, out _);
+                    }
+                }
+            }
+            return ConfigSecretProviderResolution.Resolved(value, ConfigSecretSourceMetadata.Create(ProviderId, "remote"));
+        }
+        catch (DecoderFallbackException) { return ConfigSecretProviderResolution.ProviderFailed(ProviderId); }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound) { return ConfigSecretProviderResolution.Missing(ProviderId); }
+        catch (RpcException ex) when (ex.StatusCode is StatusCode.PermissionDenied or StatusCode.Unauthenticated)
+        { return ConfigSecretProviderResolution.AccessDenied(ProviderId); }
+        catch (RpcException ex) when (ex.StatusCode is StatusCode.Unavailable or StatusCode.DeadlineExceeded or StatusCode.Cancelled)
+        { return ConfigSecretProviderResolution.Unavailable(ProviderId); }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.InvalidArgument)
+        { return ConfigSecretProviderResolution.InvalidReference(ProviderId); }
+        catch (TimeoutException)
+        { return ConfigSecretProviderResolution.Unavailable(ProviderId); }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
+        { return ConfigSecretProviderResolution.ProviderFailed(ProviderId, retryable: true); }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<ConfigSecretConfiguredClaim> InspectClaims(string rootLogicalPath, IReadOnlyList<string> secretDestinationPaths)
+    {
+        ArgumentNullException.ThrowIfNull(rootLogicalPath);
+        ArgumentNullException.ThrowIfNull(secretDestinationPaths);
+        var root = AppSurfaceConfigKey.Parse(rootLogicalPath);
+        var claims = _options.Mappings.Where(mapping => IntersectsRoot(root, AppSurfaceConfigKey.Parse(mapping.LogicalKey)))
+            .Select(mapping => new ConfigSecretConfiguredClaim(root.Equals(AppSurfaceConfigKey.Parse(mapping.LogicalKey))
+                ? ConfigSecretConfiguredClaimKind.RootMapping : ConfigSecretConfiguredClaimKind.ExactMapping,
+                mapping.LogicalKey, ProviderId, mapping.SecretIdOrResourceName, mapping.Version)).ToList();
+        var convention = _options.Conventions.SingleOrDefault(item => root.IsSameOrDescendantOf(AppSurfaceConfigKey.Parse(item.LogicalKeyPrefix)));
+        if (convention != null && !_options.Mappings.Any(mapping => root.Equals(AppSurfaceConfigKey.Parse(mapping.LogicalKey))))
+        {
+            var reference = GoogleSecretManagerSecretReference.FromConvention(_options, convention, rootLogicalPath);
+            claims.Add(new ConfigSecretConfiguredClaim(ConfigSecretConfiguredClaimKind.RootConvention, rootLogicalPath,
+                ProviderId, reference.ResourceName, null));
+        }
+        return claims;
+    }
+
+    /// <inheritdoc />
+    public ConfigCompositionValueResolution ResolveRaw(string environment, string logicalKey)
+    {
+        var request = new ConfigProviderRequest(environment, AppSurfaceConfigKey.Parse(logicalKey));
+        if (_terminalDiagnostics.TryRemove(DiagnosticKey(environment, request.Key.Value), out var previousDiagnostic))
+            return _options.FailClosedOnProviderFailure
+                ? ConfigCompositionValueResolution.TerminalFailure(Name, Priority, isSensitive: true, retryable: previousDiagnostic.Retryable)
+                : ConfigCompositionValueResolution.Missing(Name, Priority, isSensitive: true);
+
+        if (CheckCancellation(request) is { } cancellation)
+            return ConfigCompositionValueResolution.TerminalFailure(Name, Priority, isSensitive: true, retryable: cancellation.Retryable);
+        if (!TryResolveReference(request.Key, out var reference, out var lookupDiagnostic))
+        {
+            if (lookupDiagnostic == null)
+                return ConfigCompositionValueResolution.Unclaimed(Name, Priority, isSensitive: true);
+            return _options.FailClosedOnProviderFailure
+                ? ConfigCompositionValueResolution.TerminalFailure(Name, Priority, isSensitive: true, retryable: lookupDiagnostic.Retryable)
+                : ConfigCompositionValueResolution.Missing(Name, Priority, isSensitive: true);
+        }
+
+        var payload = GetPayload(request, reference);
+        if (payload.Diagnostic != null)
+            return _options.FailClosedOnProviderFailure
+                ? ConfigCompositionValueResolution.TerminalFailure(Name, Priority, isSensitive: true, retryable: payload.Diagnostic.Retryable)
+                : ConfigCompositionValueResolution.Missing(Name, Priority, isSensitive: true);
+        try
+        {
+            return ConfigCompositionValueResolution.Resolved(StrictUtf8.GetString(payload.Payload), Name, Priority, isSensitive: true);
+        }
+        catch (DecoderFallbackException)
+        {
+            EvictRejectedPayload(reference, payload);
+            return _options.FailClosedOnProviderFailure
+                ? ConfigCompositionValueResolution.TerminalFailure(Name, Priority, isSensitive: true)
+                : ConfigCompositionValueResolution.Missing(Name, Priority, isSensitive: true);
+        }
+    }
+
+    /// <inheritdoc />
+    public ConfigProviderClaim InspectClaim(string environment, string logicalKey) =>
+        TryResolveReference(AppSurfaceConfigKey.Parse(logicalKey), out _, out _) ? ConfigProviderClaim.MayClaim : ConfigProviderClaim.Unclaimed;
+
+    private bool TryCreateReference(string logicalPath, string key, string? version, out GoogleSecretManagerSecretReference reference)
+    {
+        reference = null!;
+        if (string.IsNullOrWhiteSpace(logicalPath) || !AppSurfaceGoogleSecretManagerOptionsValidator.IsValidDeclarationReference(_options, key, version)) return false;
+        reference = GoogleSecretManagerSecretReference.FromMapping(_options, new AppSurfaceGoogleSecretMapping(logicalPath, key, version));
+        return true;
+    }
+
+    private static bool IntersectsRoot(AppSurfaceConfigKey root, AppSurfaceConfigKey path) =>
+        root.IsSameOrDescendantOf(path) || path.IsSameOrDescendantOf(root);
+
+    /// <inheritdoc />
     /// <remarks>
     /// Rechecks the resource claim before publishing a value so a collision discovered during a shared fetch
     /// or conversion remains terminal for the pending resolution, including cached values.
@@ -129,7 +297,12 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
         }
 
         var payload = GetPayload(request, reference);
-        return ConvertPayload<T>(request, reference, payload);
+        var result = ConvertPayload<T>(request, reference, payload);
+        if (result.Status == ConfigProviderValueStatus.Terminal)
+            _terminalDiagnostics[DiagnosticKey(request.Environment, request.Key.Value)] = result.Diagnostic!;
+        else
+            _terminalDiagnostics.TryRemove(DiagnosticKey(request.Environment, request.Key.Value), out _);
+        return result;
     }
 
     // Runtime and audit convert the same fetched payload together with its exact resolved provenance.
@@ -170,12 +343,13 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
     [Obsolete("Use Resolve with ConfigProviderRequest. This compatibility helper uses strict logical-key semantics and throws terminal failures.")]
     public T? GetValue<T>(string environment, string key)
     {
-        var result = Resolve<T>(new ConfigProviderRequest(environment, AppSurfaceConfigKey.Parse(key)));
+        var parsed = AppSurfaceConfigKey.Parse(key);
+        var result = Resolve<T>(new ConfigProviderRequest(environment, parsed));
         return result.Status switch
         {
             ConfigProviderValueStatus.Found => result.Value,
             ConfigProviderValueStatus.Missing => default,
-            _ => throw new ConfigurationResolutionException(environment, AppSurfaceConfigKey.Parse(key), Name, result.Diagnostic!)
+            _ => throw new ConfigurationResolutionException(environment, parsed, Name, result.Diagnostic!)
         };
     }
 
@@ -186,12 +360,15 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
     public GoogleSecretManagerConfigResolution<T> ResolveValue<T>(string environment, string key)
     {
         var parsed = AppSurfaceConfigKey.Parse(key);
-        var result = Resolve<T>(new ConfigProviderRequest(environment, parsed));
+        var request = new ConfigProviderRequest(environment, parsed);
+        var result = Resolve<T>(request);
         return result.Status switch
         {
             ConfigProviderValueStatus.Missing => GoogleSecretManagerConfigResolution<T>.Unclaimed(),
             ConfigProviderValueStatus.Found => GoogleSecretManagerConfigResolution<T>.Found(result.Value!, Name),
-            _ => throw new ConfigurationResolutionException(environment, parsed, Name, result.Diagnostic!)
+            _ when result.Diagnostic?.Code == "config-key-collision" =>
+                throw new ConfigurationResolutionException(environment, parsed, Name, result.Diagnostic),
+            _ => GoogleSecretManagerConfigResolution<T>.Failed(GoogleSecretManagerResultStatus.ProviderFailed, result.Diagnostic!, Name)
         };
     }
 
@@ -276,11 +453,13 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
             ConfigPath = key.Value, Message = diagnostic.ToDisplayString()
         }]);
 
-    private PayloadResult GetPayload(ConfigProviderRequest request, GoogleSecretManagerSecretReference reference)
+    private PayloadResult GetPayload(
+        ConfigProviderRequest request,
+        GoogleSecretManagerSecretReference reference)
     {
         if (_options.CacheTtl is { } ttl && _cache.TryGetValue(reference.ResourceName, out var cached))
         {
-            if (DateTimeOffset.UtcNow - cached.CachedAt <= ttl)
+            if (_timeProvider.GetElapsedTime(cached.CachedAtTimestamp) <= ttl)
             {
                 return PayloadResult.Found(cached.Payload, cached.ResolvedResourceName, cached);
             }
@@ -316,6 +495,12 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
         }
     }
 
+    private static string ChildCacheKey(string environment, string resourceName) =>
+        $"{environment}\0{resourceName}";
+
+    private static string DiagnosticKey(string environment, string logicalKey) =>
+        $"{environment}\0{logicalKey}";
+
     private PayloadResult Fetch(GoogleSecretManagerSecretReference reference)
     {
         try
@@ -333,12 +518,12 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
             {
                 lock (_cacheGate)
                 {
-                    cacheEntry = new CachedSecret(bytes, payload.ResolvedResourceName!, DateTimeOffset.UtcNow);
+                    cacheEntry = new CachedSecret(bytes, payload.ResolvedResourceName!, _timeProvider.GetTimestamp());
                     _cache[reference.ResourceName] = cacheEntry;
                     while (_cache.Count > _options.CacheCapacity)
                     {
                         var oldest = _cache
-                            .OrderBy(pair => pair.Value.CachedAt)
+                            .OrderBy(pair => pair.Value.CachedAtTimestamp)
                             .ThenBy(pair => pair.Key, StringComparer.Ordinal)
                             .FirstOrDefault();
                         _cache.TryRemove(oldest.Key, out _);
@@ -352,19 +537,36 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
         {
             return PayloadResult.Failed(ConfigDiagnosticCatalog.Terminal("config-key-collision", reference.ResourceName));
         }
-        catch (RpcException)
+        catch (RpcException ex)
         {
-            return PayloadResult.Failed(ConfigDiagnosticCatalog.Terminal("config-provider-failed", reference.ResourceName));
+            return PayloadResult.Failed(DiagnosticFor(ex, reference.ResourceName));
         }
         catch (TimeoutException)
         {
-            return PayloadResult.Failed(ConfigDiagnosticCatalog.Terminal("config-provider-failed", reference.ResourceName));
+            return PayloadResult.Failed(RetryableDiagnostic(reference.ResourceName));
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
         {
-            return PayloadResult.Failed(ConfigDiagnosticCatalog.Terminal("config-provider-failed", reference.ResourceName));
+            return PayloadResult.Failed(RetryableDiagnostic(reference.ResourceName));
         }
     }
+
+    private static ConfigProviderTerminalDiagnostic DiagnosticFor(RpcException exception, string resourceName)
+    {
+        if (exception.StatusCode == StatusCode.InvalidArgument)
+            return ConfigDiagnosticCatalog.Terminal("config-provider-failed", resourceName);
+
+        var diagnostic = ConfigDiagnosticCatalog.Terminal("config-provider-failed", resourceName);
+        var retryable = exception.StatusCode is StatusCode.Cancelled or StatusCode.Unavailable or StatusCode.DeadlineExceeded
+            || exception.StatusCode is not (StatusCode.NotFound or StatusCode.PermissionDenied or StatusCode.Unauthenticated);
+        return WithRetryability(diagnostic, retryable);
+    }
+
+    private static ConfigProviderTerminalDiagnostic RetryableDiagnostic(string resourceName) =>
+        WithRetryability(ConfigDiagnosticCatalog.Terminal("config-provider-failed", resourceName), retryable: true);
+
+    private static ConfigProviderTerminalDiagnostic WithRetryability(ConfigProviderTerminalDiagnostic diagnostic, bool retryable) =>
+        new(diagnostic.Code, diagnostic.Problem, diagnostic.Cause, diagnostic.Fix, diagnostic.Docs, retryable);
 
     // AccessSecretVersion returns an authoritative resolved name, not an echo of its request. Numeric versions
     // and secret/location identifiers remain exact. Only version aliases and project ID/number pairs may differ.
@@ -520,11 +722,11 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
     private sealed class CachedSecret
     {
         private readonly byte[] _payload;
-        public CachedSecret(byte[] payload, string resolvedResourceName, DateTimeOffset cachedAt)
-        { _payload = (byte[])payload.Clone(); ResolvedResourceName = resolvedResourceName; CachedAt = cachedAt; }
+        public CachedSecret(byte[] payload, string resolvedResourceName, long cachedAtTimestamp)
+        { _payload = (byte[])payload.Clone(); ResolvedResourceName = resolvedResourceName; CachedAtTimestamp = cachedAtTimestamp; }
         public byte[] Payload => (byte[])_payload.Clone();
         public string ResolvedResourceName { get; }
-        public DateTimeOffset CachedAt { get; }
+        public long CachedAtTimestamp { get; }
     }
 
     private sealed class PayloadResult

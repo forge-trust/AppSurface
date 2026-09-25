@@ -776,7 +776,7 @@ public class FileBasedConfigProviderTests
     }
 
     [Fact]
-    public void Resolve_SuppressesLocationForCaseInsensitivePathCollisions()
+    public void Resolve_SkipsCaseInsensitiveDuplicateMembersAndReportsLoadFailure()
     {
         var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
@@ -803,6 +803,55 @@ public class FileBasedConfigProviderTests
             Assert.Null(result.Value);
             Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "config-key-collision");
             Assert.All(result.Sources, source => Assert.Null(source.Location));
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("utf16-le", false)]
+    [InlineData("utf16-le", true)]
+    [InlineData("utf16-be", false)]
+    [InlineData("utf16-be", true)]
+    [InlineData("utf32-le", false)]
+    [InlineData("utf32-le", true)]
+    [InlineData("utf32-be", false)]
+    [InlineData("utf32-be", true)]
+    public void Resolve_UsesDecodedTextForDuplicateDetection(string encodingName, bool duplicate)
+    {
+        var tempDir = CreateTempDirectoryPath();
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var json = duplicate
+                ? """{"Feature":{"Enabled":true},"feature":{"Enabled":false}}"""
+                : """{"Feature":{"Enabled":true}}""";
+            var encoding = encodingName switch
+            {
+                "utf16-le" => Encoding.Unicode,
+                "utf16-be" => Encoding.BigEndianUnicode,
+                "utf32-le" => Encoding.UTF32,
+                "utf32-be" => new UTF32Encoding(bigEndian: true, byteOrderMark: true),
+                _ => throw new ArgumentOutOfRangeException(nameof(encodingName))
+            };
+            File.WriteAllText(Path.Join(tempDir, "appsettings.json"), json, encoding);
+
+            var provider = CreateProvider(tempDir);
+
+            if (duplicate)
+            {
+                Assert.Empty(provider.Snapshot.Layers);
+                Assert.Equal("config-file-duplicate-member",
+                    Assert.IsType<ConfigFileLoadFailure>(Assert.Single(provider.Snapshot.LoadEvents)).Code);
+                Assert.Null(provider.Resolve<bool?>(new ConfigProviderRequest(Environments.Production, AppSurfaceConfigKey.Parse("Feature:Enabled"))).Value);
+            }
+            else
+            {
+                Assert.Single(provider.Snapshot.Layers);
+                Assert.True(provider.Resolve<bool>(new ConfigProviderRequest(Environments.Production, AppSurfaceConfigKey.Parse("Feature:Enabled"))).Value);
+            }
         }
         finally
         {

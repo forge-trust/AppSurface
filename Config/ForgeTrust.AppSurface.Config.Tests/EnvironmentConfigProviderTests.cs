@@ -31,6 +31,28 @@ public class EnvironmentConfigProviderTests
         };
     }
 
+    [Fact]
+    public void Resolve_DottedCompatibilityPathReturnsResolvedMissingAndInvalidResults()
+    {
+        var innerProvider = SnapshotFake();
+        SetSnapshotValue(innerProvider, "FEATURE__ENABLED", "true");
+        SetSnapshotValue(innerProvider, "FEATURE__COUNT", "not-a-number");
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var resolved = provider.Resolve("Production", "Feature.Enabled", typeof(bool), ConfigAuditSourceRole.Base);
+        var missing = provider.Resolve("Production", "Feature.Missing", typeof(string), ConfigAuditSourceRole.Base);
+        var invalid = provider.Resolve("Production", "Feature.Count", typeof(int), ConfigAuditSourceRole.Base);
+
+        Assert.Equal(ConfigAuditEntryState.Resolved, resolved.State);
+        Assert.Equal(true, resolved.Value);
+        Assert.Equal(AppSurfaceConfigKey.Parse("Feature:Enabled"), resolved.Key);
+        Assert.Equal(ConfigAuditEntryState.Missing, missing.State);
+        Assert.Equal(AppSurfaceConfigKey.Parse("Feature:Missing"), missing.Key);
+        Assert.Equal(ConfigAuditEntryState.Invalid, invalid.State);
+        Assert.Equal(AppSurfaceConfigKey.Parse("Feature:Count"), invalid.Key);
+        Assert.Throws<ArgumentNullException>(() => provider.Resolve("Production", null!, typeof(string), ConfigAuditSourceRole.Base));
+    }
+
     private static readonly ConditionalWeakTable<IEnvironmentProvider, Dictionary<string, string>> SnapshotValues = new();
     [Fact]
     public void GetValue_UsesEnvironmentSpecificVariableFirst()

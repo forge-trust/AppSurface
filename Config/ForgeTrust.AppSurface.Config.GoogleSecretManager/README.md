@@ -6,6 +6,33 @@ Use this package when an AppSurface app running on Google Cloud needs production
 logical config keys used by `ForgeTrust.AppSurface.Config`. The provider is read-only, source-aware, fail-closed for
 claimed keys by default, and keeps environment variables as the top emergency override.
 
+The package also implements the typed file-declared secret contracts. Its canonical provider id is
+`google-secret-manager`. For a `Secret<T>` destination, the provider validates the declared key, version, project, full
+resource name, and `latest` policy locally before any Secret Manager call. Resolution caps `LookupTimeout` to the shared
+synchronous deadline and decodes payloads as strict UTF-8 text. Missing resources, denied access, unavailable service
+calls, invalid references, and provider failures remain distinct provider-neutral outcomes for the composition engine.
+
+See the [canonical file-declared secret reference guide](../ForgeTrust.AppSurface.Config/docs/file-secret-references.md) and
+the [executable golden path](../../examples/file-secret-references/README.md) for the complete descriptor, no-rescue Google
+proof, exact environment rescue, and value-safe failure contract.
+
+## Typed file-declared references
+
+The inline descriptor uses the provider id `google-secret-manager` and a complete `key`, optional `version`, and static
+`enabled` value. Local validation happens before any Secret Manager call. A disabled descriptor validates its shape but never
+calls `IAppSurfaceGoogleSecretManagerClient`; an enabled missing or denied reference remains terminal unless the exact
+destination receives a valid environment value.
+
+The module registers one singleton and aliases that same instance to the legacy provider, raw-root, claim inspection,
+declaration inspection, and child-reference interfaces. Child-reference cache entries are separate from legacy mapping
+entries and include the environment, canonical version resource, and validation-affecting options. An optional
+`TimeProvider` constructor argument makes TTL behavior deterministic in tests while the existing two-argument
+constructor remains source-compatible.
+
+Existing `MapSecret(...)` mappings and conventions remain the compatibility path for whole roots. Declaration inspection
+reports explicit mappings at, above, or below a requested root, including mappings for ordinary destinations. Conventions
+are inspected only when the convention already claims the requested root; descendant convention discovery is not widened.
+
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
@@ -48,10 +75,12 @@ appsettings defaults < LocalSecrets < Google Secret Manager < environment variab
 
 Environment variables stay above Google Secret Manager so an operator can override a broken remote secret without
 changing code or mutating Secret Manager. File configuration and LocalSecrets stay below the remote provider. A claimed
-Google Secret Manager key stops lower-priority providers when the remote lookup is unavailable, denied, invalid, or
-cannot be converted. The logical-key contract removes `FailClosedOnProviderFailure`; claimed-key failures always
-remain terminal. Remove assignments to that former option when following the
-[coordinated upgrade guide](../../guides/config-key-migration.md#google-convention-migration).
+Google Secret Manager logical key stops lower-priority providers when the remote lookup is unavailable, denied, invalid, or
+cannot be converted. This is always terminal for the logical-key provider contract. For a `Secret<T>` root,
+`FailClosedOnProviderFailure` (default `true`) controls whether a failed Google raw whole-root base permits fallback to
+lower-priority bases. File-declared scalar references always report their claimed failures; the option does not make
+those failures fall through. Keep it enabled when lower-priority bases must not mask an unavailable secret. See the
+[coordinated upgrade guide](../../guides/config-key-migration.md#google-convention-migration) when migrating conventions.
 
 Unmapped keys are not claimed and continue through the normal provider chain.
 
@@ -171,8 +200,11 @@ services.ConfigureAppSurfaceGoogleSecretManager(options =>
 });
 ```
 
-Only successful payload reads are cached. Failures are evicted after the shared fetch completes, so a later caller can
-retry. Invalid UTF-8, failed typed conversion, and null conversion results evict their exact cached payload generation;
+Only successful payload reads are cached. The TTL uses elapsed monotonic time, so wall-clock corrections do not extend
+or shorten a cached payload's lifetime. Failures are evicted after the shared fetch completes, so a later caller can
+retry. Child-reference payloads are decoded before entering their cache, so invalid UTF-8 is retried on the next
+request. For mapped legacy lookups, invalid UTF-8, failed typed conversion, and null conversion results evict their
+exact cached payload generation;
 a slow failed conversion cannot remove a newer successful entry. Concurrent misses for one exact resource share a
 side-effect-free `Lazy` fetch. Cancelling one request stops its waiter while the shared fetch continues for other callers.
 Already-cancelled callers throw before native claims, cached reads or client access; an expired audit deadline instead

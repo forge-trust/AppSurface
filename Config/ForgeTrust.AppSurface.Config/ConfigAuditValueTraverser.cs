@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Reflection;
+using System.Text.Json;
 
 namespace ForgeTrust.AppSurface.Config;
 
@@ -9,10 +10,14 @@ namespace ForgeTrust.AppSurface.Config;
 internal sealed class ConfigAuditValueTraverser
 {
     private readonly ConfigAuditRedactor _redactor;
+    // This value-free map belongs to one audit invocation. Legacy traversers have no composition context.
+    private readonly IReadOnlyDictionary<string, ConfigSecretSlotTrace>? _secretSlots;
 
-    public ConfigAuditValueTraverser(ConfigAuditRedactor redactor)
+    public ConfigAuditValueTraverser(ConfigAuditRedactor redactor,
+        IReadOnlyList<ConfigSecretSlotTrace>? secretSlots = null)
     {
         _redactor = redactor;
+        _secretSlots = secretSlots?.ToDictionary(slot => slot.Path.Replace(':', '.'), StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -89,10 +94,10 @@ internal sealed class ConfigAuditValueTraverser
         ref int budget,
         ConfigAuditReportTraversalContext? reportTraversalContext)
     {
-        if (value == null || ConfigScalarTypes.IsScalar(value.GetType()))
-        {
+        if (value is null && _secretSlots is not null)
+            return BuildUnresolvedSecretChildren(path, ref budget, reportTraversalContext);
+        if (value is null || value is IConfigSecretValue || ConfigScalarTypes.IsScalar(value.GetType()))
             return ConfigAuditTraversalResult.Empty;
-        }
 
         if (ShouldTrack(value) && !visited.Add(value))
         {
@@ -419,6 +424,9 @@ internal sealed class ConfigAuditValueTraverser
         ref int budget,
         ConfigAuditReportTraversalContext? reportTraversalContext)
     {
+        if (_secretSlots is not null)
+            return BuildComposedObjectChildren(path, value, sources, factContext, options, visited, labels,
+                correlation, ref budget, reportTraversalContext);
         var entries = new List<ConfigAuditEntry>();
         var diagnostics = new List<ConfigAuditDiagnostic>();
         foreach (var property in value.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public))
@@ -505,6 +513,96 @@ internal sealed class ConfigAuditValueTraverser
         }
 
         return new ConfigAuditTraversalResult(entries, diagnostics);
+    }
+
+    /// <summary>Uses the same default serialized member names as composition, never reading a secret member getter.</summary>
+    private ConfigAuditTraversalResult BuildComposedObjectChildren(
+        ConfigAuditPath path, object value, IReadOnlyList<ConfigAuditSourceRecord> sources,
+        ConfigAuditFactContext facts, ConfigAuditEntryOptions options, HashSet<object> visited,
+        ConfigAuditDictionaryLabelSet labels, ConfigAuditDictionaryKeyCorrelationContext correlation,
+        ref int budget, ConfigAuditReportTraversalContext? reportContext)
+    {
+        var entries = new List<ConfigAuditEntry>();
+        var diagnostics = new List<ConfigAuditDiagnostic>();
+        foreach (var member in JsonSerializerOptions.Default.GetTypeInfo(value.GetType()).Properties)
+        {
+            if (member.Get is null) continue;
+            var childPath = path.AppendMember(member.Name);
+            if (!CanReadNextNode(path, budget, diagnostics, reportContext)) break;
+            if (_secretSlots!.TryGetValue(childPath.DisplayPath, out var slot))
+            {
+                if (!TryConsumeNode(path, ref budget, diagnostics, reportContext)) break;
+                entries.Add(BuildSecretChild(slot, member.PropertyType.FullName));
+                continue;
+            }
+            object? childValue;
+            try { childValue = member.Get(value); }
+            catch (Exception ex) when (IsRecoverableTraversalException(ex))
+            {
+                diagnostics.Add(CreateMemberReadFailureDiagnostic(childPath, ex));
+                continue;
+            }
+            if (!TryConsumeNode(path, ref budget, diagnostics, reportContext)) break;
+            entries.Add(BuildChild(childPath, childValue, sources, facts, options, visited, labels,
+                correlation, ref budget, reportContext));
+        }
+        return new(entries, diagnostics);
+    }
+
+    /// <summary>Retains only declared slot topology when a root or parent has no safe bound value to inspect.</summary>
+    private ConfigAuditTraversalResult BuildUnresolvedSecretChildren(ConfigAuditPath path,
+        ref int budget, ConfigAuditReportTraversalContext? reportContext)
+    {
+        var entries = new List<ConfigAuditEntry>();
+        var diagnostics = new List<ConfigAuditDiagnostic>();
+        var prefix = path.DisplayPath + ".";
+        var names = _secretSlots!.Keys.Where(key => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .Select(key => key[prefix.Length..].Split('.')[0]).Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase);
+        foreach (var name in names)
+        {
+            if (!TryConsumeNode(path, ref budget, diagnostics, reportContext)) break;
+            var childPath = path.AppendMember(name);
+            if (_secretSlots.TryGetValue(childPath.DisplayPath, out var slot)) entries.Add(BuildSecretChild(slot));
+            else
+            {
+                var nested = BuildUnresolvedSecretChildren(childPath, ref budget, reportContext);
+                entries.Add(new ConfigAuditEntry
+                {
+                    Key = childPath.DisplayPath,
+                    State = reportContext?.WasTruncated != true && nested.Diagnostics.Count == 0 && nested.Children.Count > 0
+                        && nested.Children.All(child => child.State == ConfigAuditEntryState.Missing)
+                        ? ConfigAuditEntryState.Missing : ConfigAuditEntryState.Invalid,
+                    Children = nested.Children,
+                    Diagnostics = nested.Diagnostics
+                });
+            }
+        }
+        return new(entries, diagnostics);
+    }
+
+    /// <summary>Renders engine state without accessing a wrapper, descriptor, or payload.</summary>
+    private static ConfigAuditEntry BuildSecretChild(ConfigSecretSlotTrace slot, string? declaredType = null)
+    {
+        var state = slot.HasValue ? ConfigAuditEntryState.Resolved
+            : slot.Code is "secret-descriptor-absent" or "secret-declared-disabled" ? ConfigAuditEntryState.Missing
+            : ConfigAuditEntryState.Invalid;
+        return new ConfigAuditEntry
+        {
+            Key = slot.Path.Replace(':', '.'),
+            DeclaredType = declaredType,
+            State = state,
+            DisplayValue = slot.HasValue ? ConfigAuditRedactor.Placeholder : null,
+            IsRedacted = true,
+            Sources = slot.Sources,
+            Diagnostics = [new ConfigAuditDiagnostic
+            {
+                Severity = state == ConfigAuditEntryState.Invalid ? ConfigAuditDiagnosticSeverity.Error : ConfigAuditDiagnosticSeverity.Info,
+                Code = slot.Code, Key = slot.Path.Replace(':', '.'), ConfigPath = slot.Path,
+                Source = slot.DeclarationSource,
+                Message = $"Secret slot state: Enabled={slot.Enabled}; HasValue={slot.HasValue}; Winner={slot.ResolvedProvider ?? "none"}; Code={slot.Code}."
+            }]
+        };
     }
 
     private ConfigAuditEntry BuildChild(

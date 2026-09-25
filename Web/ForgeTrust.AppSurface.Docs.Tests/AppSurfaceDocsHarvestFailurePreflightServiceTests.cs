@@ -4,6 +4,7 @@ using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
@@ -62,7 +63,8 @@ public sealed class AppSurfaceDocsHarvestFailurePreflightServiceTests : IDisposa
         var service = new AppSurfaceDocsHarvestFailurePreflightService(
             new AppSurfaceDocsOptions { Harvest = null! },
             aggregator,
-            _preflightLogger);
+            _preflightLogger,
+            CreateCoordinator(aggregator));
 
         await service.StartAsync(CancellationToken.None);
 
@@ -70,14 +72,16 @@ public sealed class AppSurfaceDocsHarvestFailurePreflightServiceTests : IDisposa
             .MustNotHaveHappened();
     }
 
-    [Fact]
-    public async Task StartAsync_ShouldContinue_WhenStrictModeIsEnabledAndHarvestIsHealthy()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StartAsync_ShouldContinue_WhenStrictModeIsEnabledAndHarvestIsHealthy(bool includeCoordinator)
     {
         var harvester = A.Fake<IDocHarvester>();
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
             .Returns([new DocNode("Guide", "docs/guide.md", "<p>Guide</p>")]);
         var aggregator = CreateAggregator([harvester]);
-        var service = CreateService(aggregator, failOnFailure: true);
+        var service = CreateService(aggregator, failOnFailure: true, includeCoordinator: includeCoordinator);
 
         await service.StartAsync(CancellationToken.None);
 
@@ -120,6 +124,58 @@ public sealed class AppSurfaceDocsHarvestFailurePreflightServiceTests : IDisposa
             .MustHaveHappenedOnceExactly();
     }
 
+    [Theory]
+    [InlineData(AppSurfaceDocsHarvestStartupMode.Blocking, false)]
+    [InlineData(AppSurfaceDocsHarvestStartupMode.Disabled, true)]
+    [InlineData(AppSurfaceDocsHarvestStartupMode.Background, false)]
+    public async Task StartAsync_ShouldShareReadinessWithRequests(
+        AppSurfaceDocsHarvestStartupMode startupMode,
+        bool failOnFailure)
+    {
+        var harvester = new SignalingHarvester();
+        var aggregator = CreateAggregator([harvester]);
+        var coordinator = CreateCoordinator(aggregator);
+        using var services = new ServiceCollection()
+            .AddSingleton(new AppSurfaceDocsOptions
+            {
+                Harvest = new AppSurfaceDocsHarvestOptions
+                {
+                    StartupMode = startupMode,
+                    FailOnFailure = failOnFailure
+                }
+            })
+            .AddSingleton(aggregator)
+            .AddSingleton(coordinator)
+            .AddSingleton<ILogger<AppSurfaceDocsHarvestFailurePreflightService>>(_preflightLogger)
+            .AddSingleton<AppSurfaceDocsHarvestFailurePreflightService>()
+            .BuildServiceProvider();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var preflight = services.GetRequiredService<AppSurfaceDocsHarvestFailurePreflightService>()
+            .StartAsync(timeout.Token);
+
+        try
+        {
+            await harvester.Started.Task.WaitAsync(timeout.Token);
+            Assert.True(coordinator.HasActiveOrQueuedHarvest);
+            if (startupMode != AppSurfaceDocsHarvestStartupMode.Background)
+            {
+                Assert.False(preflight.IsCompleted);
+            }
+        }
+        finally
+        {
+            harvester.Complete();
+            await preflight;
+        }
+
+        if (startupMode == AppSurfaceDocsHarvestStartupMode.Background)
+        {
+            await coordinator.EnsureStarted().WaitAsync(timeout.Token);
+        }
+
+        Assert.True(await coordinator.WaitForCompletionAsync(TimeSpan.Zero, timeout.Token));
+    }
+
     [Fact]
     public async Task StartAsync_ShouldContinue_WhenStrictModeIsEnabledAndHarvestIsEmpty()
     {
@@ -155,14 +211,16 @@ public sealed class AppSurfaceDocsHarvestFailurePreflightServiceTests : IDisposa
             .MustHaveHappenedOnceExactly();
     }
 
-    [Fact]
-    public async Task StartAsync_ShouldThrowRedactedException_WhenStrictModeIsEnabledAndHarvestFailed()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StartAsync_ShouldThrowRedactedException_WhenStrictModeIsEnabledAndHarvestFailed(bool includeCoordinator)
     {
         var harvester = A.Fake<IDocHarvester>();
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
             .Throws(new InvalidOperationException("raw failure"));
         var aggregator = CreateAggregator([harvester], repositoryRoot: "/tmp/private-repo");
-        var service = CreateService(aggregator, failOnFailure: true);
+        var service = CreateService(aggregator, failOnFailure: true, includeCoordinator: includeCoordinator);
 
         var exception = await Assert.ThrowsAsync<AppSurfaceDocsHarvestFailedException>(
             async () => await service.StartAsync(CancellationToken.None));
@@ -307,7 +365,8 @@ public sealed class AppSurfaceDocsHarvestFailurePreflightServiceTests : IDisposa
     private AppSurfaceDocsHarvestFailurePreflightService CreateService(
         DocAggregator aggregator,
         bool failOnFailure,
-        AppSurfaceDocsHarvestStartupMode startupMode = AppSurfaceDocsHarvestStartupMode.Disabled)
+        AppSurfaceDocsHarvestStartupMode startupMode = AppSurfaceDocsHarvestStartupMode.Disabled,
+        bool includeCoordinator = true)
     {
         return new AppSurfaceDocsHarvestFailurePreflightService(
             new AppSurfaceDocsOptions
@@ -319,8 +378,13 @@ public sealed class AppSurfaceDocsHarvestFailurePreflightServiceTests : IDisposa
                 }
             },
             aggregator,
-            _preflightLogger);
+            _preflightLogger,
+            includeCoordinator ? CreateCoordinator(aggregator) : null);
     }
+
+    private static AppSurfaceDocsHarvestCoordinator CreateCoordinator(DocAggregator aggregator) =>
+        new(aggregator, new AppSurfaceDocsHarvestProgressReporter(
+            A.Fake<IServiceProvider>(), A.Fake<ILogger<AppSurfaceDocsHarvestProgressReporter>>()));
 
     private sealed class SignalingHarvester : IDocHarvester
     {

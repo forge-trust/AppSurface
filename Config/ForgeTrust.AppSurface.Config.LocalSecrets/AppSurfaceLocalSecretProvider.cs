@@ -4,8 +4,8 @@ using Microsoft.Extensions.Options;
 namespace ForgeTrust.AppSurface.Config.LocalSecrets;
 
 /// <summary>Resolves typed AppSurface keys from the configured LocalSecrets store.</summary>
-/// <remarks>Resolution is request based and does not retain terminal diagnostics between requests.</remarks>
-public sealed class AppSurfaceLocalSecretProvider : IConfigProvider
+/// <remarks>Resolution is request based. Raw whole-root resolution also supports file-declared secret references.</remarks>
+public sealed class AppSurfaceLocalSecretProvider : IConfigProvider, IConfigCompositionValueProvider, IConfigProviderClaimInspector
 {
     private readonly AppSurfaceLocalSecretsOptions _options;
     private readonly IAppSurfaceLocalSecretStore _store;
@@ -28,6 +28,25 @@ public sealed class AppSurfaceLocalSecretProvider : IConfigProvider
 
     /// <inheritdoc />
     public string Name => nameof(AppSurfaceLocalSecretProvider);
+
+    /// <inheritdoc />
+    public ConfigProviderClaim InspectClaim(string environment, string logicalKey) => ConfigProviderClaim.MayClaim;
+
+    /// <inheritdoc />
+    public ConfigCompositionValueResolution ResolveRaw(string environment, string logicalKey)
+    {
+        var key = AppSurfaceConfigKey.Parse(logicalKey).WithInput(ConfigKeyInputOrigin.StrictString, logicalKey);
+        var resolution = ResolveTyped<string>(new ConfigProviderRequest(environment, key), out _);
+        return resolution.Status switch
+        {
+            LocalSecretResultStatus.Found => ConfigCompositionValueResolution.Resolved(
+                resolution.Value ?? string.Empty, Name, Priority, isSensitive: true),
+            LocalSecretResultStatus.Missing => ConfigCompositionValueResolution.Missing(Name, Priority, isSensitive: true),
+            _ when !_options.FailClosedOnStoreFailure => ConfigCompositionValueResolution.Missing(Name, Priority, isSensitive: true),
+            _ => ConfigCompositionValueResolution.TerminalFailure(Name, Priority, isSensitive: true,
+                retryable: resolution.Diagnostic?.Retryable ?? false)
+        };
+    }
 
     /// <inheritdoc />
     public ConfigProviderValueResult<T> Resolve<T>(ConfigProviderRequest request)

@@ -163,6 +163,62 @@ public sealed class AppSurfaceGoogleSecretManagerOptionsValidator : IValidateOpt
         ValidateVersion(options, version ?? options.DefaultVersion, context, errors);
     }
 
+    /// <summary>Validates a file declaration locally using the same project/default/latest policy as mappings.</summary>
+    /// <param name="options">The provider's isolated options snapshot.</param>
+    /// <param name="key">A short id or a complete projects/.../secrets/.../versions/... resource.</param>
+    /// <param name="version">An optional version or alias for short ids only.</param>
+    /// <returns>Whether the declaration is structurally valid and satisfies the existing options policy.</returns>
+    /// <remarks>The historical mapping validator remains permissive about resource syntax for compatibility.
+    /// File declarations additionally reject malformed segments locally, including disabled references. Numeric
+    /// versions and Google version aliases are accepted; latest still requires explicit opt-in in every environment.
+    /// No resource identity or diagnostic text escapes this method, and no client is constructed.</remarks>
+    internal static bool IsValidDeclarationReference(
+        AppSurfaceGoogleSecretManagerOptions options, string key, string? version)
+    {
+        var errors = new List<string>();
+        ValidateSecretReference(options, key, version, "Secret declaration", errors);
+        if (errors.Count != 0)
+        {
+            return false;
+        }
+
+        if (key.StartsWith("projects/", StringComparison.Ordinal))
+        {
+            var segments = key.Split('/');
+            return version is null
+                && segments.Length == 6
+                && segments[2] == "secrets"
+                && segments[4] == "versions"
+                && IsProjectSegment(segments[1])
+                && IsSecretId(segments[3])
+                && IsVersionSegment(segments[5]);
+        }
+
+        return IsProjectSegment(options.ProjectId)
+            && IsSecretId(key)
+            && IsVersionSegment(version ?? options.DefaultVersion);
+    }
+
+    /// <summary>Rejects path separators, escaping, whitespace and empty project segments without normalizing ids.</summary>
+    /// <remarks>Project ids/numbers and legacy domain-scoped projects are preserved; project existence is remote.</remarks>
+    private static bool IsProjectSegment(string? value) => !string.IsNullOrWhiteSpace(value)
+        && value[0] != '.' && value[^1] != '.'
+        && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '.' or ':');
+
+    /// <summary>Checks the Secret Manager secret-id character set and 255-character limit.</summary>
+    private static bool IsSecretId(string value) => value.Length is > 0 and <= 255
+        && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_');
+
+    /// <summary>Accepts numeric versions or bounded aliases, preserving case and explicit latest policy.</summary>
+    /// <remarks>Alias syntax follows the
+    /// <see href="https://cloud.google.com/secret-manager/docs/reference/rest/v1/projects.secrets">Secret resource's versionAliases contract</see>.
+    /// NEW is reserved.
+    /// This structural check does not resolve aliases or establish that a numeric version exists.</remarks>
+    private static bool IsVersionSegment(string? value) => !string.IsNullOrEmpty(value)
+        && (value.All(char.IsAsciiDigit)
+            || (value.Length <= 63 && char.IsAsciiLetter(value[0]) && value != "NEW"
+                && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_')));
+
     private static void ValidateVersion(
         AppSurfaceGoogleSecretManagerOptions options,
         string? version,
