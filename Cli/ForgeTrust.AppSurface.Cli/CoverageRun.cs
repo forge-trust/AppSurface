@@ -739,6 +739,7 @@ internal sealed class CoverageRunWorkflow
     private readonly ICoverageRunProcessRunner _processRunner;
     private readonly ICoverageRunReportGenerator _reportGenerator;
     private readonly TimeProvider _timeProvider;
+    private readonly Func<string, string, TimeProvider, CoverageRunHangDiagnosticsReader.InspectionResult> _inspectHangDiagnostics;
     private readonly Func<CancellationToken, Task>? _beforeSlowTestDiagnostics;
     private readonly Action? _slowTestDiagnosticsStaged;
     private readonly Action<string>? _beforeSlowTestDiagnosticsPromotion;
@@ -764,6 +765,7 @@ internal sealed class CoverageRunWorkflow
     /// <param name="beforeSlowTestDiagnosticsPromotion">Optional test seam invoked after a prior canonical artifact is backed up and before a staged artifact is promoted.</param>
     /// <param name="writeProjectManifest">Optional test seam that replaces the per-project manifest writer.</param>
     /// <param name="getEnvironmentVariable">Optional environment lookup used by the sandbox preflight.</param>
+    /// <param name="inspectHangDiagnostics">Optional test seam for an inspection failure; production uses the bounded VSTest sequence reader.</param>
     public CoverageRunWorkflow(
         ICoverageRunProcessRunner processRunner,
         ICoverageRunReportGenerator reportGenerator,
@@ -776,11 +778,14 @@ internal sealed class CoverageRunWorkflow
         Action? slowTestDiagnosticsStaged = null,
         Action<string>? beforeSlowTestDiagnosticsPromotion = null,
         Func<string, string, CoverageRunProject, CancellationToken, Task>? writeProjectManifest = null,
-        Func<string, string?>? getEnvironmentVariable = null)
+        Func<string, string?>? getEnvironmentVariable = null,
+        Func<string, string, TimeProvider, CoverageRunHangDiagnosticsReader.InspectionResult>? inspectHangDiagnostics = null)
     {
         _processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
         _reportGenerator = reportGenerator ?? throw new ArgumentNullException(nameof(reportGenerator));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _inspectHangDiagnostics = inspectHangDiagnostics ?? ((owned, output, clock) =>
+            CoverageRunHangDiagnosticsReader.Inspect(owned, output, clock));
         _beforeSlowTestDiagnostics = beforeSlowTestDiagnostics;
         _slowTestDiagnosticsStaged = slowTestDiagnosticsStaged;
         _beforeSlowTestDiagnosticsPromotion = beforeSlowTestDiagnosticsPromotion;
@@ -2172,7 +2177,7 @@ internal sealed class CoverageRunWorkflow
 
         try
         {
-            state.HangDiagnostics = CoverageRunHangDiagnosticsReader.Inspect(
+            state.HangDiagnostics = _inspectHangDiagnostics(
                 state.OwnedResultsDirectory, outputDirectory, _timeProvider);
         }
         catch (Exception ex) when (IsNonFatalDiagnosticException(ex))

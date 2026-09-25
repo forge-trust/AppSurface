@@ -15,6 +15,33 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 [Collection("CoverageGate process state")]
 public sealed class CoverageRunTests
 {
+    [Fact]
+    public async Task RunAsync_InspectionFailure_ShouldKeepTestFailureAndReportUnreadableDiagnostics()
+    {
+        using var repo = TempDirectory.Create("appsurface-hang-inspection-failure-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner { TestExitCode = 1 };
+        var workflow = new CoverageRunWorkflow(
+            runner,
+            new RecordingReportGenerator(),
+            TimeProvider.System,
+            inspectHangDiagnostics: (_, _, _) => throw new IOException("sequence inspection failed"));
+        using var console = new FakeInMemoryConsole();
+
+        var result = await workflow.RunAsync(
+            CreateRequest(TestProjects: [project], WatchdogMode: CoverageRunWatchdogMode.Fail,
+                NoProgressTimeout: TimeSpan.FromSeconds(180)),
+            console,
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Contains("VSTest sequence inspection: unreadable", console.ReadErrorString(), StringComparison.Ordinal);
+        using var timings = JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(result.OutputDirectory, "timings.json")));
+        var diagnostic = timings.RootElement.GetProperty("projects")[0].GetProperty("hangDiagnostics");
+        Assert.Equal("unreadable", diagnostic.GetProperty("status").GetString());
+    }
+
     [Theory]
     [InlineData("collector")]
     [InlineData("msbuild")]

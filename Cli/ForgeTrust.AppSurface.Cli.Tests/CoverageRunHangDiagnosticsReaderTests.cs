@@ -239,20 +239,25 @@ public sealed class CoverageRunHangDiagnosticsReaderTests
     {
         using var fixture = new Fixture();
         Directory.CreateDirectory(fixture.Results);
+        var validPath = fixture.Write("output/results/Sequence.xml",
+            "<TestSequence><Test Name=\"Sample.FollowingTest\" /></TestSequence>");
         var overlongPath = TestPathUtils.PathUnder(
             fixture.Results, new string('x', HangReader.MaximumNameLength + 1));
         var live = HangReader.InspectionIo.Live;
         var io = live with
         {
             EnumerateChildren = path => Path.GetFullPath(path) == Path.GetFullPath(fixture.Results)
-                ? [new FileInfo(overlongPath)]
-                : live.EnumerateChildren(path)
+                ? [new FileInfo(overlongPath), new FileInfo(validPath)]
+                : live.EnumerateChildren(path),
+            GetChildAttributes = child => child.FullName == overlongPath
+                ? throw new InvalidOperationException("overlong entry attributes must not be read")
+                : live.GetChildAttributes(child)
         };
 
         var result = HangReader.Inspect(fixture.Results, fixture.Output, io: io);
 
-        Assert.Equal("missing", result.Status);
-        Assert.Empty(result.Sequences);
+        Assert.Equal("found", result.Status);
+        Assert.Equal("Sample.FollowingTest", Assert.Single(result.Sequences).LastStartedTest);
     }
 
     [Fact]
