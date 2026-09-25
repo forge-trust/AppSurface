@@ -14,7 +14,14 @@ internal sealed record PreparedTailwindPublication(string PackageVersion, string
 internal sealed record TailwindEvidenceCommandResult(bool Succeeded, string Status, string ReportPath);
 internal sealed record TailwindHostArtifact(string Rid, string ArtifactId, string Directory);
 internal sealed record TailwindProducerBinding(TailwindPublicationRequest Request, TailwindProofSubject Subject);
-internal sealed record TailwindDiagnosticError(string Code, string Message, string? Expected, string? Observed, string NextAction, string DocsUrl, string? RelativeEvidencePath = null);
+internal sealed record TailwindDiagnosticError(
+    [property: JsonPropertyName("code")] string Code,
+    [property: JsonPropertyName("message")] string Message,
+    [property: JsonPropertyName("expected")] string? Expected,
+    [property: JsonPropertyName("observed")] string? Observed,
+    [property: JsonPropertyName("nextAction")] string NextAction,
+    [property: JsonPropertyName("docsUrl")] string DocsUrl,
+    [property: JsonPropertyName("evidencePath")] string? RelativeEvidencePath = null);
 
 /// <summary>Typed verifier for native Tailwind release evidence and publication inputs.</summary>
 internal static class TailwindEvidenceWorkflow

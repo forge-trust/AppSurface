@@ -201,7 +201,7 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
         using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(report, "diagnostics.json")));
         Assert.Equal("failed", diagnostics.RootElement.GetProperty("status").GetString());
         Assert.Equal("producer-binding", diagnostics.RootElement.GetProperty("stage").GetString());
-        Assert.Contains("Unsupported expected RID", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString());
+        Assert.Contains("Unsupported expected RID", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("message").GetString());
     }
 
     [Fact]
@@ -219,7 +219,7 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
         Assert.Empty(runner.Requests);
         using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(report, "diagnostics.json")));
         Assert.Equal("producer-binding", diagnostics.RootElement.GetProperty("stage").GetString());
-        Assert.Contains("Native host mismatch", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString());
+        Assert.Contains("Native host mismatch", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("message").GetString());
     }
 
     [Fact]
@@ -236,7 +236,7 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
         Assert.Empty(runner.Requests);
         using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(report, "diagnostics.json")));
         Assert.Equal("producer-binding", diagnostics.RootElement.GetProperty("stage").GetString());
-        Assert.Contains("package plan", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("package plan", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("message").GetString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -312,7 +312,7 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
         Assert.Empty(runner.Requests);
         using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(report, "diagnostics.json")));
         Assert.Equal("consumer-lock-preparation", diagnostics.RootElement.GetProperty("stage").GetString());
-        Assert.Contains("first-party closure", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString());
+        Assert.Contains("first-party closure", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("message").GetString());
     }
 
     [Fact]
@@ -332,7 +332,7 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
         Assert.False(File.Exists(result.ReportPath));
         using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(report, "diagnostics.json")));
         Assert.Equal("post-build-revalidation", diagnostics.RootElement.GetProperty("stage").GetString());
-        Assert.Contains("Expanded first-party package payload bytes changed", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString());
+        Assert.Contains("Expanded first-party package payload bytes changed", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("message").GetString());
     }
 
     [Theory]
@@ -358,7 +358,7 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
         Assert.False(File.Exists(result.ReportPath));
         using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(report, "diagnostics.json")));
         Assert.Equal(expectedStage, diagnostics.RootElement.GetProperty("stage").GetString());
-        Assert.Contains(expectedMessage, diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString(), StringComparison.Ordinal);
+        Assert.Contains(expectedMessage, diagnostics.RootElement.GetProperty("errors")[0].GetProperty("message").GetString(), StringComparison.Ordinal);
     }
 
     [Theory]
@@ -413,7 +413,7 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
         Assert.Equal(expectedCommands.Split(','), runner.Requests.Select(request => request.FailureVerb));
         using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(report, "diagnostics.json")));
         Assert.Equal(expectedStage, diagnostics.RootElement.GetProperty("stage").GetString());
-        Assert.Contains(expectedMessage, diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(expectedMessage, diagnostics.RootElement.GetProperty("errors")[0].GetProperty("message").GetString(), StringComparison.OrdinalIgnoreCase);
     }
 
     private static readonly string[] SupportedRids = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64"];

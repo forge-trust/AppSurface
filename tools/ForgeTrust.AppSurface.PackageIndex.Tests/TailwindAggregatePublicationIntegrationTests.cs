@@ -242,7 +242,7 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         var diagnosticsPath = TestPathUtils.PathUnder(Path.GetDirectoryName(failed.ReportPath)!, "diagnostics.json");
         using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(diagnosticsPath));
         Assert.Equal("failed", diagnostics.RootElement.GetProperty("status").GetString());
-        Assert.Contains(expectedDiagnostic, diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString(), StringComparison.Ordinal);
+        Assert.Contains(expectedDiagnostic, diagnostics.RootElement.GetProperty("errors")[0].GetProperty("message").GetString(), StringComparison.Ordinal);
     }
 
     [Theory]
@@ -379,7 +379,7 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         var diagnosticsPath = TestPathUtils.PathUnder(Path.GetDirectoryName(failed.ReportPath)!, "diagnostics.json");
         using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(diagnosticsPath));
         Assert.Contains(expectedDiagnostic,
-            diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString(), StringComparison.Ordinal);
+            diagnostics.RootElement.GetProperty("errors")[0].GetProperty("message").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -411,7 +411,7 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         Assert.False(aggregate.Succeeded);
         Assert.False(File.Exists(aggregate.ReportPath));
         using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(Path.GetDirectoryName(aggregate.ReportPath)!, "diagnostics.json")));
-        Assert.Contains("is missing or escapes its input root", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString(), StringComparison.Ordinal);
+        Assert.Contains("is missing or escapes its input root", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("message").GetString(), StringComparison.Ordinal);
     }
 
     [UnixFileSystemFact]
@@ -427,7 +427,7 @@ public sealed class TailwindAggregatePublicationIntegrationTests : IDisposable
         Assert.False(aggregate.Succeeded);
         Assert.False(File.Exists(aggregate.ReportPath));
         using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(Path.GetDirectoryName(aggregate.ReportPath)!, "diagnostics.json")));
-        Assert.Contains("link/reparse-point ancestor", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Message").GetString(), StringComparison.Ordinal);
+        Assert.Contains("link/reparse-point ancestor", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("message").GetString(), StringComparison.Ordinal);
     }
 
     [Theory]

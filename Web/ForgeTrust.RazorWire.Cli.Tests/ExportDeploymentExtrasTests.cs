@@ -91,7 +91,11 @@ public sealed class ExportDeploymentExtrasTests
         var external = Path.Join(root.Path, "external");
         Directory.CreateDirectory(output);
         Directory.CreateDirectory(external);
-        Directory.CreateSymbolicLink(Path.Join(output, "linked"), external);
+        var linkPath = Path.Join(output, "linked");
+        if (!TryCreateDirectorySymlink(linkPath, external))
+        {
+            throw Xunit.Sdk.SkipException.ForSkip("Symbolic link creation is not available in this environment.");
+        }
 
         var error = Assert.Throws<ExportValidationException>(
             () => ExportDeploymentExtras.ValidateTargetParentPath(
@@ -123,5 +127,26 @@ public sealed class ExportDeploymentExtrasTests
 
         public void Dispose()
             => Directory.Delete(Path, recursive: true);
+    }
+
+    private static bool TryCreateDirectorySymlink(string linkPath, string targetPath)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
     }
 }

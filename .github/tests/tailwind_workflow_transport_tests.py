@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -66,6 +67,8 @@ def artifact(artifact_id: int, name: str, *, expired: bool = False) -> dict:
 
 class WorkflowTransportTests(unittest.TestCase):
     def setUp(self) -> None:
+        if shutil.which("jq") is None:
+            self.skipTest("jq is required for the workflow transport tests")
         self.temp = tempfile.TemporaryDirectory(prefix="tailwind-transport-", dir=Path(__file__).parent)
         self.root = Path(self.temp.name)
         self.bin = self.root / "bin"
@@ -78,9 +81,6 @@ class WorkflowTransportTests(unittest.TestCase):
         self.jobs = self.root / "jobs.json"
         self.jobs.write_text("[]")
         self.fail_after_page: int | None = None
-        jq_dir = self.bin / "jq"
-        jq_dir.write_text("#!/bin/sh\nexec /usr/bin/jq \"$@\"\n")
-        jq_dir.chmod(0o755)
 
     def tearDown(self) -> None:
         self.temp.cleanup()
@@ -462,11 +462,13 @@ class WorkflowTransportTests(unittest.TestCase):
                     for line in step.split(run_marker, 1)[1].splitlines()
                     if not line or line.startswith("          ")
                 )
-                script = script.replace("${{ steps.start-recovery.outputs.publication_artifact_id }}", "7001")
+                self.assertIn("RECOVERED_START_ID: ${{ steps.start-recovery.outputs.publication_artifact_id }}", step)
+                self.assertNotIn("${{ steps.start-recovery.outputs.publication_artifact_id }}", script)
                 output = self.root / f"{publisher.stem}-candidate.out"
                 env = os.environ.copy()
                 env.update(
                     RECOVERED="true",
+                    RECOVERED_START_ID="7001",
                     START_RECEIPT=str(receipt),
                     PRODUCER_ARTIFACT_ID="123",
                     CURRENT_AGGREGATE_ARTIFACT_ID="999",
@@ -481,6 +483,11 @@ class WorkflowTransportTests(unittest.TestCase):
                 self.assertIn(f"expected_aggregate_sha256={original_sha}", actual)
                 self.assertIn("native_invocation_id=producer-42-1-tailwind-native", actual)
                 self.assertIn("start_artifact_id=7001", actual)
+
+                for invalid_id in ("", "0", "7; exit 0"):
+                    invalid_env = env | {"RECOVERED_START_ID": invalid_id}
+                    rejected = subprocess.run(["bash", "-c", script], cwd=ROOT, env=invalid_env, text=True, capture_output=True)
+                    self.assertNotEqual(rejected.returncode, 0, "recovered artifact ID must be a positive decimal")
 
                 for producer_id, aggregate_id in ((123, "456"), ("123", 456)):
                     receipt.write_text(json.dumps({

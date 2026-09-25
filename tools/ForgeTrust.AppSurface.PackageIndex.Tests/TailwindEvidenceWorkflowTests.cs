@@ -318,16 +318,18 @@ public sealed class TailwindEvidenceWorkflowTests : IDisposable
         Assert.Equal(stage, root.GetProperty("stage").GetString());
         Assert.False(root.GetProperty("releaseEligible").GetBoolean());
         var error = Assert.Single(root.GetProperty("errors").EnumerateArray());
-        Assert.Equal(code, error.GetProperty("Code").GetString());
-        var safeMessage = error.GetProperty("Message").GetString()!;
+        Assert.Equal(["code", "message", "expected", "observed", "nextAction", "docsUrl", "evidencePath"],
+            error.EnumerateObject().Select(property => property.Name));
+        Assert.Equal(code, error.GetProperty("code").GetString());
+        var safeMessage = error.GetProperty("message").GetString()!;
         Assert.DoesNotContain("super-secret", safeMessage, StringComparison.Ordinal);
         Assert.DoesNotContain("hunter2", safeMessage, StringComparison.Ordinal);
         Assert.DoesNotContain("hidden", safeMessage, StringComparison.Ordinal);
         Assert.DoesNotContain("user:pass", safeMessage, StringComparison.Ordinal);
         Assert.EndsWith("…", safeMessage, StringComparison.Ordinal);
         Assert.True(safeMessage.Length <= 2001);
-        Assert.False(string.IsNullOrWhiteSpace(error.GetProperty("NextAction").GetString()));
-        Assert.Equal("https://github.com/forge-trust/AppSurface/issues/798", error.GetProperty("DocsUrl").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(error.GetProperty("nextAction").GetString()));
+        Assert.Equal("https://github.com/forge-trust/AppSurface/issues/798", error.GetProperty("docsUrl").GetString());
         Assert.True(File.Exists(TestPathUtils.PathUnder(report, "summary.md")));
     }
 
@@ -409,7 +411,7 @@ public sealed class TailwindEvidenceWorkflowTests : IDisposable
         using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(report, "diagnostics.json")));
         Assert.Equal("failed", diagnostics.RootElement.GetProperty("status").GetString());
         Assert.Equal("aggregate", diagnostics.RootElement.GetProperty("stage").GetString());
-        Assert.Equal("aggregate-invalid", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Code").GetString());
+        Assert.Equal("aggregate-invalid", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("code").GetString());
     }
 
     [Fact]
@@ -426,7 +428,7 @@ public sealed class TailwindEvidenceWorkflowTests : IDisposable
         Assert.False(File.Exists(output));
         using var diagnostics = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(report, "diagnostics.json")));
         Assert.Equal("producer-binding", diagnostics.RootElement.GetProperty("stage").GetString());
-        Assert.Equal("producer-binding-invalid", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("Code").GetString());
+        Assert.Equal("producer-binding-invalid", diagnostics.RootElement.GetProperty("errors")[0].GetProperty("code").GetString());
         Assert.False(diagnostics.RootElement.GetProperty("releaseEligible").GetBoolean());
     }
 

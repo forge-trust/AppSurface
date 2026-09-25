@@ -94,7 +94,7 @@ internal sealed record TailwindCommandOptions(
             ResolveRequiredPath(AggregateInput, repositoryRoot, "--aggregate-input"), Require(AggregateArtifactId, "--aggregate-artifact-id"),
             Require(ExpectedAggregateSha256, "--expected-aggregate-sha256"),
             ResolveRequiredPath(PublicationDirectory, repositoryRoot, "--publication-directory"),
-            Path.Combine(reportDirectory, "publication-start-receipt.json"), string.Empty, reportDirectory);
+            Path.Join(reportDirectory, "publication-start-receipt.json"), string.Empty, reportDirectory);
     }
 
     internal TailwindPublicationRequest CreateStartValidationRequest(
@@ -116,7 +116,10 @@ internal sealed record TailwindCommandOptions(
     }
 
     internal string ResolveRequiredPath(string? value, string root, string flag)
-        => Path.GetFullPath(Path.IsPathRooted(Require(value, flag)) ? value! : Path.Combine(root, value!));
+    {
+        var required = Require(value, flag);
+        return Path.GetFullPath(Path.IsPathRooted(required) ? required : Path.Join(root, required));
+    }
 
     internal static string Require(string? value, string flag)
         => !string.IsNullOrWhiteSpace(value) ? value : throw new PackageIndexException($"Required option '{flag}' is missing.");

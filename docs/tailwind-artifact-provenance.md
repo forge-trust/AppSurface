@@ -110,7 +110,7 @@ When the selected publish plan contains Tailwind, `publish-prerelease` and `publ
 
 They revalidate the same evidence inside the publishing workflow before the first push and rehash each selected file immediately before pushing. The plan determines whether Tailwind evidence is mandatory; no caller bypass flag exists. Non-Tailwind plans keep existing manifest/plan checks without acquiring an unintended Tailwind gate. The API key/environment is read only after validation and start-receipt authority. `duplicate-reported` does not prove remote byte equality.
 
-All commands fail nonzero on missing/invalid input before the relevant restore/build/push. The .NET convention is 0 success and 1 failure. Successful commands write structured JSON and Markdown summaries. Error records use stable `code`, `stage`, `message`, `expected`, `observed`, `nextAction`, `docsUrl`, and optional confined relative `evidencePath`. Output is bounded and redacted; do not capture secrets, full environments, whole CLI homes, or unrelated caches. Missing, duplicate, stale, foreign-run, wrong-source, v1, malformed or mismatched evidence is a failure.
+All commands fail nonzero on missing/invalid input before the relevant restore/build/push. The .NET convention is 0 success and 1 failure. Successful commands write structured JSON and Markdown summaries. The diagnostic envelope records `stage`; each error uses stable `code`, `message`, `expected`, `observed`, `nextAction`, `docsUrl`, and optional confined relative `evidencePath`. Output is bounded and redacted; do not capture secrets, full environments, whole CLI homes, or unrelated caches. Missing, duplicate, stale, foreign-run, wrong-source, v1, malformed or mismatched evidence is a failure.
 
 ## Operator recipes
 

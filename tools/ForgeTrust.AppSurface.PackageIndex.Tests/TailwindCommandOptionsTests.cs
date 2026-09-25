@@ -86,4 +86,16 @@ public sealed class TailwindCommandOptionsTests
 
         Assert.Throws<PackageIndexException>(() => options.CreatePublicationRequest(_root, "bundle", "manifest.json"));
     }
+
+    [Fact]
+    public void ResolveRequiredPath_KeepsAbsoluteInputsAndResolvesRelativeInputsUnderRoot()
+    {
+        var options = TailwindCommandOptions.Extract([]);
+        var absolute = TestPathUtils.PathUnder(_root, "outside", "receipt.json");
+
+        Assert.Equal(absolute, options.ResolveRequiredPath(absolute, TestPathUtils.PathUnder(_root, "source"), "--test-path"));
+        Assert.Equal(TestPathUtils.PathUnder(_root, "source", "receipt.json"),
+            options.ResolveRequiredPath("receipt.json", TestPathUtils.PathUnder(_root, "source"), "--test-path"));
+        Assert.Throws<PackageIndexException>(() => options.ResolveRequiredPath(null, _root, "--test-path"));
+    }
 }

@@ -356,12 +356,13 @@ public sealed class CoverageRunOutputGuardSecurityTests
     {
         using var root = TestDirectory.Create();
         var output = root.CreateDirectory("coverage");
-        root.WriteFile("coverage/.appsurface-coverage-output", MarkerContents.Replace("\n", "\r\n", StringComparison.Ordinal));
+        var markerContents = MarkerContents + "\r\n";
+        root.WriteFile("coverage/.appsurface-coverage-output", markerContents);
 
         CoverageRunOutputGuard.Validate(output, root.Path, []);
 
         Assert.Equal(
-            MarkerContents.Replace("\n", "\r\n", StringComparison.Ordinal),
+            markerContents,
             File.ReadAllText(Path.Join(output, ".appsurface-coverage-output")));
     }
 

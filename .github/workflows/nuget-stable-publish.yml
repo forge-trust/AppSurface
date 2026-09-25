@@ -511,6 +511,7 @@ jobs:
         id: candidate
         env:
           RECOVERED: ${{ steps.start-recovery.outputs.publication_found }}
+          RECOVERED_START_ID: ${{ steps.start-recovery.outputs.publication_artifact_id }}
           START_RECEIPT: ${{ runner.temp }}/recovered-publication-start/publication-start-receipt.json
         shell: bash
         run: |
@@ -541,8 +542,9 @@ jobs:
             aggregate_sha="$(jq -er '.aggregateSha256' "$START_RECEIPT")"
             invocation="$(jq -er '.nativeInvocationId' "$START_RECEIPT")"
             [[ "$aggregate_id" =~ ^[1-9][0-9]*$ && "$aggregate_sha" =~ ^[0-9a-f]{64}$ ]]
+            [[ "$RECOVERED_START_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
             echo "start_receipt_path=$START_RECEIPT" >> "$GITHUB_OUTPUT"
-            echo "start_artifact_id=${{ steps.start-recovery.outputs.publication_artifact_id }}" >> "$GITHUB_OUTPUT"
+            echo "start_artifact_id=$RECOVERED_START_ID" >> "$GITHUB_OUTPUT"
           else
             aggregate_id="$CURRENT_AGGREGATE_ARTIFACT_ID"
             aggregate_sha="$CURRENT_AGGREGATE_SHA256"
