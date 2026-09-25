@@ -365,7 +365,7 @@ retirement and profile narrowing need a separately reviewed procedure. A failure
 lock serializes catalog reconciliation, while policy DDL may briefly wait on active work; use the bounded drain and
 maintenance procedure in the [adoption guide](../operational-assessments.md#migration-and-role-reconciliation).
 
-For the runnable two-pair psql command, identical rerun, omission refusal, and source privilege check, see the
+For the executable two-pair psql command, identical rerun, omission refusal, and source privilege check, see the
 [version-1 local walkthrough](../../examples/durable-postgresql/README.md#version-1-role-pair-walkthrough).
 
 The `appsurface_durable` schema is package-reserved. The recipe serializes with migrations and runtime transactions,
