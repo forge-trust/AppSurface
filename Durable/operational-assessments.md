@@ -1,5 +1,7 @@
 # Adopt Durable operational assessments
 
+For schema-11 runtime heartbeat cleanup and its forward-only deployment procedure, use the [heartbeat retention operations guide](heartbeat-retention-operations.md). The schema 9→10 transcript below remains the historical runtime-health adoption proof.
+
 This is the task guide for upgrading an existing PostgreSQL worker or external activator to the additive Durable
 operational-assessment contract. Start here if you need to decide whether activation is currently authorized, whether
 one pump invocation actually entered application execution, or how to roll the package back safely. The package
@@ -284,12 +286,13 @@ promise zero blocking. On any error keep Source closed and repair/roll forward w
 one-pair manifest, broad grant, or destructive schema rollback as recovery. Pair retirement and profile narrowing
 require a separately reviewed procedure.
 
-For schema 11, #823's schema-10 recipe is authoritative until #795 publishes. #795 must first replace its single-runtime
-heartbeat preflight with an exact restricted runtime-role set matching the manifest, policy, and function allowlists.
-The schema-11-capable package recipe becomes authoritative after migration 0011; apply migration 0011, rerun that
-matching package's unchanged complete manifest, then preflight and prove both pairs before activation. If #795 ships
-first, keep second-pair activation closed until the combined #795/#823 compatibility proof passes. Its release gate
-includes a real schema-10-to-11 upgrade and both-pair reproof.
+The schema-11-capable role recipe grants heartbeat pruning to every authorized runtime and no dispatcher. The current
+schema-11 CLI preflight still checks one runtime role and rejects the catalog after a second pair is enrolled. The
+[local walkthrough](../examples/durable-postgresql/README.md#version-1-role-pair-walkthrough) runs that preflight on
+the forwarding-only configuration before adding the second pair, then proves both pairs' SQL privileges and the
+forwarding workload. Keep Source activation closed until [#795](https://github.com/forge-trust/AppSurface/issues/795)
+replaces the single-runtime check with an exact restricted runtime-role set matching the manifest, policies, and
+function allowlists. Its release gate includes a real schema-10-to-11 upgrade and both-pair reproof.
 
 With `APPSURFACE_DURABLE_MIGRATION_CONNECTION` naming the migration-owner connection, the review/apply sequence is:
 

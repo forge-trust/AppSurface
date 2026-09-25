@@ -76,6 +76,7 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
         var fakeBin = Directory.CreateDirectory(Path.Join(temporaryRoot, "bin")).FullName;
         var readinessAttemptsFile = Path.Join(temporaryRoot, "readiness-attempts");
         var socketReadinessFile = Path.Join(temporaryRoot, "socket-readiness");
+        var fullManifestAppliedFile = Path.Join(temporaryRoot, "full-manifest-applied");
 
         try
         {
@@ -104,11 +105,15 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
                     case "$*" in
                       *role_pairs_json=*source_dispatcher*)
                         printf '%s\n' 'full role-pairs manifest accepted'
+                        : > "$APPSURFACE_TEST_FULL_MANIFEST_APPLIED_FILE"
                         exit 0
                         ;;
                       *role_pairs_json=*appsurface_durable_dispatcher*)
-                        printf '%s\n' 'Rejected unmanifested Durable role principal(s): appsurface_durable_source_dispatcher, appsurface_durable_source_runtime' >&2
-                        exit 3
+                        if [ -f "$APPSURFACE_TEST_FULL_MANIFEST_APPLIED_FILE" ]; then
+                          printf '%s\n' 'Rejected unmanifested Durable role principal(s): appsurface_durable_source_dispatcher, appsurface_durable_source_runtime' >&2
+                          exit 3
+                        fi
+                        exit 0
                         ;;
                       *"psql"*"-h 127.0.0.1"*"SELECT 1;"*)
                         attempts=0
@@ -161,6 +166,7 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
             startInfo.Environment["APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS"] = "30";
             startInfo.Environment["APPSURFACE_TEST_READINESS_ATTEMPTS_FILE"] = readinessAttemptsFile;
             startInfo.Environment["APPSURFACE_TEST_SOCKET_READINESS_FILE"] = socketReadinessFile;
+            startInfo.Environment["APPSURFACE_TEST_FULL_MANIFEST_APPLIED_FILE"] = fullManifestAppliedFile;
 
             using var process = Process.Start(startInfo)!;
             try
@@ -183,6 +189,7 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
             Assert.True(process.ExitCode == 0, standardError);
             Assert.Equal("2\n", await File.ReadAllTextAsync(readinessAttemptsFile));
             Assert.False(File.Exists(socketReadinessFile));
+            Assert.True(File.Exists(fullManifestAppliedFile));
             Assert.Contains("[ok] local operational-assessment proof completed", standardOutput, StringComparison.Ordinal);
         }
         finally
@@ -211,6 +218,7 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
         var childPidFile = Path.Join(temporaryRoot, "child.pid");
         var heartbeatFile = Path.Join(temporaryRoot, "heartbeat");
         var cleanupHeartbeatFile = Path.Join(temporaryRoot, "cleanup-heartbeat");
+        var fullManifestAppliedFile = Path.Join(temporaryRoot, "full-manifest-applied");
         await File.WriteAllTextAsync(cleanupHeartbeatFile, string.Empty);
 
         try
@@ -245,11 +253,15 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
                   exec)
                     case "$*" in
                       *role_pairs_json=*source_dispatcher*)
+                        : > "$APPSURFACE_TEST_FULL_MANIFEST_APPLIED_FILE"
                         exit 0
                         ;;
                       *role_pairs_json=*appsurface_durable_dispatcher*)
-                        printf '%s\n' 'Rejected unmanifested Durable role principal(s): appsurface_durable_source_dispatcher, appsurface_durable_source_runtime' >&2
-                        exit 3
+                        if [ -f "$APPSURFACE_TEST_FULL_MANIFEST_APPLIED_FILE" ]; then
+                          printf '%s\n' 'Rejected unmanifested Durable role principal(s): appsurface_durable_source_dispatcher, appsurface_durable_source_runtime' >&2
+                          exit 3
+                        fi
+                        exit 0
                         ;;
                       *gen_random_uuid*)
                         printf '%s\n' '00000000-0000-0000-0000-000000000001'
@@ -302,6 +314,7 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
             startInfo.Environment["APPSURFACE_TEST_CHILD_PID_FILE"] = childPidFile;
             startInfo.Environment["APPSURFACE_TEST_HEARTBEAT_FILE"] = heartbeatFile;
             startInfo.Environment["APPSURFACE_TEST_CLEANUP_HEARTBEAT_FILE"] = cleanupHeartbeatFile;
+            startInfo.Environment["APPSURFACE_TEST_FULL_MANIFEST_APPLIED_FILE"] = fullManifestAppliedFile;
 
             var stopwatch = Stopwatch.StartNew();
             using var process = Process.Start(startInfo)!;

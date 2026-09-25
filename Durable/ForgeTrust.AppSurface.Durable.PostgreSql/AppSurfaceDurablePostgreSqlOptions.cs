@@ -47,6 +47,22 @@ public sealed class AppSurfaceDurablePostgreSqlOptions
     /// <summary>Gets or sets how old a heartbeat may become before health reports the worker as stale.</summary>
     public TimeSpan HeartbeatStaleAfter { get; set; } = TimeSpan.FromSeconds(15);
 
+    /// <summary>Gets or sets whether admitted runtime passes trigger stale-heartbeat maintenance.</summary>
+    /// <remarks>Maintenance is capacity cleanup and does not affect pass readiness. It is triggered by the package PostgreSQL pump after admitted passes; a custom pump does not trigger provider maintenance. Set this to <see langword="false"/> in a new registration to pause pruning during an incident; stale identities remain until maintenance resumes or an operator cleans them.</remarks>
+    public bool EnableHeartbeatMaintenance { get; set; } = true;
+
+    /// <summary>Gets or sets the age after which a worker heartbeat is eligible for deletion.</summary>
+    /// <remarks>Defaults to 24 hours; PostgreSQL time determines the cutoff. Values must be at least 24 hours, at most 3650 days, and greater than <see cref="HeartbeatStaleAfter"/>.</remarks>
+    public TimeSpan HeartbeatRetention { get; set; } = TimeSpan.FromHours(24);
+
+    /// <summary>Gets or sets the interval between ordinary heartbeat maintenance calls.</summary>
+    /// <remarks>Defaults to 24 hours. Full batches catch up no faster than one call per minute; failures retry after one hour.</remarks>
+    public TimeSpan HeartbeatMaintenanceCadence { get; set; } = TimeSpan.FromHours(24);
+
+    /// <summary>Gets or sets the maximum number of stale heartbeat rows deleted by one maintenance call.</summary>
+    /// <remarks>Defaults to 500 and is bounded to 1–5000. At the default, catch-up is capped at 720,000 rows per day.</remarks>
+    public int HeartbeatPruneBatchSize { get; set; } = 500;
+
     /// <summary>Gets or sets one bounded host-shutdown reserve window for durable finalization or cleanup.</summary>
     /// <remarks>
     /// Hosted startup requires <c>TimeBudgetPerPass + (2 * ShutdownReserve) &lt;= HostOptions.ShutdownTimeout</c>.
@@ -63,6 +79,22 @@ public sealed class AppSurfaceDurablePostgreSqlOptions
         RequirePositiveBounded(IdlePollingInterval, nameof(IdlePollingInterval), TimeSpan.FromMinutes(5));
         RequirePositiveBounded(TransientFailureDelay, nameof(TransientFailureDelay), TimeSpan.FromMinutes(5));
         RequirePositiveBounded(HeartbeatStaleAfter, nameof(HeartbeatStaleAfter), TimeSpan.FromHours(1));
+        if (HeartbeatRetention < TimeSpan.FromHours(24) || HeartbeatRetention > TimeSpan.FromDays(3650)
+            || HeartbeatRetention <= HeartbeatStaleAfter)
+        {
+            throw new ArgumentOutOfRangeException(nameof(HeartbeatRetention), HeartbeatRetention,
+                "HeartbeatRetention must be at least 24 hours, no more than 3650 days, and longer than HeartbeatStaleAfter.");
+        }
+        if (HeartbeatMaintenanceCadence < TimeSpan.FromHours(1) || HeartbeatMaintenanceCadence > TimeSpan.FromDays(30))
+        {
+            throw new ArgumentOutOfRangeException(nameof(HeartbeatMaintenanceCadence), HeartbeatMaintenanceCadence,
+                "HeartbeatMaintenanceCadence must be between one hour and 30 days.");
+        }
+        if (HeartbeatPruneBatchSize is < 1 or > 5000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(HeartbeatPruneBatchSize), HeartbeatPruneBatchSize,
+                "HeartbeatPruneBatchSize must be between 1 and 5000.");
+        }
         RequirePositiveBounded(ShutdownReserve, nameof(ShutdownReserve), TimeSpan.FromMinutes(5));
         if (HeartbeatStaleAfter < TimeSpan.FromSeconds(1) || HeartbeatStaleAfter <= IdlePollingInterval)
         {
@@ -82,6 +114,10 @@ public sealed class AppSurfaceDurablePostgreSqlOptions
             IdlePollingInterval = IdlePollingInterval,
             TransientFailureDelay = TransientFailureDelay,
             HeartbeatStaleAfter = HeartbeatStaleAfter,
+            EnableHeartbeatMaintenance = EnableHeartbeatMaintenance,
+            HeartbeatRetention = HeartbeatRetention,
+            HeartbeatMaintenanceCadence = HeartbeatMaintenanceCadence,
+            HeartbeatPruneBatchSize = HeartbeatPruneBatchSize,
             ShutdownReserve = ShutdownReserve,
         };
     }

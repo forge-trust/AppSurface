@@ -1,5 +1,7 @@
 # ForgeTrust.AppSurface.Durable.PostgreSql
 
+For schema-11 runtime heartbeat cleanup, start with the [retention configuration and operations guide](../heartbeat-retention-operations.md). It gives the defaults, pause setting, exact migration commands, security boundary, capacity measurements, and forward-only recovery path.
+
 > **Public preview:** this package supplies explicit PostgreSQL schema management, Work, Flow, Schedule, an explicitly
 > opted-in bounded runtime host, and durable W3C causal evidence. Storage registration itself starts no worker or hosted
 > service.
@@ -27,9 +29,9 @@ applies DDL or advances migration history.
 The production migration order is `0001_work_shared.sql`, `0002_forced_rls.sql`, `0003_flow_protocol.sql`,
 `0004_schedule_protocol.sql`, `0005_runtime_heartbeat.sql`, `0006_flow_trace_context.sql`,
 `0007_flow_retention.sql`, `0008_flow_repair.sql`, `0009_work_contract_discovery.sql`, and
-`0010_runtime_health_observation.sql`, followed by the matching released provider package's
-`contentFiles/any/any/configure-postgresql-roles.sql` role recipe. The package recipe is byte-identical to the
-canonical [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
+`0010_runtime_health_observation.sql` and `0011_runtime_heartbeat_retention.sql`, followed by the matching released
+provider package's `contentFiles/any/any/configure-postgresql-roles.sql` role recipe. The package recipe is
+byte-identical to the canonical [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
 source, as checked by packed-consumer verification. Prefer generating the Durable schema script offline, reviewing it,
 applying the forward-only migrations, running that package recipe with the complete reviewed manifest, and completing
 schema status/preflight before enabling the worker host. The
@@ -145,7 +147,8 @@ epoch from committing new durable state after rotation.
 Runtime roles never own schema or apply DDL. Apply the ordered migrations in numeric order:
 `0001_work_shared.sql`, `0002_forced_rls.sql`, `0003_flow_protocol.sql`, `0004_schedule_protocol.sql`,
 `0005_runtime_heartbeat.sql`, `0006_flow_trace_context.sql`, `0007_flow_retention.sql`,
-`0008_flow_repair.sql`, `0009_work_contract_discovery.sql`, and `0010_runtime_health_observation.sql`.
+`0008_flow_repair.sql`, `0009_work_contract_discovery.sql`, `0010_runtime_health_observation.sql`, and
+`0011_runtime_heartbeat_retention.sql`.
 
 `0009_work_contract_discovery.sql` introduces registry-scoped Work discovery and the payload-free
 discovery function `appsurface_durable.discover_work_dispatch(text[], text[], integer)`. Its contract-lookup index and
@@ -356,6 +359,12 @@ authenticate a contract or prevent a credential holder from requesting another v
 Use a separate store or a separately designed PostgreSQL partition when independent row-level authorization or a
 separate failure domain is required. The three operational choices and their costs are summarized in the
 [adoption guide](../operational-assessments.md#shared-store-role-pair-choice).
+
+With schema 11, the recipe grants heartbeat pruning to every manifest runtime and no dispatcher. The current CLI
+structural preflight still checks one runtime role and rejects a two-pair catalog. Run it on the forwarding-only
+configuration before local enrollment; keep Source activation closed until [#795](https://github.com/forge-trust/AppSurface/issues/795)
+provides the exact runtime-set preflight and two-pair upgrade proof described in the
+[adoption guide](../operational-assessments.md#migration-and-role-reconciliation).
 
 Omitting an installed pair is an error, never retirement. The recipe preserves healthy policy OIDs, targets,
 expressions, ACLs, owners, and effective grants on an identical rerun; it rejects unexpected extra principals and broader

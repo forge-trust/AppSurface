@@ -58,7 +58,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missing.Compatibility);
         Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missingEpoch.Status.Compatibility);
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], first.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], first.AppliedVersions);
         Assert.Empty(second.AppliedVersions);
         Assert.True(compatible.IsCompatible);
         Assert.NotEqual(Guid.Empty, compatible.StoreId);
@@ -71,6 +71,143 @@ public sealed class PostgreSqlSchemaIntegrationTests
         Assert.Equal(nextEpoch, afterStaleRotation.ActiveRuntimeEpoch);
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await manager.InitializeRuntimeEpochAsync(Guid.NewGuid(), "tests", "duplicate"));
+    }
+
+    [Fact]
+    public async Task RuntimeHeartbeatRetention_PrunesOnlyEligibleRowsInBoundedBatchesAndSkipsLockedRows()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        var applied = await manager.ApplyAsync();
+        Assert.Contains(11, applied.AppliedVersions);
+
+        var currentInstance = Guid.NewGuid();
+        var otherInstance = Guid.NewGuid();
+        await ExecuteNonQueryAsync(
+            database.DataSource,
+            """
+            INSERT INTO appsurface_durable.runtime_heartbeat
+                (worker_id, worker_instance_id, runtime_epoch, hosted_surfaces, last_heartbeat_at)
+            VALUES
+                ('retention-old-a', @other_instance, @epoch, 1, clock_timestamp() - interval '48 hours'),
+                ('retention-old-b', @other_instance, @epoch, 1, clock_timestamp() - interval '48 hours'),
+                ('retention-current-id', @current_instance, @epoch, 1, clock_timestamp() - interval '48 hours'),
+                ('retention-current-other-instance', @other_instance, @epoch, 1, clock_timestamp() - interval '48 hours'),
+                ('retention-recent', @other_instance, @epoch, 1, clock_timestamp() - interval '23 hours');
+            """,
+            ("current_instance", currentInstance),
+            ("other_instance", otherInstance),
+            ("epoch", Guid.NewGuid()));
+
+        var firstBatch = await ExecuteScalarAsync<int>(
+            database.DataSource,
+            "SELECT appsurface_durable.prune_runtime_heartbeats(interval '24 hours', 2, 'retention-current-id', @current_instance);",
+            ("current_instance", currentInstance));
+        var secondBatch = await ExecuteScalarAsync<int>(
+            database.DataSource,
+            "SELECT appsurface_durable.prune_runtime_heartbeats(interval '24 hours', 2, 'retention-current-id', @current_instance);",
+            ("current_instance", currentInstance));
+        Assert.Equal(2, firstBatch);
+        Assert.Equal(1, secondBatch);
+
+        var remaining = await ExecuteScalarAsync<string[]>(
+            database.DataSource,
+            "SELECT array_agg(worker_id ORDER BY worker_id) FROM appsurface_durable.runtime_heartbeat;");
+        Assert.Equal(["retention-current-id", "retention-recent"], remaining);
+        await ExecuteNonQueryAsync(
+            database.DataSource,
+            """
+            INSERT INTO appsurface_durable.runtime_heartbeat
+                (worker_id, worker_instance_id, runtime_epoch, hosted_surfaces, last_heartbeat_at)
+            VALUES ('retention-locked', @instance, @epoch, 1, clock_timestamp() - interval '48 hours');
+            """,
+            ("instance", otherInstance),
+            ("epoch", Guid.NewGuid()));
+
+        await using var lockConnection = await database.DataSource.OpenConnectionAsync();
+        await using var lockTransaction = await lockConnection.BeginTransactionAsync();
+        await using (var lockRow = new NpgsqlCommand(
+            "SELECT worker_id FROM appsurface_durable.runtime_heartbeat WHERE worker_id = 'retention-locked' FOR UPDATE;",
+            lockConnection,
+            lockTransaction))
+        {
+            await lockRow.ExecuteScalarAsync();
+        }
+
+        var skippedLocked = await ExecuteScalarAsync<int>(
+            database.DataSource,
+            "SELECT appsurface_durable.prune_runtime_heartbeats(interval '24 hours', 10, 'retention-current-id', @current_instance);",
+            ("current_instance", currentInstance));
+        Assert.Equal(0, skippedLocked);
+        await lockTransaction.RollbackAsync();
+
+        await using var advisoryConnection = await database.DataSource.OpenConnectionAsync();
+        await using var advisoryTransaction = await advisoryConnection.BeginTransactionAsync();
+        await using (var advisoryLock = new NpgsqlCommand(
+            "SELECT pg_advisory_xact_lock(X'41534455'::bit(32)::integer, X'52484252'::bit(32)::integer);",
+            advisoryConnection,
+            advisoryTransaction))
+        {
+            await advisoryLock.ExecuteScalarAsync();
+        }
+
+        var advisoryRefusal = await ExecuteScalarAsync<int>(
+            database.DataSource,
+            "SELECT appsurface_durable.prune_runtime_heartbeats(interval '24 hours', 10, 'retention-current-id', @current_instance);",
+            ("current_instance", currentInstance));
+        Assert.Equal(0, advisoryRefusal);
+        await advisoryTransaction.RollbackAsync();
+
+        await ExecuteNonQueryAsync(database.DataSource, "DELETE FROM appsurface_durable.runtime_heartbeat;");
+        await ExecuteNonQueryAsync(
+            database.DataSource,
+            """
+            INSERT INTO appsurface_durable.runtime_heartbeat
+                (worker_id, worker_instance_id, runtime_epoch, hosted_surfaces, last_heartbeat_at)
+            VALUES ('retention-prune-first', @instance, @epoch, 1, clock_timestamp() - interval '48 hours');
+            """,
+            ("instance", otherInstance),
+            ("epoch", Guid.NewGuid()));
+
+        await using var pruneConnection = await database.DataSource.OpenConnectionAsync();
+        await using var pruneTransaction = await pruneConnection.BeginTransactionAsync();
+        await using (var pruneFirst = new NpgsqlCommand(
+            "SELECT appsurface_durable.prune_runtime_heartbeats(interval '24 hours', 1, 'another-worker', @instance);",
+            pruneConnection,
+            pruneTransaction))
+        {
+            pruneFirst.Parameters.AddWithValue("instance", Guid.NewGuid());
+            Assert.Equal(1, (int)(await pruneFirst.ExecuteScalarAsync())!);
+        }
+
+        var renewal = UpdateHeartbeatAsync(database.DataSource);
+        await Task.Delay(TimeSpan.FromMilliseconds(100));
+        Assert.False(renewal.IsCompleted);
+        await pruneTransaction.CommitAsync();
+        Assert.Equal(0, await renewal);
+        await ExecuteNonQueryAsync(
+            database.DataSource,
+            """
+            INSERT INTO appsurface_durable.runtime_heartbeat
+                (worker_id, worker_instance_id, runtime_epoch, hosted_surfaces)
+            VALUES ('retention-prune-first', @instance, @epoch, 1);
+            """,
+            ("instance", Guid.NewGuid()),
+            ("epoch", Guid.NewGuid()));
+
+        var invalid = await Assert.ThrowsAsync<PostgresException>(async () =>
+            await ExecuteScalarAsync<int>(
+                database.DataSource,
+                "SELECT appsurface_durable.prune_runtime_heartbeats(interval '1 hour', 10, 'valid-worker', @current_instance);",
+                ("current_instance", currentInstance)));
+        Assert.Equal("22023", invalid.SqlState);
+
+        static async Task<int> UpdateHeartbeatAsync(NpgsqlDataSource dataSource)
+        {
+            await using var command = dataSource.CreateCommand(
+                "UPDATE appsurface_durable.runtime_heartbeat SET last_heartbeat_at = clock_timestamp() WHERE worker_id = 'retention-prune-first';");
+            return await command.ExecuteNonQueryAsync();
+        }
     }
 
     [Fact]
@@ -213,9 +350,9 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         var retry = await retryManager.ApplyAsync();
         var compatible = await retryManager.GetStatusAsync();
-        Assert.Equal([3, 4, 5, 6, 7, 8, 9, 10], retry.AppliedVersions);
+        Assert.Equal([3, 4, 5, 6, 7, 8, 9, 10, 11], retry.AppliedVersions);
         Assert.True(compatible.IsCompatible);
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], compatible.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], compatible.AppliedVersions);
     }
 
     [Fact]
@@ -258,7 +395,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var retry = await new PostgreSqlDurableRuntimeSchemaManager(database.DataSource).ApplyAsync();
-        Assert.Equal([9, 10], retry.AppliedVersions);
+        Assert.Equal([9, 10, 11], retry.AppliedVersions);
     }
 
     [Fact]
@@ -297,7 +434,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         await writerTransaction.RollbackAsync();
         var applied = await manager.ApplyAsync();
-        Assert.Equal([10], applied.AppliedVersions);
+        Assert.Equal([10, 11], applied.AppliedVersions);
     }
 
     [Fact]
@@ -362,7 +499,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         Assert.True(status.IsCompatible);
         var extended = Assert.Single(
             embedded,
-            migration => migration.CommandTimeoutSeconds is not null);
+            migration => migration.Version == 10);
         Assert.Equal(10, extended.Version);
         Assert.Equal(330, extended.CommandTimeoutSeconds);
     }
@@ -448,7 +585,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
                 database.DataSource,
                 "ALTER FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) OWNER TO CURRENT_USER;");
             var repaired = await manager.ApplyAsync();
-            Assert.Equal([10], repaired.AppliedVersions);
+            Assert.Equal([10, 11], repaired.AppliedVersions);
         }
         finally
         {
@@ -526,7 +663,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var applied = await new PostgreSqlDurableRuntimeSchemaManager(database.DataSource).ApplyAsync();
-        Assert.Equal([10], applied.AppliedVersions);
+        Assert.Equal([10, 11], applied.AppliedVersions);
         await using (var after = database.DataSource.CreateCommand(
             """
             SELECT owner_role.rolname = current_user,
@@ -1228,6 +1365,100 @@ public sealed class PostgreSqlSchemaIntegrationTests
             }
 
             Assert.False(await reader.ReadAsync());
+        }
+
+        await using (var runtimePruneFunction = dataSource.CreateCommand(
+            """
+            SELECT owner_role.rolname = 'durable_owner',
+                   routine.prosecdef,
+                   routine.proconfig = ARRAY['search_path=pg_catalog, appsurface_durable, pg_temp'],
+                   has_function_privilege('durable_runtime', routine.oid, 'EXECUTE'),
+                   NOT has_function_privilege('durable_runtime', routine.oid, 'EXECUTE WITH GRANT OPTION'),
+                   NOT has_function_privilege('public', routine.oid, 'EXECUTE'),
+                   NOT has_function_privilege('durable_dispatcher', routine.oid, 'EXECUTE'),
+                   NOT has_function_privilege('durable_retention', routine.oid, 'EXECUTE'),
+                   NOT has_table_privilege('durable_runtime', 'appsurface_durable.runtime_heartbeat', 'DELETE'),
+                   NOT has_table_privilege('durable_runtime', 'appsurface_durable.runtime_heartbeat', 'TRUNCATE'),
+                   EXISTS
+                   (
+                       SELECT 1
+                       FROM pg_catalog.pg_policy AS policy
+                       WHERE policy.polrelid = 'appsurface_durable.runtime_heartbeat'::pg_catalog.regclass
+                         AND policy.polname = 'runtime_heartbeat_migration_owner'
+                         AND policy.polcmd = '*'
+                         AND policy.polpermissive
+                         AND policy.polroles = ARRAY['durable_owner'::pg_catalog.regrole::oid]
+                         AND pg_catalog.pg_get_expr(policy.polqual, policy.polrelid) = 'true'
+                         AND pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid) = 'true'
+                   )
+            FROM pg_catalog.pg_proc AS routine
+            JOIN pg_catalog.pg_roles AS owner_role ON owner_role.oid = routine.proowner
+            WHERE routine.oid = 'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)'::pg_catalog.regprocedure;
+            """))
+        {
+            await using var reader = await runtimePruneFunction.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            for (var ordinal = 0; ordinal < reader.FieldCount; ordinal++)
+            {
+                Assert.True(reader.GetBoolean(ordinal));
+            }
+
+            Assert.False(await reader.ReadAsync());
+        }
+
+        var retentionRuntimeConnectionString = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
+        {
+            Username = "durable_runtime",
+            Password = RuntimeRoleTestPassword,
+        }.ConnectionString;
+        await using (var retentionRuntimeDataSource = NpgsqlDataSource.Create(retentionRuntimeConnectionString))
+        {
+            await ExecuteNonQueryAsync(
+                dataSource,
+                """
+                INSERT INTO appsurface_durable.runtime_heartbeat
+                    (worker_id, worker_instance_id, runtime_epoch, hosted_surfaces, last_heartbeat_at)
+                VALUES
+                    ('role-prune-a', @instance, @epoch, 1, clock_timestamp() - interval '48 hours'),
+                    ('role-prune-b', @instance, @epoch, 1, clock_timestamp() - interval '48 hours'),
+                    ('role-prune-c', @instance, @epoch, 1, clock_timestamp() - interval '48 hours');
+                """,
+                ("instance", Guid.NewGuid()),
+                ("epoch", Guid.NewGuid()));
+            var boundedFirstCall = await ExecuteScalarAsync<int>(
+                retentionRuntimeDataSource,
+                "SELECT appsurface_durable.prune_runtime_heartbeats(interval '24 hours', 1, 'caller-selected-worker', @instance);",
+                ("instance", Guid.NewGuid()));
+            var boundedSecondCall = await ExecuteScalarAsync<int>(
+                retentionRuntimeDataSource,
+                "SELECT appsurface_durable.prune_runtime_heartbeats(interval '24 hours', 1, 'different-arbitrary-worker', @instance);",
+                ("instance", Guid.NewGuid()));
+            Assert.Equal(1, boundedFirstCall);
+            Assert.Equal(1, boundedSecondCall);
+            var remainingRoleRows = await ExecuteScalarAsync<long>(
+                dataSource,
+                "SELECT count(*) FROM appsurface_durable.runtime_heartbeat WHERE worker_id IN ('role-prune-a', 'role-prune-b', 'role-prune-c');");
+            Assert.InRange(remainingRoleRows, 1, 3);
+
+            await using var ownerConnection = await dataSource.OpenConnectionAsync();
+            await using (var setOwner = new NpgsqlCommand("SET ROLE durable_owner;", ownerConnection))
+            {
+                await setOwner.ExecuteNonQueryAsync();
+            }
+
+            try
+            {
+                await using var visibleRows = new NpgsqlCommand(
+                    "SELECT count(*) FROM appsurface_durable.runtime_heartbeat WHERE worker_id IN ('role-prune-a', 'role-prune-b', 'role-prune-c');",
+                    ownerConnection);
+                var ownerVisibleRows = (long)(await visibleRows.ExecuteScalarAsync())!;
+                Assert.Equal(remainingRoleRows, ownerVisibleRows);
+            }
+            finally
+            {
+                await using var resetOwner = new NpgsqlCommand("RESET ROLE;", ownerConnection);
+                await resetOwner.ExecuteNonQueryAsync();
+            }
         }
 
         var unrelatedConnectionString = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
@@ -2438,6 +2669,22 @@ public sealed class PostgreSqlSchemaIntegrationTests
                        'durable_dispatcher',
                        'appsurface_durable.claim_schedule_dispatch(text, interval)',
                        'EXECUTE'),
+                   has_function_privilege(
+                       'durable_runtime',
+                       'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)',
+                       'EXECUTE'),
+                   has_function_privilege(
+                       'source_runtime',
+                       'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)',
+                       'EXECUTE'),
+                   NOT has_function_privilege(
+                       'durable_dispatcher',
+                       'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)',
+                       'EXECUTE'),
+                   NOT has_function_privilege(
+                       'source_dispatcher',
+                       'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)',
+                       'EXECUTE'),
                    NOT has_table_privilege('source_dispatcher', 'appsurface_durable.flow_dispatch', 'SELECT'),
                    NOT has_function_privilege(
                        'source_dispatcher',
@@ -3076,7 +3323,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
             database.DataSource,
             """
            UPDATE appsurface_durable.store_metadata
-           SET schema_version = 10,
+           SET schema_version = 11,
                minimum_reader_version = 1,
                maximum_reader_version = 1,
                minimum_writer_version = 1,
@@ -3097,7 +3344,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         await ExecuteNonQueryAsync(
             database.DataSource,
             """
-           DELETE FROM appsurface_durable.schema_migration WHERE version IN (3, 4, 5, 6, 7, 8, 9, 10);
+           DELETE FROM appsurface_durable.schema_migration WHERE version IN (3, 4, 5, 6, 7, 8, 9, 10, 11);
            UPDATE appsurface_durable.store_metadata
            SET schema_version = 2,
                minimum_reader_version = 1,
@@ -3109,7 +3356,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         var upgrade = await manager.GetStatusAsync();
         Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, upgrade.Compatibility);
         Assert.Equal([1, 2], upgrade.AppliedVersions);
-        Assert.Equal([3, 4, 5, 6, 7, 8, 9, 10], upgrade.PendingVersions);
+        Assert.Equal([3, 4, 5, 6, 7, 8, 9, 10, 11], upgrade.PendingVersions);
         var upgradeValidation = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
             async () => await manager.ValidateAsync());
         Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, upgradeValidation.Status.Compatibility);
@@ -3130,12 +3377,12 @@ public sealed class PostgreSqlSchemaIntegrationTests
         var results = await Task.WhenAll(first.ApplyAsync().AsTask(), second.ApplyAsync().AsTask())
             .WaitAsync(TimeSpan.FromSeconds(30));
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], results.SelectMany(result => result.AppliedVersions).Order().ToArray());
-        Assert.Contains(results, result => result.AppliedVersions.SequenceEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], results.SelectMany(result => result.AppliedVersions).Order().ToArray());
+        Assert.Contains(results, result => result.AppliedVersions.SequenceEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]));
         Assert.Contains(results, result => result.AppliedVersions.Count == 0);
         await using var count = database.DataSource.CreateCommand(
             "SELECT count(*) FROM appsurface_durable.schema_migration;");
-        Assert.Equal(10, (long)(await count.ExecuteScalarAsync())!);
+        Assert.Equal(11, (long)(await count.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -3170,8 +3417,8 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         var status = await statusTask.WaitAsync(TimeSpan.FromSeconds(30));
         Assert.True(status.IsCompatible);
-        Assert.Equal(10, status.InstalledVersion);
-        Assert.Equal(10, status.RequiredVersion);
+        Assert.Equal(11, status.InstalledVersion);
+        Assert.Equal(11, status.RequiredVersion);
     }
 
     [Fact]
@@ -3197,7 +3444,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], applied.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], applied.AppliedVersions);
     }
 
     [Fact]
@@ -3215,12 +3462,12 @@ public sealed class PostgreSqlSchemaIntegrationTests
             database.DataSource,
             DurablePostgreSqlMigrationCatalog.Load(),
             migrationLockAcquireTimeout: TimeSpan.FromMilliseconds(250),
-            migrationLockRetryDelay: TimeSpan.FromMilliseconds(25));
+            sampleMigrationLockRetryDelayMilliseconds: () => 100);
         var exception = await Assert.ThrowsAsync<TimeoutException>(async () => await manager.ApplyAsync());
 
         Assert.Contains("Timed out after 0.25 seconds", exception.Message, StringComparison.Ordinal);
         Assert.Contains("migration advisory lock", exception.Message, StringComparison.Ordinal);
-        Assert.Contains("pg_stat_activity", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("pg_stat_activity", exception.Message, StringComparison.Ordinal);
 
         await using (var release = new NpgsqlCommand("SELECT pg_advisory_unlock(@lock_id);", blocker))
         {
@@ -3229,7 +3476,37 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], applied.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], applied.AppliedVersions);
+    }
+
+    [Fact]
+    public async Task ApplyLockContention_RejectsOutOfRangeRetryJitterAndCanRetry()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await using var blocker = await database.DataSource.OpenConnectionAsync();
+        await using (var acquire = new NpgsqlCommand("SELECT pg_advisory_lock(@lock_id);", blocker))
+        {
+            acquire.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            await acquire.ExecuteNonQueryAsync();
+        }
+
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(
+            database.DataSource,
+            DurablePostgreSqlMigrationCatalog.Load(),
+            migrationLockAcquireTimeout: TimeSpan.FromSeconds(2),
+            sampleMigrationLockRetryDelayMilliseconds: () => 74);
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () => await manager.ApplyAsync());
+
+        Assert.Contains("jitter sampler returned a value outside the supported range", exception.Message, StringComparison.Ordinal);
+
+        await using (var release = new NpgsqlCommand("SELECT pg_advisory_unlock(@lock_id);", blocker))
+        {
+            release.Parameters.AddWithValue("lock_id", MigrationAdvisoryLock);
+            Assert.True((bool)(await release.ExecuteScalarAsync())!);
+        }
+
+        var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], applied.AppliedVersions);
     }
 
     [Fact]
@@ -3247,10 +3524,11 @@ public sealed class PostgreSqlSchemaIntegrationTests
             database.DataSource,
             DurablePostgreSqlMigrationCatalog.Load(),
             migrationLockAcquireTimeout: TimeSpan.FromMilliseconds(250),
-            migrationLockRetryDelay: TimeSpan.FromMilliseconds(25));
+            sampleMigrationLockRetryDelayMilliseconds: () => 100);
         var script = manager.GenerateScript();
         Assert.Contains("interval '0.25 seconds'", script, StringComparison.Ordinal);
-        Assert.Contains("pg_sleep(0.025)", script, StringComparison.Ordinal);
+        Assert.Contains("pg_sleep(LEAST(", script, StringComparison.Ordinal);
+        Assert.Contains("v_retry_delay_ms / 1000.0", script, StringComparison.Ordinal);
 
         await using (var blockedConnection = await database.DataSource.OpenConnectionAsync())
         await using (var blockedCommand = new NpgsqlCommand(script, blockedConnection))
@@ -3280,7 +3558,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         var status = await manager.GetStatusAsync();
         Assert.True(status.IsCompatible);
-        Assert.Equal(10, status.InstalledVersion);
+        Assert.Equal(11, status.InstalledVersion);
     }
 
     [Fact]
@@ -3345,7 +3623,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], applied.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], applied.AppliedVersions);
     }
 
     [Fact]
@@ -3619,6 +3897,34 @@ public sealed class PostgreSqlSchemaIntegrationTests
         await command.ExecuteNonQueryAsync();
     }
 
+    private static async ValueTask ExecuteNonQueryAsync(
+        NpgsqlDataSource dataSource,
+        string sql,
+        params (string Name, object Value)[] parameters)
+    {
+        await using var command = dataSource.CreateCommand(sql);
+        foreach (var parameter in parameters)
+        {
+            command.Parameters.AddWithValue(parameter.Name, parameter.Value);
+        }
+
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async ValueTask<T> ExecuteScalarAsync<T>(
+        NpgsqlDataSource dataSource,
+        string sql,
+        params (string Name, object Value)[] parameters)
+    {
+        await using var command = dataSource.CreateCommand(sql);
+        foreach (var parameter in parameters)
+        {
+            command.Parameters.AddWithValue(parameter.Name, parameter.Value);
+        }
+
+        return (T)(await command.ExecuteScalarAsync())!;
+    }
+
     private static async ValueTask<int> WaitForBackendAsync(
         NpgsqlDataSource dataSource,
         string applicationName,
@@ -3631,7 +3937,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
                 SELECT pid
                 FROM pg_catalog.pg_stat_activity
                 WHERE application_name = @application_name
-                  AND wait_event = @wait_event
+                  AND (wait_event = @wait_event OR wait_event_type = @wait_event)
                 LIMIT 1;
                 """);
             command.Parameters.AddWithValue("application_name", applicationName);

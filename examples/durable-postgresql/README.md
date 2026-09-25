@@ -1,5 +1,7 @@
 # Durable PostgreSQL local tutorial
 
+The [schema-11 heartbeat retention guide](../../Durable/heartbeat-retention-operations.md) explains the feature's default settings and production rollout. The one-command proof below also verifies a single bounded stale-row cleanup, current-row survival, and healthy Work execution.
+
 This public-preview tutorial proves the current [`ForgeTrust.AppSurface.Durable.PostgreSql`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) adoption path on a disposable PostgreSQL 16+ database. Read the [operational-assessment adoption guide](../../Durable/operational-assessments.md) first for the existing-host recipe, health predicate meanings, exhaustive admission switch, diagnostics, migration `9 -> 10`, role reconciliation, and rollback boundary. This example is a local composition reference, not production operations guidance. Application startup never applies DDL.
 
 The [AppSurface CLI](../../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands) owns migration status, reviewed scripts, preflight, and guarded apply. This example owns only two local-proof commands:
@@ -15,6 +17,9 @@ Application startup never applies DDL. Generate, review, and apply migrations th
   completes a hosted pass, verifies the durable catalog and migration metadata are unchanged, then stops it without
   doing DDL.
 
+The heartbeat proof seed can be retried after a partial run. A completed `verify-local` uses fixed Work and Flow
+command IDs, so recreate the disposable local proof database before running the full proof again.
+
 ## One-command local proof
 
 From the repository root:
@@ -26,7 +31,8 @@ bash examples/durable-postgresql/run-local-proof.sh
 The script checks .NET 10 and Docker, asks Docker to atomically allocate a free loopback port, starts the pinned
 PostgreSQL 16.5 image with local container-only trust authentication, creates the migration owner, retention operator,
 and two restricted dispatcher/runtime pairs, builds with one MSBuild node and shared compilation disabled, explicitly
-applies schema 10, reconciles the complete manifest, verifies an identical rerun and omitted-pair refusal, and
+runs schema 11 migrations, reconciles the forwarding pair, performs its single-pair structural preflight, enrolls the
+complete two-pair manifest, verifies an identical rerun and omitted-pair refusal, and
 runs both example commands. It waits for the final server's TCP listener before creating roles; the image's temporary
 initialization server accepts Unix-socket connections and then shuts down. Set `APPSURFACE_DURABLE_LOCAL_PORT` only
 when you need a specific reviewed port; the preflight fails closed if it is occupied. The whole proof defaults to a
@@ -232,26 +238,45 @@ the temporary passfile, never a password; `--connection-env` names a variable an
 export APPSURFACE_DURABLE_MIGRATION_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE_DURABLE_LOCAL_PORT;Database=appsurface_durable_example;Username=appsurface_durable_owner;Passfile=$APPSURFACE_DURABLE_PASSFILE"
   dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
   durable schema apply --connection-env APPSURFACE_DURABLE_MIGRATION_CONNECTION --apply
-# Expected: Durable schema: 0 -> 10; applied: 0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0010.
+# Expected: Durable schema: 0 -> 11; applied: 0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0010, 0011.
 ```
 
-Apply the reviewed role recipe after migrations with the disposable container's bootstrap administrator. This keeps the
-transcript self-contained: no host PostgreSQL client is required. A production deployment extracts the matching
-released provider package recipe at `contentFiles/any/any/configure-postgresql-roles.sql`; only this disposable
-checkout proof uses the repository source file.
+Apply the reviewed role recipe after migrations with the disposable container's bootstrap administrator. The local
+walkthrough first configures the forwarding pair and runs the current schema-11 structural preflight, then enrolls the
+complete two-pair manifest. This keeps the transcript self-contained: no host PostgreSQL client is required. A
+production deployment extracts the matching released provider package recipe at
+`contentFiles/any/any/configure-postgresql-roles.sql`; only this disposable checkout proof uses the repository source
+file.
 
 ```console
 docker exec -i appsurface-durable-postgres \
   psql -v ON_ERROR_STOP=1 -U postgres -d appsurface_durable_example \
   -v migration_owner_role=appsurface_durable_owner \
-  -v role_pairs_json="$(< examples/durable-postgresql/role-pairs.example.json)" \
+  -v role_pairs_json='{"version":1,"pairs":[{"dispatcher":"appsurface_durable_dispatcher","runtime":"appsurface_durable_runtime","dispatcher_profile":"full"}]}' \
   -v retention_operator_role=appsurface_durable_retention \
   -f - < Durable/configure-postgresql-roles.sql
 
 export APPSURFACE_DURABLE_DISPATCHER_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE_DURABLE_LOCAL_PORT;Database=appsurface_durable_example;Username=appsurface_durable_dispatcher;Passfile=$APPSURFACE_DURABLE_PASSFILE"
 export APPSURFACE_DURABLE_RUNTIME_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE_DURABLE_LOCAL_PORT;Database=appsurface_durable_example;Username=appsurface_durable_runtime;Passfile=$APPSURFACE_DURABLE_PASSFILE"
 export APPSURFACE_DURABLE_RUNTIME_EPOCH='<stable UUID supplied by deployment>'
+dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
+  durable schema preflight --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION
+# Expected: the schema-11 single-pair structural and runtime-role checks pass.
+
+docker exec -i appsurface-durable-postgres \
+  psql -v ON_ERROR_STOP=1 -U postgres -d appsurface_durable_example \
+  -v migration_owner_role=appsurface_durable_owner \
+  -v role_pairs_json="$(< examples/durable-postgresql/role-pairs.example.json)" \
+  -v retention_operator_role=appsurface_durable_retention \
+  -f - < Durable/configure-postgresql-roles.sql
+# Expected: both pairs are present; the forwarding pair retains its grants.
 ```
+
+The current schema-11 CLI preflight checks one runtime role and is expected to reject the two-pair catalog after
+enrollment. [#795](https://github.com/forge-trust/AppSurface/issues/795) must add an exact manifest-runtime-set
+preflight and pass a two-pair schema-11 upgrade proof before Source activation or its deployment certificate. The
+local proof checks both role pairs' SQL privileges and forwarding behavior; it does not claim post-enrollment CLI
+preflight success.
 
 The development-only bootstrap initializes the active epoch exactly once. It requires `DOTNET_ENVIRONMENT=Development`, `APPSURFACE_DURABLE_LOCAL_PROOF=1`, a `localhost`, `127.0.0.1`, or `::1` target, and the `appsurface_durable_owner` role before it opens the durable schema. It rejects invalid UUID values, inactive schema, and an already active epoch. For proof parity with production defaults, prefer the same 16+ migration floor when choosing local dependencies.
 
@@ -261,13 +286,21 @@ DOTNET_ENVIRONMENT=Development APPSURFACE_DURABLE_LOCAL_PROOF=1 \
 # Expected: [schema-bootstrap-dev] active epoch initialized
 ```
 
-Finally, run the bounded forwarding proof. It requires the same Development and explicit local-proof confirmation, loopback targets, and the `appsurface_durable_dispatcher` and `appsurface_durable_runtime` roles before it accepts one local Work, Flow, and Work-targeted Schedule; persists W3C Flow trace context; processes one all-surfaces bounded pass; checks health; drains and resumes; then starts and stops `AddWorkerHost()` after one hosted pass while asserting the durable catalog and migration metadata are unchanged. The local shell proof separately verifies the Source Work-only dispatcher capability and denied Flow/Schedule access; the deployed Source host and direct Work pass remain part of the lane certificate proof:
+Finally, run the bounded forwarding proof. It requires the same Development and explicit local-proof confirmation,
+loopback targets, and the `appsurface_durable_dispatcher` and `appsurface_durable_runtime` roles. It seeds 501 stale
+and one recent heartbeat identities, then accepts one local Work, Flow, and Work-targeted Schedule; persists W3C Flow
+trace context; processes one all-surfaces bounded pass; proves a single 500-row maintenance batch leaves one stale,
+one recent, and the current worker row; checks health; drains and resumes; then starts and stops `AddWorkerHost()` after
+one hosted pass while asserting the durable catalog and migration metadata are unchanged. The local shell proof
+separately verifies the Source Work-only dispatcher capability and denied Flow/Schedule access; the deployed Source
+host and direct Work pass remain part of the lane certificate proof:
 
 ```console
 DOTNET_ENVIRONMENT=Development APPSURFACE_DURABLE_LOCAL_PROOF=1 \
   dotnet run --project examples/durable-postgresql -- verify-local
 # Expected named checkpoints include: Work accepted; Flow accepted with W3C trace context;
-# Schedule accepted; admission-aware pass: Completed; runtime assessment; health and drain checkpoints completed.
+# Schedule accepted; admission-aware pass: Completed; heartbeat maintenance removed one bounded batch;
+# runtime assessment; health and drain checkpoints completed.
 ```
 
 The output includes the authoritative PostgreSQL attempt. A `Completed` empty result is distinct from `Refused`,
@@ -293,7 +326,7 @@ The output includes the authoritative PostgreSQL attempt. A `Completed` empty re
 
 1. Run `appsurface durable schema status --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION` and `appsurface durable schema preflight --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION` with a scoped read-only deployment connection, such as the runtime connection in this tutorial, to identify the authoritative state. Reserve the migration-owner variable for reviewed apply and epoch operations.
 2. Correct role setup or review a forward-only script generated from the installed version.
-3. Apply through the explicit migration-owner workflow, rerun the canonical role recipe after migrations, then retry preflight and the local proof.
+3. Apply through the explicit migration-owner workflow and rerun the matching canonical role recipe after migrations. Retry preflight for a single-pair deployment; a two-pair deployment waits for the [#795 runtime-set preflight](https://github.com/forge-trust/AppSurface/issues/795) before activation.
 4. For rollout safety, disable the local host (`.AddWorkerHost` off), complete migration+role recipe reconciliation, verify status/epoch coherence, then re-enable host.
 
 Never delete `appsurface_durable.schema_migration` rows, edit migration checksums, or run destructive down-migrations. A failed migration rolls back its own transaction; regenerate the correct forward script and retry from the last committed version. A runtime epoch rotation is an authorized restore operation documented in the [PostgreSQL package README](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#explicit-schema-and-epoch-deployment), not a tutorial command.

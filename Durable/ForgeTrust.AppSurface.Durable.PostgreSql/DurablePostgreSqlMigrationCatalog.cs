@@ -25,6 +25,8 @@ internal static partial class DurablePostgreSqlMigrationCatalog
 {
     private const int ExtendedDeadlineMigrationVersion = 10;
     private const int ExtendedMigrationCommandTimeoutSeconds = 330;
+    private const int HeartbeatRetentionMigrationVersion = 11;
+    private const int HeartbeatRetentionMigrationCommandTimeoutSeconds = 330;
     private const string ResourceMarker = ".Migrations.";
     private static readonly IReadOnlyList<DurablePostgreSqlMigration> DefaultMigrations =
         LoadValidated(typeof(DurablePostgreSqlMigrationCatalog).Assembly);
@@ -76,10 +78,12 @@ internal static partial class DurablePostgreSqlMigrationCatalog
         using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         var sql = reader.ReadToEnd().Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd() + "\n";
         var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(sql)));
-        int? commandTimeoutSeconds =
-            version == ExtendedDeadlineMigrationVersion
-                ? ExtendedMigrationCommandTimeoutSeconds
-                : null;
+        int? commandTimeoutSeconds = version switch
+        {
+            ExtendedDeadlineMigrationVersion => ExtendedMigrationCommandTimeoutSeconds,
+            HeartbeatRetentionMigrationVersion => HeartbeatRetentionMigrationCommandTimeoutSeconds,
+            _ => null,
+        };
         return new DurablePostgreSqlMigration(
             version,
             match.Groups["name"].Value,

@@ -75,6 +75,11 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
             configuredOptions,
             Guid.NewGuid());
         services.AddSingleton(registration);
+        services.TryAddSingleton<TimeProvider>(TimeProvider.System);
+        services.TryAddSingleton<PostgreSqlDurableHeartbeatMaintenance>(static provider => new PostgreSqlDurableHeartbeatMaintenance(
+            provider.GetRequiredService<PostgreSqlDurableRuntimeRegistration>(),
+            provider.GetRequiredService<TimeProvider>(),
+            provider.GetService<ILogger<PostgreSqlDurableHeartbeatMaintenance>>()));
 
         services.TryAddSingleton<IDurablePayloadCodecRegistry, DurablePayloadCodecRegistry>();
         services.TryAddSingleton<IDurableWorkRegistry, DurableWorkRegistry>();
@@ -195,7 +200,8 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
             provider.GetRequiredService<DurableRuntimeAdmissionGate>(),
             provider.GetService<ILogger<PostgreSqlDurableRuntimePump>>()
                 ?? NullLogger<PostgreSqlDurableRuntimePump>.Instance,
-            passExecutor: null));
+            passExecutor: null,
+            heartbeatMaintenance: provider.GetRequiredService<PostgreSqlDurableHeartbeatMaintenance>()));
         services.TryAddSingleton<IDurableRuntimePump>(static provider =>
             provider.GetRequiredService<PostgreSqlDurableRuntimePump>());
         services.TryAddSingleton<IDurableRuntimePumpAdmission>(static provider =>
@@ -281,6 +287,7 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
             provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<HostOptions>>(),
             provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<PostgreSqlDurableHostedService>>()));
         services.AddSingleton<IHostedService>(static provider => provider.GetRequiredService<PostgreSqlDurableHostedService>());
+        services.AddSingleton<IHostedService>(static provider => provider.GetRequiredService<PostgreSqlDurableHeartbeatMaintenance>());
         return services;
     }
 

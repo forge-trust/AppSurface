@@ -1,5 +1,7 @@
 # AppSurface CLI
 
+For `appsurface durable schema` rollout of migration 0011, follow the [canonical heartbeat retention deployment and recovery guide](../../Durable/heartbeat-retention-operations.md#deploy-schema-11). Pending preflight is an expected downtime finding; activation requires a passing post-migration runtime-role preflight.
+
 The **AppSurface CLI** is the command-line home for repository-level AppSurface workflows. It is packaged as a .NET tool with the command name `appsurface`.
 
 The first public verb family is `docs`, which replaces the earlier standalone `appsurfacedocs preview --repo .` idea with AppSurface-owned preview and export commands:
@@ -64,12 +66,19 @@ accepts a connection-string argument or prints a connection string, credential, 
 is never performed by application startup. `script --output` can atomically publish or replace the named local file,
 but it never opens a database connection. Write generated SQL only to an operator-controlled directory: atomic
 publication protects readers from partial content, but it cannot make a directory shared with an untrusted local
-principal safe from path replacement.
+principal safe from path replacement. `apply --apply` has a 45-minute overall deadline for the current migration
+chain; migrations 0010 and 0011 each retain a 330-second command deadline. Plan the maintenance window with the
+[heartbeat retention operations guide](../../Durable/heartbeat-retention-operations.md).
+After migration 0011, `preflight` checks the pruning function's integer result and security settings, the
+ascending retention index, enabled and forced row level security, and the runtime role's isolation and lack of
+effective `DELETE`/`TRUNCATE` rights on the heartbeat table. Treat any named failed check as schema or role drift;
+repair it and rerun preflight before activating workers. The
+[operations guide](../../Durable/heartbeat-retention-operations.md#deploy-schema-11) describes the deployment order.
 
-The preferred production flow remains: generate and review the offline schema script, apply migrations `0001` through
-`0010` in order, apply the complete version-1 role-pair manifest with the matching released PostgreSQL provider
-package's `contentFiles/any/any/configure-postgresql-roles.sql`, run status and preflight, then explicitly enable
-[`AddWorkerHost()`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host). For recovery,
+The preferred production flow remains: generate and review the offline schema script, apply all pending numbered
+migrations (currently through `0011`) in order, apply the complete version-1 role-pair manifest with the matching
+released PostgreSQL provider package's `contentFiles/any/any/configure-postgresql-roles.sql`, run status and preflight,
+then explicitly enable [`AddWorkerHost()`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host). For recovery,
 check status, correct and review the forward-only script, then retry; never delete migration history. The
 [`durable-postgresql` example](../../examples/durable-postgresql/README.md) is a local proof, not production
 operations guidance. The provider package's packaged recipe is checked byte-identical to the canonical source by
@@ -77,6 +86,9 @@ operations guidance. The provider package's packaged recipe is checked byte-iden
 matched to the migration and hash the exact reviewed manifest file used for certificate evidence. See the
 [role manifest, grant profiles, and rollout contract](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#role-recipe-contract)
 and the [operator migration/rollback sequence](../../Durable/operational-assessments.md#migration-and-role-reconciliation).
+For two pairs on schema 11, keep Source activation closed: the current preflight checks one runtime role, and
+[#795](https://github.com/forge-trust/AppSurface/issues/795) must prove the exact manifest runtime set before that
+preflight can certify the combined catalog.
 
 Future CLI authentication is design-only today. The [authenticated command design](docs/authenticated-command-design.md) keeps auth centered on protected command execution, uses `appsurface docs publish --archive ./dist/docs --site <site>` as the first protected command wedge, and requires browser/loopback PKCE, RFC 8628 device flow, CI no-prompt behavior, secure token-cache boundaries, `ASCLI1xx` diagnostics, and packed-tool readiness proof before auth commands ship.
 

@@ -376,7 +376,7 @@ case "$mode" in
     v2_harness_path="$v2_harness_bin/Release/net10.0/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost.dll"
     [[ -f "$v2_harness_path" ]] \
       || fail "the exact $v2_package_version compatibility harness output is missing"
-    v2_release_test="ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlMixedVersionCompatibilityTests.ExactV020Preview8Package_OperatesAfterSchema10AndSupportsBinaryRollback"
+    v2_release_test="ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlMixedVersionCompatibilityTests.ExactPreviousPackage_OperatesAfterSchema11AndSupportsBinaryRollback"
     dotnet test "$project" --list-tests \
       -m:1 -p:UseSharedCompilation=false \
       >"$ci_all_list_log" \
@@ -398,14 +398,14 @@ case "$mode" in
       || fail "the exact $v2_package_version release proof was included in the remaining CI suite"
     [[ "$((ci_remaining_expected_test_count + ci_release_discovered_test_count))" == "$ci_all_expected_test_count" ]] \
       || fail "CI test discovery was not partitioned exactly between the release proof and remaining suite"
-    APPSURFACE_REQUIRE_V020_RELEASE_PROOF=true \
+    APPSURFACE_REQUIRE_PREVIOUS_PACKAGE_RELEASE_PROOF=true \
     APPSURFACE_DURABLE_V020_HARNESS_PATH="$v2_harness_path" \
     APPSURFACE_DURABLE_V020_PACKAGE_PATH="$v2_package_path" \
       dotnet test "$project" \
         -m:1 -p:UseSharedCompilation=false \
         --filter "FullyQualifiedName=$v2_release_test" \
         --logger 'console;verbosity=normal' | tee "$work_dir/v2-release-test-output.log" \
-        || fail "the exact $v2_package_version/current schema-10 release proof failed"
+        || fail "the exact immediately previous $v2_package_version/schema-11 release proof failed"
     verify_test_summary \
       "$work_dir/v2-release-test-output.log" \
       1 \

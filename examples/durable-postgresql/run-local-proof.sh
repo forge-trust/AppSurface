@@ -218,6 +218,24 @@ run_foreground dotnet run --project "$ROOT_DIR/Cli/ForgeTrust.AppSurface.Cli" \
   --apply
 printf '[ok] durable schema applied through the package-required version\n'
 
+printf -v FORWARDING_ROLE_PAIRS_JSON \
+  '{"version":1,"pairs":[{"dispatcher":"%s","runtime":"%s","dispatcher_profile":"full"}]}' \
+  "$DISPATCHER_ROLE" "$RUNTIME_ROLE"
+run_foreground docker exec -i "$CONTAINER_NAME" \
+  psql -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE_NAME" \
+  -v migration_owner_role="$MIGRATION_OWNER_ROLE" \
+  -v role_pairs_json="$FORWARDING_ROLE_PAIRS_JSON" \
+  -v retention_operator_role="$RETENTION_ROLE" \
+  -f - < "$ROOT_DIR/Durable/configure-postgresql-roles.sql" >/dev/null
+printf '[ok] forwarding role pair reconciled\n'
+
+run_foreground dotnet run --project "$ROOT_DIR/Cli/ForgeTrust.AppSurface.Cli" \
+  --configuration Release \
+  --no-build \
+  -- durable schema preflight \
+  --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION
+printf '[ok] schema 11 single-pair structural preflight passed before second-pair enrollment\n'
+
 ROLE_PAIRS_JSON="$(<"$ROLE_PAIRS_MANIFEST")"
 run_foreground docker exec -i "$CONTAINER_NAME" \
   psql -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE_NAME" \
@@ -225,7 +243,7 @@ run_foreground docker exec -i "$CONTAINER_NAME" \
   -v role_pairs_json="$ROLE_PAIRS_JSON" \
   -v retention_operator_role="$RETENTION_ROLE" \
   -f - < "$ROOT_DIR/Durable/configure-postgresql-roles.sql" >/dev/null
-printf '[ok] canonical PostgreSQL roles reconciled\n'
+printf '[ok] complete two-pair PostgreSQL manifest reconciled\n'
 
 run_foreground docker exec -i "$CONTAINER_NAME" \
   psql -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE_NAME" \
@@ -238,7 +256,7 @@ printf '[ok] identical complete-manifest rerun succeeded\n'
 if run_foreground docker exec -i "$CONTAINER_NAME" \
   psql -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE_NAME" \
   -v migration_owner_role="$MIGRATION_OWNER_ROLE" \
-  -v role_pairs_json='{"version":1,"pairs":[{"dispatcher":"appsurface_durable_dispatcher","runtime":"appsurface_durable_runtime","dispatcher_profile":"full"}]}' \
+  -v role_pairs_json="$FORWARDING_ROLE_PAIRS_JSON" \
   -v retention_operator_role="$RETENTION_ROLE" \
   -f - < "$ROOT_DIR/Durable/configure-postgresql-roles.sql" > "$OMISSION_OUTPUT_FILE" 2>&1; then
   printf 'The role recipe accepted an omitted installed pair; expected a fail-closed refusal.\n' >&2

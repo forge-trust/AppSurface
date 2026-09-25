@@ -15,7 +15,7 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 /// </summary>
 internal sealed class ExactPackageReleaseProofFactAttribute : FactAttribute
 {
-    internal const string EnvironmentVariableName = "APPSURFACE_REQUIRE_V020_RELEASE_PROOF";
+    internal const string EnvironmentVariableName = "APPSURFACE_REQUIRE_PREVIOUS_PACKAGE_RELEASE_PROOF";
 
     /// <summary>Initializes the conditional release-proof fact.</summary>
     public ExactPackageReleaseProofFactAttribute()
@@ -26,7 +26,7 @@ internal sealed class ExactPackageReleaseProofFactAttribute : FactAttribute
                 StringComparison.OrdinalIgnoreCase))
         {
             Skip =
-                "The exact v0.2.0-preview.8 package proof runs only in the explicit PostgreSQL release-proof lane.";
+                "The exact immediately previous package proof runs only in the explicit PostgreSQL release-proof lane.";
         }
     }
 }
@@ -82,7 +82,7 @@ public sealed class PostgreSqlMixedVersionCompatibilityTests
     }
 
     [ExactPackageReleaseProofFact]
-    public async Task ExactV020Preview8Package_OperatesAfterSchema10AndSupportsBinaryRollback()
+    public async Task ExactPreviousPackage_OperatesAfterSchema11AndSupportsBinaryRollback()
     {
         var harnessPath = RequireFile(HarnessPathEnvironment);
         var packagePath = RequireFile(PackagePathEnvironment);
@@ -106,7 +106,7 @@ public sealed class PostgreSqlMixedVersionCompatibilityTests
 
         await using var migrationDataSource = NpgsqlDataSource.Create(container.GetConnectionString());
         var migrations = DurablePostgreSqlMigrationCatalog.Load();
-        Assert.Equal(10, migrations.Count);
+        Assert.Equal(11, migrations.Count);
 
         var schema9Manager = new PostgreSqlDurableRuntimeSchemaManager(
             migrationDataSource,
@@ -115,27 +115,25 @@ public sealed class PostgreSqlMixedVersionCompatibilityTests
         Assert.Equal(Enumerable.Range(1, 9).ToArray(), schema9Apply.AppliedVersions);
 
         var currentManager = new PostgreSqlDurableRuntimeSchemaManager(migrationDataSource);
-        var currentAtSchema9 = await currentManager.GetStatusAsync();
-        Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, currentAtSchema9.Compatibility);
-        Assert.Equal(9, currentAtSchema9.InstalledVersion);
-        Assert.Equal(10, currentAtSchema9.RequiredVersion);
-        var startupFailure = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
-            async () => await currentManager.ValidateAsync());
-        Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, startupFailure.Status.Compatibility);
-
-        var schema10Apply = await currentManager.ApplyAsync();
+        var schema10Manager = new PostgreSqlDurableRuntimeSchemaManager(
+            migrationDataSource,
+            migrations.Take(10).ToArray());
+        var schema10Apply = await schema10Manager.ApplyAsync();
         Assert.Equal([10], schema10Apply.AppliedVersions);
-        var currentAtSchema10 = await currentManager.GetStatusAsync();
-        Assert.Equal(DurableRuntimeSchemaCompatibility.Compatible, currentAtSchema10.Compatibility);
-        Assert.Equal(10, currentAtSchema10.InstalledVersion);
-        Assert.Equal(10, currentAtSchema10.RequiredVersion);
+
+        var schema11Apply = await currentManager.ApplyAsync();
+        Assert.Equal([11], schema11Apply.AppliedVersions);
+        var currentAtSchema11 = await currentManager.GetStatusAsync();
+        Assert.Equal(DurableRuntimeSchemaCompatibility.Compatible, currentAtSchema11.Compatibility);
+        Assert.Equal(11, currentAtSchema11.InstalledVersion);
+        Assert.Equal(11, currentAtSchema11.RequiredVersion);
         await currentManager.ValidateAsync();
 
         var runtimeEpoch = Guid.NewGuid();
         await currentManager.InitializeRuntimeEpochAsync(
             runtimeEpoch,
             "mixed-version-release-proof",
-            "schema10-activation");
+            "schema11-activation");
         await CreateRestrictedRolesAsync(
             migrationDataSource,
             dispatcherPassword,
@@ -162,7 +160,7 @@ public sealed class PostgreSqlMixedVersionCompatibilityTests
         var restrictedCurrentManager = new PostgreSqlDurableRuntimeSchemaManager(runtimeDataSource);
         var restrictedCurrentStatus = await restrictedCurrentManager.GetStatusAsync();
         Assert.Equal(DurableRuntimeSchemaCompatibility.Compatible, restrictedCurrentStatus.Compatibility);
-        Assert.Equal(10, restrictedCurrentStatus.InstalledVersion);
+        Assert.Equal(11, restrictedCurrentStatus.InstalledVersion);
         await restrictedCurrentManager.ValidateAsync();
 
         await RunCurrentPackageWorkPassAsync(
@@ -178,7 +176,7 @@ public sealed class PostgreSqlMixedVersionCompatibilityTests
             runtimeConnectionString,
             runtimeEpoch,
             restrictedCurrentStatus.StoreId);
-        Assert.Equal("v0.2.0-preview.8-operational", checkpoint.GetProperty("Phase").GetString());
+        Assert.Equal("previous-package-schema11-operational", checkpoint.GetProperty("Phase").GetString());
         Assert.Equal(ExactOldPackageVersion, checkpoint.GetProperty("PackageVersion").GetString());
         Assert.Equal(ExactOldPackageSha256, checkpoint.GetProperty("PackageSha256").GetString());
         Assert.Equal(ExactOldPackageCommit, checkpoint.GetProperty("RepositoryCommit").GetString());
@@ -194,7 +192,7 @@ public sealed class PostgreSqlMixedVersionCompatibilityTests
         Assert.Equal("Healthy", checkpoint.GetProperty("HealthyAfterWork").GetString());
         Assert.True(checkpoint.GetProperty("HeartbeatMaintained").GetBoolean());
         var oldSchema = checkpoint.GetProperty("Schema");
-        Assert.Equal(10, oldSchema.GetProperty("InstalledVersion").GetInt32());
+        Assert.Equal(11, oldSchema.GetProperty("InstalledVersion").GetInt32());
         Assert.Equal(9, oldSchema.GetProperty("RequiredVersion").GetInt32());
         Assert.Equal("Compatible", oldSchema.GetProperty("Compatibility").GetString());
         var oldWork = checkpoint.GetProperty("Work");
@@ -216,7 +214,7 @@ public sealed class PostgreSqlMixedVersionCompatibilityTests
             """);
         await using var reader = await verify.ExecuteReaderAsync();
         Assert.True(await reader.ReadAsync());
-        Assert.Equal(Enumerable.Range(1, 10).ToArray(), reader.GetFieldValue<int[]>(0));
+        Assert.Equal(Enumerable.Range(1, 11).ToArray(), reader.GetFieldValue<int[]>(0));
         Assert.Equal("succeeded", reader.GetString(1));
         Assert.Equal("succeeded", reader.GetString(2));
         Assert.False(await reader.ReadAsync());
