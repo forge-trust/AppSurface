@@ -388,6 +388,228 @@ public sealed class PostgreSqlScaleIntegrationTests
     }
 
     [Fact]
+    public async Task HeartbeatRetention_RecordsHundredThousandRowPruneAndConcurrentRenewalEvidence()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+
+        const int eligibleRows = 100_000;
+        const int recentRows = 1_000;
+        const int batchSize = 500;
+        var workerPrefix = $"heartbeat-scale-{Guid.NewGuid():N}";
+        var workerId = $"{workerPrefix}-current";
+        var instanceId = Guid.NewGuid();
+        await SeedHeartbeatRetentionRowsAsync(
+            database.DataSource,
+            workerPrefix,
+            eligibleRows,
+            recentRows);
+        await using (var analyze = database.DataSource.CreateCommand(
+                         "ANALYZE appsurface_durable.runtime_heartbeat;"))
+        {
+            await analyze.ExecuteNonQueryAsync();
+        }
+
+        var plan = await ReadHeartbeatPruneCandidatePlanAsync(database.DataSource, batchSize);
+        Assert.Contains("ix_runtime_heartbeat_retention", plan, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Node Type\": \"Seq Scan\"", plan, StringComparison.Ordinal);
+        _output.WriteLine($"heartbeat retention ordered candidate plan (LIMIT {batchSize}):{Environment.NewLine}{plan}");
+
+        var before = await ReadHeartbeatStorageEvidenceAsync(database.DataSource);
+        var options = new AppSurfaceDurablePostgreSqlOptions
+        {
+            WorkerId = workerId,
+            HeartbeatPruneBatchSize = batchSize,
+            HeartbeatRetention = TimeSpan.FromHours(24),
+        }.SnapshotAndValidate();
+        var constrainedConnection = new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            ApplicationName = "appsurface-heartbeat-retention-scale",
+            MaxPoolSize = ConstrainedPoolSize,
+        };
+        await using var constrainedDataSource = NpgsqlDataSource.Create(constrainedConnection.ConnectionString);
+        var registration = new PostgreSqlDurableRuntimeRegistration(
+            constrainedDataSource,
+            constrainedDataSource,
+            new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options,
+            instanceId);
+        await using (var currentHeartbeat = constrainedDataSource.CreateCommand(
+                         """
+                         INSERT INTO appsurface_durable.runtime_heartbeat
+                             (worker_id, worker_instance_id, runtime_epoch, hosted_surfaces)
+                         VALUES (@worker_id, @instance_id, @epoch, 1);
+                         """))
+        {
+            currentHeartbeat.Parameters.AddWithValue("worker_id", workerId);
+            currentHeartbeat.Parameters.AddWithValue("instance_id", instanceId);
+            currentHeartbeat.Parameters.AddWithValue("epoch", Guid.NewGuid());
+            await currentHeartbeat.ExecuteNonQueryAsync();
+        }
+
+        await using var maintenance = new PostgreSqlDurableHeartbeatMaintenance(registration, TimeProvider.System);
+
+        // This is the same provider-owned maintenance object and SQL transaction/timeout path used by the pump.
+        var pruneStarted = Stopwatch.StartNew();
+        maintenance.SignalAdmittedPass();
+        var renewals = Enumerable.Range(1, 64)
+            .Select(index => RenewScaleHeartbeatAsync(constrainedDataSource, $"{workerPrefix}-recent-{index}"))
+            .ToArray();
+        var renewalTimes = await Task.WhenAll(renewals);
+        var remainingEligible = await WaitForEligibleHeartbeatCountAsync(
+            constrainedDataSource,
+            workerPrefix,
+            eligibleRows - batchSize,
+            TimeSpan.FromSeconds(10));
+        pruneStarted.Stop();
+
+        Assert.Equal(eligibleRows - batchSize, remainingEligible);
+        Assert.True(pruneStarted.Elapsed < TimeSpan.FromSeconds(5),
+            $"Provider prune progress took {pruneStarted.Elapsed}; the per-call production budget is 5 seconds.");
+        AssertHeartbeatRenewalGates(renewalTimes);
+
+        var after = await ReadHeartbeatStorageEvidenceAsync(constrainedDataSource);
+        var exactLiveRows = await CountAsync(
+            constrainedDataSource,
+            "SELECT count(*) FROM appsurface_durable.runtime_heartbeat;");
+        Assert.Equal(eligibleRows - batchSize + recentRows + 1, exactLiveRows);
+        _output.WriteLine($"heartbeat retention population: seededEligible={eligibleRows:N0}, " +
+            $"seededRecent={recentRows:N0}, deleted={eligibleRows - remainingEligible:N0}, " +
+            $"remainingEligible={remainingEligible:N0}, pruneDuration={pruneStarted.Elapsed.TotalMilliseconds:N1}ms, " +
+            $"renewalPoolMax={ConstrainedPoolSize}, renewalSamples={renewalTimes.Length}, " +
+            $"renewalP50={Percentile(renewalTimes, 0.50).TotalMilliseconds:N1}ms, " +
+            $"renewalP95={Percentile(renewalTimes, 0.95).TotalMilliseconds:N1}ms, " +
+            $"renewalMax={renewalTimes.Max().TotalMilliseconds:N1}ms");
+        _output.WriteLine($"heartbeat relation observation before prune: {before}");
+        _output.WriteLine($"heartbeat relation observation after prune: {after}");
+        _output.WriteLine(
+            $"heartbeat exact live rows after prune={exactLiveRows:N0} " +
+            $"(includes {recentRows:N0} recent rows and the current worker)");
+        _output.WriteLine(
+            "PostgreSQL DELETE creates dead tuples; relation and index bytes need not shrink until vacuum/rewrite. " +
+            "This scale run samples autovacuum metadata and does not force VACUUM.");
+    }
+
+    private static void AssertHeartbeatRenewalGates(TimeSpan[] renewalTimes)
+    {
+        Assert.True(Percentile(renewalTimes, 0.95) < TimeSpan.FromSeconds(5),
+            $"Concurrent heartbeat renewal p95 was {Percentile(renewalTimes, 0.95)}; gate is below 5 seconds.");
+        Assert.True(renewalTimes.Max() < TimeSpan.FromSeconds(15),
+            $"Concurrent heartbeat renewal maximum was {renewalTimes.Max()}; gate is below 15 seconds.");
+    }
+
+    private static async ValueTask SeedHeartbeatRetentionRowsAsync(
+        NpgsqlDataSource dataSource,
+        string workerPrefix,
+        int eligibleRows,
+        int recentRows)
+    {
+        await using var command = dataSource.CreateCommand(
+            """
+            INSERT INTO appsurface_durable.runtime_heartbeat
+                (worker_id, worker_instance_id, runtime_epoch, hosted_surfaces, started_at,
+                 last_heartbeat_at, draining, pass_active)
+            SELECT @worker_prefix || '-stale-' || value::text,
+                   md5(@worker_prefix || '-stale-' || value::text)::uuid,
+                   gen_random_uuid(), 1, clock_timestamp() - interval '2 days',
+                   clock_timestamp() - interval '2 days', false, false
+            FROM generate_series(1, @eligible_rows) AS value
+            UNION ALL
+            SELECT @worker_prefix || '-recent-' || value::text,
+                   md5(@worker_prefix || '-recent-' || value::text)::uuid,
+                   gen_random_uuid(), 1, clock_timestamp(), clock_timestamp(), false, false
+            FROM generate_series(1, @recent_rows) AS value;
+            """);
+        command.Parameters.AddWithValue("worker_prefix", workerPrefix);
+        command.Parameters.AddWithValue("eligible_rows", eligibleRows);
+        command.Parameters.AddWithValue("recent_rows", recentRows);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async ValueTask<string> ReadHeartbeatPruneCandidatePlanAsync(
+        NpgsqlDataSource dataSource,
+        int batchSize)
+    {
+        await using var command = dataSource.CreateCommand(
+            """
+            EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+            SELECT worker_id, worker_instance_id
+            FROM appsurface_durable.runtime_heartbeat
+            WHERE last_heartbeat_at < clock_timestamp() - interval '24 hours'
+            ORDER BY last_heartbeat_at, worker_id
+            LIMIT @batch_size;
+            """);
+        command.Parameters.AddWithValue("batch_size", batchSize);
+        return (string)(await command.ExecuteScalarAsync()
+            ?? throw new InvalidOperationException("PostgreSQL returned no heartbeat retention plan."));
+    }
+
+    private static async ValueTask<string> ReadHeartbeatStorageEvidenceAsync(NpgsqlDataSource dataSource)
+    {
+        await using var command = dataSource.CreateCommand(
+            """
+            SELECT json_build_object(
+                'live_tuples', coalesce(stats.n_live_tup, 0),
+                'dead_tuples', coalesce(stats.n_dead_tup, 0),
+                'relation_bytes', pg_total_relation_size('appsurface_durable.runtime_heartbeat'),
+                'heap_bytes', pg_relation_size('appsurface_durable.runtime_heartbeat'),
+                'index_bytes', pg_indexes_size('appsurface_durable.runtime_heartbeat'),
+                'last_autovacuum', stats.last_autovacuum,
+                'last_autoanalyze', stats.last_autoanalyze)
+            FROM pg_stat_user_tables AS stats
+            WHERE stats.schemaname = 'appsurface_durable'
+              AND stats.relname = 'runtime_heartbeat';
+            """);
+        return (string)(await command.ExecuteScalarAsync()
+            ?? throw new InvalidOperationException("PostgreSQL returned no heartbeat storage statistics."));
+    }
+
+    private static async Task<TimeSpan> RenewScaleHeartbeatAsync(NpgsqlDataSource dataSource, string workerId)
+    {
+        var started = Stopwatch.GetTimestamp();
+        await using var command = dataSource.CreateCommand(
+            """
+            UPDATE appsurface_durable.runtime_heartbeat
+            SET last_heartbeat_at = clock_timestamp(), updated_at = clock_timestamp()
+            WHERE worker_id = @worker_id;
+            """);
+        command.Parameters.AddWithValue("worker_id", workerId);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        return Stopwatch.GetElapsedTime(started);
+    }
+
+    private static async ValueTask<long> WaitForEligibleHeartbeatCountAsync(
+        NpgsqlDataSource dataSource,
+        string workerPrefix,
+        long expected,
+        TimeSpan timeout)
+    {
+        var deadline = Stopwatch.GetTimestamp() + (long)(timeout.TotalSeconds * Stopwatch.Frequency);
+        long observed;
+        do
+        {
+            await using var command = dataSource.CreateCommand(
+                "SELECT count(*) FROM appsurface_durable.runtime_heartbeat " +
+                "WHERE worker_id LIKE @prefix AND last_heartbeat_at < clock_timestamp() - interval '24 hours';");
+            command.Parameters.AddWithValue("prefix", $"{workerPrefix}-stale-%");
+            observed = (long)(await command.ExecuteScalarAsync()
+                ?? throw new InvalidOperationException("PostgreSQL returned no eligible heartbeat count."));
+            if (observed == expected)
+            {
+                return observed;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(25));
+        }
+        while (Stopwatch.GetTimestamp() < deadline);
+
+        return observed;
+    }
+
+
+    [Fact]
     public async Task DisableScope_ProjectsTenThousandWorkItemsWithinThirtySeconds()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();

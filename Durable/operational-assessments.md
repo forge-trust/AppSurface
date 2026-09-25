@@ -1,5 +1,7 @@
 # Adopt Durable operational assessments
 
+For schema-11 runtime heartbeat cleanup and its forward-only deployment procedure, use the [heartbeat retention operations guide](heartbeat-retention-operations.md). The schema 9→10 transcript below remains the historical runtime-health adoption proof.
+
 This is the task guide for upgrading an existing PostgreSQL worker or external activator to the additive Durable
 operational-assessment contract. Start here if you need to decide whether activation is currently authorized, whether
 one pump invocation actually entered application execution, or how to roll the package back safely. The package
