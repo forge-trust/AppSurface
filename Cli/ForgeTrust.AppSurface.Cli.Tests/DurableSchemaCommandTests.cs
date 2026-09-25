@@ -395,9 +395,11 @@ public sealed class DurableSchemaCommandTests
 
         var error = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
 
-        Assert.Equal(TimeSpan.FromMinutes(20), DurableSchemaApplyCommand.ApplyOperationTimeout);
-        Assert.True(DurableSchemaApplyCommand.ApplyOperationTimeout > TimeSpan.FromSeconds(30 + (9 * 30) + (2 * 330)));
-        Assert.Contains("1200-second deadline", error.Message, StringComparison.Ordinal);
+        Assert.Equal(TimeSpan.FromMinutes(45), DurableSchemaApplyCommand.ApplyOperationTimeout);
+        // Missing -> 0011: lock, nine ordinary and two extended commands, metadata, status, transactions, and cleanup.
+        var completeApplyCommandBudget = TimeSpan.FromSeconds(30 + (9 * 30) + (2 * 330) + (11 * 30) + (6 * 30) + (22 * 30) + (2 * 30));
+        Assert.True(DurableSchemaApplyCommand.ApplyOperationTimeout > completeApplyCommandBudget);
+        Assert.Contains("2700-second deadline", error.Message, StringComparison.Ordinal);
         ValueSafeAssert.DoesNotExpose("do-not-print", error.Message);
         ValueSafeAssert.DoesNotExpose("provider details are private", error.Message);
     }
