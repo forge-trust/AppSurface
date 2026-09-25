@@ -1,4 +1,4 @@
-# File declared secret references
+# File-declared secret references
 
 Use a typed `Secret<T>` member when a configuration model needs a sensitive scalar whose resource, version, and activation
 belong in checked-in configuration. The JSON object declares the reference; the provider supplies its payload. Ordinary
@@ -130,6 +130,8 @@ Without that bypass, the engine validates the plan, selects the first resolved r
 priority, resolves each declared secret, applies exact environment overrides, and binds the root once. A sensitive base
 such as [LocalSecrets](../../ForgeTrust.AppSurface.Config.LocalSecrets/README.md#typed-file-declared-secret-references)
 can supply a scalar to a secret slot. Non-sensitive file data supplies ordinary members and declaration metadata.
+For ordinary members, if every environment candidate is invalid, normal composition keeps the lower file value and
+retains the conversion diagnostics.
 A terminal base failure prevents lower-provider fallback; supply a complete direct environment root or repair that base.
 
 An enabled declaration claims its slot, replacing lower sensitive material even when the reference fails. A disabled or

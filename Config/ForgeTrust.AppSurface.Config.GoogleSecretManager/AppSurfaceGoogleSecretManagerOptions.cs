@@ -41,10 +41,10 @@ public sealed class AppSurfaceGoogleSecretManagerOptions
     public bool AllowLatestVersion { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether claimed-key failures permit fallback to lower-priority providers.
+    /// Gets or sets a value indicating whether a failed raw whole-root base stops fallback to lower-priority bases.
     /// </summary>
-    /// <remarks>File-declared scalar secret references use this compatibility policy. The logical-key provider contract
-    /// treats claimed failures as terminal.</remarks>
+    /// <remarks>Applies only when this provider supplies a raw whole-root base for a <see cref="Secret{T}"/> root.
+    /// File-declared scalar references and the logical-key provider contract always report claimed failures.</remarks>
     public bool FailClosedOnProviderFailure { get; set; } = true;
 
     /// <summary>

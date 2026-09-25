@@ -12,7 +12,7 @@ resource name, and `latest` policy locally before any Secret Manager call. Resol
 synchronous deadline and decodes payloads as strict UTF-8 text. Missing resources, denied access, unavailable service
 calls, invalid references, and provider failures remain distinct provider-neutral outcomes for the composition engine.
 
-See the [canonical file declared secret reference guide](../ForgeTrust.AppSurface.Config/docs/file-secret-references.md) and
+See the [canonical file-declared secret reference guide](../ForgeTrust.AppSurface.Config/docs/file-secret-references.md) and
 the [executable golden path](../../examples/file-secret-references/README.md) for the complete descriptor, no-rescue Google
 proof, exact environment rescue, and value-safe failure contract.
 
@@ -75,10 +75,11 @@ appsettings defaults < LocalSecrets < Google Secret Manager < environment variab
 
 Environment variables stay above Google Secret Manager so an operator can override a broken remote secret without
 changing code or mutating Secret Manager. File configuration and LocalSecrets stay below the remote provider. A claimed
-Google Secret Manager key stops lower-priority providers when the remote lookup is unavailable, denied, invalid, or
-cannot be converted. This is always terminal for the logical-key provider contract. The file-declared scalar
-`Secret<T>` compatibility path retains `FailClosedOnProviderFailure` (default `true`) to control fallback for its
-claimed-reference failures; keep it enabled when lower-priority providers must not mask an unavailable secret. See the
+Google Secret Manager logical key stops lower-priority providers when the remote lookup is unavailable, denied, invalid, or
+cannot be converted. This is always terminal for the logical-key provider contract. For a `Secret<T>` root,
+`FailClosedOnProviderFailure` (default `true`) controls whether a failed Google raw whole-root base permits fallback to
+lower-priority bases. File-declared scalar references always report their claimed failures; the option does not make
+those failures fall through. Keep it enabled when lower-priority bases must not mask an unavailable secret. See the
 [coordinated upgrade guide](../../guides/config-key-migration.md#google-convention-migration) when migrating conventions.
 
 Unmapped keys are not claimed and continue through the normal provider chain.

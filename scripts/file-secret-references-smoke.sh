@@ -35,21 +35,30 @@ run_bounded() {
   local seconds="$1"
   shift
   python3 - "$seconds" "$@" <<'PY'
+import os
+import signal
 import subprocess
 import sys
 
 timeout = float(sys.argv[1])
 argv = sys.argv[2:]
+process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           text=True, start_new_session=True)
 try:
-    result = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, timeout=timeout)
-except subprocess.TimeoutExpired as error:
-    if error.stdout:
-        sys.stdout.write(error.stdout if isinstance(error.stdout, str) else error.stdout.decode(errors="replace"))
+    output, _ = process.communicate(timeout=timeout)
+except subprocess.TimeoutExpired:
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    output, _ = process.communicate()
+    if output:
+        sys.stdout.write(output)
     print(f"TIMEOUT after {timeout:.0f}s: {argv!r}", file=sys.stderr)
     raise SystemExit(124)
-sys.stdout.write(result.stdout)
-raise SystemExit(result.returncode)
+if output:
+    sys.stdout.write(output)
+raise SystemExit(process.returncode)
 PY
 }
 
@@ -282,9 +291,11 @@ write_current_consumer
 restore_and_build_current
 start_seconds="$(python3 -c 'import time; print(time.monotonic())')"
 run_current_case disabled 'PASS mode=Production hasValue=False provider=none googleCalls=0' \
+  env -u DOTNET_ENVIRONMENT -u ASPNETCORE_ENVIRONMENT -u FILESECRETREFERENCES__APIKEY DOTNET_ENVIRONMENT=Production \
   dotnet run --project "$CURRENT_CONSUMER/FileSecretReferencesExample.csproj" --configuration Release --no-build --no-restore
 run_current_case rescue 'PASS mode=Production hasValue=True provider=EnvironmentConfigProvider googleCalls=0' \
-  env FILESECRETREFERENCES__APIKEY=environment-value dotnet run --project "$CURRENT_CONSUMER/FileSecretReferencesExample.csproj" --configuration Release --no-build --no-restore
+  env -u DOTNET_ENVIRONMENT -u ASPNETCORE_ENVIRONMENT -u FILESECRETREFERENCES__APIKEY DOTNET_ENVIRONMENT=Production \
+  FILESECRETREFERENCES__APIKEY=environment-value dotnet run --project "$CURRENT_CONSUMER/FileSecretReferencesExample.csproj" --configuration Release --no-build --no-restore
 end_seconds="$(python3 -c 'import time; print(time.monotonic())')"
 rescue_elapsed="$(python3 - "$start_seconds" "$end_seconds" <<'PY'
 import sys
@@ -297,9 +308,11 @@ if float(sys.argv[1]) >= 300:
     raise SystemExit(f"disabled+rescue exceeded five minutes: {sys.argv[1]}s")
 PY
 run_current_case enabled 'PASS mode=Development hasValue=True provider=google-secret-manager googleCalls=1' \
-  env DOTNET_ENVIRONMENT=Development dotnet run --project "$CURRENT_CONSUMER/FileSecretReferencesExample.csproj" --configuration Release --no-build --no-restore
+  env -u DOTNET_ENVIRONMENT -u ASPNETCORE_ENVIRONMENT -u FILESECRETREFERENCES__APIKEY DOTNET_ENVIRONMENT=Development \
+  dotnet run --project "$CURRENT_CONSUMER/FileSecretReferencesExample.csproj" --configuration Release --no-build --no-restore
 failure_log="$WORK_DIR/current-failure.log"
-run_bounded 30 env DOTNET_ENVIRONMENT=Failure dotnet run --project "$CURRENT_CONSUMER/FileSecretReferencesExample.csproj" --configuration Release --no-build --no-restore -- failure >"$failure_log" 2>&1
+run_bounded 30 env -u DOTNET_ENVIRONMENT -u ASPNETCORE_ENVIRONMENT -u FILESECRETREFERENCES__APIKEY DOTNET_ENVIRONMENT=Failure \
+  dotnet run --project "$CURRENT_CONSUMER/FileSecretReferencesExample.csproj" --configuration Release --no-build --no-restore -- failure >"$failure_log" 2>&1
 grep -Fqx 'EXPECTED FAILURE: secret-not-found at FileSecretReferences:ApiKey' "$failure_log"
 ! grep -Fq 'fake-google-value' "$failure_log"
 
