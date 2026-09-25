@@ -268,8 +268,12 @@ internal static class DurablePostgreSqlLocalExample
         return 0;
     }
 
-    /// <summary>Seeds more eligible identities than one configured maintenance batch.</summary>
-    private static async Task SeedRetentionProofAsync(
+    /// <summary>Idempotently seeds more eligible identities than one configured maintenance batch.</summary>
+    /// <remarks>Existing proof identities are refreshed so a retry after partial execution can reseed the retention check.</remarks>
+    /// <param name="runtimeDataSource">Runtime-role data source with heartbeat insert and update grants.</param>
+    /// <param name="runtimeEpoch">Configured epoch recorded on newly inserted proof identities.</param>
+    /// <param name="cancellationToken">Cancels the seed statement.</param>
+    internal static async Task SeedRetentionProofAsync(
         NpgsqlDataSource runtimeDataSource,
         Guid runtimeEpoch,
         CancellationToken cancellationToken)
@@ -284,11 +288,18 @@ internal static class DurablePostgreSqlLocalExample
                    clock_timestamp() - interval '2 days',
                    clock_timestamp() - interval '2 days',
                    clock_timestamp() - interval '2 days'
-            FROM generate_series(1, @stale_count) AS value;
+            FROM generate_series(1, @stale_count) AS value
+            ON CONFLICT (worker_id) DO UPDATE
+            SET started_at = EXCLUDED.started_at,
+                last_heartbeat_at = EXCLUDED.last_heartbeat_at,
+                updated_at = EXCLUDED.updated_at;
 
             INSERT INTO appsurface_durable.runtime_heartbeat
                 (worker_id, worker_instance_id, runtime_epoch, hosted_surfaces)
-            VALUES ('durable-local-proof-recent', gen_random_uuid(), @runtime_epoch, 1);
+            VALUES ('durable-local-proof-recent', gen_random_uuid(), @runtime_epoch, 1)
+            ON CONFLICT (worker_id) DO UPDATE
+            SET last_heartbeat_at = clock_timestamp(),
+                updated_at = clock_timestamp();
             """);
         command.Parameters.AddWithValue("runtime_epoch", runtimeEpoch);
         command.Parameters.AddWithValue("stale_count", LocalProofStaleHeartbeatCount);

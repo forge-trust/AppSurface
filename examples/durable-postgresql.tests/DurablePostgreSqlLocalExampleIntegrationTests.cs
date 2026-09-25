@@ -88,6 +88,13 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
             Assert.Equal(1, await DurablePostgreSqlLocalExample.RunAsync(["verify-local"], CancellationToken.None));
         }
 
+        await using (var runtimeSeedDataSource = NpgsqlDataSource.Create(
+                         ConnectionStringForRole(container.GetConnectionString(), RuntimeRole, RuntimePassword)))
+        {
+            await DurablePostgreSqlLocalExample.SeedRetentionProofAsync(runtimeSeedDataSource, Guid.Parse(runtimeEpoch), CancellationToken.None);
+            await DurablePostgreSqlLocalExample.SeedRetentionProofAsync(runtimeSeedDataSource, Guid.Parse(runtimeEpoch), CancellationToken.None);
+        }
+
         Assert.Equal(0, await DurablePostgreSqlLocalExample.RunAsync(["verify-local"], CancellationToken.None));
         await AssertProofStateAsync(administratorDataSource, Guid.Parse(runtimeEpoch));
         AssertWorkerSchemaGuardRejectsEveryChange();

@@ -150,7 +150,8 @@ internal sealed partial class DurableSchemaPreflightCommand(IDurableSchemaComman
         {
             throw new CommandException(DurableSchemaDiagnostics.PreflightFailure(
                 status.Compatibility,
-                status.PendingVersions.Contains(11)));
+                status.Compatibility == DurableRuntimeSchemaCompatibility.UpgradeRequired
+                    && status.PendingVersions is [11]));
         }
 
         var failedChecks = await RunOnlineAsync(

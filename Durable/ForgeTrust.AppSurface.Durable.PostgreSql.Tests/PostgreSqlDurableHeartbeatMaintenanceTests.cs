@@ -5,8 +5,17 @@ using Npgsql;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 
-public sealed class PostgreSqlDurableHeartbeatMaintenanceTests
+public sealed class PostgreSqlDurableHeartbeatMaintenanceTests : IDisposable
 {
+    private readonly NpgsqlDataSource _dispatcherDataSource = NpgsqlDataSource.Create("Host=localhost;Database=unused");
+    private readonly NpgsqlDataSource _runtimeDataSource = NpgsqlDataSource.Create("Host=localhost;Database=unused;Application Name=runtime");
+
+    public void Dispose()
+    {
+        _runtimeDataSource.Dispose();
+        _dispatcherDataSource.Dispose();
+    }
+
     [Fact]
     public void Constructor_RejectsMissingRegistrationAndClock()
     {
@@ -117,6 +126,7 @@ public sealed class PostgreSqlDurableHeartbeatMaintenanceTests
     {
         var calls = 0;
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var registration = CreateRegistration();
         var maintenance = new PostgreSqlDurableHeartbeatMaintenance(
             registration,
@@ -125,11 +135,20 @@ public sealed class PostgreSqlDurableHeartbeatMaintenanceTests
             {
                 Interlocked.Increment(ref calls);
                 entered.TrySetResult();
-                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    cancelled.TrySetResult();
+                    throw;
+                }
+
                 return 0;
             });
         var services = new ServiceCollection();
-        services.AddSingleton(maintenance);
+        services.AddSingleton(_ => maintenance);
         var provider = services.BuildServiceProvider();
         provider.GetRequiredService<PostgreSqlDurableHeartbeatMaintenance>().SignalAdmittedPass();
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -143,6 +162,7 @@ public sealed class PostgreSqlDurableHeartbeatMaintenanceTests
             provider.Dispose();
         }
 
+        await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var callsAtDisposal = Volatile.Read(ref calls);
         await Task.Delay(50);
         Assert.Equal(callsAtDisposal, Volatile.Read(ref calls));
@@ -308,9 +328,10 @@ public sealed class PostgreSqlDurableHeartbeatMaintenanceTests
         var epoch = Guid.NewGuid();
         await schema.InitializeRuntimeEpochAsync(epoch, "heartbeat-maintenance-tests", "lock-release");
         var status = await schema.GetStatusAsync();
+        await using var runtimeDataSource = database.CreateDataSource();
         var registration = new PostgreSqlDurableRuntimeRegistration(
             database.DataSource,
-            database.CreateDataSource(),
+            runtimeDataSource,
             new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             new AppSurfaceDurablePostgreSqlOptions
@@ -338,10 +359,10 @@ public sealed class PostgreSqlDurableHeartbeatMaintenanceTests
         Assert.True(await TryAcquirePruneLockAsync(database.DataSource));
     }
 
-    private static PostgreSqlDurableRuntimeRegistration CreateRegistration(AppSurfaceDurablePostgreSqlOptions? options = null) =>
+    private PostgreSqlDurableRuntimeRegistration CreateRegistration(AppSurfaceDurablePostgreSqlOptions? options = null) =>
         new(
-            NpgsqlDataSource.Create("Host=localhost;Database=unused"),
-            NpgsqlDataSource.Create("Host=localhost;Database=unused;Application Name=runtime"),
+            _dispatcherDataSource,
+            _runtimeDataSource,
             new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
             new PostgreSqlDurableScheduleOptions("appsurface"),
             (options ?? new AppSurfaceDurablePostgreSqlOptions()).SnapshotAndValidate(),
@@ -463,14 +484,7 @@ public sealed class PostgreSqlDurableHeartbeatMaintenanceTests
 
             internal void Fire(long now)
             {
-                if (_period == Timeout.Infinite)
-                {
-                    _due = long.MaxValue;
-                }
-                else
-                {
-                    _due = now + _period;
-                }
+                _due = _period == Timeout.Infinite ? long.MaxValue : now + _period;
 
                 callback(state);
             }

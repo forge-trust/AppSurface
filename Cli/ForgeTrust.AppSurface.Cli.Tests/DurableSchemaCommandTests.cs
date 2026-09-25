@@ -77,6 +77,27 @@ public sealed class DurableSchemaCommandTests
         ValueSafeAssert.DoesNotExpose("do-not-print", error.Message);
     }
 
+    [Theory]
+    [InlineData(DurableRuntimeSchemaCompatibility.Missing, 1)]
+    [InlineData(DurableRuntimeSchemaCompatibility.UpgradeRequired, 3)]
+    public async Task Preflight_reports_all_pending_migrations_before_0011(DurableRuntimeSchemaCompatibility compatibility, int firstPending)
+    {
+        var service = new FakeDurableSchemaCommandService
+        {
+            Status = new DurableSchemaStatusView(compatibility, firstPending - 1, 11, Enumerable.Range(firstPending, 12 - firstPending).ToArray()),
+        };
+        using var environment = new EnvironmentVariableScope("APPSURFACE_DURABLE_CONNECTION", "Host=localhost;Password=do-not-print");
+        using var console = new FakeInMemoryConsole();
+
+        var error = await Assert.ThrowsAsync<CommandException>(async () =>
+            await new DurableSchemaPreflightCommand(service).ExecuteAsync(console));
+
+        Assert.Contains($"preflight is {compatibility}", error.Message, StringComparison.Ordinal);
+        Assert.Contains("inspect status, generate a reviewed forward script", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("apply the reviewed 0011 script", error.Message, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose("do-not-print", error.Message);
+    }
+
     [Fact]
     public async Task Preflight_fails_closed_on_installed_retention_structure_drift()
     {
