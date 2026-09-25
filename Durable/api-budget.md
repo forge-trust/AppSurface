@@ -39,7 +39,8 @@ seam was removed. No public type was deleted outright.
 
 ## Compatibility rule
 
-All three packages are public previews in the coordinated prerelease publish plan. The PostgreSQL provider supplies
+The Durable, Provider, and PostgreSQL packages covered by this ledger are public previews in the coordinated prerelease
+publish plan. The PostgreSQL provider supplies
 Work, Flow, Schedule, hosted runtime, drain/recovery, retention, repair, and restore-fencing conformance. Every public
 member change must update the appropriate deterministic API snapshot and this ledger when it changes a type's audience,
 package, or visibility. The first supported publication and any persisted deployment are independent compatibility
