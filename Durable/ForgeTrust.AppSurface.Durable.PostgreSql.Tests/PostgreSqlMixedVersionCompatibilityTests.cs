@@ -350,8 +350,7 @@ public sealed class PostgreSqlMixedVersionCompatibilityTests
                 "-U", MigrationUser,
                 "-d", DatabaseName,
                 "-v", $"migration_owner_role={MigrationOwnerRole}",
-                "-v", $"dispatcher_role={DispatcherRole}",
-                "-v", $"runtime_role={RuntimeRole}",
+                "-v", $"role_pairs_json={{\"version\":1,\"pairs\":[{{\"dispatcher\":\"{DispatcherRole}\",\"runtime\":\"{RuntimeRole}\",\"dispatcher_profile\":\"full\"}}]}}",
                 "-v", $"retention_operator_role={RetentionRole}",
                 "-f", ContainerRoleRecipePath,
             ]);

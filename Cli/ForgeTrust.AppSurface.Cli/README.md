@@ -76,11 +76,19 @@ repair it and rerun preflight before activating workers. The
 [operations guide](../../Durable/heartbeat-retention-operations.md#deploy-schema-11) describes the deployment order.
 
 The preferred production flow remains: generate and review the offline schema script, apply all pending numbered
-migrations (currently through `0011`) in order, apply the canonical role recipe, run status and preflight, then
-explicitly enable [`AddWorkerHost()`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host). For recovery,
+migrations (currently through `0011`) in order, apply the complete version-1 role-pair manifest with the matching
+released PostgreSQL provider package's `contentFiles/any/any/configure-postgresql-roles.sql`, run status and preflight,
+then explicitly enable [`AddWorkerHost()`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host). For recovery,
 check status, correct and review the forward-only script, then retry; never delete migration history. The
 [`durable-postgresql` example](../../examples/durable-postgresql/README.md) is a local proof, not production
-operations guidance.
+operations guidance. The provider package's packaged recipe is checked byte-identical to the canonical source by
+[`verify-packed-consumers.sh`](https://github.com/forge-trust/AppSurface/blob/main/Durable/verify-packed-consumers.sh); keep the package release/schema version
+matched to the migration and hash the exact reviewed manifest file used for certificate evidence. See the
+[role manifest, grant profiles, and rollout contract](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#role-recipe-contract)
+and the [operator migration/rollback sequence](../../Durable/operational-assessments.md#migration-and-role-reconciliation).
+For two pairs on schema 11, keep Source activation closed: the current preflight checks one runtime role, and
+[#795](https://github.com/forge-trust/AppSurface/issues/795) must prove the exact manifest runtime set before that
+preflight can certify the combined catalog.
 
 Future CLI authentication is design-only today. The [authenticated command design](docs/authenticated-command-design.md) keeps auth centered on protected command execution, uses `appsurface docs publish --archive ./dist/docs --site <site>` as the first protected command wedge, and requires browser/loopback PKCE, RFC 8628 device flow, CI no-prompt behavior, secure token-cache boundaries, `ASCLI1xx` diagnostics, and packed-tool readiness proof before auth commands ship.
 

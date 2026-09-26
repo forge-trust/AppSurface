@@ -79,7 +79,7 @@ Run the reference proof with `./Durable/verify-postgresql.sh --quick --flow`. Fo
 ## Deployment order and retention
 
 1. Apply `0004_schedule_protocol.sql`, then `0005_runtime_heartbeat.sql`, then the reviewed forward-only `0006_flow_trace_context.sql` migration with the migration-owner connection. Never rename or reorder an applied migration.
-2. Re-run [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) after both migrations so only the scoped runtime can read or write trace metadata; the global dispatcher has no access.
+2. Re-run the complete reviewed version-1 role-pair manifest after both migrations with the matching released provider package's `contentFiles/any/any/configure-postgresql-roles.sql`. The role recipe grants trace metadata access to the paired runtimes according to the reviewed runtime grant set; dispatchers, including `full` Flow-discovery dispatchers, receive no trace-metadata access. See the [provider role-recipe reference](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#role-recipe-contract).
 3. Deploy trace-aware binaries. Older supported binaries keep null trace pointers; a later trace-aware rollout interprets those rows as `context.absent` and never backfills.
 
 Trace rows retain the same lifecycle as their linked Flow protocol records until an explicit archival policy is introduced.

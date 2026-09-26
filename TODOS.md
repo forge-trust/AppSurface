@@ -1,5 +1,9 @@
 # Deferred work
 
+## Durable role-pair retirement after #823
+
+- **What:** Design an explicit, reviewed procedure to retire or narrow one PostgreSQL Durable role pair without treating omission from the complete manifest as authorization to remove it. **Why:** #823 makes enrollment safe but a decommissioned lane otherwise leaves stale grants and policy targets. **Pros:** Closes the credential lifecycle while preserving the fail-closed manifest contract. **Cons:** Requires deployment-use proof, a lock-protected exact removal, post-removal ACL/policy and surviving-lane tests, and a coordinated operator window. **Context:** Start with the [#823 design](docs/designs/issue-823-shared-store-role-pairs.md) and [plan](docs/plans/issue-823-shared-store-role-pairs.md); first prove no active host or secret uses the pair, then review the removal action separately. **Effort:** M (human: 1–2 days / agent assistance: several hours). **Priority:** P2. **Depends on / blocked by:** #823 enrollment release and an actual pair retirement or profile-narrowing need.
+
 ## File-declared secret reference follow-ups (#807)
 
 - **What:** Add a compile-only secret-reference preflight that validates type graphs, file layers, mappings, provider compatibility, and environment aliases without resolving payloads. **Why:** Effective audit intentionally performs the same remote reads as runtime, while deployment tooling may need a zero-read readiness check. **Pros:** Safer CI and deployment review, reusable compiled-plan evidence, and no IAM/network dependency for structural validation. **Cons:** Adds a second execution mode and public naming/reporting contract that must not drift from runtime semantics. **Context:** #807 creates one value-free compiler and defers compile-only presentation; build this only by consuming that compiler rather than adding another parser. **Depends on / blocked by:** Stable #807 plan/result contracts and adopter evidence for the command or API shape.
