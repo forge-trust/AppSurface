@@ -36,7 +36,7 @@ This is a **downtime migration**. `0011_runtime_heartbeat_retention.sql` creates
 
 1. Pack and stage the schema-11-capable package while the old deployment remains active. Pin the **immediately previous published PostgreSQL provider artifact**, its SHA-256, version, and source commit. Run its actual Work and health path on schema 11 in the release lane. The current proof passes with `0.2.0-preview.8` on schema 11; verify that it is still the immediately previous artifact at publication time.
 2. Drain and stop old runtimes and writers. Inspect status and generate the reviewed migration script. A pre-migration `preflight` failure for pending 0011 is an **expected downtime finding**, not a passing activation gate.
-3. Apply 0011 with the migration-owner credential, then run the canonical [role recipe](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) with the four named roles. The recipe transfers function/schema ownership, revokes other execute grants, grants the exact prune signature to the runtime role, and installs the migration-owner heartbeat policy needed for the `SECURITY DEFINER` function under forced row level security.
+3. Apply 0011 with the migration-owner credential, then run the matching released package's [role recipe](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql) with the complete reviewed version-1 `role_pairs_json` manifest. The recipe transfers function/schema ownership, revokes other execute grants, grants the exact prune signature to every manifest runtime and no dispatcher, and installs the migration-owner heartbeat policy needed for the `SECURITY DEFINER` function under forced row level security. Do not run the current recipe on schema 10: it references the function introduced by 0011.
 4. Run schema status and **passing** preflight with the restricted runtime-role connection. Verify version 11; an integer-returning, non-set pruning function with the expected owner, security, search path, and ACL; enabled and forced row level security; a runtime role without `SUPERUSER`, `BYPASSRLS`, or effective `DELETE`/`TRUNCATE` rights; and an ascending `(last_heartbeat_at, worker_id)` btree index before activation. Preflight reports structural drift as named failed checks; repair the role or schema and rerun it before starting workers.
 5. Deploy the new binary and resume activation. Record the 100,000-stale/1,000-recent scale plan, index/buffer and deletion timing, live/dead tuples, relation/index bytes, autovacuum behavior, pool occupancy, and renewal p50/p95/max for both lock orders.
 
@@ -48,10 +48,10 @@ appsurface durable schema script --from-version 10 --output /tmp/appsurface-sche
 appsurface durable schema apply --connection-env APPSURFACE_DURABLE_MIGRATION_CONNECTION --apply
 psql -v ON_ERROR_STOP=1 \
   -v migration_owner_role=appsurface_durable_owner \
-  -v dispatcher_role=appsurface_durable_dispatcher \
-  -v runtime_role=appsurface_durable_runtime \
+  -v role_pairs_json="$(< reviewed-role-pairs.json)" \
   -v retention_operator_role=appsurface_durable_retention \
-  -f Durable/configure-postgresql-roles.sql "$APPSURFACE_DURABLE_ROLE_RECIPE_CONNECTION"
+  -f <released-provider-package>/contentFiles/any/any/configure-postgresql-roles.sql \
+  "$APPSURFACE_DURABLE_ROLE_RECIPE_CONNECTION"
 appsurface durable schema status --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION
 appsurface durable schema preflight --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION
 ```

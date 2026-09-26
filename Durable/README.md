@@ -44,7 +44,8 @@ public, testable contracts without friend access to the application package. The
 The application package registers only passive registries. A provider is selected explicitly by the host. The PostgreSQL
 provider adds explicit migrations (`0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`,
 `0004_schedule_protocol`, `0005_runtime_heartbeat`, `0006_flow_trace_context`, `0007_flow_retention`,
-`0008_flow_repair`, `0009_work_contract_discovery`, and `0010_runtime_health_observation`) plus one-operation-at-a-time Work, Flow, and Work-first Schedule
+`0008_flow_repair`, `0009_work_contract_discovery`, `0010_runtime_health_observation`, and
+`0011_runtime_heartbeat_retention`) plus one-operation-at-a-time Work, Flow, and Work-first Schedule
 persistence with versioned W3C
 causal evidence, verified retention, and evidence-first Flow repair. PostgreSQL registration remains passive; an
 application explicitly adds one bounded polling host through
@@ -92,7 +93,7 @@ operation. Never delete or rewrite migration history. The [`durable-postgresql` 
 is a local proof of the boundaries above, not production operations guidance.
 
 The role recipe takes a complete version-1 `role_pairs_json` manifest on every run. Each pair explicitly chooses
-`full` or `work_only`; omission is not retirement. After schema 10, the reviewed deployment manifest is the authority
+`full` or `work_only`; omission is not retirement. After schema 11, the reviewed deployment manifest is the authority
 for the complete pair set, and the recipe refuses omissions it can observe in package ACLs or policy targets. Compare
 the exact reviewed manifest file with the prior release record because a privileged actor could erase every catalog
 trace of a former pair. The recipe is transactional, but policy DDL can wait briefly on active work. See the

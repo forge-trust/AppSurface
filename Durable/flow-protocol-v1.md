@@ -55,8 +55,8 @@ Schema management and epoch rotation take the same exclusive session advisory lo
 
 | Operation | Transaction and locks | Required validation | Result and durable effects |
 | --- | --- | --- | --- |
-| **Get schema status** | Read-only deployment connection | Migration hashes for the current forward catalog (`0001` through `0010`) | Reports compatibility (compatible, missing, inconsistent, old/new); includes `StoreId` and active epoch. |
-| **Apply migrations** | Migration owner; session advisory lock | Pre/post migration hashes for the current forward catalog, including `0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`, `0007_flow_retention`, `0008_flow_repair`, `0009_work_contract_discovery`, and `0010_runtime_health_observation` | Applies pending known migrations in sequence under lock; fails closed on SHA-256 mismatch. |
+| **Get schema status** | Read-only deployment connection | Migration hashes for the current forward catalog (`0001` through `0011`) | Reports compatibility (compatible, missing, inconsistent, old/new); includes `StoreId` and active epoch. |
+| **Apply migrations** | Migration owner; session advisory lock | Pre/post migration hashes for the current forward catalog, including `0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`, `0007_flow_retention`, `0008_flow_repair`, `0009_work_contract_discovery`, `0010_runtime_health_observation`, and `0011_runtime_heartbeat_retention` | Applies pending known migrations in sequence under lock; fails closed on SHA-256 mismatch. |
 | **Start Flow** | Client-owned short transaction; scope -> flow_instance -> flow_command -> flow_dispatch -> flow_history | Target, StoreId, active epoch, registry, definition fingerprint, `start_idempotency_key` | Atomically creates `flow_instance` (state `ready`), records `flow_command`, appends `flow_history` event, or returns exact duplicate. |
 | **Deliver External Event** | Scoped transaction; scope -> flow_instance -> flow_command -> flow_wait -> flow_timer -> flow_dispatch -> flow_history | Target, StoreId, active epoch, unique `event_id`, matching active `waiting_event` | Records command, resolves active wait (`event_won`), supersedes timer if scheduled, updates `flow_instance` to `ready`, appends history. Exact re-delivery returns the original duplicate-stable outcome. |
 | **Fire Timer** | Payload-free discovery claim, then scoped transition; scope -> flow_instance -> flow_wait -> flow_timer -> flow_dispatch -> flow_history | StoreId, active epoch, `state = 'scheduled'`, `due_at <= clock_timestamp()` | Updates timer to `fired`, resolves event wait (`timer_won`), updates `flow_instance` to `ready`, appends history. |
@@ -124,8 +124,9 @@ PostgreSQL Flow schema requires applying migrations strictly in order:
    pre-`0009` worker before rerunning the role recipe because it removes that worker's raw `dispatch` access.
 10. `0010_runtime_health_observation.sql`: Corrects due Schedule lease observation, adds the supporting partial index,
     and preserves the schema-9 health-function signature for mixed-version readers.
+11. `0011_runtime_heartbeat_retention.sql`: Adds bounded stale-heartbeat pruning and its supporting index.
 
-After applying any migration that adds package relations, rerun the complete reviewed version-1 role-pair manifest after the migration. Deployments use the matching released provider package's `contentFiles/any/any/configure-postgresql-roles.sql`; the packaged-consumer gate verifies that file is byte-identical to the canonical [role recipe](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql). See the [provider manifest and grant reference](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#role-recipe-contract) for the required `full`/`work_only` profile on every pair.
+For current deployments, apply the forward catalog through 0011, then run the complete reviewed version-1 role-pair manifest. The current recipe references a function introduced by 0011 and cannot reconcile an earlier schema. Deployments use the matching released provider package's `contentFiles/any/any/configure-postgresql-roles.sql`; the packaged-consumer gate verifies that file is byte-identical to the canonical [role recipe](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql). See the [provider manifest and grant reference](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#role-recipe-contract) for the required `full`/`work_only` profile on every pair.
 
 ### Rollback posture
 
@@ -142,7 +143,7 @@ All scoped Flow relations, including the original six Flow tables, payload-free 
 `flow_repair_command`/`flow_repair_collision` ledgers, have Row Level Security enabled and forced:
 
 Each `full` dispatcher receives global `flow_dispatch` discovery. Run the matching package role recipe after applying
-the relevant migration and before enabling its dispatcher: the migration's
+all migrations required by that package and before enabling its dispatcher: the migration's
 `flow_dispatch_global_discovery` policy is initially `PUBLIC`, because it has
 no scope-restricted discovery fallback. The role recipe narrows that policy to every manifest-listed `full`
 dispatcher and the migration owner; the latter is required only for the migration-owner `SECURITY DEFINER`
@@ -184,7 +185,7 @@ Flow operations emit append-only `ASDURxxx` codes. Safe error reporting excludes
 | `ASDUR218` | Repair descriptor upgrade required | The suspension lacks the complete V1 child-effect descriptor digest; upgrade compatible writers and obtain a fresh assessment. |
 | `ASDUR219` | Repair evidence mismatch | Locked Work, wait, result, history, or manual-resolution proof differs from the request; reload the assessment. |
 | `ASDUR220` | Repair action unsupported | The retained state is outside the two-action repair matrix; preserve evidence and use another documented recovery path. |
-| `ASDUR400`-`ASDUR403` | Schema manager errors | Apply every pending forward-only migration through `0010` using migration-owner credentials, then rerun the role recipe before enabling a worker host. |
+| `ASDUR400`-`ASDUR403` | Schema manager errors | Apply every pending forward-only migration through `0011` using migration-owner credentials, then rerun the matching package's role recipe before enabling a worker host. |
 
 See the [diagnostics catalog](../troubleshooting/durable-diagnostics.md) for full error details.
 

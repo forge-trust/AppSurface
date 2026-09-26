@@ -251,8 +251,8 @@ SELECT NOT EXISTS (
 WITH observed(role_oid, bootstrap_owner_entry) AS (
   SELECT target.role_oid,
          c.relowner=target.role_oid
-           AND p.polname='work_contract_discovery_owner'
-           AND c.relname='work'
+           AND ((p.polname='work_contract_discovery_owner' AND c.relname='work')
+             OR (p.polname='runtime_heartbeat_migration_owner' AND c.relname='runtime_heartbeat'))
   FROM pg_catalog.pg_policy p
   JOIN pg_catalog.pg_class c ON c.oid=p.polrelid
   JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
@@ -544,22 +544,22 @@ FROM (SELECT concat_ws(', ',
 SELECT format(
     'ALTER POLICY work_contract_discovery_owner ON appsurface_durable.work TO %I',
     :'migration_owner_role') \gexec
-SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_catalog.pg_policy WHERE polname = 'runtime_heartbeat_runtime_role')
+SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_catalog.pg_policy WHERE polrelid = 'appsurface_durable.runtime_heartbeat'::pg_catalog.regclass AND polname = 'runtime_heartbeat_runtime_role')
   THEN format('ALTER POLICY runtime_heartbeat_runtime_role ON appsurface_durable.runtime_heartbeat TO %s', targets.role_list)
   ELSE format('CREATE POLICY runtime_heartbeat_runtime_role ON appsurface_durable.runtime_heartbeat FOR ALL TO %s USING (true) WITH CHECK (true)', targets.role_list) END
 FROM (SELECT string_agg(pg_catalog.format('%I', runtime_name), ', ' ORDER BY runtime_oid) AS role_list FROM role_pair) targets \gexec
-SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_catalog.pg_policy WHERE polname = 'runtime_heartbeat_migration_owner')
+SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_catalog.pg_policy WHERE polrelid = 'appsurface_durable.runtime_heartbeat'::pg_catalog.regclass AND polname = 'runtime_heartbeat_migration_owner')
   THEN format('ALTER POLICY runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat TO %I', :'migration_owner_role')
   ELSE format('CREATE POLICY runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat FOR ALL TO %I USING (true) WITH CHECK (true)', :'migration_owner_role') END \gexec
-SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_catalog.pg_policy WHERE polname = 'flow_dispatch_runtime_scope_select')
+SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_catalog.pg_policy WHERE polrelid = 'appsurface_durable.flow_dispatch'::pg_catalog.regclass AND polname = 'flow_dispatch_runtime_scope_select')
   THEN format('ALTER POLICY flow_dispatch_runtime_scope_select ON appsurface_durable.flow_dispatch TO %s', targets.role_list)
   ELSE format('CREATE POLICY flow_dispatch_runtime_scope_select ON appsurface_durable.flow_dispatch FOR SELECT TO %s USING (scope_id = nullif(current_setting(''appsurface_durable.scope_id'', true), ''''))', targets.role_list) END
 FROM (SELECT string_agg(pg_catalog.format('%I', runtime_name), ', ' ORDER BY runtime_oid) AS role_list FROM role_pair) targets \gexec
-SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_catalog.pg_policy WHERE polname = 'schedule_dispatch_runtime_scope_select')
+SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_catalog.pg_policy WHERE polrelid = 'appsurface_durable.schedule_dispatch'::pg_catalog.regclass AND polname = 'schedule_dispatch_runtime_scope_select')
   THEN format('ALTER POLICY schedule_dispatch_runtime_scope_select ON appsurface_durable.schedule_dispatch TO %s', targets.role_list)
   ELSE format('CREATE POLICY schedule_dispatch_runtime_scope_select ON appsurface_durable.schedule_dispatch FOR SELECT TO %s USING (scope_id = nullif(current_setting(''appsurface_durable.scope_id'', true), ''''))', targets.role_list) END
 FROM (SELECT string_agg(pg_catalog.format('%I', runtime_name), ', ' ORDER BY runtime_oid) AS role_list FROM role_pair) targets \gexec
-SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_catalog.pg_policy WHERE polname = 'schedule_dispatch_scope_update')
+SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_catalog.pg_policy WHERE polrelid = 'appsurface_durable.schedule_dispatch'::pg_catalog.regclass AND polname = 'schedule_dispatch_scope_update')
   THEN format('ALTER POLICY schedule_dispatch_scope_update ON appsurface_durable.schedule_dispatch TO %s', targets.role_list)
   ELSE format('CREATE POLICY schedule_dispatch_scope_update ON appsurface_durable.schedule_dispatch FOR UPDATE TO %s USING (scope_id = nullif(current_setting(''appsurface_durable.scope_id'', true), '''')) WITH CHECK (scope_id = nullif(current_setting(''appsurface_durable.scope_id'', true), ''''))', targets.role_list) END
 FROM (SELECT string_agg(pg_catalog.format('%I', runtime_name), ', ' ORDER BY runtime_oid) AS role_list FROM role_pair) targets \gexec

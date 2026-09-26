@@ -7,7 +7,7 @@ acceptance; external provider effects remain governed by the Work registration's
 ## Prerequisites
 
 - PostgreSQL 16+ through Docker/Testcontainers, or `APPSURFACE_POSTGRES_TEST_CONNECTION` pointing to PostgreSQL 16+.
-- A migration owner applies `0001` through `0010`, then runs the complete reviewed version-1 role-pair manifest with
+- A migration owner applies `0001` through `0011`, then runs the complete reviewed version-1 role-pair manifest with
   the matching released PostgreSQL provider package's
   [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
   at `contentFiles/any/any/configure-postgresql-roles.sql`. Use the `full` dispatcher profile for this Work-first
@@ -16,7 +16,7 @@ acceptance; external provider effects remain governed by the Work registration's
   validated `PostgreSqlDurableWorkOptions`, and
   `PostgreSqlDurableScheduleOptions` containing the exact runtime role name.
 - The schedule processor must use the same dispatcher/runtime role transition as production: apply migrations through
-  `0010_runtime_health_observation.sql` and rerun the complete manifest with the matching package recipe before
+  `0011_runtime_heartbeat_retention.sql` and rerun the complete manifest with the matching package recipe before
   enabling the hosted host; keep worker host disabled during this reference workload and use only a manually bounded
   pass.
 

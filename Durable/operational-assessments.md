@@ -223,7 +223,11 @@ direct Durable SQL access from its dispatcher, but it does not narrow the paired
 
 ## Migration and role reconciliation
 
-The #794 rollout is migration-first and forward-only:
+The following is the historical #794 schema-10 rollout sequence. The role recipe matching the #794 release was paired with
+migration 0010; the current packaged recipe also references the heartbeat-pruning function introduced by migration
+0011. For current package deployments, apply all migrations through 0011 before running the matching package recipe.
+
+That historical #794 rollout was migration-first and forward-only:
 
 1. Drain/stop every durable worker and Schedule writer, disable external activators, and hold the reviewed maintenance
    window through migration 10. Its partial lease-expiry index uses transactional `CREATE INDEX`, so Schedule writes
@@ -240,15 +244,18 @@ The #794 rollout is migration-first and forward-only:
    explicit CLI apply command, taking schema 9 to schema 10. The embedded `.sql` resource is a checksum-bound migration
    fragment whose `SET LOCAL` relies on the package-generated transaction wrapper; do not pass the fragment directly
    to `psql`.
-5. Use the matching released PostgreSQL provider package's
-   `contentFiles/any/any/configure-postgresql-roles.sql` and the complete reviewed `role_pairs_json` manifest to
-   reconcile object ownership, `PUBLIC EXECUTE`, and every restricted role. The packaged-consumer verification checks
-   byte identity against the canonical repository recipe. Keep the exact package version and manifest file path/hash
-   with the release record.
+5. For the historical schema-10 rollout, use the [schema-10 single-pair role recipe](https://github.com/forge-trust/AppSurface/blob/e0618ac8/Durable/configure-postgresql-roles.sql)
+   from the matching source commit with its single-pair role arguments to reconcile object ownership,
+   `PUBLIC EXECUTE`, and the restricted dispatcher/runtime roles. That source snapshot's provider package did not include the
+   recipe in `contentFiles`; that recipe predates version-1 `role_pairs_json`, so do not pass it a current manifest.
+   Keep the exact source commit and role inputs with the release record.
 6. Run schema `status` and `preflight`, verify the active epoch and StoreId, then smoke-test the old supported reader.
 7. Deploy the #794 binary, exercise health and both pump interfaces, and re-enable activation.
 
-The role recipe remains required after the migration even when the function signature is unchanged. It must leave the
+For current package deployments, apply migration 0011 before running the matching released package's recipe with the
+complete reviewed version-1 `role_pairs_json` manifest. The #794 historical schema-10 reconciliation above is
+specific to that release and its single-pair recipe. The role recipe remains required after the applicable migration
+even when the function signature is unchanged. It must leave the
 migration owner as the owner of package objects/functions, revoke package-schema `PUBLIC` privileges, grant each
 runtime only its reviewed scoped runtime capabilities (including documented heartbeat rights), and keep every
 dispatcher/runtime pair plus the retention role as distinct restricted login leaves. Registration stays passive: it
@@ -294,7 +301,10 @@ forwarding workload. Keep Source activation closed until [#795](https://github.c
 replaces the single-runtime check with an exact restricted runtime-role set matching the manifest, policies, and
 function allowlists. Its release gate includes a real schema-10-to-11 upgrade and both-pair reproof.
 
-With `APPSURFACE_DURABLE_MIGRATION_CONNECTION` naming the migration-owner connection, the review/apply sequence is:
+For the historical #794 rollout, run this sequence from the
+[schema-10 source snapshot](https://github.com/forge-trust/AppSurface/tree/e0618ac8), with
+`APPSURFACE_DURABLE_MIGRATION_CONNECTION` naming the migration-owner connection. The current checkout's CLI applies
+through 0011 and does not produce this 9-to-10-only script.
 
 ```console
 $ dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
@@ -305,10 +315,11 @@ $ dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
 $ dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
     durable schema script --from-version 9 \
     --output /tmp/appsurface-durable-9-to-10.sql
-# Review the generated file; it must contain only migration 0010 for this upgrade.
+# Review the generated file; for the historical #794 upgrade it must contain only migration 0010.
 
-# If the schema-9 function is not already owned by appsurface_durable_owner, run the canonical role recipe here
-# before applying the migration. Healthy installations skip this repair-only invocation.
+# Historical #794 only: if the schema-9 function is not already owned by appsurface_durable_owner, run that
+# release's matching role recipe here before applying the migration. Never use the current recipe before 0011.
+# Healthy installations skip this repair-only invocation.
 
 $ dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
     durable schema apply \
@@ -318,9 +329,10 @@ $ dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
 
 $ psql --host <database-host> --dbname <database-name> --username appsurface_durable_owner \
     -v migration_owner_role=appsurface_durable_owner \
-    -v role_pairs_json="$(< reviewed-role-pairs.json)" \
+    -v dispatcher_role=appsurface_durable_dispatcher \
+    -v runtime_role=appsurface_durable_runtime \
     -v retention_operator_role=appsurface_durable_retention \
-    -f <released-provider-package>/contentFiles/any/any/configure-postgresql-roles.sql
+    -f Durable/configure-postgresql-roles.sql
 
 $ dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
     durable schema preflight \

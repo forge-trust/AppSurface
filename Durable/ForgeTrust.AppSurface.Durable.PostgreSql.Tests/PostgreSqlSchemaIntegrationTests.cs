@@ -1073,6 +1073,62 @@ public sealed class PostgreSqlSchemaIntegrationTests
             baseline.ExitCode == 0,
             $"The clean baseline role recipe failed. stdout: {baseline.Stdout} stderr: {baseline.Stderr}");
 
+        // A matching policy name outside the Durable schema must not hide the missing
+        // runtime policy from the relation-scoped reconciliation branch. The PUBLIC
+        // runtime policy baseline remains, so the bootstrap precheck still applies.
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "DROP POLICY runtime_heartbeat_runtime_role ON appsurface_durable.runtime_heartbeat; " +
+            "CREATE SCHEMA unrelated_policy_schema; " +
+            "CREATE TABLE unrelated_policy_schema.runtime_heartbeat (id integer); " +
+            "ALTER TABLE unrelated_policy_schema.runtime_heartbeat ENABLE ROW LEVEL SECURITY; " +
+            "CREATE POLICY runtime_heartbeat_runtime_role ON unrelated_policy_schema.runtime_heartbeat USING (true) WITH CHECK (true);");
+        var unrelatedPolicyName = await RunRoleRecipeAsync(
+            container,
+            containerRecipePath,
+            "durable_owner",
+            CreateRolePairsManifest(("durable_dispatcher", "durable_runtime", "full")));
+        Assert.True(
+            unrelatedPolicyName.ExitCode == 0,
+            $"The role recipe did not recreate the missing Durable runtime policy when an unrelated schema had the same policy name. " +
+            $"stdout: {unrelatedPolicyName.Stdout} stderr: {unrelatedPolicyName.Stderr}");
+        await using (var reconciledPolicy = dataSource.CreateCommand(
+            "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_policy policy " +
+            "JOIN pg_catalog.pg_class relation ON relation.oid = policy.polrelid " +
+            "JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace " +
+            "WHERE namespace.nspname = 'appsurface_durable' AND relation.relname = 'runtime_heartbeat' " +
+            "AND policy.polname = 'runtime_heartbeat_runtime_role');"))
+        {
+            Assert.True((bool)(await reconciledPolicy.ExecuteScalarAsync())!);
+        }
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "DROP SCHEMA unrelated_policy_schema CASCADE;");
+
+        var manifestedPrivilegeCases = new[]
+        {
+            (Setup: "GRANT TRUNCATE ON appsurface_durable.work TO durable_runtime;", Cleanup: "REVOKE TRUNCATE ON appsurface_durable.work FROM durable_runtime;", Expected: "Dispatcher, scoped runtime, or retention operator role has an effective durable-table privilege outside the package allowlist."),
+            (Setup: "GRANT CREATE ON SCHEMA appsurface_durable TO durable_runtime;", Cleanup: "REVOKE CREATE ON SCHEMA appsurface_durable FROM durable_runtime;", Expected: "Dispatcher, scoped runtime, and retention operator roles must not have schema CREATE or grant options."),
+            (Setup: "GRANT UPDATE (work_name) ON appsurface_durable.work TO durable_runtime;", Cleanup: "REVOKE UPDATE (work_name) ON appsurface_durable.work FROM durable_runtime;", Expected: "Dispatcher, scoped runtime, or retention operator role has an effective durable-column privilege outside the package allowlist."),
+            (Setup: "GRANT UPDATE ON SEQUENCE appsurface_durable.scope_history_event_id_seq TO durable_dispatcher;", Cleanup: "REVOKE UPDATE ON SEQUENCE appsurface_durable.scope_history_event_id_seq FROM durable_dispatcher;", Expected: "Dispatcher, scoped runtime, or retention operator role has an effective durable-sequence privilege outside the package allowlist."),
+            (Setup: "GRANT EXECUTE ON FUNCTION appsurface_durable.discover_work_dispatch(text[], text[], integer) TO durable_dispatcher WITH GRANT OPTION;", Cleanup: "REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION appsurface_durable.discover_work_dispatch(text[], text[], integer) FROM durable_dispatcher;", Expected: "Dispatcher, scoped runtime, or retention operator role has an effective durable-function privilege outside the package allowlist."),
+            (Setup: "GRANT USAGE ON SCHEMA appsurface_durable TO durable_runtime WITH GRANT OPTION;", Cleanup: "REVOKE GRANT OPTION FOR USAGE ON SCHEMA appsurface_durable FROM durable_runtime;", Expected: "Dispatcher, scoped runtime, and retention operator roles must not have schema CREATE or grant options."),
+        };
+        foreach (var item in manifestedPrivilegeCases)
+        {
+            await ExecuteNonQueryAsync(dataSource, item.Setup);
+            var hostileManifestedPrivilege = await RunRoleRecipeAsync(
+                container,
+                containerRecipePath,
+                "durable_owner",
+                CreateRolePairsManifest(("durable_dispatcher", "durable_runtime", "full")));
+            var output = $"{hostileManifestedPrivilege.Stdout}\n{hostileManifestedPrivilege.Stderr}";
+            Assert.NotEqual(0, hostileManifestedPrivilege.ExitCode);
+            Assert.Contains(item.Expected, output, StringComparison.Ordinal);
+            Assert.DoesNotContain("Rejected unmanifested Durable role principal(s)", output, StringComparison.Ordinal);
+            await ExecuteNonQueryAsync(dataSource, item.Cleanup);
+        }
+
         await ExecuteNonQueryAsync(dataSource, "ALTER TABLE appsurface_durable.work OWNER TO durable_runtime;");
         var runtimeOwnedRelationSnapshot = await ReadRoleRecipeCatalogSnapshotAsync(dataSource);
         var runtimeOwnedRelation = await RunRoleRecipeAsync(
@@ -1254,7 +1310,11 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         await ExecuteNonQueryAsync(
             dataSource,
-            "GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO unrelated_login;");
+            "ALTER TABLE appsurface_durable.runtime_heartbeat OWNER TO database_owner_runtime; " +
+            "DROP POLICY runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat; " +
+            "CREATE POLICY runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat " +
+            "FOR ALL TO database_owner_runtime USING (true) WITH CHECK (true); " +
+            "GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO direct_privilege_runtime;");
         var unrelatedRuntimeGrant = await RunRoleRecipeAsync(
             container,
             containerRecipePath,
@@ -1263,10 +1323,15 @@ public sealed class PostgreSqlSchemaIntegrationTests
         Assert.NotEqual(0, unrelatedRuntimeGrant.ExitCode);
         var unrelatedRuntimeGrantOutput = $"{unrelatedRuntimeGrant.Stdout}\n{unrelatedRuntimeGrant.Stderr}";
         Assert.Contains("Rejected unmanifested Durable role principal(s)", unrelatedRuntimeGrantOutput, StringComparison.Ordinal);
-        Assert.Contains("unrelated_login", unrelatedRuntimeGrantOutput, StringComparison.Ordinal);
+        Assert.Contains("Rejected unmanifested Durable role principal(s): direct_privilege_runtime", unrelatedRuntimeGrantOutput, StringComparison.Ordinal);
+        Assert.DoesNotContain("database_owner_runtime", unrelatedRuntimeGrantOutput, StringComparison.Ordinal);
         await ExecuteNonQueryAsync(
             dataSource,
-            "REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM unrelated_login;");
+            "REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM direct_privilege_runtime; " +
+            "ALTER TABLE appsurface_durable.runtime_heartbeat OWNER TO durable_owner; " +
+            "DROP POLICY runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat; " +
+            "CREATE POLICY runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat " +
+            "FOR ALL TO durable_owner USING (true) WITH CHECK (true);");
 
         await using var lockConnection = await dataSource.OpenConnectionAsync();
         await using var lockTransaction = await lockConnection.BeginTransactionAsync();

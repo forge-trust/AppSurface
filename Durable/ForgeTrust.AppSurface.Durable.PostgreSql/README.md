@@ -99,13 +99,14 @@ Structured events `4110` (health unavailable), `4111` (admission unavailable), `
 (failed-pass cleanup) contain only operation, phase, cause, code, and documentation anchor as applicable. They do not
 expose SQL, exception text, credentials, role names, payload identifiers, scope identifiers, or aggregate identifiers.
 
-### Migration 9 -> 10 and rollback
+### Historical #794 migration 9 -> 10 and rollback
 
 For the #794 provider release, drain and stop every durable worker and Schedule writer, keep pre-`0009` workers
 stopped, generate and review the exact script, and verify that the configured migration owner owns the schema-9
-`runtime_due_dispatch_health(integer)` function. Repair owner drift with the canonical role recipe before migration
-if needed. Then apply migration `0010_runtime_health_observation` from schema 9 to 10 with that owner through the
-generated script or explicit CLI apply command, rerun the role recipe
+`runtime_due_dispatch_health(integer)` function. Repair owner drift with the #794 release's matching role recipe
+before migration if needed; do not use a current package recipe before migration 0011. Then apply migration
+`0010_runtime_health_observation` from schema 9 to 10 with that owner through the generated script or explicit CLI
+apply command, rerun the #794 release's matching role recipe
 for post-migration reconciliation, run status and preflight, smoke-test `v0.2.0-preview.8`, and deploy the new binary.
 Registration never applies the migration.
 
@@ -199,8 +200,10 @@ credential to untrusted callers.
 Apply schema migrations before the normal post-migration role-recipe run. A migration can add package relations, but
 the recipe owns the reviewed grants for existing service roles; running it second is required before Flow runtime or
 dispatcher connections can use the new relations. Migration 0010 also verifies that its schema-9 function is already
-owned by the configured migration principal. If that preflight exposes historical owner drift, run the canonical
-recipe once as a repair before retrying migration 0010, then run it again after the migration for normal reconciliation.
+owned by the configured migration principal. If that preflight exposes historical owner drift, use the
+[schema-10 single-pair role recipe](https://github.com/forge-trust/AppSurface/blob/e0618ac8/Durable/configure-postgresql-roles.sql)
+once as a repair before retrying migration 0010, then run it again after the migration for normal reconciliation.
+The current packaged recipe requires migration 0011 first.
 
 ## Run a worker host
 
@@ -297,7 +300,7 @@ scope, aggregate, connection, or trace values. At shutdown, local admission clos
 persists drain; already-permitted Work follows its ordinary cancellation/recovery path rather than inventing a result.
 
 For a cold path, first drain and stop every pre-`0009` worker because the role recipe intentionally removes its raw
-`dispatch` access. Apply every pending forward-only migration through `0010_runtime_health_observation.sql` with the migration owner, then use the matching released provider package's
+`dispatch` access. Apply every pending forward-only migration through `0011_runtime_heartbeat_retention.sql` with the migration owner, then use the matching released provider package's
 `contentFiles/any/any/configure-postgresql-roles.sql` with the complete reviewed manifest. Verify the active epoch and StoreId, deploy with `AddWorkerHost()` disabled, then enable it. Never destructively roll
 back a migration. After the role recipe runs, a pre-`0009` worker is not a compatible application rollback target because its dispatcher
 credential no longer has raw `dispatch` access; keep that worker stopped and roll forward to a `0009`-compatible binary instead. Do not
