@@ -15,7 +15,7 @@ internal interface ICommandRunner
     /// <param name="request">Command request with process, timeout, and user-facing error context.</param>
     /// <param name="cancellationToken">Cancellation token used while waiting for command completion.</param>
     /// <returns>Captured process output.</returns>
-    /// <exception cref="PackageIndexException">Thrown when the process fails to start, times out, or exits unsuccessfully.</exception>
+    /// <exception cref="PackageIndexException">Thrown when the process fails to start, times out, or exits unsuccessfully. Nonzero-exit errors include stderr and, when requested, a bounded tail of stdout.</exception>
     Task<CommandRunResult> RunAsync(CommandRunRequest request, CancellationToken cancellationToken);
 }
 
@@ -31,6 +31,7 @@ internal interface ICommandRunner
 /// <param name="TimeoutDescription">Gerund phrase used in timeout messages, such as <c>packing</c>.</param>
 /// <param name="TimeoutMilliseconds">Timeout applied to the process wait.</param>
 /// <param name="Environment">Optional environment variable overrides.</param>
+/// <param name="IncludeStandardOutputOnFailure">Whether to include the final 16,384 characters of stdout in a nonzero-exit error. Use only for commands whose output is safe to log.</param>
 internal sealed record CommandRunRequest(
     string FileName,
     IReadOnlyList<string> Arguments,
@@ -40,7 +41,8 @@ internal sealed record CommandRunRequest(
     string FailureVerb,
     string TimeoutDescription,
     int TimeoutMilliseconds,
-    IReadOnlyDictionary<string, string?>? Environment = null);
+    IReadOnlyDictionary<string, string?>? Environment = null,
+    bool IncludeStandardOutputOnFailure = false);
 
 /// <summary>
 /// Captured stdout and stderr from a successful command.
@@ -54,6 +56,7 @@ internal sealed record CommandRunResult(string StandardOutput, string StandardEr
 /// </summary>
 internal sealed class ProcessCommandRunner : ICommandRunner
 {
+    private const int FailureOutputCharacterLimit = 16_384;
     private readonly Func<Process, bool> _startProcess;
 
     public ProcessCommandRunner()
@@ -158,6 +161,13 @@ internal sealed class ProcessCommandRunner : ICommandRunner
         if (process.ExitCode != 0)
         {
             var message = $"Failed to {request.FailureVerb} '{request.Subject}' with {request.OperationName}.";
+            if (request.IncludeStandardOutputOnFailure && !string.IsNullOrWhiteSpace(standardOutput))
+            {
+                var output = standardOutput.Length > FailureOutputCharacterLimit
+                    ? standardOutput[^FailureOutputCharacterLimit..]
+                    : standardOutput;
+                message = $"{message}{Environment.NewLine}Final stdout:{Environment.NewLine}{output.TrimEnd()}";
+            }
             if (!string.IsNullOrWhiteSpace(standardError))
             {
                 message = $"{message}{Environment.NewLine}{standardError.TrimEnd()}";

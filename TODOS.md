@@ -53,6 +53,24 @@
 - **What:** Add a synthetic multi-project or multi-target packaged-consumer graph to the semantic coverage proof. **Why:** The owned `Smoke.Tests` sentinel will catch exact-project collection and raw-to-merged loss, but not every graph-specific regression. **Pros:** Covers multiple application assemblies, fan-in shape, and framework-specific output paths. **Cons:** Extends the fixture and release runtime beyond the smallest #674 guard. **Context:** Land only after the canonical manifest-bound sentinel has run reliably; use a demonstrated regression or adopter graph to choose the shape. **Depends on / blocked by:** The #674 semantic proof and observed need.
 - **What:** Extract or formalize a shared runner/integration classifier only if evidence shows the CLI and diagnostic classification need the same contract. **Why:** A separate external classifier can drift from the VSTest-only CLI contract. **Pros:** One tested meaning for runner, direct coverlet package identity, and compatibility errors. **Cons:** Can expand coverage-engine scope or introduce a cross-project dependency without a real fault. **Context:** #674 keeps the external classifier diagnostic-only and does not change VSTest/MTP support. **Depends on / blocked by:** A current classified reproduction showing a CLI contract mismatch.
 
+## Release provenance follow-up (#798)
+
+### Portable verification and retention beyond Actions
+
+**What:** Evaluate signed portable release evidence and longer-lived storage only after an adopter requires verification outside the trusted Actions run.
+
+**Why:** The #798 proof ends at the validated pre-push input and depends on retained Actions artifacts; it does not authenticate outside observers or survive artifact expiry.
+
+**Pros:** Independent consumer verification and a longer operational audit window.
+
+**Cons:** New signing identity, storage lifecycle, authorization, and remote-package semantics.
+
+**Context:** Start from the [#798 implementation plan](docs/plans/issue-798-tailwind-artifact-provenance.md) and the existing producer/host/aggregate binding. Built-in GitHub attestations can carry provenance, but do not replace proving the restored payload used by each host.
+
+**Effort:** L human / M agent
+**Priority:** P3
+**Depends on:** #798 acceptance evidence and a demonstrated need beyond current retention/trust boundaries.
+
 ## Hang-diagnostics follow-ups (#815)
 
 - **What:** Design a Microsoft.Testing.Platform hang-diagnostics policy after AppSurface supports MTP coverage execution. **Why:** #815's no-dump blame switches and `Sequence.xml` are VSTest-specific; pretending they work for MTP would produce false diagnostics. **Pros:** Eventually gives MTP adopters the same owned, bounded operator evidence. **Cons:** Requires a separate runner, artifact and timeout contract with its own integration fixtures. **Context:** Keep the #815 collector and msbuild VSTest release explicit about this boundary. **Depends on / blocked by:** A supported MTP coverage path and at least one adopter reproduction.

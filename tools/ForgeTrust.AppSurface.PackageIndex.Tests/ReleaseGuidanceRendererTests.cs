@@ -2,7 +2,10 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 
 public sealed class ReleaseGuidanceRendererTests : IDisposable
 {
-    private readonly string _repositoryRoot = Path.Combine(Path.GetTempPath(), "ReleaseGuidanceRendererTests", Guid.NewGuid().ToString("N"));
+    private readonly string _repositoryRoot = TestPathUtils.PathUnder(
+        Path.GetFullPath(Path.GetTempPath()),
+        "ReleaseGuidanceRendererTests",
+        Guid.NewGuid().ToString("N"));
 
     public ReleaseGuidanceRendererTests()
     {
@@ -106,6 +109,76 @@ public sealed class ReleaseGuidanceRendererTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateUpdatesAsync_MigratesLegacySectionPastTildeFenceContent()
+    {
+        await WriteTemplateAsync();
+        await WriteFileAsync(
+            "Example/README.md",
+            "## Release Guidance\nold policy\n\n~~~markdown\n## Fake section\n___\n~~~\n\n## Usage\n\nKeep this authored guidance.\n");
+
+        var update = Assert.Single(await new ReleaseGuidanceRenderer().CreateUpdatesAsync(_repositoryRoot, [CreateEntry("default")]));
+
+        Assert.DoesNotContain("Fake section", update.ExpectedContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("___", update.ExpectedContent, StringComparison.Ordinal);
+        Assert.Contains("## Usage\n\nKeep this authored guidance.", update.ExpectedContent, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("---")]
+    [InlineData("***")]
+    [InlineData("___")]
+    public async Task CreateUpdatesAsync_PreservesMarkdownDividerAfterLegacySection(string divider)
+    {
+        await WriteTemplateAsync();
+        await WriteFileAsync(
+            "Example/README.md",
+            $"## Release Guidance\nold policy\n\n{divider}\n\n## Usage\n\nAuthored content.\n");
+
+        var update = Assert.Single(await new ReleaseGuidanceRenderer().CreateUpdatesAsync(_repositoryRoot, [CreateEntry("default")]));
+
+        Assert.DoesNotContain("old policy", update.ExpectedContent, StringComparison.Ordinal);
+        Assert.Contains($"{ReleaseGuidanceRenderer.EndMarker}\n{divider}\n\n## Usage", update.ExpectedContent, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CreateUpdatesAsync_MigratesLegacySectionThroughEndOfFileWithoutTrailingNewline()
+    {
+        await WriteTemplateAsync();
+        await WriteFileAsync("Example/README.md", "## Release Guidance\nold policy without final newline");
+
+        var update = Assert.Single(await new ReleaseGuidanceRenderer().CreateUpdatesAsync(_repositoryRoot, [CreateEntry("default")]));
+
+        Assert.DoesNotContain("old policy", update.ExpectedContent, StringComparison.Ordinal);
+        Assert.EndsWith(ReleaseGuidanceRenderer.EndMarker + "\n", update.ExpectedContent, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CreateUpdatesAsync_MigratesHeadingAtEndOfFileWithoutTrailingNewline()
+    {
+        await WriteTemplateAsync();
+        await WriteFileAsync("Example/README.md", "## Release Guidance");
+
+        var update = Assert.Single(await new ReleaseGuidanceRenderer().CreateUpdatesAsync(_repositoryRoot, [CreateEntry("default")]));
+
+        Assert.Contains(ReleaseGuidanceRenderer.BeginMarker, update.ExpectedContent, StringComparison.Ordinal);
+        Assert.Contains(ReleaseGuidanceRenderer.EndMarker, update.ExpectedContent, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CreateUpdatesAsync_RejectsAmbiguousLegacyHeadingMigration()
+    {
+        await WriteTemplateAsync();
+        await WriteFileAsync(
+            "Example/README.md",
+            "## Release Guidance\nold policy\n\n## Usage\n\n## Release Guidance\nother policy\n");
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(
+            () => new ReleaseGuidanceRenderer().CreateUpdatesAsync(_repositoryRoot, [CreateEntry("default")]));
+
+        Assert.Contains("has 2 '## Release Guidance' headings", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CreateUpdatesAsync_PreservesCrLfForManagedRegion()
     {
         await WriteTemplateAsync();
@@ -139,6 +212,59 @@ public sealed class ReleaseGuidanceRendererTests : IDisposable
 
         Assert.Contains("release_guidance_variant", error.Message, StringComparison.Ordinal);
         Assert.Contains("Docs: tools/ForgeTrust.AppSurface.PackageIndex/README.md#release-guidance", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CreateUpdatesAsync_RejectsVariantOnUnmanagedReadme()
+    {
+        await WriteFileAsync("Example/README.md", "# Example\n\nAuthored documentation.\n");
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(
+            () => new ReleaseGuidanceRenderer().CreateUpdatesAsync(_repositoryRoot, [CreateEntry("default")]));
+
+        Assert.Contains("has no", error.Message, StringComparison.Ordinal);
+        Assert.Contains("generated policy without a managed target", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CreateUpdatesAsync_SkipsUnmanagedReadmeWithoutVariantOrTemplate()
+    {
+        await WriteFileAsync("Example/README.md", "# Example\n\nAuthored documentation.\n");
+
+        var updates = await new ReleaseGuidanceRenderer().CreateUpdatesAsync(_repositoryRoot, [CreateEntry(null)]);
+
+        Assert.Empty(updates);
+    }
+
+    [Fact]
+    public async Task CreateUpdatesAsync_ReportsMissingCanonicalTemplate()
+    {
+        await WriteFileAsync("Example/README.md", $"{ReleaseGuidanceRenderer.BeginMarker}\nold\n{ReleaseGuidanceRenderer.EndMarker}\n");
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(
+            () => new ReleaseGuidanceRenderer().CreateUpdatesAsync(_repositoryRoot, [CreateEntry("default")]));
+
+        Assert.Contains("template", error.Message, StringComparison.Ordinal);
+        Assert.Contains("does not exist", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CreateUpdatesAsync_RejectsTemplateVariantWithNoPolicyBody()
+    {
+        await WriteTemplateAsync();
+        var templatePath = TestPathUtils.PathUnder(_repositoryRoot, ReleaseGuidanceRenderer.TemplateRelativePath);
+        var template = await File.ReadAllTextAsync(templatePath);
+        var start = "<!-- appsurface-release-guidance-template: default begin -->";
+        var end = "<!-- appsurface-release-guidance-template: default end -->";
+        var beginIndex = template.IndexOf(start, StringComparison.Ordinal);
+        var endIndex = template.IndexOf(end, beginIndex, StringComparison.Ordinal);
+        await File.WriteAllTextAsync(templatePath, template[..(beginIndex + start.Length)] + "\n\n" + template[endIndex..]);
+        await WriteFileAsync("Example/README.md", $"{ReleaseGuidanceRenderer.BeginMarker}\nold\n{ReleaseGuidanceRenderer.EndMarker}\n");
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(
+            () => new ReleaseGuidanceRenderer().CreateUpdatesAsync(_repositoryRoot, [CreateEntry("default")]));
+
+        Assert.Contains("variant 'default' is empty", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -331,6 +457,104 @@ public sealed class ReleaseGuidanceRendererTests : IDisposable
     }
 
     [Fact]
+    public async Task ApplyUpdatesAsync_RejectsTargetThatBecomesSymbolicLinkAfterRendering()
+    {
+        await WriteTemplateAsync();
+        const string originalContent = "<!-- appsurface-release-guidance: begin -->\nold\n<!-- appsurface-release-guidance: end -->\n";
+        await WriteFileAsync("Example/README.md", originalContent);
+        var renderer = new ReleaseGuidanceRenderer();
+        var update = Assert.Single(await renderer.CreateUpdatesAsync(_repositoryRoot, [CreateEntry("default")]));
+        var externalDirectory = TestPathUtils.PathUnder(
+            Path.GetFullPath(Path.GetTempPath()),
+            "ReleaseGuidanceRendererOutside",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(externalDirectory);
+        var externalReadme = TestPathUtils.PathUnder(externalDirectory, "README.md");
+        const string externalContent = "External file must remain unchanged.\n";
+        await File.WriteAllTextAsync(externalReadme, externalContent);
+        try
+        {
+            File.Delete(update.FullPath);
+            if (!TryCreateFileSymlink(update.FullPath, externalReadme))
+            {
+                return;
+            }
+
+            var error = await Assert.ThrowsAsync<PackageIndexException>(() => renderer.ApplyUpdatesAsync([update]));
+
+            Assert.Contains("no longer a writable tracked non-symlink path", error.Message, StringComparison.Ordinal);
+            Assert.Equal(externalContent, await File.ReadAllTextAsync(externalReadme));
+        }
+        finally
+        {
+            File.Delete(update.FullPath);
+            if (Directory.Exists(externalDirectory))
+            {
+                Directory.Delete(externalDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ApplyUpdatesAsync_RejectsChangedTargetWithoutParentDirectory()
+    {
+        var update = new ReleaseGuidanceUpdate(
+            RepositoryRoot: null,
+            FullPath: "README.md",
+            DisplayPath: "README.md",
+            CurrentContent: "before",
+            ExpectedContent: "after",
+            Variant: "default",
+            TargetExisted: false);
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => new ReleaseGuidanceRenderer().ApplyUpdatesAsync([update]));
+
+        Assert.Contains("has no parent directory", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ApplyUpdatesAsync_RejectsTargetDeletedAfterSnapshot()
+    {
+        var target = TestPathUtils.PathUnder(_repositoryRoot, "Example", "README.md");
+        var update = new ReleaseGuidanceUpdate(
+            RepositoryRoot: null,
+            FullPath: target,
+            DisplayPath: "Example/README.md",
+            CurrentContent: "before",
+            ExpectedContent: "after",
+            Variant: "default",
+            TargetExisted: true);
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(
+            () => new ReleaseGuidanceRenderer().ApplyUpdatesAsync([update]));
+
+        Assert.Contains("disappeared after staging", error.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(target));
+    }
+
+    [Fact]
+    public async Task ApplyUpdatesAsync_RejectsTargetCreatedAfterSnapshot()
+    {
+        var target = TestPathUtils.PathUnder(_repositoryRoot, "Example", "README.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        await File.WriteAllTextAsync(target, "concurrent content");
+        var update = new ReleaseGuidanceUpdate(
+            RepositoryRoot: null,
+            FullPath: target,
+            DisplayPath: "Example/README.md",
+            CurrentContent: string.Empty,
+            ExpectedContent: "after",
+            Variant: "default",
+            TargetExisted: false);
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(
+            () => new ReleaseGuidanceRenderer().ApplyUpdatesAsync([update]));
+
+        Assert.Contains("appeared after generation started", error.Message, StringComparison.Ordinal);
+        Assert.Equal("concurrent content", await File.ReadAllTextAsync(target));
+    }
+
+    [Fact]
     public async Task ApplyUpdatesAsync_RollsBackGeneratedDocumentWhenManagedReadmeChangedAfterRendering()
     {
         await WriteTemplateAsync();
@@ -431,6 +655,27 @@ public sealed class ReleaseGuidanceRendererTests : IDisposable
         try
         {
             Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryCreateFileSymlink(string linkPath, string targetPath)
+    {
+        try
+        {
+            File.CreateSymbolicLink(linkPath, targetPath);
             return true;
         }
         catch (IOException)
