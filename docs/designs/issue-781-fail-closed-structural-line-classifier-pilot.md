@@ -115,7 +115,7 @@ Reason codes are intentionally more stable than message text. Messages may impro
 | A diff touching a token-bearing property header, accessor, or same-line closing brace | Accepted | The line overlaps both the property's `Span` and a non-brace descendant token; a same-line closing brace is accepted only when it shares a line with an eligible token such as `set;`. |
 | A diff touching only leading/trailing trivia, a documentation comment, blank line, or standalone closing brace | Rejected as `location-unmatched` | Trivia and non-declaration lines cannot borrow nearby property semantics. |
 | An eligible property sharing its changed line with another member or containing-type tokens | Rejected as `location-unmatched` | A mixed line cannot borrow the property's structural classification for executable code. |
-| Skoolit-style context with a locally declared `DbSet<T>` fixture | Accepted only because of the language shape | The original accessor scenario is reproduced without an ORM-specific rule. |
+| Context with a locally declared `DbSet<T>` auto-property | Accepted only because of the language shape | Proves generic type syntax without an ORM-specific rule; it does not reproduce the original expression-bodied accessor. |
 | Getter/setter body, expression body, invocation, assignment, or throwing accessor | Rejected | Executable behavior is never called structural. |
 | Get-only auto-property, property initializer, indexer, record positional property, interface property, C# partial property, `required`, static, virtual, abstract, override, explicit-interface member, or attributes | Rejected | Nearby-looking modern C# constructs cannot widen v0 accidentally. |
 | Accessor accessibility modifier such as `private set;` or `protected init;` | Rejected as `accessor-modifiers` | v0 accepts only unmodified declaration-only accessors. |
@@ -127,6 +127,8 @@ Reason codes are intentionally more stable than message text. Messages may impro
 | One-based line `0`, a line past EOF, or a line that overlaps two candidate declarations | Rejected as `location-unmatched` or `location-ambiguous` | Invalid and ambiguous coordinate conversion has no fallback guess. |
 | Invalid source or error symbol | Rejected | Binding failures fail closed. |
 | Exception injected by an internal test seam | Rejected as `analysis-fault` | The sidecar never destabilizes the gate. |
+
+**Post-pilot correction (2026-09-26):** The `DbSet<T> { get; set; }` fixture above reproduces only the generic property type, not the accessor syntax in the [original Skoolit PR #548](https://github.com/forge-trust/skoolit/pull/548/files). That PR added expression-bodied `DbSet<TEntity> => Set<TEntity>()` properties, which v0 rejects. The [results note](issue-781-structural-line-classifier-results.md#real-source-follow-up-2026-09-26) records the exact-source replay and decision; this historical design row must not be read as proof that v0 addresses the incident.
 
 ## Anti-Gaming Proofs
 

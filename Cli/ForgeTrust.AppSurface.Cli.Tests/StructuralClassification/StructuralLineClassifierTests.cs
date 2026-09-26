@@ -514,7 +514,7 @@ public sealed class StructuralLineClassifierTests
     }
 
     [Fact]
-    public void Classify_AcceptsSkoolitStyleGenericAccessorByLanguageShapeOnly()
+    public void Classify_AcceptsAutoPropertyWithGenericDbSetTypeByLanguageShapeOnly()
     {
         const string source = """
             namespace Fixture;
@@ -534,6 +534,48 @@ public sealed class StructuralLineClassifierTests
 
         Assert.Equal(StructuralLineDisposition.Accepted, entry.Disposition);
         Assert.Equal("structural-auto-property", entry.ReasonCode);
+    }
+
+    [Fact]
+    public void Classify_RejectsTheOriginalSkoolitExpressionBodiedAccessors()
+    {
+        // These three declarations reproduce the property source lines added by
+        // forge-trust/skoolit#548 at 3802397c. The surrounding types are test stubs,
+        // and the measured patch evidence below is synthetic, not the original report.
+        const string source = """
+            namespace Fixture;
+
+            public sealed class DbSet<T> where T : class { }
+            public sealed class DigestEmailEnvelopeEntity { }
+            public sealed class DigestEmailEnvelopeItemEntity { }
+            public sealed class DigestEmailAttemptPayloadEntity { }
+
+            public sealed class Context
+            {
+                private static DbSet<T> Set<T>() where T : class => new();
+
+                public DbSet<DigestEmailEnvelopeEntity> DigestEmailEnvelopes => Set<DigestEmailEnvelopeEntity>();
+                public DbSet<DigestEmailEnvelopeItemEntity> DigestEmailEnvelopeItems => Set<DigestEmailEnvelopeItemEntity>();
+                public DbSet<DigestEmailAttemptPayloadEntity> DigestEmailAttemptPayloads => Set<DigestEmailAttemptPayloadEntity>();
+            }
+            """;
+        var context = CreateContext(source);
+        var declarations = new[]
+        {
+            "DigestEmailEnvelopes =>",
+            "DigestEmailEnvelopeItems =>",
+            "DigestEmailAttemptPayloads =>",
+        };
+
+        foreach (var declaration in declarations)
+        {
+            var entry = ClassifySingle(context, LineOf(source, declaration));
+
+            Assert.Equal(StructuralLineDisposition.Rejected, entry.Disposition);
+            Assert.Equal("accessor-expression-body", entry.ReasonCode);
+            Assert.True(entry.IsMeasured);
+            Assert.False(entry.LineCovered);
+        }
     }
 
     [Fact]

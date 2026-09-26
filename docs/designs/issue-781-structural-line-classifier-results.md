@@ -1,6 +1,6 @@
 # #781 Structural Line Classifier Pilot Results
 
-Status: Complete as a test-only v0 pilot. No production coverage-policy change is proposed.
+Status: Complete as a test-only v0 pilot. A real-source follow-up found that the motivating Skoolit accessors are outside v0. No production coverage-policy change is proposed.
 
 This note records the outcome of the approved [#781 structural line classifier plan](issue-781-fail-closed-structural-line-classifier-pilot.md). The implementation is deliberately isolated to the CLI test project, where it can assess immutable `PatchCoverageAnalysis` evidence without changing coverage calculations, pass/fail decisions, report formats, CLI arguments, or artifact-writing behavior.
 
@@ -29,7 +29,7 @@ Run the focused pilot tests with:
 dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --no-restore --configuration Release --filter FullyQualifiedName~StructuralLineClassifierTests --logger "console;verbosity=detailed"
 ```
 
-The expanded focused run passed all 43 tests. It used the following environment:
+The original focused run passed 43 tests. On 2026-09-26, the pinned-source regression passed with the full 44-test focused suite using `--configuration Release`, `--artifacts-path /private/tmp/issue781-real-evidence-artifacts`, and `-p:NuGetAudit=false` on .NET SDK 10.0.102. The original benchmark used the following environment:
 
 | Component | Value |
 | --- | --- |
@@ -55,6 +55,14 @@ The warmed measurement window uses `GC.GetAllocatedBytesForCurrentThread` immedi
 
 ## Decision
 
-**Collect more evidence; do not introduce a production policy.** The pilot establishes that a narrow, auditable, fail-closed classification can be evaluated beside current coverage evidence without mutating it. It does not establish that this structural category is equivalent to compiler-generated execution behavior across real builds.
+**Do not introduce a production policy or promote v0 as the solution to the motivating incident.** The pilot establishes that a narrow, auditable, fail-closed classification can be evaluated beside current coverage evidence without mutating it. It does not establish that this structural category is equivalent to compiler-generated execution behavior across real builds.
 
-Before proposing any non-test integration, gather a multi-repository corpus and compare each candidate against a coverage-native, PDB, or IL-grounded comparator. The proposal must quantify false positives and false negatives, identify generated and mixed-source edge cases, define artifact and CLI compatibility requirements, and receive a separate decision. Until then, changed structural lines continue to participate in the existing coverage gate exactly as they do today.
+### Real-source follow-up (2026-09-26)
+
+The immutable [Skoolit PR #548 diff](https://github.com/forge-trust/skoolit/pull/548/files), at head commit `3802397c1742a3a3724cd4a0a205948999010fbe`, adds three `SkoolitDbContext` properties of the form `DbSet<TEntity> Name => Set<TEntity>()`. These are expression-bodied method calls, not auto-properties. The earlier positive `DbSet<T> { get; set; }` fixture tested the generic type but **did not reproduce the original accessor syntax**. The new pinned-source regression replays the three declaration lines with locally declared types and synthetic measured patch-line evidence: all three reject as `accessor-expression-body`, leaving their raw measured/uncovered state intact. Its surrounding compilation and Cobertura values are fixtures, not Skoolit's original build or report.
+
+The original Cobertura fragment was not retained among the accessible artifacts for the cited PR's [successful CI run](https://github.com/forge-trust/skoolit/actions/runs/32225391324). The historical [EvidenceHost design](appsurface-evidencehost-contract-first.md) reports 94.34% patch-line and 100% patch-branch coverage for that incident, but this follow-up cannot independently reconstruct its three line records or attribute that result to a particular compiler sequence point. In the motivating source sample, v0 applies to **0 of 3** accessor lines. That is an applicability result, not a measured false-negative rate for the deliberately narrower auto-property policy.
+
+As an independent compiled-code spot check, the same Release test build of this AppSurface checkout (`70607130`) produced a portable PDB for `ForgeTrust.AppSurface.Flow`. A temporary .NET 10 probe used `System.Reflection.Metadata` and `PEReader` to match `FlowOutcomeAttribute` and `FlowExecutionContext<TContext>` method definitions to their IL bodies and non-hidden portable-PDB sequence points. The PDB maps both accessors of [`FlowOutcomeAttribute.CallsiteId`](../../Flow/ForgeTrust.AppSurface.Flow/FlowAuthoringAttributes.cs) to source line 176 and both accessors of [`FlowExecutionContext<TContext>.ActivityResult`](../../Flow/ForgeTrust.AppSurface.Flow/FlowExecutionContext.cs) to source line 33. Their getters contain `ldarg.0; ldfld; ret`, and setters contain `ldarg.0; ldarg.1; stfld; ret`. This confirms that two real AppSurface auto-properties compile to backing-field accessors and retain source sequence points. It does **not** prove that either property is behaviorally unimportant: one is a stable activity callsite identifier and the other carries a flow activity result. The spot check did not run the classifier with the projects' full compiler contexts or join a same-build Cobertura report; the probe was not added to the repository because this result does not justify a maintained comparator yet.
+
+The bounded comparison therefore has no defensible cross-repository false-positive/false-negative rate or end-to-end latency delta. The decisive result is more basic: the exact motivating source form is excluded by design, while even compiled-trivial in-scope properties can carry domain meaning. Extending v0 to expression-bodied `Set<T>()` calls or changing coverage arithmetic would be a new policy decision, not a pilot follow-up. Keep the existing gate unchanged and park this implementation unless a separately scoped proposal supplies matching-build coverage/PDB/IL evidence, representative repositories, quantified errors and cost, and artifact/CLI compatibility requirements.
