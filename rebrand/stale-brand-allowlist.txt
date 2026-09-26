@@ -6,3 +6,4 @@
 # Keep this file checked in even when it has no entries. Package gate uses its
 # presence to prove that any future stale-name exception is explicit, dated, and
 # reviewed.
+docs/designs/issue-807-file-declared-secret-references.md|Runnable|2027-09-16|Historical review artifact path retained as provenance; the referenced file exists outside the repository.

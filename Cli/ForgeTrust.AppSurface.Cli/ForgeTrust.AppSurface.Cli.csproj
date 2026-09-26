@@ -36,6 +36,7 @@
     <Compile Remove="CoverageRunDrivers.cs" />
     <Compile Remove="CoverageRunWatchdog.cs" />
     <Compile Remove="CoverageRunArtifactReader.cs" />
+    <Compile Remove="CoverageRunHangDiagnosticsReader.cs" />
     <Compile Remove="CoverageRunOutputLease.cs" />
     <Compile Remove="CoverageProjectManifest.cs" />
     <Compile Remove="CoverageRunSlowTestDiagnostics.cs" />

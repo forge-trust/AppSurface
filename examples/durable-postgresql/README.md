@@ -1,5 +1,7 @@
 # Durable PostgreSQL local tutorial
 
+The [schema-11 heartbeat retention guide](../../Durable/heartbeat-retention-operations.md) explains the feature's default settings and production rollout. The one-command proof below also verifies a single bounded stale-row cleanup, current-row survival, and healthy Work execution.
+
 This public-preview tutorial proves the current [`ForgeTrust.AppSurface.Durable.PostgreSql`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) adoption path on a disposable PostgreSQL 16+ database. Read the [operational-assessment adoption guide](../../Durable/operational-assessments.md) first for the existing-host recipe, health predicate meanings, exhaustive admission switch, diagnostics, migration `9 -> 10`, role reconciliation, and rollback boundary. This example is a local composition reference, not production operations guidance. Application startup never applies DDL.
 
 The [AppSurface CLI](../../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands) owns migration status, reviewed scripts, preflight, and guarded apply. This example owns only two local-proof commands:
@@ -15,6 +17,9 @@ Application startup never applies DDL. Generate, review, and apply migrations th
   completes a hosted pass, verifies the durable catalog and migration metadata are unchanged, then stops it without
   doing DDL.
 
+The heartbeat proof seed can be retried after a partial run. A completed `verify-local` uses fixed Work and Flow
+command IDs, so recreate the disposable local proof database before running the full proof again.
+
 ## One-command local proof
 
 From the repository root:
@@ -25,7 +30,7 @@ bash examples/durable-postgresql/run-local-proof.sh
 
 The script checks .NET 10 and Docker, asks Docker to atomically allocate a free loopback port, starts the pinned
 PostgreSQL 16.5 image with local container-only trust authentication, creates the four restricted roles, builds with
-one MSBuild node and shared compilation disabled, explicitly applies schema 10, reruns the canonical role recipe, and
+one MSBuild node and shared compilation disabled, explicitly applies schema 11, reruns the canonical role recipe, and
 runs both example commands. It waits for the final server's TCP listener before creating roles; the image's temporary
 initialization server accepts Unix-socket connections and then shuts down. Set `APPSURFACE_DURABLE_LOCAL_PORT` only
 when you need a specific reviewed port; the preflight fails closed if it is occupied. The whole proof defaults to a
@@ -97,18 +102,23 @@ docker run --rm --name appsurface-durable-postgres \
   -p "127.0.0.1:${APPSURFACE_DURABLE_LOCAL_PORT}:5432" postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877
 ```
 
-In Terminal 2, wait at most 30 seconds before any migration operation:
+In Terminal 2, wait at most 30 seconds for the final server before any migration operation. The image entrypoint
+uses a temporary socket-only server while it creates `POSTGRES_DB`, so a socket query can pass before that server
+has shut down. Require a successful TCP query against the target database. This manual container uses local
+`trust` authentication, as configured above:
 
 ```console
 for attempt in $(seq 1 30); do
-  docker exec appsurface-durable-postgres pg_isready -h 127.0.0.1 -U postgres -d appsurface_durable_example && break
+  docker exec appsurface-durable-postgres \
+    psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d appsurface_durable_example -c 'SELECT 1;' && break
   sleep 1
 done
-docker exec appsurface-durable-postgres pg_isready -h 127.0.0.1 -U postgres -d appsurface_durable_example || exit 1
+docker exec appsurface-durable-postgres \
+  psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d appsurface_durable_example -c 'SELECT 1;' || exit 1
 ```
 
 The TCP probe waits through the image's socket-only initialization server and its shutdown before admitting the
-final server.
+final server. It also verifies that the target database accepts a query before the script creates roles.
 
 Create the local-only roles with the disposable container's bootstrap administrator. This disposable container binds
 only to loopback and uses Docker's local `trust` bootstrap mode, so it has no bootstrap password. The password setup
@@ -177,7 +187,7 @@ the temporary passfile, never a password; `--connection-env` names a variable an
 export APPSURFACE_DURABLE_MIGRATION_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE_DURABLE_LOCAL_PORT;Database=appsurface_durable_example;Username=appsurface_durable_owner;Passfile=$APPSURFACE_DURABLE_PASSFILE"
   dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
   durable schema apply --connection-env APPSURFACE_DURABLE_MIGRATION_CONNECTION --apply
-# Expected: Durable schema: 0 -> 10; applied: 0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0010.
+# Expected: Durable schema: 0 -> 11; applied: 0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0010, 0011.
 ```
 
 Apply the reviewed role recipe after migrations with the disposable container's bootstrap administrator, then configure
@@ -195,6 +205,9 @@ docker exec -i appsurface-durable-postgres \
 export APPSURFACE_DURABLE_DISPATCHER_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE_DURABLE_LOCAL_PORT;Database=appsurface_durable_example;Username=appsurface_durable_dispatcher;Passfile=$APPSURFACE_DURABLE_PASSFILE"
 export APPSURFACE_DURABLE_RUNTIME_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE_DURABLE_LOCAL_PORT;Database=appsurface_durable_example;Username=appsurface_durable_runtime;Passfile=$APPSURFACE_DURABLE_PASSFILE"
 export APPSURFACE_DURABLE_RUNTIME_EPOCH='<stable UUID supplied by deployment>'
+dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
+  durable schema preflight --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION
+# Expected: the schema-11 structural and runtime-role checks pass before activation.
 ```
 
 The development-only bootstrap initializes the active epoch exactly once. It requires `DOTNET_ENVIRONMENT=Development`, `APPSURFACE_DURABLE_LOCAL_PROOF=1`, a `localhost`, `127.0.0.1`, or `::1` target, and the `appsurface_durable_owner` role before it opens the durable schema. It rejects invalid UUID values, inactive schema, and an already active epoch. For proof parity with production defaults, prefer the same 16+ migration floor when choosing local dependencies.
@@ -205,13 +218,14 @@ DOTNET_ENVIRONMENT=Development APPSURFACE_DURABLE_LOCAL_PROOF=1 \
 # Expected: [schema-bootstrap-dev] active epoch initialized
 ```
 
-Finally, run the bounded proof. It requires the same Development and explicit local-proof confirmation, loopback targets, and the `appsurface_durable_dispatcher` and `appsurface_durable_runtime` roles before it accepts one local Work, Flow, and Work-targeted Schedule; persists W3C Flow trace context; processes one all-surfaces bounded pass; checks health; drains and resumes; then starts and stops `AddWorkerHost()` after one hosted pass while asserting the durable catalog and migration metadata are unchanged:
+Finally, run the bounded proof. It requires the same Development and explicit local-proof confirmation, loopback targets, and the `appsurface_durable_dispatcher` and `appsurface_durable_runtime` roles. It seeds 501 stale and one recent heartbeat identities, then accepts one local Work, Flow, and Work-targeted Schedule; persists W3C Flow trace context; processes one all-surfaces bounded pass; proves a single 500-row maintenance batch leaves one stale, one recent, and the current worker row; checks health; drains and resumes; then starts and stops `AddWorkerHost()` after one hosted pass while asserting the durable catalog and migration metadata are unchanged:
 
 ```console
 DOTNET_ENVIRONMENT=Development APPSURFACE_DURABLE_LOCAL_PROOF=1 \
   dotnet run --project examples/durable-postgresql -- verify-local
 # Expected named checkpoints include: Work accepted; Flow accepted with W3C trace context;
-# Schedule accepted; admission-aware pass: Completed; runtime assessment; health and drain checkpoints completed.
+# Schedule accepted; admission-aware pass: Completed; heartbeat maintenance removed one bounded batch;
+# runtime assessment; health and drain checkpoints completed.
 ```
 
 The output includes the authoritative PostgreSQL attempt. A `Completed` empty result is distinct from `Refused`,

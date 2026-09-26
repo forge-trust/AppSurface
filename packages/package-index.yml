@@ -34,8 +34,8 @@ packages:
     commercial_status: commercial_ready
     release_track: coordinated
     order: 20
-    use_when: Add this when your AppSurface modules need strongly typed configuration primitives, source-aware audit reports, or sanitized config-diff support instead of ad hoc configuration lookups.
-    includes: AppSurfaceConfigModule, typed config objects, configuration providers, source-aware audit reports, sanitized audit diff helpers, and explicit configuration access patterns.
+    use_when: Add this when your AppSurface modules need strongly typed configuration, [file declared scalar secret references](../Config/ForgeTrust.AppSurface.Config/docs/file-secret-references.md), source-aware audit reports, or sanitized config-diff support.
+    includes: AppSurfaceConfigModule, typed config objects, Secret<T> scalar destinations with atomic file descriptors and exact environment rescue, bounded provider resolution, source-aware audit reports, sanitized audit diff helpers, and explicit configuration access patterns.
     does_not_include: Web hosting, UI docs, caching, LocalSecrets local machine posture, or a remote/team vault system.
     start_here_path: Config/ForgeTrust.AppSurface.Config/README.md
     expected_dependency_package_ids:
@@ -85,11 +85,11 @@ packages:
     commercial_status: commercial_ready
     release_track: coordinated
     order: 26
-    use_when: Add this after Config when an AppSurface app running on Google Cloud should resolve explicitly mapped configuration secrets from Google Secret Manager while keeping environment variables as the emergency override.
-    includes: AppSurfaceGoogleSecretManagerModule, explicit logical-key to Secret Manager mappings, optional scoped convention resolver, fail-closed terminal diagnostics for claimed keys, Google client and transfer test seams, source-aware config audit integration, UTF-8 text conversion through AppSurface Config, and CLI-assisted declared LocalSecrets or Google transfer to existing Google secrets or a named local test namespace.
+    use_when: Add this after Config when an AppSurface app running on Google Cloud should resolve explicitly mapped configuration secrets or [file-declared `Secret<T>` references](../Config/ForgeTrust.AppSurface.Config/docs/file-secret-references.md) from Google Secret Manager while keeping environment variables as the emergency override.
+    includes: AppSurfaceGoogleSecretManagerModule, explicit logical-key to Secret Manager mappings, [file-declared `Secret<T>` references](../Config/ForgeTrust.AppSurface.Config/docs/file-secret-references.md), optional scoped convention resolver, fail-closed terminal diagnostics for claimed keys, Google client and transfer test seams, source-aware config audit integration, UTF-8 text conversion through AppSurface Config, and CLI-assisted declared LocalSecrets or Google transfer to existing Google secrets or a named local test namespace.
     does_not_include: Secret creation, deletion, disable/destroy operations, rotation, IAM provisioning, Terraform or gcloud workflows, generic multi-cloud vault abstraction, background refresh, or runtime credential minting.
     start_here_path: Config/ForgeTrust.AppSurface.Config.GoogleSecretManager/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Config.GoogleSecretManager` after Config when production-like Google Cloud hosts should read mapped AppSurface config secrets from Secret Manager with fail-closed diagnostics.
+    recipe_summary: Add `ForgeTrust.AppSurface.Config.GoogleSecretManager` after Config when production-like Google Cloud hosts should read mapped secrets or [file declared scalar references](../Config/ForgeTrust.AppSurface.Config/docs/file-secret-references.md) from Secret Manager with fail-closed diagnostics.
     depends_on:
       - ForgeTrust.AppSurface.Config
     expected_dependency_package_ids:
@@ -386,6 +386,26 @@ packages:
     start_here_path: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md
     recipe_summary: >-
       Add the PostgreSQL provider when one database must atomically own Work, explicit one-transition Flow state, [Work-first Schedule storage](../Durable/schedule-protocol-v1.md), [versioned W3C causal evidence](../Durable/flow-trace-context-v1.md), and verified per-Flow retention. Start with the [local PostgreSQL tutorial](../examples/durable-postgresql/README.md): generate a reviewed script and preflight with `appsurface durable schema`, apply only with an explicit migration-owner environment variable, then use the [verified retention guidance](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#verified-flow-retention) and explicit [`AddWorkerHost()` path](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host) when those capabilities are required.
+    depends_on:
+      - ForgeTrust.AppSurface.Durable
+      - ForgeTrust.AppSurface.Durable.Provider
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Durable
+      - ForgeTrust.AppSurface.Durable.Provider
+  - project: Durable/ForgeTrust.AppSurface.Durable.Testing/ForgeTrust.AppSurface.Durable.Testing.csproj
+    release_guidance_variant: default
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_track: coordinated
+    order: 49
+    use_when: Add this to test projects that need production-validated Durable health and pump fixtures, recorded provider calls, bounded host scenarios, or typed Work contract observations.
+    includes: Health snapshot, pump request/result/attempt, typed Work request, and native worker envelope builders; health and drain fakes; recording pump histories; timeout-aware host scenario handles; typed Work definition, registry, and binding observations.
+    does_not_include: Persistence simulation, PostgreSQL, ASP.NET Core, a test framework, assertion library, authorization policy, retry loop, HTTP mapping, or proof of real-provider behavior.
+    start_here_path: Durable/ForgeTrust.AppSurface.Durable.Testing/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Durable.Testing` to test projects for deterministic Durable fixtures and host-admission observations; keep PostgreSQL conformance tests for persistence and recovery truth, and upgrade it with matching Durable and Provider preview packages.
     depends_on:
       - ForgeTrust.AppSurface.Durable
       - ForgeTrust.AppSurface.Durable.Provider

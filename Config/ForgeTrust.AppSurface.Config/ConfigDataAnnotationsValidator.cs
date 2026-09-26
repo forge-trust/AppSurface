@@ -70,6 +70,13 @@ internal static class ConfigDataAnnotationsValidator
         HashSet<object> activePath,
         List<ConfigurationValidationFailure> failures)
     {
+        // A typed secret is an opaque destination. Application rules inspect Enabled/HasValue on the containing
+        // model; recursive framework validation must never evaluate its sensitive or throwing Value getter.
+        if (value is IConfigSecretValue)
+        {
+            return;
+        }
+
         if (!TrackVisit(value, activePath))
         {
             return;

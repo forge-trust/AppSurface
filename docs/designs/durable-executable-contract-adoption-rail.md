@@ -8,6 +8,8 @@ Status: APPROVED
 Mode: Builder
 Supersedes: `andrew-main-design-20260901-020115-issue790-tailwind-host-scoped-cli.md` for office-hours branch lineage only; the issue #790 product decision remains independent.
 
+**Case 4 current policy:** [#795's schema-11 heartbeat retention guide](../../Durable/heartbeat-retention-operations.md) supersedes the older 30-day/schema-10 retention proposal in historical review sections below. The approved default is 24 hours and the retention migration is 0011. Migration 0010 remains the separate runtime-health observation migration.
+
 ## Problem Statement
 
 A review of seven AppSurface Durable worker lanes in the downstream Skoolit application found that the core protocol is being consumed safely but the adoption layer asks every host to reconstruct too many decisions.
@@ -683,8 +685,8 @@ Depends on cases 1 and 2. PostgreSQL conformance remains in the provider test pr
 
 Add provider-owned, opportunistic heartbeat maintenance:
 
-- default retention horizon: 30 days;
-- default maintenance cadence: 24 hours per process;
+- default retention horizon: 24 hours;
+- default maintenance cadence: 24 hours per provider after the first admitted pass;
 - default delete batch: 500 rows;
 - retention must be from 24 hours through 3,650 days and longer than the configured stale threshold (currently bounded to one hour); provider validation must reject an unsafe relationship;
 - never select the caller-declared current worker instance, a row with a heartbeat at or after the cutoff, or a row whose
@@ -704,7 +706,7 @@ it can now also prune all eligible stale rows through repeated valid calls. Docu
 arbitrary exclusion arguments and repeated batches, and keep the credential unreachable from request-controlled code. A
 dedicated maintenance principal is a separate follow-up if an adopter cannot accept that existing trust model.
 
-Use exact migration `0010_runtime_heartbeat_retention.sql`. It is applied while holding the existing package migration lock and contains:
+Use exact migration `0011_runtime_heartbeat_retention.sql`. It is applied while holding the existing package migration lock and contains:
 
 ```sql
 SET LOCAL lock_timeout = '5s';
@@ -830,32 +832,32 @@ the old row or that pruning can never delay a later writer. The exact identity j
 generation from being deleted after replacement. The two-int advisory namespace avoids collision with the existing
 one-bigint migration lock; lock refusal is a successful no-op.
 
-The runtime calls the function at most once per configured cadence after it has established its current heartbeat. The
-command uses the provider's existing bounded command timeout and cancellation; the maintenance advisory lock never waits,
+The package pump signals the provider-owned maintenance loop immediately after its first admitted pass commits the current heartbeat, before Work execution; cleanup never blocks the pass. A full batch may retry no sooner than one minute after the previous call started, a partial or zero batch returns to the configured cadence, and a database failure retries no sooner than one hour. Set `EnableHeartbeatMaintenance = false` in a new provider registration to pause the loop without pausing passes. The
+command uses a short server-side statement and client-command budget (target at most five seconds) and cancellation; the maintenance advisory lock never waits,
 prelocked candidate rows are skipped, and a timeout rolls back the entire batch. The provider remains safe if maintenance
 never runs; cleanup is capacity management, not correctness.
 
 The package migration lock is also bounded. Replace blocking `pg_advisory_lock` in both `ApplyAsync` and generated scripts
-with one shared `pg_try_advisory_lock` retry contract: 100 ms bounded-jitter retries, a 30-second default deadline, caller
+with one shared `pg_try_advisory_lock` retry contract: 75–125 ms bounded-jitter retries, a 30-second default deadline, caller
 cancellation, and a stable operator-safe timeout diagnostic containing only elapsed time and the fixed lock namespace.
 Never emit another session's query, application name, host, or credentials. `lock_timeout` does not bound advisory-lock
-acquisition; it remains in migration 0010 to bound the ordinary index's table-lock wait.
+acquisition; it remains in migration 0011 to bound the ordinary index's table-lock wait.
 
 Deployment uses an explicit two-phase gate:
 
-1. Pack and pre-stage the schema-10-capable package while activation stays on the old deployment.
-2. Prove in CI that the immediately previous package binary remains compatible with schema 10. Migration 0010 is additive,
+1. Pack and pre-stage the schema-11-capable package while activation stays on the old deployment.
+2. Prove in CI that the immediately previous package binary remains compatible with schema 11. Migration 0011 is additive,
    so it intentionally preserves the metadata range that includes that prior reader/writer version.
-3. Drain and stop old runtimes, run `durable schema preflight`, acquire the bounded migration lock, apply 0010 as migration
-   owner, reapply the exact role recipe, and rerun preflight as the runtime role.
+3. Drain and stop old runtimes. Treat pending `durable schema preflight` failure as the expected downtime finding; acquire the bounded migration lock, apply 0011 as migration
+   owner, reapply the exact role recipe, and require a passing preflight as the runtime role.
 4. Deploy the new binary and resume activation only after compatibility, owner, role, and health checks pass.
 
-If the strict previous-binary test fails, the release must raise migration 0010's minimum reader/writer version to 10 before
+If the strict previous-binary test fails, the release must raise migration 0011's minimum reader/writer version to 11 before
 publication and switch the post-commit recovery instruction to activation-closed roll-forward only. If it passes, a failed
 new-package deployment may safely redeploy that exact prior binary; arbitrary older binaries are never inferred compatible.
 No down-migration is supported.
 
-Preflight flags 0010 as a downtime migration while pending. Afterward it verifies function owner, `prosecdef`, the exact
+Preflight flags 0011 as a downtime migration while pending. Afterward it verifies function owner, `prosecdef`, the exact
 `proconfig` search path including `pg_temp` last, `PUBLIC` revoke, runtime execute grant, and index structure. Index
 verification reads `pg_index`, `pg_class`, `pg_attribute`, and operator-class catalogs; it does not compare
 `pg_get_indexdef` formatting across PostgreSQL releases.
@@ -868,22 +870,24 @@ verification reads `pg_index`, `pg_class`, `pg_attribute`, and operator-class ca
   delay and safe takeover retry/re-registration without claiming the deleted old row survives.
 - Abrupt-process-loss and process-plus-GUID tests prove old rows eventually leave without shutdown cooperation.
 - Concurrent-call tests prove the advisory lock and `SKIP LOCKED` path never exceed the requested batch, never waits on an
-  already locked candidate, and bounds prune-first contention by the existing command timeout.
+  already locked candidate, and bounds prune-first contention by the short prune statement/client budget.
 - Role tests prove runtime cannot directly delete or truncate heartbeat rows, `PUBLIC` has no function access, and runtime
   can execute only the exact constrained function signature. Threat-model tests prove arbitrary exclusion arguments and
   repeated batches cannot escape the stale cutoff, batch cap, table, or function signature.
-- Migration checksum, required schema version 10, function allowlist, role recipe, schema status, generated bounded-lock
+- Migration checksum, required schema version 11, function allowlist, role recipe, schema status, generated bounded-lock
   script, preflight, two-phase deployment, strict previous-binary recovery proof, and no-down-migration guidance remain
   coherent.
 - Cleanup failure does not fail a pump pass, change readiness by itself, or hide a real runtime failure.
 - Scale proof seeds 100,000 eligible stale rows plus 1,000 recent rows, records `EXPLAIN (ANALYZE, BUFFERS)` for one 500-row
   batch, proves the retention index supplies candidate order, deletes no more than 500 rows, and completes within the
-  provider command timeout. A concurrent-heartbeat benchmark records p50/p95 renewal latency for renewal-first and
-  prune-first orderings and sets the release threshold from the repository's current heartbeat cadence and stale bound.
+  provider command timeout. A concurrent-heartbeat benchmark records p50/p95/maximum renewal latency for renewal-first and
+  prune-first orderings; p95 must stay below five seconds and no renewal may exceed the default 15-second stale bound solely because of pruning.
 
 #### Dependencies and coordination
 
 Independent of cases 1 through 3. Case 8 may report retention configuration and last maintenance outcome after this lands.
+
+The approved #795 implementation and operator procedure are maintained in the [schema-11 heartbeat retention guide](../../Durable/heartbeat-retention-operations.md). Older review sections below are historical review records, not current migration instructions.
 
 ### Case 5: `design(durable-postgresql): prove configured-target equivalence without exposing credentials`
 
@@ -1078,7 +1082,7 @@ The command may read:
 - configured and active runtime epoch;
 - provider StoreId or equivalent authoritative connected-store identity;
 - the selected worker's heartbeat age and state, when a worker ID is supplied;
-- whether migration 0010's heartbeat-retention capability is installed.
+- whether migration 0011's heartbeat-retention capability is installed.
 
 Retention capability is not inferred from migration number alone. One bounded catalog query resolves exact regprocedure `appsurface_durable.prune_runtime_heartbeats(interval,integer,text,uuid)` and verifies:
 
@@ -1259,7 +1263,7 @@ Depends on cases 1, 2, 3, and 6. Cases 7 and 8 are not required for first public
 
 1. **Adapter graduation:** what distinct second host will exercise the experimental mapping? The reference host plus seven lanes in one application provide breadth, but not independent adoption.
 2. **Target comparison:** can the deliberately narrow single-target algorithm satisfy both named consumers? Multi-host support requires a later versioned design rather than expansion during implementation.
-3. **Heartbeat cleanup cadence:** the proposed 30-day/24-hour/500 defaults require scale proof against expected deployment churn before they become public defaults.
+3. **Heartbeat cleanup cadence:** the approved 24-hour retention / 24-hour cadence / 500-row defaults require scale proof against expected deployment churn before the later release; see the [current schema-11 runbook](../../Durable/heartbeat-retention-operations.md).
 4. **Future manifest:** can a compile-time manifest be derived from the typed definition without restricting ordinary C# composition into an awkward DSL or creating a second identity source? This is explicitly outside the current doctor and rail success.
 
 These are implementation evidence gates, not reasons to collapse the case boundaries.
@@ -1362,7 +1366,7 @@ The tool counts every nonblank physical line between the tokens and must report 
 | Schema/epoch CLI safety | `appsurface durable schema status|script|preflight|apply` and `DurableSchemaOnlineCommandBase` | Extend the command family and secret-safe environment pattern |
 | Durable diagnostics | `DurableProblemCodes` and existing schema diagnostics | Use one descriptor catalog; do not invent CLI-only meanings |
 | Trace source and Flow telemetry | `AppSurfaceActivitySources`, Flow command and resumed-execution activities | Reuse the source; add one activation-service activity rather than using an unrelated Flow command as proof |
-| PostgreSQL migration/release proof | Numbered migrations, migration lock, role recipe, package index, packed-consumer verification | Add 0010 and template packaging to these existing gates |
+| PostgreSQL migration/release proof | Numbered migrations, migration lock, role recipe, package index, packed-consumer verification | Add 0011 heartbeat retention and template packaging to these existing gates |
 | Downstream proof | Seven Skoolit Durable lanes and endpoint/lifecycle tests | Measure one representative lane first; preserve Skoolit policy outside upstream regions |
 
 #### Dream state and delta
@@ -2080,7 +2084,7 @@ Actual code mapping:
 | Pump admission | `PostgreSqlDurableRuntimePump`, `_passGate`, `DurableRuntimeAdmissionGate`, schema validation, and `TryBeginPassAsync` | Refactor to one internal state machine; do not preflight then enter twice |
 | Work identity | `DurableWorkRegistration`, `IDurablePayloadCodec`, `DurablePayloadCodecRegistry`, and current DI extensions | Add one immutable definition/binding layer over the same registration and registry |
 | Test seams | Public Provider interfaces plus existing xUnit and Testcontainers patterns | Package deterministic fakes; retain PostgreSQL for provider truth |
-| Heartbeat cleanup | Migration 0005, one-row-per-worker heartbeat model, schema manager, role recipe, and mixed-version harness | Add bounded migration 0010 and runtime-owned maintenance under the existing trust model |
+| Heartbeat cleanup | Migration 0005, one-row-per-worker heartbeat model, schema manager, role recipe, and mixed-version harness | Add bounded migration 0011 and runtime-owned maintenance under the existing trust model |
 | External activation | Current direct pump and health APIs plus ASP.NET Core endpoint primitives | Add one transport-neutral service; keep route/auth/response mapping host-owned |
 | Diagnostics | Existing `appsurface durable schema` commands, problem codes, docs, and safe CLI output conventions | Extend the CLI without loading application assemblies or mutating the store |
 | Distribution | NuGet pack/release pipeline and `verify-packed-consumers.sh` | Add the missing template project and exact generated-distribution proof |

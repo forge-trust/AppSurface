@@ -170,9 +170,9 @@ printf '[run-local-proof] PostgreSQL is published on 127.0.0.1:%s\n' "$LOCAL_POR
 
 ready=0
 for _ in {1..30}; do
-  # The image's initialization server accepts Unix-socket connections before it shuts down.
-  # TCP becomes ready only after the final server starts.
-  if run_foreground docker exec "$CONTAINER_NAME" pg_isready -h 127.0.0.1 -U postgres -d "$DATABASE_NAME" >/dev/null 2>&1; then
+  if run_foreground docker exec "$CONTAINER_NAME" \
+    sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d "$1" -c "SELECT 1;"' \
+    sh "$DATABASE_NAME" >/dev/null 2>&1; then
     ready=1
     break
   fi
@@ -218,6 +218,13 @@ run_foreground docker exec -i "$CONTAINER_NAME" \
   -v retention_operator_role="$RETENTION_ROLE" \
   -f - < "$ROOT_DIR/Durable/configure-postgresql-roles.sql" >/dev/null
 printf '[ok] canonical PostgreSQL roles reconciled\n'
+
+run_foreground dotnet run --project "$ROOT_DIR/Cli/ForgeTrust.AppSurface.Cli" \
+  --configuration Release \
+  --no-build \
+  -- durable schema preflight \
+  --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION
+printf '[ok] schema 11 runtime-role structural preflight passed\n'
 
 run_foreground docker exec "$CONTAINER_NAME" \
   psql -Aqt -U postgres -d "$DATABASE_NAME" -c 'SELECT gen_random_uuid();' > "$RUNTIME_EPOCH_FILE"

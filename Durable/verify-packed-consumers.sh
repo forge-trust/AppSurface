@@ -30,6 +30,7 @@ projects=(
   "Durable/ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj"
   "Durable/ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj"
   "Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj"
+  "Durable/ForgeTrust.AppSurface.Durable.Testing/ForgeTrust.AppSurface.Durable.Testing.csproj"
 )
 
 packed_packages=(
@@ -39,6 +40,7 @@ packed_packages=(
   "ForgeTrust.AppSurface.Durable"
   "ForgeTrust.AppSurface.Durable.Provider"
   "ForgeTrust.AppSurface.Durable.PostgreSql"
+  "ForgeTrust.AppSurface.Durable.Testing"
 )
 
 fail() {
@@ -121,6 +123,64 @@ sed "s|__LOCAL_FEED__|$FEED_DIR|g" > "$CONFIG_FILE" <<'EOF'
   </packageSourceMapping>
 </configuration>
 EOF
+
+testing_consumer_dir="$WORK_DIR/TestingConsumer"
+testing_adoption_started_at="$(date +%s)"
+cp -R "$ROOT_DIR/Durable/consumers/TestingConsumer" "$testing_consumer_dir"
+mv "$testing_consumer_dir/TestingConsumer.csproj.template" "$testing_consumer_dir/TestingConsumer.csproj"
+dotnet restore "$testing_consumer_dir/TestingConsumer.csproj" \
+  --configfile "$CONFIG_FILE" \
+  -m:1 \
+  -p:AppSurfacePackageVersion="$PACKAGE_VERSION" \
+  -p:UseSharedCompilation=false
+
+testing_assets_file="$testing_consumer_dir/obj/project.assets.json"
+[[ -f "$testing_assets_file" ]] || fail "restore did not produce $testing_assets_file"
+verify_assets_package "$testing_assets_file" "ForgeTrust.AppSurface.Durable.Testing"
+python3 - "$testing_assets_file" "$PACKAGE_VERSION" <<'PY'
+import json
+import sys
+
+assets_path, version = sys.argv[1:]
+with open(assets_path, encoding="utf-8") as stream:
+    targets = next(iter(json.load(stream)["targets"].values()))
+
+root = f"ForgeTrust.AppSurface.Durable.Testing/{version}"
+if root not in targets:
+    raise SystemExit(f"packed Testing graph is missing {root}")
+
+by_name = {}
+for key in targets:
+    by_name.setdefault(key.rsplit("/", 1)[0].lower(), []).append(key)
+
+seen = set()
+pending = [root]
+while pending:
+    key = pending.pop()
+    if key in seen:
+        continue
+    seen.add(key)
+    for name in targets[key].get("dependencies", {}):
+        pending.extend(by_name.get(name.lower(), ()))
+
+for key in sorted(seen):
+    name = key.rsplit("/", 1)[0].lower()
+    if (
+        name.startswith(("microsoft.aspnetcore.", "testcontainers", "xunit", "nunit", "mstest"))
+        or name in {"microsoft.aspnetcore.app.ref", "npgsql", "microsoft.net.test.sdk", "fluentassertions", "shouldly"}
+        or name.startswith("coverlet")
+    ):
+        raise SystemExit(f"packed Testing dependency closure contains forbidden package {key}")
+print(f"Packed Testing dependency closure: {len(seen)} allowed packages")
+PY
+dotnet test "$testing_consumer_dir/TestingConsumer.csproj" \
+  --configuration Release \
+  --no-restore \
+  -m:1 \
+  -p:AppSurfacePackageVersion="$PACKAGE_VERSION" \
+  -p:UseSharedCompilation=false
+testing_adoption_seconds="$(( $(date +%s) - testing_adoption_started_at ))"
+echo "Packed Testing consumer restore-to-completed-assertions: ${testing_adoption_seconds}s (upper bound on first assertion; five-minute target: 300s)"
 
 for consumer in Adopter Provider PostgreSqlProvider; do
   consumer_dir="$WORK_DIR/$consumer"

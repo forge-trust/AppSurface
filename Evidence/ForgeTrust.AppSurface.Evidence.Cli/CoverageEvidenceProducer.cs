@@ -11,9 +11,19 @@ namespace ForgeTrust.AppSurface.Evidence.Cli;
 /// collection-then-gate ordering, so this code neither recreates coverage execution nor invokes a second
 /// <c>appsurface</c> process.
 /// </remarks>
-internal sealed class CoverageEvidenceProducer(CoverageEvidenceExecutionWorkflow executionWorkflow)
+internal sealed class CoverageEvidenceProducer
 {
-    private readonly CoverageEvidenceExecutionWorkflow _executionWorkflow = executionWorkflow ?? throw new ArgumentNullException(nameof(executionWorkflow));
+    private readonly CoverageEvidenceExecutionWorkflow _executionWorkflow;
+    private readonly TimeProvider _clock;
+
+    /// <summary>Creates an Evidence adapter with the same monotonic clock as the coverage workflow.</summary>
+    /// <param name="executionWorkflow">Shared private coverage run and gate engine.</param>
+    /// <param name="clock">Optional monotonic clock used to measure the producer's remaining test budget.</param>
+    public CoverageEvidenceProducer(CoverageEvidenceExecutionWorkflow executionWorkflow, TimeProvider? clock = null)
+    {
+        _executionWorkflow = executionWorkflow ?? throw new ArgumentNullException(nameof(executionWorkflow));
+        _clock = clock ?? TimeProvider.System;
+    }
 
     /// <summary>
     /// Runs one declared coverage producer through the private coverage core and returns its stable evidence outcome.
@@ -51,7 +61,8 @@ internal sealed class CoverageEvidenceProducer(CoverageEvidenceExecutionWorkflow
     /// <exception cref="OperationCanceledException">The caller cancels <paramref name="cancellationToken"/>.</exception>
     /// <remarks>
     /// The private core owns collection-before-gate ordering. This adapter fixes the coverage run defaults to Debug,
-    /// serial input-order execution, collector coverage, clean output, and the established AppSurface test exclusion;
+    /// serial input-order execution, collector coverage, fail-mode no-progress handling, clean output, and the established AppSurface test exclusion.
+    /// Its monotonic producer budget limits the automatic no-dump VSTest timer without replacing deadline cancellation;
     /// it does not expose a general-purpose coverage configuration surface to Evidence consumers.
     /// </remarks>
     public async Task<EvidenceProducerResult> RunAsync(
@@ -90,9 +101,13 @@ internal sealed class CoverageEvidenceProducer(CoverageEvidenceExecutionWorkflow
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         try
         {
+            var producerDeadline = new CoverageProducerDeadline(
+                _clock,
+                _clock.GetTimestamp(),
+                TimeSpan.FromSeconds(producer.TimeoutSeconds));
             deadline.CancelAfter(TimeSpan.FromSeconds(producer.TimeoutSeconds));
             var result = await _executionWorkflow.RunAndGateAsync(
-                CreateRunRequest(solutionPath, outputDirectory),
+                CreateRunRequest(solutionPath, outputDirectory) with { ProducerDeadline = producerDeadline },
                 CreateGateRequest(outputDirectory, diffSnapshot, producer.CoverageGate),
                 writers,
                 deadline.Token).ConfigureAwait(false);
@@ -112,7 +127,21 @@ internal sealed class CoverageEvidenceProducer(CoverageEvidenceExecutionWorkflow
         }
         catch (OperationCanceledException) when (deadline.IsCancellationRequested)
         {
-            return new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.TimedOut, [], "The existing AppSurface coverage workflow exceeded its bounded execution window.");
+            var timingsPath = Path.Join(outputDirectory, "coverage", "timings.json");
+            var hint = string.Empty;
+            try
+            {
+                using var artifact = CoverageRunArtifactReader.OpenRegularFile(
+                    outputDirectory,
+                    Path.Join(outputDirectory, "coverage"),
+                    timingsPath);
+                hint = " See coverage/timings.json for bounded diagnostics.";
+            }
+            catch (Exception ex) when (IsNonFatal(ex))
+            {
+                // The timeout outcome is authoritative; a missing or unsafe hint artifact is ignored.
+            }
+            return new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.TimedOut, [], "The existing AppSurface coverage workflow exceeded its bounded execution window." + hint);
         }
         catch (OperationCanceledException)
         {
@@ -154,7 +183,7 @@ internal sealed class CoverageEvidenceProducer(CoverageEvidenceExecutionWorkflow
         Verbosity: "minimal",
         HeartbeatInterval: TimeSpan.FromSeconds(30),
         NoProgressTimeout: TimeSpan.FromMinutes(10),
-        WatchdogMode: CoverageRunWatchdogMode.Warn,
+        WatchdogMode: CoverageRunHangPolicy.DefaultWatchdogMode,
         CoverageDriver: CoverageRunDriver.Collector,
         RequireNonSandbox: false);
 

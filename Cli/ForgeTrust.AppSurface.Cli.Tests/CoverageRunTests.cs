@@ -16,6 +16,278 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CoverageRunTests
 {
     [Fact]
+    public async Task RunAsync_InspectionFailure_ShouldKeepTestFailureAndReportUnreadableDiagnostics()
+    {
+        using var repo = TempDirectory.Create("appsurface-hang-inspection-failure-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner { TestExitCode = 1 };
+        var workflow = new CoverageRunWorkflow(
+            runner,
+            new RecordingReportGenerator(),
+            TimeProvider.System,
+            inspectHangDiagnostics: (_, _, _) => throw new IOException("sequence inspection failed"));
+        using var console = new FakeInMemoryConsole();
+
+        var result = await workflow.RunAsync(
+            CreateRequest(TestProjects: [project], WatchdogMode: CoverageRunWatchdogMode.Fail,
+                NoProgressTimeout: TimeSpan.FromSeconds(180)),
+            console,
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Contains("VSTest sequence inspection: unreadable", console.ReadErrorString(), StringComparison.Ordinal);
+        using var timings = JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(result.OutputDirectory, "timings.json")));
+        var diagnostic = timings.RootElement.GetProperty("projects")[0].GetProperty("hangDiagnostics");
+        Assert.Equal("unreadable", diagnostic.GetProperty("status").GetString());
+    }
+
+    [Theory]
+    [InlineData("collector")]
+    [InlineData("msbuild")]
+    public async Task RunAsync_FailMode_ShouldAppendNoDumpBlameAndSummarizeOwnedSequence(string driverName)
+    {
+        using var repo = TempDirectory.Create("appsurface-hang-run-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner { TestExitCode = 1 };
+        runner.TestStarted = _ =>
+        {
+            var args = runner.Commands.Single(command => command.Arguments[0] == "test").Arguments;
+            var resultsIndex = Array.FindIndex(args.ToArray(), argument => argument == "--results-directory");
+            Assert.True(resultsIndex >= 0);
+            var host = TestPathUtils.PathUnder(args[resultsIndex + 1], "host");
+            Directory.CreateDirectory(host);
+            File.WriteAllText(TestPathUtils.PathUnder(host, "Sequence.xml"), "<TestSequence><Test Name=\"Sample.HangingTest\" /></TestSequence>");
+        };
+        var workflow = CreateWorkflow(runner, new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var driver = Enum.Parse<CoverageRunDriver>(driverName, ignoreCase: true);
+
+        var result = await workflow.RunAsync(CreateRequest(
+            TestProjects: [project], CoverageDriver: driver,
+            WatchdogMode: CoverageRunWatchdogMode.Fail,
+            NoProgressTimeout: TimeSpan.FromSeconds(180)), console, CancellationToken.None);
+
+        Assert.False(result.Success);
+        var testArgs = runner.Commands.Single(command => command.Arguments[0] == "test").Arguments;
+        Assert.Contains("--blame-hang", testArgs);
+        Assert.Contains("--blame-hang-timeout", testArgs);
+        Assert.Contains("120s", testArgs);
+        Assert.Contains("--blame-hang-dump-type", testArgs);
+        Assert.Contains("none", testArgs);
+        Assert.Contains("last started test", console.ReadErrorString(), StringComparison.Ordinal);
+        Assert.Contains("Sample.HangingTest", console.ReadErrorString(), StringComparison.Ordinal);
+        using var timings = JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(result.OutputDirectory, "timings.json")));
+        var diagnostic = timings.RootElement.GetProperty("projects")[0].GetProperty("hangDiagnostics");
+        Assert.Equal(1, diagnostic.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("automatic", diagnostic.GetProperty("source").GetString());
+        Assert.Equal("found", diagnostic.GetProperty("status").GetString());
+        Assert.Equal(120, diagnostic.GetProperty("effectiveVstestTimeoutSeconds").GetInt32());
+        Assert.Equal("Sample.HangingTest", diagnostic.GetProperty("observations")[0].GetProperty("lastStartedTest").GetString());
+    }
+
+    [Theory]
+    [InlineData("Warn")]
+    [InlineData("Off")]
+    public async Task RunAsync_OptOut_ShouldNotAddBlameOrOwnMsbuildResults(string modeName)
+    {
+        using var repo = TempDirectory.Create("appsurface-hang-optout-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        using var console = new FakeInMemoryConsole();
+
+        var result = await CreateWorkflow(runner, new RecordingReportGenerator()).RunAsync(
+            CreateRequest(TestProjects: [project], CoverageDriver: CoverageRunDriver.Msbuild,
+                WatchdogMode: Enum.Parse<CoverageRunWatchdogMode>(modeName),
+                TestArguments: ["--results-directory", "caller-results"]),
+            console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        var args = runner.Commands.Single(command => command.Arguments[0] == "test").Arguments;
+        Assert.DoesNotContain("--blame-hang", args);
+        Assert.Equal(1, args.Count(argument => argument == "--results-directory"));
+        using var timings = JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(result.OutputDirectory, "timings.json")));
+        Assert.Equal("disabled", timings.RootElement.GetProperty("projects")[0].GetProperty("hangDiagnostics").GetProperty("status").GetString());
+    }
+
+    [Theory]
+    [InlineData("--results-directory")]
+    [InlineData("--results-directory=caller-results")]
+    [InlineData("--results-directory:caller-results")]
+    public async Task RunAsync_MsbuildFail_ShouldRejectCallerResultsBeforeDiscovery(string argument)
+    {
+        using var repo = TempDirectory.Create("appsurface-hang-owned-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        using var console = new FakeInMemoryConsole();
+        var args = argument == "--results-directory" ? new[] { argument, "caller-results" } : new[] { argument };
+
+        var exception = await Assert.ThrowsAsync<CommandException>(() => CreateWorkflow(runner, new RecordingReportGenerator()).RunAsync(
+            CreateRequest(TestProjects: [project], CoverageDriver: CoverageRunDriver.Msbuild,
+                WatchdogMode: CoverageRunWatchdogMode.Fail, TestArguments: args),
+            console, CancellationToken.None));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(runner.Commands);
+        Assert.False(Directory.Exists(TestPathUtils.PathUnder(repo.Path, "TestResults", "coverage-merged")));
+    }
+
+    [Fact]
+    public async Task RunAsync_Msbuild_ShouldInsertAutomaticBlameBeforeTestHostSeparator()
+    {
+        using var repo = TempDirectory.Create("appsurface-hang-separator-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        using var console = new FakeInMemoryConsole();
+
+        var result = await CreateWorkflow(runner, new RecordingReportGenerator()).RunAsync(
+            CreateRequest(TestProjects: [project], CoverageDriver: CoverageRunDriver.Msbuild,
+                WatchdogMode: CoverageRunWatchdogMode.Fail,
+                TestArguments: ["--", "--blame-hang", "literal", "--results-directory", "host-value"]),
+            console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        var args = runner.Commands.Single(command => command.Arguments[0] == "test").Arguments;
+        var separator = Array.FindIndex(args.ToArray(), argument => argument == "--");
+        Assert.True(separator > 0);
+        Assert.Equal(1, args.Take(separator).Count(argument => argument == "--blame-hang"));
+        Assert.Equal(new[] { "--", "--blame-hang", "literal", "--results-directory", "host-value" }, args.Skip(separator).ToArray());
+        using var timings = JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(result.OutputDirectory, "timings.json")));
+        Assert.Equal("automatic", timings.RootElement.GetProperty("projects")[0].GetProperty("hangDiagnostics").GetProperty("source").GetString());
+    }
+
+    [Fact]
+    public async Task RunAsync_ShortBudget_ShouldKeepFailWatchdogWithoutAutomaticBlame()
+    {
+        using var repo = TempDirectory.Create("appsurface-hang-short-budget-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        using var console = new FakeInMemoryConsole();
+
+        var result = await CreateWorkflow(runner, new RecordingReportGenerator()).RunAsync(
+            CreateRequest(TestProjects: [project], CoverageDriver: CoverageRunDriver.Msbuild,
+                WatchdogMode: CoverageRunWatchdogMode.Fail,
+                NoProgressTimeout: TimeSpan.FromSeconds(89)),
+            console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        var args = runner.Commands.Single(command => command.Arguments[0] == "test").Arguments;
+        Assert.DoesNotContain("--blame-hang", args);
+        Assert.DoesNotContain("--results-directory", args);
+        using var timings = JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(result.OutputDirectory, "timings.json")));
+        var diagnostic = timings.RootElement.GetProperty("projects")[0].GetProperty("hangDiagnostics");
+        Assert.Equal("none", diagnostic.GetProperty("source").GetString());
+        Assert.Equal("skipped-short-budget", diagnostic.GetProperty("status").GetString());
+    }
+
+    [Theory]
+    [InlineData("collector", "--blame-crash")]
+    [InlineData("msbuild", "--settings")]
+    public async Task RunAsync_ManualPolicy_ShouldPreserveCallerArgumentsAndReportScope(string driverName, string option)
+    {
+        using var repo = TempDirectory.Create("appsurface-hang-manual-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var runner = new RecordingCoverageRunProcessRunner();
+        using var console = new FakeInMemoryConsole();
+        var driver = Enum.Parse<CoverageRunDriver>(driverName, ignoreCase: true);
+
+        var result = await CreateWorkflow(runner, new RecordingReportGenerator()).RunAsync(
+            CreateRequest(TestProjects: [project], CoverageDriver: driver,
+                WatchdogMode: CoverageRunWatchdogMode.Fail,
+                TestArguments: [option, "caller-value"]),
+            console, CancellationToken.None);
+
+        Assert.True(result.Success);
+        var args = runner.Commands.Single(command => command.Arguments[0] == "test").Arguments;
+        Assert.Equal("caller-value", args[Array.IndexOf(args.ToArray(), option) + 1]);
+        Assert.DoesNotContain("--blame-hang", args);
+        if (driver == CoverageRunDriver.Msbuild) Assert.DoesNotContain("--results-directory", args);
+        using var timings = JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(result.OutputDirectory, "timings.json")));
+        var diagnostic = timings.RootElement.GetProperty("projects")[0].GetProperty("hangDiagnostics");
+        Assert.Equal("manual", diagnostic.GetProperty("source").GetString());
+        Assert.Equal(driver == CoverageRunDriver.Msbuild ? "unscoped" : "missing", diagnostic.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task RunAsync_CallerCancellation_ShouldRecordInflightSequenceWithoutChangingCancellation()
+    {
+        using var repo = TempDirectory.Create("appsurface-hang-cancel-");
+        var project = repo.WriteFile("tests/Sample.Tests/Sample.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        using var caller = new CancellationTokenSource();
+        var runner = new RecordingCoverageRunProcessRunner();
+        runner.TestStarted = _ =>
+        {
+            var args = runner.Commands.Single(command => command.Arguments[0] == "test").Arguments;
+            var resultsIndex = Array.FindIndex(args.ToArray(), argument => argument == "--results-directory");
+            var host = TestPathUtils.PathUnder(args[resultsIndex + 1], "host");
+            Directory.CreateDirectory(host);
+            File.WriteAllText(TestPathUtils.PathUnder(host, "Sequence.xml"), "<TestSequence><Test Name=\"Sample.InflightTest\" /></TestSequence>");
+            caller.Cancel();
+        };
+        runner.TestDelays[project] = TimeSpan.FromSeconds(5);
+        using var console = new FakeInMemoryConsole();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => CreateWorkflow(runner, new RecordingReportGenerator()).RunAsync(
+            CreateRequest(TestProjects: [project], NoProgressTimeout: TimeSpan.FromSeconds(180),
+                WatchdogMode: CoverageRunWatchdogMode.Fail),
+            console, caller.Token));
+
+        using var timings = JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(repo.Path, "TestResults", "coverage-merged", "timings.json")));
+        var recorded = timings.RootElement.GetProperty("projects")[0];
+        Assert.Equal("terminated", recorded.GetProperty("executionStatus").GetString());
+        Assert.Equal(JsonValueKind.Null, recorded.GetProperty("exitCode").ValueKind);
+        var diagnostic = recorded.GetProperty("hangDiagnostics");
+        Assert.Equal("automatic", diagnostic.GetProperty("source").GetString());
+        Assert.Equal("found", diagnostic.GetProperty("status").GetString());
+        Assert.Equal("Sample.InflightTest", diagnostic.GetProperty("observations")[0].GetProperty("lastStartedTest").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(diagnostic.GetProperty("invocationId").GetString()));
+    }
+
+    [Fact]
+    public async Task RunAsync_CancellationDoesNotRepeatCompletedProjectHangSummary()
+    {
+        using var repo = TempDirectory.Create("appsurface-hang-completed-cancel-");
+        var first = repo.WriteFile("tests/First.Tests/First.Tests.csproj", "<Project />");
+        var second = repo.WriteFile("tests/Second.Tests/Second.Tests.csproj", "<Project />");
+        using var current = PushCurrentDirectory(repo.Path);
+        using var caller = new CancellationTokenSource();
+        var runner = new RecordingCoverageRunProcessRunner { TestExitCode = 1 };
+        runner.TestDelays[second] = TimeSpan.FromSeconds(5);
+        runner.TestStarted = project =>
+        {
+            if (project == second)
+            {
+                caller.Cancel();
+                return;
+            }
+
+            var args = runner.Commands.Single(command => command.Arguments[0] == "test").Arguments;
+            var resultsIndex = Array.FindIndex(args.ToArray(), argument => argument == "--results-directory");
+            var host = TestPathUtils.PathUnder(args[resultsIndex + 1], "host");
+            Directory.CreateDirectory(host);
+            File.WriteAllText(TestPathUtils.PathUnder(host, "Sequence.xml"),
+                "<TestSequence><Test Name=\"Sample.CompletedFailure\" /></TestSequence>");
+        };
+        using var console = new FakeInMemoryConsole();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => CreateWorkflow(runner, new RecordingReportGenerator()).RunAsync(
+            CreateRequest(TestProjects: [first, second], NoProgressTimeout: TimeSpan.FromSeconds(180),
+                WatchdogMode: CoverageRunWatchdogMode.Fail, CoverageDriver: CoverageRunDriver.Collector),
+            console, caller.Token));
+
+        var summaries = console.ReadErrorString().Split(Environment.NewLine)
+            .Count(line => line.Contains("last started test \"Sample.CompletedFailure\"", StringComparison.Ordinal));
+        Assert.Equal(1, summaries);
+    }
+
+    [Fact]
     public void CoverageRunCommand_ShouldCreateRequestWithWatchdogOptions()
     {
         var command = new CoverageRunCommand(CreateWorkflow(
@@ -2829,7 +3101,8 @@ public sealed class CoverageRunTests
         var priorTimings = repo.WriteFile("prior-timings.json", """
             {
               "projects": [
-                { "project": "tests/First.Tests/First.Tests.csproj", "seconds": 5 },
+                { "project": "tests/First.Tests/First.Tests.csproj", "seconds": 5,
+                  "hangDiagnostics": { "schemaVersion": 999, "futureStatus": { "value": "ignored" } } },
                 { "project": ".\\tests\\Slow.Tests\\Slow.Tests.csproj", "seconds": 50 },
                 { "project": "./tests/After.Tests/After.Tests.csproj", "seconds": 90 }
               ]
@@ -4775,6 +5048,19 @@ public sealed class CoverageRunTests
 
         Assert.Contains("incomplete owned option", exception.Message, StringComparison.Ordinal);
         Assert.Contains($"'{argument}' requires a value", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("--collect", "")]
+    [InlineData("--results-directory", "")]
+    [InlineData("--collect", "--")]
+    [InlineData("--results-directory", "--")]
+    public void ValidateTestArguments_ShouldRejectEmptyOrSeparatorOwnedValues(string option, string value)
+    {
+        var exception = Assert.Throws<CommandException>(() =>
+            CoverageRunDriverStrategy.ValidateTestArguments(CoverageRunDriver.Collector, [option, value]));
+
+        Assert.Contains("ASCOV101", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
