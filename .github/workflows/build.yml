@@ -445,6 +445,9 @@ jobs:
         run: |
           dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --configuration Release --no-restore -- verify
 
+      - name: Verify Tailwind release artifact transport
+        run: python3 .github/tests/tailwind_workflow_transport_tests.py
+
       - name: Verify generated Markdown snippets
         run: |
           dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify
