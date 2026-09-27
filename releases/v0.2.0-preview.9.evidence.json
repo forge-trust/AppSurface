@@ -25,7 +25,7 @@
     {
       "path": "releases/v0.2.0-preview.9.md",
       "algorithm": "sha256",
-      "value": "bbce76a380272938c7a67d8b546d7b31efbfbfe1fbd689b4ff380d35581ea221"
+      "value": "94814ddfa579830e46c54fb4b45a60fb89c2bc73a7584daa71c3a290664a4897"
     },
     {
       "path": "releases/v0.2.0-preview.9.md.yml",
@@ -388,7 +388,7 @@
   "generatedAtUtc": "2026-09-26T00:00:00.0000000Z",
   "subject": {
     "name": "AppSurface release evidence",
-    "sha256": "463f3c51106f800b79f8efe45b90e31859f4c5e2a7b81a2f93dfef2f45b6087f"
+    "sha256": "b5e9f55a5d6002b73617091542d95aa1ce3fdfa381388705ed885ae58a2ecdca"
   },
   "attestation": null
 }
