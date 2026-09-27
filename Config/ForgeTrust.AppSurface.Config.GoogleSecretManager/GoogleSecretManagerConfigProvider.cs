@@ -476,28 +476,39 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
 
         using (remoteLease)
         {
-            var lazy = _inFlight.GetOrAdd(reference.ResourceName, _ => new Lazy<Task<PayloadResult>>(
-                () => Task.Run(() => Fetch(reference), CancellationToken.None), LazyThreadSafetyMode.ExecutionAndPublication));
-            var sharedTask = lazy.Value;
-            _ = sharedTask.ContinueWith(
-                _ => _inFlight.TryRemove(new KeyValuePair<string, Lazy<Task<PayloadResult>>>(reference.ResourceName, lazy)),
-                CancellationToken.None,
-                TaskContinuationOptions.ExecuteSynchronously,
-                TaskScheduler.Default);
-            try
+            while (true)
             {
-                return sharedTask.WaitAsync(request.Scope.CancellationToken).GetAwaiter().GetResult();
-            }
-            catch (OperationCanceledException) when (request.Scope.IsAudit)
-            {
-                return PayloadResult.Failed(request.Scope.MarkAuditDeadline());
-            }
-            finally
-            {
-                // A completed fetch must leave the flight table before a sequential uncached lookup starts.
-                // The continuation still removes flights whose callers stop waiting before the fetch completes.
-                if (sharedTask.IsCompleted)
+                var candidate = new Lazy<Task<PayloadResult>>(
+                    () => Task.Run(() => Fetch(reference), CancellationToken.None), LazyThreadSafetyMode.ExecutionAndPublication);
+                var lazy = _inFlight.GetOrAdd(reference.ResourceName, candidate);
+                // A canceled caller may leave a completed flight until its cleanup continuation runs.
+                // New callers must not reuse that old result when caching is disabled.
+                if (!ReferenceEquals(candidate, lazy) && lazy.IsValueCreated && lazy.Value.IsCompleted)
+                {
                     _inFlight.TryRemove(new KeyValuePair<string, Lazy<Task<PayloadResult>>>(reference.ResourceName, lazy));
+                    continue;
+                }
+
+                var sharedTask = lazy.Value;
+                _ = sharedTask.ContinueWith(
+                    _ => _inFlight.TryRemove(new KeyValuePair<string, Lazy<Task<PayloadResult>>>(reference.ResourceName, lazy)),
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+                try
+                {
+                    return sharedTask.WaitAsync(request.Scope.CancellationToken).GetAwaiter().GetResult();
+                }
+                catch (OperationCanceledException) when (request.Scope.IsAudit)
+                {
+                    return PayloadResult.Failed(request.Scope.MarkAuditDeadline());
+                }
+                finally
+                {
+                    // Also remove a completed flight before a sequential caller can begin.
+                    if (sharedTask.IsCompleted)
+                        _inFlight.TryRemove(new KeyValuePair<string, Lazy<Task<PayloadResult>>>(reference.ResourceName, lazy));
+                }
             }
         }
     }

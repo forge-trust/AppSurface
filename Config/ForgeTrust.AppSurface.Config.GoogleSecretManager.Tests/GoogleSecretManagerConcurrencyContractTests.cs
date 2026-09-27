@@ -632,6 +632,8 @@ public sealed class GoogleSecretManagerConcurrencyContractTests
             client.Release.Set();
             AssertFound("live-result", await live.Result.WaitAsync(Timeout));
             Assert.Equal(1, client.Calls);
+            AssertFound("live-result", provider.Resolve<string>(Request("Payments:One")));
+            Assert.Equal(2, client.Calls);
         }
         finally
         {
