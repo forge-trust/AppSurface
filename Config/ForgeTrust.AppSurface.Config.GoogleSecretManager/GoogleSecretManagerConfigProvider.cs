@@ -31,6 +31,7 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
     private readonly ConcurrentDictionary<string, CachedSecret> _childCache = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, ConfigProviderTerminalDiagnostic> _terminalDiagnostics = new(StringComparer.Ordinal);
     private readonly TimeProvider _timeProvider;
+    private readonly TaskScheduler _flightCleanupScheduler;
 
     /// <summary>Creates a provider using the registered Google Secret Manager client.</summary>
     /// <param name="options">Provider configuration.</param>
@@ -63,11 +64,18 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
     {
     }
 
+    /// <summary>Creates a provider with internal clock and flight-cleanup scheduling seams.</summary>
+    /// <param name="options">Provider configuration.</param>
+    /// <param name="client">The read-only Secret Manager client seam.</param>
+    /// <param name="serviceProvider">Optional declaration-registry source.</param>
+    /// <param name="timeProvider">Optional cache and deadline clock; null selects the system clock.</param>
+    /// <param name="flightCleanupScheduler">Optional test scheduler for completed-flight cleanup; null uses the default scheduler. Tests that hold this scheduler must eventually drain its queued tasks.</param>
     internal GoogleSecretManagerConfigProvider(
         IOptions<AppSurfaceGoogleSecretManagerOptions> options,
         IAppSurfaceGoogleSecretManagerClient client,
         IServiceProvider? serviceProvider,
-        TimeProvider? timeProvider)
+        TimeProvider? timeProvider,
+        TaskScheduler? flightCleanupScheduler = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(client);
@@ -80,6 +88,7 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
 
         _client = client;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _flightCleanupScheduler = flightCleanupScheduler ?? TaskScheduler.Default;
         var entries = _options.Mappings.Select(mapping =>
         {
             var reference = GoogleSecretManagerSecretReference.FromMapping(_options, mapping);
@@ -476,21 +485,40 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
 
         using (remoteLease)
         {
-            var lazy = _inFlight.GetOrAdd(reference.ResourceName, _ => new Lazy<Task<PayloadResult>>(
-                () => Task.Run(() => Fetch(reference), CancellationToken.None), LazyThreadSafetyMode.ExecutionAndPublication));
-            var sharedTask = lazy.Value;
-            _ = sharedTask.ContinueWith(
-                _ => _inFlight.TryRemove(new KeyValuePair<string, Lazy<Task<PayloadResult>>>(reference.ResourceName, lazy)),
-                CancellationToken.None,
-                TaskContinuationOptions.ExecuteSynchronously,
-                TaskScheduler.Default);
-            try
+            var resourceName = reference.ResourceName;
+            var candidate = new Lazy<Task<PayloadResult>>(
+                () => Task.Run(() => Fetch(reference), CancellationToken.None), LazyThreadSafetyMode.ExecutionAndPublication);
+            while (true)
             {
-                return sharedTask.WaitAsync(request.Scope.CancellationToken).GetAwaiter().GetResult();
-            }
-            catch (OperationCanceledException) when (request.Scope.IsAudit)
-            {
-                return PayloadResult.Failed(request.Scope.MarkAuditDeadline());
+                var lazy = _inFlight.GetOrAdd(resourceName, candidate);
+                // A canceled caller may leave a completed flight until its cleanup continuation runs.
+                // New callers must not reuse that old result when caching is disabled.
+                if (!ReferenceEquals(candidate, lazy) && lazy.IsValueCreated && lazy.Value.IsCompleted)
+                {
+                    _inFlight.TryRemove(new KeyValuePair<string, Lazy<Task<PayloadResult>>>(resourceName, lazy));
+                    continue;
+                }
+
+                var sharedTask = lazy.Value;
+                _ = sharedTask.ContinueWith(
+                    _ => _inFlight.TryRemove(new KeyValuePair<string, Lazy<Task<PayloadResult>>>(resourceName, lazy)),
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    _flightCleanupScheduler);
+                try
+                {
+                    return sharedTask.WaitAsync(request.Scope.CancellationToken).GetAwaiter().GetResult();
+                }
+                catch (OperationCanceledException) when (request.Scope.IsAudit)
+                {
+                    return PayloadResult.Failed(request.Scope.MarkAuditDeadline());
+                }
+                finally
+                {
+                    // Also remove a completed flight before a sequential caller can begin.
+                    if (sharedTask.IsCompleted)
+                        _inFlight.TryRemove(new KeyValuePair<string, Lazy<Task<PayloadResult>>>(resourceName, lazy));
+                }
             }
         }
     }
