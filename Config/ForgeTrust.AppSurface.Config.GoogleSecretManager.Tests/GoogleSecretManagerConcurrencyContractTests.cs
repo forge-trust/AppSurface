@@ -649,6 +649,40 @@ public sealed class GoogleSecretManagerConcurrencyContractTests
     }
 
     [Fact]
+    public async Task CanceledOnlyWaiter_DoesNotExposeACompletedFlightToTheNextUncachedLookup()
+    {
+        using var client = new GatedClient((Resource, "live-result"));
+        var cleanupScheduler = new HeldCleanupScheduler();
+        var options = new AppSurfaceGoogleSecretManagerOptions { ProjectId = "project", CacheTtl = null };
+        options.MapSecret("Payments:One", Resource);
+        var provider = new GoogleSecretManagerConfigProvider(
+            Options.Create(options), client, serviceProvider: null, timeProvider: null, flightCleanupScheduler: cleanupScheduler);
+        using var cancellation = new CancellationTokenSource();
+        using var cancelledScope = new ConfigResolutionScope(cancellation.Token);
+        var worker = Start(provider, "Payments:One", cancelledScope);
+        try
+        {
+            await client.AllStarted.Task.WaitAsync(Timeout);
+            worker.WaitUntilBlocked();
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => worker.Result.WaitAsync(Timeout));
+
+            client.Release.Set();
+            await cleanupScheduler.Queued.Task.WaitAsync(Timeout);
+            Assert.Equal(1, client.Calls);
+            AssertFound("live-result", provider.Resolve<string>(Request("Payments:One")));
+            Assert.Equal(2, client.Calls);
+        }
+        finally
+        {
+            client.Release.Set();
+            cleanupScheduler.Drain();
+            try { await worker.Result.WaitAsync(Timeout); }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        }
+    }
+
+    [Fact]
     public async Task SharedFetchFailure_ReachesEveryWaiterAndIsEvictedBeforeRetry()
     {
         using var client = new GatedClient((Resource, "retry-result")) { FailFirstFetch = true };
@@ -778,6 +812,29 @@ public sealed class GoogleSecretManagerConcurrencyContractTests
                 || (Volatile.Read(ref _enteredResolution) != 0
                     && (_thread.ThreadState & ThreadState.WaitSleepJoin) != 0), Timeout), "Resolution did not reach its bounded wait.");
             Assert.False(Result.IsCompleted);
+        }
+    }
+
+    private sealed class HeldCleanupScheduler : TaskScheduler
+    {
+        private readonly ConcurrentQueue<Task> _queued = new();
+
+        internal TaskCompletionSource Queued { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override IEnumerable<Task> GetScheduledTasks() => _queued.ToArray();
+
+        protected override void QueueTask(Task task)
+        {
+            _queued.Enqueue(task);
+            Queued.TrySetResult();
+        }
+
+        protected override bool TryExecuteTaskInline(Task task, bool taskWasPreviouslyQueued) => false;
+
+        internal void Drain()
+        {
+            while (_queued.TryDequeue(out var task))
+                TryExecuteTask(task);
         }
     }
 
