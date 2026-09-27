@@ -353,8 +353,8 @@ public sealed class DurableHostScenarioTests
         cts.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
         var handle = Assert.Single(scenario.PumpInvocations);
-        Assert.True(handle.Completion.IsCanceled);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => handle.Completion);
+        Assert.True(handle.Completion.IsCanceled);
 
         static async ValueTask<DurableRuntimePumpAttempt> CancelWhenRequestedAsync(CancellationToken token)
         {
