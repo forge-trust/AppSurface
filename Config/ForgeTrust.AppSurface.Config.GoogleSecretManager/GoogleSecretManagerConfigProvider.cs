@@ -492,6 +492,13 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
             {
                 return PayloadResult.Failed(request.Scope.MarkAuditDeadline());
             }
+            finally
+            {
+                // A completed fetch must leave the flight table before a sequential uncached lookup starts.
+                // The continuation still removes flights whose callers stop waiting before the fetch completes.
+                if (sharedTask.IsCompleted)
+                    _inFlight.TryRemove(new KeyValuePair<string, Lazy<Task<PayloadResult>>>(reference.ResourceName, lazy));
+            }
         }
     }
 
