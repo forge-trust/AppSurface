@@ -161,6 +161,65 @@ class WorkflowTransportTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("producer_found=false", (self.root / "out").read_text())
 
+    def test_dependency_skipped_jobs_with_no_steps_allow_repack_and_publication_retry(self) -> None:
+        self.jobs.write_text(json.dumps([{"jobs": [
+            {"name": "pack-and-verify", "status": "completed", "conclusion": "skipped", "steps": []},
+            {"name": "publish-nuget", "status": "completed", "conclusion": "skipped", "steps": []},
+        ]}]))
+        producer = self.run_resolver(
+            "resolve-producer", "--repository", "org/repo", "--run-id", "9", "--run-attempt", "2",
+            "--name", "producer", "--output", str(self.root / "producer"), pages=[{"artifacts": []}],
+        )
+        self.assertEqual(producer.returncode, 0, producer.stderr)
+        self.assertIn("producer_found=false", (self.root / "producer").read_text())
+        publication = self.run_resolver(
+            "resolve-publication", "--repository", "org/repo", "--run-id", "9", "--run-attempt", "2",
+            "--name", "publication", "--output", str(self.root / "publication"), pages=[{"artifacts": []}],
+        )
+        self.assertEqual(publication.returncode, 0, publication.stderr)
+        self.assertIn("publication_found=false", (self.root / "publication").read_text())
+
+    def test_empty_or_contradictory_skipped_job_history_blocks_repack(self) -> None:
+        for status, conclusion, steps in [
+            ("completed", "failure", []),
+            ("completed", "cancelled", []),
+            ("in_progress", "skipped", []),
+            ("completed", "skipped", None),
+            ("completed", "skipped", [{"name": "Other step", "conclusion": "success"}]),
+        ]:
+            with self.subTest(status=status, conclusion=conclusion, steps=steps):
+                jobs = [
+                    {"name": "pack-and-verify", "status": "completed", "conclusion": "skipped", "steps": []},
+                    {"name": "publish-nuget", "status": "completed", "conclusion": "skipped", "steps": []},
+                ]
+                jobs[0].update(status=status, conclusion=conclusion)
+                if steps is None:
+                    jobs[0].pop("steps")
+                else:
+                    jobs[0]["steps"] = steps
+                self.jobs.write_text(json.dumps([{"jobs": jobs}]))
+                result = self.run_resolver(
+                    "resolve-producer", "--repository", "org/repo", "--run-id", "9", "--run-attempt", "2",
+                    "--name", "producer", "--output", str(self.root / "unsafe"), pages=[{"artifacts": []}],
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("producer upload outcome 'unknown'", result.stderr)
+
+    def test_publication_retry_rejects_missing_or_cancelled_prior_job_history(self) -> None:
+        for publish_job in [
+            {"name": "publish-nuget", "status": "completed", "conclusion": "skipped"},
+            {"name": "publish-nuget", "status": "completed", "conclusion": "cancelled", "steps": []},
+        ]:
+            with self.subTest(publish_job=publish_job):
+                self.jobs.write_text(json.dumps([{"jobs": [publish_job]}]))
+                result = self.run_resolver(
+                    "resolve-publication", "--repository", "org/repo", "--run-id", "9", "--run-attempt", "2",
+                    "--name", "publication", "--output", str(self.root / "unsafe-publication"),
+                    pages=[{"artifacts": []}],
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("publication-start was never uploaded", result.stderr)
+
     def test_ambiguous_prior_upload_or_publication_start_blocks_repack(self) -> None:
         for upload, start in [("success", "skipped"), ("skipped", "success"), ("unknown", "skipped"), ("skipped", "unknown")]:
             with self.subTest(upload=upload, start=start):
@@ -609,13 +668,17 @@ class WorkflowTransportTests(unittest.TestCase):
 
     def test_recovery_history_requires_proven_skips_and_rejects_unknown_outcomes(self) -> None:
         script = RESOLVER.read_text()
+        outcome_start = script.index("upload_outcome() {")
+        outcome_end = script.index("\n}\n", outcome_start) + 3
+        outcome = script[outcome_start:outcome_end]
         start = script.index("assert_safe_repack_history() {")
         end = script.index("\n}\n", start) + 3
         function = script[start:end]
         self.assertIn('"$upload_step" == skipped', function)
         self.assertIn('"$start_step" == skipped', function)
-        self.assertIn('"unknown"', function)
-        self.assertIn('"cancelled"', function) if "cancelled" in function else None
+        self.assertIn('"unknown"', outcome)
+        self.assertIn('upload_outcome "$producer_job"', function)
+        self.assertIn('upload_outcome "$publish_job"', function)
         self.assertIn('for ((prior=1; prior<attempt; prior++))', script)
 
     def test_native_artifact_failure_cases_retain_empty_partial_map_without_fallback(self) -> None:
