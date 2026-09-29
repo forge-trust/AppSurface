@@ -108,7 +108,7 @@ public sealed class OriginalCandidatePublicationReplayTests
     }
 
     [Fact]
-    public async Task RecordingPublisher_InterruptsOnlyExactTailwindArtifact()
+    public async Task RealEvidenceRecordingPublisher_InterruptsOnlyExactTailwindArtifact()
     {
         var mainArtifact = $"{PackageId}.{PackageVersion}.nupkg";
         var publisher = new RealEvidenceRecordingPublisher(mainArtifact) { Attempt = 1 };
