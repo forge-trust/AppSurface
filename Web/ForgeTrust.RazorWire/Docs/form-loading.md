@@ -2,7 +2,7 @@
 
 RazorWire form loading gives an accepted Turbo form submission visible feedback while the browser waits for token preparation or the server. It applies to forms enhanced with `rw-active="true"`; it does not add a general request or navigation loading API. The app can supply a nearby status message, and RazorWire shows its accessible top bar when no app indicator applies.
 
-For the local, section-shared, fallback-with-failure-UX-off, and five-second Turbo Frame examples, run the [RazorWire MVC example](../../examples/razorwire-mvc/README.md#form-loading-feedback). This guide describes the package contract and its current proof status.
+For the local, section-shared, fallback-with-failure-UX-off, and five-second Turbo Frame examples, run the [RazorWire MVC example](../../../examples/razorwire-mvc/README.md#form-loading-feedback). This guide describes the package contract and its current proof status.
 
 ## Quick start
 
