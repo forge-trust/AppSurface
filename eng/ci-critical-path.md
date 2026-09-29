@@ -133,6 +133,9 @@ a project path alone is interpreted as a command name. On Windows runners using 
 Bash, use the `-p:SourceRevisionId=...` MSBuild switch when stamping the verifier.
 Git Bash rewrites the leading slash in `/p:...`, leaving MSBuild with an extra project
 argument.
+The checked-in Tailwind release manifest is pinned to LF by [`.gitattributes`](https://github.com/forge-trust/AppSurface/blob/main/.gitattributes),
+including on Windows. Its packed copy must byte-match the source during native proof;
+Git checkout conversion to CRLF would reject an otherwise unchanged producer.
 
 Cache misses are normal after dependency updates, lock-file updates, or cache eviction. The cache is only useful if warm runs reduce selected workflow time or runner minutes without regressing the all-green decision path. For cache experiments, record at least:
 
