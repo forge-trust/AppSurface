@@ -109,11 +109,11 @@ internal static class TailwindNativeConsumerWorkflow
             var sdkVersion = sdk.StandardOutput.Trim();
             if (string.IsNullOrWhiteSpace(sdkVersion)) throw new PackageIndexException("Native host .NET SDK version is empty.");
             failedStage = "initial-restore";
-            await RunCommand(runner, "restore", [project, "--configfile", Path.Combine(consumer, "NuGet.config"), "--locked-mode"], consumer, environment, cancellationToken);
+            await RunCommand(runner, "restore", "restore", [project, "--configfile", Path.Combine(consumer, "NuGet.config"), "--locked-mode"], consumer, environment, cancellationToken);
             TailwindConsumerLock.RequireUnchanged(lockPath, expectedLock);
             completed.Add("restore");
             failedStage = "locked-restore";
-            await RunCommand(runner, "locked restore", [project, "--configfile", Path.Combine(consumer, "NuGet.config"), "--locked-mode"], consumer, environment, cancellationToken);
+            await RunCommand(runner, "restore", "locked restore", [project, "--configfile", Path.Combine(consumer, "NuGet.config"), "--locked-mode"], consumer, environment, cancellationToken);
             TailwindConsumerLock.RequireUnchanged(lockPath, expectedLock);
             completed.Add("locked-restore");
 
@@ -186,7 +186,7 @@ internal static class TailwindNativeConsumerWorkflow
 
             failedStage = "native-build";
             await File.WriteAllTextAsync(Path.Combine(consumer, "wwwroot", "css", "app.css"), "@import \"tailwindcss\";\n", cancellationToken);
-            await RunCommand(runner, "build", [project, "--configuration", "Release", "--no-restore"], consumer, environment, cancellationToken);
+            await RunCommand(runner, "build", "build", [project, "--configuration", "Release", "--no-restore"], consumer, environment, cancellationToken);
             completed.Add("build");
             var generatedCss = Path.Combine(consumer, "wwwroot", "css", "site.gen.css");
             if (!File.Exists(generatedCss) || new FileInfo(generatedCss).Length == 0) throw new PackageIndexException("Tailwind consumer build did not generate fresh nonempty wwwroot/css/site.gen.css.");
@@ -347,9 +347,9 @@ internal static class TailwindNativeConsumerWorkflow
         File.WriteAllText(Path.Combine(consumer, "Tailwind.PackageConsumerProof.csproj"), $"<Project Sdk=\"Microsoft.NET.Sdk.Razor\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><TailwindDownloadCacheRoot>{cacheXml}</TailwindDownloadCacheRoot></PropertyGroup><ItemGroup><PackageReference Include=\"{TailwindId}\" Version=\"{version}\" /></ItemGroup></Project>");
     }
 
-    private static async Task RunCommand(ICommandRunner runner, string stage, IReadOnlyList<string> args, string cwd,
+    private static async Task RunCommand(ICommandRunner runner, string verb, string stage, IReadOnlyList<string> args, string cwd,
         IReadOnlyDictionary<string, string?> environment, CancellationToken token)
-        => _ = await runner.RunAsync(new CommandRunRequest("dotnet", args, cwd, $"dotnet {stage}", "Tailwind native consumer",
+        => _ = await runner.RunAsync(new CommandRunRequest("dotnet", [verb, .. args], cwd, $"dotnet {stage}", "Tailwind native consumer",
             stage, $"running {stage}", CommandTimeout, environment), token);
 
     /// <summary>
