@@ -93,7 +93,7 @@ When any managed form is pending, a document state marker suppresses Turbo's del
 
 ### Consumer adoption and distribution
 
-Ship the runtime, C# options, generated static asset, public contract manifest, guide, and runnable RazorWire MVC example together. RazorWire is currently consumed from a configured package feed or source build; do not claim public NuGet v0.1 availability until the publish path is live. After package verification, update one real form in the affected app to use a local indicator and verify the site-wide fallback on another form. That app retains its own visual design. Document version and asset-build requirements for package consumers in the [RazorWire start page](../../Web/ForgeTrust.RazorWire/README.md) and a focused loading guide.
+Ship the runtime, C# options, generated static asset, public contract manifest, guide, and working RazorWire MVC example together. RazorWire is currently consumed from a configured package feed or source build; do not claim public NuGet v0.1 availability until the publish path is live. After package verification, update one real form in the affected app to use a local indicator and verify the site-wide fallback on another form. That app retains its own visual design. Document version and asset-build requirements for package consumers in the [RazorWire start page](../../Web/ForgeTrust.RazorWire/README.md) and a focused loading guide.
 
 ## Success Criteria
 
@@ -115,7 +115,7 @@ Ship the runtime, C# options, generated static asset, public contract manifest, 
 1. Build the independent form ownership marker and activity ledger. Add the Playwright lazy token hold/failure/retry test first, then implement the settle/cancel path it exercises.
 2. Add boundary resolution, shared counts, app-owned indicator visibility, fallback bar, scoped Turbo-bar coordination, and duplicate guard.
 3. Add C# and browser tests for every terminal path, concurrency, accessibility, no-JavaScript behavior, and controlled five- and ten-second delays. Keep the lazy token Playwright test in the normal RazorWire integration suite.
-4. Build and verify generated assets; update the public contract manifest, package docs, root discoverability, and runnable MVC example.
+4. Build and verify generated assets; update the public contract manifest, package docs, root discoverability, and working MVC example.
 5. Install the verified package build in the affected app, add one local indicator, and run the delayed submission proof. Update [#827](https://github.com/forge-trust/AppSurface/issues/827) with any contract changes before implementation starts.
 
 ## The Assignment
