@@ -33,6 +33,7 @@
     <EmbeddedResource Include="wwwroot\razorwire\form-interactions.js" LogicalName="RazorWireEmbeddedAssets/razorwire/form-interactions.js" />
     <EmbeddedResource Include="wwwroot\razorwire\page-navigation.js" LogicalName="RazorWireEmbeddedAssets/razorwire/page-navigation.js" />
     <EmbeddedResource Include="wwwroot\razorwire\razorwire.islands.js" LogicalName="RazorWireEmbeddedAssets/razorwire/razorwire.islands.js" />
+    <EmbeddedResource Include="wwwroot\razorwire\razorwire.loading.css" LogicalName="RazorWireEmbeddedAssets/razorwire/razorwire.loading.css" />
     <EmbeddedResource Include="wwwroot\razorwire\razorwire.js" LogicalName="RazorWireEmbeddedAssets/razorwire/razorwire.js" />
     <EmbeddedResource Include="wwwroot\razorwire\section-copy.js" LogicalName="RazorWireEmbeddedAssets/razorwire/section-copy.js" />
     <EmbeddedResource Include="wwwroot\razorwire\turbo.es2017-umd.js" LogicalName="RazorWireEmbeddedAssets/razorwire/turbo.es2017-umd.js" />
@@ -56,7 +57,7 @@
       <Output TaskParameter="ExitCode" PropertyName="_RazorWireGeneratedAssetsVerifyExitCode" />
     </Exec>
     <Error Condition="'$(_RazorWireGeneratedAssetsVerifyExitCode)' != '0'"
-           Text="RWPACK001 RazorWire generated browser assets failed pack verification. Problem: pack would embed stale or unverifiable wwwroot runtime assets. Cause: TypeScript source changed, pnpm dependencies are missing, or the verify script failed. Fix: run `pnpm --dir Web install --frozen-lockfile` if needed, then `pnpm --dir Web run assets:razorwire:build` and `pnpm --dir Web run assets:razorwire:verify`. Emergency bypass only: `/p:VerifyRazorWireGeneratedAssetsBeforePack=false`. Docs: Web/ForgeTrust.RazorWire/Docs/runtime-contract-pipeline.md." />
+           Text="RWPACK001 RazorWire generated browser assets failed pack verification. Problem: pack would embed stale or unverifiable wwwroot runtime assets. Cause: runtime or authored asset source changed, pnpm dependencies are missing, or the verify script failed. Fix: run `pnpm --dir Web install --frozen-lockfile` if needed, then `pnpm --dir Web run assets:razorwire:build` and `pnpm --dir Web run assets:razorwire:verify`. Emergency bypass only: `/p:VerifyRazorWireGeneratedAssetsBeforePack=false`. Docs: Web/ForgeTrust.RazorWire/Docs/runtime-contract-pipeline.md." />
   </Target>
 
 </Project>

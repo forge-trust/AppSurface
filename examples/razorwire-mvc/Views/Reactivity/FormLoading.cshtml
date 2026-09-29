@@ -1,0 +1,90 @@
+@{
+    ViewData["Title"] = "Form Loading";
+}
+
+<div class="space-y-8">
+    <header class="space-y-3">
+        <h1 class="text-3xl font-bold tracking-tight text-slate-950">Form loading feedback</h1>
+        <p class="max-w-3xl text-base leading-7 text-slate-600">
+            Each form waits briefly so you can see when RazorWire accepts a submission.
+            The application owns the nearby status messages; a form without one uses RazorWire's top bar.
+        </p>
+    </header>
+
+    <div id="form-loading-result" aria-live="polite"></div>
+
+    <section class="space-y-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+             data-rw-loading-boundary>
+        <h2 class="text-xl font-semibold text-slate-950">Nearby status</h2>
+        <form id="loading-local-form"
+              action="@Url.Action("SubmitFormLoading", "Reactivity", new { delayMs = 1500 })"
+              method="post"
+              rw-active="true"
+              rw-antiforgery="lazy"
+              data-rw-loading-boundary>
+            <input type="hidden" name="sample" value="local form" />
+            <button id="loading-local-primary" type="submit" class="rounded-md bg-indigo-600 px-4 py-2 font-semibold text-white">Save locally</button>
+            <button id="loading-local-secondary" type="submit" class="rounded-md bg-slate-900 px-4 py-2 font-semibold text-white">Save again</button>
+            <span data-rw-loading-indicator hidden role="status" aria-live="polite" class="ml-3 text-indigo-700">
+                Saving local form…
+            </span>
+        </form>
+        <button id="loading-local-external" form="loading-local-form" type="submit" class="rounded-md bg-slate-900 px-4 py-2 font-semibold text-white">Save externally</button>
+
+        <span data-rw-loading-indicator hidden role="status" aria-live="polite" class="text-indigo-700">
+            Processing a site form…
+        </span>
+        <form id="loading-site-form"
+              asp-controller="Reactivity"
+              asp-action="SubmitFormLoading"
+              asp-route-delayMs="1500"
+              method="post"
+              rw-active="true">
+            <input type="hidden" name="sample" value="site form" />
+            <button type="submit" class="rounded-md bg-slate-900 px-4 py-2 font-semibold text-white">Save with site status</button>
+        </form>
+        <form id="loading-site-form-secondary"
+              asp-controller="Reactivity"
+              asp-action="SubmitFormLoading"
+              asp-route-delayMs="2000"
+              method="post"
+              rw-active="true">
+            <input type="hidden" name="sample" value="second site form" />
+            <button type="submit" class="rounded-md bg-slate-900 px-4 py-2 font-semibold text-white">Save another site form</button>
+        </form>
+    </section>
+
+    <section class="space-y-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 class="text-xl font-semibold text-slate-950">Package fallback</h2>
+        <p class="text-slate-600">This form has no applicable application indicator, so it shows the package's compact top bar.</p>
+        <form id="loading-fallback-form"
+              asp-controller="Reactivity"
+              asp-action="SubmitFormLoading"
+              asp-route-delayMs="1700"
+              method="post"
+              rw-active="true"
+              data-rw-form-failure="off">
+            <input type="hidden" name="sample" value="fallback form" />
+            <button type="submit" class="rounded-md bg-slate-900 px-4 py-2 font-semibold text-white">Save with top bar</button>
+        </form>
+    </section>
+
+    <turbo-frame id="loading-sample-frame">
+        <section class="space-y-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+                 data-rw-loading-boundary>
+            <h2 class="text-xl font-semibold text-slate-950">Frame status</h2>
+            <form id="loading-frame-form"
+                  asp-controller="Reactivity"
+                  asp-action="SubmitFormLoading"
+                  asp-route-delayMs="5000"
+                  method="post"
+                  rw-active="true">
+                <input type="hidden" name="sample" value="frame form" />
+                <button type="submit" class="rounded-md bg-slate-900 px-4 py-2 font-semibold text-white">Save in frame</button>
+            </form>
+            <span data-rw-loading-indicator hidden role="status" aria-live="polite" class="text-indigo-700">
+                Processing a frame form…
+            </span>
+        </section>
+    </turbo-frame>
+</div>

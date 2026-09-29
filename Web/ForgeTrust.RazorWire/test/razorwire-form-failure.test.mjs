@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { transformSync } from 'esbuild';
 import vm from 'node:vm';
 
 const runtimePath = new URL('../wwwroot/razorwire/razorwire.js', import.meta.url);
+const authoredRuntimePath = new URL('../assets/src/razorwire.ts', import.meta.url);
 const pageNavigationPath = new URL('../wwwroot/razorwire/page-navigation.js', import.meta.url);
 
 test('runtime merges config and exposes formFailureManager', () => {
@@ -50,6 +52,521 @@ test('before fetch supports Headers-like request headers', () => {
   });
 
   assert.equal(headers.get('X-RazorWire-Form'), 'true');
+});
+
+test('authored runtime aborts a rejected lazy token before resuming and preserves the preparation failure through Turbo submit-end', async () => {
+  const tokenRequests = [];
+  let tokenRequestCount = 0;
+  const { document } = loadRuntime({
+    authoredRuntime: true,
+    fetch: async (url, options) => {
+      tokenRequests.push({ url, options });
+      tokenRequestCount += 1;
+      if (tokenRequestCount === 1) return { ok: false, status: 503 };
+      return {
+        ok: true,
+        json: async () => ({
+          formFieldName: '__RequestVerificationToken',
+          requestToken: 'retry-token',
+          headerName: 'RequestVerificationToken'
+        })
+      };
+    }
+  });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'auto');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.setAttribute('data-rw-loading', 'true');
+  const submitter = new FakeElement('button');
+  submitter.type = 'submit';
+  const preDisabledSubmitter = new FakeElement('input');
+  preDisabledSubmitter.type = 'submit';
+  preDisabledSubmitter.disabled = true;
+  const externalSubmitter = new FakeElement('input');
+  externalSubmitter.type = 'image';
+  form.elements = [submitter, preDisabledSubmitter, externalSubmitter];
+  document.body.appendChild(form);
+  let preparationFailureEvents = 0;
+  form.addEventListener('razorwire:form:failure', event => {
+    preparationFailureEvents += 1;
+    assert.equal(event.detail.message, 'We could not prepare this form. Check your connection and try again.');
+  });
+
+  const simulatedPosts = [];
+  const createRequestEvent = () => {
+    const fetchOptions = { headers: {} };
+    let resumeCount = 0;
+    const event = {
+      type: 'turbo:before-fetch-request',
+      target: form,
+      defaultPrevented: false,
+      preventDefault() {
+        this.defaultPrevented = true;
+      },
+      detail: {
+        fetchOptions,
+        resume: () => {
+          resumeCount += 1;
+          if (!fetchOptions.signal?.aborted) simulatedPosts.push(fetchOptions);
+        }
+      }
+    };
+    return { event, fetchOptions, get resumeCount() { return resumeCount; } };
+  };
+
+  const failedAttempt = createRequestEvent();
+  document.dispatchEvent({ type: 'pointerdown', target: form });
+  document.dispatchEvent(failedAttempt.event);
+  assert.equal(failedAttempt.event.defaultPrevented, true);
+  assert.equal(submitter.disabled, true);
+  assert.equal(preDisabledSubmitter.disabled, true);
+  assert.equal(externalSubmitter.disabled, true);
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(tokenRequests.length, 1);
+  assert.equal(preparationFailureEvents, 1);
+  assert.equal(failedAttempt.resumeCount, 1);
+  assert.equal(failedAttempt.fetchOptions.signal.aborted, true);
+  assert.equal(simulatedPosts.length, 0);
+  assert.equal(submitter.disabled, false);
+  assert.equal(preDisabledSubmitter.disabled, true);
+  assert.equal(externalSubmitter.disabled, false);
+  assert.equal(document.documentElement.getAttribute('data-rw-loading-form-state'), null);
+
+  const fallback = document.body.querySelector('[data-rw-loading-fallback]');
+  assert.ok(fallback);
+  assert.equal(fallback.hasAttribute('hidden'), true);
+  const failureMessage = form.querySelector('[data-rw-form-error-message="true"]');
+  assert.equal(failureMessage.textContent, 'We could not prepare this form. Check your connection and try again.');
+
+  const failedSubmission = { submitter, fetchRequest: { fetchOptions: failedAttempt.fetchOptions } };
+  document.dispatchEvent({
+    type: 'turbo:submit-start',
+    target: form,
+    detail: { formSubmission: failedSubmission }
+  });
+  assert.equal(form.querySelector('[data-rw-form-error-message="true"]'), failureMessage);
+  document.dispatchEvent({
+    type: 'turbo:submit-end',
+    target: form,
+    detail: { formSubmission: failedSubmission, success: false }
+  });
+  assert.equal(form.getAttribute('data-rw-submit-status'), 'failed');
+  assert.equal(form.querySelector('[data-rw-form-error-message="true"]').textContent, failureMessage.textContent);
+  assert.equal(simulatedPosts.length, 0);
+
+  const retryAttempt = createRequestEvent();
+  document.dispatchEvent(retryAttempt.event);
+  assert.equal(retryAttempt.event.defaultPrevented, true);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(tokenRequests.length, 2);
+  assert.equal(retryAttempt.resumeCount, 1);
+  assert.equal(retryAttempt.fetchOptions.signal, undefined);
+  assert.equal(simulatedPosts.length, 1);
+
+  const retrySubmission = { submitter, fetchRequest: { fetchOptions: retryAttempt.fetchOptions } };
+  document.dispatchEvent({
+    type: 'turbo:submit-start',
+    target: form,
+    detail: { formSubmission: retrySubmission }
+  });
+  document.dispatchEvent({
+    type: 'turbo:submit-end',
+    target: form,
+    detail: { formSubmission: retrySubmission, success: true }
+  });
+  assert.equal(form.querySelector('[data-rw-form-error-generated="true"]'), null);
+  assert.equal(submitter.disabled, false);
+});
+
+test('authored runtime shows loading with failure UX off and honors case-insensitive lock overrides', () => {
+  const { document } = loadRuntime({ authoredRuntime: true });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-loading', 'true');
+  form.setAttribute('data-rw-form-failure', 'off');
+  form.setAttribute('data-rw-loading-lock', 'FALSE');
+  const submitter = new FakeElement('button');
+  submitter.type = 'submit';
+  form.elements = [submitter];
+  document.body.appendChild(form);
+
+  const fetchOptions = { headers: {} };
+  document.dispatchEvent({
+    type: 'turbo:before-fetch-request',
+    target: form,
+    detail: { fetchOptions }
+  });
+
+  const fallback = document.body.querySelector('[data-rw-loading-fallback]');
+  assert.ok(fallback);
+  assert.equal(fallback.hasAttribute('hidden'), false);
+  assert.equal(submitter.disabled, false);
+
+  document.dispatchEvent({
+    type: 'turbo:submit-end',
+    target: form,
+    detail: { formSubmission: { fetchRequest: { fetchOptions } } }
+  });
+  assert.equal(fallback.hasAttribute('hidden'), true);
+});
+
+test('authored runtime treats loading off case-insensitively', () => {
+  const { document } = loadRuntime({ authoredRuntime: true });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-loading', 'OFF');
+  document.body.appendChild(form);
+
+  document.dispatchEvent({
+    type: 'turbo:before-fetch-request',
+    target: form,
+    detail: { fetchOptions: { headers: {} } }
+  });
+
+  assert.equal(document.body.querySelector('[data-rw-loading-fallback]'), null);
+  assert.equal(form.getAttribute('data-rw-loading-state'), null);
+});
+
+test('authored runtime allows Turbo visit feedback beside an app indicator and restores bar state', () => {
+  const { document } = loadRuntime({ authoredRuntime: true });
+  document.documentElement.setAttribute('data-rw-loading-turbo-bar', 'app-owned');
+  const attempt = startLoadingRequest(document, { appIndicator: true });
+  const indicator = attempt.indicator;
+
+  assert.equal(indicator.hasAttribute('hidden'), false);
+  assert.equal(document.documentElement.getAttribute('data-rw-loading-turbo-bar'), 'suppress');
+
+  document.dispatchEvent({ type: 'turbo:visit' });
+  assert.equal(document.documentElement.getAttribute('data-rw-loading-turbo-bar'), 'app-owned');
+  assert.equal(indicator.hasAttribute('hidden'), false);
+
+  // Turbo can render a preview and a prevented before-render without ending the visit.
+  document.dispatchEvent({ type: 'turbo:render' });
+  document.addEventListener('turbo:before-render', event => event.preventDefault());
+  const beforeRender = {
+    type: 'turbo:before-render',
+    defaultPrevented: false,
+    preventDefault() { this.defaultPrevented = true; }
+  };
+  document.dispatchEvent(beforeRender);
+  assert.equal(beforeRender.defaultPrevented, true);
+  assert.equal(document.documentElement.getAttribute('data-rw-loading-turbo-bar'), 'app-owned');
+
+  // Replaced visits keep navigation arbitration active until the terminal load.
+  document.dispatchEvent({ type: 'turbo:visit' });
+  document.dispatchEvent({ type: 'turbo:load' });
+  assert.equal(document.documentElement.getAttribute('data-rw-loading-turbo-bar'), 'suppress');
+  assert.equal(indicator.hasAttribute('hidden'), false);
+
+  finishLoadingRequest(document, attempt);
+  assert.equal(indicator.hasAttribute('hidden'), true);
+  assert.equal(document.documentElement.getAttribute('data-rw-loading-turbo-bar'), 'app-owned');
+});
+
+test('authored runtime keeps fallback arbitration through a visit and hands off until it settles', () => {
+  const { document, mutationObservers } = loadRuntime({ authoredRuntime: true });
+  const fallbackAttempt = startLoadingRequest(document);
+  const appAttempt = startLoadingRequest(document, { appIndicator: true });
+  const fallback = document.body.querySelector('[data-rw-loading-fallback]');
+
+  assert.ok(fallback);
+  assert.equal(fallback.hasAttribute('hidden'), false);
+  assert.equal(appAttempt.indicator.hasAttribute('hidden'), false);
+  assert.equal(document.documentElement.getAttribute('data-rw-loading-turbo-bar'), 'suppress');
+
+  document.dispatchEvent({ type: 'turbo:visit' });
+  finishLoadingRequest(document, fallbackAttempt);
+  assert.equal(fallback.hasAttribute('hidden'), false);
+  assert.equal(document.documentElement.getAttribute('data-rw-loading-turbo-bar'), 'suppress');
+
+  // A canceled render gate and a preview render are not visit completion.
+  document.addEventListener('turbo:before-render', event => event.preventDefault());
+  document.dispatchEvent({
+    type: 'turbo:before-render',
+    defaultPrevented: false,
+    preventDefault() { this.defaultPrevented = true; }
+  });
+  document.dispatchEvent({ type: 'turbo:render' });
+  assert.equal(fallback.hasAttribute('hidden'), false);
+  assert.equal(document.documentElement.getAttribute('data-rw-loading-turbo-bar'), 'suppress');
+
+  finishLoadingRequest(document, appAttempt);
+  assert.equal(appAttempt.indicator.hasAttribute('hidden'), true);
+  assert.equal(fallback.hasAttribute('hidden'), false);
+
+  fallback.remove();
+  mutationObservers.at(-1).trigger();
+  const reattachedFallback = document.body.querySelector('[data-rw-loading-fallback]');
+  assert.ok(reattachedFallback);
+  assert.notEqual(reattachedFallback, fallback);
+  assert.equal(reattachedFallback.hasAttribute('hidden'), false);
+
+  document.dispatchEvent({ type: 'turbo:load' });
+  assert.equal(reattachedFallback.hasAttribute('hidden'), true);
+  assert.equal(document.documentElement.getAttribute('data-rw-loading-turbo-bar'), null);
+});
+
+test('authored runtime ignores a canceled before-visit gate and keeps native behavior when fallback is off', () => {
+  const canceledRuntime = loadRuntime({ authoredRuntime: true });
+  const canceledAttempt = startLoadingRequest(canceledRuntime.document, { appIndicator: true });
+  canceledRuntime.document.addEventListener('turbo:before-visit', event => event.preventDefault());
+  const beforeVisit = {
+    type: 'turbo:before-visit',
+    defaultPrevented: false,
+    preventDefault() { this.defaultPrevented = true; }
+  };
+  canceledRuntime.document.dispatchEvent(beforeVisit);
+  assert.equal(beforeVisit.defaultPrevented, true);
+  finishLoadingRequest(canceledRuntime.document, canceledAttempt);
+  assert.equal(canceledAttempt.indicator.hasAttribute('hidden'), true);
+  assert.equal(canceledRuntime.document.body.querySelector('[data-rw-loading-fallback]'), null);
+  assert.equal(canceledRuntime.document.documentElement.getAttribute('data-rw-loading-turbo-bar'), null);
+
+  const nativeRuntime = loadRuntime({ authoredRuntime: true, formLoadingShowFallbackBar: 'false' });
+  const nativeAttempt = startLoadingRequest(nativeRuntime.document);
+  assert.equal(nativeRuntime.document.body.querySelector('[data-rw-loading-fallback]'), null);
+  assert.equal(nativeRuntime.document.documentElement.getAttribute('data-rw-loading-turbo-bar'), null);
+  nativeRuntime.document.dispatchEvent({ type: 'turbo:visit' });
+  finishLoadingRequest(nativeRuntime.document, nativeAttempt);
+  assert.equal(nativeRuntime.document.documentElement.getAttribute('data-rw-loading-turbo-bar'), null);
+  nativeRuntime.document.dispatchEvent({ type: 'turbo:load' });
+  assert.equal(nativeRuntime.document.documentElement.getAttribute('data-rw-loading-turbo-bar'), null);
+});
+
+test('authored runtime releases visit handoff on turbo reload and pagehide', () => {
+  const reloadRuntime = loadRuntime({ authoredRuntime: true });
+  reloadRuntime.document.documentElement.setAttribute('data-rw-loading-turbo-bar', 'preexisting');
+  const reloadAttempt = startLoadingRequest(reloadRuntime.document);
+  const reloadFallback = reloadRuntime.document.body.querySelector('[data-rw-loading-fallback]');
+  reloadRuntime.document.dispatchEvent({ type: 'turbo:visit' });
+  finishLoadingRequest(reloadRuntime.document, reloadAttempt);
+  assert.equal(reloadFallback.hasAttribute('hidden'), false);
+  reloadRuntime.document.dispatchEvent({ type: 'turbo:reload' });
+  assert.equal(reloadFallback.hasAttribute('hidden'), true);
+  assert.equal(reloadRuntime.document.documentElement.getAttribute('data-rw-loading-turbo-bar'), 'preexisting');
+
+  const pagehideRuntime = loadRuntime({ authoredRuntime: true });
+  const pagehideAttempt = startLoadingRequest(pagehideRuntime.document, { appIndicator: true });
+  pagehideRuntime.document.dispatchEvent({ type: 'turbo:visit' });
+  pagehideRuntime.window.dispatchEvent({ type: 'pagehide' });
+  assert.equal(pagehideAttempt.indicator.hasAttribute('hidden'), true);
+  assert.equal(pagehideAttempt.form.getAttribute('data-rw-loading-state'), null);
+  assert.equal(pagehideRuntime.document.documentElement.getAttribute('data-rw-loading-form-state'), null);
+  assert.equal(pagehideRuntime.document.documentElement.getAttribute('data-rw-loading-turbo-bar'), null);
+});
+
+test('authored runtime rebinds a pending form when its local indicator is removed', () => {
+  const { document, mutationObservers } = loadRuntime({ authoredRuntime: true });
+  const outerBoundary = new FakeElement('section');
+  outerBoundary.setAttribute('data-rw-loading-boundary', '');
+  const outerIndicator = new FakeElement('span');
+  outerIndicator.setAttribute('data-rw-loading-indicator', '');
+  outerIndicator.setAttribute('hidden', '');
+  outerBoundary.appendChild(outerIndicator);
+
+  const innerBoundary = new FakeElement('div');
+  innerBoundary.setAttribute('data-rw-loading-boundary', '');
+  const innerIndicator = new FakeElement('span');
+  innerIndicator.setAttribute('data-rw-loading-indicator', '');
+  innerIndicator.setAttribute('hidden', '');
+  const form = new FakeForm();
+  form.setAttribute('data-rw-loading', 'true');
+  innerBoundary.append(innerIndicator, form);
+  outerBoundary.appendChild(innerBoundary);
+  document.body.appendChild(outerBoundary);
+
+  const fetchOptions = { headers: {} };
+  document.dispatchEvent({
+    type: 'turbo:before-fetch-request',
+    target: form,
+    detail: { fetchOptions }
+  });
+
+  assert.equal(innerBoundary.getAttribute('data-rw-loading-state'), 'pending');
+  assert.equal(outerBoundary.getAttribute('data-rw-loading-state'), null);
+  assert.equal(innerIndicator.hasAttribute('hidden'), false);
+  assert.equal(outerIndicator.hasAttribute('hidden'), true);
+
+  innerIndicator.remove();
+  const observer = mutationObservers.find(candidate => !candidate.disconnected
+    && candidate.options?.attributeFilter?.includes('data-rw-loading-indicator'));
+  assert.ok(observer);
+  assert.equal(observer.target, document.documentElement);
+  assert.equal(observer.options.childList, true);
+  assert.equal(observer.options.subtree, true);
+  assert.equal(observer.options.attributes, true);
+  assert.deepEqual(Array.from(observer.options.attributeFilter), [
+    'data-rw-loading-boundary',
+    'data-rw-loading-indicator'
+  ]);
+  observer.trigger();
+
+  assert.equal(innerBoundary.getAttribute('data-rw-loading-state'), null);
+  assert.equal(outerBoundary.getAttribute('data-rw-loading-state'), 'pending');
+  assert.equal(innerIndicator.hasAttribute('hidden'), true);
+  assert.equal(outerIndicator.hasAttribute('hidden'), false);
+  assert.equal(document.documentElement.getAttribute('data-rw-loading-form-state'), 'pending');
+
+  document.dispatchEvent({
+    type: 'turbo:submit-end',
+    target: form,
+    detail: { formSubmission: { fetchRequest: { fetchOptions } } }
+  });
+
+  assert.equal(outerBoundary.getAttribute('data-rw-loading-state'), null);
+  assert.equal(outerIndicator.hasAttribute('hidden'), true);
+  assert.equal(document.documentElement.getAttribute('data-rw-loading-form-state'), null);
+  assert.equal(observer.disconnected, true);
+});
+
+test('authored runtime restores a form boundary state after rebinding its removed indicator', () => {
+  const { document, mutationObservers } = loadRuntime({ authoredRuntime: true });
+  const outerBoundary = new FakeElement('section');
+  outerBoundary.setAttribute('data-rw-loading-boundary', '');
+  const outerIndicator = new FakeElement('span');
+  outerIndicator.setAttribute('data-rw-loading-indicator', '');
+  outerIndicator.setAttribute('hidden', '');
+  const form = new FakeForm();
+  form.setAttribute('data-rw-loading', 'true');
+  form.setAttribute('data-rw-loading-boundary', '');
+  const localIndicator = new FakeElement('span');
+  localIndicator.setAttribute('data-rw-loading-indicator', '');
+  localIndicator.setAttribute('hidden', '');
+  form.appendChild(localIndicator);
+  outerBoundary.append(outerIndicator, form);
+  document.body.appendChild(outerBoundary);
+
+  const fetchOptions = { headers: {} };
+  document.dispatchEvent({
+    type: 'turbo:before-fetch-request',
+    target: form,
+    detail: { fetchOptions }
+  });
+  assert.equal(form.getAttribute('data-rw-loading-state'), 'pending');
+
+  localIndicator.remove();
+  const observer = mutationObservers.find(candidate => !candidate.disconnected
+    && candidate.options?.attributeFilter?.includes('data-rw-loading-indicator'));
+  assert.ok(observer);
+  observer.trigger();
+  assert.equal(outerBoundary.getAttribute('data-rw-loading-state'), 'pending');
+
+  document.dispatchEvent({
+    type: 'turbo:submit-end',
+    target: form,
+    detail: { formSubmission: { fetchRequest: { fetchOptions } } }
+  });
+  assert.equal(form.getAttribute('data-rw-loading-state'), null);
+  assert.equal(outerBoundary.getAttribute('data-rw-loading-state'), null);
+  assert.equal(outerIndicator.hasAttribute('hidden'), true);
+});
+
+test('authored runtime switches from the fallback to an injected local indicator', () => {
+  const { document, mutationObservers } = loadRuntime({ authoredRuntime: true });
+  const boundary = new FakeElement('section');
+  boundary.setAttribute('data-rw-loading-boundary', '');
+  const form = new FakeForm();
+  form.setAttribute('data-rw-loading', 'true');
+  boundary.appendChild(form);
+  document.body.appendChild(boundary);
+
+  const fetchOptions = { headers: {} };
+  document.dispatchEvent({
+    type: 'turbo:before-fetch-request',
+    target: form,
+    detail: { fetchOptions }
+  });
+
+  const fallback = document.body.querySelector('[data-rw-loading-fallback]');
+  assert.ok(fallback);
+  assert.equal(fallback.hasAttribute('hidden'), false);
+  assert.equal(boundary.getAttribute('data-rw-loading-state'), null);
+
+  const indicator = new FakeElement('span');
+  indicator.setAttribute('data-rw-loading-indicator', '');
+  indicator.setAttribute('hidden', '');
+  boundary.appendChild(indicator);
+  const observer = mutationObservers.find(candidate => !candidate.disconnected
+    && candidate.options?.attributeFilter?.includes('data-rw-loading-indicator'));
+  assert.ok(observer);
+  observer.trigger();
+
+  assert.equal(boundary.getAttribute('data-rw-loading-state'), 'pending');
+  assert.equal(indicator.hasAttribute('hidden'), false);
+  assert.equal(fallback.hasAttribute('hidden'), true);
+
+  document.dispatchEvent({
+    type: 'turbo:submit-end',
+    target: form,
+    detail: { formSubmission: { fetchRequest: { fetchOptions } } }
+  });
+
+  assert.equal(boundary.getAttribute('data-rw-loading-state'), null);
+  assert.equal(indicator.hasAttribute('hidden'), true);
+  assert.equal(fallback.hasAttribute('hidden'), true);
+});
+
+test('authored runtime cancels pending antiforgery when its form is removed', async () => {
+  let resolveToken;
+  const { document, mutationObservers } = loadRuntime({
+    authoredRuntime: true,
+    fetch: async () => new Promise(resolve => {
+      resolveToken = resolve;
+    })
+  });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'off');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.setAttribute('data-rw-loading', 'true');
+  document.body.appendChild(form);
+
+  let resumeCount = 0;
+  const fetchOptions = { headers: {} };
+  const requestEvent = {
+    type: 'turbo:before-fetch-request',
+    target: form,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    detail: {
+      fetchOptions,
+      resume: () => {
+        resumeCount += 1;
+      }
+    }
+  };
+  document.dispatchEvent(requestEvent);
+
+  assert.equal(requestEvent.defaultPrevented, true);
+  assert.equal(typeof resolveToken, 'function');
+  assert.equal(document.documentElement.getAttribute('data-rw-loading-form-state'), 'pending');
+
+  form.remove();
+  const observer = mutationObservers.find(candidate => !candidate.disconnected
+    && candidate.options?.attributeFilter?.includes('data-rw-loading-indicator'));
+  assert.ok(observer);
+  observer.trigger();
+
+  assert.equal(resumeCount, 1);
+  assert.equal(fetchOptions.signal.aborted, true);
+  assert.equal(form.getAttribute('data-rw-loading-state'), null);
+  assert.equal(document.documentElement.getAttribute('data-rw-loading-form-state'), null);
+  assert.equal(document.body.querySelector('[data-rw-loading-fallback]').hasAttribute('hidden'), true);
+
+  resolveToken({
+    ok: true,
+    json: async () => ({
+      formFieldName: '__RequestVerificationToken',
+      requestToken: 'late-token'
+    })
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(resumeCount, 1);
+  assert.equal(fetchOptions.headers.RequestVerificationToken, undefined);
+  assert.equal(observer.disconnected, true);
 });
 
 test('stream connections include credentials for configured live origin', () => {
@@ -540,6 +1057,17 @@ test('lazy antiforgery refresh failure clears active submit state', async () => 
   };
   document.dispatchEvent(event);
   await new Promise(resolve => setTimeout(resolve, 0));
+  document.dispatchEvent({
+    type: 'turbo:submit-end',
+    target: form,
+    detail: {
+      success: false,
+      formSubmission: {
+        submitter: button,
+        fetchRequest: { fetchOptions: event.detail.fetchOptions }
+      }
+    }
+  });
 
   const submitEnd = events.find(item => item.type === 'razorwire:form:submit-end');
   assert.equal(event.defaultPrevented, true);
@@ -1490,6 +2018,7 @@ test('page navigation resyncs active link visibility after panel open and resize
 
 function loadRuntime(runtimeOptions = {}) {
   const document = new FakeDocument(runtimeOptions);
+  const mutationObservers = [];
   const locationUrl = new URL(runtimeOptions.windowHref ?? 'https://example.test/');
   const visits = [];
   const windowListeners = new Map();
@@ -1558,19 +2087,39 @@ function loadRuntime(runtimeOptions = {}) {
   if (turbo !== null) {
     window.Turbo = turbo;
   }
+  class FakeMutationObserver {
+    constructor(callback) {
+      this.callback = callback;
+      this.disconnected = false;
+      this.target = null;
+      this.options = null;
+      mutationObservers.push(this);
+    }
+
+    observe(target, options) {
+      this.target = target;
+      this.options = options;
+    }
+
+    disconnect() {
+      this.disconnected = true;
+    }
+
+    trigger(records = []) {
+      if (!this.disconnected) this.callback(records, this);
+    }
+  }
   const context = {
     console: { log: () => {} },
     document,
     window,
     Turbo: turbo ?? undefined,
     Element: FakeElement,
+    HTMLElement: FakeElement,
     HTMLFormElement: FakeForm,
     CustomEvent: FakeCustomEvent,
     EventSource: FakeEventSource,
-    MutationObserver: class {
-      observe() {}
-      disconnect() {}
-    },
+    MutationObserver: FakeMutationObserver,
     ResizeObserver: runtimeOptions.ResizeObserver,
     setTimeout,
     clearTimeout,
@@ -1580,16 +2129,20 @@ function loadRuntime(runtimeOptions = {}) {
     Intl,
     URL,
     URLSearchParams,
+    AbortController,
     fetch: runtimeOptions.fetch
   };
   context.globalThis = context;
   vm.createContext(context);
-  vm.runInContext(readFileSync(runtimePath, 'utf8'), context);
+  const runtimeSource = runtimeOptions.authoredRuntime
+    ? transformSync(readFileSync(authoredRuntimePath, 'utf8'), { loader: 'ts', target: 'es2020' }).code
+    : readFileSync(runtimePath, 'utf8');
+  vm.runInContext(runtimeSource, context);
   if (runtimeOptions.pageNavigation) {
     vm.runInContext(readFileSync(pageNavigationPath, 'utf8'), context);
   }
 
-  return { context, document, window, turbo };
+  return { context, document, window, turbo, mutationObservers };
 }
 
 function createPageNavigationFixture(document) {
@@ -1644,6 +2197,45 @@ function clickEvent(target, overrides = {}) {
 
 function waitForAnimationFrame() {
   return new Promise(resolve => setTimeout(resolve, 0));
+}
+
+function startLoadingRequest(document, { appIndicator = false } = {}) {
+  const form = new FakeForm();
+  form.setAttribute('data-rw-loading', 'true');
+  let indicator = null;
+
+  if (appIndicator) {
+    const boundary = new FakeElement('section');
+    boundary.setAttribute('data-rw-loading-boundary', '');
+    indicator = new FakeElement('span');
+    indicator.setAttribute('data-rw-loading-indicator', '');
+    indicator.setAttribute('hidden', '');
+    boundary.append(indicator, form);
+    document.body.appendChild(boundary);
+  } else {
+    document.body.appendChild(form);
+  }
+
+  const fetchOptions = { headers: {} };
+  document.dispatchEvent({
+    type: 'turbo:before-fetch-request',
+    target: form,
+    detail: { fetchOptions }
+  });
+
+  return { form, fetchOptions, indicator };
+}
+
+function finishLoadingRequest(document, attempt) {
+  document.dispatchEvent({
+    type: 'turbo:submit-end',
+    target: attempt.form,
+    detail: {
+      formSubmission: {
+        fetchRequest: { fetchOptions: attempt.fetchOptions }
+      }
+    }
+  });
 }
 
 function loadRuntimeWithVisitAction(runtimeOptions = {}) {
@@ -1765,6 +2357,10 @@ class FakeElement {
 
   hasAttribute(name) {
     return this.attributes.has(name);
+  }
+
+  matches(selector) {
+    return matches(this, selector);
   }
 
   removeAttribute(name) {
@@ -1906,6 +2502,8 @@ class FakeDocument {
     this.listeners = new Map();
     this.head = new FakeElement('head');
     this.body = new FakeElement('body');
+    this.documentElement = new FakeElement('html');
+    this.documentElement.append(this.head, this.body);
     this.activeElement = null;
     this.currentScript = new FakeElement('script');
     this.currentScript.setAttribute('src', '/_content/ForgeTrust.RazorWire/razorwire/razorwire.js');
@@ -1918,6 +2516,15 @@ class FakeDocument {
     this.currentScript.setAttribute('data-rw-live-origin', runtimeOptions.liveOrigin ?? '');
     this.currentScript.setAttribute('data-rw-hybrid-credentials', runtimeOptions.hybridCredentials ?? 'auto');
     this.currentScript.setAttribute('data-rw-antiforgery-endpoint', runtimeOptions.antiforgeryEndpoint ?? '/_rw/antiforgery/token');
+    if (runtimeOptions.formLoadingEnabled !== undefined) {
+      this.currentScript.setAttribute('data-rw-form-loading-enabled', runtimeOptions.formLoadingEnabled);
+    }
+    if (runtimeOptions.formLoadingShowFallbackBar !== undefined) {
+      this.currentScript.setAttribute('data-rw-form-loading-show-fallback-bar', runtimeOptions.formLoadingShowFallbackBar);
+    }
+    if (runtimeOptions.formLoadingPreventDuplicateSubmissions !== undefined) {
+      this.currentScript.setAttribute('data-rw-form-loading-prevent-duplicate-submissions', runtimeOptions.formLoadingPreventDuplicateSubmissions);
+    }
   }
 
   addEventListener(type, listener) {
@@ -1969,6 +2576,9 @@ function walk(root, callback) {
 }
 
 function matches(element, selector) {
+  if (selector === '[data-rw-loading-indicator]') return element.hasAttribute('data-rw-loading-indicator');
+  if (selector === '[data-rw-loading-boundary]') return element.hasAttribute('data-rw-loading-boundary');
+  if (selector === '[data-rw-loading-fallback]') return element.hasAttribute('data-rw-loading-fallback');
   if (selector === 'rw-stream-source') return element.tagName === 'RW-STREAM-SOURCE';
   if (selector === 'time[data-rw-time]') return element.tagName === 'TIME' && element.hasAttribute('data-rw-time');
   if (selector === 'time[data-rw-time][data-rw-time-display="relative"]') {

@@ -62,6 +62,11 @@ public class RazorWireScriptsTagHelperTests
 
         A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
                 "/my-app",
+                "/_content/ForgeTrust.RazorWire/razorwire/razorwire.loading.css"))
+            .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire.loading.css?v=loading");
+
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
+                "/my-app",
                 "/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js"))
             .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js?v=456");
         A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
@@ -92,6 +97,10 @@ public class RazorWireScriptsTagHelperTests
         Assert.Null(_output.TagName); // Should remove the wrapper tag
 
         var content = _output.Content.GetContent();
+        Assert.Contains(
+            "<link rel=\"stylesheet\" href=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire.loading.css?v=loading\" />",
+            content);
+        Assert.DoesNotContain("<style", content);
         Assert.Contains(
             "src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/turbo.es2017-umd.js?v=turbo\"",
             content);
@@ -435,6 +444,26 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains("data-rw-form-failure-enabled=\"true\"", content);
         Assert.Contains("data-rw-form-failure-mode=\"auto\"", content);
         Assert.Contains("data-rw-default-failure-message=\"Custom &quot;failure&quot; &amp; retry\"", content);
+    }
+
+    [Fact]
+    public void Process_EmitsConfiguredFormLoadingRuntimeOptions()
+    {
+        var options = new RazorWireOptions();
+        options.Forms.Loading.Enabled = false;
+        options.Forms.Loading.ShowFallbackBar = false;
+        options.Forms.Loading.PreventDuplicateSubmissions = false;
+        var helper = new RazorWireScriptsTagHelper(_fileVersionProvider, options) { ViewContext = _viewContext };
+
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(A<PathString>._, A<string>._))
+            .ReturnsLazily(call => call.GetArgument<string>(1)!);
+
+        helper.Process(_context, _output);
+
+        var content = _output.Content.GetContent();
+        Assert.Contains("data-rw-form-loading-enabled=\"false\"", content);
+        Assert.Contains("data-rw-form-loading-show-fallback-bar=\"false\"", content);
+        Assert.Contains("data-rw-form-loading-prevent-duplicate-submissions=\"false\"", content);
     }
 
     [Fact]

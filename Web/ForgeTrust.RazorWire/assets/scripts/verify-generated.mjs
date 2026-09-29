@@ -11,7 +11,8 @@ const trackedOutputPaths = [
   path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'behavior-kit.js'),
   path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'page-navigation.js'),
   path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'section-copy.js'),
-  path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'form-interactions.js')
+  path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'form-interactions.js'),
+  path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'razorwire.loading.css')
 ];
 const copiedThirdPartyOutputPaths = [
   path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'turbo.es2017-umd.js')
@@ -56,7 +57,7 @@ export function runGeneratedAssetVerification(operations = {}) {
   );
 
   if (staleOutputs.length > 0) {
-    writeError('RWASSET003 RazorWire generated assets are stale. Problem: package outputs changed when rebuilt from assets/src. Cause: runtime TypeScript was changed without rebuilding the wwwroot outputs. Fix: run `pnpm --dir Web run assets:razorwire:build` or `pnpm --dir Web run assets:build` and commit the updated files. Docs: Web/ForgeTrust.RazorWire/Docs/runtime-contract-pipeline.md.');
+    writeError('RWASSET003 RazorWire generated or authored assets are stale. Problem: package outputs changed when rebuilt from assets/src. Cause: runtime TypeScript or an authored asset changed without rebuilding the wwwroot outputs. Fix: run `pnpm --dir Web run assets:razorwire:build` or `pnpm --dir Web run assets:build` and commit the updated files. Docs: Web/ForgeTrust.RazorWire/Docs/runtime-contract-pipeline.md.');
     for (const output of staleOutputs) {
       writeError(`- ${output}`);
     }

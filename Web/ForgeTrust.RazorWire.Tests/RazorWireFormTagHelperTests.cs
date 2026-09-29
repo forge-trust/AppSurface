@@ -14,6 +14,7 @@ public class RazorWireFormTagHelperTests
         helper.Process(CreateContext(), output);
 
         Assert.Equal("true", output.Attributes["data-turbo"].Value);
+        Assert.Equal("true", output.Attributes["data-rw-loading"].Value);
         Assert.Equal("true", output.Attributes["data-rw-form"].Value);
         Assert.Equal("auto", output.Attributes["data-rw-form-failure"].Value);
         Assert.Contains("__RazorWireForm", output.PostContent.GetContent());
@@ -88,6 +89,7 @@ public class RazorWireFormTagHelperTests
         helper.Process(CreateContext(), output);
 
         Assert.Equal("lazy", output.Attributes["data-rw-antiforgery"].Value);
+        Assert.Equal("true", output.Attributes["data-rw-loading"].Value);
         Assert.Equal("true", output.Attributes["data-rw-form"].Value);
         Assert.False(output.Attributes.ContainsName("rw-antiforgery"));
     }
@@ -101,6 +103,7 @@ public class RazorWireFormTagHelperTests
         helper.Process(CreateContext(), output);
 
         Assert.Equal("lazy", output.Attributes["data-rw-antiforgery"].Value);
+        Assert.Equal("true", output.Attributes["data-rw-loading"].Value);
         Assert.Equal("true", output.Attributes["data-rw-form"].Value);
         Assert.Equal("off", output.Attributes["data-rw-form-failure"].Value);
         Assert.DoesNotContain("__RazorWireForm", output.PostContent.GetContent());
@@ -143,8 +146,69 @@ public class RazorWireFormTagHelperTests
         helper.Process(CreateContext(), output);
 
         Assert.Equal("true", output.Attributes["data-turbo"].Value);
+        Assert.Equal("true", output.Attributes["data-rw-loading"].Value);
         Assert.False(output.Attributes.ContainsName("data-rw-form"));
         Assert.DoesNotContain("__RazorWireForm", output.PostContent.GetContent());
+    }
+
+    [Theory]
+    [InlineData("off")]
+    [InlineData("OFF")]
+    public void Process_WhenLoadingIsOptedOut_PreservesOptOutAndDoesNotEmitOwnershipMarker(string value)
+    {
+        var helper = new RazorWireFormTagHelper(new RazorWireOptions());
+        var output = CreateOutput("data-rw-loading", value);
+
+        helper.Process(CreateContext(), output);
+
+        Assert.Equal(value, output.Attributes["data-rw-loading"].Value);
+        Assert.Equal("true", output.Attributes["data-rw-form"].Value);
+    }
+
+    [Theory]
+    [InlineData("true")]
+    [InlineData("false")]
+    [InlineData("sometimes")]
+    public void Process_PreservesPerFormLoadingLockForRuntimeResolution(string value)
+    {
+        var helper = new RazorWireFormTagHelper(new RazorWireOptions());
+        var output = CreateOutput("data-rw-loading-lock", value);
+
+        helper.Process(CreateContext(), output);
+
+        Assert.Equal("true", output.Attributes["data-rw-loading"].Value);
+        Assert.Equal(value, output.Attributes["data-rw-loading-lock"].Value);
+    }
+
+    [Fact]
+    public void Process_WhenLoadingIsDisabledGlobally_RemovesOwnershipMarkerWithoutChangingFailureUx()
+    {
+        var options = new RazorWireOptions();
+        options.Forms.Loading.Enabled = false;
+        var helper = new RazorWireFormTagHelper(options);
+        var output = CreateOutput("data-rw-loading", "true");
+
+        helper.Process(CreateContext(), output);
+
+        Assert.False(output.Attributes.ContainsName("data-rw-loading"));
+        Assert.Equal("true", output.Attributes["data-rw-form"].Value);
+        Assert.Equal("auto", output.Attributes["data-rw-form-failure"].Value);
+        Assert.Contains("__RazorWireForm", output.PostContent.GetContent());
+    }
+
+    [Fact]
+    public void Process_WhenFailureUxIsOff_LoadingMarkerDoesNotAddFailureOnlyFields()
+    {
+        var helper = new RazorWireFormTagHelper(new RazorWireOptions());
+        var output = CreateOutput("data-rw-form-failure", "off");
+
+        helper.Process(CreateContext(), output);
+
+        Assert.Equal("true", output.Attributes["data-rw-loading"].Value);
+        Assert.Equal("off", output.Attributes["data-rw-form-failure"].Value);
+        Assert.False(output.Attributes.ContainsName("data-rw-form"));
+        Assert.DoesNotContain("__RazorWireForm", output.PostContent.GetContent());
+        Assert.DoesNotContain("__RazorWireFormFailureTarget", output.PostContent.GetContent());
     }
 
     [Fact]
@@ -172,6 +236,7 @@ public class RazorWireFormTagHelperTests
 
         Assert.Equal("false", output.Attributes["data-turbo"].Value);
         Assert.False(output.Attributes.ContainsName("data-rw-form"));
+        Assert.False(output.Attributes.ContainsName("data-rw-loading"));
     }
 
     private static TagHelperContext CreateContext()

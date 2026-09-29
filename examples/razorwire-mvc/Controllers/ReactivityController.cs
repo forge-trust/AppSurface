@@ -46,6 +46,39 @@ public class ReactivityController : Controller
     }
 
     /// <summary>
+    /// Renders the form-loading sample with local, site-wide, and package fallback indicators.
+    /// </summary>
+    /// <returns>The form-loading sample view.</returns>
+    public IActionResult FormLoading()
+    {
+        return View();
+    }
+
+    /// <summary>
+    /// Accepts a loading-sample form submission and returns a Turbo Stream response.
+    /// </summary>
+    /// <param name="sample">The sample form identifier displayed in the response.</param>
+    /// <param name="delayMs">Optional demonstration delay, clamped to ten seconds.</param>
+    /// <returns>A stream update for enhanced forms or a redirect for native submissions.</returns>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> SubmitFormLoading([FromForm] string? sample, [FromQuery] int delayMs = 0)
+    {
+        await Task.Delay(Math.Clamp(delayMs, 0, 10_000), HttpContext.RequestAborted);
+
+        if (Request.IsTurboRequest())
+        {
+            return this.RazorWireStream()
+                .UpdateHtml(
+                    "form-loading-result",
+                    $"<p>Saved {System.Net.WebUtility.HtmlEncode(sample ?? "form")}.</p>")
+                .BuildResult();
+        }
+
+        return RedirectToAction(nameof(FormLoading));
+    }
+
+    /// <summary>
     /// Renders the RazorWire form-interactions demonstration page.
     /// </summary>
     /// <returns>An <see cref="IActionResult"/> that renders the form-interactions UX sample.</returns>

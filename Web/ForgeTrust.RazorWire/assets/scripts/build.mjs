@@ -16,7 +16,8 @@ const generatedOutputs = [
     output: path.join(outputRoot, 'razorwire.js'),
     label: 'razorwire.js',
     banner: 'Generated from assets/src/razorwire.ts. Do not edit wwwroot/razorwire/razorwire.js by hand.',
-    rawBytes: 35_000,
+    // Form loading adds a DOM-aware attempt ledger and visit handoff; keep the transferred gzip ceiling at 12 KB.
+    rawBytes: 46_000,
     gzipBytes: 12_000
   },
   {
@@ -60,6 +61,16 @@ const generatedOutputs = [
     banner: 'Generated from assets/src/form-interactions.ts. Do not edit wwwroot/razorwire/form-interactions.js by hand.',
     rawBytes: 24_000,
     gzipBytes: 7_000
+  }
+];
+
+const authoredOutputs = [
+  {
+    entry: path.join(assetRoot, 'src', 'razorwire.loading.css'),
+    output: path.join(outputRoot, 'razorwire.loading.css'),
+    label: 'razorwire.loading.css',
+    rawBytes: 5_000,
+    gzipBytes: 1_500
   }
 ];
 
@@ -177,6 +188,32 @@ async function copyThirdPartyOutput(asset, operations = {}) {
   }
 }
 
+async function verifyAssetBudgets(assets) {
+  for (const budget of assets) {
+    const bytes = await readFile(budget.output);
+    const rawSize = (await stat(budget.output)).size;
+    const gzipSize = gzipSync(bytes).length;
+
+    if (rawSize > budget.rawBytes || gzipSize > budget.gzipBytes) {
+      throw new Error(
+        `RWASSET002 ${budget.label} exceeds asset budget. Problem: package output is larger than allowed. Cause: the browser payload changed or grew without an intentional budget update. Fix: verify the output provenance, then reduce the payload or update the budget in Web/ForgeTrust.RazorWire/assets/scripts/build.mjs with reviewer context. Docs: Web/ForgeTrust.RazorWire/Docs/runtime-contract-pipeline.md. Size: raw ${rawSize}/${budget.rawBytes}, gzip ${gzipSize}/${budget.gzipBytes}.`
+      );
+    }
+  }
+}
+
+async function copyAuthoredOutputs() {
+  for (const authored of authoredOutputs) {
+    await copyFile(authored.entry, authored.output);
+  }
+}
+
+async function buildAuthoredAssets() {
+  await mkdir(outputRoot, { recursive: true });
+  await copyAuthoredOutputs();
+  await verifyAssetBudgets(authoredOutputs);
+}
+
 async function buildAssets() {
   await mkdir(outputRoot, { recursive: true });
 
@@ -197,25 +234,17 @@ async function buildAssets() {
     });
   }
 
+  await copyAuthoredOutputs();
+
   for (const copied of copiedThirdPartyOutputs) {
     await copyThirdPartyOutput(copied);
   }
 
-  for (const budget of [...generatedOutputs, ...copiedThirdPartyOutputs]) {
-    const bytes = await readFile(budget.output);
-    const rawSize = (await stat(budget.output)).size;
-    const gzipSize = gzipSync(bytes).length;
-
-    if (rawSize > budget.rawBytes || gzipSize > budget.gzipBytes) {
-      throw new Error(
-        `RWASSET002 ${budget.label} exceeds asset budget. Problem: package output is larger than allowed. Cause: the browser payload changed or grew without an intentional budget update. Fix: verify the output provenance, then reduce the payload or update the budget in Web/ForgeTrust.RazorWire/assets/scripts/build.mjs with reviewer context. Docs: Web/ForgeTrust.RazorWire/Docs/runtime-contract-pipeline.md. Size: raw ${rawSize}/${budget.rawBytes}, gzip ${gzipSize}/${budget.gzipBytes}.`
-      );
-    }
-  }
+  await verifyAssetBudgets([...generatedOutputs, ...authoredOutputs, ...copiedThirdPartyOutputs]);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   await buildAssets();
 }
 
-export { buildAssets, copiedThirdPartyOutputs, copyThirdPartyOutput, generatedOutputs, outputRoot };
+export { authoredOutputs, buildAssets, buildAuthoredAssets, copiedThirdPartyOutputs, copyThirdPartyOutput, generatedOutputs, outputRoot };
