@@ -89,6 +89,18 @@ write_artifact_outputs() {
   } >>"$output"
 }
 
+upload_outcome() {
+  local job="$1" step_name="$2"
+  # A dependency-skipped job has no steps, so its upload could not have run.
+  # Missing or contradictory job history must remain unknown.
+  jq -r --arg step_name "$step_name" '
+    if .status == "completed" and .conclusion == "skipped" and (.steps | type) == "array" and (.steps | length) == 0
+    then "skipped"
+    else [.steps[]? | select(.name == $step_name)][0].conclusion // "unknown"
+    end
+  ' <<<"$job"
+}
+
 assert_safe_repack_history() {
   local previous_attempt="$1" jobs_json producer_job publish_job upload_step start_step
   # The attempt endpoint is paginated. Missing jobs/steps, incomplete API data,
@@ -98,8 +110,8 @@ assert_safe_repack_history() {
   producer_job="$(jq -c '[.[] | select(.name == "pack-and-verify")] | if length == 1 then .[0] else empty end' <<<"$jobs_json")"
   publish_job="$(jq -c '[.[] | select(.name == "publish-nuget")] | if length == 1 then .[0] else empty end' <<<"$jobs_json")"
   [[ -n "$producer_job" && -n "$publish_job" ]] || { echo "Attempt $previous_attempt lacks complete producer/publication job history." >&2; return 1; }
-  upload_step="$(jq -r '[.steps[]? | select(.name == "Upload frozen producer bundle")][0].conclusion // "unknown"' <<<"$producer_job")"
-  start_step="$(jq -r '[.steps[]? | select(.name == "Upload publication-start receipt")][0].conclusion // "unknown"' <<<"$publish_job")"
+  upload_step="$(upload_outcome "$producer_job" "Upload frozen producer bundle")"
+  start_step="$(upload_outcome "$publish_job" "Upload publication-start receipt")"
   [[ "$upload_step" == skipped ]] || { echo "Attempt $previous_attempt producer upload outcome '$upload_step' does not prove that no frozen candidate was uploaded." >&2; return 1; }
   [[ "$start_step" == skipped ]] || { echo "Attempt $previous_attempt publication-start outcome '$start_step' does not prove publication never started." >&2; return 1; }
 }
@@ -167,7 +179,7 @@ case "$mode" in
           jobs_json="$(gh_api_array "repos/${repository}/actions/runs/${run_id}/attempts/${prior}/jobs" jobs all)"
           publish_job="$(jq -c '[.[] | select(.name == "publish-nuget")] | if length == 1 then .[0] else empty end' <<<"$jobs_json")"
           [[ -n "$publish_job" ]] || { echo "Prior-attempt job history is incomplete; publication-start recovery is unknown." >&2; exit 1; }
-          start_step="$(jq -r '[.steps[]? | select(.name == "Upload publication-start receipt")][0].conclusion // "unknown"' <<<"$publish_job")"
+          start_step="$(upload_outcome "$publish_job" "Upload publication-start receipt")"
           [[ "$start_step" == skipped ]] || { echo "Prior-attempt job history does not prove publication-start was never uploaded (attempt $prior: $start_step)." >&2; exit 1; }
         done
       fi
