@@ -136,6 +136,40 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains("turbo:frame-load", content);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Process_EmitsLoadingStylesheetOnlyWhenFormLoadingIsEnabled(bool enabled)
+    {
+        var options = new RazorWireOptions();
+        options.Forms.Loading.Enabled = enabled;
+        var helper = new RazorWireScriptsTagHelper(_fileVersionProvider, options) { ViewContext = _viewContext };
+        const string stylesheetPath = "/_content/ForgeTrust.RazorWire/razorwire/razorwire.loading.css";
+        const string versionedStylesheetPath = "/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire.loading.css?v=loading";
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(A<PathString>._, A<string>._))
+            .ReturnsLazily(call => call.GetArgument<string>(1)!);
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath("/my-app", stylesheetPath))
+            .Returns(versionedStylesheetPath);
+
+        helper.Process(_context, _output);
+
+        var content = _output.Content.GetContent();
+        var stylesheetCall = A.CallTo(() => _fileVersionProvider.AddFileVersionToPath("/my-app", stylesheetPath));
+        Assert.Equal(
+            enabled,
+            content.Contains($"<link rel=\"stylesheet\" href=\"{versionedStylesheetPath}\" />", StringComparison.Ordinal));
+        Assert.Contains($"data-rw-form-loading-enabled=\"{enabled.ToString().ToLowerInvariant()}\"", content);
+
+        if (enabled)
+        {
+            stylesheetCall.MustHaveHappenedOnceExactly();
+        }
+        else
+        {
+            stylesheetCall.MustNotHaveHappened();
+        }
+    }
+
     [Fact]
     public void Process_WithCustomTurbo_EmitsVersionedSameOriginScriptFirst()
     {

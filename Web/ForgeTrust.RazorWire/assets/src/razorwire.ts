@@ -48,7 +48,6 @@ interface LoadingStateNode {
 }
 
 interface FormLoadingAttempt {
-    id: number;
     form: HTMLFormElement;
     fetchOptions: Record<string, unknown>;
     signal: AbortSignal | null;
@@ -64,7 +63,6 @@ interface FormLoadingAttempt {
 interface AttributeReference {
     count: number;
     snapshot: AttributeSnapshot;
-    pendingValue: string;
 }
 
 interface HiddenReference {
@@ -84,6 +82,8 @@ interface AntiforgeryContinuation {
     resume: () => void;
     resumed: boolean;
     canceled: boolean;
+    signal: AbortSignal | null;
+    abortListener: (() => void) | null;
 }
 
 /**
@@ -149,6 +149,9 @@ interface FormSubmitState {
     submitter: (HTMLElement & { disabled: boolean }) | null;
     disabledByRazorWire: boolean;
     describedById: string | null;
+    submission: object | null;
+    fetchOptions: object | null;
+    settled: boolean;
 }
 
 interface AntiforgeryTokenPayload {
@@ -980,7 +983,6 @@ declare const Turbo: TurboRuntime | undefined;
         attributeReferences: Map<Element, Map<string, AttributeReference>>;
         hiddenReferences: Map<HTMLElement, HiddenReference>;
         submitControlReferences: Map<SubmitControl, SubmitControlReference>;
-        nextAttemptId: number;
         fallbackElement: HTMLElement | null;
         domObserver: MutationObserver | null;
         turboVisitPending: boolean;
@@ -999,7 +1001,6 @@ declare const Turbo: TurboRuntime | undefined;
             this.attributeReferences = new Map();
             this.hiddenReferences = new Map();
             this.submitControlReferences = new Map();
-            this.nextAttemptId = 1;
             this.fallbackElement = null;
             this.domObserver = null;
             this.turboVisitPending = false;
@@ -1028,7 +1029,7 @@ declare const Turbo: TurboRuntime | undefined;
         }
 
         handleBeforeFetchRequest(event) {
-            const form = this.getForm(event.target);
+            const form = event.target instanceof HTMLFormElement ? event.target : null;
             if (!form || !this.isLoadingEnabled(form)) return;
 
             const detail = event.detail || {};
@@ -1046,7 +1047,6 @@ declare const Turbo: TurboRuntime | undefined;
             if (signal?.aborted) return;
 
             const attempt: FormLoadingAttempt = {
-                id: this.nextAttemptId++,
                 form,
                 fetchOptions,
                 signal,
@@ -1192,7 +1192,12 @@ declare const Turbo: TurboRuntime | undefined;
         observePendingDom() {
             if (this.domObserver || typeof MutationObserver === 'undefined' || !document.documentElement) return;
 
-            this.domObserver = new MutationObserver(() => this.reconcilePendingAttempts());
+            this.domObserver = new MutationObserver(records => {
+                const relevant = records.filter(record => this.isRelevantLoadingMutation(record));
+                if (relevant.length > 0 || records.length === 0) {
+                    this.reconcilePendingAttempts(relevant);
+                }
+            });
             this.domObserver.observe(document.documentElement, {
                 childList: true,
                 subtree: true,
@@ -1207,7 +1212,46 @@ declare const Turbo: TurboRuntime | undefined;
             this.domObserver = null;
         }
 
-        reconcilePendingAttempts() {
+        isRelevantLoadingMutation(record: MutationRecord) {
+            if (record.type === 'attributes') return true;
+
+            const selector = '[data-rw-loading], [data-rw-loading-boundary], '
+                + '[data-rw-loading-indicator], [data-rw-loading-fallback]';
+            for (const node of [...Array.from(record.addedNodes), ...Array.from(record.removedNodes)]) {
+                if (node instanceof Element && (node.matches(selector) || node.querySelector(selector))) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        loadingMutationScopes(records: MutationRecord[]) {
+            const scopes: Element[] = [];
+            for (const record of records) {
+                const target = record.target instanceof Element ? record.target : document.body;
+                if (!target) continue;
+
+                if (record.type === 'attributes') {
+                    const scope = record.attributeName === 'data-rw-loading-boundary'
+                        ? target
+                        : this.nearestBoundary(target) || target;
+                    scopes.push(scope);
+                    continue;
+                }
+
+                for (const node of [...Array.from(record.addedNodes), ...Array.from(record.removedNodes)]) {
+                    if (!(node instanceof Element)) continue;
+                    const scope = node.isConnected
+                        ? this.nearestBoundary(node) || node
+                        : this.nearestBoundary(target) || target;
+                    scopes.push(scope);
+                }
+            }
+            return scopes;
+        }
+
+        reconcilePendingAttempts(records: MutationRecord[] = []) {
+            const scopes = this.loadingMutationScopes(records);
             for (const attempt of Array.from(this.attempts)) {
                 if (attempt.settled) continue;
                 if (!attempt.form.isConnected) {
@@ -1215,10 +1259,14 @@ declare const Turbo: TurboRuntime | undefined;
                     continue;
                 }
 
-                this.reconcileAttemptDom(attempt);
+                if (records.length === 0 || scopes.some(scope => scope.contains(attempt.form)
+                    || attempt.form.contains(scope))) {
+                    this.reconcileAttemptDom(attempt);
+                }
             }
 
             this.reconcileVisitFallbackHandoff();
+            this.updateTurboBarState();
         }
 
         reconcileVisitFallbackHandoff() {
@@ -1267,8 +1315,6 @@ declare const Turbo: TurboRuntime | undefined;
                 if (attempt.visual) this.releaseVisual(attempt.visual);
                 attempt.visual = selected.visual;
             }
-
-            this.updateTurboBarState();
         }
 
         resolveVisual(form: HTMLFormElement) {
@@ -1414,8 +1460,7 @@ declare const Turbo: TurboRuntime | undefined;
             if (!reference) {
                 reference = {
                     count: 0,
-                    snapshot: this.snapshotAttribute(element, name),
-                    pendingValue
+                    snapshot: this.snapshotAttribute(element, name)
                 };
                 references.set(name, reference);
             }
@@ -1454,7 +1499,7 @@ declare const Turbo: TurboRuntime | undefined;
 
             attempt.settled = true;
             if (this.turboVisitPending && attempt.visual) this.retainFallbackForVisit();
-            if (reason === 'form-disconnected') {
+            if (reason === 'form-disconnected' || reason === 'aborted') {
                 this.formFailureManager?.cancelPendingAntiforgery(attempt.fetchOptions);
             }
 
@@ -1568,9 +1613,13 @@ declare const Turbo: TurboRuntime | undefined;
         config: RuntimeConfig;
         loadingManager: FormLoadingManager;
         state: WeakMap<HTMLFormElement, Partial<FormSubmitState>>;
+        submissionStates: WeakMap<object, FormSubmitState>;
+        fetchOptionStates: WeakMap<object, FormSubmitState>;
+        activeStates: WeakMap<HTMLFormElement, Set<FormSubmitState>>;
         antiforgeryRefreshes: WeakMap<HTMLFormElement, Promise<AntiforgeryTokenPayload | null>>;
         antiforgeryContinuations: WeakMap<object, AntiforgeryContinuation>;
         preparationFailures: WeakMap<object, true>;
+        canceledPreparations: WeakMap<object, true>;
         reportedAntiforgeryFailures: WeakSet<Promise<AntiforgeryTokenPayload | null>>;
         nextId: number;
         styleId: string;
@@ -1579,9 +1628,13 @@ declare const Turbo: TurboRuntime | undefined;
             this.config = config;
             this.loadingManager = loadingManager;
             this.state = new WeakMap();
+            this.submissionStates = new WeakMap();
+            this.fetchOptionStates = new WeakMap();
+            this.activeStates = new WeakMap();
             this.antiforgeryRefreshes = new WeakMap();
             this.antiforgeryContinuations = new WeakMap();
             this.preparationFailures = new WeakMap();
+            this.canceledPreparations = new WeakMap();
             this.reportedAntiforgeryFailures = new WeakSet();
             this.nextId = 1;
             this.styleId = 'rw-form-failure-default-styles';
@@ -1602,7 +1655,7 @@ declare const Turbo: TurboRuntime | undefined;
         }
 
         handleBeforeFetchRequest(event) {
-            const form = this.getForm(event.target);
+            const form = event.target instanceof HTMLFormElement ? event.target : null;
             if (!this.isRazorWireTransportForm(form)) return;
 
             const detail = event.detail;
@@ -1629,13 +1682,28 @@ declare const Turbo: TurboRuntime | undefined;
                 const resume = typeof detail.resume === 'function'
                     ? () => detail.resume()
                     : () => {};
+                const rawSignal = fetchOptions.signal;
+                const signal = rawSignal && typeof rawSignal === 'object'
+                    && typeof (rawSignal as AbortSignal).addEventListener === 'function'
+                    ? rawSignal as AbortSignal
+                    : null;
                 const continuation: AntiforgeryContinuation = {
                     fetchOptions,
                     resume,
                     resumed: false,
-                    canceled: false
+                    canceled: false,
+                    signal,
+                    abortListener: null
                 };
                 this.antiforgeryContinuations.set(fetchOptions, continuation);
+                if (signal) {
+                    continuation.abortListener = () => this.cancelPendingAntiforgery(fetchOptions);
+                    signal.addEventListener('abort', continuation.abortListener, { once: true });
+                    if (signal.aborted) {
+                        this.cancelPendingAntiforgery(fetchOptions);
+                        return;
+                    }
+                }
 
                 const preparation = this.ensureAntiforgeryToken(form);
                 preparation
@@ -1667,6 +1735,9 @@ declare const Turbo: TurboRuntime | undefined;
 
         resumeAntiforgeryContinuation(continuation: AntiforgeryContinuation) {
             if (continuation.resumed || continuation.canceled) return;
+            if (continuation.signal && continuation.abortListener) {
+                continuation.signal.removeEventListener('abort', continuation.abortListener);
+            }
             continuation.resumed = true;
             this.antiforgeryContinuations.delete(continuation.fetchOptions);
             continuation.resume();
@@ -1684,7 +1755,11 @@ declare const Turbo: TurboRuntime | undefined;
             if (!continuation || continuation.resumed || continuation.canceled) return;
 
             continuation.canceled = true;
+            if (continuation.signal && continuation.abortListener) {
+                continuation.signal.removeEventListener('abort', continuation.abortListener);
+            }
             this.antiforgeryContinuations.delete(fetchOptions);
+            this.canceledPreparations.set(fetchOptions, true);
             this.abortFetchOptions(fetchOptions);
             continuation.resumed = true;
             continuation.resume();
@@ -1713,8 +1788,9 @@ declare const Turbo: TurboRuntime | undefined;
             const form = this.getForm(event.target);
             if (!this.isRazorWireForm(form)) return;
 
-            const submitter = event.detail?.formSubmission?.submitter || null;
-            const fetchOptions = this.getSubmissionFetchOptions(event.detail?.formSubmission);
+            const submission = event.detail?.formSubmission;
+            const submitter = submission?.submitter || null;
+            const fetchOptions = this.getSubmissionFetchOptions(submission);
             const preparationFailed = !!fetchOptions && this.preparationFailures.has(fetchOptions);
             if (!preparationFailed) this.clearGeneratedFailure(form);
             form.setAttribute('data-rw-submitting', 'true');
@@ -1722,14 +1798,29 @@ declare const Turbo: TurboRuntime | undefined;
             if (!preparationFailed) form.removeAttribute('data-rw-last-status');
             form.setAttribute('aria-busy', 'true');
 
-            const formState = { submitter, disabledByRazorWire: false, describedById: null };
-            if (submitter && form.getAttribute('data-rw-disable-submit') !== 'false' && !submitter.disabled) {
+            const formState: FormSubmitState = {
+                submitter,
+                disabledByRazorWire: false,
+                describedById: null,
+                submission: submission && typeof submission === 'object' ? submission : null,
+                fetchOptions,
+                settled: false
+            };
+            const loadingAllowsOverlap = this.loadingManager.isLoadingEnabled(form)
+                && !this.loadingManager.isLockEnabled(form);
+            if (submitter && form.getAttribute('data-rw-disable-submit') !== 'false'
+                && !loadingAllowsOverlap && !submitter.disabled) {
                 submitter.disabled = true;
                 submitter.setAttribute('data-rw-submit-disabled-by-razorwire', 'true');
                 formState.disabledByRazorWire = true;
             }
 
             this.state.set(form, formState);
+            if (formState.submission) this.submissionStates.set(formState.submission, formState);
+            if (fetchOptions) this.fetchOptionStates.set(fetchOptions, formState);
+            const active = this.activeStates.get(form) || new Set<FormSubmitState>();
+            active.add(formState);
+            this.activeStates.set(form, active);
             this.dispatch(form, 'razorwire:form:submit-start', { form, submitter });
         }
 
@@ -1738,11 +1829,26 @@ declare const Turbo: TurboRuntime | undefined;
             if (!this.isRazorWireForm(form)) return;
 
             const fetchOptions = this.getSubmissionFetchOptions(event.detail?.formSubmission);
+            if (fetchOptions && this.canceledPreparations.has(fetchOptions)) {
+                const formState = this.getSubmissionState(form, event.detail?.formSubmission);
+                const stillSubmitting = this.finishSubmitting(form, formState);
+                if (stillSubmitting) form.setAttribute('data-rw-submit-status', 'submitting');
+                else form.removeAttribute('data-rw-submit-status');
+                this.canceledPreparations.delete(fetchOptions);
+                this.dispatch(form, 'razorwire:form:submit-end', {
+                    form,
+                    submitter: formState.submitter || event.detail?.formSubmission?.submitter || null,
+                    success: false,
+                    statusCode: null,
+                    handled: false
+                });
+                return;
+            }
             if (fetchOptions && this.preparationFailures.has(fetchOptions)) {
-                const formState = this.state.get(form) || {};
+                const formState = this.getSubmissionState(form, event.detail?.formSubmission);
                 const submitter = formState.submitter || event.detail?.formSubmission?.submitter || null;
-                this.finishSubmitting(form, formState);
-                form.setAttribute('data-rw-submit-status', 'failed');
+                const stillSubmitting = this.finishSubmitting(form, formState);
+                form.setAttribute('data-rw-submit-status', stillSubmitting ? 'submitting' : 'failed');
                 this.preparationFailures.delete(fetchOptions);
                 this.dispatch(form, 'razorwire:form:submit-end', {
                     form,
@@ -1758,11 +1864,11 @@ declare const Turbo: TurboRuntime | undefined;
             const handled = this.isHandled(event.detail?.fetchResponse);
             const responseKind = this.getResponseKind(event.detail?.fetchResponse);
             const success = event.detail?.success === true;
-            const formState = this.state.get(form) || {};
+            const formState = this.getSubmissionState(form, event.detail?.formSubmission);
             const submitter = formState.submitter || event.detail?.formSubmission?.submitter || null;
             const previousFailureCount = this.getFailureAttemptCount(form);
 
-            this.finishSubmitting(form, formState);
+            const stillSubmitting = this.finishSubmitting(form, formState);
 
             if (success) {
                 if (previousFailureCount > 0) {
@@ -1773,14 +1879,15 @@ declare const Turbo: TurboRuntime | undefined;
                 }
 
                 this.clearGeneratedFailure(form);
-                form.removeAttribute('data-rw-submit-status');
+                if (stillSubmitting) form.setAttribute('data-rw-submit-status', 'submitting');
+                else form.removeAttribute('data-rw-submit-status');
                 form.removeAttribute('data-rw-last-status');
                 form.removeAttribute('data-rw-form-failure-count');
                 this.dispatch(form, 'razorwire:form:submit-end', { form, submitter, success, statusCode, handled });
                 return;
             }
 
-            form.setAttribute('data-rw-submit-status', 'failed');
+            form.setAttribute('data-rw-submit-status', stillSubmitting ? 'submitting' : 'failed');
             if (statusCode !== null) {
                 form.setAttribute('data-rw-last-status', String(statusCode));
             }
@@ -1823,17 +1930,24 @@ declare const Turbo: TurboRuntime | undefined;
             if (!this.isRazorWireForm(form)) return;
 
             const fetchOptions = event.detail?.request?.fetchOptions;
+            if (fetchOptions && this.canceledPreparations.has(fetchOptions)) {
+                const formState = this.getFetchOptionState(form, fetchOptions);
+                const stillSubmitting = this.finishSubmitting(form, formState);
+                if (stillSubmitting) form.setAttribute('data-rw-submit-status', 'submitting');
+                else form.removeAttribute('data-rw-submit-status');
+                return;
+            }
             if (fetchOptions && this.preparationFailures.has(fetchOptions)) {
-                const formState = this.state.get(form) || {};
-                this.finishSubmitting(form, formState);
-                form.setAttribute('data-rw-submit-status', 'failed');
+                const formState = this.getFetchOptionState(form, fetchOptions);
+                const stillSubmitting = this.finishSubmitting(form, formState);
+                form.setAttribute('data-rw-submit-status', stillSubmitting ? 'submitting' : 'failed');
                 return;
             }
 
-            const formState = this.state.get(form) || {};
+            const formState = this.getFetchOptionState(form, fetchOptions);
             const submitter = formState.submitter || null;
-            this.finishSubmitting(form, formState);
-            form.setAttribute('data-rw-submit-status', 'failed');
+            const stillSubmitting = this.finishSubmitting(form, formState);
+            form.setAttribute('data-rw-submit-status', stillSubmitting ? 'submitting' : 'failed');
 
             const target = this.resolveTarget(form);
             const developmentDiagnostic = target.diagnostic
@@ -1873,13 +1987,44 @@ declare const Turbo: TurboRuntime | undefined;
             });
         }
 
-        finishSubmitting(form, formState) {
+        getSubmissionState(form: HTMLFormElement, submission): Partial<FormSubmitState> {
+            if (submission && typeof submission === 'object') {
+                const state = this.submissionStates.get(submission);
+                if (state) return state;
+                const fetchOptions = this.getSubmissionFetchOptions(submission);
+                if (fetchOptions) return this.getFetchOptionState(form, fetchOptions);
+            }
+            return this.state.get(form) || {};
+        }
+
+        getFetchOptionState(form: HTMLFormElement, fetchOptions): Partial<FormSubmitState> {
+            if (fetchOptions && typeof fetchOptions === 'object') {
+                return this.fetchOptionStates.get(fetchOptions) || this.state.get(form) || {};
+            }
+            return this.state.get(form) || {};
+        }
+
+        finishSubmitting(form: HTMLFormElement, formState: Partial<FormSubmitState>) {
+            const active = this.activeStates.get(form);
+            if (!formState.settled) {
+                formState.settled = true;
+                active?.delete(formState as FormSubmitState);
+                if (formState.submitter && formState.disabledByRazorWire) {
+                    formState.submitter.disabled = false;
+                    formState.submitter.removeAttribute('data-rw-submit-disabled-by-razorwire');
+                }
+            }
+
+            if (active?.size) {
+                form.setAttribute('data-rw-submitting', 'true');
+                form.setAttribute('aria-busy', 'true');
+                return true;
+            }
+
+            this.activeStates.delete(form);
             form.removeAttribute('data-rw-submitting');
             form.removeAttribute('aria-busy');
-            if (formState.submitter && formState.disabledByRazorWire) {
-                formState.submitter.disabled = false;
-                formState.submitter.removeAttribute('data-rw-submit-disabled-by-razorwire');
-            }
+            return false;
         }
 
         isRazorWireForm(form): form is HTMLFormElement {
@@ -2058,12 +2203,12 @@ declare const Turbo: TurboRuntime | undefined;
 
         handleAntiforgeryRefreshFailure(form, error, fetchOptions: Record<string, unknown> | null = null) {
             form.setAttribute('data-rw-antiforgery-state', 'failed');
-            const formState = this.state.get(form) || {};
+            const formState = this.getFetchOptionState(form, fetchOptions);
             const submitter = formState.submitter || null;
             const wasSubmitting = form.hasAttribute('data-rw-submitting');
             if (wasSubmitting || fetchOptions) {
-                this.finishSubmitting(form, formState);
-                form.setAttribute('data-rw-submit-status', 'failed');
+                const stillSubmitting = this.finishSubmitting(form, formState);
+                form.setAttribute('data-rw-submit-status', stillSubmitting ? 'submitting' : 'failed');
             }
 
             const target = this.resolveTarget(form);

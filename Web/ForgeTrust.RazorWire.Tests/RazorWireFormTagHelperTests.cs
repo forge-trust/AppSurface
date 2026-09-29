@@ -197,6 +197,20 @@ public class RazorWireFormTagHelperTests
     }
 
     [Fact]
+    public void Process_WhenLoadingIsDisabledGlobally_PreservesExplicitFormOptOut()
+    {
+        var options = new RazorWireOptions();
+        options.Forms.Loading.Enabled = false;
+        var helper = new RazorWireFormTagHelper(options);
+        var output = CreateOutput("data-rw-loading", "off");
+
+        helper.Process(CreateContext(), output);
+
+        Assert.Equal("off", output.Attributes["data-rw-loading"].Value);
+        Assert.Equal("true", output.Attributes["data-rw-form"].Value);
+    }
+
+    [Fact]
     public void Process_WhenFailureUxIsOff_LoadingMarkerDoesNotAddFailureOnlyFields()
     {
         var helper = new RazorWireFormTagHelper(new RazorWireOptions());

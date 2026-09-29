@@ -16,9 +16,10 @@ const generatedOutputs = [
     output: path.join(outputRoot, 'razorwire.js'),
     label: 'razorwire.js',
     banner: 'Generated from assets/src/razorwire.ts. Do not edit wwwroot/razorwire/razorwire.js by hand.',
-    // Form loading adds a DOM-aware attempt ledger and visit handoff; keep the transferred gzip ceiling at 12 KB.
-    rawBytes: 46_000,
-    gzipBytes: 12_000
+    // Form loading plus per-request failed-form state keeps overlapping unlocked submissions correct.
+    // The reviewed bundle is 48,117 raw / 12,373 gzip bytes; retain only narrow growth headroom.
+    rawBytes: 49_000,
+    gzipBytes: 12_500
   },
   {
     entry: path.join(assetRoot, 'src', 'razorwire.islands.ts'),

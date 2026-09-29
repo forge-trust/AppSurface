@@ -48,14 +48,25 @@
   animation: rw-loading-fallback-travel 1.3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+[data-rw-loading-fallback]:dir(rtl)::after {
+  animation-name: rw-loading-fallback-travel-rtl;
+}
+
 @keyframes rw-loading-fallback-travel {
   to {
     transform: translateX(400%);
   }
 }
 
+@keyframes rw-loading-fallback-travel-rtl {
+  to {
+    transform: translateX(-400%);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  [data-rw-loading-fallback]::after {
+  [data-rw-loading-fallback]::after,
+  [data-rw-loading-fallback]:dir(rtl)::after {
     inset-inline-start: 0;
     inline-size: 100%;
     animation: none;
@@ -71,7 +82,8 @@
     forced-color-adjust: auto;
   }
 
-  [data-rw-loading-fallback]::after {
+  [data-rw-loading-fallback]::after,
+  [data-rw-loading-fallback]:dir(rtl)::after {
     inset-inline-start: 0;
     inline-size: 100%;
     background: Highlight;
@@ -80,5 +92,5 @@
 }
 
 html[data-rw-loading-turbo-bar="suppress"] .turbo-progress-bar {
-  display: none !important;
+  display: none;
 }

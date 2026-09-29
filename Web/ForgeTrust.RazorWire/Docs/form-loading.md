@@ -6,7 +6,7 @@ For the local, section-shared, fallback-with-failure-UX-off, and five-second Tur
 
 ## Quick start
 
-1. Keep `<rw:scripts />` in the shared layout. It loads RazorWire and the versioned loading stylesheet from the package. The default stylesheet URL is `/_content/ForgeTrust.RazorWire/razorwire/razorwire.loading.css`.
+1. Keep `<rw:scripts />` in the shared layout. It loads RazorWire and, when form loading is enabled (the default), the versioned loading stylesheet from the package. The default stylesheet URL is `/_content/ForgeTrust.RazorWire/razorwire/razorwire.loading.css`.
 2. Add an initially hidden, app-authored status indicator to a boundary containing the form:
 
 ```cshtml
@@ -85,7 +85,7 @@ Loading begins only after Turbo accepts the submission. Browser constraint-valid
 
 RazorWire snapshots and restores the previous `hidden` value on an app indicator and the previous `data-rw-loading-state` value on the form and selected boundary. Reference counting keeps shared UI pending while any associated request remains active. The package owns `data-rw-loading-state="pending"`; do not set that runtime state in app markup. If a selected indicator or boundary is replaced while its form remains connected, the live activity is rebound to the nearest applicable indicator or fallback. Removing the form settles its activity.
 
-Lazy anti-forgery token preparation is inside the loading interval. If token refresh fails, RazorWire cancels the paused form submission without sending an unprotected POST, clears the loading state, and leaves the form retryable. The existing failed-form path owns the explanation. If failed-form UX is disabled, the host app owns that explanation. See [Security & Anti-Forgery](antiforgery.md) for token setup and recovery details.
+Lazy anti-forgery token preparation is inside the loading interval. If token refresh fails, RazorWire cancels the paused form submission without sending an unprotected POST, clears the loading state, and leaves the form retryable. The existing failed-form path owns the explanation. If failed-form UX is disabled, the host app owns that explanation. Aborting a pending token preparation also resumes Turbo without a POST, but does not show a failure message for that deliberate cancellation; this applies even when loading feedback is opted out. See [Security & Anti-Forgery](antiforgery.md) for token setup and recovery details.
 
 Loading applies to form submissions, not arbitrary requests or navigation. A separate accepted Turbo visit can use Turbo's navigation progress bar alongside an app-owned form indicator. While a package fallback is active, it remains the single top-level signal. If the form finishes before the visit, the fallback carries feedback until the visit finishes, including when the form had used an app indicator. A canceled visit does not change the form signal. No loading-specific public events or navigation API are added.
 
@@ -112,7 +112,7 @@ Set these on `:root`, `body`, or an app shell to match the host theme. The anima
 
 ### Strict Content Security Policy
 
-`<rw:scripts />` emits a normal same-origin stylesheet link for `/_content/ForgeTrust.RazorWire/razorwire/razorwire.loading.css` (with the app path base and static-file versioning applied). The host's Content Security Policy must authorize that resource under `style-src`; for a same-origin package asset, `style-src 'self'` is sufficient. A script nonce does not authorize an external stylesheet under a nonce-only `style-src` policy. The package fallback does not rely on a nonce-less inline style block or style attribute. If the stylesheet is missing or stale, rebuild and verify the generated assets as described in the [runtime contract pipeline](runtime-contract-pipeline.md).
+When `Forms.Loading.Enabled` is true, `<rw:scripts />` emits a normal same-origin stylesheet link for `/_content/ForgeTrust.RazorWire/razorwire/razorwire.loading.css` (with the app path base and static-file versioning applied). Disabling form loading omits the link. The host's Content Security Policy must authorize that resource under `style-src`; for a same-origin package asset, `style-src 'self'` is sufficient. A script nonce does not authorize an external stylesheet under a nonce-only `style-src` policy. The package fallback does not rely on a nonce-less inline style block or style attribute. If the stylesheet is missing or stale, rebuild and verify the generated assets as described in the [runtime contract pipeline](runtime-contract-pipeline.md).
 
 ## Troubleshooting
 

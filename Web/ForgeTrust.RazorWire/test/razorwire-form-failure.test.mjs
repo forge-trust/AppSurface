@@ -54,6 +54,31 @@ test('before fetch supports Headers-like request headers', () => {
   assert.equal(headers.get('X-RazorWire-Form'), 'true');
 });
 
+test('a link prefetch inside a form does not start form loading or mark the request as a form POST', () => {
+  const { document } = loadRuntime({ authoredRuntime: true });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-loading', 'true');
+  const link = new FakeElement('a');
+  const submitter = new FakeElement('button');
+  submitter.type = 'submit';
+  form.elements = [submitter];
+  form.appendChild(link);
+  document.body.appendChild(form);
+  const fetchOptions = { headers: {} };
+
+  document.dispatchEvent({
+    type: 'turbo:before-fetch-request',
+    target: link,
+    detail: { fetchOptions }
+  });
+
+  assert.equal(form.getAttribute('data-rw-loading-state'), null);
+  assert.equal(document.body.querySelector('[data-rw-loading-fallback]'), null);
+  assert.equal(submitter.disabled, false);
+  assert.equal(fetchOptions.headers['X-RazorWire-Form'], undefined);
+});
+
 test('authored runtime aborts a rejected lazy token before resuming and preserves the preparation failure through Turbo submit-end', async () => {
   const tokenRequests = [];
   let tokenRequestCount = 0;
@@ -180,6 +205,137 @@ test('authored runtime aborts a rejected lazy token before resuming and preserve
   assert.equal(submitter.disabled, false);
 });
 
+test('aborting a held lazy-token request resumes immediately without posting or leaving loading active', async () => {
+  let releaseToken;
+  const tokenResponse = new Promise(resolve => { releaseToken = resolve; });
+  const { document } = loadRuntime({
+    authoredRuntime: true,
+    fetch: async () => tokenResponse
+  });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.setAttribute('data-rw-loading', 'true');
+  const submitter = new FakeElement('button');
+  submitter.type = 'submit';
+  form.elements = [submitter];
+  document.body.appendChild(form);
+
+  const controller = new AbortController();
+  const fetchOptions = { headers: {}, signal: controller.signal };
+  let resumeCount = 0;
+  let postCount = 0;
+  let failureCount = 0;
+  form.addEventListener('razorwire:form:failure', () => { failureCount += 1; });
+  const event = {
+    type: 'turbo:before-fetch-request',
+    target: form,
+    defaultPrevented: false,
+    preventDefault() { this.defaultPrevented = true; },
+    detail: {
+      fetchOptions,
+      resume: () => {
+        resumeCount += 1;
+        if (!fetchOptions.signal.aborted) postCount += 1;
+      }
+    }
+  };
+  document.dispatchEvent(event);
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(form.getAttribute('data-rw-loading-state'), 'pending');
+  assert.equal(submitter.disabled, true);
+  const submission = { submitter, fetchRequest: { fetchOptions } };
+  document.dispatchEvent({
+    type: 'turbo:submit-start',
+    target: form,
+    detail: { formSubmission: submission }
+  });
+
+  controller.abort();
+  assert.equal(form.isConnected, true);
+  assert.equal(resumeCount, 1);
+  assert.equal(postCount, 0);
+  assert.equal(fetchOptions.signal.aborted, true);
+  assert.equal(form.getAttribute('data-rw-loading-state'), null);
+  assert.equal(submitter.disabled, false);
+  document.dispatchEvent({
+    type: 'turbo:fetch-request-error',
+    target: form,
+    detail: { request: { fetchOptions } }
+  });
+  document.dispatchEvent({
+    type: 'turbo:submit-end',
+    target: form,
+    detail: { formSubmission: submission, success: false }
+  });
+  assert.equal(failureCount, 0);
+  assert.equal(form.querySelector('[data-rw-form-error-generated]'), null);
+  assert.equal(form.getAttribute('data-rw-submit-status'), null);
+
+  releaseToken({
+    ok: true,
+    json: async () => ({
+      formFieldName: '__RequestVerificationToken',
+      requestToken: 'late-token',
+      headerName: 'RequestVerificationToken'
+    })
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(resumeCount, 1);
+  assert.equal(postCount, 0);
+});
+
+test('an opted-out loading form still cancels a held lazy-token continuation without failure UI', async () => {
+  let releaseToken;
+  const tokenResponse = new Promise(resolve => { releaseToken = resolve; });
+  const { document } = loadRuntime({
+    authoredRuntime: true,
+    fetch: async () => tokenResponse
+  });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.setAttribute('data-rw-loading', 'off');
+  document.body.appendChild(form);
+  const controller = new AbortController();
+  const fetchOptions = { headers: {}, signal: controller.signal };
+  let resumeCount = 0;
+  let failureCount = 0;
+  form.addEventListener('razorwire:form:failure', () => { failureCount += 1; });
+  document.dispatchEvent({
+    type: 'turbo:before-fetch-request',
+    target: form,
+    preventDefault() {},
+    detail: { fetchOptions, resume: () => { resumeCount += 1; } }
+  });
+  assert.equal(form.getAttribute('data-rw-loading-state'), null);
+
+  controller.abort();
+  assert.equal(resumeCount, 1);
+  assert.equal(fetchOptions.signal.aborted, true);
+  const submission = { fetchRequest: { fetchOptions } };
+  document.dispatchEvent({
+    type: 'turbo:fetch-request-error',
+    target: form,
+    detail: { request: { fetchOptions } }
+  });
+  document.dispatchEvent({
+    type: 'turbo:submit-end',
+    target: form,
+    detail: { formSubmission: submission, success: false }
+  });
+  assert.equal(failureCount, 0);
+  assert.equal(form.querySelector('[data-rw-form-error-generated]'), null);
+
+  releaseToken({ ok: true, json: async () => ({
+    formFieldName: '__RequestVerificationToken',
+    requestToken: 'late-token',
+    headerName: 'RequestVerificationToken'
+  }) });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(resumeCount, 1);
+});
+
 test('authored runtime shows loading with failure UX off and honors case-insensitive lock overrides', () => {
   const { document } = loadRuntime({ authoredRuntime: true });
   const form = new FakeForm();
@@ -209,6 +365,97 @@ test('authored runtime shows loading with failure UX off and honors case-insensi
     detail: { formSubmission: { fetchRequest: { fetchOptions } } }
   });
   assert.equal(fallback.hasAttribute('hidden'), true);
+});
+
+test('global duplicate prevention off keeps one form pending until both requests settle', () => {
+  const { document, context } = loadRuntime({
+    authoredRuntime: true,
+    formLoadingPreventDuplicateSubmissions: 'false'
+  });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-loading', 'true');
+  const submitter = new FakeElement('button');
+  submitter.type = 'submit';
+  form.elements = [submitter];
+  document.body.appendChild(form);
+
+  const first = { headers: {} };
+  const second = { headers: {} };
+  for (const fetchOptions of [first, second]) {
+    document.dispatchEvent({
+      type: 'turbo:before-fetch-request',
+      target: form,
+      detail: { fetchOptions }
+    });
+  }
+
+  const fallback = document.body.querySelector('[data-rw-loading-fallback]');
+  assert.equal(context.window.RazorWire.config.formLoadingPreventDuplicateSubmissions, false);
+  assert.equal(submitter.disabled, false);
+  assert.equal(form.getAttribute('data-rw-loading-state'), 'pending');
+  assert.equal(fallback.hasAttribute('hidden'), false);
+
+  finishLoadingRequest(document, { form, fetchOptions: first });
+  assert.equal(form.getAttribute('data-rw-loading-state'), 'pending');
+  assert.equal(fallback.hasAttribute('hidden'), false);
+
+  finishLoadingRequest(document, { form, fetchOptions: second });
+  assert.equal(form.getAttribute('data-rw-loading-state'), null);
+  assert.equal(fallback.hasAttribute('hidden'), true);
+});
+
+test('overlapping unlocked submissions retain busy state through out-of-order completion', () => {
+  const { document } = loadRuntime({ authoredRuntime: true });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-loading', 'true');
+  form.setAttribute('data-rw-loading-lock', 'false');
+  const firstButton = new FakeElement('button');
+  firstButton.type = 'submit';
+  const secondButton = new FakeElement('button');
+  secondButton.type = 'submit';
+  form.elements = [firstButton, secondButton];
+  document.body.appendChild(form);
+
+  const first = { submitter: firstButton, fetchRequest: { fetchOptions: { headers: {} } } };
+  const second = { submitter: secondButton, fetchRequest: { fetchOptions: { headers: {} } } };
+  for (const submission of [first, second]) {
+    document.dispatchEvent({
+      type: 'turbo:before-fetch-request',
+      target: form,
+      detail: { fetchOptions: submission.fetchRequest.fetchOptions }
+    });
+    document.dispatchEvent({
+      type: 'turbo:submit-start',
+      target: form,
+      detail: { formSubmission: submission }
+    });
+  }
+
+  assert.equal(firstButton.disabled, false);
+  assert.equal(secondButton.disabled, false);
+  assert.equal(form.getAttribute('aria-busy'), 'true');
+  assert.equal(form.getAttribute('data-rw-loading-state'), 'pending');
+
+  document.dispatchEvent({
+    type: 'turbo:submit-end',
+    target: form,
+    detail: { formSubmission: first, success: true }
+  });
+  assert.equal(form.getAttribute('aria-busy'), 'true');
+  assert.equal(form.getAttribute('data-rw-submit-status'), 'submitting');
+  assert.equal(form.getAttribute('data-rw-loading-state'), 'pending');
+  assert.equal(firstButton.disabled, false);
+  assert.equal(secondButton.disabled, false);
+
+  document.dispatchEvent({
+    type: 'turbo:submit-end',
+    target: form,
+    detail: { formSubmission: second, success: true }
+  });
+  assert.equal(form.getAttribute('aria-busy'), null);
+  assert.equal(form.getAttribute('data-rw-submit-status'), null);
+  assert.equal(form.getAttribute('data-rw-loading-state'), null);
 });
 
 test('authored runtime treats loading off case-insensitively', () => {
@@ -417,6 +664,49 @@ test('authored runtime rebinds a pending form when its local indicator is remove
   assert.equal(outerIndicator.hasAttribute('hidden'), true);
   assert.equal(document.documentElement.getAttribute('data-rw-loading-form-state'), null);
   assert.equal(observer.disconnected, true);
+});
+
+test('pending DOM observer skips unrelated mutations and reconciles only the changed boundary', () => {
+  const { document, mutationObservers } = loadRuntime({ authoredRuntime: true });
+  const first = startLoadingRequest(document, { appIndicator: true });
+  const second = startLoadingRequest(document, { appIndicator: true });
+  const firstBoundary = first.form.parentElement;
+  const secondBoundary = second.form.parentElement;
+  const firstQuery = firstBoundary.querySelectorAll.bind(firstBoundary);
+  const secondQuery = secondBoundary.querySelectorAll.bind(secondBoundary);
+  let firstScans = 0;
+  let secondScans = 0;
+  firstBoundary.querySelectorAll = (...args) => {
+    firstScans += 1;
+    return firstQuery(...args);
+  };
+  secondBoundary.querySelectorAll = (...args) => {
+    secondScans += 1;
+    return secondQuery(...args);
+  };
+
+  const observer = mutationObservers.at(-1);
+  observer.trigger([{
+    type: 'childList',
+    target: document.body,
+    addedNodes: [new FakeElement('p')],
+    removedNodes: []
+  }]);
+  assert.equal(firstScans, 0);
+  assert.equal(secondScans, 0);
+
+  observer.trigger([{
+    type: 'attributes',
+    target: first.indicator,
+    attributeName: 'data-rw-loading-indicator',
+    addedNodes: [],
+    removedNodes: []
+  }]);
+  assert.ok(firstScans > 0);
+  assert.equal(secondScans, 0);
+
+  finishLoadingRequest(document, first);
+  finishLoadingRequest(document, second);
 });
 
 test('authored runtime restores a form boundary state after rebinding its removed indicator', () => {

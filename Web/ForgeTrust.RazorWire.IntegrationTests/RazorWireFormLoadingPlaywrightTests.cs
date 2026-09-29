@@ -115,6 +115,83 @@ public sealed class RazorWireFormLoadingPlaywrightTests
     }
 
     [Fact]
+    public async Task AbortedLazyTokenRequest_ResumesWithoutPostingOrLeavingLoadingActive()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        var tokenStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseToken = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var posts = 0;
+        page.Request += (_, request) =>
+        {
+            if (request.Method == "POST" && request.Url.Contains("/Reactivity/SubmitFormLoading", StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref posts);
+            }
+        };
+        await page.RouteAsync("**/_rw/antiforgery/token", async route =>
+        {
+            tokenStarted.TrySetResult();
+            await releaseToken.Task;
+            try
+            {
+                await route.ContinueAsync();
+            }
+            catch (PlaywrightException)
+            {
+                // The page may cancel the held token fetch before this route is released.
+            }
+        });
+
+        try
+        {
+            await page.GotoAsync($"{_fixture.BaseUrl}/Reactivity/FormLoading");
+            await page.Locator("#loading-local-form").EvaluateAsync(
+                """
+                form => {
+                    window.__loadingResumeCount = 0;
+                    window.__loadingFailureCount = 0;
+                    window.__loadingSubmitEndCount = 0;
+                    form.addEventListener('razorwire:form:failure', () => window.__loadingFailureCount++);
+                    form.addEventListener('turbo:submit-end', () => window.__loadingSubmitEndCount++);
+                    form.addEventListener('turbo:before-fetch-request', event => {
+                        const controller = new AbortController();
+                        event.detail.fetchOptions.signal = controller.signal;
+                        window.__loadingAbortController = controller;
+                        const resume = event.detail.resume;
+                        event.detail.resume = () => {
+                            window.__loadingResumeCount++;
+                            resume();
+                        };
+                    });
+                }
+                """);
+            await page.Locator("#loading-local-primary").ClickAsync();
+            await tokenStarted.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            await Assertions.Expect(page.Locator("#loading-local-form [data-rw-loading-indicator]")).ToBeVisibleAsync();
+
+            await page.EvaluateAsync("() => window.__loadingAbortController.abort()");
+            await page.WaitForFunctionAsync("() => window.__loadingResumeCount === 1");
+            await page.WaitForFunctionAsync("() => window.__loadingSubmitEndCount === 1");
+            await Assertions.Expect(page.Locator("#loading-local-form [data-rw-loading-indicator]")).ToBeHiddenAsync();
+            Assert.Null(await page.Locator("#loading-local-form").GetAttributeAsync("data-rw-loading-state"));
+            Assert.False(await page.Locator("#loading-local-primary").IsDisabledAsync());
+            Assert.Equal(0, await page.EvaluateAsync<int>("() => window.__loadingFailureCount"));
+            Assert.Equal(0, await page.Locator("#loading-local-form [data-rw-form-error-generated]").CountAsync());
+            Assert.Equal(0, posts);
+
+            releaseToken.TrySetResult();
+            await page.WaitForTimeoutAsync(100);
+            Assert.Equal(1, await page.EvaluateAsync<int>("() => window.__loadingResumeCount"));
+            Assert.Equal(0, posts);
+        }
+        finally
+        {
+            releaseToken.TrySetResult();
+        }
+    }
+
+    [Fact]
     public async Task LocalSiteAndFallbackIndicators_FollowBoundaryPrecedence()
     {
         await using var context = await _fixture.Browser.NewContextAsync();
