@@ -708,6 +708,29 @@ class WorkflowTransportTests(unittest.TestCase):
         self.assertNotIn("osx-x64", result.stdout + result.stderr.split("Current native invocation")[0])
         self.assertIn("osx-x64", result.stderr)
 
+    def test_tailwind_manifest_checkout_preserves_producer_bytes_with_autocrlf(self) -> None:
+        relative = Path("Web/ForgeTrust.AppSurface.Web.Tailwind/tailwind.release.json")
+        expected = (ROOT / relative).read_bytes()
+        self.assertIn(b"\n", expected)
+        self.assertNotIn(b"\r\n", expected)
+
+        checkout = self.root / "git-checkout"
+        manifest = checkout / relative
+        manifest.parent.mkdir(parents=True)
+        shutil.copyfile(ROOT / ".gitattributes", checkout / ".gitattributes")
+        manifest.write_bytes(expected)
+        subprocess.run(["git", "init", "-q"], cwd=checkout, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-c", "core.autocrlf=true", "add", ".gitattributes", relative.as_posix()],
+            cwd=checkout, check=True, capture_output=True,
+        )
+        manifest.unlink()
+        subprocess.run(
+            ["git", "-c", "core.autocrlf=true", "checkout-index", "--force", "--", relative.as_posix()],
+            cwd=checkout, check=True, capture_output=True,
+        )
+        self.assertEqual(expected, manifest.read_bytes())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
