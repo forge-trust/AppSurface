@@ -285,6 +285,65 @@ test('aborting a held lazy-token request resumes immediately without posting or 
   assert.equal(postCount, 0);
 });
 
+test('pagehide cancels a held lazy-token submission before a restored page can post', async () => {
+  let releaseToken;
+  const tokenResponse = new Promise(resolve => { releaseToken = resolve; });
+  const { document, window } = loadRuntime({
+    authoredRuntime: true,
+    fetch: async () => tokenResponse
+  });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.setAttribute('data-rw-loading', 'true');
+  const submitter = new FakeElement('button');
+  submitter.type = 'submit';
+  form.elements = [submitter];
+  document.body.appendChild(form);
+
+  const fetchOptions = { headers: {}, signal: new AbortController().signal };
+  let resumeCount = 0;
+  let postCount = 0;
+  const submission = { submitter, fetchRequest: { fetchOptions } };
+  document.dispatchEvent({
+    type: 'turbo:before-fetch-request',
+    target: form,
+    preventDefault() {},
+    detail: {
+      fetchOptions,
+      resume: () => {
+        resumeCount += 1;
+        if (!fetchOptions.signal.aborted) postCount += 1;
+      }
+    }
+  });
+  document.dispatchEvent({
+    type: 'turbo:submit-start',
+    target: form,
+    detail: { formSubmission: submission }
+  });
+  assert.equal(form.getAttribute('data-rw-loading-state'), 'pending');
+
+  window.dispatchEvent({ type: 'pagehide' });
+  assert.equal(resumeCount, 1);
+  assert.equal(postCount, 0);
+  assert.equal(fetchOptions.signal.aborted, true);
+  assert.equal(form.getAttribute('data-rw-loading-state'), null);
+  assert.equal(submitter.disabled, false);
+
+  releaseToken({
+    ok: true,
+    json: async () => ({
+      formFieldName: '__RequestVerificationToken',
+      requestToken: 'late-token',
+      headerName: 'RequestVerificationToken'
+    })
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(resumeCount, 1);
+  assert.equal(postCount, 0);
+});
+
 test('an opted-out loading form still cancels a held lazy-token continuation without failure UI', async () => {
   let releaseToken;
   const tokenResponse = new Promise(resolve => { releaseToken = resolve; });

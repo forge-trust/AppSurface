@@ -1499,7 +1499,7 @@ declare const Turbo: TurboRuntime | undefined;
 
             attempt.settled = true;
             if (this.turboVisitPending && attempt.visual) this.retainFallbackForVisit();
-            if (reason === 'form-disconnected' || reason === 'aborted') {
+            if (reason === 'form-disconnected' || reason === 'aborted' || reason === 'pagehide') {
                 this.formFailureManager?.cancelPendingAntiforgery(attempt.fetchOptions);
             }
 

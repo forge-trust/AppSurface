@@ -203,7 +203,8 @@ public sealed class RazorWireFormLoadingPlaywrightTests
         await Assertions.Expect(page.Locator("#loading-local-form [data-rw-loading-indicator]")).ToBeHiddenAsync();
         await Assertions.Expect(page.Locator("#form-loading-result")).ToContainTextAsync("Saved site form.");
 
-        Assert.Null(await page.Locator("#loading-fallback-form").GetAttributeAsync("data-rw-form"));
+        Assert.Equal("true", await page.Locator("#loading-fallback-form").GetAttributeAsync("data-rw-form"));
+        Assert.Equal("off", await page.Locator("#loading-fallback-form").GetAttributeAsync("data-rw-form-failure"));
         Assert.Equal("true", await page.Locator("#loading-fallback-form").GetAttributeAsync("data-rw-loading"));
         var postStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releasePost = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
