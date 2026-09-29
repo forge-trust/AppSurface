@@ -485,7 +485,8 @@ class WorkflowTransportTests(unittest.TestCase):
         self.assertIn("ref: ${{ env.SOURCE_COMMIT }}", source)
         self.assertIn('actual="$(git rev-parse HEAD)"', source)
         self.assertIn('test "$actual" = "$SOURCE_COMMIT"', source)
-        self.assertEqual(source.count('/p:SourceRevisionId="$SOURCE_REVISION_ID"'), 2)
+        self.assertEqual(source.count('-p:SourceRevisionId="$SOURCE_REVISION_ID"'), 2)
+        self.assertNotIn('/p:SourceRevisionId="$SOURCE_REVISION_ID"', source)
         for publisher in PUBLISHERS:
             text = publisher.read_text()
             self.assertIn("source_commit: ${{ needs.validate-tag.outputs.tag-commit }}", text)

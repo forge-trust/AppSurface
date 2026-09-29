@@ -128,6 +128,11 @@ successful artifact from an earlier workflow run.
 Every selected native runner must provide Bash, `jq`, and either `sha256sum` or
 `shasum`. Treat a missing prerequisite as a host-configuration failure and install the
 tool before enabling the runner label in `TAILWIND_NATIVE_HOST_RUNNERS`.
+The native consumer proof must pass `restore` or `build` as the first `dotnet` argument;
+a project path alone is interpreted as a command name. On Windows runners using Git
+Bash, use the `-p:SourceRevisionId=...` MSBuild switch when stamping the verifier.
+Git Bash rewrites the leading slash in `/p:...`, leaving MSBuild with an extra project
+argument.
 
 Cache misses are normal after dependency updates, lock-file updates, or cache eviction. The cache is only useful if warm runs reduce selected workflow time or runner minutes without regressing the all-green decision path. For cache experiments, record at least:
 

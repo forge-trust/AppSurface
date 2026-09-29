@@ -137,7 +137,7 @@ jobs:
           SOURCE_REVISION_ID: ${{ env.SOURCE_COMMIT }}
         run: |
           dotnet restore tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --locked-mode
-          dotnet build tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --configuration Release --no-restore --output "$RUNNER_TEMP/package-index" /p:SourceRevisionId="$SOURCE_REVISION_ID"
+          dotnet build tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --configuration Release --no-restore --output "$RUNNER_TEMP/package-index" -p:SourceRevisionId="$SOURCE_REVISION_ID"
 
       - name: Prove frozen producer package on native host
         shell: bash
@@ -287,7 +287,7 @@ jobs:
       - name: Build verifier
         env:
           SOURCE_REVISION_ID: ${{ env.SOURCE_COMMIT }}
-        run: dotnet build tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -c Release --no-restore --output "$RUNNER_TEMP/package-index" /p:SourceRevisionId="$SOURCE_REVISION_ID"
+        run: dotnet build tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -c Release --no-restore --output "$RUNNER_TEMP/package-index" -p:SourceRevisionId="$SOURCE_REVISION_ID"
       - name: Validate host receipts and create aggregate
         id: aggregate
         shell: bash
