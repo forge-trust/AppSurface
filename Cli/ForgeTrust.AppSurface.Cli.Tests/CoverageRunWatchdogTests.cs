@@ -1053,7 +1053,9 @@ public sealed class CoverageRunWatchdogTests
 
     private static async Task WaitForIncidentOrdinalAsync(string path, int ordinal)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        // A prior warning may still be writing its artifact when the rearmed incident is queued.
+        // Allow that bounded write and the monitor's next turn under loaded CI scheduling.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         while (true)
         {
             try
