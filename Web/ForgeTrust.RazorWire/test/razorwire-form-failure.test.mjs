@@ -344,6 +344,57 @@ test('pagehide cancels a held lazy-token submission before a restored page can p
   assert.equal(postCount, 0);
 });
 
+test('pagehide cancels lazy-token submissions when loading is opted out or disabled globally', async () => {
+  for (const mode of ['form-off', 'global-off']) {
+    let releaseToken;
+    const tokenResponse = new Promise(resolve => { releaseToken = resolve; });
+    const { document, window } = loadRuntime({
+      authoredRuntime: true,
+      formLoadingEnabled: mode === 'global-off' ? 'false' : 'true',
+      fetch: async () => tokenResponse
+    });
+    const form = new FakeForm();
+    form.setAttribute('data-rw-form', 'true');
+    form.setAttribute('data-rw-antiforgery', 'lazy');
+    form.setAttribute('data-rw-loading', mode === 'form-off' ? 'off' : 'true');
+    document.body.appendChild(form);
+
+    const fetchOptions = { headers: {}, signal: new AbortController().signal };
+    let resumeCount = 0;
+    let postCount = 0;
+    document.dispatchEvent({
+      type: 'turbo:before-fetch-request',
+      target: form,
+      preventDefault() {},
+      detail: {
+        fetchOptions,
+        resume: () => {
+          resumeCount += 1;
+          if (!fetchOptions.signal.aborted) postCount += 1;
+        }
+      }
+    });
+    assert.equal(form.getAttribute('data-rw-loading-state'), null, mode);
+
+    window.dispatchEvent({ type: 'pagehide' });
+    assert.equal(resumeCount, 1, mode);
+    assert.equal(postCount, 0, mode);
+    assert.equal(fetchOptions.signal.aborted, true, mode);
+
+    releaseToken({
+      ok: true,
+      json: async () => ({
+        formFieldName: '__RequestVerificationToken',
+        requestToken: 'late-token',
+        headerName: 'RequestVerificationToken'
+      })
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(resumeCount, 1, mode);
+    assert.equal(postCount, 0, mode);
+  }
+});
+
 test('an opted-out loading form still cancels a held lazy-token continuation without failure UI', async () => {
   let releaseToken;
   const tokenResponse = new Promise(resolve => { releaseToken = resolve; });

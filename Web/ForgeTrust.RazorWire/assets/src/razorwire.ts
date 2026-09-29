@@ -1618,6 +1618,7 @@ declare const Turbo: TurboRuntime | undefined;
         activeStates: WeakMap<HTMLFormElement, Set<FormSubmitState>>;
         antiforgeryRefreshes: WeakMap<HTMLFormElement, Promise<AntiforgeryTokenPayload | null>>;
         antiforgeryContinuations: WeakMap<object, AntiforgeryContinuation>;
+        activeAntiforgeryContinuations: Set<AntiforgeryContinuation>;
         preparationFailures: WeakMap<object, true>;
         canceledPreparations: WeakMap<object, true>;
         reportedAntiforgeryFailures: WeakSet<Promise<AntiforgeryTokenPayload | null>>;
@@ -1633,6 +1634,7 @@ declare const Turbo: TurboRuntime | undefined;
             this.activeStates = new WeakMap();
             this.antiforgeryRefreshes = new WeakMap();
             this.antiforgeryContinuations = new WeakMap();
+            this.activeAntiforgeryContinuations = new Set();
             this.preparationFailures = new WeakMap();
             this.canceledPreparations = new WeakMap();
             this.reportedAntiforgeryFailures = new WeakSet();
@@ -1652,6 +1654,7 @@ declare const Turbo: TurboRuntime | undefined;
             document.addEventListener('turbo:submit-start', event => this.handleSubmitStart(event));
             document.addEventListener('turbo:submit-end', event => this.handleSubmitEnd(event));
             document.addEventListener('turbo:fetch-request-error', event => this.handleFetchRequestError(event));
+            window.addEventListener('pagehide', () => this.cancelAllPendingAntiforgery());
         }
 
         handleBeforeFetchRequest(event) {
@@ -1696,6 +1699,7 @@ declare const Turbo: TurboRuntime | undefined;
                     abortListener: null
                 };
                 this.antiforgeryContinuations.set(fetchOptions, continuation);
+                this.activeAntiforgeryContinuations.add(continuation);
                 if (signal) {
                     continuation.abortListener = () => this.cancelPendingAntiforgery(fetchOptions);
                     signal.addEventListener('abort', continuation.abortListener, { once: true });
@@ -1740,6 +1744,7 @@ declare const Turbo: TurboRuntime | undefined;
             }
             continuation.resumed = true;
             this.antiforgeryContinuations.delete(continuation.fetchOptions);
+            this.activeAntiforgeryContinuations.delete(continuation);
             continuation.resume();
         }
 
@@ -1759,10 +1764,17 @@ declare const Turbo: TurboRuntime | undefined;
                 continuation.signal.removeEventListener('abort', continuation.abortListener);
             }
             this.antiforgeryContinuations.delete(fetchOptions);
+            this.activeAntiforgeryContinuations.delete(continuation);
             this.canceledPreparations.set(fetchOptions, true);
             this.abortFetchOptions(fetchOptions);
             continuation.resumed = true;
             continuation.resume();
+        }
+
+        cancelAllPendingAntiforgery() {
+            for (const continuation of Array.from(this.activeAntiforgeryContinuations)) {
+                this.cancelPendingAntiforgery(continuation.fetchOptions);
+            }
         }
 
         handleAntiforgeryIntent(event) {
