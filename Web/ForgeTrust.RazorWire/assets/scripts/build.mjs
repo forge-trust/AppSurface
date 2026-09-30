@@ -16,10 +16,11 @@ const generatedOutputs = [
     output: path.join(outputRoot, 'razorwire.js'),
     label: 'razorwire.js',
     banner: 'Generated from assets/src/razorwire.ts. Do not edit wwwroot/razorwire/razorwire.js by hand.',
-    // Form loading plus per-request failed-form state keeps overlapping unlocked submissions correct.
-    // The reviewed bundle is 48,117 raw / 12,373 gzip bytes; retain only narrow growth headroom.
-    rawBytes: 49_000,
-    gzipBytes: 12_500
+    // Form loading, per-request failed-form state, and detached lazy-token cancellation
+    // keep form submissions safe through overlap and DOM removal. The reviewed bundle
+    // is 49,364 raw / 12,530 gzip bytes; retain narrow growth headroom.
+    rawBytes: 50_000,
+    gzipBytes: 12_750
   },
   {
     entry: path.join(assetRoot, 'src', 'razorwire.islands.ts'),
@@ -209,12 +210,6 @@ async function copyAuthoredOutputs() {
   }
 }
 
-async function buildAuthoredAssets() {
-  await mkdir(outputRoot, { recursive: true });
-  await copyAuthoredOutputs();
-  await verifyAssetBudgets(authoredOutputs);
-}
-
 async function buildAssets() {
   await mkdir(outputRoot, { recursive: true });
 
@@ -248,4 +243,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   await buildAssets();
 }
 
-export { authoredOutputs, buildAssets, buildAuthoredAssets, copiedThirdPartyOutputs, copyThirdPartyOutput, generatedOutputs, outputRoot };
+export { authoredOutputs, buildAssets, copiedThirdPartyOutputs, copyThirdPartyOutput, generatedOutputs, outputRoot };

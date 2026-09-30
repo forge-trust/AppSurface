@@ -78,6 +78,7 @@ interface SubmitControlReference {
 }
 
 interface AntiforgeryContinuation {
+    form: HTMLFormElement;
     fetchOptions: Record<string, unknown>;
     resume: () => void;
     resumed: boolean;
@@ -899,7 +900,7 @@ declare const Turbo: TurboRuntime | undefined;
      * @attribute data-rw-loading-boundary
      * @target ancestor element
      * @type {boolean}
-     * @default nearest marked ancestor, then body
+     * @default none; only marked ancestors are boundaries
      */
 
     /**
@@ -1320,7 +1321,7 @@ declare const Turbo: TurboRuntime | undefined;
         resolveVisual(form: HTMLFormElement) {
             let boundary: Element | null = form;
             while (boundary) {
-                if (boundary.hasAttribute('data-rw-loading-boundary') || boundary === document.body) {
+                if (boundary.hasAttribute('data-rw-loading-boundary')) {
                     const indicator = this.firstOwnedIndicator(boundary);
                     if (indicator) {
                         return {
@@ -1353,7 +1354,7 @@ declare const Turbo: TurboRuntime | undefined;
                 if (current.hasAttribute('data-rw-loading-boundary')) return current;
                 current = current.parentElement;
             }
-            return document.body?.contains(element) ? document.body : null;
+            return null;
         }
 
         ensureFallback() {
@@ -1619,6 +1620,7 @@ declare const Turbo: TurboRuntime | undefined;
         antiforgeryRefreshes: WeakMap<HTMLFormElement, Promise<AntiforgeryTokenPayload | null>>;
         antiforgeryContinuations: WeakMap<object, AntiforgeryContinuation>;
         activeAntiforgeryContinuations: Set<AntiforgeryContinuation>;
+        antiforgeryDomObserver: MutationObserver | null;
         preparationFailures: WeakMap<object, true>;
         canceledPreparations: WeakMap<object, true>;
         reportedAntiforgeryFailures: WeakSet<Promise<AntiforgeryTokenPayload | null>>;
@@ -1635,6 +1637,7 @@ declare const Turbo: TurboRuntime | undefined;
             this.antiforgeryRefreshes = new WeakMap();
             this.antiforgeryContinuations = new WeakMap();
             this.activeAntiforgeryContinuations = new Set();
+            this.antiforgeryDomObserver = null;
             this.preparationFailures = new WeakMap();
             this.canceledPreparations = new WeakMap();
             this.reportedAntiforgeryFailures = new WeakSet();
@@ -1691,6 +1694,7 @@ declare const Turbo: TurboRuntime | undefined;
                     ? rawSignal as AbortSignal
                     : null;
                 const continuation: AntiforgeryContinuation = {
+                    form,
                     fetchOptions,
                     resume,
                     resumed: false,
@@ -1700,6 +1704,7 @@ declare const Turbo: TurboRuntime | undefined;
                 };
                 this.antiforgeryContinuations.set(fetchOptions, continuation);
                 this.activeAntiforgeryContinuations.add(continuation);
+                this.observePendingAntiforgeryDom();
                 if (signal) {
                     continuation.abortListener = () => this.cancelPendingAntiforgery(fetchOptions);
                     signal.addEventListener('abort', continuation.abortListener, { once: true });
@@ -1713,11 +1718,19 @@ declare const Turbo: TurboRuntime | undefined;
                 preparation
                     .then(token => {
                         if (continuation.canceled) return;
+                        if (!form.isConnected) {
+                            this.cancelPendingAntiforgery(fetchOptions);
+                            return;
+                        }
                         this.applyAntiforgeryTokenToFetchOptions(fetchOptions, token);
                         this.resumeAntiforgeryContinuation(continuation);
                     })
                     .catch(error => {
                         if (continuation.canceled) return;
+                        if (!form.isConnected) {
+                            this.cancelPendingAntiforgery(fetchOptions);
+                            return;
+                        }
 
                         // Turbo resumes a prevented before-fetch event even when token preparation
                         // failed. Replacing this request's signal before resume makes Turbo finish
@@ -1737,6 +1750,27 @@ declare const Turbo: TurboRuntime | undefined;
             }
         }
 
+        /** Cancels paused requests when their forms leave the document, even without loading feedback. */
+        observePendingAntiforgeryDom() {
+            if (this.antiforgeryDomObserver || typeof MutationObserver === 'undefined' || !document.documentElement) return;
+
+            this.antiforgeryDomObserver = new MutationObserver(() => {
+                for (const continuation of Array.from(this.activeAntiforgeryContinuations)) {
+                    if (!continuation.form.isConnected) {
+                        this.cancelPendingAntiforgery(continuation.fetchOptions);
+                    }
+                }
+            });
+            this.antiforgeryDomObserver.observe(document.documentElement, { childList: true, subtree: true });
+        }
+
+        /** Releases the disconnect observer once no anti-forgery request is paused. */
+        disconnectPendingAntiforgeryDomObserver() {
+            if (this.activeAntiforgeryContinuations.size > 0) return;
+            this.antiforgeryDomObserver?.disconnect();
+            this.antiforgeryDomObserver = null;
+        }
+
         resumeAntiforgeryContinuation(continuation: AntiforgeryContinuation) {
             if (continuation.resumed || continuation.canceled) return;
             if (continuation.signal && continuation.abortListener) {
@@ -1745,6 +1779,7 @@ declare const Turbo: TurboRuntime | undefined;
             continuation.resumed = true;
             this.antiforgeryContinuations.delete(continuation.fetchOptions);
             this.activeAntiforgeryContinuations.delete(continuation);
+            this.disconnectPendingAntiforgeryDomObserver();
             continuation.resume();
         }
 
@@ -1765,6 +1800,7 @@ declare const Turbo: TurboRuntime | undefined;
             }
             this.antiforgeryContinuations.delete(fetchOptions);
             this.activeAntiforgeryContinuations.delete(continuation);
+            this.disconnectPendingAntiforgeryDomObserver();
             this.canceledPreparations.set(fetchOptions, true);
             this.abortFetchOptions(fetchOptions);
             continuation.resumed = true;

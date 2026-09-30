@@ -477,6 +477,34 @@ test('authored runtime shows loading with failure UX off and honors case-insensi
   assert.equal(fallback.hasAttribute('hidden'), true);
 });
 
+test('an indicator on an unmarked body cannot suppress another form’s fallback', () => {
+  const { document } = loadRuntime({ authoredRuntime: true });
+  const firstForm = new FakeForm();
+  firstForm.setAttribute('data-rw-loading', 'true');
+  const indicator = new FakeElement('span');
+  indicator.setAttribute('data-rw-loading-indicator', '');
+  indicator.setAttribute('hidden', '');
+  document.body.append(firstForm, indicator);
+
+  const secondAttempt = startLoadingRequest(document);
+  const fallback = document.body.querySelector('[data-rw-loading-fallback]');
+  assert.ok(fallback);
+  assert.equal(fallback.hasAttribute('hidden'), false);
+  assert.equal(indicator.hasAttribute('hidden'), true);
+  assert.equal(document.body.getAttribute('data-rw-loading-state'), null);
+  finishLoadingRequest(document, secondAttempt);
+  assert.equal(fallback.hasAttribute('hidden'), true);
+
+  document.body.setAttribute('data-rw-loading-boundary', '');
+  const markedAttempt = startLoadingRequest(document);
+  assert.equal(indicator.hasAttribute('hidden'), false);
+  assert.equal(fallback.hasAttribute('hidden'), true);
+  assert.equal(document.body.getAttribute('data-rw-loading-state'), 'pending');
+  finishLoadingRequest(document, markedAttempt);
+  assert.equal(indicator.hasAttribute('hidden'), true);
+  assert.equal(document.body.getAttribute('data-rw-loading-state'), null);
+});
+
 test('global duplicate prevention off keeps one form pending until both requests settle', () => {
   const { document, context } = loadRuntime({
     authoredRuntime: true,
@@ -967,6 +995,141 @@ test('authored runtime cancels pending antiforgery when its form is removed', as
   assert.equal(resumeCount, 1);
   assert.equal(fetchOptions.headers.RequestVerificationToken, undefined);
   assert.equal(observer.disconnected, true);
+});
+
+test('detached lazy-token forms cannot POST when loading is opted out or disabled', async () => {
+  for (const mode of ['form-off', 'global-off']) {
+    for (const completion of ['observer', 'token-success', 'token-failure']) {
+      let releaseToken;
+      const tokenResponse = new Promise(resolve => { releaseToken = resolve; });
+      const { document, mutationObservers } = loadRuntime({
+        authoredRuntime: true,
+        formLoadingEnabled: mode === 'global-off' ? 'false' : 'true',
+        fetch: async () => tokenResponse
+      });
+      const form = new FakeForm();
+      form.setAttribute('data-rw-form', 'true');
+      form.setAttribute('data-rw-antiforgery', 'lazy');
+      form.setAttribute('data-rw-loading', mode === 'form-off' ? 'off' : 'true');
+      document.body.appendChild(form);
+
+      const fetchOptions = { headers: {} };
+      let resumeCount = 0;
+      let postCount = 0;
+      let failureCount = 0;
+      form.addEventListener('razorwire:form:failure', () => { failureCount += 1; });
+      const requestEvent = {
+        type: 'turbo:before-fetch-request',
+        target: form,
+        defaultPrevented: false,
+        preventDefault() { this.defaultPrevented = true; },
+        detail: {
+          fetchOptions,
+          resume: () => {
+            resumeCount += 1;
+            if (!fetchOptions.signal?.aborted) postCount += 1;
+          }
+        }
+      };
+      document.dispatchEvent(requestEvent);
+
+      const observer = mutationObservers.find(candidate => !candidate.disconnected
+        && candidate.target === document.documentElement
+        && candidate.options?.childList
+        && !candidate.options?.attributes);
+      assert.equal(requestEvent.defaultPrevented, true, `${mode}/${completion}`);
+      assert.ok(observer, `${mode}/${completion}`);
+      assert.equal(document.body.querySelector('[data-rw-loading-fallback]'), null);
+
+      form.remove();
+      if (completion === 'observer') {
+        observer.trigger();
+        assert.equal(resumeCount, 1, mode);
+      } else {
+        assert.equal(resumeCount, 0, `${mode}/${completion}`);
+      }
+
+      releaseToken(completion === 'token-failure'
+        ? { ok: false, status: 503 }
+        : {
+            ok: true,
+            json: async () => ({
+              formFieldName: '__RequestVerificationToken',
+              requestToken: 'late-token',
+              headerName: 'RequestVerificationToken'
+            })
+          });
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      assert.equal(resumeCount, 1, `${mode}/${completion}`);
+      assert.equal(postCount, 0, `${mode}/${completion}`);
+      assert.equal(fetchOptions.signal.aborted, true, `${mode}/${completion}`);
+      assert.equal(failureCount, 0, `${mode}/${completion}`);
+      assert.equal(observer.disconnected, true, `${mode}/${completion}`);
+    }
+  }
+});
+
+test('one detached lazy-token form does not cancel another paused form', async () => {
+  const releaseTokens = [];
+  const { document, mutationObservers } = loadRuntime({
+    authoredRuntime: true,
+    formLoadingEnabled: 'false',
+    fetch: async () => new Promise(resolve => { releaseTokens.push(resolve); })
+  });
+  const attempts = [];
+  for (let index = 0; index < 2; index += 1) {
+    const form = new FakeForm();
+    form.setAttribute('data-rw-form', 'true');
+    form.setAttribute('data-rw-antiforgery', 'lazy');
+    document.body.appendChild(form);
+    const fetchOptions = { headers: {} };
+    const attempt = { form, fetchOptions, resumeCount: 0, postCount: 0 };
+    document.dispatchEvent({
+      type: 'turbo:before-fetch-request',
+      target: form,
+      preventDefault() {},
+      detail: {
+        fetchOptions,
+        resume: () => {
+          attempt.resumeCount += 1;
+          if (!fetchOptions.signal?.aborted) attempt.postCount += 1;
+        }
+      }
+    });
+    attempts.push(attempt);
+  }
+
+  const observer = mutationObservers.find(candidate => !candidate.disconnected
+    && candidate.target === document.documentElement
+    && candidate.options?.childList
+    && !candidate.options?.attributes);
+  assert.ok(observer);
+  assert.equal(releaseTokens.length, 2);
+
+  attempts[0].form.remove();
+  observer.trigger();
+  assert.equal(attempts[0].resumeCount, 1);
+  assert.equal(attempts[0].postCount, 0);
+  assert.equal(attempts[1].resumeCount, 0);
+  assert.equal(observer.disconnected, false);
+
+  releaseTokens[1]({
+    ok: true,
+    json: async () => ({ requestToken: 'second-token' })
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(attempts[1].resumeCount, 1);
+  assert.equal(attempts[1].postCount, 1);
+  assert.equal(observer.disconnected, true);
+
+  releaseTokens[0]({
+    ok: true,
+    json: async () => ({ requestToken: 'late-first-token' })
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(attempts[0].resumeCount, 1);
+  assert.equal(attempts[0].postCount, 0);
 });
 
 test('stream connections include credentials for configured live origin', () => {
