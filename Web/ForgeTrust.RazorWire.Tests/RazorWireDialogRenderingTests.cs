@@ -30,7 +30,6 @@ public sealed class RazorWireDialogRenderingTests
             ? new ViewComponentByNameStreamAction("update", "panel&1", "Widget", arguments)
             : new ViewComponentStreamAction("update", "panel&1", typeof(TestComponent), arguments);
 
-        Assert.Equal("panel&1", action.Target);
         var html = await action.RenderCorrelatedAsync(CreateViewContext(context), Metadata, RazorWireDialogPhase.New);
 
         Assert.Contains("target=\"panel&amp;1\"", html);
@@ -159,14 +158,13 @@ public sealed class RazorWireDialogRenderingTests
     }
 
     [Fact]
-    public async Task TargetedPartial_ExposesTargetAndIncludesSearchedLocationsOnFailure()
+    public async Task TargetedPartial_IncludesSearchedLocationsOnFailure()
     {
         var engine = A.Fake<ICompositeViewEngine>();
         A.CallTo(() => engine.FindView(A<ActionContext>._, "Missing", false)).Returns(ViewEngineResult.NotFound("Missing", []));
         A.CallTo(() => engine.GetView(null, "Missing", false)).Returns(ViewEngineResult.NotFound("Missing", ["/Views/Missing.cshtml"]));
         using var context = CreateContext(services => services.AddSingleton(engine));
         IRazorWireTargetedStreamAction action = new PartialViewStreamAction("update", "panel", "Missing");
-        Assert.Equal("panel", action.Target);
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => action.RenderAsync(CreateViewContext(context)));
         Assert.Contains("/Views/Missing.cshtml", exception.Message);
         Assert.Contains("Docs/dialog-responses.md", exception.Message);

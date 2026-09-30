@@ -1,5 +1,6 @@
 using System.Net.Mime;
 using System.Text;
+using FakeItEasy;
 using ForgeTrust.RazorWire.Forms;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -11,6 +12,7 @@ using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Primitives;
 
@@ -90,7 +92,8 @@ public class RazorWireAntiforgeryFailureFilterTests
         context.HttpContext.Request.Headers[RazorWireFormHeaders.FormRequest] = "true";
         context.HttpContext.Request.Headers["X-RazorWire-Request"] = "invalid";
         context.HttpContext.Request.Headers["X-RazorWire-Order"] = "1";
-        await CreateFilter(Environments.Development).OnResultExecutionAsync(context, () => CreateExecutedContext(context));
+        var logger = A.Fake<ILogger<RazorWireAntiforgeryFailureFilter>>();
+        await CreateFilter(Environments.Development, logger: logger).OnResultExecutionAsync(context, () => CreateExecutedContext(context));
         var result = Assert.IsType<ContentResult>(context.Result);
         Assert.Equal(400, result.StatusCode);
         Assert.Equal(MediaTypeNames.Text.Plain, result.ContentType);
@@ -98,6 +101,9 @@ public class RazorWireAntiforgeryFailureFilterTests
         Assert.DoesNotContain("<turbo-stream", result.Content);
         Assert.False(context.HttpContext.Response.Headers.ContainsKey("X-RazorWire-Request"));
         Assert.Equal("false", context.HttpContext.Response.Headers[RazorWireFormHeaders.FormHandled]);
+        var log = Assert.Single(Fake.GetCalls(logger));
+        var state = Assert.IsAssignableFrom<IEnumerable<KeyValuePair<string, object?>>>(log.Arguments[2]);
+        Assert.True(Assert.IsType<bool>(Assert.Single(state, item => item.Key == "TurboStreamRequested").Value));
     }
 
     [Fact]
@@ -320,7 +326,8 @@ public class RazorWireAntiforgeryFailureFilterTests
 
     private static RazorWireAntiforgeryFailureFilter CreateFilter(
         string environmentName,
-        Action<RazorWireOptions>? configureOptions = null)
+        Action<RazorWireOptions>? configureOptions = null,
+        ILogger<RazorWireAntiforgeryFailureFilter>? logger = null)
     {
         var options = new RazorWireOptions();
         configureOptions?.Invoke(options);
@@ -329,7 +336,7 @@ public class RazorWireAntiforgeryFailureFilterTests
             options,
             new RazorWireFormRequestClassifier(NullLogger<RazorWireFormRequestClassifier>.Instance),
             new TestWebHostEnvironment { EnvironmentName = environmentName },
-            NullLogger<RazorWireAntiforgeryFailureFilter>.Instance);
+            logger ?? NullLogger<RazorWireAntiforgeryFailureFilter>.Instance);
     }
 
     public static TheoryData<Exception> FormReadExceptions()

@@ -159,6 +159,8 @@ The runtime dispatches:
 - `razorwire:form:diagnostic`
 - `razorwire:form:submit-end`
 
+For a [dialog submission](dialog-responses.md), a stale response still dispatches `razorwire:form:submit-end` after submission cleanup, with its own result details. It does not dispatch failure UI events or modify the replacement dialog. Listen on the submitted form itself when it may have been detached by replacement; an event on a detached form cannot bubble to the document.
+
 `razorwire:form:failure` is cancelable. Call `event.preventDefault()` to suppress the default fallback while still using `FailureMode.Auto`.
 
 The event detail includes `form`, `target`, `message`, and optional `developmentDiagnostic`.

@@ -1877,7 +1877,7 @@ declare const Turbo: TurboRuntime | undefined;
         }
 
         handleSubmitEnd(event) {
-            const form = this.getForm(event.target);
+            const form = this.getForm(event.detail?.formSubmission?.formElement) || this.getForm(event.target);
             if (!this.isRazorWireForm(form)) return;
 
             const fetchOptions = this.getSubmissionFetchOptions(event.detail?.formSubmission);
@@ -1922,7 +1922,10 @@ declare const Turbo: TurboRuntime | undefined;
 
             const stillSubmitting = this.finishSubmitting(form, formState);
 
-            if (this.dialogManager.isStaleForm(form, event.detail)) return;
+            if (this.dialogManager.isStaleForm(form, event.detail)) {
+                this.dispatch(form, 'razorwire:form:submit-end', { form, submitter, success, statusCode, handled });
+                return;
+            }
 
             if (success) {
                 if (previousFailureCount > 0) {

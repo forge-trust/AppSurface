@@ -92,6 +92,7 @@ internal sealed class RazorWireAntiforgeryFailureFilter : IAsyncAlwaysRunResultF
         var request = context.HttpContext.Request;
         var useDiagnostics = _environment.IsDevelopment() && _options.Forms.EnableDevelopmentDiagnostics;
         var responseKind = SelectResponseKind(request);
+        var turboStreamRequested = responseKind == RazorWireAntiforgeryResponseKind.TurboStream;
         var message = BuildMessage(useDiagnostics);
         var turboStreamTarget = await ResolveTurboStreamTargetAsync(request, context.HttpContext.RequestAborted);
 
@@ -149,7 +150,7 @@ internal sealed class RazorWireAntiforgeryFailureFilter : IAsyncAlwaysRunResultF
             "RazorWire form antiforgery validation failed. StatusCode: {StatusCode}. Environment: {Environment}. TurboStreamRequested: {TurboStreamRequested}.",
             StatusCodes.Status400BadRequest,
             _environment.EnvironmentName,
-            responseKind == RazorWireAntiforgeryResponseKind.TurboStream);
+            turboStreamRequested);
     }
 
     private static RazorWireAntiforgeryResponseKind SelectResponseKind(HttpRequest request)

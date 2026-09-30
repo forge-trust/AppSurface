@@ -15,8 +15,6 @@ public class PartialViewStreamAction : IRazorWireTargetedStreamAction
     private readonly string _viewName;
     private readonly object? _model;
 
-    string IRazorWireTargetedStreamAction.Target => _target;
-
     /// <summary>
     /// Initializes a new <see cref="PartialViewStreamAction"/> configured to render the specified partial view and wrap its output in a Turbo Stream element.
     /// </summary>

@@ -140,8 +140,6 @@ public class ViewComponentStreamAction : IRazorWireTargetedStreamAction
     private readonly Type _componentType;
     private readonly object? _arguments;
 
-    string IRazorWireTargetedStreamAction.Target => _target;
-
     /// <summary>
     /// Creates an action that renders the specified view component type into a Turbo Stream fragment targeting the given element.
     /// </summary>
@@ -213,8 +211,6 @@ public class ViewComponentByNameStreamAction : IRazorWireTargetedStreamAction
     private readonly string _target;
     private readonly string _componentName;
     private readonly object? _arguments;
-
-    string IRazorWireTargetedStreamAction.Target => _target;
 
     /// <summary>
     /// Creates an action that renders a named view component into a Turbo Stream fragment targeting the specified element.

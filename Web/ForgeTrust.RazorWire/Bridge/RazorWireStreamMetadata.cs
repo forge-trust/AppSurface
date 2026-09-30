@@ -158,13 +158,10 @@ internal sealed record RazorWireRequestMetadata(Guid RequestId, long Order, Guid
 }
 
 /// <summary>
-/// Exposes target ownership to the response renderer without inspecting rendered stream markup.
+/// Renders package-authored target actions with request correlation metadata.
 /// </summary>
 internal interface IRazorWireTargetedStreamAction : IRazorWireStreamAction
 {
-    /// <summary>Gets the DOM target encoded by this action.</summary>
-    string Target { get; }
-
     /// <summary>Renders this action with validated request correlation metadata.</summary>
     Task<string> RenderCorrelatedAsync(
         ViewContext viewContext,

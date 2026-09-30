@@ -882,7 +882,6 @@ public class RazorWireStreamBuilder
         public string Target { get; }
         public string? Content { get; }
         public TemplateContentKind ContentKind { get; }
-        string IRazorWireTargetedStreamAction.Target => Target;
 
         /// <summary>
         /// Initializes a new instance with the specified turbo-stream action, target, and optional template content.

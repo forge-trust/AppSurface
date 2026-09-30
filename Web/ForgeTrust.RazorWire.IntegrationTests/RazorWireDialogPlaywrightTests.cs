@@ -1151,6 +1151,9 @@ public sealed class RazorWireDialogPlaywrightTests
             "**/Reactivity/CompleteDialog");
         await page.Locator("#dialog-form").EvaluateAsync(
             "form => { form.setAttribute('data-turbo-frame','dialog-inside-frame'); form.dataset.testStaleFailure = 'true'; " +
+            "window.__dialogStaleSubmitEnds = []; form.addEventListener('razorwire:form:submit-end', event => window.__dialogStaleSubmitEnds.push({ " +
+            "success: event.detail.success, statusCode: event.detail.statusCode, handled: event.detail.handled, " +
+            "submitting: form.hasAttribute('data-rw-submitting'), busy: form.hasAttribute('aria-busy') })); " +
             "document.addEventListener('turbo:submit-end', event => { if (event.detail.formSubmission.formElement === form) window.__dialogStaleFailureFinished = true; }); " +
             "form.requestSubmit(); }");
         var staleFormRequest = await delayedFailure.NextRequestAsync();
@@ -1183,6 +1186,11 @@ public sealed class RazorWireDialogPlaywrightTests
         Assert.Equal("Current error target", (await page.Locator("#dialog-errors").InnerTextAsync()).Trim());
         Assert.Equal(0, await page.Locator("[data-rw-dialog] [data-rw-form-error-generated='true']").CountAsync());
         Assert.Equal("Replacement after failed submit", await page.Locator("[data-rw-dialog-title]").InnerTextAsync());
+        Assert.Equal(1, await page.EvaluateAsync<int>("() => window.__dialogStaleSubmitEnds.length"));
+        Assert.True(await page.EvaluateAsync<bool>(
+            "() => { const event = window.__dialogStaleSubmitEnds[0]; return event.success === false && event.handled === false " +
+            "&& event.submitting === false && event.busy === false; }"));
+        Assert.Equal(networkFailure ? null : 500, await page.EvaluateAsync<int?>("() => window.__dialogStaleSubmitEnds[0].statusCode"));
     }
 
     private static async Task<IResponse> ClickAndWaitForResponseAsync(
