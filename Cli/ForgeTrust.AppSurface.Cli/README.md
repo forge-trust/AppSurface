@@ -1361,6 +1361,7 @@ Verify one exact release tree from a version catalog without starting the docs w
 ```bash
 appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3
 appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3 --trusted-release-root ./published-docs
+appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3 --max-rewritten-file-size-bytes 16777216
 ```
 
 Options:
@@ -1368,8 +1369,9 @@ Options:
 - `--catalog`: Path to the AppSurface Docs version catalog JSON file.
 - `--version`: Exact version identifier to verify.
 - `--trusted-release-root`: Trusted release root used to resolve `exactTreePath` entries. When omitted, paths resolve the same way as runtime defaults: relative to the catalog directory.
+- `--max-rewritten-file-size-bytes`: Maximum size for a rewritten HTML file or root `search-index.json` in the published tree. The default is 4,194,304 bytes (4 MiB); supported values are 1 through 33,554,432 bytes (32 MiB). Set this to the same [published tree rewrite limit](../../Web/ForgeTrust.AppSurface.Docs/README.md#published-tree-rewrite-limit) configured on a host that mounts a larger archive.
 
-The command loads the catalog, resolves the selected `exactTreePath`, and runs the same release archive verification used at runtime. Pass `--trusted-release-root` when the deployment sets `AppSurfaceDocs:Versioning:TrustedReleaseRootPath`; otherwise the local verifier may inspect a different relative tree than the host would mount. It exits nonzero when the version is missing, lacks a `releaseManifestSha256` pin, has a mismatched manifest digest, has missing or changed files, or contains handler-servable files not covered by the manifest. The catalog pin proves local archive integrity relative to trusted host configuration; it is not a signature or build provenance attestation. For stable AppSurface releases, run this verifier before `./eng/release check --docs-catalog ...` or `./eng/release publish --docs-catalog ...`; the release tool then confirms the same catalog entry is recorded in release evidence before stable publishing can continue.
+The command loads the catalog, resolves the selected `exactTreePath`, and runs the same release archive verification used at runtime. Pass `--trusted-release-root` when the deployment sets `AppSurfaceDocs:Versioning:TrustedReleaseRootPath`; otherwise the local verifier may inspect a different relative tree than the host would mount. The rewrite limit is a resource guard, not an archive integrity bypass: only raise it for a measured exported file and configure the same limit on any host that mounts that archive. A larger limit increases request-time memory exposure. It exits nonzero when the version is missing, lacks a `releaseManifestSha256` pin, has a mismatched manifest digest, has missing or changed files, or contains handler-servable files not covered by the manifest. The catalog pin proves local archive integrity relative to trusted host configuration; it is not a signature or build provenance attestation. For stable AppSurface releases, run this verifier before `./eng/release check --docs-catalog ...` or `./eng/release publish --docs-catalog ...`; the release tool then confirms the same catalog entry is recorded in release evidence before stable publishing can continue.
 
 Migration map for repo-owned AppSurface Docs export:
 
