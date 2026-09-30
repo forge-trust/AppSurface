@@ -295,6 +295,21 @@ jobs:
             --github-output "${GITHUB_OUTPUT}" \
             "${promote_arg[@]}"
 
+      # The exported archive stays bound to the immutable tag. Use the verifier from
+      # this protected workflow commit so a post-tag verifier repair can inspect it.
+      - name: Checkout archive verifier at workflow commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: release-verifier
+          persist-credentials: false
+
+      - name: Build archive verifier
+        run: |
+          set -euo pipefail
+          test "$(git -C release-verifier rev-parse HEAD)" = "${GITHUB_SHA}"
+          dotnet build release-verifier/Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release
+
       - name: Verify staged docs archive
         env:
           VERSION: ${{ needs.validate-release.outputs.version }}
@@ -302,11 +317,16 @@ jobs:
           PAGES_STAGING_ROOT: ${{ steps.docs.outputs.pages_staging_root }}
         run: |
           set -euo pipefail
-          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-build --no-restore -- \
+          max_rewritten_file_size_bytes=4194304
+          if [[ "${VERSION}" == "0.2.0-preview.11" ]]; then
+            max_rewritten_file_size_bytes=16777216
+          fi
+          dotnet run --project release-verifier/Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-build --no-restore -- \
             docs verify-archive \
             --catalog "${CATALOG_PATH}" \
             --version "${VERSION}" \
-            --trusted-release-root "${PAGES_STAGING_ROOT}"
+            --trusted-release-root "${PAGES_STAGING_ROOT}" \
+            --max-rewritten-file-size-bytes "${max_rewritten_file_size_bytes}"
 
       - name: Create or reuse draft release and upload docs assets
         env:
