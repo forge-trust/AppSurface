@@ -214,6 +214,10 @@ public class RazorWireWebModuleTests
             };
 
             using var runtimeResponse = await client.GetAsync("/_content/ForgeTrust.RazorWire/razorwire/razorwire.js");
+            using var dialogCssResponse = await client.GetAsync("/_content/ForgeTrust.RazorWire/razorwire/razorwire-dialog.css");
+            Assert.Equal(HttpStatusCode.OK, dialogCssResponse.StatusCode);
+            Assert.Equal("text/css", dialogCssResponse.Content.Headers.ContentType?.MediaType);
+            Assert.Contains("[data-rw-dialog]", await dialogCssResponse.Content.ReadAsStringAsync(), StringComparison.Ordinal);
             Assert.Equal(HttpStatusCode.OK, runtimeResponse.StatusCode);
             Assert.Equal("text/javascript", runtimeResponse.Content.Headers.ContentType?.MediaType);
             Assert.Contains(

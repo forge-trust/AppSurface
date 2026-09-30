@@ -21,6 +21,7 @@ public sealed class RazorWirePackageContractTests
     private const string PackageVersion = "0.0.0-packagecontract";
     private const string TurboPackagePath = "staticwebassets/razorwire/turbo.es2017-umd.js";
     private const string TurboSha256 = "f9e09e3a3093874fe56d5341ca3594ac959f8b097c9b6171a5b37838da3aec81";
+    private const string DialogCssPackagePath = "staticwebassets/razorwire/razorwire-dialog.css";
     private static readonly string[] FirstPartyBrowserPackagePaths =
     [
         "staticwebassets/razorwire/razorwire.js",
@@ -28,7 +29,8 @@ public sealed class RazorWirePackageContractTests
         "staticwebassets/razorwire/behavior-kit.js",
         "staticwebassets/razorwire/page-navigation.js",
         "staticwebassets/razorwire/section-copy.js",
-        "staticwebassets/razorwire/form-interactions.js"
+        "staticwebassets/razorwire/form-interactions.js",
+        DialogCssPackagePath
     ];
 
     [Fact]
@@ -57,6 +59,18 @@ public sealed class RazorWirePackageContractTests
             var digest = Convert.ToHexStringLower(SHA256.HashData(turboStream));
 
             Assert.Equal(TurboSha256, digest);
+            var dialogCssEntry = Assert.Single(archive.Entries, entry => entry.FullName == DialogCssPackagePath);
+            using var packagedDialogCss = dialogCssEntry.Open();
+            using var generatedDialogCss = File.OpenRead(TestPathUtils.PathUnder(
+                repositoryRoot,
+                "Web",
+                "ForgeTrust.RazorWire",
+                "wwwroot",
+                "razorwire",
+                "razorwire-dialog.css"));
+            Assert.Equal(
+                Convert.ToHexStringLower(SHA256.HashData(generatedDialogCss)),
+                Convert.ToHexStringLower(SHA256.HashData(packagedDialogCss)));
             Assert.Contains(archive.Entries, entry => entry.FullName == "THIRD-PARTY-NOTICES.md");
             Assert.All(
                 FirstPartyBrowserPackagePaths,

@@ -16,8 +16,17 @@ const generatedOutputs = [
     output: path.join(outputRoot, 'razorwire.js'),
     label: 'razorwire.js',
     banner: 'Generated from assets/src/razorwire.ts. Do not edit wwwroot/razorwire/razorwire.js by hand.',
-    rawBytes: 35_000,
-    gzipBytes: 12_000
+    // #828 adds request-owned dialogs and a stream render queue to the core.
+    rawBytes: 44_000,
+    gzipBytes: 15_000
+  },
+  {
+    entry: path.join(assetRoot, 'src', 'dialog-responses.css'),
+    output: path.join(outputRoot, 'razorwire-dialog.css'),
+    label: 'razorwire-dialog.css',
+    banner: 'Generated from assets/src/dialog-responses.css. Do not edit this output.',
+    rawBytes: 3_000,
+    gzipBytes: 1_200
   },
   {
     entry: path.join(assetRoot, 'src', 'razorwire.islands.ts'),
@@ -191,9 +200,9 @@ async function buildAssets() {
       target: ['es2022'],
       sourcemap: false,
       legalComments: 'none',
-      banner: {
-        js: `// ${generated.banner}`
-      }
+      banner: generated.entry.endsWith('.css')
+        ? { css: `/* ${generated.banner} */` }
+        : { js: `// ${generated.banner}` }
     });
   }
 

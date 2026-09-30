@@ -1,27 +1,31 @@
+import { DialogResponseManager } from './dialog-responses';
+
 /**
  * RazorWire Core Client Runtime
  * Provides native stream monitoring and event dispatching.
  */
-interface Window {
-    RazorWireInitialized?: boolean;
-    RazorWire?: {
-        config?: Record<string, unknown>;
-        connectionManager?: unknown;
-        localTimeFormatter?: unknown;
-        formFailureManager?: unknown;
-        pageNavigationManager?: unknown;
-        sectionCopyManager?: unknown;
-        formInteractionsManager?: unknown;
-        behaviors?: unknown;
-    };
-    Turbo?: TurboRuntime;
+declare global {
+    interface Window {
+        RazorWireInitialized?: boolean;
+        RazorWire?: {
+            config?: Record<string, unknown>;
+            connectionManager?: unknown;
+            localTimeFormatter?: unknown;
+            formFailureManager?: unknown;
+            pageNavigationManager?: unknown;
+            sectionCopyManager?: unknown;
+            formInteractionsManager?: unknown;
+            behaviors?: unknown;
+        };
+        Turbo?: TurboRuntime;
+    }
 }
 
 interface TurboRuntime {
     connectStreamSource?(source: EventSource): void;
     disconnectStreamSource?(source: EventSource): void;
     visit?(url: string, options?: { action?: string }): void;
-    StreamActions?: Record<string, (this: Element) => void>;
+    StreamActions?: Record<string, (this: Element) => void | Promise<void>>;
 }
 
 interface StreamSourceRegistration {
@@ -800,7 +804,7 @@ declare const Turbo: TurboRuntime | undefined;
         nextId: number;
         styleId: string;
 
-        constructor(config: RuntimeConfig) {
+        constructor(config: RuntimeConfig, private dialogManager: DialogResponseManager) {
             this.config = config;
             this.state = new WeakMap();
             this.antiforgeryRefreshes = new WeakMap();
@@ -903,6 +907,8 @@ declare const Turbo: TurboRuntime | undefined;
 
             this.finishSubmitting(form, formState);
 
+            if (this.dialogManager.isStaleForm(form, event.detail)) return;
+
             if (success) {
                 if (previousFailureCount > 0) {
                     this.dispatchProductIntelligenceEvent('razorwire.form.failure_recovered', {
@@ -964,6 +970,7 @@ declare const Turbo: TurboRuntime | undefined;
             const formState = this.state.get(form) || {};
             const submitter = formState.submitter || null;
             this.finishSubmitting(form, formState);
+            if (this.dialogManager.isStaleForm(form, event.detail)) return;
             form.setAttribute('data-rw-submit-status', 'failed');
 
             const target = this.resolveTarget(form);
@@ -1701,9 +1708,11 @@ declare const Turbo: TurboRuntime | undefined;
     // Initialize
     const runtimeConfig = readRuntimeConfig();
     installVisitStreamAction();
+    const dialogResponseManager = new DialogResponseManager(resolveTurbo());
+    dialogResponseManager.start();
     const connectionManager = new ConnectionManager(runtimeConfig);
     const localTimeFormatter = new LocalTimeFormatter();
-    const formFailureManager = new FormFailureManager(runtimeConfig);
+    const formFailureManager = new FormFailureManager(runtimeConfig, dialogResponseManager);
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {

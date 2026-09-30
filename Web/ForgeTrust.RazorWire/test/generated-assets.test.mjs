@@ -28,6 +28,10 @@ test('generated runtime outputs keep provenance banners and public package paths
   const pageNavigation = readFileSync(pageNavigationPath, 'utf8');
   const sectionCopy = readFileSync(sectionCopyPath, 'utf8');
   const formInteractions = readFileSync(formInteractionsPath, 'utf8');
+  const dialogCss = readFileSync(new URL('../wwwroot/razorwire/razorwire-dialog.css', import.meta.url), 'utf8');
+  assert.match(dialogCss, /^\/\* Generated from assets\/src\/dialog-responses\.css\./);
+  assert.match(dialogCss, /data-rw-dialog/);
+  assert.match(dialogCss, /--rw-dialog-width/);
 
   assert.match(runtime, /^\/\/ Generated from assets\/src\/razorwire\.ts\./);
   assert.match(islands, /^\/\/ Generated from assets\/src\/razorwire\.islands\.ts\./);

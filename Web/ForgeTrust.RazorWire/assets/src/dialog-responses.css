@@ -1,0 +1,49 @@
+/* RazorWire owns the shell; application fields and actions inherit host styles. */
+[data-rw-dialog] {
+    color: var(--rw-dialog-text, var(--rw-ui-text, #27272a));
+    background: var(--rw-dialog-surface, var(--rw-ui-surface, #fff));
+    border: 1px solid var(--rw-dialog-border, var(--rw-ui-border, #d4d4d8));
+    border-radius: var(--rw-ui-radius, .5rem);
+    font: inherit;
+    padding: 0;
+    margin: auto;
+    width: min(var(--rw-dialog-width, 32rem), calc(100vw - 2rem));
+    max-width: calc(100vw - 2rem);
+    max-height: var(--rw-dialog-max-height, calc(100dvh - 2rem));
+    overflow: hidden;
+    box-sizing: border-box;
+}
+[data-rw-dialog][open] { display: flex; flex-direction: column; }
+[data-rw-dialog]::backdrop { background: var(--rw-dialog-backdrop, rgb(0 0 0 / .45)); }
+[data-rw-dialog-header] {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--rw-ui-gap, .75rem);
+    justify-content: space-between;
+    flex: 0 0 auto;
+    padding: var(--rw-dialog-spacing, 1rem);
+    border-bottom: 1px solid var(--rw-dialog-border, var(--rw-ui-border, #d4d4d8));
+}
+[data-rw-dialog-title] { margin: 0; font-size: 1.25rem; line-height: 1.4; overflow-wrap: anywhere; max-height: 30dvh; overflow: auto; }
+[data-rw-dialog-close] {
+    flex: 0 0 auto;
+    min-width: 44px;
+    min-height: 44px;
+    font: inherit;
+    color: inherit;
+    background: inherit;
+    border: 1px solid var(--rw-dialog-border, var(--rw-ui-border, #d4d4d8));
+    border-radius: var(--rw-ui-radius, .5rem);
+    cursor: pointer;
+}
+[data-rw-dialog-body] {
+    padding: var(--rw-dialog-spacing, 1rem);
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    overflow-wrap: anywhere;
+}
+[data-rw-dialog-title]:focus-visible,
+[data-rw-dialog-body]:focus-visible,
+[data-rw-dialog-close]:focus-visible { outline: 2px solid var(--rw-dialog-focus, #2563eb); outline-offset: -2px; }
+@media (prefers-reduced-motion: reduce) { [data-rw-dialog], [data-rw-dialog]::backdrop { animation: none; transition: none; } }

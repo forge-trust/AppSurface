@@ -1,0 +1,67 @@
+@model RazorWireWebExample.Models.DialogResponsesSampleModel
+
+@{
+    ViewData["Title"] = "Dialog Responses";
+}
+
+<div class="space-y-8">
+    <header class="space-y-3">
+        <p class="text-sm font-semibold uppercase tracking-wide text-indigo-600">RazorWire responses</p>
+        <div class="max-w-3xl space-y-3">
+            <h1 class="text-3xl font-bold tracking-tight text-slate-950">Server-selected dialog responses</h1>
+            <p class="text-base leading-7 text-slate-600">
+                Check status with an enhanced GET link, or submit Save to update the page and open a follow-up form.
+                The same endpoints return this page with equivalent inline content when the request asks for HTML.
+            </p>
+        </div>
+    </header>
+
+    <section class="grid gap-5 lg:grid-cols-2">
+        <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="text-lg font-semibold text-slate-950">Check status</h2>
+            <p class="mt-2 text-sm leading-6 text-slate-600">The status result is rendered from a partial. Its final line is updated by a later stream action, after the dialog opens.</p>
+            <a asp-controller="Reactivity"
+               asp-action="DialogStatus"
+               data-turbo-stream="true"
+               class="mt-4 inline-flex rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500">
+                Check status
+            </a>
+        </div>
+
+        <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="text-lg font-semibold text-slate-950">Save</h2>
+            <p class="mt-2 text-sm leading-6 text-slate-600">The stream response updates the page and opens the follow-up form in a dialog.</p>
+            <form asp-controller="Reactivity" asp-action="SaveDialog" method="post" rw-active="true" class="mt-4">
+                <button type="submit" class="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
+                    Save and continue
+                </button>
+            </form>
+        </div>
+    </section>
+
+    <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="dialog-result-heading">
+        <h2 id="dialog-result-heading" class="text-lg font-semibold text-slate-950">Page result</h2>
+        <p id="dialog-result" class="mt-2 text-sm leading-6 text-slate-700">@Model.ResultMessage</p>
+    </section>
+
+    @if (Model.Status is not null)
+    {
+        <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="inline-status-heading">
+            <h2 id="inline-status-heading" class="text-lg font-semibold text-slate-950">HTML status fallback</h2>
+            <partial name="_DialogStatus" model="Model.Status" />
+        </section>
+    }
+
+    @if (Model.ShowDialogForm)
+    {
+        <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="inline-dialog-form-heading">
+            <h2 id="inline-dialog-form-heading" class="text-lg font-semibold text-slate-950">HTML form fallback</h2>
+            <partial name="_DialogForm" model="Model.Form" />
+        </section>
+    }
+
+    <p class="max-w-3xl text-sm leading-6 text-slate-600">
+        This local sample does not persist the form value. RazorWire's request and flow metadata control presentation only;
+        they do not order or undo durable application writes.
+    </p>
+</div>

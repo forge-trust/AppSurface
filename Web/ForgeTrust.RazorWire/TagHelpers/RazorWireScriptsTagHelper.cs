@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 namespace ForgeTrust.RazorWire.TagHelpers;
 
 /// <summary>
-/// Tag helper for rendering the necessary RazorWire scripts.
+/// Tag helper for rendering the necessary RazorWire scripts and dialog stylesheet.
 /// </summary>
 [HtmlTargetElement("rw:scripts")]
 public class RazorWireScriptsTagHelper : TagHelper
@@ -111,6 +111,9 @@ public class RazorWireScriptsTagHelper : TagHelper
     /// Turbo is emitted first according to <see cref="RazorWireOptions.Turbo"/>. Bundled and custom modes preserve the
     /// current request path base and static-asset versioning. Host-managed mode emits no Turbo tag and requires the host
     /// to finish loading a compatible Turbo runtime before this output executes.
+    /// A versioned same-origin <c>razorwire-dialog.css</c> link supplies the package-owned dialog shell styles,
+    /// including for a server response that opens the first dialog after initial page load. Dialogs do not require
+    /// inline style elements. See <c>Docs/dialog-responses.md</c> for CSS variables and the opt-in server API.
     /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// Thrown when <see cref="RazorWireOptions.Hybrid"/>.<see cref="RazorWireHybridOptions.LiveOrigin"/> is not an
@@ -130,6 +133,9 @@ public class RazorWireScriptsTagHelper : TagHelper
         var razorwireJs = _fileVersionProvider.AddFileVersionToPath(
             pathBase,
             "/_content/ForgeTrust.RazorWire/razorwire/razorwire.js");
+        var dialogCss = _fileVersionProvider.AddFileVersionToPath(
+            pathBase,
+            "/_content/ForgeTrust.RazorWire/razorwire/razorwire-dialog.css");
         var islandsJs = _fileVersionProvider.AddFileVersionToPath(
             pathBase,
             "/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js");
@@ -172,6 +178,7 @@ public class RazorWireScriptsTagHelper : TagHelper
         // Turbo, when package-ordered, precedes the custom RazorWire island loader.
         var scripts = $@"
 {turboScript}
+<link rel=""stylesheet"" href=""{dialogCss}"" />
 <script src=""{razorwireJs}"" data-rw-development-diagnostics=""{diagnosticsEnabled.ToString().ToLowerInvariant()}"" data-rw-form-failure-enabled=""{failureUxEnabled}"" data-rw-form-failure-mode=""{failureMode}"" data-rw-default-failure-message=""{defaultFailureMessage}"" data-rw-live-origin=""{liveOrigin}"" data-rw-hybrid-credentials=""{credentialsMode}"" data-rw-antiforgery-endpoint=""{antiforgeryEndpoint}"" data-rw-product-intelligence-enabled=""{productIntelligenceEnabled}""></script>
 <script src=""{islandsJs}""></script>
 ";

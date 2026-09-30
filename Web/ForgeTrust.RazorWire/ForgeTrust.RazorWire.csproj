@@ -27,6 +27,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="wwwroot\razorwire\razorwire-dialog.css" LogicalName="RazorWireEmbeddedAssets/razorwire/razorwire-dialog.css" />
     <EmbeddedResource Include="wwwroot\background.png" LogicalName="RazorWireEmbeddedAssets/background.png" />
     <EmbeddedResource Include="wwwroot\exampleJsInterop.js" LogicalName="RazorWireEmbeddedAssets/exampleJsInterop.js" />
     <EmbeddedResource Include="wwwroot\razorwire\behavior-kit.js" LogicalName="RazorWireEmbeddedAssets/razorwire/behavior-kit.js" />

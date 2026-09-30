@@ -1,4 +1,3 @@
-using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.AspNetCore.Mvc.ViewEngines;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
@@ -9,12 +8,14 @@ namespace ForgeTrust.RazorWire.Bridge;
 /// <summary>
 /// A Turbo Stream action that renders a partial view as its content.
 /// </summary>
-public class PartialViewStreamAction : IRazorWireStreamAction
+public class PartialViewStreamAction : IRazorWireTargetedStreamAction
 {
     private readonly string _action;
     private readonly string _target;
     private readonly string _viewName;
     private readonly object? _model;
+
+    string IRazorWireTargetedStreamAction.Target => _target;
 
     /// <summary>
     /// Initializes a new <see cref="PartialViewStreamAction"/> configured to render the specified partial view and wrap its output in a Turbo Stream element.
@@ -49,24 +50,70 @@ public class PartialViewStreamAction : IRazorWireStreamAction
     /// <exception cref="InvalidOperationException">Thrown if the partial view cannot be located.</exception>
     public async Task<string> RenderAsync(ViewContext viewContext, CancellationToken cancellationToken = default)
     {
+        var content = await RenderPartialContentAsync(viewContext, _viewName, _model, cancellationToken);
+        return RazorWireStreamMarkup.RenderTargeted(_action, _target, content, hasTemplate: true);
+    }
+
+    /// <inheritdoc />
+    async Task<string> IRazorWireTargetedStreamAction.RenderCorrelatedAsync(
+        ViewContext viewContext,
+        RazorWireRequestMetadata metadata,
+        RazorWireDialogPhase phase,
+        CancellationToken cancellationToken)
+    {
+        var content = await RenderPartialContentAsync(viewContext, _viewName, _model, cancellationToken);
+        return RazorWireStreamMarkup.RenderTargeted(
+            _action,
+            _target,
+            content,
+            hasTemplate: true,
+            metadata,
+            phase);
+    }
+
+    /// <summary>
+    /// Renders a partial view body without adding an outer Turbo Stream element.
+    /// </summary>
+    /// <param name="viewContext">The MVC context used to locate services and render the partial.</param>
+    /// <param name="viewName">The partial view name or path.</param>
+    /// <param name="model">The model passed to the partial.</param>
+    /// <param name="cancellationToken">The request cancellation token.</param>
+    /// <returns>The trusted Razor-rendered partial body.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the partial view cannot be located.</exception>
+    internal static async Task<string> RenderPartialContentAsync(
+        ViewContext viewContext,
+        string viewName,
+        object? model,
+        CancellationToken cancellationToken = default)
+    {
         var services = viewContext.HttpContext.RequestServices;
         var viewEngine = services.GetRequiredService<ICompositeViewEngine>();
         var tempDataProvider = services.GetRequiredService<ITempDataDictionaryFactory>();
 
         // Preserve parent context (ViewBag/ViewData) and just override the Model
-        var viewData = new ViewDataDictionary(viewContext.ViewData) { Model = _model };
+        var viewData = new ViewDataDictionary(viewContext.ViewData) { Model = model };
 
         await using var writer = new StringWriter();
 
-        var viewResult = viewEngine.FindView(viewContext, _viewName, isMainPage: false);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var viewResult = viewEngine.FindView(viewContext, viewName, isMainPage: false);
         if (!viewResult.Success)
         {
-            viewResult = viewEngine.GetView(executingFilePath: null, _viewName, isMainPage: false);
+            viewResult = viewEngine.GetView(executingFilePath: null, viewName, isMainPage: false);
         }
 
         if (!viewResult.Success)
         {
-            throw new InvalidOperationException($"The partial view '{_viewName}' was not found.");
+            var locations = string.Join(
+                Environment.NewLine,
+                viewResult.SearchedLocations ?? Enumerable.Empty<string>());
+            var locationDetails = string.IsNullOrWhiteSpace(locations)
+                ? string.Empty
+                : $" MVC searched:{Environment.NewLine}{locations}";
+            throw new InvalidOperationException(
+                $"The partial view '{viewName}' was not found.{locationDetails} "
+                + $"Check the view name and MVC view locations. See {RazorWireRequestMetadata.DocumentationPath}.");
         }
 
         var partialViewContext = new ViewContext(
@@ -78,16 +125,10 @@ public class PartialViewStreamAction : IRazorWireStreamAction
             new HtmlHelperOptions()
         );
 
-        // We can check cancellation before rendering
         cancellationToken.ThrowIfCancellationRequested();
 
         await viewResult.View.RenderAsync(partialViewContext);
-        var content = writer.ToString();
-
-        var encodedTarget = HtmlEncoder.Default.Encode(_target);
-        var encodedAction = HtmlEncoder.Default.Encode(_action);
-
-        return
-            $"<turbo-stream action=\"{encodedAction}\" target=\"{encodedTarget}\"><template>{content}</template></turbo-stream>";
+        cancellationToken.ThrowIfCancellationRequested();
+        return writer.ToString();
     }
 }

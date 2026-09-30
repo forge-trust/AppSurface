@@ -53,6 +53,10 @@ public class RazorWireScriptsTagHelperTests
         // Arrange
         A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
                 "/my-app",
+                "/_content/ForgeTrust.RazorWire/razorwire/razorwire-dialog.css"))
+            .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire-dialog.css?v=dialog");
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
+                "/my-app",
                 "/_content/ForgeTrust.RazorWire/razorwire/turbo.es2017-umd.js"))
             .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/turbo.es2017-umd.js?v=turbo");
         A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
@@ -92,6 +96,7 @@ public class RazorWireScriptsTagHelperTests
         Assert.Null(_output.TagName); // Should remove the wrapper tag
 
         var content = _output.Content.GetContent();
+        Assert.Contains("<link rel=\"stylesheet\" href=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire-dialog.css?v=dialog\" />", content);
         Assert.Contains(
             "src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/turbo.es2017-umd.js?v=turbo\"",
             content);

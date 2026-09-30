@@ -31,6 +31,7 @@ The root `assets:typecheck`, `assets:test`, `assets:build`, and `assets:verify` 
 ## Source And Output Ownership
 
 - `assets/src/razorwire.ts` is the authored source for the core runtime exposed at `/_content/ForgeTrust.RazorWire/razorwire/razorwire.js`.
+- `assets/src/dialog-responses.ts` is bundled into the core runtime for [dialog responses](dialog-responses.md). `assets/src/dialog-responses.css` produces the committed `wwwroot/razorwire/razorwire-dialog.css` stylesheet; `<rw:scripts />` emits its versioned same-origin link, and assembly-only hosts serve its embedded fallback. Rebuild the stylesheet with the same asset commands as the scripts.
 - `assets/src/razorwire.islands.ts` is the authored source for the island loader exposed at `/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js`.
 - `assets/src/page-navigation.ts` is the authored source for the lazy page-navigation runtime exposed at `/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js`.
 - `assets/src/section-copy.ts` is the authored source for the lazy section-copy runtime exposed at `/_content/ForgeTrust.RazorWire/razorwire/section-copy.js`.
@@ -57,6 +58,7 @@ The TypeScript migration preserves the public browser surface:
   - `/_content/ForgeTrust.RazorWire/razorwire/section-copy.js`
   - `/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js`
   - `/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js`
+- Stylesheet path: `/_content/ForgeTrust.RazorWire/razorwire/razorwire-dialog.css`. The package shell uses [documented dialog variables](dialog-responses.md#shell-and-accessibility) and contains no inline styles.
 - Tag helper output: `<rw:scripts />`, `<rw:scripts behavior-kit="true" />`, the bundled or custom same-origin Turbo script selected by `RazorWireOptions.Turbo`, host-managed omission, and lazy/eager split-runtime detectors. Hosts that need a cross-origin URL, subresource integrity, or custom script attributes own the complete Turbo tag and its synchronous load order through `HostManaged` mode.
 - Global state: `window.RazorWire`, `window.RazorWire.config`, `connectionManager`, `localTimeFormatter`, `formFailureManager`, `pageNavigationManager`, `sectionCopyManager`, `formInteractionsManager`, and `behaviors`.
 - Section copy: consumers use the singleton `window.RazorWire.sectionCopyManager`; they call `scan()` after out-of-band DOM changes, use `prune()` for disconnected roots, and use `getDiagnostics()`/`clearDiagnostics()` for recovery. Do not construct `SectionCopyManager`.

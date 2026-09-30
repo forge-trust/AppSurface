@@ -1,6 +1,9 @@
+using System.Linq;
 using System.Text.Encodings.Web;
+using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
+using Microsoft.AspNetCore.Mvc.ViewComponents;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -19,18 +22,78 @@ internal static class ViewComponentStreamHelper
     /// <param name="target">The DOM element identifier to update.</param>
     /// <param name="componentIdentifier">The view component to invoke; either a CLR <see cref="Type"/> or the component's string name.</param>
     /// <param name="arguments">Optional arguments to pass to the view component.</param>
+    /// <param name="cancellationToken">The request cancellation token.</param>
     /// <returns>A Turbo Stream XML fragment whose `action` and `target` attributes are HTML-encoded and whose &lt;template&gt; contains the rendered component HTML.</returns>
     public static async Task<string> RenderComponentStreamAsync(
         ViewContext viewContext,
         string action,
         string target,
-        dynamic componentIdentifier,
-        object? arguments)
+        object componentIdentifier,
+        object? arguments,
+        CancellationToken cancellationToken = default)
     {
+        var content = await RenderComponentContentAsync(viewContext, componentIdentifier, arguments, cancellationToken);
+        return RazorWireStreamMarkup.RenderTargeted(action, target, content, hasTemplate: true);
+    }
+
+    /// <summary>
+    /// Renders a view component body without adding an outer Turbo Stream element.
+    /// </summary>
+    /// <param name="viewContext">The current Razor view context used as the basis for rendering.</param>
+    /// <param name="componentIdentifier">The component type or name.</param>
+    /// <param name="arguments">Optional arguments passed to the component.</param>
+    /// <param name="cancellationToken">The request cancellation token.</param>
+    /// <returns>The rendered component HTML.</returns>
+    public static async Task<string> RenderComponentContentAsync(
+        ViewContext viewContext,
+        object componentIdentifier,
+        object? arguments,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(viewContext);
+        ArgumentNullException.ThrowIfNull(componentIdentifier);
+        cancellationToken.ThrowIfCancellationRequested();
+
         await using var writer = new StringWriter();
 
         var services = viewContext.HttpContext.RequestServices;
         var tempDataProvider = services.GetRequiredService<ITempDataDictionaryFactory>();
+
+        if (componentIdentifier is Type requestedType
+            && services.GetService<IViewComponentDescriptorCollectionProvider>() is { } descriptorProvider
+            && !descriptorProvider.ViewComponents.Items.Any(descriptor => descriptor.TypeInfo.AsType() == requestedType))
+        {
+            var componentName = requestedType.FullName ?? requestedType.Name;
+            var mvcMessage = $"MVC did not discover a view component whose type is '{componentName}'.";
+            throw new InvalidOperationException(
+                $"The view component '{componentName}' could not be resolved by MVC. {mvcMessage} "
+                + $"Check the component type and application discovery. See {RazorWireRequestMetadata.DocumentationPath}.",
+                new InvalidOperationException(mvcMessage));
+        }
+
+        if (componentIdentifier is string requestedName
+            && services.GetService<IViewComponentSelector>() is { } selector)
+        {
+            ViewComponentDescriptor? descriptor;
+            try
+            {
+                descriptor = selector.SelectComponent(requestedName);
+            }
+            catch (InvalidOperationException exception)
+            {
+                throw new InvalidOperationException(
+                    $"The view component '{requestedName}' could not be resolved by MVC. "
+                    + $"MVC reported: {exception.Message} See {RazorWireRequestMetadata.DocumentationPath}.",
+                    exception);
+            }
+
+            if (descriptor is null)
+            {
+                throw CreateMissingComponentException(
+                    requestedName,
+                    $"MVC did not discover a view component named '{requestedName}'.");
+            }
+        }
 
         var componentViewContext = new ViewContext(
             viewContext,
@@ -44,27 +107,40 @@ internal static class ViewComponentStreamHelper
 
         ((IViewContextAware)viewComponentHelper).Contextualize(componentViewContext);
 
-        var result = await viewComponentHelper.InvokeAsync(componentIdentifier, arguments);
+        var result = componentIdentifier switch
+        {
+            Type componentType => await viewComponentHelper.InvokeAsync(componentType, arguments),
+            string componentName => await viewComponentHelper.InvokeAsync(componentName, arguments),
+            _ => throw new ArgumentException("A view component identifier must be a component Type or name.", nameof(componentIdentifier))
+        };
+
+        cancellationToken.ThrowIfCancellationRequested();
+
         result.WriteTo(writer, HtmlEncoder.Default);
+        cancellationToken.ThrowIfCancellationRequested();
+        return writer.ToString();
+    }
 
-        var content = writer.ToString();
-        var encodedTarget = HtmlEncoder.Default.Encode(target);
-        var encodedAction = HtmlEncoder.Default.Encode(action);
-
-        return
-            $"<turbo-stream action=\"{encodedAction}\" target=\"{encodedTarget}\"><template>{content}</template></turbo-stream>";
+    private static InvalidOperationException CreateMissingComponentException(string componentName, string mvcMessage)
+    {
+        return new InvalidOperationException(
+            $"The view component '{componentName}' could not be resolved by MVC. {mvcMessage} "
+            + $"Check the component name and application discovery. See {RazorWireRequestMetadata.DocumentationPath}.",
+            new InvalidOperationException(mvcMessage));
     }
 }
 
 /// <summary>
 /// A Turbo Stream action that renders a view component by its <see cref="Type"/>.
 /// </summary>
-public class ViewComponentStreamAction : IRazorWireStreamAction
+public class ViewComponentStreamAction : IRazorWireTargetedStreamAction
 {
     private readonly string _action;
     private readonly string _target;
     private readonly Type _componentType;
     private readonly object? _arguments;
+
+    string IRazorWireTargetedStreamAction.Target => _target;
 
     /// <summary>
     /// Creates an action that renders the specified view component type into a Turbo Stream fragment targeting the given element.
@@ -102,19 +178,43 @@ public class ViewComponentStreamAction : IRazorWireStreamAction
             _action,
             _target,
             _componentType,
-            _arguments);
+            _arguments,
+            cancellationToken);
+    }
+
+    /// <inheritdoc />
+    async Task<string> IRazorWireTargetedStreamAction.RenderCorrelatedAsync(
+        ViewContext viewContext,
+        RazorWireRequestMetadata metadata,
+        RazorWireDialogPhase phase,
+        CancellationToken cancellationToken)
+    {
+        var content = await ViewComponentStreamHelper.RenderComponentContentAsync(
+            viewContext,
+            _componentType,
+            _arguments,
+            cancellationToken);
+        return RazorWireStreamMarkup.RenderTargeted(
+            _action,
+            _target,
+            content,
+            hasTemplate: true,
+            metadata,
+            phase);
     }
 }
 
 /// <summary>
 /// A Turbo Stream action that renders a view component by its name.
 /// </summary>
-public class ViewComponentByNameStreamAction : IRazorWireStreamAction
+public class ViewComponentByNameStreamAction : IRazorWireTargetedStreamAction
 {
     private readonly string _action;
     private readonly string _target;
     private readonly string _componentName;
     private readonly object? _arguments;
+
+    string IRazorWireTargetedStreamAction.Target => _target;
 
     /// <summary>
     /// Creates an action that renders a named view component into a Turbo Stream fragment targeting the specified element.
@@ -152,6 +252,28 @@ public class ViewComponentByNameStreamAction : IRazorWireStreamAction
             _action,
             _target,
             _componentName,
-            _arguments);
+            _arguments,
+            cancellationToken);
+    }
+
+    /// <inheritdoc />
+    async Task<string> IRazorWireTargetedStreamAction.RenderCorrelatedAsync(
+        ViewContext viewContext,
+        RazorWireRequestMetadata metadata,
+        RazorWireDialogPhase phase,
+        CancellationToken cancellationToken)
+    {
+        var content = await ViewComponentStreamHelper.RenderComponentContentAsync(
+            viewContext,
+            _componentName,
+            _arguments,
+            cancellationToken);
+        return RazorWireStreamMarkup.RenderTargeted(
+            _action,
+            _target,
+            content,
+            hasTemplate: true,
+            metadata,
+            phase);
     }
 }

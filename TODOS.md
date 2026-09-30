@@ -1,5 +1,9 @@
 # Deferred work
 
+## Server-pushed RazorWire dialogs (#828 follow-up)
+
+- **What:** Design explicit server-pushed dialog commands after request-scoped #828 dialogs are adopted. **Why:** A live stream has no initiating request or current form owner, so the request/flow token contract from [#828](docs/designs/issue-828-server-selected-dialogs.md) cannot be reused unchanged. **Pros:** Supports genuinely asynchronous attention when an application has a user need. **Cons:** Adds replay, authorization, interruption, and multi-tab lifecycle decisions. **Context:** #828 intentionally supports only response-owned dialogs; keep hub replay and automatic presentation outside its first release. **Effort:** L human team / M CC + gstack. **Priority:** P3. **Depends on / blocked by:** #828 adoption evidence and a concrete server-initiated use case.
+
 ## File-declared secret reference follow-ups (#807)
 
 - **What:** Add a compile-only secret-reference preflight that validates type graphs, file layers, mappings, provider compatibility, and environment aliases without resolving payloads. **Why:** Effective audit intentionally performs the same remote reads as runtime, while deployment tooling may need a zero-read readiness check. **Pros:** Safer CI and deployment review, reusable compiled-plan evidence, and no IAM/network dependency for structural validation. **Cons:** Adds a second execution mode and public naming/reporting contract that must not drift from runtime semantics. **Context:** #807 creates one value-free compiler and defers compile-only presentation; build this only by consuming that compiler rather than adding another parser. **Depends on / blocked by:** Stable #807 plan/result contracts and adopter evidence for the command or API shape.

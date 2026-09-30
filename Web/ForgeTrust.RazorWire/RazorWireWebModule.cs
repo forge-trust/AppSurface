@@ -161,7 +161,7 @@ public class RazorWireWebModule : IAppSurfaceWebModule
     /// Maps RazorWire HTTP endpoints into the application's endpoint route builder.
     /// </summary>
     /// <remarks>
-    /// In addition to the streaming endpoints, this maps assembly-embedded fallbacks for RazorWire's runtime scripts
+    /// In addition to the streaming endpoints, this maps assembly-embedded fallbacks for RazorWire's runtime scripts, dialog stylesheet,
     /// and package demo assets. Normal ASP.NET Core static web assets still serve these files first when their manifest
     /// is available; the endpoint fallback keeps package-hosted tools working when only compiled assemblies are present.
     /// </remarks>
@@ -175,6 +175,7 @@ public class RazorWireWebModule : IAppSurfaceWebModule
         MapEmbeddedAssetFallback(endpoints, "razorwire/form-interactions.js");
         MapEmbeddedAssetFallback(endpoints, "razorwire/page-navigation.js");
         MapEmbeddedAssetFallback(endpoints, "razorwire/razorwire.js");
+        MapEmbeddedAssetFallback(endpoints, "razorwire/razorwire-dialog.css");
         MapEmbeddedAssetFallback(endpoints, "razorwire/razorwire.islands.js");
         MapEmbeddedAssetFallback(endpoints, "razorwire/section-copy.js");
         MapEmbeddedAssetFallback(endpoints, "razorwire/turbo.es2017-umd.js");

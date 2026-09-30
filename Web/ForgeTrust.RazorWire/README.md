@@ -21,6 +21,8 @@ Wait for the `Permanent Island` card to load, then click the `+` button. The `In
 
 When consuming package builds from a configured feed, reference `ForgeTrust.RazorWire` first, use the [brochure starter](https://github.com/forge-trust/AppSurface/tree/main/examples/razorwire-brochure-starter) for the package-only baseline, and continue at [Add the Module](#add-the-module) for module-level options. Public NuGet install commands will replace this note when the `v0.1` publishing path is live.
 
+For a server-selected dialog with a full HTML fallback, visit `/Reactivity/DialogResponses` in the same sample and follow the [dialog response walkthrough](Docs/dialog-responses.md).
+
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
@@ -51,6 +53,12 @@ for current release risk, migration guidance, and readiness.
         <button type="submit" aria-label="Increment counter" class="h-10 w-10 bg-indigo-600 text-white rounded-lg flex items-center justify-center hover:bg-indigo-700 active:scale-90 transition-all shadow-sm shadow-indigo-100">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
         </button>
+        <button type="submit"
+                name="openDialog"
+                value="true"
+                class="ml-2 rounded-lg border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50">
+            Increment and show result
+        </button>
     </form>
 </div>
 ```
@@ -62,14 +70,14 @@ for current release risk, migration guidance, and readiness.
 ```csharp
 [HttpPost]
 [ValidateAntiForgeryToken]
-public IActionResult IncrementCounter([FromForm] int clientCount)
+public IActionResult IncrementCounter([FromForm] int clientCount, [FromForm] bool openDialog = false)
 {
     CounterViewComponent.Increment();
     clientCount++;
 
     if (Request.IsTurboRequest())
     {
-        return this.RazorWireStream()
+        var stream = this.RazorWireStream()
             .Update(
                 "instance-score-value",
                 CounterViewComponent.Count.ToString())
@@ -77,8 +85,21 @@ public IActionResult IncrementCounter([FromForm] int clientCount)
             .ReplacePartial(
                 "client-count-input",
                 "_CounterInput",
-                clientCount)
-            .BuildResult();
+                clientCount);
+
+        if (openDialog)
+        {
+            var distantResult =
+                $"Counter updated to {CounterViewComponent.Count} in the local in-memory sample; " +
+                "the separate Reactivity page result was updated too.";
+
+            stream.Update("counter-distant-result", distantResult);
+            stream.OpenDialog(
+                "Counter updated",
+                distantResult);
+        }
+
+        return stream.BuildResult();
     }
 
     // Safe redirect
@@ -98,6 +119,14 @@ public IActionResult IncrementCounter([FromForm] int clientCount)
 <!-- /appsurface:snippet -->
 
 Read the [focused proof path](../../examples/razorwire-mvc/README.md#start-here-return-razor-fragments) for the file-by-file walkthrough. If copying this pattern gives you a bare `400 Bad Request`, anti-forgery is the first thing to check. See [Security & Anti-Forgery](Docs/antiforgery.md).
+
+## Server-Selected Dialog Responses
+
+When an explicit server response needs attention or a follow-up action, use the [server-selected dialog response API and protocol guide](Docs/dialog-responses.md). A single MVC response can update a page target and open one accessible RazorWire shell containing an app-owned partial or view component. Routine acknowledgements and recoverable feedback should stay near their fields.
+
+Run the sample and open `/Reactivity/DialogResponses`. **Check status** opts a GET link into Turbo Streams; **Save and continue** posts an anti-forgery-protected form, updates `dialog-result`, and opens a form in the shell. Invalid submissions return handled `422` validation in the same flow. A valid submission updates the page result and explicitly closes. The same routes render full HTML when Turbo Streams are not accepted, including when JavaScript is disabled.
+
+The builder has one pending dialog slot. `OpenDialog*` queues an open, `ReplaceDialog*` replaces that unsent payload, `CloseDialog()` queues an explicit close, and `HasActiveDialog` reports only the builder's pending final state. It does not report what the browser currently displays. Dialog actions require `BuildResult()` or `RenderAsync(viewContext)` so request correlation can be validated; plain `Build()` throws a developer diagnostic with those replacement calls. Follow the [dialog guide's API and recovery reference](Docs/dialog-responses.md#builder-api) from that diagnostic. See the guide for all text, partial, generic-component, and named-component overloads, flow metadata, accepted races, cache/CSP requirements, and recovery guidance.
 
 The source-backed snippets in this README are generated from `docs:snippet` markers in the sample app. After changing marked sample code, run:
 
@@ -301,6 +330,8 @@ RazorWire markup only lights up when your views import the package TagHelpers an
 <!-- /appsurface:snippet -->
 
 Plain `<rw:scripts/>` is enough for page navigation, section copy, and form interactions. RazorWire emits small detectors that load `page-navigation.js` only when the rendered page contains `rw-page-nav` / `data-rw-page-nav` markup, `section-copy.js` only when it contains `data-rw-section-copy` / `data-rw-section-copy-target` markup, and `form-interactions.js` only when it contains `data-rw-form-toggle` or `data-rw-form-collection` markup, including after Turbo page or frame renders. The optional `page-navigation="true"`, `section-copy="true"`, and `form-interactions="true"` attributes are eager-load escape hatches, but they are not required for normal adoption. Behavior Kit is explicit in v1; set `behavior-kit="true"` when the page registers `window.RazorWire.behaviors`.
+
+`<rw:scripts />` also emits the dialog response runtime and its same-origin, versioned stylesheet link. The stylesheet is part of the package asset set and has an embedded-asset fallback; there is no separate dialog manager or CSS opt-in to configure. See the [dialog guide](Docs/dialog-responses.md#shell-and-accessibility) for shell variables, request-origin handling, and the Turbo 8.0.23 proof boundary.
 
 App-authored behavior kit registration is different: use `<rw:scripts behavior-kit="true" />` when app bundles call `window.RazorWire.behaviors.register(...)` or `window.RazorWire.behaviors.registerLifecycle(...)`. Behavior kit has no v1 lazy marker or synthetic static-export reference.
 
@@ -951,6 +982,8 @@ For installation, `dnx`, local-package, and source-run examples, see the
 
 ## Examples
 
+- [Server-selected dialog responses](Docs/dialog-responses.md)
+- [MVC dialog sample](../../examples/razorwire-mvc/README.md#server-selected-dialogs)
 - [Focused proof path: return Razor fragments](../../examples/razorwire-mvc/README.md#start-here-return-razor-fragments)
 - [Full RazorWire MVC example](../../examples/razorwire-mvc/README.md)
 - [Failed Form UX guide](Docs/form-failures.md)
