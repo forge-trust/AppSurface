@@ -193,6 +193,10 @@ failed entries are evicted. Cache keys are exact full version resources, and pay
 boundary. A cached alias lookup retains the resolved version name alongside the bytes, so audit does not refetch a
 possibly newer version to identify an older cached value.
 
+With `CacheTtl = null`, completed sequential lookups fetch again so a rotated secret can become visible immediately.
+Overlapping lookups for the same resource can share one in-flight client request; do not rely on one remote call per
+concurrent caller.
+
 ```csharp
 services.ConfigureAppSurfaceGoogleSecretManager(options =>
 {

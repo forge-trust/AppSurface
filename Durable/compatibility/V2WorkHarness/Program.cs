@@ -64,9 +64,9 @@ var schema = provider.GetRequiredService<IDurableRuntimeSchemaManager>();
 var schemaStatus = await schema.GetStatusAsync();
 Require(
     schemaStatus.Compatibility == DurableRuntimeSchemaCompatibility.Compatible
-        && schemaStatus.InstalledVersion == 10
+        && schemaStatus.InstalledVersion == 11
         && schemaStatus.RequiredVersion == 9,
-    $"Expected old package schema 9 to be compatible with installed schema 10; observed " +
+    $"Expected the exact previous package schema 9 to be compatible with installed schema 11; observed " +
     $"{schemaStatus.Compatibility} ({schemaStatus.RequiredVersion}/{schemaStatus.InstalledVersion}).");
 await schema.ValidateAsync();
 
@@ -138,7 +138,7 @@ Require(
 
 Console.WriteLine(JsonSerializer.Serialize(new
 {
-    Phase = "v0.2.0-preview.8-operational",
+    Phase = "previous-package-schema11-operational",
     PackageVersion = packageVersion,
     PackageSha256 = packageSha256,
     RepositoryCommit = repositoryCommit,

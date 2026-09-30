@@ -23,6 +23,10 @@ That is the core RazorWire workflow in one interaction: a normal MVC form posts,
 
 To inspect failed-submission conventions, navigate to `/Reactivity/FormFailures`. That page intentionally triggers validation, anti-forgery, authorization, malformed request, and server failures so you can compare server-handled errors with the default runtime fallback.
 
+### Form Loading Feedback
+
+To inspect form-loading conventions, navigate to `/Reactivity/FormLoading`. It demonstrates a form-local status, a section-shared status, the package fallback on a form with `data-rw-form-failure="off"`, and a five-second Turbo Frame submission with a local status. The fallback case shows that loading remains enabled when failure UX is opted out. The [Form Loading Feedback guide](../../Web/ForgeTrust.RazorWire/Docs/form-loading.md) covers configuration, indicator ownership, CSP, and the remaining manual and consumer proof.
+
 To inspect same-page navigation conventions, navigate to `/Navigation/PageNavigation`. That page is a brochure-style proof for active section links, initial hash state, optional mobile panel close, and Bootstrap scrollspy replacement without custom page JavaScript.
 
 To inspect the default runtime-sourcing contract without unrelated network traffic, navigate to `/Reactivity/DeterministicRuntime`. Its dedicated layout contains no external fonts or other remote assets, loads the package-owned Turbo 8.0.23 runtime from the app origin, and links to a second state through Turbo Drive. The integration tests record external HTTP requests, preserve a window sentinel across visits, and cover the hash, frame, and stream risks selected by the [Turbo 8.0.23 upgrade review](../../Web/ForgeTrust.RazorWire/Docs/turbo-8.0.23-upgrade-review.md).

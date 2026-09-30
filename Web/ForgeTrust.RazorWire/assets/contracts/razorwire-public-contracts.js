@@ -28,6 +28,9 @@ window.RazorWire = window.RazorWire || {};
  * @property {boolean} failureUxEnabled - Whether failed-form request markers, events, fallback rendering, and diagnostics are enabled.
  * @property {"auto"|"manual"|"off"} failureMode - Default failed-form behavior.
  * @property {string} defaultFailureMessage - Reader-facing fallback copy for unhandled form failures.
+ * @property {boolean} formLoadingEnabled - C# `Forms.Loading.Enabled`, serialized as `data-rw-form-loading-enabled`; defaults to `true`.
+ * @property {boolean} formLoadingShowFallbackBar - C# `Forms.Loading.ShowFallbackBar`, serialized as `data-rw-form-loading-show-fallback-bar`; defaults to `true`.
+ * @property {boolean} formLoadingPreventDuplicateSubmissions - C# `Forms.Loading.PreventDuplicateSubmissions`, serialized as `data-rw-form-loading-prevent-duplicate-submissions`; defaults to `true`.
  */
 
 /**
@@ -283,6 +286,61 @@ window.RazorWire = window.RazorWire || {};
  */
 
 /**
+ * Enables RazorWire loading feedback and loading-layer duplicate prevention for an `rw-active` form.
+ * The form Tag Helper emits `data-rw-loading="true"` when global loading is enabled. Set it to `off` to opt out of the whole loading layer for that form; failure handling is independent.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-loading
+ * @target form[rw-active]
+ * @type {"true"|"off"}
+ * @default true
+ * @related data-rw-loading-lock
+ */
+
+/**
+ * Overrides the global duplicate-submission setting for one enabled loading form.
+ * `false` permits overlapping submissions; `true` keeps the same-form guard active. Other values use the global setting. This browser guard does not provide server-side idempotency, and direct `form.submit()` bypasses it.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-loading-lock
+ * @target form[rw-active]
+ * @type {"true"|"false"}
+ * @default true
+ * @related data-rw-loading
+ */
+
+/**
+ * Declares a loading-indicator ownership boundary. The marker is presence-only; any value declares a boundary. An indicator belongs to its nearest boundary, and enabled forms search their ancestor boundaries from nearest outward.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-loading-boundary
+ * @target ancestor element containing an enabled form and its indicators
+ * @type {presence-only}
+ * @related data-rw-loading-indicator
+ */
+
+/**
+ * Marks app-authored status content that RazorWire may reveal for a pending form.
+ * Start it hidden and provide visible action text plus status semantics such as `role="status"` and `aria-live="polite"`. RazorWire toggles only the `hidden` state; the app owns the message and presentation.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-loading-indicator
+ * @target app-authored element owned by an applicable loading boundary
+ * @type {presence-only}
+ * @related data-rw-loading-boundary
+ */
+
+/**
+ * Runtime state hook set to `pending` on an active form and its selected boundary.
+ * RazorWire snapshots and restores the previous value. Do not author this state as a control input.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-loading-state
+ * @target enabled form or selected loading boundary
+ * @type {"pending"}
+ */
+
+/**
  * Marks a same-page navigation root that RazorWire should enhance.
  * @public
  * @namespace RazorWire
@@ -505,6 +563,107 @@ window.RazorWire = window.RazorWire || {};
  * @hookKind data-attribute
  * @target generated form failure UI
  * @stability stable
+ */
+
+/**
+ * Stable selector for the package-owned form-loading fallback bar.
+ * The fallback is fixed-position and its packaged stylesheet respects the `hidden` state.
+ * @public
+ * @namespace RazorWire
+ * @cssHook [data-rw-loading-fallback]
+ * @hookKind data-attribute
+ * @target package-owned form-loading status bar
+ * @stability stable
+ */
+
+/**
+ * Stable selector for a form or loading boundary with pending form activity.
+ * @public
+ * @namespace RazorWire
+ * @cssHook [data-rw-loading-state="pending"]
+ * @hookKind data-attribute
+ * @target enabled form or selected loading boundary
+ * @stability stable
+ */
+
+/**
+ * Controls the accent used by the package form-loading fallback.
+ * @public
+ * @namespace RazorWire
+ * @cssCustomProperty --rw-ui-accent
+ * @target [data-rw-loading-fallback]
+ * @syntax <color>
+ * @default #2563eb
+ */
+
+/**
+ * Controls the stacking order of the package form-loading fallback.
+ * @public
+ * @namespace RazorWire
+ * @cssCustomProperty --rw-loading-fallback-z-index
+ * @target [data-rw-loading-fallback]
+ * @syntax <integer>
+ * @default 1000
+ */
+
+/**
+ * Controls the main block size of the package form-loading fallback before safe-area padding.
+ * @public
+ * @namespace RazorWire
+ * @cssCustomProperty --rw-loading-fallback-block-size
+ * @target [data-rw-loading-fallback]
+ * @syntax <length>
+ * @default 2.5rem
+ */
+
+/**
+ * Controls the background of the package form-loading fallback.
+ * @public
+ * @namespace RazorWire
+ * @cssCustomProperty --rw-loading-fallback-surface
+ * @target [data-rw-loading-fallback]
+ * @syntax <color>
+ * @default #fff
+ */
+
+/**
+ * Controls the status text color of the package form-loading fallback.
+ * @public
+ * @namespace RazorWire
+ * @cssCustomProperty --rw-loading-fallback-color
+ * @target [data-rw-loading-fallback]
+ * @syntax <color>
+ * @default #111827
+ */
+
+/**
+ * Controls the bottom border color of the package form-loading fallback.
+ * @public
+ * @namespace RazorWire
+ * @cssCustomProperty --rw-loading-fallback-border
+ * @target [data-rw-loading-fallback]
+ * @syntax <color>
+ * @default rgb(17 24 39 / 18%)
+ */
+
+/**
+ * Controls the shadow of the package form-loading fallback.
+ * @public
+ * @namespace RazorWire
+ * @cssCustomProperty --rw-loading-fallback-shadow
+ * @target [data-rw-loading-fallback]
+ * @syntax <shadow>
+ * @default 0 0.125rem 0.5rem rgb(17 24 39 / 14%)
+ */
+
+/**
+ * Controls the thickness of the package form-loading fallback's decorative progress strip.
+ * @public
+ * @namespace RazorWire
+ * @cssCustomProperty --rw-loading-fallback-progress-size
+ * @target [data-rw-loading-fallback]
+ * @syntax <length>
+ * @default 0.1875rem
  */
 
 /**

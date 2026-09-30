@@ -137,6 +137,8 @@ dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.App
 
 For failed submissions, RazorWire also ships a convention-based form UX stack: default form-local fallbacks for unhandled failures, server helpers for validation errors, anti-forgery diagnostics in development, and styling/event hooks for consumers. See [Failed Form UX](Docs/form-failures.md) or run the sample and visit `/Reactivity/FormFailures`.
 
+For accepted submissions, [Form Loading Feedback](Docs/form-loading.md) documents app-owned status indicators, the package fallback, global and per-form options, and their interaction with lazy anti-forgery preparation. Run the MVC sample and visit `/Reactivity/FormLoading` for local, shared-boundary, fallback, and Turbo Frame examples.
+
 ## Behavior Kit in 3 Minutes
 
 Use RazorWire behavior kit when app-owned JavaScript needs to enhance server-rendered DOM without duplicate document listeners after Turbo visits, frame replacement, partial updates, or repeated bundle evaluation.
@@ -482,6 +484,7 @@ Package-owned sensitive streams may impose stricter rules than the global RazorW
 - Return form updates from normal MVC controllers with `this.RazorWireStream()`, not a separate JSON API.
 - See the broader [RazorWire MVC Example](../../examples/razorwire-mvc/README.md) for registration, message publishing, islands, and SSE.
 - See [Failed Form UX](Docs/form-failures.md) for server failure conventions, customization, and diagnostics.
+- See [Form Loading Feedback](Docs/form-loading.md) for pending indicators, fallback behavior, duplicate prevention, and loading options.
 - See [Security & Anti-Forgery](Docs/antiforgery.md) for the form-update patterns that matter in production.
 
 ## Core Concepts
@@ -987,5 +990,6 @@ For installation, `dnx`, local-package, and source-run examples, see the
 - [Focused proof path: return Razor fragments](../../examples/razorwire-mvc/README.md#start-here-return-razor-fragments)
 - [Full RazorWire MVC example](../../examples/razorwire-mvc/README.md)
 - [Failed Form UX guide](Docs/form-failures.md)
+- [Form Loading Feedback guide](Docs/form-loading.md)
 - [Runtime Contract Pipeline](Docs/runtime-contract-pipeline.md)
 - [Security & Anti-Forgery](Docs/antiforgery.md)

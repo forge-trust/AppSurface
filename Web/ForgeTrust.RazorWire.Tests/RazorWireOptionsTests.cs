@@ -1,9 +1,39 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.RazorWire.Tests;
 
 public class RazorWireOptionsTests
 {
+    [Fact]
+    public void FormLoadingOptions_DefaultToEnabledFallbackAndDuplicatePrevention()
+    {
+        var options = new RazorWireOptions();
+
+        Assert.True(options.Forms.Loading.Enabled);
+        Assert.True(options.Forms.Loading.ShowFallbackBar);
+        Assert.True(options.Forms.Loading.PreventDuplicateSubmissions);
+    }
+
+    [Fact]
+    public void FormLoadingOptions_ResolveConfiguredValuesThroughServiceRegistration()
+    {
+        var services = new ServiceCollection();
+        services.AddRazorWire(options =>
+        {
+            options.Forms.Loading.Enabled = false;
+            options.Forms.Loading.ShowFallbackBar = false;
+            options.Forms.Loading.PreventDuplicateSubmissions = false;
+        });
+
+        using var provider = services.BuildServiceProvider();
+        var loading = provider.GetRequiredService<IOptions<RazorWireOptions>>().Value.Forms.Loading;
+
+        Assert.False(loading.Enabled);
+        Assert.False(loading.ShowFallbackBar);
+        Assert.False(loading.PreventDuplicateSubmissions);
+    }
+
     [Fact]
     public void TurboRuntimeMode_DefaultsToBundled()
     {

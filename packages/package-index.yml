@@ -392,6 +392,26 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Durable
       - ForgeTrust.AppSurface.Durable.Provider
+  - project: Durable/ForgeTrust.AppSurface.Durable.Testing/ForgeTrust.AppSurface.Durable.Testing.csproj
+    release_guidance_variant: default
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_track: coordinated
+    order: 49
+    use_when: Add this to test projects that need production-validated Durable health and pump fixtures, recorded provider calls, bounded host scenarios, or typed Work contract observations.
+    includes: Health snapshot, pump request/result/attempt, typed Work request, and native worker envelope builders; health and drain fakes; recording pump histories; timeout-aware host scenario handles; typed Work definition, registry, and binding observations.
+    does_not_include: Persistence simulation, PostgreSQL, ASP.NET Core, a test framework, assertion library, authorization policy, retry loop, HTTP mapping, or proof of real-provider behavior.
+    start_here_path: Durable/ForgeTrust.AppSurface.Durable.Testing/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Durable.Testing` to test projects for deterministic Durable fixtures and host-admission observations; keep PostgreSQL conformance tests for persistence and recovery truth, and upgrade it with matching Durable and Provider preview packages.
+    depends_on:
+      - ForgeTrust.AppSurface.Durable
+      - ForgeTrust.AppSurface.Durable.Provider
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Durable
+      - ForgeTrust.AppSurface.Durable.Provider
   - project: Durable/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost.csproj
     classification: excluded
     publish_decision: do_not_publish

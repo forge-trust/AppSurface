@@ -22,7 +22,7 @@ public sealed class DurableSchemaContractTests
     }
 
     [Fact]
-    public void MigrationCatalog_IsExactlyTenOrderedChecksummedResources()
+    public void MigrationCatalog_IsExactlyElevenOrderedChecksummedResources()
     {
         var migrations = DurablePostgreSqlMigrationCatalog.Load();
 
@@ -214,6 +214,13 @@ public sealed class DurableSchemaContractTests
                     "REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM PUBLIC;",
                     tenth.Sql,
                     StringComparison.Ordinal);
+            },
+            eleventh =>
+            {
+                Assert.Equal(11, eleventh.Version);
+                Assert.Equal("runtime_heartbeat_retention", eleventh.Name);
+                Assert.Equal(64, eleventh.Sha256.Length);
+                Assert.Equal(330, eleventh.CommandTimeoutSeconds);
             });
         Assert.Equal(migrations.Count, DurablePostgreSqlMigrationCatalog.RequiredVersion);
         Assert.Equal(migrations.Count, PostgreSqlDurableRuntimeSchemaManager.RequiredVersion);
@@ -298,11 +305,15 @@ public sealed class DurableSchemaContractTests
         Assert.True(
             script.IndexOf("0009_work_contract_discovery", StringComparison.Ordinal)
             < script.IndexOf("0010_runtime_health_observation", StringComparison.Ordinal));
+        Assert.True(
+            script.IndexOf("0010_runtime_health_observation", StringComparison.Ordinal)
+            < script.IndexOf("0011_runtime_heartbeat_retention", StringComparison.Ordinal));
         Assert.Contains(
             """
             DO $appsurface_durable$
             DECLARE
                 lock_deadline timestamp with time zone := pg_catalog.clock_timestamp() + interval '30 seconds';
+                v_retry_delay_ms integer;
             BEGIN
                 LOOP
                     EXIT WHEN pg_catalog.pg_try_advisory_lock(4707181168775217740);
@@ -311,7 +322,11 @@ public sealed class DurableSchemaContractTests
                             ERRCODE = '55P03',
                             MESSAGE = 'Timed out after 30 seconds waiting for AppSurface Durable migration advisory lock 4707181168775217740. Retry after the active migration owner completes.';
                     END IF;
-                    PERFORM pg_catalog.pg_sleep(0.1);
+                    v_retry_delay_ms := 75 + pg_catalog.floor(pg_catalog.random() * 51)::integer;
+                    PERFORM pg_catalog.pg_sleep(LEAST(
+                        v_retry_delay_ms / 1000.0,
+                        GREATEST(EXTRACT(EPOCH FROM lock_deadline - pg_catalog.clock_timestamp()), 0)
+                    ));
                 END LOOP;
             END
             $appsurface_durable$;
@@ -319,6 +334,9 @@ public sealed class DurableSchemaContractTests
             script,
             StringComparison.Ordinal);
         Assert.DoesNotContain("SELECT pg_advisory_lock(", script, StringComparison.Ordinal);
+        Assert.Contains("v_retry_delay_ms := 75 + pg_catalog.floor(pg_catalog.random() * 51)::integer", script, StringComparison.Ordinal);
+        Assert.Contains("GREATEST(EXTRACT(EPOCH FROM lock_deadline - pg_catalog.clock_timestamp()), 0)", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("pg_stat_activity", script, StringComparison.Ordinal);
         Assert.Contains("closing that session after an error releases the session lock", script, StringComparison.Ordinal);
         var tenthMarker = script.IndexOf("-- Migration 0010_runtime_health_observation", StringComparison.Ordinal);
         var tenthTransaction = script.IndexOf("BEGIN;", tenthMarker, StringComparison.Ordinal);
@@ -339,9 +357,12 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("0008_flow_repair", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0009_work_contract_discovery", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0010_runtime_health_observation", pendingOnly, StringComparison.Ordinal);
+        Assert.Contains("0011_runtime_heartbeat_retention", pendingOnly, StringComparison.Ordinal);
+        Assert.Contains("minimum_reader_version = 1, maximum_reader_version = 11", pendingOnly, StringComparison.Ordinal);
+        Assert.Contains("minimum_writer_version = 1, maximum_writer_version = 11", pendingOnly, StringComparison.Ordinal);
         Assert.DoesNotContain("-- Migration", current, StringComparison.Ordinal);
         Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(-1));
-        Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(11));
+        Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(12));
     }
 
     [Fact]
@@ -358,7 +379,7 @@ public sealed class DurableSchemaContractTests
         Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlDurableRuntimeSchemaManager(
             dataSource,
             migrations,
-            migrationLockRetryDelay: TimeSpan.Zero));
+            migrationLockAcquireTimeout: Timeout.InfiniteTimeSpan));
     }
 
     [Theory]
@@ -534,13 +555,19 @@ public sealed class DurableSchemaContractTests
         var recipe = File.ReadAllText(TestPathUtils.PathUnder(
             repositoryRoot,
             "Durable/configure-postgresql-roles.sql"));
+        var providerProject = File.ReadAllText(TestPathUtils.PathUnder(
+            repositoryRoot,
+            "Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj"));
 
+        Assert.Contains("contentFiles/any/any/configure-postgresql-roles.sql", providerProject, StringComparison.Ordinal);
+        Assert.Contains(":'role_pairs_json'", recipe, StringComparison.Ordinal);
+        Assert.Contains("dispatcher_profile", recipe, StringComparison.Ordinal);
+        Assert.Contains("work_only", recipe, StringComparison.Ordinal);
+        Assert.Contains("full", recipe, StringComparison.Ordinal);
         Assert.DoesNotContain("to_regrole", recipe, StringComparison.Ordinal);
-        Assert.Equal(4, CountOccurrences(recipe, "WHERE rolname = :"));
-        Assert.Contains("AS roles_are_distinct", recipe, StringComparison.Ordinal);
-        Assert.Contains("AS service_roles_are_restricted_login_leaves", recipe, StringComparison.Ordinal);
-        Assert.Contains("AS service_roles_are_membership_free", recipe, StringComparison.Ordinal);
-        Assert.Contains("AS service_roles_do_not_own_database", recipe, StringComparison.Ordinal);
+        Assert.Contains("role_pairs_json", recipe, StringComparison.Ordinal);
+        Assert.Contains("AS fixed_roles_valid", recipe, StringComparison.Ordinal);
+        Assert.Contains("AS pair_roles_valid", recipe, StringComparison.Ordinal);
         Assert.Contains("AS durable_objects_owned_by_migration_role", recipe, StringComparison.Ordinal);
         Assert.Contains("AS durable_rls_flags_are_exact", recipe, StringComparison.Ordinal);
         Assert.Contains("AS durable_rls_policies_are_exact", recipe, StringComparison.Ordinal);
@@ -549,7 +576,7 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("pg_catalog.pg_policy", recipe, StringComparison.Ordinal);
         Assert.Contains("pg_catalog.pg_get_expr", recipe, StringComparison.Ordinal);
         Assert.Contains(
-            "ALTER POLICY flow_dispatch_global_discovery ON appsurface_durable.flow_dispatch TO %I, %I",
+            "ALTER POLICY flow_dispatch_global_discovery ON appsurface_durable.flow_dispatch TO %s",
             recipe,
             StringComparison.Ordinal);
         Assert.Contains("flow_dispatch_runtime_scope_select", recipe, StringComparison.Ordinal);
@@ -567,7 +594,7 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("pg_catalog.pg_auth_members", recipe, StringComparison.Ordinal);
         Assert.DoesNotContain("pg_catalog.pg_has_role", recipe, StringComparison.Ordinal);
         Assert.Contains(
-            "pg_catalog.pg_advisory_xact_lock(4707181168775217740)",
+            "pg_try_advisory_xact_lock(4707181168775217740)",
             recipe,
             StringComparison.Ordinal);
         Assert.Contains("AS service_roles_have_safe_schema_privileges", recipe, StringComparison.Ordinal);
@@ -593,11 +620,11 @@ public sealed class DurableSchemaContractTests
             recipe,
             StringComparison.Ordinal);
         Assert.Contains(
-            "REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM %I",
+            "REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM %s",
             recipe,
             StringComparison.Ordinal);
         Assert.Contains(
-            "GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO %I",
+            "GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO %s",
             recipe,
             StringComparison.Ordinal);
         Assert.Contains("pg_catalog.aclexplode(routine.proacl)", recipe, StringComparison.Ordinal);
@@ -610,11 +637,11 @@ public sealed class DurableSchemaContractTests
             recipe,
             StringComparison.Ordinal);
         Assert.Contains(
-            "REVOKE ALL ON TABLE appsurface_durable.dispatch FROM %I",
+            "REVOKE ALL ON TABLE appsurface_durable.dispatch FROM %s",
             recipe,
             StringComparison.Ordinal);
         Assert.Contains(
-            "GRANT EXECUTE ON FUNCTION appsurface_durable.discover_work_dispatch(text[], text[], integer) TO %I",
+            "GRANT EXECUTE ON FUNCTION appsurface_durable.discover_work_dispatch(text[], text[], integer) TO %s",
             recipe,
             StringComparison.Ordinal);
         Assert.Contains(

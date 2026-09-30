@@ -30,7 +30,8 @@ public sealed class RazorWirePackageContractTests
         "staticwebassets/razorwire/page-navigation.js",
         "staticwebassets/razorwire/section-copy.js",
         "staticwebassets/razorwire/form-interactions.js",
-        DialogCssPackagePath
+        DialogCssPackagePath,
+        "staticwebassets/razorwire/razorwire.loading.css"
     ];
 
     [Fact]

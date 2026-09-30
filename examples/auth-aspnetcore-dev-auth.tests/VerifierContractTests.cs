@@ -123,7 +123,8 @@ public sealed class VerifierContractTests
     {
         await using var fixture = await VerifierFixture.CreateAsync(mode);
 
-        var result = await fixture.RunAsync();
+        // Coverage instrumentation can delay child startup without changing the HTTP failure being verified.
+        var result = await fixture.RunAsync(processTimeout: TimeSpan.FromSeconds(30));
 
         Assert.Equal(5, result.ExitCode);
         Assert.Contains($"[stage=HTTP_PROOF reason={reason}]", result.CombinedOutput, StringComparison.Ordinal);

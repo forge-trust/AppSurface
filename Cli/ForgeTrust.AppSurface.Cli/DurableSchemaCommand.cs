@@ -104,6 +104,12 @@ internal sealed partial class DurableSchemaScriptCommand(IDurableSchemaCommandSe
 [Command("durable schema apply", Description = "Apply pending numbered durable migrations under the package advisory lock.")]
 internal sealed partial class DurableSchemaApplyCommand(IDurableSchemaCommandService service) : DurableSchemaOnlineCommandBase(service)
 {
+    /// <summary>
+    /// The apply deadline covers the package lock wait, all pending migration commands (including the two with
+    /// 330-second deadlines), status reads, metadata writes, transaction boundaries, and lock cleanup.
+    /// </summary>
+    internal static readonly TimeSpan ApplyOperationTimeout = TimeSpan.FromMinutes(45);
+
     /// <summary>Gets or sets the required mutation confirmation.</summary>
     [CommandOption("apply", Description = "Required confirmation that reviewed migrations may be applied with the migration-owner connection.")]
     public bool Apply { get; set; }
@@ -121,7 +127,8 @@ internal sealed partial class DurableSchemaApplyCommand(IDurableSchemaCommandSer
         var result = await RunOnlineAsync(
             ResolveConnectionString(),
             console.RegisterCancellationHandler(),
-            Service.ApplyAsync).ConfigureAwait(false);
+            Service.ApplyAsync,
+            ApplyOperationTimeout).ConfigureAwait(false);
         var applied = result.AppliedVersions.Count == 0
             ? "none"
             : string.Join(", ", result.AppliedVersions.Select(static version => version.ToString("D4", CultureInfo.InvariantCulture)));
@@ -144,7 +151,19 @@ internal sealed partial class DurableSchemaPreflightCommand(IDurableSchemaComman
             Service.GetStatusAsync).ConfigureAwait(false);
         if (!status.IsCompatible)
         {
-            throw new CommandException(DurableSchemaDiagnostics.PreflightFailure(status.Compatibility));
+            throw new CommandException(DurableSchemaDiagnostics.PreflightFailure(
+                status.Compatibility,
+                status.Compatibility == DurableRuntimeSchemaCompatibility.UpgradeRequired
+                    && status.PendingVersions is [11]));
+        }
+
+        var failedChecks = await RunOnlineAsync(
+            ResolveConnectionString(),
+            console.RegisterCancellationHandler(),
+            Service.VerifyRetentionPreflightAsync).ConfigureAwait(false);
+        if (failedChecks.Count != 0)
+        {
+            throw new CommandException(DurableSchemaDiagnostics.RetentionStructureFailure(failedChecks));
         }
 
         await console.Output.WriteLineAsync(
@@ -199,11 +218,18 @@ internal abstract class DurableSchemaOnlineCommandBase(IDurableSchemaCommandServ
     protected static async ValueTask<T> RunOnlineAsync<T>(
         string connectionString,
         CancellationToken cancellationToken,
-        Func<string, CancellationToken, ValueTask<T>> operation)
+        Func<string, CancellationToken, ValueTask<T>> operation,
+        TimeSpan? operationTimeout = null)
     {
         ArgumentNullException.ThrowIfNull(operation);
+        var timeout = operationTimeout ?? OnlineOperationTimeout;
+        if (timeout <= TimeSpan.Zero || timeout > TimeSpan.FromMilliseconds(int.MaxValue))
+        {
+            throw new ArgumentOutOfRangeException(nameof(operationTimeout));
+        }
+
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        deadline.CancelAfter(OnlineOperationTimeout);
+        deadline.CancelAfter(timeout);
         try
         {
             return await operation(connectionString, deadline.Token).ConfigureAwait(false);
@@ -215,7 +241,7 @@ internal abstract class DurableSchemaOnlineCommandBase(IDurableSchemaCommandServ
         catch (OperationCanceledException) when (deadline.IsCancellationRequested)
         {
             throw new CommandException(
-                $"Durable schema operation was canceled or exceeded its {FormatOnlineOperationTimeout()} deadline. Check PostgreSQL readiness or the package advisory lock, then retry.");
+                $"Durable schema operation was canceled or exceeded its {FormatOnlineOperationTimeout(timeout)} deadline. Check PostgreSQL readiness or the package advisory lock, then retry.");
         }
         catch (NpgsqlException)
         {
@@ -225,7 +251,7 @@ internal abstract class DurableSchemaOnlineCommandBase(IDurableSchemaCommandServ
         catch (TimeoutException)
         {
             throw new CommandException(
-                $"Durable schema database operation timed out after its {FormatOnlineOperationTimeout()} deadline. Check PostgreSQL readiness or the package advisory lock, then retry.");
+                $"Durable schema database operation timed out after its {FormatOnlineOperationTimeout(timeout)} deadline. Check PostgreSQL readiness or the package advisory lock, then retry.");
         }
         catch (ArgumentException)
         {
@@ -260,8 +286,8 @@ internal abstract class DurableSchemaOnlineCommandBase(IDurableSchemaCommandServ
         return value.All(static character => char.IsLetterOrDigit(character) || character == '_');
     }
 
-    private static string FormatOnlineOperationTimeout() =>
-        $"{OnlineOperationTimeout.TotalSeconds.ToString(CultureInfo.InvariantCulture)}-second";
+    private static string FormatOnlineOperationTimeout(TimeSpan timeout) =>
+        $"{timeout.TotalSeconds.ToString(CultureInfo.InvariantCulture)}-second";
 }
 
 /// <summary>Testable CLI boundary over the PostgreSQL schema manager.</summary>
@@ -269,6 +295,9 @@ internal interface IDurableSchemaCommandService
 {
     /// <summary>Reads compatibility without mutation.</summary>
     ValueTask<DurableSchemaStatusView> GetStatusAsync(string connectionString, CancellationToken cancellationToken);
+
+    /// <summary>Verifies the installed heartbeat-retention function, grants, runtime role, and index structure.</summary>
+    ValueTask<IReadOnlyList<string>> VerifyRetentionPreflightAsync(string connectionString, CancellationToken cancellationToken);
 
     /// <summary>Generates deterministic migration SQL without opening a connection.</summary>
     string GenerateScript(int fromVersion);
@@ -280,6 +309,179 @@ internal interface IDurableSchemaCommandService
 /// <summary>Production CLI adapter that creates and disposes a short-lived Npgsql data source per online command.</summary>
 internal sealed class DurableSchemaCommandService : IDurableSchemaCommandService
 {
+    private const string RetentionStructurePreflightSql =
+        """
+        WITH heartbeat AS
+        (
+            SELECT relation.oid, relation.relrowsecurity, relation.relforcerowsecurity, relation.relowner, namespace.nspowner
+            FROM pg_catalog.pg_class AS relation
+            JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+            WHERE namespace.nspname = 'appsurface_durable'
+              AND relation.relname = 'runtime_heartbeat'
+              AND relation.relkind = 'r'
+        ),
+        runtime_role AS
+        (
+            SELECT role.oid
+            FROM heartbeat
+            JOIN pg_catalog.pg_policy AS policy ON policy.polrelid = heartbeat.oid
+            CROSS JOIN LATERAL unnest(policy.polroles) AS policy_role(role_oid)
+            JOIN pg_catalog.pg_roles AS role ON role.oid = policy_role.role_oid
+            WHERE cardinality(policy.polroles) = 1
+              AND policy.polname = 'runtime_heartbeat_runtime_role'
+              AND role.rolname <> 'public'
+              AND NOT role.rolsuper
+              AND NOT role.rolbypassrls
+            GROUP BY role.oid
+            HAVING count(*) = 1
+        ),
+        retention_function AS
+        (
+            SELECT procedure.*, namespace.nspowner
+            FROM pg_catalog.pg_proc AS procedure
+            JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = procedure.pronamespace
+            JOIN heartbeat ON namespace.nspowner = heartbeat.nspowner
+            WHERE namespace.nspname = 'appsurface_durable'
+              AND procedure.proname = 'prune_runtime_heartbeats'
+              AND procedure.prokind = 'f'
+              AND procedure.prorettype = 'pg_catalog.int4'::pg_catalog.regtype::oid
+              AND NOT procedure.proretset
+              AND procedure.pronargs = 4
+              AND procedure.proargtypes[0] = 'pg_catalog.interval'::pg_catalog.regtype::oid
+              AND procedure.proargtypes[1] = 'pg_catalog.int4'::pg_catalog.regtype::oid
+              AND procedure.proargtypes[2] = 'pg_catalog.text'::pg_catalog.regtype::oid
+              AND procedure.proargtypes[3] = 'pg_catalog.uuid'::pg_catalog.regtype::oid
+        ),
+        retention_index AS
+        (
+            SELECT index_class.oid, index_meta.*
+            FROM heartbeat
+            JOIN pg_catalog.pg_index AS index_meta ON index_meta.indrelid = heartbeat.oid
+            JOIN pg_catalog.pg_class AS index_class ON index_class.oid = index_meta.indexrelid
+            JOIN pg_catalog.pg_am AS access_method ON access_method.oid = index_class.relam
+            WHERE index_class.relname = 'ix_runtime_heartbeat_retention'
+              AND access_method.amname = 'btree'
+              AND index_meta.indisvalid
+              AND index_meta.indisready
+              AND NOT index_meta.indisunique
+              AND index_meta.indnkeyatts = 2
+              AND index_meta.indnatts = 2
+              AND index_meta.indpred IS NULL
+              AND index_meta.indexprs IS NULL
+              -- B-tree indoption 0 is ASC NULLS LAST, matching the pruning query's ORDER BY.
+              AND index_meta.indoption[0] = 0
+              AND index_meta.indoption[1] = 0
+              AND
+              (
+                  SELECT array_agg(attribute.attname ORDER BY key.ordinality)
+                  FROM unnest(index_meta.indkey) WITH ORDINALITY AS key(attnum, ordinality)
+                  JOIN pg_catalog.pg_attribute AS attribute
+                    ON attribute.attrelid = heartbeat.oid AND attribute.attnum = key.attnum
+              ) = ARRAY['last_heartbeat_at', 'worker_id']::name[]
+              AND
+              (
+                  SELECT array_agg(opclass.opcname ORDER BY key.ordinality)
+                  FROM unnest(index_meta.indclass) WITH ORDINALITY AS key(opclass_oid, ordinality)
+                  JOIN pg_catalog.pg_opclass AS opclass ON opclass.oid = key.opclass_oid
+                  JOIN pg_catalog.pg_am AS opclass_method ON opclass_method.oid = opclass.opcmethod
+                  JOIN pg_catalog.pg_namespace AS opclass_namespace ON opclass_namespace.oid = opclass.opcnamespace
+                  WHERE opclass_method.amname = 'btree'
+                    AND opclass_namespace.nspname = 'pg_catalog'
+              ) = ARRAY['timestamptz_ops', 'text_ops']::name[]
+        )
+        , checks AS
+        (
+            SELECT
+                (SELECT count(*) = 1 FROM heartbeat WHERE relrowsecurity AND relforcerowsecurity) AS forced_rls,
+                (SELECT count(*) = 1 FROM runtime_role) AS runtime_role,
+                (SELECT count(*) = 1 FROM retention_function) AS function_signature,
+                EXISTS (SELECT 1 FROM heartbeat, retention_function AS routine WHERE routine.proowner = heartbeat.nspowner) AS function_owner,
+                EXISTS (SELECT 1 FROM retention_function WHERE prosecdef) AS security_definer,
+                EXISTS (SELECT 1 FROM retention_function WHERE proconfig = ARRAY['search_path=pg_catalog, appsurface_durable, pg_temp']::text[]) AS search_path,
+                EXISTS
+                (
+                    SELECT 1 FROM heartbeat
+                    CROSS JOIN runtime_role
+                    WHERE (SELECT count(*) = 2 FROM pg_catalog.pg_policy AS any_policy WHERE any_policy.polrelid = heartbeat.oid)
+                    AND EXISTS
+                    (
+                        SELECT 1 FROM pg_catalog.pg_policy AS policy
+                        WHERE policy.polrelid = heartbeat.oid
+                          AND policy.polname = 'runtime_heartbeat_runtime_role'
+                          AND policy.polcmd = '*'
+                          AND policy.polpermissive
+                          AND cardinality(policy.polroles) = 1
+                          AND policy.polroles[1] = runtime_role.oid
+                          AND pg_catalog.pg_get_expr(policy.polqual, policy.polrelid) = 'true'
+                          AND pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid) = 'true'
+                    )
+                    AND EXISTS
+                    (
+                        SELECT 1 FROM pg_catalog.pg_policy AS policy
+                        CROSS JOIN retention_function AS routine
+                        WHERE policy.polrelid = heartbeat.oid
+                          AND policy.polname = 'runtime_heartbeat_migration_owner'
+                          AND policy.polcmd = '*'
+                          AND policy.polpermissive
+                          AND cardinality(policy.polroles) = 1
+                          AND policy.polroles[1] = heartbeat.nspowner
+                          AND routine.proowner = heartbeat.nspowner
+                          AND heartbeat.relowner = heartbeat.nspowner
+                          AND pg_catalog.pg_get_expr(policy.polqual, policy.polrelid) = 'true'
+                          AND pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid) = 'true'
+                    )
+                ) AS heartbeat_policies,
+                EXISTS
+                (
+                    SELECT 1 FROM runtime_role, retention_function AS routine
+                    WHERE NOT EXISTS
+                    (
+                        SELECT 1
+                        FROM pg_catalog.aclexplode(COALESCE(routine.proacl, pg_catalog.acldefault('f', routine.proowner))) AS privilege
+                        WHERE privilege.privilege_type = 'EXECUTE'
+                          AND privilege.grantee NOT IN (routine.proowner, runtime_role.oid)
+                    )
+                    AND EXISTS
+                    (
+                        SELECT 1
+                        FROM pg_catalog.aclexplode(COALESCE(routine.proacl, pg_catalog.acldefault('f', routine.proowner))) AS privilege
+                        WHERE privilege.grantee = runtime_role.oid
+                          AND privilege.privilege_type = 'EXECUTE'
+                          AND NOT privilege.is_grantable
+                    )
+                    AND NOT EXISTS
+                    (
+                        SELECT 1
+                        FROM pg_catalog.aclexplode(COALESCE(routine.proacl, pg_catalog.acldefault('f', routine.proowner))) AS privilege
+                        WHERE privilege.grantee = 0 AND privilege.privilege_type = 'EXECUTE'
+                    )
+                ) AS function_acl,
+                (SELECT count(*) = 0 FROM runtime_role, pg_catalog.pg_auth_members AS membership
+                 WHERE membership.roleid = runtime_role.oid OR membership.member = runtime_role.oid) AS role_membership,
+                EXISTS
+                (
+                    SELECT 1 FROM heartbeat, runtime_role
+                    WHERE NOT pg_catalog.has_table_privilege(runtime_role.oid, heartbeat.oid, 'DELETE')
+                      AND NOT pg_catalog.has_table_privilege(runtime_role.oid, heartbeat.oid, 'TRUNCATE')
+                ) AS runtime_table_privileges,
+                (SELECT count(*) = 1 FROM retention_index) AS retention_index
+        )
+        SELECT array_remove(ARRAY[
+            CASE WHEN NOT forced_rls THEN 'forced_rls' END,
+            CASE WHEN NOT runtime_role THEN 'runtime_role' END,
+            CASE WHEN NOT function_signature THEN 'function_signature' END,
+            CASE WHEN NOT function_owner THEN 'function_owner' END,
+            CASE WHEN NOT security_definer THEN 'security_definer' END,
+            CASE WHEN NOT search_path THEN 'search_path' END,
+            CASE WHEN NOT heartbeat_policies THEN 'heartbeat_policies' END,
+            CASE WHEN NOT function_acl THEN 'function_acl' END,
+            CASE WHEN NOT role_membership THEN 'role_membership' END,
+            CASE WHEN NOT runtime_table_privileges THEN 'runtime_table_privileges' END,
+            CASE WHEN NOT retention_index THEN 'retention_index' END
+        ]::text[], NULL)
+        FROM checks;
+        """;
+
     /// <inheritdoc />
     public async ValueTask<DurableSchemaStatusView> GetStatusAsync(string connectionString, CancellationToken cancellationToken)
     {
@@ -287,6 +489,19 @@ internal sealed class DurableSchemaCommandService : IDurableSchemaCommandService
         var status = await new PostgreSqlDurableRuntimeSchemaManager(dataSource).GetStatusAsync(cancellationToken).ConfigureAwait(false);
         return DurableSchemaStatusView.From(status);
     }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<string>> VerifyRetentionPreflightAsync(string connectionString, CancellationToken cancellationToken)
+    {
+        await using var dataSource = NpgsqlDataSource.Create(RequireConnectionString(connectionString));
+        await using var command = dataSource.CreateCommand(RetentionStructurePreflightSql);
+        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return MapRetentionPreflightResult(result);
+    }
+
+    /// <summary>Maps the catalog query result to failed checks, failing closed for unexpected result shapes.</summary>
+    internal static IReadOnlyList<string> MapRetentionPreflightResult(object? result) =>
+        result is string[] failedChecks ? failedChecks : ["catalog_result"];
 
     /// <inheritdoc />
     public string GenerateScript(int fromVersion)
@@ -344,11 +559,21 @@ internal static class DurableSchemaDiagnostics
     private const string DocumentationPath = "https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#explicit-schema-and-epoch-deployment";
 
     /// <summary>Builds the single-block incompatibility diagnostic used by preflight.</summary>
-    internal static string PreflightFailure(DurableRuntimeSchemaCompatibility compatibility) =>
-        $"Problem: durable schema preflight is {compatibility}. " +
-        $"Cause: {Cause(compatibility)} " +
-        "Fix: inspect status, generate a reviewed forward script, apply it with the migration owner, then retry preflight. " +
-        $"Docs: {DocumentationPath}";
+    internal static string PreflightFailure(DurableRuntimeSchemaCompatibility compatibility, bool heartbeatRetentionPending = false) =>
+        heartbeatRetentionPending
+            ? "Problem: durable schema preflight found pending migration 0011, which requires a drained maintenance window. This is an expected downtime finding, not a passing gate. " +
+              "Cause: heartbeat retention structures are not installed. " +
+              "Fix: keep activation closed, drain old runtimes, apply the reviewed 0011 script as migration owner, reapply the role recipe, then rerun preflight with the runtime role. " +
+              $"Docs: {DocumentationPath}"
+            : $"Problem: durable schema preflight is {compatibility}. " +
+              $"Cause: {Cause(compatibility)} " +
+              "Fix: inspect status, generate a reviewed forward script, apply it with the migration owner, then retry preflight. " +
+              $"Docs: {DocumentationPath}";
+
+    /// <summary>Builds a fixed, secret-safe failure for schema-11 structure or privilege drift.</summary>
+    internal static string RetentionStructureFailure(IReadOnlyList<string> failedChecks) =>
+        "Problem: durable schema 0011 structural preflight failed. Cause: the retention function, runtime grants, role membership, or index does not match the required contract. Fix: apply the reviewed role recipe, then rerun preflight using both migration-owner and runtime-role connections. Do not activate until both pass. Docs: " +
+        DocumentationPath + " Failed checks: " + string.Join(", ", failedChecks) + ".";
 
     /// <summary>Builds a stable failure for schema-manager incompatibility.</summary>
     internal static string SchemaIncompatible(DurableRuntimeSchemaCompatibility compatibility) =>

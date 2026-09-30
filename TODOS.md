@@ -4,6 +4,10 @@
 
 - **What:** Design explicit server-pushed dialog commands after request-scoped #828 dialogs are adopted. **Why:** A live stream has no initiating request or current form owner, so the request/flow token contract from [#828](docs/designs/issue-828-server-selected-dialogs.md) cannot be reused unchanged. **Pros:** Supports genuinely asynchronous attention when an application has a user need. **Cons:** Adds replay, authorization, interruption, and multi-tab lifecycle decisions. **Context:** #828 intentionally supports only response-owned dialogs; keep hub replay and automatic presentation outside its first release. **Effort:** L human team / M CC + gstack. **Priority:** P3. **Depends on / blocked by:** #828 adoption evidence and a concrete server-initiated use case.
 
+## Durable role-pair retirement after #823
+
+- **What:** Design an explicit, reviewed procedure to retire or narrow one PostgreSQL Durable role pair without treating omission from the complete manifest as authorization to remove it. **Why:** #823 makes enrollment safe but a decommissioned lane otherwise leaves stale grants and policy targets. **Pros:** Closes the credential lifecycle while preserving the fail-closed manifest contract. **Cons:** Requires deployment-use proof, a lock-protected exact removal, post-removal ACL/policy and surviving-lane tests, and a coordinated operator window. **Context:** Start with the [#823 design](docs/designs/issue-823-shared-store-role-pairs.md) and [plan](docs/plans/issue-823-shared-store-role-pairs.md); first prove no active host or secret uses the pair, then review the removal action separately. **Effort:** M (human: 1–2 days / agent assistance: several hours). **Priority:** P2. **Depends on / blocked by:** #823 enrollment release and an actual pair retirement or profile-narrowing need.
+
 ## File-declared secret reference follow-ups (#807)
 
 - **What:** Add a compile-only secret-reference preflight that validates type graphs, file layers, mappings, provider compatibility, and environment aliases without resolving payloads. **Why:** Effective audit intentionally performs the same remote reads as runtime, while deployment tooling may need a zero-read readiness check. **Pros:** Safer CI and deployment review, reusable compiled-plan evidence, and no IAM/network dependency for structural validation. **Cons:** Adds a second execution mode and public naming/reporting contract that must not drift from runtime semantics. **Context:** #807 creates one value-free compiler and defers compile-only presentation; build this only by consuming that compiler rather than adding another parser. **Depends on / blocked by:** Stable #807 plan/result contracts and adopter evidence for the command or API shape.
@@ -56,6 +60,24 @@
 
 - **What:** Add a synthetic multi-project or multi-target packaged-consumer graph to the semantic coverage proof. **Why:** The owned `Smoke.Tests` sentinel will catch exact-project collection and raw-to-merged loss, but not every graph-specific regression. **Pros:** Covers multiple application assemblies, fan-in shape, and framework-specific output paths. **Cons:** Extends the fixture and release runtime beyond the smallest #674 guard. **Context:** Land only after the canonical manifest-bound sentinel has run reliably; use a demonstrated regression or adopter graph to choose the shape. **Depends on / blocked by:** The #674 semantic proof and observed need.
 - **What:** Extract or formalize a shared runner/integration classifier only if evidence shows the CLI and diagnostic classification need the same contract. **Why:** A separate external classifier can drift from the VSTest-only CLI contract. **Pros:** One tested meaning for runner, direct coverlet package identity, and compatibility errors. **Cons:** Can expand coverage-engine scope or introduce a cross-project dependency without a real fault. **Context:** #674 keeps the external classifier diagnostic-only and does not change VSTest/MTP support. **Depends on / blocked by:** A current classified reproduction showing a CLI contract mismatch.
+
+## Release provenance follow-up (#798)
+
+### Portable verification and retention beyond Actions
+
+**What:** Evaluate signed portable release evidence and longer-lived storage only after an adopter requires verification outside the trusted Actions run.
+
+**Why:** The #798 proof ends at the validated pre-push input and depends on retained Actions artifacts; it does not authenticate outside observers or survive artifact expiry.
+
+**Pros:** Independent consumer verification and a longer operational audit window.
+
+**Cons:** New signing identity, storage lifecycle, authorization, and remote-package semantics.
+
+**Context:** Start from the [#798 implementation plan](docs/plans/issue-798-tailwind-artifact-provenance.md) and the existing producer/host/aggregate binding. Built-in GitHub attestations can carry provenance, but do not replace proving the restored payload used by each host.
+
+**Effort:** L human / M agent
+**Priority:** P3
+**Depends on:** #798 acceptance evidence and a demonstrated need beyond current retention/trust boundaries.
 
 ## Hang-diagnostics follow-ups (#815)
 

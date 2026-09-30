@@ -8,9 +8,13 @@ type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.AppSurfaceDura
 type public sealed class ForgeTrust.AppSurface.Durable.PostgreSql.AppSurfaceDurablePostgreSqlOptions
   constructor public ForgeTrust.AppSurface.Durable.PostgreSql.AppSurfaceDurablePostgreSqlOptions()
   property public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeSurface HostedSurfaces { get: public; set: public; }
+  property public System.Boolean EnableHeartbeatMaintenance { get: public; set: public; }
   property public System.Boolean SendWakeNotifications { get: public; set: public; }
+  property public System.Int32 HeartbeatPruneBatchSize { get: public; set: public; }
   property public System.Int32 MaximumItemsPerPass { get: public; set: public; }
   property public System.String WorkerId { get: public; set: public; }
+  property public System.TimeSpan HeartbeatMaintenanceCadence { get: public; set: public; }
+  property public System.TimeSpan HeartbeatRetention { get: public; set: public; }
   property public System.TimeSpan HeartbeatStaleAfter { get: public; set: public; }
   property public System.TimeSpan IdlePollingInterval { get: public; set: public; }
   property public System.TimeSpan ShutdownReserve { get: public; set: public; }

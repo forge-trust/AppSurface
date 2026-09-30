@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using ForgeTrust.AppSurface.Release;
 using ForgeTrust.AppSurface.ReleaseContracts;
 
@@ -32,6 +33,166 @@ public sealed class ReleaseEvidenceCoverageTests
 
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-schema-invalid");
         Assert.Null(result.Bundle);
+    }
+
+    [Theory]
+    [InlineData("{")]
+    [InlineData("null")]
+    public void ValidateTagRejectsMalformedOrNullV1Evidence(string evidenceJson)
+    {
+        var result = ReleaseEvidence.ValidateTag(
+            Version,
+            ReleaseClassification,
+            Version.TagName,
+            TagCommit,
+            ReleaseNote,
+            ReleaseSidecar,
+            CreateV1Manifest("abc123"),
+            evidenceJson);
+
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-schema-invalid");
+        Assert.Null(result.Bundle);
+        Assert.Null(result.Summary);
+    }
+
+    [Fact]
+    public void ValidateTagRejectsEvidenceWhoseSubjectHasTheWrongJsonType()
+    {
+        var manifest = CreateV1Manifest("abc123");
+        var evidence = JsonNode.Parse(ReleaseEvidence.Serialize(CreateV1Bundle(manifest)))!.AsObject();
+        evidence["subject"] = new JsonArray();
+
+        var result = ReleaseEvidence.ValidateTag(
+            Version, ReleaseClassification, Version.TagName, TagCommit,
+            ReleaseNote, ReleaseSidecar, manifest, evidence.ToJsonString());
+
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-schema-invalid");
+        Assert.Null(result.Bundle);
+    }
+
+    [Fact]
+    public async Task ValidatePreparedRejectsEvidenceWhoseSubjectHasTheWrongJsonType()
+    {
+        var root = TestPathUtils.PathUnder(Path.GetTempPath(), "ReleaseEvidenceCoverage", Guid.NewGuid().ToString("N"));
+        var workspace = new ReleaseWorkspace(root);
+        var evidence = JsonNode.Parse(ReleaseEvidence.Serialize(CreateV1Bundle(CreateV1Manifest("abc123"))))!.AsObject();
+        evidence["subject"] = new JsonArray();
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(workspace.ReleaseEvidencePath(Version))!);
+            await File.WriteAllTextAsync(workspace.ReleaseEvidencePath(Version), evidence.ToJsonString());
+
+            var result = await ReleaseEvidence.ValidatePreparedAsync(
+                workspace, Version, ReleaseClassification, "abc123", CancellationToken.None);
+
+            Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-schema-invalid");
+            Assert.Null(result.Bundle);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ValidatePreparedRejectsMalformedAndIncompleteV1Evidence()
+    {
+        var root = TestPathUtils.PathUnder(Path.GetTempPath(), "ReleaseEvidenceCoverage", Guid.NewGuid().ToString("N"));
+        var workspace = new ReleaseWorkspace(root);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(workspace.ReleaseEvidencePath(Version))!);
+            await File.WriteAllTextAsync(workspace.ReleaseEvidencePath(Version), "{");
+            var malformed = await ReleaseEvidence.ValidatePreparedAsync(workspace, Version, ReleaseClassification, "abc123", CancellationToken.None);
+            Assert.Contains(malformed.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-schema-invalid");
+            Assert.Null(malformed.Bundle);
+
+            await File.WriteAllTextAsync(workspace.ReleaseEvidencePath(Version), "null");
+            var nullEvidence = await ReleaseEvidence.ValidatePreparedAsync(workspace, Version, ReleaseClassification, "abc123", CancellationToken.None);
+            Assert.Contains(nullEvidence.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-schema-invalid");
+            Assert.Null(nullEvidence.Bundle);
+
+            var incomplete = JsonNode.Parse(ReleaseEvidence.Serialize(CreateV1Bundle(CreateV1Manifest("abc123"))))!.AsObject();
+            incomplete.Remove("subject");
+            await File.WriteAllTextAsync(workspace.ReleaseEvidencePath(Version), incomplete.ToJsonString());
+            var missingSubject = await ReleaseEvidence.ValidatePreparedAsync(workspace, Version, ReleaseClassification, "abc123", CancellationToken.None);
+            Assert.Contains(missingSubject.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-schema-invalid");
+            Assert.Null(missingSubject.Bundle);
+            Assert.Null(missingSubject.Summary);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ValidateTagRequiresStableDocsArchiveCatalogPin()
+    {
+        var manifest = CreateV1Manifest("abc123");
+        var bundle = CreateV1Bundle(manifest) with { ReleaseClassification = "stable" };
+        bundle = RefreshV1Subject(bundle);
+
+        var result = ReleaseEvidence.ValidateTag(
+            Version, "stable", Version.TagName, TagCommit, ReleaseNote, ReleaseSidecar, manifest, ReleaseEvidence.Serialize(bundle));
+
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-evidence-docs-archive-required");
+    }
+
+    [Theory]
+    [InlineData("not-json", "release-evidence-release-manifest-schema-invalid")]
+    [InlineData("{\"schema\":\"appsurface-release-manifest-v1\",\"version\":1}", "release-evidence-release-manifest-schema-invalid")]
+    [InlineData("null", "release-evidence-release-manifest-schema-invalid")]
+    public void ValidateTagRejectsUnparseableV1ReleaseManifest(string manifestContent, string expectedCode)
+    {
+        var bundle = CreateV1Bundle(manifestContent);
+        var digest = ReleaseEvidence.ComputeSha256Hex(manifestContent);
+        bundle = RefreshV1Subject(bundle with
+        {
+            ReleaseManifestDigest = new ReleaseEvidenceFileDigest("sha256", digest),
+            ReleaseArtifactDigests = bundle.ReleaseArtifactDigests
+                .Select(item => item.Path == bundle.ReleaseManifestPath ? item with { Value = digest } : item)
+                .ToArray()
+        });
+
+        var result = ReleaseEvidence.ValidateTag(
+            Version, ReleaseClassification, Version.TagName, TagCommit, ReleaseNote, ReleaseSidecar,
+            manifestContent, ReleaseEvidence.Serialize(bundle));
+
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == expectedCode);
+    }
+
+    [Fact]
+    public async Task ValidatePreparedRejectsEvidenceFinalizedForAnotherCommit()
+    {
+        var root = TestPathUtils.PathUnder(Path.GetTempPath(), "ReleaseEvidenceCoverage", Guid.NewGuid().ToString("N"));
+        var workspace = new ReleaseWorkspace(root);
+        var bundle = CreateV1Bundle(CreateV1Manifest("abc123"));
+        bundle = RefreshV1Subject(bundle with
+        {
+            Commits = bundle.Commits with { ReleasePreparationCommit = "different-commit" }
+        });
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(workspace.ReleaseEvidencePath(Version))!);
+            await File.WriteAllTextAsync(workspace.ReleaseEvidencePath(Version), ReleaseEvidence.Serialize(bundle));
+
+            var result = await ReleaseEvidence.ValidatePreparedAsync(
+                workspace, Version, ReleaseClassification, "abc123", CancellationToken.None);
+
+            Assert.Contains(result.Diagnostics,
+                diagnostic => diagnostic.Code == "release-evidence-release-preparation-commit-mismatch");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
     }
 
     [Fact]

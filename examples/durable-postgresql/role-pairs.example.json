@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "pairs": [
+    {
+      "dispatcher": "appsurface_durable_dispatcher",
+      "runtime": "appsurface_durable_runtime",
+      "dispatcher_profile": "full"
+    },
+    {
+      "dispatcher": "appsurface_durable_source_dispatcher",
+      "runtime": "appsurface_durable_source_runtime",
+      "dispatcher_profile": "work_only"
+    }
+  ]
+}

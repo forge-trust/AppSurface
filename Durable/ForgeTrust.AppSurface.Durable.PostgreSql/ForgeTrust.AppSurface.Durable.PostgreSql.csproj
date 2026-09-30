@@ -20,6 +20,11 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Migrations/*.sql" />
+    <!-- Ship the canonical operator recipe unchanged; hosts run it after migrations. -->
+    <None Include="../configure-postgresql-roles.sql"
+          Pack="true"
+          PackagePath="contentFiles/any/any/configure-postgresql-roles.sql"
+          CopyToOutputDirectory="Never" />
   </ItemGroup>
 
 </Project>
