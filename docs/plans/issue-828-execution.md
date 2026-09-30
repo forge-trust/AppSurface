@@ -28,3 +28,23 @@ Coverage gate: `./scripts/coverage-solution.sh` unchanged, full solution plus ga
 Server builder/result and tests; browser manager and styles/package delivery; MVC sample/forms/fallback; integration/browser tests; docs; enhance; clean baseline commit; Standard browser QA; exact repository coverage gate; ship draft PR.
 
 Pre-existing changes belong to #828 planning. Preserve review scratch directories without committing them.
+
+## Integrated validation progress — 2026-09-30
+
+- Core implementation committed as `4feb8d94`; current main integrated as `c474a423` (base `a15bd0c1`, includes #827 form loading). Additive merge preserves both stylesheet paths, loading ownership and dialog stale-form fallback guards. Generated assets rebuilt.
+- Enhance cycle 1: six supported fixes (link provenance bound to actual temporary forms rather than URL FIFO, retired shell identity guard, final Turbo renderer wrapping after synchronous extension dispatch, current-response-only validation focus, `RenderAsync` response-token echo, corresponding docs). Cycle 2 independent verdict pending. Accepted UC828 opener races remain documented.
+- Asset validation after integration: `npm test` passed 21 generated-asset and 130 runtime tests. Authored runtime harness now bundles the module graph through esbuild.
+- Preliminary UI check on local integrated app `http://localhost:5829`: status dialog/ordered update, Escape and exact initiating-link focus, save dialog/first Name field, handled empty-name validation/Name focus, successful completion/page result/server close and Save trigger focus all passed. Standard QA follows clean integration-test baseline.
+- Browser regression run outside sandbox executed 23 cases (12 pass, 11 fail). Actual test setup/assertion corrections in progress: hidden input value assignment, phase expectations, status-vs-save opening, deliberate overlap setup, no-JavaScript navigation wait. No browser-test passing claim yet.
+- Review scratch moved to `/private/tmp/issue828-preserved-design-reviews`; retained without publication.
+- Required gates pending: full server suite terminal result; final Playwright cases; clean review; Standard QA; exact `./scripts/coverage-solution.sh` aggregate95/85 and patch95/85 against integrated origin/main; draft PR.
+
+## Browser baseline ready
+
+- Full server/host suite: 526 passed, 0 failed (host run log `/private/tmp/issue828-server-host.log`).
+- Enhance cycle 2 independent review: `NO_FINDINGS`; stopped before checkpoint after six fixes in cycle 1.
+- Final asset run: 21 generated-asset checks and 130 runtime tests passed; TypeScript typecheck passed.
+- Dialog Playwright suite: 27 passed, 0 failed, including cancelled confirmation provenance, retired shell close event, extension render ordering, validation focus ownership, 422/success/fallback/antiforgery, both response orders, reused targets, stale failures and responsive/CSP checks.
+- Corrected fixture duplicate IDs, observed Turbo completion on document for detached forms, asserted existing handled antiforgery response, and awaited asynchronous Turbo render before checking replacement flow.
+- Isolated `TMPDIR=/private/tmp/issue828-native-tmp` resolves a transient verified Tailwind native-library loading stall; no gate or product behavior was changed.
+- Standard QA, fresh full coverage gate and ship draft PR remain.
