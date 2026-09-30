@@ -109,7 +109,7 @@ document.addEventListener('razorwire:form:failure', event => {
 
 ## Development Diagnostics
 
-In `Development`, RazorWire rewrites anti-forgery validation failures for RazorWire form requests into a helpful `400` response. The diagnostic explains that the token is missing or stale, gives fixes, and links back to [Security & Anti-Forgery](./antiforgery.md). In production, the response remains safe for users and does not expose implementation details.
+In `Development`, RazorWire rewrites anti-forgery validation failures for RazorWire form requests into a helpful `400` response. The diagnostic explains that the token is missing or stale, gives fixes, and links back to [Security & Anti-Forgery](./antiforgery.md). In production, the response remains safe for users and does not expose implementation details. For [dialog responses](./dialog-responses.md), the handled stream echoes validated request/flow metadata so a delayed antiforgery failure cannot overwrite a newer dialog's reused local error target. Invalid presentation metadata keeps the 400 diagnostic in plain text and emits no stream actions.
 
 The adapter recognizes RazorWire form requests by:
 

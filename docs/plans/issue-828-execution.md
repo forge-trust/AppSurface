@@ -48,3 +48,11 @@ Pre-existing changes belong to #828 planning. Preserve review scratch directorie
 - Corrected fixture duplicate IDs, observed Turbo completion on document for detached forms, asserted existing handled antiforgery response, and awaited asynchronous Turbo render before checking replacement flow.
 - Isolated `TMPDIR=/private/tmp/issue828-native-tmp` resolves a transient verified Tailwind native-library loading stall; no gate or product behavior was changed.
 - Standard QA, fresh full coverage gate and ship draft PR remain.
+
+## Final failure-path revision
+
+- Standard live QA complete at `/private/tmp/issue828-qa-standard/report.md`: status/open/order/Escape focus, save/422/name focus, valid completion/explicit close/trigger focus, inline counter default and explicit centered modal all passed, no console errors. Scoped provisional score100; links, performance, speech and browser chrome focus cycling unscored. No confirmed QA defects.
+- A real delayed antiforgery400 reproduced a flow-ownership gap: its package filter emitted uncorrelated targeted streams. Fixed filter metadata echo; invalid correlation keeps400 as plaintext with no mutation. Selector actions matching both page and dialog now preserve page effects and exclude stale dialog matches. Docs and unit tests cover the response contract.
+- Reproduction: `LateRealAntiforgeryFailure_CannotRewriteReplacementDialogErrorTarget` failed with current error target overwritten; passed after fix and explicit MVC binary rebuild. Base control unavailable because main has no dialog API.
+- Added current500 retry,200 remaining open until explicit server close, and shared selector target partition verification. Final server531/531; dialog Playwright30/30; assets21+130 and typecheck pass; samplebuild0warnings/errors.
+- Coverage attempt1 stopped gracefully after production correction made it stale; partial run is not a coverage pass. Exact command unchanged for next attempt.

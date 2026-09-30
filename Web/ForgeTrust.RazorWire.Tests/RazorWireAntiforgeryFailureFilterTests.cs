@@ -49,6 +49,57 @@ public class RazorWireAntiforgeryFailureFilterTests
         Assert.Equal("true", context.HttpContext.Response.Headers[RazorWireFormHeaders.FormHandled]);
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task OnResultExecutionAsync_CorrelatedFailureEchoesMetadata(bool bodyTarget, bool insideFlow)
+    {
+        var context = CreateResultExecutingContext(
+            accept: "text/vnd.turbo-stream.html",
+            form: bodyTarget ? null : new FormCollection(new Dictionary<string, StringValues>
+            {
+                [RazorWireFormFields.FailureTarget] = "dialog-errors"
+            }));
+        context.HttpContext.Request.Headers[RazorWireFormHeaders.FormRequest] = "true";
+        var requestId = Guid.NewGuid().ToString("D");
+        var flow = Guid.NewGuid().ToString("D");
+        context.HttpContext.Request.Headers["X-RazorWire-Request"] = requestId;
+        context.HttpContext.Request.Headers["X-RazorWire-Order"] = "17";
+        if (insideFlow) context.HttpContext.Request.Headers["X-RazorWire-Flow"] = flow;
+
+        await CreateFilter(Environments.Development).OnResultExecutionAsync(context, () => CreateExecutedContext(context));
+
+        var result = Assert.IsType<ContentResult>(context.Result);
+        Assert.Equal(StatusCodes.Status400BadRequest, result.StatusCode);
+        Assert.Equal("text/vnd.turbo-stream.html", result.ContentType);
+        Assert.Equal(requestId, context.HttpContext.Response.Headers["X-RazorWire-Request"]);
+        Assert.Contains($"data-rw-request=\"{requestId}\"", result.Content);
+        Assert.Contains("data-rw-order=\"17\"", result.Content);
+        Assert.Contains("data-rw-dialog-phase=\"origin\"", result.Content);
+        if (insideFlow) Assert.Contains($"data-rw-flow=\"{flow}\"", result.Content);
+        else Assert.DoesNotContain("data-rw-flow=", result.Content);
+        Assert.Equal(bodyTarget ? 2 : 1, result.Content!.Split("data-rw-request=", StringSplitOptions.None).Length - 1);
+    }
+
+    [Fact]
+    public async Task OnResultExecutionAsync_InvalidPresentationMetadataPreserves400WithoutStreamMutation()
+    {
+        var context = CreateResultExecutingContext(accept: "text/vnd.turbo-stream.html");
+        context.HttpContext.Request.Headers[RazorWireFormHeaders.FormRequest] = "true";
+        context.HttpContext.Request.Headers["X-RazorWire-Request"] = "invalid";
+        context.HttpContext.Request.Headers["X-RazorWire-Order"] = "1";
+        await CreateFilter(Environments.Development).OnResultExecutionAsync(context, () => CreateExecutedContext(context));
+        var result = Assert.IsType<ContentResult>(context.Result);
+        Assert.Equal(400, result.StatusCode);
+        Assert.Equal(MediaTypeNames.Text.Plain, result.ContentType);
+        Assert.Contains("Antiforgery token validation failed", result.Content);
+        Assert.DoesNotContain("<turbo-stream", result.Content);
+        Assert.False(context.HttpContext.Response.Headers.ContainsKey("X-RazorWire-Request"));
+        Assert.Equal("true", context.HttpContext.Response.Headers[RazorWireFormHeaders.FormHandled]);
+    }
+
     [Fact]
     public async Task OnResultExecutionAsync_WhenHeaderMarksRazorWireFormWithoutTarget_ReturnsTurboStreamForBodySelector()
     {

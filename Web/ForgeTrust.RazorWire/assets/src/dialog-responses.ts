@@ -187,18 +187,25 @@ export class DialogResponseManager {
 
     private allowTarget(stream: Element) {
         if (stream.getAttribute('action') === 'rw-dialog') return true;
-        const id = stream.getAttribute('target');
-        const target = id ? document.getElementById(id) : null;
-        if (!target || !this.shell?.contains(target)) return true;
         // Opaque/manual actions have no package correlation contract. Leave
         // them to their author, as documented for the raw-stream escape hatch.
         if (!stream.hasAttribute('data-rw-request')) return true;
+        const id = stream.getAttribute('target');
+        const selector = !id ? stream.getAttribute('targets') : null;
+        const target = id ? document.getElementById(id) : null;
+        const targets = selector ? Array.from(document.querySelectorAll(selector)) : target ? [target] : [];
+        if (!targets.some(element => this.shell?.contains(element))) return true;
         const request = this.requestFor(stream);
-        if (!request) return false;
         const phase = stream.getAttribute('data-rw-dialog-phase');
-        if (phase === 'new') return !!request.newFlow && request.newFlow === this.flow && request.order === this.latestInsideOrder;
-        if (phase !== 'origin') return false;
-        return !!request.originFlow && this.eligible(request);
+        const allowed = request && (phase === 'new'
+            ? !!request.newFlow && request.newFlow === this.flow && request.order === this.latestInsideOrder
+            : phase === 'origin' && !!request.originFlow && this.eligible(request));
+        if (allowed) return true;
+        if (!selector || !targets.some(element => !this.shell?.contains(element))) return false;
+        // A package selector action may match both page and dialog diagnostics.
+        // Keep its ordinary page effects while excluding the stale shell targets.
+        stream.setAttribute('targets', `:is(${selector}):not([data-rw-dialog],[data-rw-dialog] *)`);
+        return true;
     }
 
     private command(stream: Element) {

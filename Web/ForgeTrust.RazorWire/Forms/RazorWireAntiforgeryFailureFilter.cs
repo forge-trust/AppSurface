@@ -1,5 +1,6 @@
 using System.Net.Mime;
 using System.Text.Encodings.Web;
+using ForgeTrust.RazorWire.Bridge;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
@@ -21,6 +22,8 @@ namespace ForgeTrust.RazorWire.Forms;
 /// <see cref="RazorWireFormHeaders.FormHandled"/>, and chooses Turbo Stream, HTML, or plain-text output from the
 /// request's <c>Accept</c> header. Turbo Stream responses prefer a form-local target when the posted marker can be read
 /// within the configured safety limit; otherwise they append one safe diagnostic block to <c>body</c>.
+/// Correlated Turbo responses echo request metadata so a delayed form-local failure cannot update a newer dialog flow.
+/// Invalid presentation metadata returns the same 400 diagnostic as plain text without applying stream actions.
 /// </remarks>
 internal sealed class RazorWireAntiforgeryFailureFilter : IAsyncAlwaysRunResultFilter, IOrderedFilter
 {
@@ -90,6 +93,27 @@ internal sealed class RazorWireAntiforgeryFailureFilter : IAsyncAlwaysRunResultF
         var message = BuildMessage(useDiagnostics);
         var turboStreamTarget = await ResolveTurboStreamTargetAsync(request, context.HttpContext.RequestAborted);
 
+        RazorWireRequestMetadata? metadata = null;
+        if (responseKind == RazorWireAntiforgeryResponseKind.TurboStream)
+        {
+            try
+            {
+                metadata = RazorWireRequestMetadata.Read(request, required: false);
+            }
+            catch (InvalidOperationException)
+            {
+                // Preserve the antiforgery rejection when presentation headers are
+                // invalid, without sending an unscoped action into a live dialog.
+                responseKind = RazorWireAntiforgeryResponseKind.PlainText;
+            }
+        }
+
+        if (metadata is not null)
+        {
+            context.HttpContext.Response.Headers[RazorWireRequestMetadata.ResponseRequestHeaderName] =
+                metadata.RequestId.ToString("D");
+        }
+
         context.HttpContext.Response.Headers[RazorWireFormHeaders.FormHandled] = "true";
         context.Result = responseKind switch
         {
@@ -97,7 +121,7 @@ internal sealed class RazorWireAntiforgeryFailureFilter : IAsyncAlwaysRunResultF
             {
                 StatusCode = StatusCodes.Status400BadRequest,
                 ContentType = TurboStreamContentType,
-                Content = BuildTurboStream(message, turboStreamTarget)
+                Content = BuildTurboStream(message, turboStreamTarget, metadata)
             },
             RazorWireAntiforgeryResponseKind.Html => new ContentResult
             {
@@ -232,21 +256,27 @@ internal sealed class RazorWireAntiforgeryFailureFilter : IAsyncAlwaysRunResultF
                && length <= MaxFailureTargetFormBytes;
     }
 
-    private static string BuildTurboStream(RazorWireFormFailureMessage message, RazorWireTurboStreamTarget target)
+    private static string BuildTurboStream(
+        RazorWireFormFailureMessage message,
+        RazorWireTurboStreamTarget target,
+        RazorWireRequestMetadata? metadata)
     {
         var html = BuildHtml(message);
+        var attributes = metadata?.ToHtmlAttributes(RazorWireDialogPhase.Origin) ?? string.Empty;
         if (target.AttributeName == "target")
         {
             return "<turbo-stream action=\"update\" "
                    + target.ToAttributeHtml()
+                   + attributes
                    + "><template>"
                    + html
                    + "</template></turbo-stream>";
         }
 
-        return "<turbo-stream action=\"remove\" targets=\"[data-rw-form-error-generated=true][data-rw-form-error-kind=antiforgery]\"></turbo-stream>"
+        return $"<turbo-stream action=\"remove\" targets=\"[data-rw-form-error-generated=true][data-rw-form-error-kind=antiforgery]\"{attributes}></turbo-stream>"
                + "<turbo-stream action=\"append\" "
                + target.ToAttributeHtml()
+               + attributes
                + "><template>"
                + html
                + "</template></turbo-stream>";

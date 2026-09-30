@@ -812,6 +812,101 @@ public sealed class RazorWireDialogPlaywrightTests
     }
 
     [Fact]
+    public async Task StaleSelectorAction_PreservesPageEffectsAndExcludesReplacementDialogTargets()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await page.GotoAsync($"{_fixture.BaseUrl}{DialogPagePath}");
+        await AddRaceProgressTargetAsync(page);
+        await OpenSaveDialogAsync(page);
+        await WaitForDialogTitleAsync(page, "Complete the save");
+        await using var insideRoute = await ControlledStreamRoute.InstallAsync(page, "**/Reactivity/CompleteDialog");
+        await page.Locator("#dialog-form").EvaluateAsync("form => { form.dataset.turboFrame='dialog-inside-frame'; form.requestSubmit(); }");
+        var old = await insideRoute.NextRequestAsync();
+        await using var outsideRoute = await ControlledStreamRoute.InstallAsync(page, "**/Reactivity/DialogStatus*");
+        await page.Locator(StatusLinkSelector).EvaluateAsync("link => link.click()");
+        var replacement = await outsideRoute.NextRequestAsync();
+        replacement.Respond(OpenCommand(replacement.Correlation, "Current selector flow", "<div class=\"shared-error\" id=\"current-dialog-error\">Keep current dialog</div>"));
+        await WaitForDialogTitleAsync(page, "Current selector flow");
+        await page.EvaluateAsync("() => { const error=document.createElement('div'); error.className='shared-error'; error.id='page-error'; error.textContent='Remove page error'; document.body.append(error); }");
+        old.Respond(string.Concat(
+            $"<turbo-stream action=\"remove\" targets=\".shared-error\"{MetadataAttributes(old.Correlation, "origin")}><template></template></turbo-stream>",
+            ProgressCommand(old.Correlation, "selector applied")));
+        await WaitForProgressAsync(page, "selector applied");
+        Assert.Equal(0, await page.Locator("#page-error").CountAsync());
+        Assert.Equal("Keep current dialog", await page.Locator("#current-dialog-error").InnerTextAsync());
+    }
+
+    [Fact]
+    public async Task CurrentDialogFailure_RetryKeepsSuccessOpenUntilServerClose()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await page.GotoAsync($"{_fixture.BaseUrl}{DialogPagePath}");
+        await OpenSaveDialogAsync(page);
+        await WaitForDialogTitleAsync(page, "Complete the save");
+        var flow = await ReadLiveFlowAsync(page);
+        await using var route = await ControlledStreamRoute.InstallAsync(page, "**/Reactivity/CompleteDialog");
+        await page.Locator("#Name").FillAsync("Retry Reader");
+        await page.Locator("#dialog-form button[type=submit]").ClickAsync();
+        var failed = await route.NextRequestAsync();
+        failed.Respond("upstream failure", 500, "text/plain");
+        await page.Locator("#dialog-errors [data-rw-form-error-generated=true]").WaitForAsync();
+        Assert.Equal(1, await page.Locator("[data-rw-dialog][open]").CountAsync());
+        Assert.Equal("Retry Reader", await page.InputValueAsync("#Name"));
+        Assert.True(await page.Locator("#dialog-form button[type=submit]").IsEnabledAsync());
+        await page.Locator("#dialog-form button[type=submit]").ClickAsync();
+        var retry = await route.NextRequestAsync();
+        retry.Respond(UpdateCommand(retry.Correlation, "dialog-errors", "Recovered successfully", "origin"));
+        await WaitForTextAsync(page, "#dialog-errors", "Recovered successfully");
+        Assert.Equal(flow, await ReadLiveFlowAsync(page));
+        Assert.Equal(1, await page.Locator("[data-rw-dialog][open]").CountAsync());
+        await page.Locator("#dialog-form button[type=submit]").ClickAsync();
+        var completion = await route.NextRequestAsync();
+        completion.Respond(string.Concat(
+            UpdateCommand(completion.Correlation, "dialog-result", "Retry complete", "origin"),
+            CloseCommand(completion.Correlation)));
+        await WaitForTextAsync(page, "#dialog-result", "Retry complete");
+        await page.Locator("[data-rw-dialog][open]").WaitForAsync(new() { State = WaitForSelectorState.Hidden });
+    }
+
+    [Fact]
+    public async Task LateRealAntiforgeryFailure_CannotRewriteReplacementDialogErrorTarget()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await page.GotoAsync($"{_fixture.BaseUrl}{DialogPagePath}");
+        await AddRaceProgressTargetAsync(page);
+        await OpenSaveDialogAsync(page);
+        await WaitForDialogTitleAsync(page, "Complete the save");
+        var arrived = new TaskCompletionSource<IAPIResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await page.RouteAsync("**/Reactivity/CompleteDialog", async route =>
+        {
+            var response = await route.FetchAsync();
+            arrived.TrySetResult(response);
+            await release.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            await route.FulfillAsync(new() { Response = response });
+        });
+        await page.Locator("#dialog-form").EvaluateAsync(
+            "form => { form.querySelector('[name=__RequestVerificationToken]').value='invalid'; " +
+            "form.setAttribute('data-turbo-frame','dialog-inside-frame'); " +
+            "document.addEventListener('turbo:submit-end', event => { if (event.detail.formSubmission.formElement === form) window.oldAntiforgeryFinished=true; }); form.requestSubmit(); }");
+        var failure = await arrived.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.Equal(400, failure.Status);
+        Assert.Contains("data-rw-form-error-kind=\"antiforgery\"", await failure.TextAsync());
+        await using var replacementRoute = await ControlledStreamRoute.InstallAsync(page, "**/Reactivity/DialogStatus*");
+        await page.Locator(StatusLinkSelector).EvaluateAsync("link => link.click()");
+        var replacement = await replacementRoute.NextRequestAsync();
+        replacement.Respond(OpenCommand(replacement.Correlation, "Current flow", DialogFormHtml("Current error target")));
+        await WaitForDialogTitleAsync(page, "Current flow");
+        release.SetResult();
+        await page.WaitForFunctionAsync("() => window.oldAntiforgeryFinished === true");
+        Assert.Equal("Current error target", (await page.Locator("#dialog-errors").InnerTextAsync()).Trim());
+        Assert.Equal(0, await page.Locator("[data-rw-dialog] [data-rw-form-error-generated=true]").CountAsync());
+    }
+
+    [Fact]
     public async Task CancelledInsideLinkConfirmation_DoesNotPoisonTheNextOutsideRequestToTheSameUrl()
     {
         await using var context = await _fixture.Browser.NewContextAsync();
