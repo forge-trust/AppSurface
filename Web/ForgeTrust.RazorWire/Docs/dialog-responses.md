@@ -1,6 +1,6 @@
 # Server-selected dialog responses
 
-RazorWire dialogs let an MVC action explicitly present a response in one accessible, package-owned native dialog shell. The application owns the Razor body and decides which response needs attention. Start with the runnable [MVC dialog sample](../../../examples/razorwire-mvc/README.md#server-selected-dialogs) and the [RazorWire package guide](../README.md#server-selected-dialog-responses).
+RazorWire dialogs let an MVC action explicitly present a response in one accessible, package-owned native dialog shell. The application owns the Razor body and decides which response needs attention. Start with the [MVC dialog sample](../../../examples/razorwire-mvc/README.md#server-selected-dialogs) and the [RazorWire package guide](../README.md#server-selected-dialog-responses).
 
 Use a dialog when a result needs the user's attention or a follow-up action and moving it next to the trigger would still leave it easy to miss. Keep routine acknowledgements and recoverable feedback beside their fields. The [sample's IncrementCounter adoption proof](../../../examples/razorwire-mvc/README.md#real-adoption-proof-incrementcounter) shows an explicit opt-in for a distant counter result while preserving its inline default.
 

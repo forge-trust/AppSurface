@@ -22,7 +22,7 @@ The useful capability is a server-composed interaction: one response can update 
 - **Turbo transport.** GET links opt into streams with `data-turbo-stream`; non-GET Turbo forms already request streams. Open and close do not navigate or add history entries. Server-pushed dialogs are deferred.
 - **Flow ownership.** A response must not replace or close a dialog opened by a later interaction. A response from a form inside a dialog must not change a dialog that has since been replaced or dismissed.
 - **Fallback.** The same GET or POST endpoint chooses an HTML page when the request does not accept Turbo Streams. No raw stream markup is served as the no-JavaScript page.
-- **Distribution.** This ships in the existing `ForgeTrust.RazorWire` package and its built assets. The package is not yet publicly published as v0.1; use the existing configured feed or source build and runnable MVC example until that release path is live.
+- **Distribution.** This ships in the existing `ForgeTrust.RazorWire` package and its built assets. The package is not yet publicly published as v0.1; use the existing configured feed or source build and [MVC example](../../examples/razorwire-mvc/README.md) until that release path is live.
 
 ## Independent review
 
@@ -94,7 +94,7 @@ Document a controller example where `Accept: text/vnd.turbo-stream.html` returns
 2. **Browser protocol:** test out-of-order outside opens, inside close after replacement by a later response, two overlapping in-dialog submissions, dismissal while pending, a duplicate request token, the one-frame results of open-then-replace and close-then-open, page actions targeting the final dialog after its slot, stale response after another flow opens, disconnected trigger focus, Escape/Close, navigation/cache cleanup, and a slow partial followed by close.
 3. **Forms:** test handled `422` validation inside the dialog, unhandled network/HTTP failure, retry, success with page update plus close, dismissal before response, and the existing form failure and loading behavior without duplicate UI.
 4. **Fallback and accessibility:** test the same GET and POST endpoints with JavaScript disabled, `Vary: Accept`, keyboard path, accessible name, focus return, narrow viewport, reduced motion, and CSP with same-origin stylesheet but no inline styles.
-5. **Packaging:** build/type-check runtime assets, verify static or hybrid export and embedded asset fallback, run affected .NET and Playwright suites, format, and run solution coverage when practical. Update the RazorWire package README, focused dialog guide, design guidance, package index, and runnable MVC sample with canonical links.
+5. **Packaging:** build/type-check runtime assets, verify static or hybrid export and embedded asset fallback, run affected .NET and Playwright suites, format, and run solution coverage when practical. Update the RazorWire package README, focused dialog guide, design guidance, package index, and [MVC sample](../../examples/razorwire-mvc/README.md) with canonical links.
 
 Ship through the existing RazorWire source/package verification path; public NuGet instructions wait for the actual v0.1 release. The first adoption proof is one real save or status flow whose current response target is far from its trigger. Measure whether the completed result is visible and actionable without scrolling. [#827](https://github.com/forge-trust/AppSurface/issues/827) remains responsible for the wait between click and response.
 

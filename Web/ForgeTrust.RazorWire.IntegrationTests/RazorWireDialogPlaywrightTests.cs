@@ -824,9 +824,11 @@ public sealed class RazorWireDialogPlaywrightTests
         await page.Locator("[data-rw-dialog-body]").EvaluateAsync(
             "body => { body.replaceChildren(document.createTextNode('Short centered response.')); body.style.overflow = 'visible'; }");
         var centering = await page.Locator("[data-rw-dialog]").EvaluateAsync<DialogBounds>(
-            "dialog => { const rect = dialog.getBoundingClientRect(); return { Left: rect.left, Top: rect.top, Width: rect.width, Height: rect.height }; }");
-        Assert.InRange(Math.Abs(centering.Left + centering.Width / 2 - 640), 0, 1);
-        Assert.InRange(Math.Abs(centering.Top + centering.Height / 2 - 360), 0, 1);
+            "dialog => { const rect = dialog.getBoundingClientRect(); return { Left: rect.left, Top: rect.top, Width: rect.width, Height: rect.height, " +
+            "ViewportWidth: document.documentElement.getBoundingClientRect().width, ViewportHeight: document.documentElement.clientHeight }; }");
+        // The root's rendered width excludes the stable scrollbar gutter even when headless Chromium hides scrollbars.
+        Assert.InRange(Math.Abs(centering.Left + centering.Width / 2 - centering.ViewportWidth / 2), 0, 1);
+        Assert.InRange(Math.Abs(centering.Top + centering.Height / 2 - centering.ViewportHeight / 2), 0, 1);
     }
 
     [Fact]
@@ -1442,6 +1444,10 @@ public sealed class RazorWireDialogPlaywrightTests
         public double Width { get; set; }
 
         public double Height { get; set; }
+
+        public double ViewportWidth { get; set; }
+
+        public double ViewportHeight { get; set; }
     }
 
     private sealed record RequestCorrelation(Guid Request, long Order, Guid? Flow);
