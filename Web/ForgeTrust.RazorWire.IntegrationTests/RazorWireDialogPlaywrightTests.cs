@@ -328,8 +328,24 @@ public sealed class RazorWireDialogPlaywrightTests
             SaveDialogPath,
             StatusCodes.Status200OK);
         Assert.Equal(StatusCodes.Status200OK, saveResponse.Status);
+        Assert.Contains("no-store", await saveResponse.HeaderValueAsync("Cache-Control") ?? string.Empty, StringComparison.OrdinalIgnoreCase);
         await page.WaitForURLAsync($"**{SaveDialogPath}");
         Assert.Equal(1, await page.Locator("#dialog-form").CountAsync());
+
+        // Value: protects=HTML validation retains input and no-store caching; fails_when=invalid POST loses its form;
+        // why_new=the existing fallback journey covered only valid POST; seam=none.
+        await page.Locator("#Name").FillAsync("A");
+        var validationResponse = await SubmitAndWaitForResponseAsync(
+            page,
+            "#dialog-form",
+            CompleteDialogPath,
+            StatusCodes.Status422UnprocessableEntity);
+        Assert.Contains("no-store", await validationResponse.HeaderValueAsync("Cache-Control") ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        await page.WaitForURLAsync($"**{CompleteDialogPath}");
+        await WaitForTextAsync(page, "#dialog-errors", "Name must be at least 2 characters.");
+        Assert.Equal("A", await page.InputValueAsync("#Name"));
+        Assert.Equal(0, await page.Locator("turbo-stream, [data-rw-dialog]").CountAsync());
+
         await page.Locator("#Name").FillAsync("Ada Lovelace");
         var submitResponse = await SubmitAndWaitForResponseAsync(
             page,
@@ -338,6 +354,7 @@ public sealed class RazorWireDialogPlaywrightTests
             expectedStatus: null);
 
         Assert.Equal(StatusCodes.Status200OK, submitResponse.Status);
+        Assert.Contains("no-store", await submitResponse.HeaderValueAsync("Cache-Control") ?? string.Empty, StringComparison.OrdinalIgnoreCase);
         await page.WaitForURLAsync($"**{CompleteDialogPath}");
         await WaitForTextAsync(page, "#dialog-result", "Dialog completed for Ada Lovelace");
         Assert.Equal(0, await page.Locator("turbo-stream, [data-rw-dialog]").CountAsync());
@@ -648,6 +665,50 @@ public sealed class RazorWireDialogPlaywrightTests
         Assert.Equal("First command", await page.Locator("[data-rw-dialog-title]").InnerTextAsync());
         Assert.Equal("first body", (await page.Locator("[data-rw-dialog-body]").InnerTextAsync()).Trim());
         Assert.Equal(1, await page.Locator("[data-rw-dialog]").CountAsync());
+    }
+
+    // Value: protects=pruned requests cannot mutate live dialogs while page effects and new submissions work;
+    // fails_when=registry eviction bypasses flow gating or blocks new requests; why_new=unknown tokens did not exercise pruning; seam=none.
+    [Fact]
+    public async Task LongLivedTab_PrunedRequestCannotMutateDialogAndCurrentSubmissionStillWorks()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await page.GotoAsync($"{_fixture.BaseUrl}{DialogPagePath}");
+        await AddRaceProgressTargetAsync(page);
+        await OpenSaveDialogAsync(page);
+        await WaitForDialogTitleAsync(page, "Complete the save");
+        var flow = await ReadLiveFlowAsync(page);
+
+        await using var submissions = await ControlledStreamRoute.InstallAsync(page, "**/Reactivity/CompleteDialog");
+        await page.Locator("#dialog-form").EvaluateAsync("form => form.requestSubmit()");
+        var old = await submissions.NextRequestAsync();
+
+        // Exercise the public Turbo request hook past the retention bound without
+        // inspecting the private registry or issuing hundreds of server writes.
+        var uniqueRequestCount = await page.Locator($"form[action*='{SaveDialogPath}']").EvaluateAsync<int>(
+            "form => { const tokens = new Set(); for (let index = 0; index < 513; index++) { " +
+            "const detail = { url: new URL(form.action), fetchOptions: { headers: { Accept: 'text/vnd.turbo-stream.html' } } }; " +
+            "form.dispatchEvent(new CustomEvent('turbo:before-fetch-request', { bubbles: true, detail })); " +
+            "tokens.add(new Headers(detail.fetchOptions.headers).get('X-RazorWire-Request')); } return tokens.size; }");
+        Assert.Equal(513, uniqueRequestCount);
+
+        old.Respond(string.Concat(
+            UpdateCommand(old.Correlation, "dialog-errors", "Pruned request changed errors", "origin"),
+            CloseCommand(old.Correlation),
+            ProgressCommand(old.Correlation, "pruned-request-finished")));
+        await WaitForProgressAsync(page, "pruned-request-finished");
+        Assert.Equal(flow, await ReadLiveFlowAsync(page));
+        Assert.Equal("Complete the save", await page.Locator("[data-rw-dialog-title]").InnerTextAsync());
+        Assert.DoesNotContain("Pruned request", await page.Locator("#dialog-errors").InnerTextAsync(), StringComparison.Ordinal);
+
+        await page.Locator("#dialog-form").EvaluateAsync("form => form.requestSubmit()");
+        var current = await submissions.NextRequestAsync();
+        Assert.Equal(flow, current.Correlation.Flow);
+        Assert.True(current.Correlation.Order > old.Correlation.Order + 512);
+        current.Respond(UpdateCommand(current.Correlation, "dialog-errors", "Current response after pruning", "origin"));
+        await WaitForTextAsync(page, "#dialog-errors", "Current response after pruning");
+        Assert.Equal(1, await page.Locator("[data-rw-dialog][open]").CountAsync());
     }
 
     [Fact]
