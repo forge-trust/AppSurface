@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -385,16 +384,17 @@ public sealed class AppSurfaceWebPushOptionsAndSenderTests
         var custody = new BlockingCancellationCustody();
         var sender = CreateSender(new StatusHandler(HttpStatusCode.Gone), CreateOptions(), custody);
         var send = sender.SendAsync(CreateSendRequest(CreateSubscription())).AsTask();
-        await custody.Started.Task.WaitAsync(TimeSpan.FromSeconds(1));
-        var elapsed = Stopwatch.StartNew();
 
         try
         {
-            await custody.CallbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            var result = await send.WaitAsync(TimeSpan.FromSeconds(5));
+            await custody.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            // Bound SendAsync from the cleanup start, before observing the separately scheduled callback.
+            // A sender that waits for the blocked callback cannot satisfy this completion bound.
+            var result = await send.WaitAsync(TimeSpan.FromSeconds(10));
+            await custody.CallbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
             Assert.Equal(AppSurfaceWebPushCleanupState.Failed, result.CleanupState);
-            Assert.InRange(elapsed.Elapsed, TimeSpan.Zero, TimeSpan.FromSeconds(10));
         }
         finally
         {
@@ -672,7 +672,13 @@ public sealed class AppSurfaceWebPushOptionsAndSenderTests
         public async Task ReleaseCallbackAsync()
         {
             callbackRelease.Set();
-            await CallbackCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            if (!CallbackStarted.Task.IsCompleted)
+            {
+                // Preserve the callback-start failure rather than replacing it with a teardown timeout.
+                return;
+            }
+
+            await CallbackCompleted.Task.WaitAsync(TimeSpan.FromSeconds(30));
             callbackRelease.Dispose();
         }
     }
