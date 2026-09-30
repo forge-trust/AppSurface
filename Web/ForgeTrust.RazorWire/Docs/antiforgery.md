@@ -81,6 +81,8 @@ When export sees a RazorWire-managed form with static `__RequestVerificationToke
 
 Hybrid export without `--live-origin` is also supported for deployments where the CDN passes RazorWire endpoints back to the backend on the same public origin. In that mode, export removes safe static token inputs and marks the form for lazy refresh while preserving an app-owned same-origin action.
 
+If a form is removed while its lazy token request is paused, RazorWire cancels that submission and resumes Turbo with an aborted request, so no POST is sent. Page departure and request abortion have the same cancellation behavior. This protection also applies when the form opts out of [loading feedback](form-loading.md) or loading is disabled globally; it does not show a failure message for deliberate cancellation.
+
 You may write `rw-antiforgery="lazy"` on a form as an explicit assertion, but it is not required for safe static-token conversion. Do not use `rw-antiforgery="off"` on exported forms that contain anti-forgery tokens unless the form is loaded from a live endpoint instead of static HTML.
 
 Export fails with `RWEXPORT006` when anti-forgery cannot be made safe: any anti-forgery marker in CDN mode, unmanaged forms, external form actions, omitted split-origin hybrid credentials, or explicit anti-forgery opt-out. This is intentionally early and noisy so stale tokens do not ship to production.

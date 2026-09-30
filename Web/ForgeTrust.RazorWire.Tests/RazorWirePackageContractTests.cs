@@ -28,7 +28,8 @@ public sealed class RazorWirePackageContractTests
         "staticwebassets/razorwire/behavior-kit.js",
         "staticwebassets/razorwire/page-navigation.js",
         "staticwebassets/razorwire/section-copy.js",
-        "staticwebassets/razorwire/form-interactions.js"
+        "staticwebassets/razorwire/form-interactions.js",
+        "staticwebassets/razorwire/razorwire.loading.css"
     ];
 
     [Fact]
