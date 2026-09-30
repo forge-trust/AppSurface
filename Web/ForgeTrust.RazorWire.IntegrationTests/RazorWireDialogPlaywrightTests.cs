@@ -749,6 +749,16 @@ public sealed class RazorWireDialogPlaywrightTests
         await page.SetViewportSizeAsync(375, 700);
         Assert.True(await IsDialogWithinViewportAsync(page, 375));
 
+        // A 1280x720 desktop at 200% browser zoom has this effective CSS viewport.
+        // Exercise the resulting reflow with long content, including a reachable Close control.
+        await page.SetViewportSizeAsync(640, 360);
+        Assert.True(await IsDialogWithinViewportAsync(page, 640));
+        Assert.True(await page.Locator("[data-rw-dialog-body]").EvaluateAsync<bool>(
+            "body => body.scrollHeight > body.clientHeight && body.clientHeight > 0"));
+        Assert.True(await page.Locator("[data-rw-dialog-close]").EvaluateAsync<bool>(
+            "close => { const rect = close.getBoundingClientRect(); " +
+            "return rect.top >= 0 && rect.bottom <= innerHeight && rect.width >= 44 && rect.height >= 44; }"));
+
         await page.SetViewportSizeAsync(1280, 720);
         await page.Locator("[data-rw-dialog-body]").EvaluateAsync(
             "body => { body.replaceChildren(document.createTextNode('Short centered response.')); body.style.overflow = 'visible'; }");
@@ -756,6 +766,51 @@ public sealed class RazorWireDialogPlaywrightTests
             "dialog => { const rect = dialog.getBoundingClientRect(); return { Left: rect.left, Top: rect.top, Width: rect.width, Height: rect.height }; }");
         Assert.InRange(Math.Abs(centering.Left + centering.Width / 2 - 640), 0, 1);
         Assert.InRange(Math.Abs(centering.Top + centering.Height / 2 - 360), 0, 1);
+    }
+
+    [Fact]
+    public async Task DialogShell_DefaultTextCloseAndFocusHaveAccessibleContrast()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await page.GotoAsync($"{_fixture.BaseUrl}{DialogPagePath}");
+        await ClickAndWaitForResponseAsync(page, StatusLinkSelector, DialogStatusPath, HttpMethod.Get.Method);
+        await WaitForDialogTitleAsync(page, "Service status");
+
+        await page.Keyboard.PressAsync("Tab");
+        Assert.True(await page.Locator("[data-rw-dialog-close]").EvaluateAsync<bool>(
+            "close => close === document.activeElement && getComputedStyle(close).outlineStyle === 'solid' " +
+            "&& parseFloat(getComputedStyle(close).outlineWidth) >= 2"));
+
+        var ratios = await page.EvaluateAsync<double[]>(
+            """
+            () => {
+                const dialog = document.querySelector('[data-rw-dialog]');
+                const close = document.querySelector('[data-rw-dialog-close]');
+                const luminance = color => {
+                    const rgb = color.match(/[\d.]+/g).slice(0, 3).map(Number);
+                    const linear = rgb.map(value => {
+                        const channel = value / 255;
+                        return channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4;
+                    });
+                    return linear[0] * .2126 + linear[1] * .7152 + linear[2] * .0722;
+                };
+                const contrast = (foreground, background) => {
+                    const a = luminance(foreground), b = luminance(background);
+                    return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
+                };
+                const background = getComputedStyle(dialog).backgroundColor;
+                return [
+                    contrast(getComputedStyle(dialog).color, background),
+                    contrast(getComputedStyle(close).color, background),
+                    contrast(getComputedStyle(close).outlineColor, background)
+                ];
+            }
+            """);
+
+        Assert.True(ratios[0] >= 4.5, $"Shell text contrast was {ratios[0]:F2}:1.");
+        Assert.True(ratios[1] >= 4.5, $"Close text contrast was {ratios[1]:F2}:1.");
+        Assert.True(ratios[2] >= 3, $"Focus outline contrast was {ratios[2]:F2}:1.");
     }
 
     [Fact]
@@ -868,6 +923,38 @@ public sealed class RazorWireDialogPlaywrightTests
             CloseCommand(completion.Correlation)));
         await WaitForTextAsync(page, "#dialog-result", "Retry complete");
         await page.Locator("[data-rw-dialog][open]").WaitForAsync(new() { State = WaitForSelectorState.Hidden });
+    }
+
+    [Fact]
+    public async Task CurrentAntiforgeryFailure_WithInvalidPresentationMetadataShowsLocalRetry()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await page.GotoAsync($"{_fixture.BaseUrl}{DialogPagePath}");
+        await OpenSaveDialogAsync(page);
+        await WaitForDialogTitleAsync(page, "Complete the save");
+        await page.RouteAsync("**/Reactivity/CompleteDialog", async route =>
+        {
+            var headers = (await route.Request.AllHeadersAsync()).ToDictionary(
+                pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+            headers["X-RazorWire-Request"] = "invalid";
+            var response = await route.FetchAsync(new RouteFetchOptions { Headers = headers });
+            await route.FulfillAsync(new RouteFulfillOptions { Response = response });
+        });
+        await page.Locator("#dialog-form").EvaluateAsync(
+            "form => form.querySelector('[name=__RequestVerificationToken]').value = 'invalid'");
+        await page.Locator("#Name").FillAsync("Retry Reader");
+
+        var response = await SubmitAndWaitForResponseAsync(
+            page, "#dialog-form", CompleteDialogPath, StatusCodes.Status400BadRequest);
+
+        Assert.StartsWith("text/plain", await response.HeaderValueAsync("content-type"));
+        Assert.Equal("false", await response.HeaderValueAsync("X-RazorWire-Form-Handled"));
+        Assert.DoesNotContain("<turbo-stream", await response.TextAsync());
+        await page.Locator("#dialog-errors [data-rw-form-error-generated=true]").WaitForAsync();
+        Assert.Equal("Retry Reader", await page.InputValueAsync("#Name"));
+        Assert.True(await page.Locator("#dialog-form button[type=submit]").IsEnabledAsync());
+        Assert.Equal(1, await page.Locator("[data-rw-dialog][open]").CountAsync());
     }
 
     [Fact]

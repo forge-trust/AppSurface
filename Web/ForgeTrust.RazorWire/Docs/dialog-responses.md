@@ -36,6 +36,63 @@ The builder has one dialog slot. A second `OpenDialog*` while an open is pending
 
 The dialog API needs request context. Return `BuildResult()` from the MVC request or call `RenderAsync(viewContext)`; `Build()` fails for a builder with a dialog command because it has no request headers to correlate. Its `InvalidOperationException` tells the developer to use `BuildResult()` from a controller action or `RenderAsync(viewContext)` with the current request context. The package README links this API and recovery guide alongside that diagnostic; the exception does not fabricate a stream response. The final response contains at most one dialog action. There is no raw-HTML dialog overload. Manually authored raw streams and `IRazorWireStreamHub` replay/live-push are outside the scoped-dialog guarantees.
 
+### Copyable body examples
+
+Inside a controller's enhanced response branch, a plain-text response can update the page and draw attention to the result:
+
+```csharp
+return this.RazorWireStream()
+    .Update("dialog-result", "Check complete.")
+    .OpenDialog("Service status", "The service is ready for your next request.")
+    .BuildResult();
+```
+
+A partial uses the same MVC view discovery and model conventions as the [sample status partial](../../../examples/razorwire-mvc/Views/Reactivity/_DialogStatus.cshtml):
+
+```csharp
+return this.RazorWireStream()
+    .OpenDialogPartial("Service status", "_DialogStatus", model)
+    .BuildResult();
+```
+
+For a view component, these generic and named calls both use the sample's existing [Counter component](../../../examples/razorwire-mvc/ViewComponents/CounterViewComponent.cs). The generic form requires `using RazorWireWebExample.ViewComponents;` in that sample:
+
+```csharp
+return this.RazorWireStream()
+    .OpenDialogComponent<CounterViewComponent>("Current counter")
+    .BuildResult();
+```
+
+```csharp
+return this.RazorWireStream()
+    .OpenDialogComponent("Current counter", "Counter")
+    .BuildResult();
+```
+
+Components that accept parameters receive an anonymous object matching their `Invoke` or `InvokeAsync` arguments. For example, the sample's [UserList component](../../../examples/razorwire-mvc/ViewComponents/UserListViewComponent.cs) accepts `users`:
+
+```csharp
+return this.RazorWireStream()
+    .OpenDialogComponent("Active users", "UserList", new { users })
+    .BuildResult();
+```
+
+When multiple helpers contribute to one response, inspect the pending slot before adding an open. An intentional replacement retains one final payload and does not render the overwritten component:
+
+```csharp
+var response = this.RazorWireStream()
+    .OpenDialogComponent<CounterViewComponent>("Current counter");
+
+if (response.HasActiveDialog)
+{
+    response.ReplaceDialog("Counter result", "The counter check is complete.");
+}
+
+return response.BuildResult();
+```
+
+Use `ReplaceDialogPartial` or either `ReplaceDialogComponent` overload in the same position when the final body needs Razor rendering. These snippets belong in an `IsTurboRequest()` branch with a full HTML counterpart, as shown below.
+
 ## GET, POST, and handled validation
 
 Use the ordinary endpoint and `Accept` negotiation for the enhanced and no-JavaScript paths. A stream GET link must opt in with `data-turbo-stream`; Turbo forms already request a stream. Keep a complete HTML view and working form for ordinary requests.
@@ -107,7 +164,7 @@ The browser assigns supported Turbo requests an opaque request ID and tab-local 
 
 The runtime supplies these headers; application code should not mint or forward them. A Turbo stream GET link is internally submitted by Turbo through a temporary form, so RazorWire retains the initiating link as the request origin for correlation and focus. The original link's flow is captured before that temporary form is created; the temporary form is not mistaken for a user-authored form inside the dialog.
 
-These values are bounded UI-presentation metadata, never authentication, CSRF protection, idempotency keys, or a database write-ordering mechanism. Every correlated stream response echoes the request, order, and optional flow values on its package-authored stream actions as `data-rw-request`, `data-rw-order`, and optional `data-rw-flow`, plus the action's `data-rw-dialog-phase` (`origin`, `new`, or `closed`). Both `BuildResult()` and `RenderAsync(viewContext)` echo the matching request token in the HTTP response header `X-RazorWire-Request` for correlated responses. The browser consults that header for `422` responses to associate validation with its originating submission and focus after the matching dialog update renders. The header does not change success handling. Page-only responses without correlation keep their existing behavior. Package-generated handled antiforgery failures also echo correlation on their stream actions, so a late 400 response cannot overwrite a reused form-local error target in a newer dialog. Invalid presentation headers preserve the antiforgery 400 as a plain-text diagnostic without stream mutation. A correlated selector action matching both page and stale dialog diagnostics keeps its page effects and excludes the stale dialog targets.
+These values are bounded UI-presentation metadata, never authentication, CSRF protection, idempotency keys, or a database write-ordering mechanism. Every correlated stream response echoes the request, order, and optional flow values on its package-authored stream actions as `data-rw-request`, `data-rw-order`, and optional `data-rw-flow`, plus the action's `data-rw-dialog-phase` (`origin`, `new`, or `closed`). Both `BuildResult()` and `RenderAsync(viewContext)` echo the matching request token in the HTTP response header `X-RazorWire-Request` for correlated responses. The browser consults that header for `422` responses to associate validation with its originating submission and focus after the matching dialog update renders. The header does not change success handling. Page-only responses without correlation keep their existing behavior. Package-generated handled antiforgery failures also echo correlation on their stream actions, so a late 400 response cannot overwrite a reused form-local error target in a newer dialog. Invalid presentation headers preserve the antiforgery 400 as a plain-text diagnostic without stream mutation and mark it unhandled, allowing the current form's local failure/retry UI to present the rejection. A correlated selector action matching both page and stale dialog diagnostics keeps its page effects and excludes the stale dialog targets.
 
 An accepted open creates a new flow and replaces the current shell. Stale outside opens and responses from a dismissed, replaced, or no-longer-live inside flow cannot change the current dialog. Older overlapping submissions in one flow cannot overwrite newer validation state. For package-authored target actions, RazorWire applies this gating only when the action's actual target is inside the live dialog shell. An action carrying unknown or malformed correlation is skipped only when its target is inside the shell; an outside-page target remains eligible. A `rw-dialog` command must independently have a known, well-formed, unused request token to be accepted. Actions with no `data-rw-request`, including opaque/raw custom actions, are left to Turbo's normal behavior and remain the action author's responsibility. They are outside the scoped-dialog guarantee. Do not use an uncorrelated custom action to mutate dialog content when relying on flow isolation.
 
@@ -164,4 +221,4 @@ From the repository root, run:
 dotnet run --project examples/razorwire-mvc/RazorWireWebExample.csproj
 ```
 
-Visit `/Reactivity/DialogResponses`, click **Check status**, then **Save and continue**. Submit a one-character or whitespace-only name to see handled validation stay in the dialog; submit a valid name to see the page result update and the server explicitly close the dialog. Disable JavaScript and use the same full-page forms. The [sample README](../../../examples/razorwire-mvc/README.md#server-selected-dialogs) records exact routes, targets, response bodies, and its prepared-app timing target; the five-minute target is not a measured result, and a cold checkout is a separate measurement.
+Visit `/Reactivity/DialogResponses`, click **Check status**, then **Save and continue**. Submit a one-character or whitespace-only name to see handled validation stay in the dialog; submit a valid name to see the page result update and the server explicitly close the dialog. Disable JavaScript and use the same full-page forms. The [sample README](../../../examples/razorwire-mvc/README.md#server-selected-dialogs) records exact routes, targets, response bodies, and the prepared-app interaction timing; developer setup and clean-source startup are separate measurements.

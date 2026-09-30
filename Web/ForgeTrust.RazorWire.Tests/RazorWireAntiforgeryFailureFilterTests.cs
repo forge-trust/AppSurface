@@ -97,7 +97,7 @@ public class RazorWireAntiforgeryFailureFilterTests
         Assert.Contains("Antiforgery token validation failed", result.Content);
         Assert.DoesNotContain("<turbo-stream", result.Content);
         Assert.False(context.HttpContext.Response.Headers.ContainsKey("X-RazorWire-Request"));
-        Assert.Equal("true", context.HttpContext.Response.Headers[RazorWireFormHeaders.FormHandled]);
+        Assert.Equal("false", context.HttpContext.Response.Headers[RazorWireFormHeaders.FormHandled]);
     }
 
     [Fact]

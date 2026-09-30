@@ -56,3 +56,19 @@ Pre-existing changes belong to #828 planning. Preserve review scratch directorie
 - Reproduction: `LateRealAntiforgeryFailure_CannotRewriteReplacementDialogErrorTarget` failed with current error target overwritten; passed after fix and explicit MVC binary rebuild. Base control unavailable because main has no dialog API.
 - Added current500 retry,200 remaining open until explicit server close, and shared selector target partition verification. Final server531/531; dialog Playwright30/30; assets21+130 and typecheck pass; samplebuild0warnings/errors.
 - Coverage attempt1 stopped gracefully after production correction made it stale; partial run is not a coverage pass. Exact command unchanged for next attempt.
+
+## Plan audit closure and full-gate triage
+
+- Added copyable plain text, partial, generic component, named component, parameterized component, and pending-slot replacement examples to the canonical guide.
+- Added regression checks for default shell/Close text contrast and keyboard focus contrast, plus 640×360 CSS viewport reflow (the effective viewport of a 1280×720 desktop at 200% zoom). This is equivalent layout testing; the in-app browser did not implement keyboard page zoom. Live equivalent-viewport shell/Close bounds passed.
+- Prepared running-app interaction: Check status to visible titled dialog/Close took347ms; ordered body update visible without scrolling. Default text/Close contrast14.89:1; keyboard Close focus2px solid#2563eb. This is response timing, not developer setup time.
+- Coverage attempt2 runs the unchanged exact gate at `e837dbad`; additional test/docs audit edits make its evidence diagnostic, not final. Auth verifier child-launch timeouts, durable watchdog missing child PID, fake Git startup timeouts, documentation TOC screenshot changes, and one registration SSE timeout require triage. No gate waiver or threshold change.
+
+## Coverage recovery and adoption evidence
+
+- Invalid presentation metadata in the antiforgery filter now emits `X-RazorWire-Form-Handled: false` with its plaintext400 diagnostic, letting only the current form show local retry UI. Unit and live-browser regressions verify that it remains an antiforgery rejection and cannot rewrite a newer dialog.
+- Final dialog plus registration browser slice:33/33 pass. Refreshed documentation detail/release screenshots for new TOC links and current release; excluded home pixel noise and search focus/caret captures from the baseline update.
+- Enhance coverage cycle1: added semantic typed/named component correlation and discovery, MVC ambiguity, missing-partial diagnostics, cancellation, invalid input and internal stream contract tests. Server543/543 pass. Focused diagnostic patch coverage98.30% line/97.32% branch; focused aggregate is not a solution gate pass.
+- All three initially failing process test projects passed full collector reruns sequentially on the host: AuthAspNetCoreDevAuthExample61, DurablePostgreSqlLocalExample55, Durable.AdoptionMetrics57. Original timeout cause remains unproven; no thresholds, watchdogs or product semantics changed.
+- Independent prepared-app adoption on one clean export took242.254s from action/link edits to HTTP readiness. Parent browser click subsequently confirmed a visible titled dialog/body/Close in289ms. Initial clean-source extraction/startup took11.312s (0.673s extraction,10.638s run); global NuGet cache warm and host permissions required. Evidence screenshot `/private/tmp/issue828-prepared-adoption.jpg`.
+- Refreshed main adds only the web-push timeout assertion stabilization (#841). Merge it before the final unchanged full coverage run. Standard QA is complete; final coverage/review and draft PR remain.

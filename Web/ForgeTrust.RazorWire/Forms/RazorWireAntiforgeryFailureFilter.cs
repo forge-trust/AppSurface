@@ -14,7 +14,7 @@ using Microsoft.Extensions.Logging;
 namespace ForgeTrust.RazorWire.Forms;
 
 /// <summary>
-/// Converts RazorWire form anti-forgery validation failures into handled responses that Turbo can render in-place.
+/// Converts RazorWire form anti-forgery validation failures into negotiated responses and preserves local fallback.
 /// </summary>
 /// <remarks>
 /// The filter runs late in MVC result execution so it can see <see cref="IAntiforgeryValidationFailedResult"/> results
@@ -23,7 +23,8 @@ namespace ForgeTrust.RazorWire.Forms;
 /// request's <c>Accept</c> header. Turbo Stream responses prefer a form-local target when the posted marker can be read
 /// within the configured safety limit; otherwise they append one safe diagnostic block to <c>body</c>.
 /// Correlated Turbo responses echo request metadata so a delayed form-local failure cannot update a newer dialog flow.
-/// Invalid presentation metadata returns the same 400 diagnostic as plain text without applying stream actions.
+/// Invalid presentation metadata returns the same 400 diagnostic as plain text without applying stream actions,
+/// with <see cref="RazorWireFormHeaders.FormHandled"/> false so the current form can present local failure/retry UI.
 /// </remarks>
 internal sealed class RazorWireAntiforgeryFailureFilter : IAsyncAlwaysRunResultFilter, IOrderedFilter
 {
@@ -68,7 +69,8 @@ internal sealed class RazorWireAntiforgeryFailureFilter : IAsyncAlwaysRunResultF
     public int Order => int.MaxValue - 100;
 
     /// <summary>
-    /// Rewrites RazorWire anti-forgery validation failures into handled form responses, then continues result execution.
+    /// Rewrites RazorWire anti-forgery validation failures into form responses, then continues result execution.
+    /// Invalid presentation metadata uses an unhandled plaintext response so the current form can show local retry UI.
     /// </summary>
     /// <param name="context">The MVC result-executing context.</param>
     /// <param name="next">Delegate that continues MVC result execution.</param>
@@ -94,6 +96,7 @@ internal sealed class RazorWireAntiforgeryFailureFilter : IAsyncAlwaysRunResultF
         var turboStreamTarget = await ResolveTurboStreamTargetAsync(request, context.HttpContext.RequestAborted);
 
         RazorWireRequestMetadata? metadata = null;
+        var invalidPresentationMetadata = false;
         if (responseKind == RazorWireAntiforgeryResponseKind.TurboStream)
         {
             try
@@ -105,6 +108,7 @@ internal sealed class RazorWireAntiforgeryFailureFilter : IAsyncAlwaysRunResultF
                 // Preserve the antiforgery rejection when presentation headers are
                 // invalid, without sending an unscoped action into a live dialog.
                 responseKind = RazorWireAntiforgeryResponseKind.PlainText;
+                invalidPresentationMetadata = true;
             }
         }
 
@@ -114,7 +118,10 @@ internal sealed class RazorWireAntiforgeryFailureFilter : IAsyncAlwaysRunResultF
                 metadata.RequestId.ToString("D");
         }
 
-        context.HttpContext.Response.Headers[RazorWireFormHeaders.FormHandled] = "true";
+        // A plaintext diagnostic cannot present the error in an enhanced form.
+        // Leave this failure unhandled so the current form's local retry UI runs.
+        context.HttpContext.Response.Headers[RazorWireFormHeaders.FormHandled] =
+            invalidPresentationMetadata ? "false" : "true";
         context.Result = responseKind switch
         {
             RazorWireAntiforgeryResponseKind.TurboStream => new ContentResult

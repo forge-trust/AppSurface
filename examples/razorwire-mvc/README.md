@@ -126,7 +126,11 @@ Run the sample, open `/Reactivity/DialogResponses`, and try the enhanced respons
 
 Both GET routes send `Vary: Accept` and `Cache-Control: private, no-store`. The POST response variants also send `Cache-Control: private, no-store`.
 
-**Prepared-app time-to-first-result target: under five minutes.** This is a target, not a measured result; browser-lane validation has not timed it yet. Measure a prepared app separately from a cold checkout that must restore, build, and start the sample.
+**Developer adoption trial (2026-09-30): 242.254 seconds from editing a prepared sample through HTTP readiness.** An independent worker added a server action and enhanced link in a clean source export, then rebuilt and started that same export. A browser click subsequently opened the titled **Adoption trial** dialog with its body and Close control in 289 ms. Setup and the browser check were measured separately; the browser check was delayed by review work and an app restart. The prepared-app setup meets the under-five-minute target. This trial used the warm global NuGet cache and host execution permissions; it is not a first-ever machine setup measurement.
+
+**Clean-source startup trial: 11.312 seconds** from export extraction through HTTP readiness: extraction 0.673 seconds, then `dotnet run` 10.638 seconds. The global NuGet cache was warm. The initial sandbox startup failed; the successful run used host execution permissions. No prebuilt project binaries were copied into the export.
+
+The existing **Check status** interaction separately took 347 ms from clicking to a visible titled dialog and Close control in the already-running sample; its ordered body update was visible without scrolling. These interaction timings describe response presentation after setup.
 
 ### Real Adoption Proof: IncrementCounter
 
