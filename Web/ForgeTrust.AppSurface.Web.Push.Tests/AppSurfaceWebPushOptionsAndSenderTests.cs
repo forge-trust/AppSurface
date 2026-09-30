@@ -384,10 +384,11 @@ public sealed class AppSurfaceWebPushOptionsAndSenderTests
         var custody = new BlockingCancellationCustody();
         var sender = CreateSender(new StatusHandler(HttpStatusCode.Gone), CreateOptions(), custody);
         var send = sender.SendAsync(CreateSendRequest(CreateSubscription())).AsTask();
-        await custody.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         try
         {
+            await custody.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
             // Bound SendAsync from the cleanup start, before observing the separately scheduled callback.
             // A sender that waits for the blocked callback cannot satisfy this completion bound.
             var result = await send.WaitAsync(TimeSpan.FromSeconds(10));
