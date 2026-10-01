@@ -292,6 +292,10 @@ internal sealed class EvidenceCliWorkflow
         {
             throw new EvidenceCliException("ASEVD204", $"Evidence policy '{policyPath}' does not exist.", "Run 'appsurface evidence init --sample' or pass --policy with a checked-in policy path.");
         }
+        catch (ArgumentException)
+        {
+            throw new EvidenceCliException("ASEVD204", "Evidence policy path is empty or invalid.", "Run 'appsurface evidence init --sample' or pass --policy with a valid checked-in policy path.");
+        }
         catch (Exception exception) when (exception is JsonException or InvalidDataException or IOException or UnauthorizedAccessException)
         {
             throw new EvidenceCliException(
@@ -414,6 +418,10 @@ internal sealed class EvidenceCliWorkflow
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
             throw new EvidenceCliException("ASEVD208", $"Evidence file '{path}' does not exist.", "Pass paths from the same generated evidence output directory.");
+        }
+        catch (ArgumentException)
+        {
+            throw new EvidenceCliException("ASEVD208", "Evidence file path is empty or invalid.", "Pass valid plan and manifest paths from the same generated evidence output directory.");
         }
         catch (Exception exception) when (exception is JsonException or InvalidDataException or IOException or UnauthorizedAccessException)
         {

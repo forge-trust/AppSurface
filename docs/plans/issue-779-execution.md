@@ -346,3 +346,30 @@ assemblies were unchanged. Logs: `/private/tmp/issue779-encoding-red.stdout.log`
 `/private/tmp/issue779-encoding-red.json` and `/private/tmp/issue779-encoding-green.log`.
 Scoped whitespace formatting and diff checks exited **0**. Python verifier controls passed **4/4**;
 the mechanism launcher passed shell syntax validation and all 14 checked documentation destinations exist.
+
+### Coverage attempts 4 and 5, and invalid-path repair
+
+Attempt 4 completed all **54/54** project outcomes at committed `cf6d3aa7` against `origin/main`
+`4aa8329c`. The build had zero warnings/errors; 53 projects passed, while the auth fixture suite had
+**6 failed / 55 passed**. The unchanged wrapper exited **1 / ASCOV120** before the official aggregate
+and patch gates. Raw merged coverage was **95.11% line / 89.03% branch**, which is not a gate pass.
+Preserved evidence: `/private/tmp/issue779-coverage-attempt4-evidence/summary.json` and its copied
+project log. The same failed auth controls plus an early-exit neighbor passed **7/7**, exit **0**,
+in both isolated unsandboxed and sandboxed collector trials with unchanged deadlines. Those trials
+do not explain the full-run stalls or establish a causal production fix.
+
+Attempt 5 started on clean committed `2bb8f1f6` with the same base and command, then the user
+interrupted the turn. Its terminal exit file is absent and its execution handle is no longer present.
+Process inspection found no surviving coverage or test process for this checkout; other checkouts'
+work was left alone. Its last log heartbeat was at elapsed 690 seconds in the RazorWire integration
+project. This attempt is **interrupted and unverified**, with no invented numeric exit or gate result.
+
+A subsequent native review identified raw `ArgumentException` for an empty policy path. Actual CLI
+reproduction confirmed the leak. The two file readers now map empty or file-API-rejected paths to
+generic `ASEVD204` (policy) or `ASEVD208` (plan/manifest), without the invalid path or inner exception.
+Six public workflow regressions cover empty and NUL-containing paths for all three inputs. The
+fresh Evidence filter passed **176/176**, exit **0**, with no warning/error matches; whitespace
+formatting and diff checks exited **0**. Actual rebuilt CLI `doctor --policy ''` exited **1** with
+only the expected `ASEVD204` diagnostic. Logs: `/private/tmp/issue779-path-validation2.log`,
+`/private/tmp/issue779-path-format.log` and `/private/tmp/issue779-empty-policy-fixed.stderr.log`.
+The next full gate must measure this final committed repair; fresh packed CLI/SDK QA is in progress.

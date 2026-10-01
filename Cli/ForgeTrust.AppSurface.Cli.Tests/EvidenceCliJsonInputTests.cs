@@ -162,6 +162,39 @@ public sealed class EvidenceCliJsonInputTests
     }
 
     [Theory]
+    [InlineData("policy", "")]
+    [InlineData("plan", "")]
+    [InlineData("manifest", "")]
+    [InlineData("policy", "path-secret-canary\0.json")]
+    [InlineData("plan", "path-secret-canary\0.json")]
+    [InlineData("manifest", "path-secret-canary\0.json")]
+    public async Task Workflow_MapsInvalidPathsToSafeDiagnostic(string input, string path)
+    {
+        using var directory = TestDirectory.Create();
+        var paths = await CreateInputsAsync(directory.Path);
+        paths[input] = path;
+        var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
+
+        var exception = await Assert.ThrowsAsync<EvidenceCliException>(async () =>
+        {
+            if (input == "policy")
+            {
+                await workflow.DoctorAsync(
+                    new EvidencePlanningRequest(paths["policy"], ["docs/readme.md"], null), CancellationToken.None);
+            }
+            else
+            {
+                await workflow.VerifyAsync(paths["plan"], paths["manifest"], CancellationToken.None);
+            }
+        });
+
+        Assert.Equal(input == "policy" ? "ASEVD204" : "ASEVD208", exception.Code);
+        Assert.DoesNotContain("path-secret-canary", exception.ToString(), StringComparison.Ordinal);
+        Assert.Null(exception.InnerException);
+        Assert.Equal(3, Directory.GetFiles(directory.Path).Length);
+    }
+
+    [Theory]
     [InlineData("policy", false)]
     [InlineData("plan", false)]
     [InlineData("manifest", false)]
