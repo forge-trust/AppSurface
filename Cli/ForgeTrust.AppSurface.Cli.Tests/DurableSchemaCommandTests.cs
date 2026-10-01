@@ -1,6 +1,6 @@
+using System.Text;
 using CliFx;
 using CliFx.Infrastructure;
-using System.Text;
 using ForgeTrust.AppSurface.Durable.PostgreSql;
 using ForgeTrust.AppSurface.Testing;
 using Npgsql;

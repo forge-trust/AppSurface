@@ -26,7 +26,7 @@ internal sealed class DurablePreflightArtifactProof
     private const string PostgresImage = "postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877";
     private const string OwnerRole = "appsurface_durable_owner";
     private const string StoreId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa8450";
-    private const string ActiveEpoch = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb8450";
+    private const string ActiveEpoch = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb8450";
     private const string RolePairsRelativePath = "examples/durable-postgresql/role-pairs-full-and-work-only.example.json";
     private const string Schema10FixtureRelativePath = "Durable/consumers/PostgreSqlPreflightConsumer/schema10-two-pair.sql";
 

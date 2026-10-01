@@ -317,7 +317,10 @@ public sealed class DurableRoleManifestTests
 
     private sealed class TestDirectory : IDisposable
     {
-        private TestDirectory(string path) => Path = path;
+        private TestDirectory(string path)
+        {
+            Path = path;
+        }
 
         public string Path { get; }
 

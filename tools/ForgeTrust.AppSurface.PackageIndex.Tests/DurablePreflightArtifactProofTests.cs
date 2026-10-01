@@ -16,7 +16,10 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
     private const string ArtifactId = "artifact-845";
     private readonly string _root = TestPathUtils.PathUnder(Path.GetTempPath(), "durable-preflight-proof", Guid.NewGuid().ToString("N"));
 
-    public DurablePreflightArtifactProofTests() => Directory.CreateDirectory(_root);
+    public DurablePreflightArtifactProofTests()
+    {
+        Directory.CreateDirectory(_root);
+    }
 
     [Theory]
     [InlineData("candidate")]
@@ -322,7 +325,13 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
             runner.LastRequest.Environment!["PREFLIGHT_ROLE_PAIRS_FILE"]);
         Assert.Equal("appsurface_durable_owner", runner.LastRequest.Environment["PREFLIGHT_MIGRATION_OWNER_ROLE"]);
         Assert.Equal("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa8450", runner.LastRequest.Environment["PREFLIGHT_STORE_ID"]);
-        Assert.Equal("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb8450", runner.LastRequest.Environment["PREFLIGHT_ACTIVE_EPOCH"]);
+        Assert.Equal("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb8450", runner.LastRequest.Environment["PREFLIGHT_ACTIVE_EPOCH"]);
+        // The real consumer parses both overrides before it creates a disposable fixture.
+        // String equality alone must not let the carrier and receipt fixture share a malformed identity.
+        Assert.True(Guid.TryParseExact(runner.LastRequest.Environment["PREFLIGHT_STORE_ID"], "D", out var storeId));
+        Assert.NotEqual(Guid.Empty, storeId);
+        Assert.True(Guid.TryParseExact(runner.LastRequest.Environment["PREFLIGHT_ACTIVE_EPOCH"], "D", out var activeEpoch));
+        Assert.NotEqual(Guid.Empty, activeEpoch);
         Assert.Equal(4, result.ScenarioCount);
         Assert.False(File.Exists(fixture.Request.ArtifactManifestPath));
         Assert.True(File.Exists(fixture.Request.ApprovedManifestPath));
@@ -1293,7 +1302,7 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
                 onePairManifestSha256 = onePairSha,
                 migrationOwnerRole = "appsurface_durable_owner",
                 storeId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa8450",
-                activeEpoch = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb8450",
+                activeEpoch = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb8450",
                 postgresImage = "postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877",
                 scenarios,
                 cliResults,
@@ -1320,7 +1329,7 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
                     lanePassBackendPid = 51,
                     lanePassExecutingBackendPid = 53,
                     lanePassStoreId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa8450",
-                    lanePassActiveEpoch = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb8450",
+                    lanePassActiveEpoch = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb8450",
                     lanePassStarted = true,
                     lanePassObservedExecuting = true,
                     lanePassBackendTerminated = true,
@@ -1335,7 +1344,7 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
                     activationReceiptWithheld = true,
                     activationBackendPid = 52,
                     activationStoreId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa8450",
-                    activationActiveEpoch = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb8450",
+                    activationActiveEpoch = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb8450",
                     activationWorkInvocationStartedBeforeCompletion = true,
                     activationDrainVerifiedCheckpointObserved = true,
                     activationHostedServicesStopped = true,
@@ -1400,15 +1409,15 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
             void AddScenarioResults(string scenario, int count, string manifestHash, bool includeSource)
             {
                 cliResults.Add(new ReceiptRecord(scenario, "runtime", 1, "appsurface_durable_runtime", "appsurface_durable_owner", count,
-                    manifestHash, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa8450", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb8450", 3.1));
+                    manifestHash, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa8450", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb8450", 3.1));
                 if (includeSource)
                 {
                     cliResults.Add(new ReceiptRecord(scenario, "runtime", 2, "appsurface_durable_source_runtime", "appsurface_durable_owner", count,
-                        manifestHash, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa8450", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb8450", 3.2));
+                        manifestHash, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa8450", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb8450", 3.2));
                 }
 
                 cliResults.Add(new ReceiptRecord(scenario, "owner-diagnostic", null, "appsurface_durable_owner", "appsurface_durable_owner", count,
-                    manifestHash, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa8450", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb8450", 4.0));
+                    manifestHash, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa8450", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb8450", 4.0));
             }
 
             static object Scenario(string name, int runtimeCount, bool schema10, bool laneSkipped = false)
@@ -1427,7 +1436,7 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
                     laneEvidenceAfter = laneSkipped ? null : LaneEvidence(name, runtimeCount == 2),
                     fixtureActivationCallbackCompleted = true,
                     storeId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa8450",
-                    activeEpoch = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb8450",
+                    activeEpoch = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb8450",
                     modeledSchema10BaselinePresent = schema10
                 };
 
@@ -1436,7 +1445,7 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
                 {
                     scenario = name,
                     storeId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa8450",
-                    activeEpoch = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb8450",
+                    activeEpoch = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb8450",
                     guardBackendPid = 42,
                     forwarder = new
                     {
