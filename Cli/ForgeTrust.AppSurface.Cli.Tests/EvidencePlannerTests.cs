@@ -821,7 +821,7 @@ public sealed class EvidencePlannerTests
         Assert.Equal("Correct the input and rerun.", diagnostic.Fix);
     }
 
-    private sealed class ReplacingEvidenceDiffFileAccess(string expectedPath, byte[] replacement) : IEvidenceDiffFileAccess
+    private sealed class ReplacingEvidenceDiffFileAccess(string expectedPath, byte[] replacement) : IEvidenceInputFileAccess
     {
         public bool WasOpened { get; private set; }
 

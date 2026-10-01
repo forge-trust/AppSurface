@@ -1,5 +1,23 @@
 # Deferred work
 
+## EvidenceHost follow-ups after #779
+
+### Portable origin receipts
+
+**What:** Evaluate signed portable EvidenceHost receipts when a consumer needs verification outside the protected CI output channel.
+
+**Why:** The [#779 shared admission design](docs/designs/issue-779-evidencehost-trust-boundary.md) deliberately records `ValidatedNotAttested`; a structurally valid manifest cannot authenticate its own source.
+
+**Pros:** Gives external gate consumers a verifiable origin and explicit retention policy.
+
+**Cons:** Adds signing identity, authorization, key/identity lifecycle and retained evidence costs; it cannot prove correctness of subject-owned test logic.
+
+**Context:** Reuse the [release provenance follow-up](#release-provenance-follow-up-798) where its origin/retention requirements coincide. Preserve admission, registered assertion semantics and the separate CI containment boundary; do not simply rename a limited assertion to `Attested`.
+
+**Effort:** Human L / agent M, subject to consumer research.
+**Priority:** P3
+**Depends on:** #779 hostile proof, a real external consumer and a separate signing/retention design.
+
 ## Durable role-pair retirement after #823
 
 - **What:** Design an explicit, reviewed procedure to retire or narrow one PostgreSQL Durable role pair without treating omission from the complete manifest as authorization to remove it. **Why:** #823 makes enrollment safe but a decommissioned lane otherwise leaves stale grants and policy targets. **Pros:** Closes the credential lifecycle while preserving the fail-closed manifest contract. **Cons:** Requires deployment-use proof, a lock-protected exact removal, post-removal ACL/policy and surviving-lane tests, and a coordinated operator window. **Context:** Start with the [#823 design](docs/designs/issue-823-shared-store-role-pairs.md) and [plan](docs/plans/issue-823-shared-store-role-pairs.md); first prove no active host or secret uses the pair, then review the removal action separately. **Effort:** M (human: 1–2 days / agent assistance: several hours). **Priority:** P2. **Depends on / blocked by:** #823 enrollment release and an actual pair retirement or profile-narrowing need.

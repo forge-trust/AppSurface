@@ -24,6 +24,14 @@ An `EvidencePolicy` resolves into an immutable `EvidencePlan`. A run records dec
 | `EvidenceProducerResult`, `EvidenceManifest` | Terminal producer outcomes and the resulting gate claim. |
 | `EvidenceCanonicalJson`, `EvidenceDigest`, `EvidenceManifestBuilder` | Canonical serialization, digesting, claim calculation, and manifest verification. |
 
+### Bounded JSON input
+
+`EvidenceCanonicalJson.Deserialize<T>(ReadOnlySpan<byte>)` preserves the existing in-memory entry point and enforces a protected **20 MiB** input ceiling. Use `DeserializeAsync<T>(Stream, maximumBytes, cancellationToken)` when reading a file or another stream: it counts bytes while reading, does not depend on seekability or advertised length, and stops after observing the first byte over the limit, before parsing or allocating a full document. The stream remains owned by the caller. `maximumBytes` may lower the ceiling (including zero) but cannot raise it. The span overload with an explicit limit is available for callers that already hold bytes.
+
+All deserialization entry points reject malformed JSON, duplicate or case-colliding property names anywhere in the document, unknown enum strings, and numeric enum values. Known enum names remain case-insensitive. Required constructor members must be present; non-nullable members and contract collection items cannot be `null`. Optional constructor defaults and explicitly nullable fields remain supported. Unknown object properties are ignored so additive optional fields remain compatible; they are also omitted when the parsed contract is serialized again. `EvidencePlan` and `EvidenceManifest` must declare contract version `1.0`, the only version currently emitted by the planner and manifest builder. Diagnostics use bounded generic messages: size and stream-read failures throw `InvalidDataException`, schema and JSON failures throw `JsonException`, invalid lower-limit arguments throw `ArgumentOutOfRangeException`, and stream cancellation propagates `OperationCanceledException`.
+
+The span overload cannot limit memory already allocated by its caller. Prefer the counted stream overload at an untrusted file or stream boundary, and do not use a stream length check as a substitute for counted reading. These methods validate structure and format; they do not authenticate who supplied the JSON or make a plan trusted.
+
 `EvidenceClaimKind.TargetedComplete` is eligible for a pull-request gate; `ReleaseComplete` is eligible only for a release gate and requires `ValidatedNotAttested` envelope status. `ObservationOnly` is deliberately informative, never gate-eligible. `NoEvidenceRequired` is valid only when the selected profile declares no resources, producers, or obligations.
 
 ## Claim rules

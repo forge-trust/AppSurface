@@ -25,10 +25,12 @@ appsurface evidence verify TestResults/evidence/evidence-manifest.json
 | Command | Behavior |
 | --- | --- |
 | `init --sample` | Creates a marked, non-overwriting policy, host skeleton, and local README. `--force` may replace only previously marked starter files. |
-| `doctor` | Resolves policy and reports policy, diff, Docker, browser, and release-envelope prerequisites without starting anything. |
+| `doctor` | Resolves policy and reports structural policy/diff and Docker/browser prerequisites without starting anything. Protected execution-envelope facts remain `unverified` for every profile, including when `GITHUB_ACTIONS=true`. |
 | `explain` | Writes the resolved plan and a human-readable summary without running producers. |
 | `run` | Runs selected built-in coverage evidence, writes a canonical plan/manifest/summary, and writes a GitHub step summary when available. Consumer-owned browser/E2E or resource-backed producers run through the separate Aspire EvidenceHost package. |
 | `verify` | Recomputes binding and digest verification without running any producer. |
+
+Policy, plan and manifest JSON use the shared [bounded JSON reader](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#bounded-json-input): at most 20 MiB of UTF-8 input per file, counted as bytes arrive before parsing. A file length check does not establish this bound. Duplicate or case-colliding properties, unknown or numeric enum values and unsupported plan/manifest versions are rejected; safe additive properties remain compatible. Unreadable, oversized or invalid policy input returns `ASEVD205`; equivalent generated input failures return `ASEVD209`. Diagnostics contain no JSON content or raw reader exception. Structural verification checks consistency and does not authenticate origin.
 
 ## Incomplete profiles are not complete evidence
 
@@ -41,7 +43,7 @@ Coverage execution uses the same fail-mode [watchdog and no-dump VSTest hang pol
 ## Pitfalls
 
 - Do not run a repository-wide gate after intentionally filtering out required tests and expect a complete claim.
-- Do not treat `doctor`'s `ready_with_external_prerequisites` status as a pass; it describes what the consumer CI image must provide.
+- Do not treat `doctor`'s `ready_with_external_prerequisites` status as a pass; it describes prerequisites and grants no admission. The `trusted-envelope` check stays `unverified` until the registered verifier runs under an independently armed supervisor. Consult the [consumer acceptance record](../../docs/evidence/issue779-consumer-acceptance.md); setting a CI environment flag cannot substitute for that proof.
 - Do not set `--observation-only` on a job that must satisfy a PR or release gate.
 - Do not hand-edit generated artifacts; use `verify`.
 

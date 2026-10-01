@@ -719,10 +719,18 @@ public static class EvidenceArtifactValidation
 }
 
 /// <summary>
-/// Serializes contract objects deterministically for evidence identity and verification.
+/// Serializes contract objects deterministically for evidence identity and verification, and strictly ingests bounded JSON.
 /// </summary>
 public static class EvidenceCanonicalJson
 {
+    /// <summary>
+    /// Gets the protected maximum number of UTF-8 bytes accepted by Evidence JSON deserialization.
+    /// Callers may configure a lower per-input limit, but cannot raise this ceiling.
+    /// </summary>
+    public const int MaximumInputBytes = 20 * 1024 * 1024;
+
+    private const string SupportedContractVersion = "1.0";
+
     /// <summary>
     /// Serializes a value as canonical UTF-8 JSON with ordinal object-property order.
     /// </summary>
@@ -744,23 +752,346 @@ public static class EvidenceCanonicalJson
     }
 
     /// <summary>
-    /// Deserializes a JSON document using the contract serializer options.
+    /// Deserializes a bounded JSON document using the contract serializer options.
+    /// Object properties must be unique under ordinal, case-insensitive comparison at every depth. Enum values must
+    /// be known strings. Required constructor members must be present and non-null, and contract collections must
+    /// not contain null items. Optional nullable members and constructor defaults remain supported.
+    /// Unknown properties are ignored for additive compatibility, and plan and manifest values
+    /// must declare the currently supported contract version (<c>1.0</c>).
     /// </summary>
     /// <typeparam name="TValue">Value type to deserialize.</typeparam>
-    /// <param name="utf8Json">JSON bytes.</param>
+    /// <param name="utf8Json">JSON bytes already held in memory.</param>
     /// <returns>The deserialized value.</returns>
+    /// <exception cref="InvalidDataException">The input exceeds <see cref="MaximumInputBytes"/>.</exception>
+    /// <exception cref="JsonException">The input is malformed, ambiguous, contains an invalid enum, or uses an unsupported plan or manifest version.</exception>
     public static TValue Deserialize<TValue>(ReadOnlySpan<byte> utf8Json)
     {
-        var value = JsonSerializer.Deserialize<TValue>(utf8Json, SerializerOptions);
-        return value ?? throw new InvalidOperationException($"Evidence JSON did not contain a {typeof(TValue).Name} value.");
+        return Deserialize<TValue>(utf8Json, MaximumInputBytes);
+    }
+
+    /// <summary>
+    /// Deserializes a bounded JSON document using a caller-selected limit that cannot exceed
+    /// <see cref="MaximumInputBytes"/>. This overload is useful when a protected input source has a tighter budget.
+    /// </summary>
+    /// <typeparam name="TValue">Value type to deserialize.</typeparam>
+    /// <param name="utf8Json">JSON bytes already held in memory.</param>
+    /// <param name="maximumBytes">Optional lower per-input limit, from zero through <see cref="MaximumInputBytes"/>.</param>
+    /// <returns>The deserialized value.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maximumBytes"/> is outside the permitted range.</exception>
+    /// <exception cref="InvalidDataException">The input exceeds <paramref name="maximumBytes"/>.</exception>
+    /// <exception cref="JsonException">The input is malformed, ambiguous, contains an invalid enum, or uses an unsupported plan or manifest version.</exception>
+    public static TValue Deserialize<TValue>(ReadOnlySpan<byte> utf8Json, int maximumBytes)
+    {
+        ValidateMaximumBytes(maximumBytes);
+        if (utf8Json.Length > maximumBytes)
+        {
+            throw new InvalidDataException("Evidence JSON exceeds the maximum input size.");
+        }
+
+        TValue? value;
+        try
+        {
+            ValidateUniquePropertyNames(utf8Json);
+            value = JsonSerializer.Deserialize<TValue>(utf8Json, DeserializerOptions);
+        }
+        catch (JsonException)
+        {
+            throw new JsonException("Evidence JSON is malformed or does not match the supported contract.");
+        }
+
+        if (value is null)
+        {
+            throw new JsonException("Evidence JSON is empty or does not contain the requested contract.");
+        }
+
+        ValidateCollectionItems(value);
+        ValidateContractVersion(value);
+        return value;
+    }
+
+    /// <summary>
+    /// Reads and deserializes a JSON document from a stream while counting bytes as they arrive. The stream is not
+    /// owned or disposed by this method. Reading stops with a safe error after observing the first byte above the
+    /// configured limit; seekability and advertised stream length are not used as bounds.
+    /// </summary>
+    /// <typeparam name="TValue">Value type to deserialize.</typeparam>
+    /// <param name="utf8Json">Readable source stream.</param>
+    /// <param name="maximumBytes">Per-input limit, from zero through <see cref="MaximumInputBytes"/>.</param>
+    /// <param name="cancellationToken">Token used to cancel stream reading.</param>
+    /// <returns>The deserialized value.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="utf8Json"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maximumBytes"/> is outside the permitted range.</exception>
+    /// <exception cref="InvalidDataException">The stream cannot be read safely or the input exceeds <paramref name="maximumBytes"/>.</exception>
+    /// <exception cref="JsonException">The input is malformed, ambiguous, contains an invalid enum, or uses an unsupported plan or manifest version.</exception>
+    /// <exception cref="OperationCanceledException">The read was canceled.</exception>
+    public static async ValueTask<TValue> DeserializeAsync<TValue>(
+        Stream utf8Json,
+        int maximumBytes = MaximumInputBytes,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(utf8Json);
+        ValidateMaximumBytes(maximumBytes);
+
+        var bytes = await ReadBoundedInputAsync(utf8Json, maximumBytes, cancellationToken).ConfigureAwait(false);
+        return Deserialize<TValue>(bytes, maximumBytes);
     }
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         PropertyNameCaseInsensitive = true,
         WriteIndented = false,
-        Converters = { new JsonStringEnumConverter() },
+        MaxDepth = 64,
+        Converters = { new StrictStringEnumConverterFactory() },
     };
+
+    private static readonly JsonSerializerOptions DeserializerOptions = new(SerializerOptions)
+    {
+        RespectNullableAnnotations = true,
+        RespectRequiredConstructorParameters = true,
+    };
+
+    private static async ValueTask<byte[]> ReadBoundedInputAsync(
+        Stream source,
+        int maximumBytes,
+        CancellationToken cancellationToken)
+    {
+        const int BufferSize = 81920;
+        var buffer = new byte[BufferSize];
+        using var output = new MemoryStream(Math.Min(maximumBytes, BufferSize));
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var bytesRemaining = maximumBytes - (int)output.Length;
+            var requestedBytes = Math.Min(buffer.Length, bytesRemaining + 1);
+            int bytesRead;
+            try
+            {
+                bytesRead = await source.ReadAsync(buffer.AsMemory(0, requestedBytes), cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (IOException)
+            {
+                throw new InvalidDataException("Evidence JSON input could not be read.");
+            }
+            catch (UnauthorizedAccessException)
+            {
+                throw new InvalidDataException("Evidence JSON input could not be read.");
+            }
+            catch (NotSupportedException)
+            {
+                throw new InvalidDataException("Evidence JSON input could not be read.");
+            }
+            catch (ObjectDisposedException)
+            {
+                throw new InvalidDataException("Evidence JSON input could not be read.");
+            }
+
+            if (bytesRead == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return output.ToArray();
+            }
+
+            if (bytesRead > bytesRemaining)
+            {
+                throw new InvalidDataException("Evidence JSON exceeds the maximum input size.");
+            }
+
+            output.Write(buffer, 0, bytesRead);
+        }
+    }
+
+    private static void ValidateMaximumBytes(int maximumBytes)
+    {
+        if (maximumBytes < 0 || maximumBytes > MaximumInputBytes)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(maximumBytes),
+                $"The input limit must be between zero and {MaximumInputBytes} bytes.");
+        }
+    }
+
+    private static void ValidateUniquePropertyNames(ReadOnlySpan<byte> utf8Json)
+    {
+        var reader = new Utf8JsonReader(utf8Json, new JsonReaderOptions { MaxDepth = 64 });
+        var objectScopes = new Stack<HashSet<string>?>();
+        var reusableSets = new Stack<HashSet<string>>();
+
+        try
+        {
+            while (reader.Read())
+            {
+                switch (reader.TokenType)
+                {
+                    case JsonTokenType.StartObject:
+                        objectScopes.Push(null);
+                        break;
+                    case JsonTokenType.PropertyName:
+                    {
+                        var properties = objectScopes.Pop();
+                        properties ??= reusableSets.Count > 0
+                            ? reusableSets.Pop()
+                            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        var propertyName = reader.GetString()!;
+                        if (!properties.Add(propertyName))
+                        {
+                            throw new JsonException("Evidence JSON contains duplicate or case-colliding object properties.");
+                        }
+
+                        objectScopes.Push(properties);
+                        break;
+                    }
+                    case JsonTokenType.EndObject:
+                    {
+                        var properties = objectScopes.Pop();
+                        if (properties is not null)
+                        {
+                            properties.Clear();
+                            reusableSets.Push(properties);
+                        }
+
+                        break;
+                    }
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            throw new JsonException("Evidence JSON is malformed or contains duplicate or case-colliding object properties.");
+        }
+    }
+
+    private static void ValidateContractVersion<TValue>(TValue value)
+    {
+        if (value is EvidencePlan plan && !string.Equals(plan.ContractVersion, SupportedContractVersion, StringComparison.Ordinal))
+        {
+            throw new JsonException("Evidence plan contract version is missing or unsupported.");
+        }
+
+        if (value is EvidenceManifest manifest && !string.Equals(manifest.ContractVersion, SupportedContractVersion, StringComparison.Ordinal))
+        {
+            throw new JsonException("Evidence manifest contract version is missing or unsupported.");
+        }
+    }
+
+    // System.Text.Json validates required members, but nullable annotations do not cover collection elements.
+    private static void ValidateCollectionItems(object value)
+    {
+        switch (value)
+        {
+            case EvidencePolicy policy:
+                ValidateItems(policy.Profiles);
+                ValidateItems(policy.Rules);
+                break;
+            case EvidenceProfile profile:
+                ValidateItems(profile.Resources);
+                ValidateItems(profile.Producers);
+                ValidateItems(profile.Obligations);
+                break;
+            case EvidenceResourceDeclaration resource:
+                ValidateItems(resource.Requires);
+                break;
+            case EvidenceProducerDeclaration producer:
+                ValidateItems(producer.RequiredResources);
+                ValidateItems(producer.AssertionIds);
+                ValidateItems(producer.ArtifactSlots);
+                break;
+            case EvidenceObligation obligation:
+                ValidateItems(obligation.RequiredProducerIds);
+                break;
+            case EvidencePlan plan:
+                ValidateCollectionItems(plan.Profile);
+                ValidateItems(plan.ChangedPaths);
+                ValidateItems(plan.MatchedRuleIds);
+                if (plan.PolicySnapshot is not null)
+                {
+                    ValidateCollectionItems(plan.PolicySnapshot);
+                }
+
+                break;
+            case EvidenceManifest manifest:
+                ValidateItems(manifest.ResourceResults);
+                ValidateItems(manifest.SelectedObligationIds);
+                ValidateItems(manifest.ClosedObligationIds);
+                ValidateItems(manifest.UnmediatedObligationIds);
+                ValidateItems(manifest.ProducerResults);
+                break;
+            case EvidenceProducerResult result:
+                ValidateItems(result.SatisfiedAssertionIds);
+                if (result.Artifacts is not null)
+                {
+                    ValidateItems(result.Artifacts);
+                }
+
+                break;
+        }
+    }
+
+    private static void ValidateItems<TItem>(IEnumerable<TItem> items)
+        where TItem : notnull
+    {
+        foreach (var item in items)
+        {
+            if (item is null)
+            {
+                throw new JsonException("Evidence JSON contains a null item in a required contract collection.");
+            }
+
+            ValidateCollectionItems(item);
+        }
+    }
+
+    private sealed class StrictStringEnumConverterFactory : JsonConverterFactory
+    {
+        public override bool CanConvert(Type typeToConvert) => typeToConvert.IsEnum;
+
+        public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options)
+        {
+            var converterType = typeof(StrictStringEnumConverter<>).MakeGenericType(typeToConvert);
+            return (JsonConverter)Activator.CreateInstance(converterType)!;
+        }
+    }
+
+    private sealed class StrictStringEnumConverter<TEnum> : JsonConverter<TEnum>
+        where TEnum : struct, Enum
+    {
+        public StrictStringEnumConverter()
+        {
+        }
+
+        public override TEnum Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType != JsonTokenType.String)
+            {
+                throw new JsonException();
+            }
+
+            var name = reader.GetString();
+            if (name is null
+                || !Enum.GetNames<TEnum>().Contains(name, StringComparer.OrdinalIgnoreCase)
+                || !Enum.TryParse<TEnum>(name, ignoreCase: true, out var value))
+            {
+                throw new JsonException();
+            }
+
+            return value;
+        }
+
+        public override void Write(Utf8JsonWriter writer, TEnum value, JsonSerializerOptions options)
+        {
+            var name = Enum.GetName(value);
+            if (name is null)
+            {
+                throw new JsonException();
+            }
+
+            writer.WriteStringValue(name);
+        }
+    }
 
     private static void WriteElement(JsonElement element, Utf8JsonWriter writer)
     {

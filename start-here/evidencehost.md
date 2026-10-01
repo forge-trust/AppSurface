@@ -16,6 +16,8 @@ appsurface evidence explain --path src/Orders/SubmitOrder.cs
 
 The generated policy maps `docs/**` to an explicit `no-evidence` profile and sends every unmatched path to a non-empty conservative coverage profile. `explain` tells a developer, before tests start, which profile won, which rule selected it, which producers must run, and which obligations they must close.
 
+`doctor` reports `ready_with_external_prerequisites` when structural planning succeeds but protected execution facts remain `unverified`. It grants no runtime admission, including when a CI environment flag is present. Consult the [consumer acceptance record](../docs/evidence/issue779-consumer-acceptance.md) for the required consumer, supervision and platform proof. Policy and generated JSON are read under the shared [20 MiB counted input limit](../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md#bounded-json-input); invalid or oversized inputs fail before planning or verification.
+
 ```text
 Evidence plan: targeted-coverage (targeted)
 Why: conservative:targeted-coverage

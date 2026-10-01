@@ -1,0 +1,37 @@
+name: EvidenceHost Linux mechanism proof (no admission)
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tests/evidencehost-consumer/**'
+      - 'scripts/verify-evidencehost-linux-mechanism.sh'
+      - '.github/workflows/evidencehost-mechanism-proof.yml'
+  workflow_dispatch:
+
+jobs:
+  linux-mechanism:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout candidate proof (not Trusted tooling)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Prove independent supervision and separate identities
+        run: bash scripts/verify-evidencehost-linux-mechanism.sh "$RUNNER_TEMP/evidence779-mechanism"
+      - name: Retain provisional observations
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: evidence779-linux-mechanism-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence779-mechanism/*.json
+          if-no-files-found: warn
+          retention-days: 7
