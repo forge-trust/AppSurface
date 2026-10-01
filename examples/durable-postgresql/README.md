@@ -140,7 +140,72 @@ to every direct `DurableRuntimePumpRequest`, including recovery calls. `HostedSu
 requests are independent and must be constrained themselves. Flow or Schedule selection must fail closed against the
 Work-only dispatcher. See the provider's [host and direct-pass example](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host).
 
-## Ten-minute PostgreSQL transcript
+## Complete-manifest preflight walkthrough
+
+The [one-pair full manifest](role-pairs-full.example.json) and [full plus `work_only` manifest](role-pairs-full-and-work-only.example.json)
+are fictional disposable examples using the role names created by the local transcript below. They are not reviewed
+deployment inputs. The same exact file bytes must be used for the matching recipe run and every preflight command;
+changing whitespace or order changes SHA-256 and requires a new review. For actual deployment, substitute the reviewed
+file and actual independently reviewed owner role, and use the matching released provider package's extracted
+`contentFiles/any/any/configure-postgresql-roles.sql` bytes. Repository-source commands below demonstrate syntax only,
+not candidate or published-package proof.
+
+For a one-pair store, reconcile using the full manifest and the local canonical recipe. In an actual deployment, read
+the package recipe from the matched provider artifact. Load `APPSURFACE_DURABLE_RUNTIME_CONNECTION` from the local
+secret store before running the runtime command; the CLI accepts only the environment-variable name, never the
+connection value. The step-by-step transcript below demonstrates disposable runtime credential setup. Use the same
+pair file for both commands:
+
+```bash
+ROLE_PAIRS_FILE=examples/durable-postgresql/role-pairs-full.example.json
+ROLE_PAIRS_JSON="$(< "$ROLE_PAIRS_FILE")"
+docker exec -i appsurface-durable-postgres \
+  psql -v ON_ERROR_STOP=1 -U postgres -d appsurface_durable_example \
+  -v migration_owner_role=appsurface_durable_owner \
+  -v role_pairs_json="$ROLE_PAIRS_JSON" \
+  -v retention_operator_role=appsurface_durable_retention \
+  -f - < Durable/configure-postgresql-roles.sql
+shasum -a 256 "$ROLE_PAIRS_FILE"
+appsurface durable schema preflight \
+  --role-pairs-file "$ROLE_PAIRS_FILE" \
+  --migration-owner-role appsurface_durable_owner \
+  --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION
+```
+
+For the enrolled two-pair store, apply the full-plus-`work_only` file once with the recipe and run preflight separately
+under each runtime credential. Populate both named environment variables from the disposable secret setup; never
+reuse one credential for both invocations. The owner is an explicit diagnostic identity only and does not count as a
+runtime pass:
+
+```bash
+ROLE_PAIRS_FILE=examples/durable-postgresql/role-pairs-full-and-work-only.example.json
+ROLE_PAIRS_JSON="$(< "$ROLE_PAIRS_FILE")"
+docker exec -i appsurface-durable-postgres \
+  psql -v ON_ERROR_STOP=1 -U postgres -d appsurface_durable_example \
+  -v migration_owner_role=appsurface_durable_owner \
+  -v role_pairs_json="$ROLE_PAIRS_JSON" \
+  -v retention_operator_role=appsurface_durable_retention \
+  -f - < Durable/configure-postgresql-roles.sql
+shasum -a 256 "$ROLE_PAIRS_FILE"
+appsurface durable schema preflight \
+  --role-pairs-file "$ROLE_PAIRS_FILE" \
+  --migration-owner-role appsurface_durable_owner \
+  --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION
+appsurface durable schema preflight \
+  --role-pairs-file "$ROLE_PAIRS_FILE" \
+  --migration-owner-role appsurface_durable_owner \
+  --connection-env APPSURFACE_DURABLE_SOURCE_RUNTIME_CONNECTION
+```
+
+The preflight result distinguishes `runtime` from `owner-diagnostic`, and validates that `session_user` and
+`current_user` are the same identity. It reports the provider-observed StoreId and nullable epoch without bootstrapping
+or rotating either. Activation still requires a matching nonempty epoch, both runtime results, both lane proofs, and a
+separate dedicated owner guard held continuously across all checks and activation. Each CLI invocation owns its own
+dedicated nonpooled session-affine connection and completes within the 30-second total deadline (up to 28 seconds for
+work and 2 for cleanup). Transaction- and statement-pooling proxies are unsupported. See the [complete operations and
+receipt checklist](../../Durable/heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist).
+
+## Step-by-step PostgreSQL transcript
 
 In Terminal 1, run a disposable database:
 
@@ -190,6 +255,7 @@ docker exec appsurface-durable-postgres \
 read -r -s -p 'Migration-owner password: ' migration_owner_password; printf '\n'
 read -r -s -p 'Forwarding dispatcher password: ' dispatcher_password; printf '\n'
 read -r -s -p 'Forwarding runtime password: ' runtime_password; printf '\n'
+read -r -s -p 'Source runtime password: ' source_runtime_password; printf '\n'
 read -r -s -p 'Retention-operator password: ' retention_operator_password; printf '\n'
 case $- in *x*) appsurface_restore_xtrace=1; set +x ;; esac
 umask 077
@@ -202,10 +268,12 @@ escape_pgpass_field() {
 migration_owner_passfile_password="$(escape_pgpass_field "$migration_owner_password")" || { printf 'Password cannot contain a newline.\n' >&2; exit 1; }
 dispatcher_passfile_password="$(escape_pgpass_field "$dispatcher_password")" || { printf 'Password cannot contain a newline.\n' >&2; exit 1; }
 runtime_passfile_password="$(escape_pgpass_field "$runtime_password")" || { printf 'Password cannot contain a newline.\n' >&2; exit 1; }
+source_runtime_passfile_password="$(escape_pgpass_field "$source_runtime_password")" || { printf 'Password cannot contain a newline.\n' >&2; exit 1; }
 retention_operator_passfile_password="$(escape_pgpass_field "$retention_operator_password")" || { printf 'Password cannot contain a newline.\n' >&2; exit 1; }
 printf '127.0.0.1:%s:appsurface_durable_example:appsurface_durable_owner:%s\n' "$APPSURFACE_DURABLE_LOCAL_PORT" "$migration_owner_passfile_password" > "$APPSURFACE_DURABLE_PASSFILE"
 printf '127.0.0.1:%s:appsurface_durable_example:appsurface_durable_dispatcher:%s\n' "$APPSURFACE_DURABLE_LOCAL_PORT" "$dispatcher_passfile_password" >> "$APPSURFACE_DURABLE_PASSFILE"
 printf '127.0.0.1:%s:appsurface_durable_example:appsurface_durable_runtime:%s\n' "$APPSURFACE_DURABLE_LOCAL_PORT" "$runtime_passfile_password" >> "$APPSURFACE_DURABLE_PASSFILE"
+printf '127.0.0.1:%s:appsurface_durable_example:appsurface_durable_source_runtime:%s\n' "$APPSURFACE_DURABLE_LOCAL_PORT" "$source_runtime_passfile_password" >> "$APPSURFACE_DURABLE_PASSFILE"
 printf '127.0.0.1:%s:appsurface_durable_example:appsurface_durable_retention:%s\n' "$APPSURFACE_DURABLE_LOCAL_PORT" "$retention_operator_passfile_password" >> "$APPSURFACE_DURABLE_PASSFILE"
 printf '%s\n%s\n' "$migration_owner_password" "$migration_owner_password" | \
   docker exec -i appsurface-durable-postgres psql -U postgres -d appsurface_durable_example -c '\password appsurface_durable_owner'
@@ -215,10 +283,14 @@ printf '%s\n%s\n' "$runtime_password" "$runtime_password" | \
   docker exec -i appsurface-durable-postgres psql -U postgres -d appsurface_durable_example -c '\password appsurface_durable_runtime'
 printf '%s\n%s\n' "$retention_operator_password" "$retention_operator_password" | \
   docker exec -i appsurface-durable-postgres psql -U postgres -d appsurface_durable_example -c '\password appsurface_durable_retention'
-unset migration_owner_password dispatcher_password runtime_password retention_operator_password migration_owner_passfile_password dispatcher_passfile_password runtime_passfile_password retention_operator_passfile_password
+printf '%s\n%s\n' "$source_runtime_password" "$source_runtime_password" | \
+  docker exec -i appsurface-durable-postgres psql -U postgres -d appsurface_durable_example -c '\password appsurface_durable_source_runtime'
+unset migration_owner_password dispatcher_password runtime_password source_runtime_password retention_operator_password migration_owner_passfile_password dispatcher_passfile_password runtime_passfile_password source_runtime_passfile_password retention_operator_passfile_password
 if [ "${appsurface_restore_xtrace:-0}" = 1 ]; then set -x; fi
 unset appsurface_restore_xtrace
 export PGPASSFILE="$APPSURFACE_DURABLE_PASSFILE"
+export APPSURFACE_DURABLE_RUNTIME_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE_DURABLE_LOCAL_PORT;Database=appsurface_durable_example;Username=appsurface_durable_runtime;Passfile=$APPSURFACE_DURABLE_PASSFILE"
+export APPSURFACE_DURABLE_SOURCE_RUNTIME_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE_DURABLE_LOCAL_PORT;Database=appsurface_durable_example;Username=appsurface_durable_source_runtime;Passfile=$APPSURFACE_DURABLE_PASSFILE"
 ```
 
 The credential block temporarily disables shell xtrace when it was enabled, so password expansions cannot be copied into command logs; its prior tracing state is restored after the password values are unset.
@@ -242,17 +314,18 @@ export APPSURFACE_DURABLE_MIGRATION_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE_
 ```
 
 Apply the reviewed role recipe after migrations with the disposable container's bootstrap administrator. The local
-walkthrough first configures the forwarding pair and runs the current schema-11 structural preflight, then enrolls the
-complete two-pair manifest. This keeps the transcript self-contained: no host PostgreSQL client is required. A
-production deployment extracts the matching released provider package recipe at
+walkthrough first configures the forwarding pair and runs one-pair preflight, then enrolls the complete two-pair
+manifest and runs one preflight per runtime credential. This keeps the transcript self-contained: no host PostgreSQL
+client is required. A production deployment extracts the matching released provider package recipe at
 `contentFiles/any/any/configure-postgresql-roles.sql`; only this disposable checkout proof uses the repository source
 file.
 
 ```console
+ROLE_PAIRS_FILE=examples/durable-postgresql/role-pairs-full.example.json
 docker exec -i appsurface-durable-postgres \
   psql -v ON_ERROR_STOP=1 -U postgres -d appsurface_durable_example \
   -v migration_owner_role=appsurface_durable_owner \
-  -v role_pairs_json='{"version":1,"pairs":[{"dispatcher":"appsurface_durable_dispatcher","runtime":"appsurface_durable_runtime","dispatcher_profile":"full"}]}' \
+  -v role_pairs_json="$(< "$ROLE_PAIRS_FILE")" \
   -v retention_operator_role=appsurface_durable_retention \
   -f - < Durable/configure-postgresql-roles.sql
 
@@ -260,23 +333,35 @@ export APPSURFACE_DURABLE_DISPATCHER_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE
 export APPSURFACE_DURABLE_RUNTIME_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE_DURABLE_LOCAL_PORT;Database=appsurface_durable_example;Username=appsurface_durable_runtime;Passfile=$APPSURFACE_DURABLE_PASSFILE"
 export APPSURFACE_DURABLE_RUNTIME_EPOCH='<stable UUID supplied by deployment>'
 dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
-  durable schema preflight --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION
-# Expected: the schema-11 single-pair structural and runtime-role checks pass.
+  durable schema preflight \
+  --role-pairs-file "$ROLE_PAIRS_FILE" \
+  --migration-owner-role appsurface_durable_owner \
+  --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION
+# Expected local result: this runtime is identified as the one-pair runtime; source proof is not package proof.
 
+ROLE_PAIRS_FILE=examples/durable-postgresql/role-pairs-full-and-work-only.example.json
 docker exec -i appsurface-durable-postgres \
   psql -v ON_ERROR_STOP=1 -U postgres -d appsurface_durable_example \
   -v migration_owner_role=appsurface_durable_owner \
-  -v role_pairs_json="$(< examples/durable-postgresql/role-pairs.example.json)" \
+  -v role_pairs_json="$(< "$ROLE_PAIRS_FILE")" \
   -v retention_operator_role=appsurface_durable_retention \
   -f - < Durable/configure-postgresql-roles.sql
 # Expected: both pairs are present; the forwarding pair retains its grants.
+dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
+  durable schema preflight \
+  --role-pairs-file "$ROLE_PAIRS_FILE" \
+  --migration-owner-role appsurface_durable_owner \
+  --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION
+dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
+  durable schema preflight \
+  --role-pairs-file "$ROLE_PAIRS_FILE" \
+  --migration-owner-role appsurface_durable_owner \
+  --connection-env APPSURFACE_DURABLE_SOURCE_RUNTIME_CONNECTION
 ```
 
-The current schema-11 CLI preflight checks one runtime role and is expected to reject the two-pair catalog after
-enrollment. [#795](https://github.com/forge-trust/AppSurface/issues/795) must add an exact manifest-runtime-set
-preflight and pass a two-pair schema-11 upgrade proof before Source activation or its deployment certificate. The
-local proof checks both role pairs' SQL privileges and forwarding behavior; it does not claim post-enrollment CLI
-preflight success.
+Load the Source runtime connection from the disposable secret store before the second invocation. Local commands
+exercise source behavior only; they do not prove matched candidate packages or restored public artifacts. The complete
+candidate and published proof requires the four scenarios in the [canonical operations checklist](../../Durable/heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist).
 
 The development-only bootstrap initializes the active epoch exactly once. It requires `DOTNET_ENVIRONMENT=Development`, `APPSURFACE_DURABLE_LOCAL_PROOF=1`, a `localhost`, `127.0.0.1`, or `::1` target, and the `appsurface_durable_owner` role before it opens the durable schema. It rejects invalid UUID values, inactive schema, and an already active epoch. For proof parity with production defaults, prefer the same 16+ migration floor when choosing local dependencies.
 
@@ -324,9 +409,9 @@ The output includes the authoritative PostgreSQL attempt. A `Completed` empty re
 
 ## Recovery and upgrades
 
-1. Run `appsurface durable schema status --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION` and `appsurface durable schema preflight --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION` with a scoped read-only deployment connection, such as the runtime connection in this tutorial, to identify the authoritative state. Reserve the migration-owner variable for reviewed apply and epoch operations.
+1. Run `appsurface durable schema status --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION`, then run `appsurface durable schema preflight --role-pairs-file ./reviewed-role-pairs.json --migration-owner-role <reviewed-owner> --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION` with the complete reviewed manifest and owner. Repeat preflight for every distinct runtime credential; owner diagnostics do not replace runtime passes.
 2. Correct role setup or review a forward-only script generated from the installed version.
-3. Apply through the explicit migration-owner workflow and rerun the canonical role recipe after migrations, using the version from the matching released provider package. Retry preflight for a single-pair deployment; a two-pair deployment waits for the [#795 runtime-set preflight](https://github.com/forge-trust/AppSurface/issues/795) before activation.
+3. Apply through the explicit migration-owner workflow and rerun the canonical role recipe after migrations, using the version from the matching released provider package. After a reviewed repair, rerun every runtime pass, both lane proofs, and the full guarded deployment gate; recipe refusal is not a promise that all drift is repairable by recipe rerun.
 4. For rollout safety, disable the local host (`.AddWorkerHost` off), complete migration+role recipe reconciliation, verify status/epoch coherence, then re-enable host.
 
 Never delete `appsurface_durable.schema_migration` rows, edit migration checksums, or run destructive down-migrations. A failed migration rolls back its own transaction; regenerate the correct forward script and retry from the last committed version. A runtime epoch rotation is an authorized restore operation documented in the [PostgreSQL package README](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#explicit-schema-and-epoch-deployment), not a tutorial command.

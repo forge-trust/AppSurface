@@ -17,6 +17,7 @@ internal static class Program
     private const string ReleasePreparationWitnessCommand = "release-prep-witness";
     private const string VerifyTailwindConsumerCommand = "verify-tailwind-consumer";
     private const string VerifyTailwindEvidenceCommand = "verify-tailwind-evidence";
+    private const string VerifyPreflightArtifactsCommand = "verify-preflight-artifact";
     private const string InspectPythonParserCandidateCommand = "inspect-python-parser-candidate";
 
     private static readonly string Usage = """
@@ -36,6 +37,8 @@ internal static class Program
                       Verify a local-only Tailwind consumer or run a producer-bound native release proof.
           verify-tailwind-evidence
                       Validate producer-binding, aggregate five native receipts, prepare publication inputs, or validate an uploaded publication-start receipt before credentials.
+          verify-preflight-artifact
+                      Consume or validate/promote an exact frozen package bundle with the disposable PostgreSQL runtime-preflight proof.
           publish-prerelease
                       Publish validated prerelease package artifacts to NuGet from a protected workflow job.
           publish-stable
@@ -80,6 +83,9 @@ internal static class Program
           --smoke-work-dir <path>
                                 Isolated smoke install work directory. Defaults to artifacts/package-smoke.
           --smoke-report <path> Smoke install report path. Defaults to artifacts/package-smoke-report.md.
+          --preflight-source-commit <sha> --preflight-run-id <id> --preflight-artifact-id <id>
+          --preflight-candidate-receipt <path>
+                                Required by the published smoke carrier to bind the candidate proof and package bundle.
           --base-ref <ref>      Required fetched base ref or commit for release-prep-witness.
           --witness <path>      Required JSON witness output path for release-prep-witness; normally a temporary path.
           --python-parser-package <path>
@@ -166,11 +172,51 @@ internal static class Program
                 and not ReleasePreparationWitnessCommand
                 and not VerifyTailwindConsumerCommand
                 and not VerifyTailwindEvidenceCommand
+                and not VerifyPreflightArtifactsCommand
                 and not InspectPythonParserCandidateCommand)
             {
                 await standardError.WriteLineAsync($"Unknown command '{command}'.");
                 await standardError.WriteLineAsync(Usage);
                 return 1;
+            }
+
+            if (normalizedCommand == VerifyPreflightArtifactsCommand)
+            {
+                var proofOptions = DurablePreflightArtifactProofCommandOptions.Parse(args.Skip(1).ToArray(), currentDirectory);
+                var proof = new DurablePreflightArtifactProof(new CliWrapCommandRunner());
+                DurablePreflightArtifactProofResult result;
+                if (proofOptions.Mode == "candidate")
+                {
+                    result = await proof.RunCandidateAsync(proofOptions.Request, cancellationToken);
+                }
+                else if (proofOptions.Mode == "promote")
+                {
+                    await DurablePreflightArtifactProof.ValidateAndPromoteCandidateManifestAsync(
+                        proofOptions.Request,
+                        proofOptions.Request.ReceiptPath,
+                        proofOptions.Request.RepositoryRoot,
+                        cancellationToken);
+                    await standardOut.WriteLineAsync(
+                        $"Issue #845 candidate receipt validated and approved manifest promoted for {proofOptions.Request.ArtifactId}.");
+                    return 0;
+                }
+                else if (proofOptions.Mode == "published")
+                {
+                    result = await proof.RunPublishedAsync(
+                        proofOptions.Request,
+                        proofOptions.CandidateReceiptPath!,
+                        proofOptions.RestoredPackagesPath!,
+                        proofOptions.PublishedReceiptPath!,
+                        cancellationToken);
+                }
+                else
+                {
+                    throw new PackageIndexException("verify-preflight-artifact --mode must be candidate or published.");
+                }
+
+                await standardOut.WriteLineAsync(
+                    $"Issue #845 {proofOptions.Mode} artifact proof passed for {proofOptions.Request.ArtifactId}; scenarios={result.ScenarioCount}, elapsed-ms={result.TotalMilliseconds:F0}.");
+                return 0;
             }
 
             var tailwindOptions = TailwindCommandOptions.Extract(args.Skip(1).ToArray());
@@ -299,7 +345,7 @@ internal static class Program
 
             if (normalizedCommand == SmokeInstallCommand)
             {
-                var smokeRequest = options.CreatePackageSmokeInstallRequest();
+                var smokeRequest = options.CreatePackageSmokeInstallRequest(requirePreflightProof: smokeInstallAsync is null);
                 smokeInstallAsync ??= RunPackageSmokeInstallWorkflowAsync;
                 var smokeReport = await smokeInstallAsync(smokeRequest, cancellationToken);
                 var reportPath = FormatDisplayPath(smokeRequest.RepositoryRoot, smokeRequest.ReportPath);
@@ -460,6 +506,10 @@ internal static class Program
 /// <param name="WitnessPath">Optional explicit JSON witness destination used only by the release-preparation witness command.</param>
 /// <param name="PythonParserCandidatePackagePath">Optional local candidate package supplied only to the parser-candidate inspection command.</param>
 /// <param name="PythonParserProofReportPath">Machine-readable candidate-proof report path.</param>
+/// <param name="PreflightSourceCommit">Source commit bound to candidate and published preflight receipts.</param>
+/// <param name="PreflightRunId">Producer run identifier bound to candidate and published preflight receipts.</param>
+/// <param name="PreflightArtifactId">Immutable producer artifact identifier bound to candidate and published preflight receipts.</param>
+/// <param name="PreflightCandidateReceiptPath">Retained candidate proof receipt required by production smoke-install.</param>
 internal sealed record CommandLineOptions(
     PackageIndexRequest Request,
     string ArtifactsOutputPath,
@@ -479,7 +529,11 @@ internal sealed record CommandLineOptions(
     string? BaseRef,
     string? WitnessPath,
     string? PythonParserCandidatePackagePath,
-    string PythonParserProofReportPath)
+    string PythonParserProofReportPath,
+    string? PreflightSourceCommit,
+    string? PreflightRunId,
+    string? PreflightArtifactId,
+    string? PreflightCandidateReceiptPath)
 {
     /// <summary>
     /// Parses path-related CLI options into a resolved chooser request.
@@ -512,6 +566,10 @@ internal sealed record CommandLineOptions(
         string? witnessPath = null;
         string? pythonParserCandidatePackagePath = null;
         string? pythonParserProofReportPath = null;
+        string? preflightSourceCommit = null;
+        string? preflightRunId = null;
+        string? preflightArtifactId = null;
+        string? preflightCandidateReceiptPath = null;
 
         for (var index = 0; index < args.Length; index++)
         {
@@ -648,6 +706,30 @@ internal sealed record CommandLineOptions(
                 continue;
             }
 
+            if (string.Equals(argument, "--preflight-source-commit", StringComparison.Ordinal))
+            {
+                preflightSourceCommit = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
+
+            if (string.Equals(argument, "--preflight-run-id", StringComparison.Ordinal))
+            {
+                preflightRunId = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
+
+            if (string.Equals(argument, "--preflight-artifact-id", StringComparison.Ordinal))
+            {
+                preflightArtifactId = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
+
+            if (string.Equals(argument, "--preflight-candidate-receipt", StringComparison.Ordinal))
+            {
+                preflightCandidateReceiptPath = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
+
             throw new PackageIndexException($"Unknown option '{argument}'.");
         }
 
@@ -667,6 +749,9 @@ internal sealed record CommandLineOptions(
         var resolvedSmokeWorkDirectory = ResolvePath(smokeWorkDirectory, repoRoot, Path.Join(repoRoot, "artifacts", "package-smoke"));
         var resolvedSmokeReportPath = ResolvePath(smokeReportPath, repoRoot, Path.Join(repoRoot, "artifacts", "package-smoke-report.md"));
         var resolvedPythonParserProofReportPath = ResolvePath(pythonParserProofReportPath, repoRoot, Path.Join(repoRoot, "artifacts", "python-parser-candidate-proof.json"));
+        var resolvedPreflightCandidateReceiptPath = string.IsNullOrWhiteSpace(preflightCandidateReceiptPath)
+            ? null
+            : ResolvePath(preflightCandidateReceiptPath, repoRoot, preflightCandidateReceiptPath);
 
         return new CommandLineOptions(
             new PackageIndexRequest(repoRoot, resolvedManifestPath, resolvedOutputPath, resolvedReadinessOutputPath),
@@ -687,7 +772,11 @@ internal sealed record CommandLineOptions(
             baseRef,
             string.IsNullOrWhiteSpace(witnessPath) ? null : ResolvePath(witnessPath, repoRoot, witnessPath),
             string.IsNullOrWhiteSpace(pythonParserCandidatePackagePath) ? null : ResolvePath(pythonParserCandidatePackagePath, repoRoot, pythonParserCandidatePackagePath),
-            resolvedPythonParserProofReportPath);
+            resolvedPythonParserProofReportPath,
+            preflightSourceCommit,
+            preflightRunId,
+            preflightArtifactId,
+            resolvedPreflightCandidateReceiptPath);
     }
 
     /// <summary>
@@ -744,15 +833,48 @@ internal sealed record CommandLineOptions(
     /// Converts parsed CLI options into a package smoke install request.
     /// </summary>
     /// <returns>The package smoke install request.</returns>
-    internal PackageSmokeInstallRequest CreatePackageSmokeInstallRequest()
+    internal PackageSmokeInstallRequest CreatePackageSmokeInstallRequest(bool requirePreflightProof = true)
     {
+        DurablePreflightArtifactProofRequest? preflightProof = null;
+        var proofValuesSupplied = new[]
+        {
+            PreflightSourceCommit,
+            PreflightRunId,
+            PreflightArtifactId,
+            PreflightCandidateReceiptPath
+        }.Any(static value => !string.IsNullOrWhiteSpace(value));
+        if (requirePreflightProof || proofValuesSupplied)
+        {
+            if (string.IsNullOrWhiteSpace(PreflightSourceCommit)
+                || string.IsNullOrWhiteSpace(PreflightRunId)
+                || string.IsNullOrWhiteSpace(PreflightArtifactId)
+                || string.IsNullOrWhiteSpace(PreflightCandidateReceiptPath))
+            {
+                throw new PackageIndexException(
+                    "The production smoke-install carrier requires --preflight-source-commit, --preflight-run-id, --preflight-artifact-id, and --preflight-candidate-receipt.");
+            }
+
+            preflightProof = new DurablePreflightArtifactProofRequest(
+                Request.RepositoryRoot,
+                ArtifactsInputPath,
+                ArtifactManifestPath,
+                ArtifactManifestPath,
+                Path.Join(SmokeWorkDirectory, "preflight-published.receipt.json"),
+                PreflightSourceCommit,
+                PreflightRunId,
+                PreflightArtifactId);
+        }
+
         return new PackageSmokeInstallRequest(
             Request.RepositoryRoot,
             Request.ManifestPath,
             ArtifactManifestPath,
             SmokeWorkDirectory,
             SmokeReportPath,
-            Source);
+            Source,
+            preflightProof,
+            PreflightCandidateReceiptPath,
+            preflightProof?.ReceiptPath);
     }
 
     /// <summary>
