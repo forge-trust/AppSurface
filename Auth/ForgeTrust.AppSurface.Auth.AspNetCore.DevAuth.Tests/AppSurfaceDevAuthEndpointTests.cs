@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,7 +16,7 @@ using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.Tests;
 
-public sealed class AppSurfaceDevAuthEndpointTests
+public sealed partial class AppSurfaceDevAuthEndpointTests
 {
     [Fact]
     public void MapAppSurfaceDevAuth_WithNullEndpoints_ThrowsArgumentNullException()
@@ -391,8 +392,10 @@ public sealed class AppSurfaceDevAuthEndpointTests
     [Fact]
     public async Task SelectPersona_InUnallowedEnvironment_ReturnsNotFoundWithoutCookieMutation()
     {
-        await using var app = BuildApp();
-        using var services = BuildEndpointServices("Staging", AddDefaultPersonas);
+        var probe = new PersonaSelectionProbe();
+        await using var app = BuildAppWithProbe(probe);
+        using var services = BuildEndpointServices("Staging", AddDefaultPersonas, serviceCollection =>
+            AddPersonaSelectionResolutionProbe(serviceCollection, probe));
         var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
         var context = CreateContext(services);
         context.Request.RouteValues["personaId"] = "admin";
@@ -401,6 +404,7 @@ public sealed class AppSurfaceDevAuthEndpointTests
 
         Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
         Assert.DoesNotContain(AppSurfaceDevAuthDefaults.CookieName, context.Response.Headers.SetCookie.ToString(), StringComparison.Ordinal);
+        AssertNoPersonaSelectionActivation(probe);
     }
 
     [Fact]
@@ -578,16 +582,20 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.Contains(AppSurfaceDevAuthDefaults.CookieName, selectContext.Response.Headers.SetCookie.ToString(), StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task SelectPersona_WithCrossOriginBrowserPost_RejectsWithoutCookie()
+    [Theory]
+    [InlineData("Origin", "https://evil.example")]
+    [InlineData("Referer", "https://evil.example/source")]
+    [InlineData("Sec-Fetch-Site", "cross-site")]
+    public async Task SelectPersona_WithCrossOriginBrowserPost_RejectsWithoutCookie(string headerName, string headerValue)
     {
-        await using var app = BuildApp();
+        var probe = new PersonaSelectionProbe();
+        await using var app = BuildAppWithProbe(probe, singletonHandler: true);
         var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
         var context = CreateContext(app.Services);
         context.Request.Method = HttpMethods.Post;
         context.Request.Scheme = "http";
         context.Request.Host = new HostString("127.0.0.1", 5058);
-        context.Request.Headers["Origin"] = "https://evil.example";
+        context.Request.Headers[headerName] = headerValue;
         context.Request.RouteValues["personaId"] = "admin";
 
         await endpoint.RequestDelegate!(context);
@@ -596,6 +604,7 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
         Assert.Contains("AppSurface DevAuth same-origin request required", body, StringComparison.Ordinal);
         Assert.True(context.Response.Headers.SetCookie.Count == 0, "Cross-origin persona selection must not set a cookie.");
+        AssertNoPersonaSelectionActivation(probe);
     }
 
     [Fact]
@@ -695,7 +704,8 @@ public sealed class AppSurfaceDevAuthEndpointTests
     [Fact]
     public async Task SelectPersona_WithRouteUnsafePersonaId_ReturnsSafeDiagnostic()
     {
-        await using var app = BuildApp();
+        var probe = new PersonaSelectionProbe();
+        await using var app = BuildAppWithProbe(probe, singletonHandler: true);
         var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
         var context = CreateContext(app.Services);
         context.Request.RouteValues["personaId"] = "admin+viewer";
@@ -707,12 +717,14 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.Contains(AppSurfaceDevAuthDiagnostics.InvalidPersonaId, body, StringComparison.Ordinal);
         Assert.DoesNotContain("admin+viewer", body, StringComparison.Ordinal);
         Assert.True(context.Response.Headers.SetCookie.Count == 0, "Invalid persona selection must not set a cookie.");
+        AssertNoPersonaSelectionActivation(probe);
     }
 
     [Fact]
     public async Task SelectPersona_WithUnknownRouteSafePersonaId_ReturnsSafeDiagnostic()
     {
-        await using var app = BuildApp();
+        var probe = new PersonaSelectionProbe();
+        await using var app = BuildAppWithProbe(probe, singletonHandler: true);
         var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
         var context = CreateContext(app.Services);
         context.Request.RouteValues["personaId"] = "ghost";
@@ -724,6 +736,7 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.Contains(AppSurfaceDevAuthDiagnostics.InvalidPersonaId, body, StringComparison.Ordinal);
         Assert.DoesNotContain("ghost", body, StringComparison.Ordinal);
         Assert.True(context.Response.Headers.SetCookie.Count == 0, "Unknown persona selection must not set a cookie.");
+        AssertNoPersonaSelectionActivation(probe);
     }
 
     [Theory]
@@ -732,7 +745,8 @@ public sealed class AppSurfaceDevAuthEndpointTests
     [InlineData("admin-email")]
     public async Task SelectPersona_WithSensitivePersonaId_ReturnsSafeDiagnostic(string personaId)
     {
-        await using var app = BuildApp();
+        var probe = new PersonaSelectionProbe();
+        await using var app = BuildAppWithProbe(probe, singletonHandler: true);
         var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
         var context = CreateContext(app.Services);
         context.Request.RouteValues["personaId"] = personaId;
@@ -744,12 +758,14 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.Contains(AppSurfaceDevAuthDiagnostics.InvalidPersonaId, body, StringComparison.Ordinal);
         Assert.DoesNotContain(personaId, body, StringComparison.Ordinal);
         Assert.True(context.Response.Headers.SetCookie.Count == 0, "Sensitive persona selection must not set a cookie.");
+        AssertNoPersonaSelectionActivation(probe);
     }
 
     [Fact]
     public async Task SelectPersona_WithBlankPersonaId_ReturnsSafeDiagnostic()
     {
-        await using var app = BuildApp();
+        var probe = new PersonaSelectionProbe();
+        await using var app = BuildAppWithProbe(probe, singletonHandler: true);
         var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
         var context = CreateContext(app.Services);
         context.Request.RouteValues["personaId"] = " ";
@@ -760,12 +776,14 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
         Assert.Contains(AppSurfaceDevAuthDiagnostics.InvalidPersonaId, body, StringComparison.Ordinal);
         Assert.True(context.Response.Headers.SetCookie.Count == 0, "Blank persona selection must not set a cookie.");
+        AssertNoPersonaSelectionActivation(probe);
     }
 
     [Fact]
     public async Task SelectPersona_WithPaddedPersonaId_ReturnsSafeDiagnostic()
     {
-        await using var app = BuildApp();
+        var probe = new PersonaSelectionProbe();
+        await using var app = BuildAppWithProbe(probe, singletonHandler: true);
         var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
         var context = CreateContext(app.Services);
         context.Request.RouteValues["personaId"] = " admin ";
@@ -777,6 +795,7 @@ public sealed class AppSurfaceDevAuthEndpointTests
         Assert.Contains(AppSurfaceDevAuthDiagnostics.InvalidPersonaId, body, StringComparison.Ordinal);
         Assert.DoesNotContain("Local Admin", body, StringComparison.Ordinal);
         Assert.True(context.Response.Headers.SetCookie.Count == 0, "Padded persona selection must not set a cookie.");
+        AssertNoPersonaSelectionActivation(probe);
     }
 
     [Fact]
@@ -931,7 +950,8 @@ public sealed class AppSurfaceDevAuthEndpointTests
     [Fact]
     public async Task ControlEndpoints_RejectNonLoopbackRequests()
     {
-        await using var app = BuildApp();
+        var probe = new PersonaSelectionProbe();
+        await using var app = BuildAppWithProbe(probe);
         var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/status", HttpMethods.Get);
         var context = CreateContext(app.Services);
         context.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.10");
@@ -942,12 +962,23 @@ public sealed class AppSurfaceDevAuthEndpointTests
         var body = await ReadBodyAsync(context);
         Assert.Contains("AppSurface DevAuth local request required", body, StringComparison.Ordinal);
         Assert.DoesNotContain(AppSurfaceDevAuthDiagnostics.NonDevelopmentEnvironment, body, StringComparison.Ordinal);
+
+        var selectEndpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
+        var selectContext = CreateContext(app.Services);
+        selectContext.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.10");
+        selectContext.Request.RouteValues["personaId"] = "admin";
+        await selectEndpoint.RequestDelegate!(selectContext);
+
+        Assert.Equal(StatusCodes.Status403Forbidden, selectContext.Response.StatusCode);
+        Assert.Equal(0, selectContext.Response.Headers.SetCookie.Count);
+        AssertNoPersonaSelectionActivation(probe);
     }
 
     [Fact]
     public async Task ControlEndpoints_RejectRequestsWithUnknownRemoteAddress()
     {
-        await using var app = BuildApp();
+        var probe = new PersonaSelectionProbe();
+        await using var app = BuildAppWithProbe(probe);
         var endpoint = FindEndpoint(app, "/_appsurface/dev-auth/status", HttpMethods.Get);
         var context = CreateContext(app.Services);
         context.Connection.RemoteIpAddress = null;
@@ -955,6 +986,16 @@ public sealed class AppSurfaceDevAuthEndpointTests
         await endpoint.RequestDelegate!(context);
 
         Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
+
+        var selectEndpoint = FindEndpoint(app, "/_appsurface/dev-auth/select/{personaId}", HttpMethods.Post);
+        var selectContext = CreateContext(app.Services);
+        selectContext.Connection.RemoteIpAddress = null;
+        selectContext.Request.RouteValues["personaId"] = "admin";
+        await selectEndpoint.RequestDelegate!(selectContext);
+
+        Assert.Equal(StatusCodes.Status403Forbidden, selectContext.Response.StatusCode);
+        Assert.Equal(0, selectContext.Response.Headers.SetCookie.Count);
+        AssertNoPersonaSelectionActivation(probe);
     }
 
     [Fact]
@@ -1166,12 +1207,18 @@ public sealed class AppSurfaceDevAuthEndpointTests
         return BuildApp(AddDefaultPersonas, mapProofEndpoint);
     }
 
-    private static WebApplication BuildApp(Action<AppSurfaceDevAuthOptions> configureDevAuth, bool mapProofEndpoint = false)
+    private static WebApplication BuildApp(
+        Action<AppSurfaceDevAuthOptions> configureDevAuth,
+        bool mapProofEndpoint = false,
+        Action<IServiceCollection>? configureServices = null,
+        Action<IWebHostBuilder>? configureWebHost = null,
+        Action<WebApplication>? configurePipeline = null)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
             EnvironmentName = Environments.Development,
         });
+        configureWebHost?.Invoke(builder.WebHost);
 
         builder.Services.AddRouting();
         builder.Services.AddAuthorization(options =>
@@ -1185,8 +1232,10 @@ public sealed class AppSurfaceDevAuthEndpointTests
         });
         builder.Services.AddAppSurfaceAspNetCoreAuth(options => options.MapSubjectClaim("sub"));
         builder.Services.AddAppSurfaceDevAuth(builder.Environment, configureDevAuth);
+        configureServices?.Invoke(builder.Services);
 
         var app = builder.Build();
+        configurePipeline?.Invoke(app);
         app.MapAppSurfaceDevAuth();
         if (mapProofEndpoint)
         {
@@ -1241,13 +1290,15 @@ public sealed class AppSurfaceDevAuthEndpointTests
 
     private static ServiceProvider BuildEndpointServices(
         string environmentName,
-        Action<AppSurfaceDevAuthOptions> configureDevAuth)
+        Action<AppSurfaceDevAuthOptions> configureDevAuth,
+        Action<IServiceCollection>? configureServices = null)
     {
         var services = new ServiceCollection();
         services.AddDataProtection();
         services.AddLogging();
         services.AddSingleton<IHostEnvironment>(new TestHostEnvironment(environmentName));
         services.AddSingleton<IOptions<AppSurfaceDevAuthOptions>>(Options.Create(CreateOptions(configureDevAuth)));
+        configureServices?.Invoke(services);
         return services.BuildServiceProvider();
     }
 

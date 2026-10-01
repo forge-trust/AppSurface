@@ -119,6 +119,10 @@ public sealed class VerifierContractTests
     [InlineData("http-transport-failure", "HTTP_TRANSPORT_FAILED")]
     [InlineData("http-timeout", "HTTP_TRANSPORT_FAILED")]
     [InlineData("http-contract-failure", "HTTP_CONTRACT_FAILED")]
+    [InlineData("candidate-id-drift", "HTTP_CONTRACT_FAILED")]
+    [InlineData("candidate-id-missing", "HTTP_CONTRACT_FAILED")]
+    [InlineData("candidate-progress-reset", "HTTP_CONTRACT_FAILED")]
+    [InlineData("candidate-action-redirect", "HTTP_CONTRACT_FAILED")]
     public async Task HttpFailure_IsClassifiedAfterChildOwnedListenEvidence(string mode, string reason)
     {
         await using var fixture = await VerifierFixture.CreateAsync(mode);
@@ -173,6 +177,11 @@ public sealed class VerifierContractTests
         Assert.Contains("/_appsurface/dev-auth/status", fixture.ReadEvents(), StringComparison.Ordinal);
         Assert.Contains("/_appsurface/dev-auth/select/viewer", fixture.ReadEvents(), StringComparison.Ordinal);
         Assert.Contains("/viewer", fixture.ReadEvents(), StringComparison.Ordinal);
+        Assert.Contains("/_appsurface/dev-auth/select/labeler", fixture.ReadEvents(), StringComparison.Ordinal);
+        Assert.Contains("/_appsurface/dev-auth/select/reviewer", fixture.ReadEvents(), StringComparison.Ordinal);
+        Assert.Contains("/candidate/label/complete", fixture.ReadEvents(), StringComparison.Ordinal);
+        Assert.Contains("/candidate/review/complete", fixture.ReadEvents(), StringComparison.Ordinal);
+        Assert.Contains("Shared candidate, independent work, and repeated persona switches passed", result.CombinedOutput, StringComparison.Ordinal);
         Assert.Contains("/api/auth-proof", fixture.ReadEvents(), StringComparison.Ordinal);
         fixture.AssertNoChildrenRemain();
         Assert.Empty(fixture.FindEvidenceDirectories());
@@ -967,6 +976,24 @@ public sealed class VerifierContractTests
           'GET /_appsurface/dev-auth/') body='AppSurface Dev Auth [FAKE LOCAL AUTH]' ;;
           'POST /_appsurface/dev-auth/select/admin') status='302'; location='Location: /'; set_cookie='Set-Cookie: .AppSurface.DevAuth.Persona=fixture-cookie; Path=/' ;;
           'POST /_appsurface/dev-auth/select/viewer') status='302'; location='Location: /viewer'; set_cookie='Set-Cookie: .AppSurface.DevAuth.Persona=viewer-cookie; Path=/' ;;
+          'POST /_appsurface/dev-auth/select/labeler') status='302'; location='Location: /candidate/label'; set_cookie='Set-Cookie: .AppSurface.DevAuth.Persona=labeler-cookie; Path=/' ;;
+          'POST /_appsurface/dev-auth/select/reviewer') status='302'; location='Location: /candidate/review'; set_cookie='Set-Cookie: .AppSurface.DevAuth.Persona=reviewer-cookie; Path=/' ;;
+          'GET /candidate/label'|'GET /candidate/review')
+            candidate_id='synthetic-candidate-001'
+            [[ "$mode" == "candidate-id-drift" && "$path" == "/candidate/review" ]] && candidate_id='synthetic-candidate-002'
+            id_marker="data-candidate-id=\"$candidate_id\""
+            [[ "$mode" == "candidate-id-missing" ]] && id_marker=''
+            labeling='pending'; review='pending'
+            [[ -f "${events}.label-completed" ]] && labeling='completed'
+            [[ -f "${events}.review-completed" ]] && review='completed'
+            [[ "$mode" == "candidate-progress-reset" && "$path" == "/candidate/review" ]] && labeling='pending'
+            body="<h1>Candidate</h1><p>Fixtures ready</p><code $id_marker>$candidate_id</code><p>Labeling: $labeling</p><p>Review: $review</p>"
+            ;;
+          'POST /candidate/label/complete')
+            status='303'; location='Location: /candidate/label'; : > "${events}.label-completed"
+            [[ "$mode" == "candidate-action-redirect" ]] && location='Location: /wrong-page'
+            ;;
+          'POST /candidate/review/complete') status='303'; location='Location: /candidate/review'; : > "${events}.review-completed" ;;
           'GET /viewer')
             case "$cookie" in
               *viewer-cookie*) body='Viewer landing page' ;;

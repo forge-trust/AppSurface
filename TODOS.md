@@ -1,5 +1,23 @@
 # Deferred work
 
+## DevAuth persona fixture activation (#772)
+
+### Host-owned durable or multi-process reference example
+
+**What:** Consider a durable or multi-process fixture example only after a concrete adopter demonstrates that the process-local [#772 design](docs/designs/issue-772-persona-scoped-fixture-activation.md) is insufficient.
+
+**Why:** A persistence example could explain transactional ensure, scenario-key uniqueness and cross-process consistency while preserving host ownership.
+
+**Pros:** Shows how a real host preserves one scenario and completed work across processes and restarts.
+
+**Cons:** Adds a persistence provider, credentials, cleanup, lifecycle and failure policy to maintain.
+
+**Context:** The planned delivery will prove one synthetic candidate with independent labeling/review progress in a single host process. It resets on restart and makes no durable or cross-process guarantee. Start with the [execution plan](docs/plans/issue-772-persona-scoped-fixture-activation.md) and the adopter's concrete failure before choosing storage. This follow-up adds no persistence work, telemetry or schedule to #772.
+
+**Effort:** L for a human team / M with agent assistance.
+**Priority:** P3.
+**Depends on / blocked by:** Concrete adopter evidence; a host-selected persistence engine; scenario-key uniqueness and transaction design; an independently reviewed failure/recovery policy.
+
 ## Typed Work definition adoption follow-up (#800)
 
 - **What:** Review two independent definition migrations, or review six months after release if fewer migrations exist, before adding more convenience APIs. **Why:** [#800](https://github.com/forge-trust/AppSurface/issues/800) proves contract consistency and preserved runtime behavior; faster onboarding and fewer real-user errors remain unmeasured. **Pros:** Grounds later API work in observed friction and helps the [parent adoption rail](https://github.com/forge-trust/AppSurface/issues/793) compare correct registration, request authoring and actual terminal completion. **Cons:** Requires adopter participation and cannot establish causality from a tiny sample. **Context:** Start with the [approved design](docs/designs/issue-800-typed-work-definitions.md) and [implementation plan](docs/plans/issue-800-typed-work-definitions.md); record duplicated facts removed, decisions retained, authoring mistakes, cached/cold prerequisites and time to first accepted-and-processed Work separately. Line count is secondary; do not turn missing timing into a fabricated speed claim. **Effort:** M (human: 1–2 days / agent assistance: 2–4 hours, excluding adopter availability). **Priority:** P3. **Depends on / blocked by:** #800 release and real adopter evidence; no telemetry collection or scheduled automation is authorized by this TODO.
