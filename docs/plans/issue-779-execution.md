@@ -525,3 +525,49 @@ and patch **98.42% line / 100.00% branch**, using the unchanged thresholds, tole
 `origin/main` and `codecov` mode. It writes only to
 `/private/tmp/issue779-coverage-attempt8-threshold-only/`. The failed full wrapper remains
 failed. No publication or coverage exception follows from this diagnostic result.
+
+
+### Coverage attempt 10 and process-stage diagnosis
+
+The unchanged `./scripts/coverage-solution.sh` ran at clean `c236fadae5424feeaefbdc28a193055bc7761980`
+against `origin/main` at `4aa8329c76f4279ad319747f9f3c14b9b8de51ef`. All **54/54** slots
+completed; the build had **zero warnings/errors**. The wrapper exited **1 / ASCOV120**
+with **8 failed tests**: seven AdoptionMetrics Git-process controls and one RazorWire
+`SeparateVisit_ArbitratesTurboBarWithPendingFrameForm(useFallback: False)` navigation wait.
+JUnit totals are **15,020 passed / 8 failed / 4 skipped**. Raw merged coverage is
+**95.09% line / 89.03% branch**; the official aggregate/patch gate was not reached.
+The immutable archive is `/private/tmp/issue779-coverage-attempt10-evidence/`; both recorded
+wrapper owner PIDs were absent at the terminal check. This attempt is failed.
+
+AdoptionMetrics had passed **57/57**, exit **0**, in 13 seconds directly before attempt 10.
+The recurring failures report the initial checkout timeout, before the expected source
+probe, error output or heartbeat marker. A diagnostic-only copy of the verifier in
+`/private/tmp/issue779-adoption-stage-trace/` reproduced this with both direct and CliWrap
+nested launches: `Process.Start` and ownership attachment completed in about 20 ms,
+then `WaitForExitAsync` consumed the original one-second deadline without fixture entry.
+A fresh script's sampled process tree showed Bash and its `/bin/sh` child alive before
+the first statement. Later unchanged launches recovered. Bash tracing, explicit interpreter
+and a longer sampling deadline were temporary diagnostic variants only; none is a production
+repair or repository validation pass. One sampler reached no usable stack before child exit.
+This narrows the observed failure to pre-entry startup but establishes no exact cause.
+
+The actual CLI coverage runner then passed the **unchanged entire AdoptionMetrics project
+57/57**, exit **0**, in **19.693 seconds**, with its collector, JUnit and default hang policy.
+Command: `dotnet Cli/ForgeTrust.AppSurface.Cli/bin/Debug/net10.0/ForgeTrust.AppSurface.Cli.dll coverage run --test-project tools/ForgeTrust.AppSurface.Durable.AdoptionMetrics.Tests/ForgeTrust.AppSurface.Durable.AdoptionMetrics.Tests.csproj --output /private/tmp/issue779-adoption-native-runner/output-owned --configuration Debug --no-build --no-restore --test-results junit --slow-test-diagnostics`.
+The first diagnostic launch mistakenly placed receipt files in the output root and exited
+`ASCOV109` before testing; its corrected launch used an absent child root. Receipts are
+under `/private/tmp/issue779-adoption-native-runner/`. No environment override was used;
+`BASH_ENV` was absent, stdin was `/dev/null`, no TTY was attached, and the owned process
+group was absent afterward. This tests the actual runner path, not the full-solution gate.
+
+The two RazorWire navigation theory controls passed **2/2**, exit **0**, in **9.385 seconds**:
+`dotnet test Web/ForgeTrust.RazorWire.IntegrationTests/ForgeTrust.RazorWire.IntegrationTests.csproj --no-build --no-restore --filter FullyQualifiedName~SeparateVisit_ArbitratesTurboBarWithPendingFrameForm --collect:'XPlat Code Coverage' --results-directory /private/tmp/issue779-turbobar-repro/results --logger 'trx;LogFileName=focused.trx' --logger 'console;verbosity=normal'`.
+The original failure occurred after all loading/bar assertions, while waiting for navigation
+load; no retained screenshot/trace establishes a product race or a test synchronization defect.
+Read-only findings are `/private/tmp/issue779-turbobar-failure-review.md`; no suggested wait
+replacement was applied. The focused process group was absent afterward.
+
+No product/test, deadline, skip, environment requirement, coverage threshold or comparison
+base was changed. These completed recovery checks support one fresh unchanged full attempt 11;
+they do not waive its gate. Preliminary draft creation and all post-Ubuntu integration
+remain pending as defined in the [staged scope](issue-779-preliminary-proof.md).
