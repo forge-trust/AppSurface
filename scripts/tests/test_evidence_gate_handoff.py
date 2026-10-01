@@ -23,6 +23,28 @@ SPEC.loader.exec_module(handoff)
 
 
 class HandoffPathTests(unittest.TestCase):
+    def test_evidence_json_matches_dotnet_escaping_for_git_path_characters(self) -> None:
+        self.assertEqual(
+            b'{"Value":"a\\u002Bb\\u0060\\u0022\\\\"}',
+            handoff._canonical_evidence_json({"Value": 'a+b`"\\'}),
+        )
+        self.assertEqual(
+            b'{"Value":"ends-with-backslash\\\\"}',
+            handoff._canonical_evidence_json({"Value": "ends-with-backslash\\"}),
+        )
+        self.assertEqual(
+            b'{"Value":"quote\\u0022plus\\u002Bbacktick\\u0060"}',
+            handoff._canonical_evidence_json({"Value": 'quote"plus+backtick`'}),
+        )
+        self.assertEqual(
+            b'{"Value":"\\\\u00af\\u002B"}',
+            handoff._canonical_evidence_json({"Value": "\\u00af+"}),
+        )
+        self.assertEqual(
+            b'{"Value":"caf\\u00E9"}',
+            handoff._canonical_evidence_json({"Value": "café"}),
+        )
+
     def test_new_output_directory_can_be_created_under_physical_parent(self) -> None:
         with tempfile.TemporaryDirectory(prefix="evidence-gate-handoff-") as temporary:
             parent = Path(temporary).resolve() / "physical-parent"

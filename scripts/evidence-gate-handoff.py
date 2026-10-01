@@ -104,9 +104,38 @@ def _read_json(path: Path, maximum_bytes: int, description: str) -> tuple[Mappin
 def _canonical_evidence_json(value: Mapping[str, Any]) -> bytes:
     """Match EvidenceCanonicalJson's compact, ordinal-property UTF-8 representation."""
     encoded = _canonical_json(value)
-    for character, escape in (("<", b"\\u003C"), (">", b"\\u003E"), ("&", b"\\u0026"), ("'", b"\\u0027")):
-        encoded = encoded.replace(character.encode("ascii"), escape)
-    return re.sub(rb"\\u([0-9a-f]{4})", lambda match: b"\\u" + match.group(1).upper(), encoded)
+    escaped_ascii = {
+        ord("+"): b"\\u002B",
+        ord("<"): b"\\u003C",
+        ord(">"): b"\\u003E",
+        ord("&"): b"\\u0026",
+        ord("'"): b"\\u0027",
+        ord("`"): b"\\u0060",
+    }
+    output = bytearray()
+    in_string = False
+    index = 0
+    while index < len(encoded):
+        character = encoded[index]
+        if character == ord('"'):
+            in_string = not in_string
+            output.append(character)
+        elif in_string and character == ord("\\") and index + 1 < len(encoded):
+            next_character = encoded[index + 1]
+            if next_character == ord('"'):
+                output.extend(b"\\u0022")
+            elif next_character == ord("u") and index + 5 < len(encoded):
+                output.extend(b"\\u" + encoded[index + 2 : index + 6].upper())
+                index += 4
+            else:
+                output.extend(encoded[index : index + 2])
+            index += 1
+        elif in_string and character in escaped_ascii:
+            output.extend(escaped_ascii[character])
+        else:
+            output.append(character)
+        index += 1
+    return bytes(output)
 
 
 def _read_evidence_plan(path: Path) -> tuple[Mapping[str, Any], bytes]:
