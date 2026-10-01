@@ -821,7 +821,7 @@ public static class EvidenceCanonicalJson
     /// <returns>The deserialized value.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="utf8Json"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="maximumBytes"/> is outside the permitted range.</exception>
-    /// <exception cref="InvalidDataException">The stream cannot be read safely or the input exceeds <paramref name="maximumBytes"/>.</exception>
+    /// <exception cref="InvalidDataException">The input exceeds <paramref name="maximumBytes"/>, or reading throws <see cref="IOException"/>, <see cref="UnauthorizedAccessException"/>, <see cref="NotSupportedException"/> or <see cref="ObjectDisposedException"/>.</exception>
     /// <exception cref="JsonException">The input is malformed, ambiguous, contains an invalid enum, or uses an unsupported plan or manifest version.</exception>
     /// <exception cref="OperationCanceledException">The read was canceled.</exception>
     public static async ValueTask<TValue> DeserializeAsync<TValue>(

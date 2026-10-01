@@ -164,6 +164,58 @@ public sealed class EvidenceJsonInputTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Deserialize_AcceptsExactly64NestedLevels(bool useObjects)
+    {
+        const int Depth = 64;
+        var opening = useObjects ? "{\"child\":" : "[";
+        var closing = useObjects ? "}" : "]";
+        var json = Encoding.UTF8.GetBytes(
+            string.Concat(Enumerable.Repeat(opening, Depth)) + "\"nesting-canary\"" +
+            string.Concat(Enumerable.Repeat(closing, Depth)));
+        var spanValue = EvidenceCanonicalJson.Deserialize<JsonElement>(json);
+        await using var stream = new ChunkedNonSeekableStream(json, maximumChunkBytes: 1);
+        var streamValue = await EvidenceCanonicalJson.DeserializeAsync<JsonElement>(stream);
+
+        foreach (var value in new[] { spanValue, streamValue })
+        {
+            var leaf = value;
+            for (var level = 0; level < Depth; level++)
+            {
+                leaf = useObjects ? leaf.GetProperty("child") : leaf[0];
+            }
+
+            Assert.Equal("nesting-canary", leaf.GetString());
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Deserialize_Rejects65NestedLevelsWithSafeJsonException(bool useObjects)
+    {
+        const int Depth = 65;
+        var opening = useObjects ? "{\"child\":" : "[";
+        var closing = useObjects ? "}" : "]";
+        var json = Encoding.UTF8.GetBytes(
+            string.Concat(Enumerable.Repeat(opening, Depth)) + "\"nesting-secret-canary\"" +
+            string.Concat(Enumerable.Repeat(closing, Depth)));
+
+        var spanFailure = Assert.Throws<JsonException>(() => EvidenceCanonicalJson.Deserialize<JsonElement>(json));
+        await using var stream = new ChunkedNonSeekableStream(json, maximumChunkBytes: 1);
+        var streamFailure = await Assert.ThrowsAsync<JsonException>(async () =>
+            await EvidenceCanonicalJson.DeserializeAsync<JsonElement>(stream));
+
+        foreach (var failure in new[] { spanFailure, streamFailure })
+        {
+            Assert.Equal("Evidence JSON is malformed or does not match the supported contract.", failure.Message);
+            Assert.Null(failure.InnerException);
+            Assert.DoesNotContain("nesting-secret-canary", failure.ToString(), StringComparison.Ordinal);
+        }
+    }
+
+    [Theory]
     [InlineData("null")]
     [InlineData("{\"Id\":\"json-secret\"")]
     public void Deserialize_UsesSafeJsonExceptionForNullOrMalformedInput(string json)

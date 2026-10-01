@@ -605,3 +605,57 @@ these fabricated fixtures establish neither CI execution nor runtime admission.
 The verifier and invocation notes are under
 `/private/tmp/issue779-proof-acceptance-preparation/`. Actual Ubuntu observations,
 preliminary publication and all remaining protected integration are still required.
+
+
+### Coverage attempt 12 and collector recovery
+
+The unchanged `./scripts/coverage-solution.sh` ran at clean
+`50b4d533dd5ae02e5fa3421e5c8072bc55dda56d`, against `origin/main` at
+`4aa8329c76f4279ad319747f9f3c14b9b8de51ef`. All **54/54** projects completed;
+the build reported **zero warnings/errors**. All tests passed: **15,028 passed,
+0 failed, 4 skipped**. The wrapper nevertheless exited **1 / ASCOV115**, because
+Coverlet threw `EndOfStreamException` while collecting RazorWire.Tests coverage
+and that project produced zero Cobertura files. The official aggregate and patch
+gates were not reached. Duration was 1,180.447 seconds; the owned process group
+was absent at completion. The immutable archive is
+`/private/tmp/issue779-coverage-attempt12-evidence/`, with manifest SHA-256
+`832fc5a9279740b50336ec1d9ee3812c39a6948738fca67bd203d82011711e1b`.
+
+The retained RazorWire hit file was zero bytes. Upstream Coverlet 10.0.1
+[`Coverage.CalculateCoverage`](https://github.com/coverlet-coverage/coverlet/blob/v10.0.1/src/coverlet.core/Coverage.cs#L424)
+reads its initial integer header at the stack's failing line. This establishes the
+immediate missing-data condition, but not why the file was empty. A copy and metadata
+are retained under `/private/tmp/issue779-collector-source-diagnosis/`; neither the
+original file nor the collector package was changed.
+
+One unchanged whole-project recovery through the actual CLI collector runner passed
+**545/545**, exit **0**, in **28.929 seconds**, with raw, normalized and merged
+Cobertura reports and no surviving owned processes. Command:
+`dotnet Cli/ForgeTrust.AppSurface.Cli/bin/Debug/net10.0/ForgeTrust.AppSurface.Cli.dll coverage run --test-project Web/ForgeTrust.RazorWire.Tests/ForgeTrust.RazorWire.Tests.csproj --output /private/tmp/issue779-razorwire-collector-recovery/output-owned --configuration Debug --no-build --no-restore --test-results junit --slow-test-diagnostics`.
+Receipts and the archive are under `/private/tmp/issue779-razorwire-collector-recovery/`.
+This recovery does not replace the failed full wrapper.
+
+The preparatory coverage and documentation audits identified two bounded corrections:
+four public-boundary theory cases now exercise the exact 64-level limit and reject
+65 levels for both object and array nesting, using span and one-byte nonseekable
+stream inputs; the Contracts reference and XML exception comment now name the four
+stream exception categories actually normalized. Other custom-stream exceptions
+propagate unchanged. The depth and exception contracts have a fresh scoped core and
+native adversarial review; rebuilt focused validation and a new unchanged full wrapper
+remain required. No coverage threshold, comparison base, skip, deadline or environment
+requirement was changed. Actual Ubuntu proof and the remaining protected integration
+are still pending under the [approved preliminary scope](issue-779-preliminary-proof.md).
+
+
+Scoped formatting exited **0** and preserved the reviewed source bytes. The rebuilt
+CLI Evidence filter then passed **182/182**, exit **0**, with no compiler, analyzer
+or XML documentation warnings. Commands: `dotnet format
+Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --no-restore
+--include Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceJsonInputTests.cs
+Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceContracts.cs`, then
+`dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj
+--no-restore --filter FullyQualifiedName~Evidence --logger 'console;verbosity=minimal'`.
+Receipts are under `/private/tmp/issue779-depth-focused-validation/` and
+`/private/tmp/issue779-depth-focused-parent/`. The scoped adversarial review report is
+`/private/tmp/issue779-depth-adversarial-review.md`. These checks cover the four new
+boundary controls and existing Evidence behavior; the full coverage gate remains required.
