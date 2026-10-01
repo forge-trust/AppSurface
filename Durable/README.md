@@ -30,6 +30,11 @@ binary rollback boundary. For the canonical manifest and exact grants, use the
 [PostgreSQL provider role-recipe reference](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#role-recipe-contract)
 and its [two-pair local walkthrough](../examples/durable-postgresql/README.md#version-1-role-pair-walkthrough).
 
+For a passive external wake host, start with the canonical [external activation reference](external-activation-v1.md)
+and its [authenticated PostgreSQL example](../examples/durable-external-activation/README.md). The service composes
+provider health with one authoritative admission attempt, a separate cooperative request budget, closed outcomes, and
+bounded activity tags; the host still owns routes, authorization, HTTP policy, probes, and deployment limits.
+
 For host and module tests, use the [Durable Testing package guide](ForgeTrust.AppSurface.Durable.Testing/README.md)
 for its six health-state defaults, authoritative pump-admission scenario, timeout handling, history retention, and
 privacy boundaries. Pair it with PostgreSQL conformance when a test needs evidence about stored or recovered state.

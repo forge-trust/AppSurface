@@ -7,3 +7,9 @@
 # presence to prove that any future stale-name exception is explicit, dated, and
 # reviewed.
 docs/designs/issue-807-file-declared-secret-references.md|Runnable|2027-09-16|Historical review artifact path retained as provenance; the referenced file exists outside the repository.
+docs/designs/issue-804-external-activation.md|Runnable|2027-09-16|Approved design retains historical external review artifact paths as provenance.
+docs/designs/issue-804-external-activation.md|runnable|2027-09-16|Approved design retains its original executable-example wording and historical workspace identity.
+docs/designs/issue-804-external-activation.md.review.8YsHpT/round-1.prompt.md|runnable|2027-09-16|Preserved local review prompt contains the historical workspace path; it is not product documentation.
+docs/designs/issue-804-external-activation.md.review.8YsHpT/round-2.prompt.md|runnable|2027-09-16|Preserved local review prompt contains the historical workspace path; it is not product documentation.
+docs/designs/issue-804-external-activation.md.review.8YsHpT/round-1.json|runnable|2027-09-16|Preserved local review result contains the historical workspace path; it is not product documentation.
+Durable/verify-packed-consumers.sh|Runnable|2027-09-16|The standard TRX counter notRunnable is required to reject non-executable test runs; it is not a product brand.

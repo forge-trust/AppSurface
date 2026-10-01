@@ -47,6 +47,30 @@ package, or visibility. The first supported publication and any persisted deploy
 boundaries: whichever happens first freezes canonical bytes, and every later canonical-byte change requires a new schema
 id.
 
+## External activation v1 (#804)
+
+The Provider package adds four public activation contracts and one passive registration extension:
+
+- `DurableExternalActivationRequest` requires the existing `DurableRuntimePumpRequest` plus an explicit positive
+  cooperative `RequestBudget` within the .NET timer bound.
+- `DurableExternalActivationOutcomeKind` adds ten fixed outcomes without changing the existing four-kind
+  `DurableRuntimePumpAttemptKind` algebra or its numeric values.
+- `DurableExternalActivationResult` validates the closed observed-state/code/pump-result combinations and retains the
+  exact provider aggregate only for `Completed`.
+- `IDurableExternalActivationService.ActivateAsync` composes current health observation with exactly one authoritative
+  admission call and a separate caller token.
+- `DurableExternalActivationServiceCollectionExtensions.AddDurableExternalActivation()` repeat-safely registers the
+  singleton service, `TimeProvider.System`, and logging without creating a host, route, timer, connection, schema change,
+  or exporter.
+
+The namespace is `ForgeTrust.AppSurface.Durable.Provider`. The concrete service and per-invocation phase/clock/resource
+helper remain internal. Existing direct `IDurableRuntimePumpAdmission` and legacy `IDurableRuntimePump` callers retain
+their contracts and are not redirected. The
+[versioned activation reference](external-activation-v1.md) documents the decision to add this orchestration surface,
+its constraints, host ownership, failure mapping, and telemetry. The Provider
+[`PublicAPI.Shipped.txt`](ForgeTrust.AppSurface.Durable.Provider/PublicAPI.Shipped.txt) snapshot remains the exhaustive
+member inventory.
+
 ## Slice 3 PostgreSQL API
 
 The public-preview `ForgeTrust.AppSurface.Durable.PostgreSql` package adds thirteen public types in three deliberate
