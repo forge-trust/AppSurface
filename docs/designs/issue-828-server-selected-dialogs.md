@@ -82,7 +82,7 @@ The shell has a visible heading bound to the dialog's accessible name, a visible
 
 An in-dialog form has these visible states: submitting (retain the dialog and its Turbo pending state; coordinate any added indicator with [#827 form loading feedback](https://github.com/forge-trust/AppSurface/issues/827)), handled `422` validation (retain form and errors), unhandled failure (use the existing [form-local failure fallback](../../Web/ForgeTrust.RazorWire/Docs/form-failures.md) inside the dialog), and success (remain open unless the response explicitly closes it). On an accepted validation update, focus the first invalid field or error summary according to the existing form contract; do not send focus back to the page. Dismissal while a request is pending does not cancel a server mutation. Reopening requires a new explicit open response.
 
-The approved low-fidelity [interaction sketch](./issue-828-dialog-wireframe.png) shows the trigger, server-selected dialog, and handled validation state. It illustrates the shell and focus flow; host applications own their own typography, colors, and form layout.
+The approved low-fidelity [interaction sketch](https://github.com/forge-trust/AppSurface/blob/f597e7ad2062379720a835826183fa33fa9a3327/docs/designs/issue-828-dialog-wireframe.png) shows the trigger, server-selected dialog, and handled validation state. It illustrates the shell and focus flow; host applications own their own typography, colors, and form layout.
 
 ## Request negotiation and no-JavaScript fallback
 
