@@ -163,6 +163,49 @@ public sealed class EvidenceGitChangeCaptureTests
     }
 
     [Fact]
+    public async Task Capture_ShouldRejectMixedObjectIdFormatsBeforeReadingGit()
+    {
+        using var repository = new GitFixture();
+
+        var exception = await Assert.ThrowsAsync<EvidencePlanningException>(() =>
+            EvidenceGitChangeCapture.CaptureAsync(repository.Path, new string('a', 40), new string('b', 64)));
+
+        Assert.Equal("ASEVD130", exception.Code);
+    }
+
+    [Fact]
+    public async Task Capture_ShouldRejectUnavailableTrustedObjectStore()
+    {
+        using var repository = new GitFixture();
+        var missingStore = Path.Join(repository.Path, "missing-object-store");
+        var revision = new string('a', 40);
+
+        var exception = await Assert.ThrowsAsync<EvidencePlanningException>(() =>
+            EvidenceGitChangeCapture.CaptureAsync(missingStore, revision, revision));
+
+        Assert.Equal("ASEVD131", exception.Code);
+    }
+
+    [Fact]
+    public async Task Capture_ShouldRejectNonCommitObjectAndUnchangedCommitPair()
+    {
+        using var repository = new GitFixture();
+        File.WriteAllText(Path.Join(repository.Path, "readme.md"), "content\n");
+        repository.Run("add", "readme.md");
+        repository.Commit("base");
+        var commitRevision = repository.Run("rev-parse", "HEAD").Trim();
+        var blobRevision = repository.Run("rev-parse", "HEAD:readme.md").Trim();
+
+        var nonCommit = await Assert.ThrowsAsync<EvidencePlanningException>(() =>
+            EvidenceGitChangeCapture.CaptureAsync(repository.Path, commitRevision, blobRevision));
+        Assert.Equal("ASEVD131", nonCommit.Code);
+
+        var noChange = await Assert.ThrowsAsync<EvidencePlanningException>(() =>
+            EvidenceGitChangeCapture.CaptureAsync(repository.Path, commitRevision, commitRevision));
+        Assert.Equal("ASEVD132", noChange.Code);
+    }
+
+    [Fact]
     public async Task RevisionBoundCli_ShouldRecreateV2IdentityAndRejectTamperedDiffOrPolicy()
     {
         using var repository = new GitFixture();
