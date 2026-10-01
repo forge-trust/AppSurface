@@ -4,7 +4,7 @@ Branch: main
 Repo: forge-trust/AppSurface
 Commit: f03ffdb99bc38daf402005c1435577bc325e1c8e
 
-Status: APPROVED requirements by the user with final Autoplan answer A on 2026-10-01; new feature not implemented/tested.
+Status: APPROVED requirements by the user with final Autoplan answer A on 2026-10-01. The implementation and focused verification are complete; see the [implementation evidence](issue-772-implementation-evidence.md) for actual results and remaining solution gates.
 
 ## Affected Pages/Routes
 - POST /_appsurface/dev-auth/select/{personaId}: guards, explicit persona, scope, cookie order, awaited success, errors and cancellation.
@@ -87,7 +87,7 @@ Status: APPROVED requirements by the user with final Autoplan answer A on 2026-1
 - E05: verifier process ownership, finite deadlines, redirect/proxy refusal, redaction and cleanup — current VerifierContractTests lifecycle/error cases.
 
 ## Test Value and Evidence
-29 planned contract groups plus 5 existing regression groups; these are enumerated groups, not measured source branches. Existing tests partially support E01-E05; G01-G29 remain gaps until implementation. No coverage percentage or new test pass is claimed.
+29 planned contract groups plus 5 existing regression groups; these are enumerated groups, not measured source branches. Implemented tests and browser acceptance address G01-G29 and retain E01-E05; the [execution ledger](issue-772-implementation-evidence.md#validation-ledger) separates passing focused checks from remaining full validation. These group counts do not claim a source-coverage percentage.
 Use existing xUnit/net10.0 projects, real scopes and real protected cookies. Test-owned registration, gates/counters and intentionally documented internal store/render APIs need no production-only test export. Never use reflection, sleeps or a mocked auth replacement.
 No LLM/prompt/model code is touched: eval scope none. New production branches require near-complete branch verification; run targeted tests then solution coverage when practical.
 

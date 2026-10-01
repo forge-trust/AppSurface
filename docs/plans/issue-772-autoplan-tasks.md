@@ -1,16 +1,16 @@
 # Autoplan implementation tasks (#772)
 
-Final plan APPROVED by the user with answer A on 2026-10-01. Aggregated only from this workflow on main, full HEAD in the recent five-commit window. Exact-match key: component + sorted files + title. Twelve distinct task records remain; semantic overlap is retained and marked, so estimates must not be summed. Use the [ordered execution checklist](issue-772-persona-scoped-fixture-activation.md) to sequence actual work.
+Final plan APPROVED by the user with answer A on 2026-10-01. Aggregated only from this workflow on main, full HEAD in the recent five-commit window. Exact-match key: component + sorted files + title. Twelve distinct task records remain; semantic overlap is retained and marked, so estimates must not be summed. Use the [ordered execution checklist](issue-772-persona-scoped-fixture-activation.md) to sequence actual work. Authored deliverables and focused/browser acceptance are complete; Eng-T3 remains open until the full solution and artifact gates in the [evidence ledger](issue-772-implementation-evidence.md#remaining-full-validation) pass.
 
-- [ ] **CEO-T1 (P1, human ~2h / agent ~15m) — Sample** — Guard progress actions and log safe activation outcomes
+- [x] **CEO-T1 (P1, human ~2h / agent ~15m) — Sample** — Guard progress actions and log safe activation outcomes
   - Surfaced by: ceo-review — CEO Sections 3/8: sample mutation admission and safe lifecycle logs
   - Files: examples/auth-aspnetcore-dev-auth/Program.cs
   - Possible overlap: CEO-T2, Design-T1, Eng-T2, DX-T1, Design-T2.
-- [ ] **CEO-T2 (P1, human ~3h / agent ~20m) — Sample proof** — Implement one candidate and deterministic failure/reselection
+- [x] **CEO-T2 (P1, human ~3h / agent ~20m) — Sample proof** — Implement one candidate and deterministic failure/reselection
   - Surfaced by: ceo-review — CEO C1/C2/C5 and Section 6: exact-one, stable ID and progress recovery
   - Files: examples/auth-aspnetcore-dev-auth/Program.cs, examples/auth-aspnetcore-dev-auth.tests/AuthAspNetCoreDevAuthExampleTests.cs
   - Possible overlap: CEO-T1, Design-T1, Eng-T3, Eng-T2, DX-T1, DX-T2, Design-T2.
-- [ ] **Design-T1 (P1, human 2h / agent 15min) — Example UI** — Implement role pages and safe state/reselection/303 flow
+- [x] **Design-T1 (P1, human 2h / agent 15min) — Example UI** — Implement role pages and safe state/reselection/303 flow
   - Surfaced by: design-review — Passes 1–3: hierarchy, visible readiness and exact route contract unspecified
   - Files: examples/auth-aspnetcore-dev-auth/Program.cs, examples/auth-aspnetcore-dev-auth/README.md, docs/plans/issue-772-browser-qa.md
   - Possible overlap: CEO-T1, CEO-T2, Eng-T3, Eng-T2, DX-T1, DX-T2, Design-T2, Eng-T4, DX-T3.
@@ -18,35 +18,35 @@ Final plan APPROVED by the user with answer A on 2026-10-01. Aggregated only fro
   - Surfaced by: eng-review — Test G01-G29: new hook, sample, concurrency, errors, accessibility, verifier and compiled-doc proof are gaps until built
   - Files: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.Tests/AppSurfaceDevAuthEndpointTests.cs, examples/auth-aspnetcore-dev-auth.tests/AuthAspNetCoreDevAuthExampleTests.cs, examples/auth-aspnetcore-dev-auth.tests/VerifierContractTests.cs, docs/plans/issue-772-browser-qa.md
   - Possible overlap: CEO-T2, Design-T1, Eng-T2, Eng-T1, DX-T1, DX-T2, CEO-T3, Design-T2, DX-T3.
-- [ ] **Eng-T2 (P1, human ~4h / agent ~35min) — Sample pipeline/state** — Implement ordered narrow failure middleware and coherent immutable store snapshots
+- [x] **Eng-T2 (P1, human ~4h / agent ~35min) — Sample pipeline/state** — Implement ordered narrow failure middleware and coherent immutable store snapshots
   - Surfaced by: eng-review — Architecture A1/A3 + Test G12-G24: pipeline order/cookie preservation and concurrent state ownership require explicit implementation
   - Files: examples/auth-aspnetcore-dev-auth/Program.cs, examples/auth-aspnetcore-dev-auth/LocalCandidateFixtureStore.cs, examples/auth-aspnetcore-dev-auth/LocalFixtureActivation.cs, examples/auth-aspnetcore-dev-auth.tests/AuthAspNetCoreDevAuthExampleTests.cs
   - Possible overlap: CEO-T1, CEO-T2, Design-T1, Eng-T3, DX-T1, DX-T2, Design-T2, Eng-T4.
-- [ ] **Eng-T1 (P1, human ~3h / agent ~25min) — Selection endpoint** — Implement exact captured-token checks and prove real request lifetime
+- [x] **Eng-T1 (P1, human ~3h / agent ~25min) — Selection endpoint** — Implement exact captured-token checks and prove real request lifetime
   - Surfaced by: eng-review — Architecture A2 + Test G01-G11: explicit pre/post-await RequestAborted checks; root-provider harness cannot prove scoped lifetime
   - Files: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/AppSurfaceDevAuthEndpointRouteBuilderExtensions.cs, Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/IAppSurfaceDevAuthPersonaSelectionHandler.cs, Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.Tests/AppSurfaceDevAuthEndpointTests.cs
   - Possible overlap: Eng-T3, Eng-T4.
-- [ ] **DX-T1 (P1, human 2h / agent 15min) — Opt-in docs** — Add source-backed complete activation quickstart and safe contract guidance
+- [x] **DX-T1 (P1, human 2h / agent 15min) — Opt-in docs** — Add source-backed complete activation quickstart and safe contract guidance
   - Surfaced by: devex-review — Passes 1–2/4: complete first-use source and nearby scope, composition and deadline examples absent
   - Files: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md, examples/auth-aspnetcore-dev-auth/Program.cs, examples/auth-aspnetcore-dev-auth.tests/AuthAspNetCoreDevAuthExampleTests.cs
   - Possible overlap: CEO-T1, CEO-T2, Design-T1, Eng-T3, Eng-T2, DX-T2, Design-T2, Eng-T4.
-- [ ] **DX-T2 (P1, human 1h / agent 10min) — Recovery docs** — Add three-path runbook and safe log lookup
+- [x] **DX-T2 (P1, human 1h / agent 10min) — Recovery docs** — Add three-path runbook and safe log lookup
   - Surfaced by: devex-review — Pass 3: host-resolution, partial-activation and cancellation errors need actionable local recovery guidance
   - Files: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md, examples/auth-aspnetcore-dev-auth/README.md, examples/auth-aspnetcore-dev-auth.tests/AuthAspNetCoreDevAuthExampleTests.cs
   - Possible overlap: CEO-T2, Design-T1, Eng-T3, Eng-T2, DX-T1, Design-T2, Eng-T4.
-- [ ] **CEO-T3 (P2, human ~1h / agent ~10m) — Verifier** — Extend existing real-socket workflow and route shim
+- [x] **CEO-T3 (P2, human ~1h / agent ~10m) — Verifier** — Extend existing real-socket workflow and route shim
   - Surfaced by: ceo-review — CEO C4: retain lifecycle proof while adding shared-candidate flow
   - Files: examples/auth-aspnetcore-dev-auth/verify.sh, examples/auth-aspnetcore-dev-auth.tests/VerifierContractTests.cs
   - Possible overlap: Eng-T3.
-- [ ] **Design-T2 (P2, human 1h / agent 10min) — Example accessibility** — Apply sample tokens, responsive layout and accessible native forms
+- [x] **Design-T2 (P2, human 1h / agent 10min) — Example accessibility** — Apply sample tokens, responsive layout and accessible native forms
   - Surfaced by: design-review — Passes 5–6: responsive, encoded output and keyboard/contrast requirements absent
   - Files: examples/auth-aspnetcore-dev-auth/Program.cs, examples/auth-aspnetcore-dev-auth.tests/AuthAspNetCoreDevAuthExampleTests.cs, docs/plans/issue-772-browser-qa.md
   - Possible overlap: CEO-T1, CEO-T2, Design-T1, Eng-T3, Eng-T2, DX-T1, DX-T2, DX-T3.
-- [ ] **Eng-T4 (P2, human ~1h / agent ~10min) — Internal documentation** — Document response/cancellation/locking ownership at their actual APIs
+- [x] **Eng-T4 (P2, human ~1h / agent ~10min) — Internal documentation** — Document response/cancellation/locking ownership at their actual APIs
   - Surfaced by: eng-review — Code Quality Q1/Q2 + Performance P1: helper responsibilities and cancellation limits must stay understandable
   - Files: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/AppSurfaceDevAuthEndpointRouteBuilderExtensions.cs, examples/auth-aspnetcore-dev-auth/LocalCandidateFixtureStore.cs, examples/auth-aspnetcore-dev-auth/LocalFixtureActivation.cs, Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md, examples/auth-aspnetcore-dev-auth/README.md
   - Possible overlap: Design-T1, Eng-T2, Eng-T1, DX-T1, DX-T2.
-- [ ] **DX-T3 (P2, human 1h / agent 10min) — Adoption proof** — Add discovery, coordinated release guidance and observed QA timing template
+- [x] **DX-T3 (P2, human 1h / agent 10min) — Adoption proof** — Add discovery, coordinated release guidance and observed QA timing template
   - Surfaced by: devex-review — Passes 5/8: additive upgrade behavior and whole-journey observations must be explicit
   - Files: start-here/auth-adoption-ladder.md, packages/package-index.yml, README.md, releases/unreleased.entries/2026-10-01-devauth-fixture-activation.md, docs/plans/issue-772-browser-qa.md
   - Possible overlap: Design-T1, Eng-T3, Design-T2.
