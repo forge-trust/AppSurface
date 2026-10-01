@@ -4,9 +4,10 @@ Rerun on October 1, 2026 using the exact `origin/main` base commit
 `4aa8329c76f4279ad319747f9f3c14b9b8de51ef` for both sides. The baseline was built from that clean source snapshot.
 The candidate used the same base plus the provider/request patch after the cleanup-scheduler and audit-admission coverage fixes. The v3 harness source was
 copied unchanged into the baseline snapshot, and its source fingerprints and workload controls match the candidate.
-The complete unedited records are the [baseline JSONL](issue-819-origin-main-2026-10-01.jsonl),
-[candidate JSONL](issue-819-candidate-2026-10-01.jsonl), and
-[16-resource/4-caller validation JSONL](issue-819-caller-count-4-verification-2026-10-01.jsonl).
+The complete unedited records are pinned to the commit that captured them:
+[baseline JSONL](https://github.com/forge-trust/AppSurface/blob/1843abd85e97c21ea5830cd78b300c567ba32495/Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Benchmarks/results/issue-819-origin-main-2026-10-01.jsonl),
+[candidate JSONL](https://github.com/forge-trust/AppSurface/blob/1843abd85e97c21ea5830cd78b300c567ba32495/Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Benchmarks/results/issue-819-candidate-2026-10-01.jsonl), and
+[16-resource/4-caller validation JSONL](https://github.com/forge-trust/AppSurface/blob/1843abd85e97c21ea5830cd78b300c567ba32495/Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Benchmarks/results/issue-819-caller-count-4-verification-2026-10-01.jsonl).
 
 | Field | Baseline | Candidate |
 | --- | --- | --- |

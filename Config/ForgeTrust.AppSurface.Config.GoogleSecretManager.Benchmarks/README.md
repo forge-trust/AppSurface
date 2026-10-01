@@ -78,7 +78,7 @@ Do not compare runs with different runtime, processor count, ThreadPool minimum,
 state, caller/resource count, or repetition count. The issue's adopter inputs (distinct startup resources, maximum
 concurrent resolutions, and end-to-end startup duration) have not been supplied; label this workload provisional until
 calibrated. See the [captured baseline/candidate results and raw samples](results/issue-819-comparison-2026-10-01.md),
-including the [16-resource/4-caller verification samples](results/issue-819-caller-count-4-verification-2026-10-01.jsonl).
+including the [16-resource/4-caller verification samples](https://github.com/forge-trust/AppSurface/blob/1843abd85e97c21ea5830cd78b300c567ba32495/Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Benchmarks/results/issue-819-caller-count-4-verification-2026-10-01.jsonl).
 
 This fake workload measures the harness and scheduling shape under controlled synchronous calls. It is not a production
 startup measurement and does not establish a latency improvement or production speedup. Report the raw samples even
