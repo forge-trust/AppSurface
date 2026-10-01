@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stdout
 import importlib.util
+import io
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "evidence-gate-verifier-context.py"
@@ -133,6 +137,42 @@ class VerifierContextTests(unittest.TestCase):
             self.assertEqual(expected, json.loads(output.read_bytes()))
             with self.assertRaises(context.VerifierContextError):
                 context.write_new_identity(output, expected)
+
+    def test_main_reads_fresh_identity_and_writes_expected_identity(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="evidence-verifier-context-") as temporary:
+            root = Path(temporary)
+            capture = root / "capture.json"
+            output = root / "expected.json"
+            capture.write_bytes(context._canonical(self.identity))
+            environment = dict(self.environment, GITHUB_TOKEN="test-token", GITHUB_API_URL="https://api.github.com")
+            with patch.dict(os.environ, environment), patch.object(context, "_read_api", side_effect=lambda path, **_kwargs: self._api(path)):
+                with redirect_stdout(io.StringIO()):
+                    self.assertEqual(0, context.main(["--fresh-identity", str(capture), "--output", str(output)]))
+            self.assertEqual("5678", json.loads(output.read_bytes())["SubjectJobId"])
+
+    def test_api_reader_rejects_oversized_or_malformed_responses(self) -> None:
+        class Response(io.BytesIO):
+            def __init__(self, body: bytes, content_length: str | None = None) -> None:
+                super().__init__(body)
+                self.status = 200
+                self.headers = {} if content_length is None else {"Content-Length": content_length}
+
+        class Opener:
+            def __init__(self, response: Response) -> None:
+                self.response = response
+
+            def open(self, _request: object, timeout: int) -> Response:
+                assert timeout == context.API_TIMEOUT_SECONDS
+                return self.response
+
+        with patch.object(context, "build_opener", return_value=Opener(Response(b'{"id":1}'))):
+            self.assertEqual({"id": 1}, context._read_api("repos/example/repo", api_base="https://api.github.com", token="test"))
+        with patch.object(context, "build_opener", return_value=Opener(Response(b"{}", str(context.MAX_API_BYTES + 1)))):
+            with self.assertRaises(context.VerifierContextError):
+                context._read_api("repos/example/repo", api_base="https://api.github.com", token="test")
+        with patch.object(context, "build_opener", return_value=Opener(Response(b"{"))):
+            with self.assertRaises(context.VerifierContextError):
+                context._read_api("repos/example/repo", api_base="https://api.github.com", token="test")
 
 
 if __name__ == "__main__":
