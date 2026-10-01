@@ -445,3 +445,68 @@ Red/green logs: `/private/tmp/issue779-wrapped-red.log` and
 The watcher was instructed to stop the just-started attempt 7 before code replacement;
 its exact terminal result remains pending. A new committed full run and refreshed packed
 Contracts/SDK proof are required for this repair before publication.
+
+
+### Coverage attempt 8 and final packaged preliminary QA
+
+The unchanged `./scripts/coverage-solution.sh` completed all **54/54** project slots on
+clean `118c3855cbaaad9f479747f742b8af8da18d27ca` against `origin/main` at
+`4aa8329c76f4279ad319747f9f3c14b9b8de51ef`. The build reported **zero warnings/errors**.
+The wrapper exited **1 / ASCOV120**, with **11 failed tests across four projects**:
+Config (1), the auth verifier fixture (2), Durable local proof scripts (2), and Docs
+prerequisite scripts (6). All CLI tests **1726/1726** and RazorWire integration tests
+**231/231** passed. Raw merged coverage was **95.11% line / 89.04% branch**; the official
+aggregate/patch gate was not reached, so this is not a gate pass. The complete preserved
+log, exit marker, 54 project logs/JUnit files, timings and Cobertura are under
+`/private/tmp/issue779-coverage-attempt8-evidence/`. Process inspection found none of
+the recorded attempt-8 owner, runner, build or failure-process PIDs present.
+
+The attempt-7 interruption record is now retained at
+`/private/tmp/issue779-coverage-attempt7-interrupted-evidence/termination-summary.txt`.
+It records shell status **130**, no wrapper exit marker, and the recorded owner/dotnet
+PIDs absent. No numeric wrapper exit result or coverage pass is claimed for that run.
+
+The failures were child startup deadlines. Auth diagnostics stop at `PREFLIGHT,BUILD`
+before the first shim event; Docs diagnostics stop after command-presence checks.
+The exact Config scalar validation control passed with its collector, **1/1**, exit **0**,
+in 10 seconds. A first unchanged Durable two-control collector trial reproduced both
+failures. A temporary instrumentation trial subsequently passed but emitted zero trace
+records, so it establishes no stage diagnosis. After the read-only load watch observed
+a reduction, the unchanged two-control trial passed **2/2**, exit **0**, in 14.041 seconds.
+No test deadline, coverage threshold/base, skip or production source was changed.
+Focused evidence is retained in `/private/tmp/issue779-config-startup-repro/` and
+`/private/tmp/issue779-durable-startup-recovered/`. The host's 14 logical CPUs and
+concurrent load readings are an observed condition, not a proved common cause.
+
+The refreshed packed CLI at **0.1.0-issue779-proof.20261001.6** sets both `Version` and
+`PackageVersion`. The earlier `.5` `--version` mismatch came from setting only
+`PackageVersion` in the verification build; it did not establish a product defect.
+The `.6` archive audit and local-feed-only installation passed, and installed
+`--version` exactly prints the package version. Pack exit **0** had no compiler/package
+warnings, one root README and `RepositoryCommit` matching `118c3855`. Archive SHA-256:
+`3f66e5bfb8e1b5042eb4f0ffac7f07ed6b97ba3a12865ebd18553ff34089f74a`.
+
+Functional [QA Standard](issue-779-preliminary-proof.md#verification-and-expected-outcomes)
+passed **20/20 current CLI contracts**, preserving separate exits/stdout/stderr and
+19 preceding-observation checkpoints: version/help/init, CI-flag doctor remaining
+unverified, explain with plan/summary but no manifest, and safe duplicate/null/property,
+enum-value, empty/missing-path and malformed plan/manifest diagnostics. The report and
+materialized evidence are `/private/tmp/issue779-packed-final-20261001/qa-06/qa-report-current.md`
+and its `evidence.json`; the parent retrieved the overall process exit **0**.
+
+The exact Contracts **.5** local-feed SDK consumer also passed, exit **0** in 3.089 seconds,
+with no warnings or stderr. It verifies nested typed array/dictionary/wrapper values,
+null collection rejection, counted streams, valid/default/additive/enum compatibility,
+malformed property names and four malformed enum-string span/stream controls. The latter
+returned the exact generic `JsonException`, no inner exception and no canary; no new
+source repair was selected. Contracts package SHA-256:
+`13a3e8c89f36fb0ad4cca5abb9b238fce03a31501d856885bbc12b790b03779b`. Packaged, cached and
+consumer-output Contracts DLL hashes match
+`fd260ffd0e468bad63c3be2fceb8032d7a283a92c39b6c443d7ef6d7c5169193`.
+
+Generated documentation checks at `118c3855` passed: existing Debug DLL PackageIndex
+`verify` exit **0** in 24.979 seconds and MarkdownSnippets `verify` exit **0** in 0.233 seconds.
+Logs and numeric metadata are retained under `/private/tmp/issue779-generated-doc-final-118c/`.
+The final narrow core and native adversarial repair reviews found no actionable static
+defect; they do not replace the required full coverage or actual Ubuntu mechanism proof.
+A fresh unchanged full wrapper remains mandatory before any draft publication.
