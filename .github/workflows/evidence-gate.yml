@@ -35,23 +35,73 @@ jobs:
           fetch-depth: 1
 
       - name: Capture the exact pull-request revision pair
+        id: capture
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           capture_directory="$RUNNER_TEMP/evidence-gate-capture"
-          handoff_directory="$RUNNER_TEMP/evidence-gate-handoff"
 
           python3 "$GITHUB_WORKSPACE/trusted/scripts/evidence-gate-controller.py" \
             --event "$GITHUB_EVENT_PATH" \
             --output "$capture_directory" \
             --target-branch main
 
+          if [[ -f "$capture_directory/source.diff" && ! -L "$capture_directory/source.diff" ]]; then
+            printf '%s\n' 'mode=same-repository' >> "$GITHUB_OUTPUT"
+          elif [[ -f "$capture_directory/observation.json" && ! -L "$capture_directory/observation.json" ]]; then
+            printf '%s\n' 'mode=observation-only' >> "$GITHUB_OUTPUT"
+          else
+            echo 'The controller did not produce a recognized bounded capture.' >&2
+            exit 1
+          fi
+
+      - name: Set up the trusted policy planner
+        if: ${{ steps.capture.outputs.mode == 'same-repository' }}
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Resolve the base-owned policy for the exact captured change
+        if: ${{ steps.capture.outputs.mode == 'same-repository' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          capture_directory="$RUNNER_TEMP/evidence-gate-capture"
+          identity="$capture_directory/pull-request-run-identity.json"
+          base_revision=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["BaseRevision"])' "$identity")
+          head_revision=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["HeadRevision"])' "$identity")
+          planner_project="$GITHUB_WORKSPACE/trusted/Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"
+          policy="$GITHUB_WORKSPACE/trusted/.appsurface/evidence/evidence.policy.json"
+
+          dotnet restore "$planner_project" --locked-mode --verbosity quiet
+          dotnet run --no-restore --project "$planner_project" -- evidence explain \
+            --gate-mode \
+            --policy "$policy" \
+            --repository "$capture_directory/repository.git" \
+            --base-revision "$base_revision" \
+            --head-revision "$head_revision" \
+            --diff-file "$capture_directory/source.diff" \
+            --pr-run-identity "$identity" \
+            --output "$RUNNER_TEMP/evidence-gate-plan"
+
+      - name: Create the bounded subject handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          capture_directory="$RUNNER_TEMP/evidence-gate-capture"
+          handoff_directory="$RUNNER_TEMP/evidence-gate-handoff"
+          plan_arguments=()
+          if [[ -f "$capture_directory/source.diff" ]]; then
+            plan_arguments=(--plan-file "$RUNNER_TEMP/evidence-gate-plan/evidence-plan.json")
+          fi
+
           python3 "$GITHUB_WORKSPACE/trusted/scripts/evidence-gate-handoff.py" create \
             --capture-directory "$capture_directory" \
             --trusted-scripts-directory "$GITHUB_WORKSPACE/trusted/scripts" \
-            --output-directory "$handoff_directory"
+            --output-directory "$handoff_directory" \
+            "${plan_arguments[@]}"
 
       - name: Upload the bounded same-run handoff
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -103,7 +153,7 @@ jobs:
           result_path = sys.argv[1]
           fallback = (
               b'{"claimEligible":false,"execution":"failed","schemaVersion":1,'
-              b'"diagnostic":{"code":"ASEGH011","message":"The credentialless subject handoff failed before recording its bounded result."}}\n'
+              b'"diagnostic":{"code":"ASEHB011","message":"The credentialless subject handoff failed before recording its bounded result."}}\n'
           )
           try:
               descriptor = os.open(

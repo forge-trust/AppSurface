@@ -1,14 +1,14 @@
 # AppSurface evidence-gate diagnostics
 
-This guide maps the stable `ASEGG`, `ASEGH`, `ASEGS`, and `ASESE` diagnostics currently emitted by the command parser, host, verifier I/O layer, subject launcher, fixed offline entrypoint, and checked-in pilot workflow. `ASEGG` identifies `verify-gate` command or handoff processing, `ASEGH` identifies host execution and the non-claiming workflow pilot, `ASEGS` identifies the standalone subject launcher, and `ASESE` identifies the fixed offline entrypoint. The controller capture script reports bounded plain-language errors; it does not currently emit these code families.
+This guide maps the stable `ASEGG`, `ASEHB`, `ASEGH`, `ASEGS`, and `ASESE` diagnostics emitted by the verifier I/O layer, private handoff, host, subject launcher, fixed offline entrypoint, and checked-in pilot workflow. `ASEGG` identifies `verify-gate` command processing, `ASEHB` identifies the controller-to-subject handoff, `ASEGH` identifies host execution and the non-claiming workflow verdict, `ASEGS` identifies the subject launcher, and `ASESE` identifies the fixed offline entrypoint. The controller capture script reports bounded plain-language errors; it does not currently emit these code families.
 
-These codes report a failed or incomplete operation. They never turn an observation into a gate pass. The separate `ASEVG` codes are final library-verdict results, documented in the planner's [trusted PR verdict reference](../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md#trusted-pr-verdict-boundary).
+These codes report a failed or incomplete operation, except `ASEHB010`, which reports completed subject execution without a gate claim. None turns an observation into a gate pass. The separate `ASEVG` codes are final library-verdict results, documented in the planner's [trusted PR verdict reference](../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md#trusted-pr-verdict-boundary).
 
 ## Read the current result correctly
 
 `run` can exit `0` when the trusted policy explicitly selects an empty targeted profile and the host emits `NoEvidenceRequired`. That is a successful host result for that profile; it does not run a producer or publish a final CI verdict. Other profiles remain incomplete while their producer and resource registrations are absent.
 
-The checked-in `pull_request_target` workflow is a separate scaffold. Its trusted-verifier step deliberately emits `ASEGH003` and exits nonzero because subject execution and trusted checkout/isolation attestation are not implemented. The branch-owned shadow job checks contracts only. The standalone subject launcher is also deliberately non-claiming: it always reports `claimEligible: false`, exits nonzero, has no supplied pinned image or locked dependency supply, and is not wired into the pilot. Production `verify-gate` cannot currently issue an eligible verdict because its GitHub authority provider lacks an actual subject-checkout attestor. Tests that exercise an eligible verifier result inject a trusted authority snapshot; they do not establish live production authority. Keep the pilot non-required and do not remove obligations or weaken checks to clear these diagnostics. See the [rollout record](evidence-gate-rollout.md) and [policy and producer matrix](evidence-gate-policy-matrix.md).
+The checked-in `pull_request_target` workflow is a separate scaffold. Its controller resolves the captured diff through the base-owned policy, and its credentialless job validates the bounded handoff. An explicitly empty documentation profile needs no OCI run; a supported code profile can start only with a reviewed digest-pinned image and offline dependencies. Both results say `claimEligible: false`. The trusted-verifier step deliberately emits `ASEGH003` and exits nonzero because it does not yet consume the subject result or prove checkout, isolation, artifacts, and current PR revisions together. The branch-owned shadow job checks contracts only. Production `verify-gate` can evaluate a fully empty profile from fresh PR/run/job API authority without a subject checkout attestor, but this workflow does not invoke it; nonempty profiles still lack the required checkout and isolation proof. Keep the pilot non-required and do not remove obligations or weaken checks to clear these diagnostics. See the [rollout record](evidence-gate-rollout.md) and [policy and producer matrix](evidence-gate-policy-matrix.md).
 
 ## `ASEGG`: verifier command and handoff processing
 
@@ -22,12 +22,30 @@ The checked-in `pull_request_target` workflow is a separate scaffold. Its truste
 | `ASEGG108` | A verification result file already exists in the output directory; outputs are create-new. | Choose a fresh output directory and preserve the earlier result for diagnosis. | [Runner command and verifier boundary](../tools/ForgeTrust.AppSurface.EvidenceGate/README.md#verify-gate-and-current-pilot) |
 | `ASEGG199` | An unexpected non-fatal verifier failure occurred. | Keep the run ineligible; inspect trusted runner diagnostics and the input handoffs, without exposing raw untrusted content or converting the result to success. | [Trusted PR verdict reference](../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md#trusted-pr-verdict-boundary) |
 
+## `ASEHB`: private controller-to-subject handoff
+
+These codes come from [`evidence-gate-handoff.py`](../scripts/evidence-gate-handoff.py) or the workflow's fixed result fallback. A successful handoff or subject run is still non-claiming; the trusted verifier must independently authorize the final PR check.
+
+| Code | Cause | Safe fix |
+| --- | --- | --- |
+| `ASEHB001` | A captured/downloaded identity, v2 plan, diff, digest, run attempt, or bounded file set is missing or mismatched. | Recreate the handoff from the same base-owned policy, exact captured Git objects, and current workflow attempt. Do not edit the artifact. |
+| `ASEHB002` | The controller cannot safely create or publish a private handoff directory. | Use a new physical output path under the ephemeral runner's private temporary root. |
+| `ASEHB003` | Bounded Git tree inventory or archive creation failed or exceeded its deadline or byte limit. | Inspect the trusted Git store and limits; recapture the exact revision pair rather than substituting a working-tree snapshot. |
+| `ASEHB004` | The archived tree contains an unsafe entry, omits a Git blob, changes a blob or mode, or exceeds a fixed bound. | Correct the head tree or its export attributes; do not skip the entry or trust the transformed archive. |
+| `ASEHB005` | The downloaded snapshot could not be materialized as a bounded regular-file tree. | Retire the failed subject attempt and regenerate the exact private artifact. |
+| `ASEHB006` | The bounded subject result could not be written safely. | Preserve failure and rerun with a new private result path. |
+| `ASEHB007` | A fork capture is observation-only. | Review and promote the exact commit to a same-repository branch before requesting a gate-eligible PR run. |
+| `ASEHB008` | The selected profile is unsupported, the reviewed digest-pinned offline image is unavailable, or the trusted launcher cannot load. | Implement the declared profile and image supply; do not substitute `code-coverage` for another profile. |
+| `ASEHB009` | The selected subject process exited unsuccessfully. | Read its bounded diagnostic, fix the declared producer, and rerun a fresh attempt. |
+| `ASEHB010` | The selected subject execution completed, but no trusted verifier has authorized a claim. | Continue to the base-owned verifier; do not use this result as a required-check verdict. |
+| `ASEHB011` | An unexpected handoff failure or missing result triggered the fixed fallback. | Keep the run failed and inspect the trusted controller/subject job logs without exposing raw subject output. |
+
 ## `ASEGH`: host and pilot workflow
 
 | Code | Cause | Safe fix | Start here / reference |
 | --- | --- | --- | --- |
 | `ASEGH001` | `run` arguments are missing, duplicated, unknown, or malformed. | Run `--help`; provide the required plan, policy, repository, and new output-directory options. | [Host run behavior](../tools/ForgeTrust.AppSurface.EvidenceGate/README.md#host-run-behavior) |
-| `ASEGH003` | The checked-in base-owned pilot intentionally stops: subject execution and trusted checkout/isolation attestation are not implemented. | Leave it non-required. Complete and prove the trusted subject handoff and attestation before replacing the scaffold. | [Rollout record](evidence-gate-rollout.md) |
+| `ASEGH003` | The checked-in base-owned pilot intentionally stops: the trusted verifier does not yet consume the handoff or prove complete producer, checkout, isolation, and freshness authority. | Leave it non-required. Complete and pilot the trusted verifier and every selected profile before replacing the scaffold. | [Rollout record](evidence-gate-rollout.md) |
 | `ASEGH102` | A required host input is unavailable, or host input/output I/O could not be processed safely. | Check the base-owned policy, plan, Git object store, paths, and permissions; recapture missing inputs in the trusted controller. | [Host run behavior](../tools/ForgeTrust.AppSurface.EvidenceGate/README.md#host-run-behavior) |
 | `ASEGH103` | A plan or policy is malformed or noncanonical, or the plan has no bounded identity from which a manifest can safely be formed. | Recreate the canonical plan and policy from trusted inputs. If identity is not trustworthy, the host correctly emits no manifest. | [Revision-bound planning](../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md#revision-bound-git-change-capture) |
 | `ASEGH104` | The plan fails trusted revision/policy verification, including the planner's exact-plan mismatch. | Discard the handoff and rebuild it from the protected policy and exact base/head objects in the trusted object store. | [Revision-bound planning](../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md#revision-bound-git-change-capture) |
@@ -42,7 +60,7 @@ The checked-in `pull_request_target` workflow is a separate scaffold. Its truste
 
 ## `ASEGS`: standalone subject launcher
 
-These diagnostics come from a separate OCI execution primitive, not from the current pilot workflow. Its successful subject-process exit is still not a gate claim. Keep controller-owned paths, image digest, profile, and limits authoritative; never relax an isolation check to make the launcher proceed.
+These diagnostics come from the OCI execution primitive, which the pilot can invoke only for a supported selected profile with a configured image. Its successful subject-process exit is still not a gate claim. Keep controller-owned paths, image digest, profile, and limits authoritative; never relax an isolation check to make the launcher proceed.
 
 | Code | Cause | Safe fix | Start here / reference |
 | --- | --- | --- | --- |
@@ -66,7 +84,7 @@ These diagnostics come from a separate OCI execution primitive, not from the cur
 
 ## `ASESE`: fixed offline subject entrypoint
 
-The [entrypoint](../scripts/evidence-gate-subject-entrypoint.py) is a non-claiming primitive intended for a reviewed subject image. It is not wired into the pilot. The current solution's container-dependent tests produce `ASESE010`; the script also lacks controller-diff binding and patch thresholds. A successful toy-fixture execution record still says `claimEligible: false` and is not a manifest claim.
+The [entrypoint](../scripts/evidence-gate-subject-entrypoint.py) is a non-claiming primitive intended for a reviewed subject image. The pilot launcher can call it when that image is supplied, but no image or locked feed has been approved for the repository. The current solution's container-dependent tests produce `ASESE010`; the script also lacks controller-diff binding and patch thresholds. A successful toy-fixture execution record still says `claimEligible: false` and is not a manifest claim.
 
 | Code | Cause | Safe fix | Start here / reference |
 | --- | --- | --- | --- |
