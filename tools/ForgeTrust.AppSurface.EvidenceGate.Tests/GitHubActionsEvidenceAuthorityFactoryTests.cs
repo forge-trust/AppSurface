@@ -16,7 +16,7 @@ public sealed class GitHubActionsEvidenceAuthorityFactoryTests
 
     [Theory]
     [InlineData("http://api.github.com")]
-    [InlineData("https://user:password@api.github.com")]
+    [InlineData("https://user:PASSWORD@api.github.com")]
     [InlineData("https://api.github.com?token=secret")]
     [InlineData("https://api.github.com#fragment")]
     [InlineData("not-a-url")]
