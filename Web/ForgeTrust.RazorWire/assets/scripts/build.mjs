@@ -16,11 +16,17 @@ const generatedOutputs = [
     output: path.join(outputRoot, 'razorwire.js'),
     label: 'razorwire.js',
     banner: 'Generated from assets/src/razorwire.ts. Do not edit wwwroot/razorwire/razorwire.js by hand.',
-    // Form loading, per-request failed-form state, and detached lazy-token cancellation
-    // keep form submissions safe through overlap and DOM removal. The reviewed bundle
-    // is 49,364 raw / 12,530 gzip bytes; retain narrow growth headroom.
-    rawBytes: 50_000,
-    gzipBytes: 12_750
+    // #827 form loading plus #828 dialog ownership and ordered rendering.
+    rawBytes: 60_000,
+    gzipBytes: 16_000
+  },
+  {
+    entry: path.join(assetRoot, 'src', 'dialog-responses.css'),
+    output: path.join(outputRoot, 'razorwire-dialog.css'),
+    label: 'razorwire-dialog.css',
+    banner: 'Generated from assets/src/dialog-responses.css. Do not edit this output.',
+    rawBytes: 3_000,
+    gzipBytes: 1_200
   },
   {
     entry: path.join(assetRoot, 'src', 'razorwire.islands.ts'),
@@ -224,9 +230,9 @@ async function buildAssets() {
       target: ['es2022'],
       sourcemap: false,
       legalComments: 'none',
-      banner: {
-        js: `// ${generated.banner}`
-      }
+      banner: generated.entry.endsWith('.css')
+        ? { css: `/* ${generated.banner} */` }
+        : { js: `// ${generated.banner}` }
     });
   }
 

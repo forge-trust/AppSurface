@@ -1,27 +1,31 @@
+import { DialogResponseManager } from './dialog-responses';
+
 /**
  * RazorWire Core Client Runtime
  * Provides native stream monitoring and event dispatching.
  */
-interface Window {
-    RazorWireInitialized?: boolean;
-    RazorWire?: {
-        config?: Record<string, unknown>;
-        connectionManager?: unknown;
-        localTimeFormatter?: unknown;
-        formFailureManager?: unknown;
-        pageNavigationManager?: unknown;
-        sectionCopyManager?: unknown;
-        formInteractionsManager?: unknown;
-        behaviors?: unknown;
-    };
-    Turbo?: TurboRuntime;
+declare global {
+    interface Window {
+        RazorWireInitialized?: boolean;
+        RazorWire?: {
+            config?: Record<string, unknown>;
+            connectionManager?: unknown;
+            localTimeFormatter?: unknown;
+            formFailureManager?: unknown;
+            pageNavigationManager?: unknown;
+            sectionCopyManager?: unknown;
+            formInteractionsManager?: unknown;
+            behaviors?: unknown;
+        };
+        Turbo?: TurboRuntime;
+    }
 }
 
 interface TurboRuntime {
     connectStreamSource?(source: EventSource): void;
     disconnectStreamSource?(source: EventSource): void;
     visit?(url: string, options?: { action?: string }): void;
-    StreamActions?: Record<string, (this: Element) => void>;
+    StreamActions?: Record<string, (this: Element) => void | Promise<void>>;
 }
 
 interface StreamSourceRegistration {
@@ -1627,7 +1631,7 @@ declare const Turbo: TurboRuntime | undefined;
         nextId: number;
         styleId: string;
 
-        constructor(config: RuntimeConfig, loadingManager: FormLoadingManager) {
+        constructor(config: RuntimeConfig, loadingManager: FormLoadingManager, private dialogManager: DialogResponseManager) {
             this.config = config;
             this.loadingManager = loadingManager;
             this.state = new WeakMap();
@@ -1873,7 +1877,7 @@ declare const Turbo: TurboRuntime | undefined;
         }
 
         handleSubmitEnd(event) {
-            const form = this.getForm(event.target);
+            const form = this.getForm(event.detail?.formSubmission?.formElement) || this.getForm(event.target);
             if (!this.isRazorWireForm(form)) return;
 
             const fetchOptions = this.getSubmissionFetchOptions(event.detail?.formSubmission);
@@ -1917,6 +1921,11 @@ declare const Turbo: TurboRuntime | undefined;
             const previousFailureCount = this.getFailureAttemptCount(form);
 
             const stillSubmitting = this.finishSubmitting(form, formState);
+
+            if (this.dialogManager.isStaleForm(form, event.detail)) {
+                this.dispatch(form, 'razorwire:form:submit-end', { form, submitter, success, statusCode, handled });
+                return;
+            }
 
             if (success) {
                 if (previousFailureCount > 0) {
@@ -1995,6 +2004,7 @@ declare const Turbo: TurboRuntime | undefined;
             const formState = this.getFetchOptionState(form, fetchOptions);
             const submitter = formState.submitter || null;
             const stillSubmitting = this.finishSubmitting(form, formState);
+            if (this.dialogManager.isStaleForm(form, event.detail)) return;
             form.setAttribute('data-rw-submit-status', stillSubmitting ? 'submitting' : 'failed');
 
             const target = this.resolveTarget(form);
@@ -2777,10 +2787,12 @@ declare const Turbo: TurboRuntime | undefined;
     // Initialize
     const runtimeConfig = readRuntimeConfig();
     installVisitStreamAction();
+    const dialogResponseManager = new DialogResponseManager(resolveTurbo());
+    dialogResponseManager.start();
     const connectionManager = new ConnectionManager(runtimeConfig);
     const localTimeFormatter = new LocalTimeFormatter();
     const formLoadingManager = new FormLoadingManager(runtimeConfig);
-    const formFailureManager = new FormFailureManager(runtimeConfig, formLoadingManager);
+    const formFailureManager = new FormFailureManager(runtimeConfig, formLoadingManager, dialogResponseManager);
     formLoadingManager.setFormFailureManager(formFailureManager);
 
     if (document.readyState === 'loading') {

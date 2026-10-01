@@ -1,5 +1,9 @@
 # Deferred work
 
+## Server-pushed RazorWire dialogs (#828 follow-up)
+
+- **What:** Design explicit server-pushed dialog commands after request-scoped #828 dialogs are adopted. **Why:** A live stream has no initiating request or current form owner, so the request/flow token contract from [#828](docs/designs/issue-828-server-selected-dialogs.md) cannot be reused unchanged. **Pros:** Supports genuinely asynchronous attention when an application has a user need. **Cons:** Adds replay, authorization, interruption, and multi-tab lifecycle decisions. **Context:** #828 intentionally supports only response-owned dialogs; keep hub replay and automatic presentation outside its first release. **Effort:** L human team / M CC + gstack. **Priority:** P3. **Depends on / blocked by:** #828 adoption evidence and a concrete server-initiated use case.
+
 ## Durable role-pair retirement after #823
 
 - **What:** Design an explicit, reviewed procedure to retire or narrow one PostgreSQL Durable role pair without treating omission from the complete manifest as authorization to remove it. **Why:** #823 makes enrollment safe but a decommissioned lane otherwise leaves stale grants and policy targets. **Pros:** Closes the credential lifecycle while preserving the fail-closed manifest contract. **Cons:** Requires deployment-use proof, a lock-protected exact removal, post-removal ACL/policy and surviving-lane tests, and a coordinated operator window. **Context:** Start with the [#823 design](docs/designs/issue-823-shared-store-role-pairs.md) and [plan](docs/plans/issue-823-shared-store-role-pairs.md); first prove no active host or secret uses the pair, then review the removal action separately. **Effort:** M (human: 1–2 days / agent assistance: several hours). **Priority:** P2. **Depends on / blocked by:** #823 enrollment release and an actual pair retirement or profile-narrowing need.

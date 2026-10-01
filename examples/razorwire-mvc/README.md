@@ -61,6 +61,7 @@ To inspect the default runtime-sourcing contract without unrelated network traff
 <form asp-controller="Reactivity" asp-action="IncrementCounter" method="post" rw-active="true" data-counter-form>
     <input type="hidden" name="clientCount" id="client-count-input" value="0" />
     <button type="submit" aria-label="Increment counter">+</button>
+    <button type="submit" name="openDialog" value="true">Increment and show result</button>
 </form>
 ```
 
@@ -69,18 +70,27 @@ To inspect the default runtime-sourcing contract without unrelated network traff
 ```csharp
 [HttpPost]
 [ValidateAntiForgeryToken]
-public IActionResult IncrementCounter([FromForm] int clientCount)
+public IActionResult IncrementCounter([FromForm] int clientCount, [FromForm] bool openDialog = false)
 {
     CounterViewComponent.Increment();
     clientCount++;
 
     if (Request.IsTurboRequest())
     {
-        return this.RazorWireStream()
+        var stream = this.RazorWireStream()
             .Update("instance-score-value", CounterViewComponent.Count.ToString())
             .Update("session-score-value", clientCount.ToString())
-            .ReplacePartial("client-count-input", "_CounterInput", clientCount)
-            .BuildResult();
+            .ReplacePartial("client-count-input", "_CounterInput", clientCount);
+
+        if (openDialog)
+        {
+            var result = $"Counter updated to {CounterViewComponent.Count} in the local in-memory sample; " +
+                "the separate Reactivity page result was updated too.";
+            stream.Update("counter-distant-result", result);
+            stream.OpenDialog("Counter updated", result);
+        }
+
+        return stream.BuildResult();
     }
 
     var referer = Request.Headers["Referer"].ToString();
@@ -100,6 +110,41 @@ public IActionResult IncrementCounter([FromForm] int clientCount)
 - If clicking `+` gives you a bare `400 Bad Request`, check the package docs for [Security & Anti-Forgery](../../Web/ForgeTrust.RazorWire/Docs/antiforgery.md). That is the first thing to verify when you copy this pattern into another page or app.
 - If the form does not update in place, check the same anti-forgery guidance first, then confirm you are still posting with `rw-active="true"` and returning a RazorWire stream from `IncrementCounter`.
 - If you want the broader sample context instead of the focused proof, continue below.
+
+## Server-Selected Dialogs
+
+Run the sample, open `/Reactivity/DialogResponses`, and try the enhanced responses. The dialog body is an app-owned Razor partial; RazorWire supplies the accessible shell. The same actions render a complete HTML page with the equivalent status or form when Turbo is not requesting a stream.
+
+| Route | Trigger and enhanced response | Full HTML behavior |
+|---|---|---|
+| `GET /Reactivity/DialogResponses` | Opens the sample page. The response is private/no-store and varies by `Accept`. | Renders the same page shell. |
+| `GET /Reactivity/DialogStatus` | **Check status** is an ordinary link with `data-turbo-stream`. The private/no-store response varies by `Accept`, opens `_DialogStatus`, then updates `#dialog-proof-after` to `Ordered update applied`. This later action proves the stream applies a target update after its dialog body is inserted. | Renders the status partial inline on the sample page. |
+| `POST /Reactivity/SaveDialog` | The outside **Save and continue** form includes the normal MVC anti-forgery token. The response updates `#dialog-result`, then opens `_DialogForm` in the shell. | Renders the result and the same form inline. |
+| `POST /Reactivity/CompleteDialog` | The in-dialog form posts its `Name`. Invalid input returns a handled `422`, replaces `#dialog-form`, and renders the validation summary in `#dialog-errors` while retaining the entered value. Success updates `#dialog-result` and explicitly calls `CloseDialog()`. | Renders the same form and errors in the page with status `422`; a valid submission renders the completed result in the page. |
+
+`Name` is required, must be at least two characters, and is limited to 40 characters; whitespace-only names are rejected after trimming. The sample does not persist the submitted value. Escape, the visible Close control, or navigation can dismiss a dialog and discard unsaved visible input while an already-submitted server operation continues. Request/flow metadata orders presentation only; it does not order or undo durable application writes. See the [server-selected dialog guide](../../Web/ForgeTrust.RazorWire/Docs/dialog-responses.md) for the full API, protocol, cache, CSP, and recovery contract.
+
+Both GET routes send `Vary: Accept` and `Cache-Control: private, no-store`. The POST response variants also send `Cache-Control: private, no-store`.
+
+The full HTML view passes `DialogIdPrefix = "inline-"` through partial view data. `_DialogStatus` and `_DialogForm` apply that prefix to their inline target and field IDs, including the label's `for` and the form's failure target. Dialog stream targets retain `dialog-proof-after`, `dialog-form`, `dialog-errors`, and `Name`; the bound field name remains `Name` in both variants. This keeps a direct HTML visit followed by an enhanced response from creating duplicate IDs or updating the wrong copy. See [fallback target ownership](../../Web/ForgeTrust.RazorWire/Docs/dialog-responses.md#get-post-and-handled-validation).
+
+**Developer adoption trial (2026-09-30): 242.254 seconds from editing a prepared sample through HTTP readiness.** An independent worker added a server action and enhanced link in a clean source export, then rebuilt and started that same export. A browser click subsequently opened the titled **Adoption trial** dialog with its body and Close control in 289 ms. Setup and the browser check were measured separately; the browser check was delayed by review work and an app restart. The prepared-app setup meets the under-five-minute target. This trial used the warm global NuGet cache and host execution permissions; it is not a first-ever machine setup measurement.
+
+**Clean-source startup trial: 11.312 seconds** from export extraction through HTTP readiness: extraction 0.673 seconds, then `dotnet run` 10.638 seconds. The global NuGet cache was warm. The initial sandbox startup failed; the successful run used host execution permissions. No prebuilt project binaries were copied into the export.
+
+The existing **Check status** interaction separately took 347 ms from clicking to a visible titled dialog and Close control in the already-running sample; its ordered body update was visible without scrolling. These interaction timings describe response presentation after setup.
+
+### Real Adoption Proof: IncrementCounter
+
+The existing counter action is the sample's opt-in adoption proof. On `/Reactivity`, the counter trigger lives in the **Permanent Island** in the left column. Its existing `+` button posts `POST /Reactivity/IncrementCounter` and keeps the ordinary response inline: `#instance-score-value` and `#session-score-value` change beside the button, and `#client-count-input` is replaced for the next click. That default is unchanged.
+
+The adjacent **Increment and show result** submit button opts into the same action's dialog branch. The response also updates `#counter-distant-result` in the main/right column, then opens a plain-text dialog titled **Counter updated** with this body (where `{count}` is the new in-memory counter value):
+
+```text
+Counter updated to {count} in the local in-memory sample; the separate Reactivity page result was updated too.
+```
+
+This makes the route, trigger, distant target, and body concrete: the trigger is in the left sidebar island, while the additional page target is in the main column. The dialog is opt-in because this result is separated from the trigger; routine increments continue to update their nearby values without interrupting the user. The dialog branch also preserves the existing counter updates. This is sample-only in-memory state, not a durable save workflow.
 
 ## Broader Sample Features
 

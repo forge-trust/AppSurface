@@ -15,17 +15,21 @@ Examples in scope:
 - package-generated form feedback
 - package-owned stream or island status affordances
 - package-owned fallback UI around enhanced RazorWire behavior
+- the package-owned shell, title, Close control, and focus behavior for a server-selected dialog
 - documented attributes and custom properties on RazorWire-generated nodes
 
 Examples out of scope:
 
 - arbitrary app markup inside a RazorWire form
+- the dialog body, including application-authored fields, messages, validation layout, and actions
 - view components, partials, or layouts authored by the host app
 - sample-app visual styling
 - AppSurface Docs documentation chrome
 - consumer-owned Tailwind, Bootstrap, or design-system classes
 
 If a node is authored by the application, RazorWire should not impose a visual opinion on it. RazorWire may add behavior attributes or script hooks where the feature requires them, but the host application owns the element's design.
+
+For dialog API, flow, form, cache, fallback, and CSP behavior, see [Server-Selected Dialog Responses](Docs/dialog-responses.md). The app chooses when to interrupt; the package owns only the accessible shell around its app-authored body.
 
 ## RazorWire Is Not AppSurface Docs
 
@@ -47,6 +51,8 @@ RazorWire-owned UI should be:
 - resilient: wrap cleanly on narrow screens and inside constrained forms
 
 Generated UI should explain state, not compete with the app's primary interface.
+
+The dialog shell should remain a quiet container: keep its package-owned heading and visible Close control discoverable above the scrollable app body, use restrained backdrop and focus styling, and let long app content scroll within a narrow viewport. Do not add a branded footer or impose package styling on the host's form controls. Opening is an explicit response choice for results that would otherwise be easy to miss; routine acknowledgements and recoverable field errors stay inline.
 
 ## Styling Surface
 
@@ -88,6 +94,8 @@ Consumers should be able to override generated UI at three levels:
 Use the narrowest override that matches the decision. Global overrides are good for product-wide color and radius alignment. Form-level overrides are better when one workflow needs a different density or state color. Target-level overrides are for one-off corrections around a specific generated node.
 
 Feature docs must name the supported attributes and custom properties before consumers are expected to depend on them.
+
+The server-selected dialog shell uses same-origin package CSS and documented `data-rw-*` hooks and custom properties. `<rw:scripts />` emits the stylesheet as a versioned same-origin link, with the package's embedded-asset fallback available when static package assets are unavailable. The host may override `--rw-dialog-text`, `--rw-dialog-surface`, `--rw-dialog-border`, `--rw-dialog-width`, `--rw-dialog-max-height`, `--rw-dialog-backdrop`, `--rw-dialog-spacing`, and `--rw-dialog-focus`. Shell radius and header gap use canonical `--rw-ui-radius` and `--rw-ui-gap` fallbacks. Its styling contract must not require inline style attributes or inline script execution, so a host can keep a strict Content Security Policy while allowing its same-origin package assets. The [dialog guide](Docs/dialog-responses.md#shell-and-accessibility) records the current CSP and runtime boundary.
 
 ## Example Generated Component
 
@@ -160,7 +168,7 @@ Generated feedback should stay close to the interaction that caused it. When foc
 Avoid these by default:
 
 - global toast systems for local form failures
-- modal takeovers for recoverable inline feedback
+- modal takeovers for routine acknowledgements or recoverable inline feedback; use a dialog only when an explicit result needs attention or follow-up and an inline destination would still be easy to miss
 - sample-app Tailwind dependencies in package-generated UI
 - a package-wide RazorWire visual theme
 - hard-coded colors that cannot be overridden with custom properties
