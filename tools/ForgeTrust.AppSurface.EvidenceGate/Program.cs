@@ -11,19 +11,19 @@ internal static class Program
     {
         if (IsHelp(args))
         {
-            return await RunAsync(args, Console.Out, Console.Error).ConfigureAwait(false);
+            return await RunAsync(args, System.Console.Out, System.Console.Error).ConfigureAwait(false);
         }
 
         if (args.Length > 0 && string.Equals(args[0], "verify-gate", StringComparison.Ordinal))
         {
             if (!TryParseVerify(args, out _))
             {
-                return await RunAsync(args, Console.Out, Console.Error).ConfigureAwait(false);
+                return await RunAsync(args, System.Console.Out, System.Console.Error).ConfigureAwait(false);
             }
         }
         else if (!TryParse(args, out _))
         {
-            return await RunAsync(args, Console.Out, Console.Error).ConfigureAwait(false);
+            return await RunAsync(args, System.Console.Out, System.Console.Error).ConfigureAwait(false);
         }
 
         using var cancellation = new CancellationTokenSource();
@@ -32,14 +32,14 @@ internal static class Program
             eventArgs.Cancel = true;
             cancellation.Cancel();
         };
-        Console.CancelKeyPress += cancelHandler;
+        System.Console.CancelKeyPress += cancelHandler;
         try
         {
-            return await RunAsync(args, Console.Out, Console.Error, cancellation.Token).ConfigureAwait(false);
+            return await RunAsync(args, System.Console.Out, System.Console.Error, cancellation.Token).ConfigureAwait(false);
         }
         finally
         {
-            Console.CancelKeyPress -= cancelHandler;
+            System.Console.CancelKeyPress -= cancelHandler;
         }
     }
 
@@ -47,7 +47,7 @@ internal static class Program
     /// <remarks>
     /// This internal entry point contains the same argument parsing and execution routing used by
     /// <see cref="Main(string[])"/>. Supplying writers lets in-process callers observe command output
-    /// without replacing the process-wide <see cref="Console.Out"/> or <see cref="Console.Error"/>.
+    /// without replacing the process-wide <see cref="System.Console.Out"/> or <see cref="System.Console.Error"/>.
     /// Invalid arguments return 64; command execution retains the host and verifier exit codes.
     /// </remarks>
     internal static async Task<int> RunAsync(
