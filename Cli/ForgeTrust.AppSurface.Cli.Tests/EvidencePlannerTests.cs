@@ -577,6 +577,69 @@ public sealed class EvidencePlannerTests
     }
 
     [Fact]
+    public async Task ArtifactWriter_ShouldStreamExactlyDeclaredBytesAndDetectLaterMutation()
+    {
+        using var directory = TestDirectory.Create();
+        var producer = new EvidenceProducerDeclaration(
+            "coverage", "coverage", "1", [], [],
+            [new EvidenceArtifactSlot("report", "coverage", "text/plain", Required: true, MaximumBytes: 16)], 60);
+        var writer = new EvidenceArtifactWriter(producer, directory.Path);
+        using var source = new MemoryStream("streamed"u8.ToArray());
+
+        var artifact = await writer.WriteAsync("report", "coverage/streamed.txt", source, 8);
+
+        Assert.True(source.CanRead);
+        Assert.Equal(8, artifact.LengthBytes);
+        Assert.Equal(EvidenceDigest.Sha256("streamed"u8), artifact.Sha256);
+        Assert.Equal("streamed", await File.ReadAllTextAsync(Path.Join(directory.Path, "coverage", "streamed.txt")));
+        Assert.True(await writer.VerifyWrittenArtifactsAsync());
+        await File.WriteAllTextAsync(Path.Join(directory.Path, "coverage", "streamed.txt"), "altered!");
+        Assert.False(await writer.VerifyWrittenArtifactsAsync());
+    }
+
+    [Theory]
+    [InlineData("short", 6)]
+    [InlineData("too-long", 4)]
+    public async Task ArtifactWriter_ShouldRejectStreamLengthMismatchWithoutRetainingAReservation(string content, long declaredLength)
+    {
+        using var directory = TestDirectory.Create();
+        var producer = new EvidenceProducerDeclaration(
+            "coverage", "coverage", "1", [], [],
+            [new EvidenceArtifactSlot("report", "coverage", "text/plain", Required: true, MaximumBytes: 16)], 60);
+        var writer = new EvidenceArtifactWriter(producer, directory.Path);
+        using var source = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => writer.WriteAsync("report", "coverage/streamed.txt", source, declaredLength).AsTask());
+
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.False(File.Exists(Path.Join(directory.Path, "coverage", "streamed.txt")));
+        using var retry = new MemoryStream("retry"u8.ToArray());
+        var artifact = await writer.WriteAsync("report", "coverage/streamed.txt", retry, 5);
+        Assert.Equal(5, artifact.LengthBytes);
+        Assert.True(await writer.VerifyWrittenArtifactsAsync());
+    }
+
+    [Fact]
+    public async Task ArtifactWriter_ShouldRejectUnreadableAndOutOfBoundsStreamsBeforeWriting()
+    {
+        using var directory = TestDirectory.Create();
+        var producer = new EvidenceProducerDeclaration(
+            "coverage", "coverage", "1", [], [],
+            [new EvidenceArtifactSlot("report", "coverage", "text/plain", Required: true, MaximumBytes: 4)], 60);
+        var writer = new EvidenceArtifactWriter(producer, directory.Path);
+        using var closed = new MemoryStream();
+        closed.Dispose();
+        using var source = new MemoryStream("five!"u8.ToArray());
+
+        await Assert.ThrowsAsync<ArgumentException>(() => writer.WriteAsync("report", "coverage/streamed.txt", closed, 0).AsTask());
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => writer.WriteAsync("report", "coverage/streamed.txt", source, -1).AsTask());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => writer.WriteAsync("report", "coverage/streamed.txt", source, 5).AsTask());
+
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.False(File.Exists(Path.Join(directory.Path, "coverage", "streamed.txt")));
+    }
+
+    [Fact]
     public async Task CliWorkflow_ShouldCreateMarkedStarterAndVerifyGeneratedNoEvidenceManifest()
     {
         using var directory = TestDirectory.Create();
