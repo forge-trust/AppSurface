@@ -136,7 +136,7 @@ connection credentials stay in child-process environment variables. Consult the 
 carrier arguments, and retain the candidate receipt with the original bundle for the public smoke invocation.
 
 The internal `Program.RunAsync` command boundary accepts an optional `preflightCommandRunner` for verification of
-candidate, promotion, and published command dispatch. Omitting it uses `CliWrapCommandRunner` to launch the real
+candidate and published command dispatch. Omitting it uses `CliWrapCommandRunner` to launch the real
 bounded consumer process. The override changes only that external-command boundary: argument parsing, archive and
 receipt validation, checked scratch cleanup, and manifest promotion still run through the production carrier.
 Promotion validates retained evidence without launching a consumer. This is an internal test seam, not a CLI option;
