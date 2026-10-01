@@ -510,3 +510,18 @@ Logs and numeric metadata are retained under `/private/tmp/issue779-generated-do
 The final narrow core and native adversarial repair reviews found no actionable static
 defect; they do not replace the required full coverage or actual Ubuntu mechanism proof.
 A fresh unchanged full wrapper remains mandatory before any draft publication.
+
+The six failed Docs prerequisite controls then passed **6/6**, exit **0**, in 6.366
+seconds, and the auth HTTP theory passed **3/3**, exit **0**, in 6.126 seconds. Both
+used the existing Debug assemblies, collector and unchanged deadlines/environment.
+Their owned process groups were absent after completion. Evidence is under
+`/private/tmp/issue779-docs-startup-recovered/` and
+`/private/tmp/issue779-auth-startup-recovered/`. This supports one new unchanged full
+wrapper attempt after recovery; it does not establish a causal source repair.
+
+A diagnostic-only threshold check on the preserved attempt-8 Cobertura at the same
+production/test source exited **0**, measuring aggregate **95.11% line / 89.04% branch**
+and patch **98.42% line / 100.00% branch**, using the unchanged thresholds, tolerance,
+`origin/main` and `codecov` mode. It writes only to
+`/private/tmp/issue779-coverage-attempt8-threshold-only/`. The failed full wrapper remains
+failed. No publication or coverage exception follows from this diagnostic result.
