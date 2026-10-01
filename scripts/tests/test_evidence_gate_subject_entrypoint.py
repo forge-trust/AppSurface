@@ -394,7 +394,7 @@ class FixedOfflineSubjectEntrypointTests(unittest.TestCase):
             output_budget = entrypoint.OutputBudget(32)
             with self.assertRaisesRegex(entrypoint.EntrypointError, "output exceeded"):
                 entrypoint.run_bounded_process(
-                    [sys.executable, "-c", "import os; os.write(1, b'x' * 4096)"],
+                    [sys.executable, "-c", "import os,time; os.write(1, b'x' * 4096); time.sleep(3)"],
                     working_directory=root,
                     environment=environment,
                     deadline=time.monotonic() + 5,
