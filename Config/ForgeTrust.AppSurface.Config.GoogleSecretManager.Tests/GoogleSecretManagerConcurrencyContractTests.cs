@@ -1003,7 +1003,7 @@ public sealed class GoogleSecretManagerConcurrencyContractTests
             client.Release(1);
             await client.Finished(1).WaitAsync(Timeout);
             Assert.True(SpinWait.SpinUntil(() => cleanupScheduler.QueueAttempts == 1, Timeout));
-            Assert.Equal(0, provider.PublishedFlightCount);
+            Assert.True(SpinWait.SpinUntil(() => provider.PublishedFlightCount == 0, Timeout));
 
             next = Start(provider, "Payments:One");
             await client.Started(2).WaitAsync(Timeout);
