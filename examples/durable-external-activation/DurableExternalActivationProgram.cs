@@ -36,7 +36,8 @@ internal static class DurableExternalActivationProgram
 
     /// <summary>Executes one sample CLI command and returns its process exit code.</summary>
     /// <param name="args">Command line after the executable name.</param>
-    internal static async Task<int> RunAsync(string[] args)
+    /// <param name="shutdownToken">Requests graceful shutdown of <c>serve</c> after startup; other commands finish independently.</param>
+    internal static async Task<int> RunAsync(string[] args, CancellationToken shutdownToken = default)
     {
         if (args is ["help" or "--help" or "-h"] || args.Length == 0)
         {
@@ -51,7 +52,7 @@ internal static class DurableExternalActivationProgram
                 "schema-apply-dev" when args.Length == 1 => await ApplySchemaAsync(),
                 "epoch-bootstrap-dev" when args.Length == 1 => await BootstrapEpochAsync(),
                 "accept-demo-work" => await AcceptDemoWorkAsync(args),
-                "serve" when args.Length == 1 => await ServeAsync(args),
+                "serve" when args.Length == 1 => await ServeAsync(args, shutdownToken),
                 "inspect-demo-work" => await InspectDemoWorkAsync(args),
                 _ => UnknownCommand(args[0]),
             };
@@ -180,7 +181,8 @@ internal static class DurableExternalActivationProgram
 
     /// <summary>Composes a passive authenticated runtime after read-only schema and epoch verification.</summary>
     /// <param name="args">Original command line passed to startup context.</param>
-    private static async Task<int> ServeAsync(string[] args)
+    /// <param name="shutdownToken">Requests graceful host shutdown after the startup checks and listener have completed.</param>
+    private static async Task<int> ServeAsync(string[] args, CancellationToken shutdownToken)
     {
         RequireDevelopmentEnvironment();
         var dispatcherConnection = RequireEnvironment(DispatcherConnectionKey);
@@ -221,7 +223,7 @@ internal static class DurableExternalActivationProgram
             await app.StartAsync().ConfigureAwait(false);
             var address = app.Urls.Order(StringComparer.Ordinal).FirstOrDefault() ?? "configured by host";
             Console.WriteLine($"[serve] host ready at {address}; /live /compatibility /ready");
-            await app.WaitForShutdownAsync().ConfigureAwait(false);
+            await app.WaitForShutdownAsync(shutdownToken).ConfigureAwait(false);
             return 0;
         }
         finally
