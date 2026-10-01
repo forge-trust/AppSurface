@@ -187,7 +187,8 @@ class EvidenceGateControllerTests(unittest.TestCase):
         self.assertEqual([("forge-trust/AppSurface", 777, TOKEN)] * 2, api.calls)
         self.assertEqual(DIFF, (self.output_path / "source.diff").read_bytes())
         self.assertEqual(
-            b'{"HeadRepositoryId":123,"PullRequestNumber":777,"RepositoryId":123,'
+            b'{"BaseRevision":"' + BASE_SHA.encode("ascii") + b'","HeadRepositoryId":123,"HeadRevision":"'
+            + HEAD_SHA.encode("ascii") + b'","PullRequestNumber":777,"RepositoryId":123,'
             b'"TargetBranch":"main","WorkflowRunAttempt":2,"WorkflowRunId":456}',
             (self.output_path / "pull-request-run-identity.json").read_bytes(),
         )

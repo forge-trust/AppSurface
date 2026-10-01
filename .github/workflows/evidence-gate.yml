@@ -21,7 +21,7 @@ jobs:
   controller-capture:
     name: Evidence gate controller capture (non-claiming)
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: read
@@ -48,44 +48,10 @@ jobs:
             --output "$capture_directory" \
             --target-branch main
 
-          install -d -m 700 "$handoff_directory"
-          if [[ -f "$capture_directory/source.diff" && ! -L "$capture_directory/source.diff" \
-            && -f "$capture_directory/pull-request-run-identity.json" \
-            && ! -L "$capture_directory/pull-request-run-identity.json" ]]; then
-            install -m 600 "$capture_directory/source.diff" "$handoff_directory/source.diff"
-            install -m 600 "$capture_directory/pull-request-run-identity.json" \
-              "$handoff_directory/pull-request-run-identity.json"
-          elif [[ -f "$capture_directory/observation.json" && ! -L "$capture_directory/observation.json" ]]; then
-            install -m 600 "$capture_directory/observation.json" "$handoff_directory/observation.json"
-          else
-            echo 'The controller did not produce one recognized bounded handoff.' >&2
-            exit 1
-          fi
-
-          python3 - "$handoff_directory" <<'PY'
-          import os
-          from pathlib import Path
-          import stat
-          import sys
-
-          root = Path(sys.argv[1])
-          entries = list(root.iterdir())
-          names = {entry.name for entry in entries}
-          valid = (
-              names == {"source.diff", "pull-request-run-identity.json"}
-              or names == {"observation.json"}
-          )
-          if not valid or len(entries) != len(names):
-              raise SystemExit("The controller handoff file set is invalid.")
-          total = 0
-          for entry in entries:
-              metadata = entry.lstat()
-              if not stat.S_ISREG(metadata.st_mode):
-                  raise SystemExit("The controller handoff contains a non-regular file.")
-              total += metadata.st_size
-          if total > 20 * 1024 * 1024 + 64 * 1024:
-              raise SystemExit("The controller handoff exceeds its byte limit.")
-          PY
+          python3 "$GITHUB_WORKSPACE/trusted/scripts/evidence-gate-handoff.py" create \
+            --capture-directory "$capture_directory" \
+            --trusted-scripts-directory "$GITHUB_WORKSPACE/trusted/scripts" \
+            --output-directory "$handoff_directory"
 
       - name: Upload the bounded same-run handoff
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -102,7 +68,7 @@ jobs:
     needs: controller-capture
     if: ${{ needs.controller-capture.result == 'success' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 30
     permissions: {}
     steps:
       - name: Download this run's controller handoff
@@ -111,36 +77,51 @@ jobs:
           name: evidence-gate-controller-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/evidence-gate-controller-handoff
 
-      - name: Validate the bounded handoff without executing pull-request content
+      - name: Execute the bounded non-claiming subject profile
+        shell: bash
+        env:
+          EVIDENCE_GATE_SUBJECT_IMAGE: ${{ vars.EVIDENCE_GATE_SUBJECT_IMAGE }}
+        run: |
+          set -euo pipefail
+          python3 "$RUNNER_TEMP/evidence-gate-controller-handoff/evidence-gate-handoff.py" execute \
+            --handoff-directory "$RUNNER_TEMP/evidence-gate-controller-handoff" \
+            --subject-checkout "$RUNNER_TEMP/evidence-gate-subject-checkout" \
+            --scratch-directory "$RUNNER_TEMP/evidence-gate-subject-scratch" \
+            --result "$RUNNER_TEMP/evidence-gate-subject-result.json" \
+            --image-digest "$EVIDENCE_GATE_SUBJECT_IMAGE"
+
+      - name: Ensure a fixed non-claiming result exists
+        if: ${{ always() }}
         shell: bash
         run: |
           set -euo pipefail
-          python3 - "$RUNNER_TEMP/evidence-gate-controller-handoff" <<'PY'
-          from pathlib import Path
+          python3 - "$RUNNER_TEMP/evidence-gate-subject-result.json" <<'PY'
+          import os
           import stat
           import sys
 
-          root = Path(sys.argv[1])
-          entries = list(root.iterdir())
-          names = {entry.name for entry in entries}
-          if not (
-              names == {"source.diff", "pull-request-run-identity.json"}
-              or names == {"observation.json"}
-          ) or len(entries) != len(names):
-              raise SystemExit("The downloaded controller handoff file set is invalid.")
-          total = 0
-          for entry in entries:
-              metadata = entry.lstat()
-              if not stat.S_ISREG(metadata.st_mode):
-                  raise SystemExit("The downloaded handoff contains a non-regular file.")
-              total += metadata.st_size
-          if total > 20 * 1024 * 1024 + 64 * 1024:
-              raise SystemExit("The downloaded controller handoff exceeds its byte limit.")
+          result_path = sys.argv[1]
+          fallback = (
+              b'{"claimEligible":false,"execution":"failed","schemaVersion":1,'
+              b'"diagnostic":{"code":"ASEGH011","message":"The credentialless subject handoff failed before recording its bounded result."}}\n'
+          )
+          try:
+              descriptor = os.open(
+                  result_path,
+                  os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                  0o600,
+              )
+          except FileExistsError:
+              metadata = os.lstat(result_path)
+              if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 16 * 1024:
+                  raise SystemExit("The subject result path is not a bounded regular file.")
+          else:
+              with os.fdopen(descriptor, "wb") as result_file:
+                  result_file.write(fallback)
           PY
-          printf '%s\n' '{"claimEligible":false,"execution":"not-run","schemaVersion":1}' \
-            > "$RUNNER_TEMP/evidence-gate-subject-result.json"
 
       - name: Upload the fixed non-claiming subject result
+        if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: evidence-gate-subject-${{ github.run_id }}-${{ github.run_attempt }}
@@ -193,9 +174,10 @@ jobs:
             echo ''
             printf '%s\n' "- Controller capture job: $CONTROLLER_RESULT"
             printf '%s\n' "- Credentialless subject job: $SUBJECT_RESULT"
-            echo '- Subject execution: not run; no reviewed subject image or producer handoff is configured.'
-            echo '- Checkout/isolation attestation: unavailable; workflow/job metadata does not attest the consumed checkout.'
+            echo '- Subject handoff: controller snapshot execution is wired; the fixed result is always non-claiming.'
+            echo '- OCI prerequisite: a digest-pinned image must already exist in the rootless local image store and contain the locked offline feed.'
+            echo '- Checkout/isolation attestation: unavailable to the verdict; no trusted verifier consumes an attestation.'
             echo '- Trusted gate verdict: unavailable; host registrations and complete producer verification are not established.'
           } >> "$GITHUB_STEP_SUMMARY"
-          echo 'ASEGH003: Non-claiming pilot scaffold. Subject execution and trusted checkout/isolation attestation are not implemented.'
+          echo 'ASEGH003: Non-claiming pilot scaffold. No trusted verifier or complete producer registrations are available.'
           exit 1

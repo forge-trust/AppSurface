@@ -100,7 +100,7 @@ internal static class EvidenceHostRunner
                 }
             }
 
-            var registrations = CreateFirstPartyRegistrations();
+            var registrations = CreateFirstPartyRegistrations(repositoryPath);
             EvidenceManifest manifest;
             if (invalidDiagnostic is not null)
             {
@@ -110,7 +110,7 @@ internal static class EvidenceHostRunner
             {
                 await using var host = EvidenceHostBootstrap.Create(
                     plan,
-                    ConfigureFirstPartyRegistrations,
+                    registration => ConfigureFirstPartyRegistrations(registration, repositoryPath),
                     new EvidenceHostOptions(ArtifactDirectory: Path.Join(outputRoot, "artifacts")));
                 manifest = await host.RunAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
             }
@@ -178,17 +178,19 @@ internal static class EvidenceHostRunner
         }
     }
 
-    private static EvidenceHostRegistration CreateFirstPartyRegistrations()
+    internal static EvidenceHostRegistration CreateFirstPartyRegistrations(string repositoryRoot)
     {
         var registrations = new EvidenceHostRegistration();
-        ConfigureFirstPartyRegistrations(registrations);
+        ConfigureFirstPartyRegistrations(registrations, repositoryRoot);
         return registrations;
     }
 
-    private static void ConfigureFirstPartyRegistrations(EvidenceHostRegistration registrations)
+    private static void ConfigureFirstPartyRegistrations(EvidenceHostRegistration registrations, string repositoryRoot)
     {
-        // Deliberately empty: no AppSurface producer/resource currently satisfies the approved
-        // isolation, dependency-supply, artifact, and cleanup constraints.
+        ArgumentNullException.ThrowIfNull(registrations);
+        registrations.AddProducer(new ProtectedReleaseEvidenceProducer(
+            repositoryRoot,
+            new UnavailableProtectedReleaseInvocationProvider()));
     }
 
     private static bool IsSupportedEmptyProfile(EvidencePlan plan) =>

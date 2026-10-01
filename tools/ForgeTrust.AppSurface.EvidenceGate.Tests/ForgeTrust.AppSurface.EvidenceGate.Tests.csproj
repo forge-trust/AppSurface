@@ -28,6 +28,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../ForgeTrust.AppSurface.EvidenceGate/ForgeTrust.AppSurface.EvidenceGate.csproj" />
+    <ProjectReference Include="../ForgeTrust.AppSurface.Release/ForgeTrust.AppSurface.Release.csproj" />
   </ItemGroup>
 
 </Project>

@@ -600,6 +600,8 @@ def _capture_diff(
     _require_current_match(event_snapshot, api_snapshot)
 
     identity = {
+        "BaseRevision": api_snapshot["base_revision"],
+        "HeadRevision": api_snapshot["head_revision"],
         "HeadRepositoryId": api_snapshot["head_repository_id"],
         "PullRequestNumber": api_snapshot["number"],
         "RepositoryId": repository_id,

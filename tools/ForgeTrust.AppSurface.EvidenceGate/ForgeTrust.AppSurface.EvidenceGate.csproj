@@ -16,6 +16,7 @@
     <ProjectReference Include="../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/ForgeTrust.AppSurface.Evidence.Aspire.csproj" />
     <ProjectReference Include="../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/ForgeTrust.AppSurface.Evidence.Contracts.csproj" />
     <ProjectReference Include="../../Evidence/ForgeTrust.AppSurface.Evidence.Planner/ForgeTrust.AppSurface.Evidence.Planner.csproj" />
+    <ProjectReference Include="../ForgeTrust.AppSurface.Release/ForgeTrust.AppSurface.Release.csproj" />
   </ItemGroup>
 
 </Project>
