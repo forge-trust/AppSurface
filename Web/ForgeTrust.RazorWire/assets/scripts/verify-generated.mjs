@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 const scriptRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptRoot, '..', '..', '..', '..');
 const trackedOutputPaths = [
+  path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'razorwire-dialog.css'),
   path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'razorwire.js'),
   path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'razorwire.islands.js'),
   path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'behavior-kit.js'),

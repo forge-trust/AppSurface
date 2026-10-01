@@ -11,6 +11,8 @@ public class RazorWireStreamBuilder
 {
     private readonly Controller? _controller;
     private readonly List<IRazorWireStreamAction> _actions = new();
+    private int? _dialogSlotIndex;
+    private RazorWireDialogPayload? _dialogPayload;
     private bool _hasFormError;
 
     /// <summary>
@@ -332,6 +334,193 @@ public class RazorWireStreamBuilder
     }
 
     /// <summary>
+    /// Queues a dialog command that opens a titled dialog containing an HTML-encoded plain-text message.
+    /// </summary>
+    /// <remarks>
+    /// A builder can hold only one pending dialog payload. Calling another <c>OpenDialog*</c> method while
+    /// <see cref="HasActiveDialog"/> is true throws immediately; use a <c>ReplaceDialog*</c> method to explicitly
+    /// overwrite the pending title and body. A null message produces an empty body. The dialog command occupies the
+    /// position of the first dialog operation, so page actions retain their order around that position. The command
+    /// requires request correlation and therefore can be emitted with <see cref="BuildResult(int?)"/> or rendered
+    /// with <see cref="RenderAsync(Microsoft.AspNetCore.Mvc.Rendering.ViewContext,CancellationToken)"/>; it cannot be
+    /// emitted with <see cref="Build"/>.
+    /// </remarks>
+    /// <param name="title">Nonblank plain-text dialog title; RazorWire encodes it as an HTML attribute.</param>
+    /// <param name="message">Optional plain-text body; RazorWire HTML-encodes it, and <see langword="null"/> means an empty body.</param>
+    /// <returns>This builder for fluent chaining.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="title"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when another dialog open payload is already pending.</exception>
+    public RazorWireStreamBuilder OpenDialog(string title, string? message)
+    {
+        QueueDialogOpen(RazorWireDialogPayload.ForMessage(title, message));
+        return this;
+    }
+
+    /// <summary>
+    /// Queues a dialog command that opens a titled dialog containing a rendered partial view.
+    /// </summary>
+    /// <remarks>
+    /// Only the final buffered dialog payload is rendered. A later <c>ReplaceDialog*</c> call overwrites this partial
+    /// without invoking its view. The partial uses the existing trusted Razor markup boundary. The command requires
+    /// request correlation, so use <see cref="BuildResult(int?)"/> or
+    /// <see cref="RenderAsync(Microsoft.AspNetCore.Mvc.Rendering.ViewContext,CancellationToken)"/>.
+    /// </remarks>
+    /// <param name="title">Nonblank plain-text dialog title; RazorWire encodes it as an HTML attribute.</param>
+    /// <param name="viewName">The MVC partial view name or path to render as the dialog body.</param>
+    /// <param name="model">Optional model passed to the partial view.</param>
+    /// <returns>This builder for fluent chaining.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="title"/> or <paramref name="viewName"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when another dialog open payload is already pending.</exception>
+    public RazorWireStreamBuilder OpenDialogPartial(string title, string viewName, object? model = null)
+    {
+        QueueDialogOpen(RazorWireDialogPayload.ForPartial(title, viewName, model));
+        return this;
+    }
+
+    /// <summary>
+    /// Queues a dialog command that opens a titled dialog containing a rendered view component selected by type.
+    /// </summary>
+    /// <remarks>
+    /// Only the final buffered dialog payload is rendered. A later <c>ReplaceDialog*</c> call overwrites this component
+    /// without invoking it. The component uses the existing trusted Razor markup boundary. The command requires request
+    /// correlation, so use <see cref="BuildResult(int?)"/> or
+    /// <see cref="RenderAsync(Microsoft.AspNetCore.Mvc.Rendering.ViewContext,CancellationToken)"/>.
+    /// </remarks>
+    /// <typeparam name="T">The <see cref="ViewComponent"/> type to render.</typeparam>
+    /// <param name="title">Nonblank plain-text dialog title; RazorWire encodes it as an HTML attribute.</param>
+    /// <param name="arguments">Optional arguments passed to the view component.</param>
+    /// <returns>This builder for fluent chaining.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="title"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when another dialog open payload is already pending.</exception>
+    public RazorWireStreamBuilder OpenDialogComponent<T>(string title, object? arguments = null) where T : ViewComponent
+    {
+        QueueDialogOpen(RazorWireDialogPayload.ForComponent(title, typeof(T), arguments));
+        return this;
+    }
+
+    /// <summary>
+    /// Queues a dialog command that opens a titled dialog containing a rendered view component selected by name.
+    /// </summary>
+    /// <remarks>
+    /// Only the final buffered dialog payload is rendered. A later <c>ReplaceDialog*</c> call overwrites this component
+    /// without invoking it. The component uses the existing trusted Razor markup boundary. The command requires request
+    /// correlation, so use <see cref="BuildResult(int?)"/> or
+    /// <see cref="RenderAsync(Microsoft.AspNetCore.Mvc.Rendering.ViewContext,CancellationToken)"/>.
+    /// </remarks>
+    /// <param name="title">Nonblank plain-text dialog title; RazorWire encodes it as an HTML attribute.</param>
+    /// <param name="componentName">The MVC view component name to render as the dialog body.</param>
+    /// <param name="arguments">Optional arguments passed to the view component.</param>
+    /// <returns>This builder for fluent chaining.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="title"/> or <paramref name="componentName"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when another dialog open payload is already pending.</exception>
+    public RazorWireStreamBuilder OpenDialogComponent(string title, string componentName, object? arguments = null)
+    {
+        QueueDialogOpen(RazorWireDialogPayload.ForNamedComponent(title, componentName, arguments));
+        return this;
+    }
+
+    /// <summary>
+    /// Replaces the pending dialog title and body with an HTML-encoded plain-text message.
+    /// </summary>
+    /// <remarks>
+    /// Replacement changes the single unsent dialog slot and creates no intermediate browser command. It requires a
+    /// pending open payload, as reported by <see cref="HasActiveDialog"/>. A null message produces an empty body.
+    /// </remarks>
+    /// <param name="title">Nonblank plain-text dialog title; RazorWire encodes it as an HTML attribute.</param>
+    /// <param name="message">Optional plain-text body; RazorWire HTML-encodes it, and <see langword="null"/> means an empty body.</param>
+    /// <returns>This builder for fluent chaining.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="title"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when no dialog open payload is pending.</exception>
+    public RazorWireStreamBuilder ReplaceDialog(string title, string? message)
+    {
+        ReplaceDialogPayload(RazorWireDialogPayload.ForMessage(title, message));
+        return this;
+    }
+
+    /// <summary>
+    /// Replaces the pending dialog title and body with a rendered partial view.
+    /// </summary>
+    /// <remarks>
+    /// Replacement changes the single unsent dialog slot and creates no intermediate browser command. It requires a
+    /// pending open payload, as reported by <see cref="HasActiveDialog"/>. Only the final partial is rendered.
+    /// </remarks>
+    /// <param name="title">Nonblank plain-text dialog title; RazorWire encodes it as an HTML attribute.</param>
+    /// <param name="viewName">The MVC partial view name or path to render as the dialog body.</param>
+    /// <param name="model">Optional model passed to the partial view.</param>
+    /// <returns>This builder for fluent chaining.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="title"/> or <paramref name="viewName"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when no dialog open payload is pending.</exception>
+    public RazorWireStreamBuilder ReplaceDialogPartial(string title, string viewName, object? model = null)
+    {
+        ReplaceDialogPayload(RazorWireDialogPayload.ForPartial(title, viewName, model));
+        return this;
+    }
+
+    /// <summary>
+    /// Replaces the pending dialog title and body with a rendered view component selected by type.
+    /// </summary>
+    /// <remarks>
+    /// Replacement changes the single unsent dialog slot and creates no intermediate browser command. It requires a
+    /// pending open payload, as reported by <see cref="HasActiveDialog"/>. Only the final component is rendered.
+    /// </remarks>
+    /// <typeparam name="T">The <see cref="ViewComponent"/> type to render.</typeparam>
+    /// <param name="title">Nonblank plain-text dialog title; RazorWire encodes it as an HTML attribute.</param>
+    /// <param name="arguments">Optional arguments passed to the view component.</param>
+    /// <returns>This builder for fluent chaining.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="title"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when no dialog open payload is pending.</exception>
+    public RazorWireStreamBuilder ReplaceDialogComponent<T>(string title, object? arguments = null) where T : ViewComponent
+    {
+        ReplaceDialogPayload(RazorWireDialogPayload.ForComponent(title, typeof(T), arguments));
+        return this;
+    }
+
+    /// <summary>
+    /// Replaces the pending dialog title and body with a rendered view component selected by name.
+    /// </summary>
+    /// <remarks>
+    /// Replacement changes the single unsent dialog slot and creates no intermediate browser command. It requires a
+    /// pending open payload, as reported by <see cref="HasActiveDialog"/>. Only the final component is rendered.
+    /// </remarks>
+    /// <param name="title">Nonblank plain-text dialog title; RazorWire encodes it as an HTML attribute.</param>
+    /// <param name="componentName">The MVC view component name to render as the dialog body.</param>
+    /// <param name="arguments">Optional arguments passed to the view component.</param>
+    /// <returns>This builder for fluent chaining.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="title"/> or <paramref name="componentName"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when no dialog open payload is pending.</exception>
+    public RazorWireStreamBuilder ReplaceDialogComponent(string title, string componentName, object? arguments = null)
+    {
+        ReplaceDialogPayload(RazorWireDialogPayload.ForNamedComponent(title, componentName, arguments));
+        return this;
+    }
+
+    /// <summary>
+    /// Queues an explicit close command in the builder's single dialog slot.
+    /// </summary>
+    /// <remarks>
+    /// Closing clears any pending open payload, so <see cref="HasActiveDialog"/> becomes false. Repeated calls are
+    /// idempotent. A later <c>OpenDialog*</c> call changes the same slot to open; a close command requires
+    /// <see cref="BuildResult(int?)"/> or request-aware <see cref="RenderAsync(Microsoft.AspNetCore.Mvc.Rendering.ViewContext,CancellationToken)"/>
+    /// and cannot be emitted by <see cref="Build"/>.
+    /// </remarks>
+    /// <returns>This builder for fluent chaining.</returns>
+    public RazorWireStreamBuilder CloseDialog()
+    {
+        EnsureDialogSlot();
+        _dialogPayload = null;
+        return this;
+    }
+
+    /// <summary>
+    /// Gets whether this builder currently has a pending dialog open payload.
+    /// </summary>
+    /// <remarks>
+    /// This reports only the builder's response buffer, not whether a browser currently displays a dialog. It is true
+    /// after an open or replacement and false initially or after <see cref="CloseDialog"/>.
+    /// </remarks>
+    public bool HasActiveDialog => _dialogPayload is not null;
+
+    /// <summary>
     /// Queues a remove action targeting the specified DOM element.
     /// </summary>
     /// <param name="target">The DOM target selector or identifier whose element will be removed.</param>
@@ -465,6 +654,14 @@ public class RazorWireStreamBuilder
     /// <exception cref="InvalidOperationException">Thrown if the builder contains actions that require asynchronous rendering (such as partial views or view components); use RenderAsync(viewContext) or BuildResult() instead.</exception>
     public string Build()
     {
+        if (_dialogSlotIndex is not null)
+        {
+            throw new InvalidOperationException(
+                "Cannot synchronously build a stream containing a dialog command because request correlation metadata is required. "
+                + $"Return BuildResult() from a controller action or call RenderAsync(viewContext) with the current request context. "
+                + $"See {RazorWireRequestMetadata.DocumentationPath}.");
+        }
+
         var sb = new System.Text.StringBuilder();
         foreach (var action in _actions)
         {
@@ -492,15 +689,43 @@ public class RazorWireStreamBuilder
     /// <param name="viewContext">The view rendering context to use for each action.</param>
     /// <param name="cancellationToken">Token to observe for cancellation.</param>
     /// <returns>The concatenated HTML string produced by rendering each queued action.</returns>
+    /// <remarks>
+    /// Snapshots the dialog slot before awaiting renderers and validates request correlation when a dialog is present.
+    /// After successful rendering, echoes a correlated request UUID in the response's <c>X-RazorWire-Request</c> header
+    /// when the response has not started, so handled validation can be associated with its submission. Once response
+    /// headers are read-only, the header is left unchanged. Callers own the response content type, status, and
+    /// handled-form header; prefer <see cref="BuildResult(int?)"/> when returning a controller response.
+    /// See <c>Docs/dialog-responses.md</c> for the complete presentation contract.
+    /// </remarks>
     public async Task<string> RenderAsync(
         Microsoft.AspNetCore.Mvc.Rendering.ViewContext viewContext,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(viewContext);
+        var actions = CreateActionSnapshot();
+        var dialogIndex = RazorWireStreamRendering.FindDialogCommandIndex(actions);
+        var metadata = RazorWireRequestMetadata.Read(viewContext.HttpContext.Request, required: dialogIndex >= 0);
+        var command = dialogIndex >= 0
+            ? ((IRazorWireDialogCommandStreamAction)actions[dialogIndex]).Command
+            : (RazorWireDialogCommand?)null;
         var sb = new System.Text.StringBuilder();
-        foreach (var action in _actions)
+        for (var index = 0; index < actions.Count; index++)
         {
-            var html = await action.RenderAsync(viewContext, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var phase = RazorWireStreamRendering.GetPhase(index, dialogIndex, command);
+            var html = await RazorWireStreamRendering.RenderActionAsync(
+                actions[index],
+                viewContext,
+                metadata,
+                phase,
+                cancellationToken);
             sb.Append(html);
+        }
+
+        if (metadata is not null && !viewContext.HttpContext.Response.HasStarted)
+        {
+            viewContext.HttpContext.Response.Headers[RazorWireRequestMetadata.ResponseRequestHeaderName] =
+                metadata.RequestId.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         return sb.ToString();
@@ -521,10 +746,52 @@ public class RazorWireStreamBuilder
     public RazorWireStreamResult BuildResult(int? statusCode = null)
     {
         return new RazorWireStreamResult(
-            _actions.ToList(),
+            CreateActionSnapshot(),
             _controller,
             statusCode,
             formHandled: _hasFormError);
+    }
+
+    private void QueueDialogOpen(RazorWireDialogPayload payload)
+    {
+        if (HasActiveDialog)
+        {
+            throw new InvalidOperationException(
+                $"A dialog is already queued. Use a ReplaceDialog* method to replace it or call CloseDialog() first. See {RazorWireRequestMetadata.DocumentationPath}.");
+        }
+
+        EnsureDialogSlot();
+        _dialogPayload = payload;
+    }
+
+    private void ReplaceDialogPayload(RazorWireDialogPayload payload)
+    {
+        if (!HasActiveDialog)
+        {
+            throw new InvalidOperationException(
+                $"No dialog open payload is queued. Call an OpenDialog* method first or check HasActiveDialog before replacing. See {RazorWireRequestMetadata.DocumentationPath}.");
+        }
+
+        _dialogPayload = payload;
+    }
+
+    private void EnsureDialogSlot()
+    {
+        _dialogSlotIndex ??= _actions.Count;
+    }
+
+    private List<IRazorWireStreamAction> CreateActionSnapshot()
+    {
+        var snapshot = new List<IRazorWireStreamAction>(_actions);
+        if (_dialogSlotIndex is int dialogSlotIndex)
+        {
+            var command = _dialogPayload is null
+                ? RazorWireDialogStreamAction.Close()
+                : RazorWireDialogStreamAction.Open(_dialogPayload);
+            snapshot.Insert(dialogSlotIndex, command);
+        }
+
+        return snapshot;
     }
 
     private static string BuildGeneratedFormErrorHtml(
@@ -610,7 +877,7 @@ public class RazorWireStreamBuilder
         TrustedHtml
     }
 
-    private class TemplateStreamAction : ISynchronousRazorWireStreamAction
+    private class TemplateStreamAction : ISynchronousRazorWireStreamAction, IRazorWireTargetedStreamAction
     {
         public string Action { get; }
         public string Target { get; }
@@ -642,16 +909,28 @@ public class RazorWireStreamBuilder
         /// <returns>The turbo-stream element for the action and target; for action "remove" the element has no &lt;template&gt;, otherwise its &lt;template&gt; contains the action's HTML.</returns>
         public string Render()
         {
-            var encodedTarget = HtmlEncoder.Default.Encode(Target);
-            var encodedAction = HtmlEncoder.Default.Encode(Action);
-            if (Action == "remove")
-            {
-                return $"<turbo-stream action=\"remove\" target=\"{encodedTarget}\">"
-                       + $"</turbo-stream>";
-            }
+            return RazorWireStreamMarkup.RenderTargeted(
+                Action,
+                Target,
+                RenderTemplateContent(),
+                hasTemplate: Action != "remove");
+        }
 
-            return $"<turbo-stream action=\"{encodedAction}\" target=\"{encodedTarget}\">"
-                   + $"<template>{RenderTemplateContent()}</template></turbo-stream>";
+        /// <inheritdoc />
+        public Task<string> RenderCorrelatedAsync(
+            Microsoft.AspNetCore.Mvc.Rendering.ViewContext viewContext,
+            RazorWireRequestMetadata metadata,
+            RazorWireDialogPhase phase,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(RazorWireStreamMarkup.RenderTargeted(
+                Action,
+                Target,
+                RenderTemplateContent(),
+                hasTemplate: Action != "remove",
+                metadata,
+                phase));
         }
 
         private string RenderTemplateContent()

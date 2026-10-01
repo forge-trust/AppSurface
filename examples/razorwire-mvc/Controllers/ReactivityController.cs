@@ -90,6 +90,127 @@ public class ReactivityController : Controller
     }
 
     /// <summary>
+    /// Renders the full-page entry point for the server-selected dialog response sample.
+    /// </summary>
+    /// <returns>The dialog response sample page.</returns>
+    [HttpGet]
+    public IActionResult DialogResponses()
+    {
+        SetDialogResponseHeaders(varyByAccept: true);
+        return View(new DialogResponsesSampleModel());
+    }
+
+    /// <summary>
+    /// Returns a status result in a server-selected dialog for stream requests or inline in a full HTML page.
+    /// </summary>
+    /// <returns>A dialog stream response or the full dialog response sample page.</returns>
+    [HttpGet]
+    public IActionResult DialogStatus()
+    {
+        SetDialogResponseHeaders(varyByAccept: true);
+        var status = new DialogStatusSampleModel
+        {
+            Message = "The local sample service is available.",
+            ProofMessage = Request.IsTurboRequest()
+                ? "Waiting for the ordered stream update."
+                : "The HTML fallback displays this status inline."
+        };
+
+        if (Request.IsTurboRequest())
+        {
+            return this.RazorWireStream()
+                .OpenDialogPartial("Service status", "_DialogStatus", status)
+                .Update("dialog-proof-after", "Ordered update applied")
+                .BuildResult();
+        }
+
+        return View(nameof(DialogResponses), new DialogResponsesSampleModel
+        {
+            ResultMessage = "Status checked. The HTML response shows the result inline.",
+            Status = status
+        });
+    }
+
+    /// <summary>
+    /// Updates the page result and opens the follow-up form in a dialog for stream requests.
+    /// </summary>
+    /// <returns>A page update and dialog stream response, or the full HTML page with the form inline.</returns>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public IActionResult SaveDialog()
+    {
+        SetDialogResponseHeaders(varyByAccept: false);
+        var form = new DialogResponseFormModel();
+
+        if (Request.IsTurboRequest())
+        {
+            return this.RazorWireStream()
+                .Update("dialog-result", "A follow-up is ready. Complete the form to finish this local demonstration.")
+                .OpenDialogPartial("Complete the save", "_DialogForm", form)
+                .BuildResult();
+        }
+
+        return View(nameof(DialogResponses), new DialogResponsesSampleModel
+        {
+            ResultMessage = "A follow-up is ready. Complete the form below to finish this local demonstration.",
+            Form = form,
+            ShowDialogForm = true
+        });
+    }
+
+    /// <summary>
+    /// Validates the dialog form, retaining invalid input in a handled 422 response and explicitly closing on success.
+    /// </summary>
+    /// <param name="model">The submitted name.</param>
+    /// <returns>A handled 422 dialog update, an explicit success close, or a full HTML fallback page.</returns>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public IActionResult CompleteDialog([FromForm] DialogResponseFormModel model)
+    {
+        SetDialogResponseHeaders(varyByAccept: false);
+        var normalizedName = model.Name?.Trim();
+
+        if (ModelState.IsValid && normalizedName is { Length: < 2 })
+        {
+            ModelState.AddModelError(nameof(model.Name), "Name must contain at least 2 non-whitespace characters.");
+        }
+
+        if (!ModelState.IsValid)
+        {
+            if (Request.IsTurboRequest())
+            {
+                return this.RazorWireStream()
+                    .ReplacePartial("dialog-form", "_DialogForm", model)
+                    .FormValidationErrors("dialog-errors", ModelState)
+                    .BuildResult(StatusCodes.Status422UnprocessableEntity);
+            }
+
+            Response.StatusCode = StatusCodes.Status422UnprocessableEntity;
+            return View(nameof(DialogResponses), new DialogResponsesSampleModel
+            {
+                ResultMessage = "Correct the name before completing the local demonstration.",
+                Form = model,
+                ShowDialogForm = true
+            });
+        }
+
+        var resultMessage = $"Dialog completed for {normalizedName}. This local sample does not persist the value.";
+
+        if (Request.IsTurboRequest())
+        {
+            return this.RazorWireStream()
+                .Update("dialog-result", resultMessage)
+                .CloseDialog()
+                .BuildResult();
+        }
+
+        return View(nameof(DialogResponses), new DialogResponsesSampleModel
+        {
+            ResultMessage = resultMessage
+        });
+    }
+
+    /// <summary>
     /// Renders a dependency-free browser proof for RazorWire's bundled Turbo runtime.
     /// </summary>
     /// <param name="state">The proof state. Only <c>second</c> selects the second state; every other value selects the first.</param>
@@ -221,18 +342,19 @@ public class ReactivityController : Controller
     /// Increments the server and session counters and returns a Turbo/RazorWire stream to update the UI or a safe redirect.
     /// </summary>
     /// <param name="clientCount">The current session client count (will be incremented).</param>
+    /// <param name="openDialog">Set only by the explicit opt-in submit button to request a server-selected result dialog.</param>
     /// <returns>`IActionResult` that is a Turbo stream updating counters for Turbo requests; otherwise a redirect to the referring local URL or the Index action.</returns>
     // docs:snippet razorwire-increment-counter:start
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public IActionResult IncrementCounter([FromForm] int clientCount)
+    public IActionResult IncrementCounter([FromForm] int clientCount, [FromForm] bool openDialog = false)
     {
         CounterViewComponent.Increment();
         clientCount++;
 
         if (Request.IsTurboRequest())
         {
-            return this.RazorWireStream()
+            var stream = this.RazorWireStream()
                 .Update(
                     "instance-score-value",
                     CounterViewComponent.Count.ToString())
@@ -240,8 +362,21 @@ public class ReactivityController : Controller
                 .ReplacePartial(
                     "client-count-input",
                     "_CounterInput",
-                    clientCount)
-                .BuildResult();
+                    clientCount);
+
+            if (openDialog)
+            {
+                var distantResult =
+                    $"Counter updated to {CounterViewComponent.Count} in the local in-memory sample; " +
+                    "the separate Reactivity page result was updated too.";
+
+                stream.Update("counter-distant-result", distantResult);
+                stream.OpenDialog(
+                    "Counter updated",
+                    distantResult);
+            }
+
+            return stream.BuildResult();
         }
 
         // Safe redirect
@@ -429,5 +564,15 @@ public class ReactivityController : Controller
         });
 
         return model;
+    }
+
+    private void SetDialogResponseHeaders(bool varyByAccept)
+    {
+        Response.Headers["Cache-Control"] = "private, no-store";
+
+        if (varyByAccept)
+        {
+            Response.Headers["Vary"] = "Accept";
+        }
     }
 }

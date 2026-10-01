@@ -18,8 +18,9 @@ This PR references #779 without closing it.
 3. Submit the provisional Linux allocation and independent-supervision fixtures to the
    [candidate workflow](../../.github/workflows/evidencehost-mechanism-proof.yml). Capture immutable
    run/revision/artifact identifiers from an actual Ubuntu run before selecting the public provider seam.
-4. Refresh the five release-route visual snapshots whose preview.11 content was inspected during
-   coverage failure diagnosis; retain existing comparison thresholds and verify without refresh enabled.
+4. Resolve the release-route visual drift found during coverage diagnosis. The initial five-snapshot
+   repair is superseded by the newer baselines merged from `main`; preserve its current release content
+   and the existing comparison thresholds. The preliminary diff now changes no visual snapshot.
 5. Pass the unchanged [coverage gate](../evidence/issue779-coverage-gate.md), scoped reviews, formatting,
    CLI planning QA and isolated packed CLI/SDK checks before creating a draft PR.
 

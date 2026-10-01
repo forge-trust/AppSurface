@@ -291,3 +291,21 @@ A fresh native preparatory review reported no actionable finding, with test/fixt
 reviewed in summary mode only. Outside Claude Code remains unavailable. This is scoped review evidence;
 full coverage, ship review and actual Ubuntu mechanism proof remain required. Python verifier controls
 passed **4/4**, and the mechanism script passed shell syntax validation. No Trusted platform is admitted.
+
+### Base integration before coverage attempt 4
+
+Functional `/qa` Standard on committed `4a74a6b5` passed seven CLI/SDK contracts with separate captured
+streams/exits and six observation checkpoints. Report:
+`/private/tmp/issue779-qa-final-4a74a6b5/qa-report-issue779-2026-10-01.md`.
+
+Coverage attempt 3 began at `4a74a6b5`, built with zero warnings/errors, then was intentionally interrupted
+when a fetch advanced `origin/main` from `fd0b124e` to `4aa8329c` (#844). The watcher observed terminal
+exit **130**; cancellation interrupted the shell's exit-file write. The log is
+`/private/tmp/issue779-coverage-attempt3.log`. No gate pass or complete child-exit proof is claimed from
+that run; its active dotnet child was reported forcefully terminated. Subsequent process inspection
+found no surviving process with that reported PID, while unrelated work was left alone.
+
+The merge preserves both independent TODO additions. Newer `main` release baselines replace the initial
+five-snapshot repair: parent inspection confirmed preview.11 plus the newly merged dialog release content.
+The final preliminary diff therefore changes no PNG. Current-base integration precedes a new unchanged
+full coverage command and fresh ship review.
