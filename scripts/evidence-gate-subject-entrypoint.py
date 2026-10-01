@@ -205,7 +205,7 @@ def validate_mounts(
 
 
 def _validate_dependency_feed(root: Path) -> None:
-    """Require a physical, read-only local NuGet feed; restore verifies lock hashes."""
+    """Scan every feed entry for physical files; locked restore verifies package hashes."""
     try:
         root_info = root.stat()
         if not stat.S_ISDIR(root_info.st_mode):
@@ -213,7 +213,7 @@ def _validate_dependency_feed(root: Path) -> None:
         stack = [root]
         entries_seen = 0
         package_seen = False
-        while stack and not package_seen:
+        while stack:
             current = stack.pop()
             with os.scandir(current) as entries:
                 for entry in entries:
@@ -227,7 +227,6 @@ def _validate_dependency_feed(root: Path) -> None:
                         stack.append(Path(entry.path))
                     elif stat.S_ISREG(info.st_mode) and entry.name.endswith(".nupkg"):
                         package_seen = True
-                        break
                     elif not stat.S_ISREG(info.st_mode):
                         raise EntrypointError("ASESE002", "The locked dependency source contains an unsupported file type.")
         if not package_seen:

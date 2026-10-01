@@ -38,6 +38,42 @@ public sealed class EvidenceNoFollowArtifactExtractorTests
         Assert.True(await writer.VerifyWrittenArtifactsAsync());
     }
 
+    [Fact]
+    public async Task ExtractAsync_ShouldPreserveInputOrderAcrossDeclaredArtifactSlots()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            await AssertUnsupportedPlatformFailsClosedAsync();
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        Directory.CreateDirectory(temp.ScratchRoot);
+        Directory.CreateDirectory(temp.ArtifactRoot);
+        Directory.CreateDirectory(Path.Join(temp.ScratchRoot, "subject"));
+        var summary = new byte[] { 4, 5, 6 };
+        var report = new byte[] { 1, 2 };
+        await File.WriteAllBytesAsync(Path.Join(temp.ScratchRoot, "subject", "summary.bin"), summary);
+        await File.WriteAllBytesAsync(Path.Join(temp.ScratchRoot, "subject", "report.bin"), report);
+        using var root = OpenTrustedRoot(temp.ScratchRoot);
+        var writer = CreateWriter(
+            temp.ArtifactRoot,
+            new EvidenceArtifactSlot("summary", "summaries", "application/octet-stream", Required: false, EvidenceArtifactWriter.MaximumTotalArtifactBytes));
+
+        var results = await EvidenceNoFollowArtifactExtractor.ExtractAsync(
+            root,
+            writer,
+            [
+                new EvidenceNoFollowArtifact("summary", "subject/summary.bin", "summaries/summary.bin"),
+                new EvidenceNoFollowArtifact("report", "subject/report.bin", "reports/report.bin"),
+            ]);
+
+        Assert.Equal(new[] { "summary", "report" }, results.Select(static result => result.LogicalName));
+        Assert.Equal(summary, await File.ReadAllBytesAsync(Path.Join(temp.ArtifactRoot, "summaries", "summary.bin")));
+        Assert.Equal(report, await File.ReadAllBytesAsync(Path.Join(temp.ArtifactRoot, "reports", "report.bin")));
+        Assert.True(await writer.VerifyWrittenArtifactsAsync());
+    }
+
     [Theory]
     [InlineData("../outside")]
     [InlineData("subject/../outside")]
@@ -56,6 +92,64 @@ public sealed class EvidenceNoFollowArtifactExtractorTests
                 CreateWriter(Path.GetTempPath()),
                 [new EvidenceNoFollowArtifact("report", sourcePath, "reports/report.bin")]));
         Assert.NotNull(exception.ParamName);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ShouldRejectNullInputsAndInvalidArtifactRecordsBeforeOpeningRoot()
+    {
+        using var invalidRoot = new SafeFileHandle(new IntPtr(-1), ownsHandle: false);
+        var writer = CreateWriter(Path.GetTempPath());
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() => EvidenceNoFollowArtifactExtractor.ExtractAsync(
+            null!,
+            writer,
+            []));
+        await Assert.ThrowsAsync<ArgumentNullException>(() => EvidenceNoFollowArtifactExtractor.ExtractAsync(
+            invalidRoot,
+            null!,
+            []));
+        await Assert.ThrowsAsync<ArgumentNullException>(() => EvidenceNoFollowArtifactExtractor.ExtractAsync(
+            invalidRoot,
+            writer,
+            null!));
+        await Assert.ThrowsAsync<ArgumentNullException>(() => EvidenceNoFollowArtifactExtractor.ExtractAsync(
+            invalidRoot,
+            writer,
+            [null!]));
+        await Assert.ThrowsAsync<ArgumentException>(() => EvidenceNoFollowArtifactExtractor.ExtractAsync(
+            invalidRoot,
+            writer,
+            [new EvidenceNoFollowArtifact("  ", "subject/report.bin", "reports/report.bin")]));
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ShouldRejectMalformedOrOverlongSourceAndDestinationPaths()
+    {
+        using var invalidRoot = new SafeFileHandle(new IntPtr(-1), ownsHandle: false);
+        var writer = CreateWriter(Path.GetTempPath());
+        string?[] invalidPaths =
+        [
+            null,
+            "",
+            " ",
+            "subject/\0report.bin",
+            "subject/\u0001report.bin",
+            "\ud800",
+            new string('a', 256),
+            new string('a', 4_097),
+        ];
+
+        foreach (var invalidPath in invalidPaths)
+        {
+            await Assert.ThrowsAsync<ArgumentException>(() => EvidenceNoFollowArtifactExtractor.ExtractAsync(
+                invalidRoot,
+                writer,
+                [new EvidenceNoFollowArtifact("report", invalidPath!, "reports/report.bin")]));
+            await Assert.ThrowsAsync<ArgumentException>(() => EvidenceNoFollowArtifactExtractor.ExtractAsync(
+                invalidRoot,
+                writer,
+                [new EvidenceNoFollowArtifact("report", "subject/report.bin", invalidPath!)]));
+        }
     }
 
     [Fact]
@@ -110,6 +204,40 @@ public sealed class EvidenceNoFollowArtifactExtractorTests
             CreateWriter(Path.GetTempPath()),
             [],
             new EvidenceNoFollowArtifactExtractionLimits { MaximumDuration = TimeSpan.FromMinutes(3) }));
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ShouldRejectInvalidMinimumLimitsAndCallerFileCountBeforeOpeningRoot()
+    {
+        using var invalidRoot = new SafeFileHandle(new IntPtr(-1), ownsHandle: false);
+        var writer = CreateWriter(Path.GetTempPath());
+        var invalidLimits = new[]
+        {
+            new EvidenceNoFollowArtifactExtractionLimits { MaximumFileCount = 0 },
+            new EvidenceNoFollowArtifactExtractionLimits { MaximumFileCount = -1 },
+            new EvidenceNoFollowArtifactExtractionLimits { MaximumTotalBytes = 0 },
+            new EvidenceNoFollowArtifactExtractionLimits { MaximumTotalBytes = -1 },
+            new EvidenceNoFollowArtifactExtractionLimits { MaximumDuration = TimeSpan.Zero },
+            new EvidenceNoFollowArtifactExtractionLimits { MaximumDuration = TimeSpan.FromTicks(-1) },
+        };
+
+        foreach (var limits in invalidLimits)
+        {
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => EvidenceNoFollowArtifactExtractor.ExtractAsync(
+                invalidRoot,
+                writer,
+                [],
+                limits));
+        }
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => EvidenceNoFollowArtifactExtractor.ExtractAsync(
+            invalidRoot,
+            writer,
+            [
+                new EvidenceNoFollowArtifact("report", "subject/one.bin", "reports/one.bin"),
+                new EvidenceNoFollowArtifact("summary", "subject/two.bin", "summaries/two.bin"),
+            ],
+            new EvidenceNoFollowArtifactExtractionLimits { MaximumFileCount = 1 }));
     }
 
     [Fact]
@@ -185,6 +313,73 @@ public sealed class EvidenceNoFollowArtifactExtractorTests
     }
 
     [Fact]
+    public async Task ExtractAsync_ShouldRejectAggregateOverflowBeforePromotingAnyArtifact()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            await AssertUnsupportedPlatformFailsClosedAsync();
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        Directory.CreateDirectory(temp.ScratchRoot);
+        Directory.CreateDirectory(temp.ArtifactRoot);
+        Directory.CreateDirectory(Path.Join(temp.ScratchRoot, "subject"));
+        await File.WriteAllBytesAsync(Path.Join(temp.ScratchRoot, "subject", "one.bin"), [1, 2]);
+        await File.WriteAllBytesAsync(Path.Join(temp.ScratchRoot, "subject", "two.bin"), [3, 4]);
+        using var root = OpenTrustedRoot(temp.ScratchRoot);
+        var writer = CreateWriter(
+            temp.ArtifactRoot,
+            new EvidenceArtifactSlot("summary", "summaries", "application/octet-stream", Required: false, EvidenceArtifactWriter.MaximumTotalArtifactBytes));
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => EvidenceNoFollowArtifactExtractor.ExtractAsync(
+            root,
+            writer,
+            [
+                new EvidenceNoFollowArtifact("report", "subject/one.bin", "reports/one.bin"),
+                new EvidenceNoFollowArtifact("summary", "subject/two.bin", "summaries/two.bin"),
+            ],
+            new EvidenceNoFollowArtifactExtractionLimits { MaximumTotalBytes = 3 }));
+
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.False(File.Exists(Path.Join(temp.ArtifactRoot, "reports", "one.bin")));
+        Assert.False(File.Exists(Path.Join(temp.ArtifactRoot, "summaries", "two.bin")));
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ShouldRejectNonDirectoryRootAndMissingSourcesWithoutWriting()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            await AssertUnsupportedPlatformFailsClosedAsync();
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        Directory.CreateDirectory(temp.ScratchRoot);
+        Directory.CreateDirectory(temp.ArtifactRoot);
+        var rootFile = Path.Join(temp.ScratchRoot, "not-a-directory");
+        await File.WriteAllTextAsync(rootFile, "not a directory");
+        using var nonDirectoryRoot = File.OpenHandle(rootFile);
+        var writer = CreateWriter(temp.ArtifactRoot);
+        var request = new[] { new EvidenceNoFollowArtifact("report", "subject/missing.bin", "reports/report.bin") };
+
+        await Assert.ThrowsAsync<ArgumentException>(() => EvidenceNoFollowArtifactExtractor.ExtractAsync(
+            nonDirectoryRoot,
+            writer,
+            request));
+
+        using var root = OpenTrustedRoot(temp.ScratchRoot);
+        await Assert.ThrowsAnyAsync<IOException>(() => EvidenceNoFollowArtifactExtractor.ExtractAsync(
+            root,
+            writer,
+            request));
+
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.False(File.Exists(Path.Join(temp.ArtifactRoot, "reports", "report.bin")));
+    }
+
+    [Fact]
     public async Task ExtractAsync_ShouldRejectContentChangedDuringStreamingBeforePromotion()
     {
         if (!OperatingSystem.IsLinux())
@@ -253,15 +448,19 @@ public sealed class EvidenceNoFollowArtifactExtractorTests
             []));
     }
 
-    private static EvidenceArtifactWriter CreateWriter(string artifactRoot)
+    private static EvidenceArtifactWriter CreateWriter(string artifactRoot, params EvidenceArtifactSlot[] additionalSlots)
     {
+        var slots = new[]
+        {
+            new EvidenceArtifactSlot("report", "reports", "application/octet-stream", Required: false, EvidenceArtifactWriter.MaximumTotalArtifactBytes),
+        }.Concat(additionalSlots);
         var producer = new EvidenceProducerDeclaration(
             "extractor-test",
             "test",
             "1.0.0",
             [],
             [],
-            [new EvidenceArtifactSlot("report", "reports", "application/octet-stream", Required: false, EvidenceArtifactWriter.MaximumTotalArtifactBytes)],
+            slots.ToArray(),
             TimeoutSeconds: 120);
         return new EvidenceArtifactWriter(producer, artifactRoot);
     }

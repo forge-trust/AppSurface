@@ -176,6 +176,21 @@ class FixedOfflineSubjectEntrypointTests(unittest.TestCase):
             self.assertEqual("ASESE002", result["diagnostic"]["code"])
             self.assertLess((scratch / entrypoint.RESULT_RELATIVE_PATH).stat().st_size, entrypoint.MAX_RESULT_BYTES)
 
+    def test_dependency_feed_scans_every_entry_after_first_package(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            feed = Path(temporary).resolve() / "locked-dependencies"
+            self.make_feed(feed)
+            nested = feed / "nested"
+            nested.mkdir()
+            (nested / "second.1.0.0.nupkg").write_bytes(b"second locked package")
+
+            entrypoint._validate_dependency_feed(feed)
+
+            (nested / "unsafe-link").symlink_to(feed / "example.package.1.0.0.nupkg")
+            with self.assertRaises(entrypoint.EntrypointError) as failure:
+                entrypoint._validate_dependency_feed(feed)
+            self.assertEqual("ASESE002", failure.exception.code)
+
     def test_unlocked_solution_project_fails_before_restore(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             parent = Path(temporary).resolve()

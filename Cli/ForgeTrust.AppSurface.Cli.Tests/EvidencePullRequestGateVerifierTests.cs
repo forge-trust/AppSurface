@@ -170,6 +170,56 @@ public sealed class EvidencePullRequestGateVerifierTests
     }
 
     [Fact]
+    public async Task VerifyAsync_ShouldRejectMalformedControllerIdentityBeforeReadingAuthority()
+    {
+        await using var fixture = await GateFixture.CreateAsync();
+        var invalidIdentities = new[]
+        {
+            fixture.ExpectedIdentity with { Repository = "missing-owner" },
+            fixture.ExpectedIdentity with { Repository = "forge-trust/AppSurface\n" },
+            fixture.ExpectedIdentity with { EventName = "workflow_dispatch" },
+            fixture.ExpectedIdentity with { WorkflowId = string.Empty },
+            fixture.ExpectedIdentity with { SubjectJobId = "evidence\nsubject" },
+            fixture.ExpectedIdentity with
+            {
+                RunIdentity = fixture.RunIdentity with { WorkflowRunAttempt = 0 },
+            },
+        };
+
+        foreach (var invalidIdentity in invalidIdentities)
+        {
+            var result = await fixture.VerifyAsync(
+                expectedIdentity: invalidIdentity,
+                authorityProvider: new ThrowingAuthorityProvider());
+
+            Assert.False(result.IsEligible);
+            Assert.Equal("ASEVG001", result.Code);
+            Assert.Null(result.Summary);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyAsync_ShouldRejectMalformedRevisionBeforeReplanning()
+    {
+        await using var fixture = await GateFixture.CreateAsync();
+        var malformedPlans = new[]
+        {
+            fixture.Plan with { BaseRevision = "not-a-revision" },
+            fixture.Plan with { HeadRevision = new string('A', 40) },
+            fixture.Plan with { HeadRevision = new string('a', 64) },
+        };
+
+        foreach (var plan in malformedPlans)
+        {
+            var result = await fixture.VerifyAsync(plan: plan);
+
+            Assert.False(result.IsEligible);
+            Assert.Equal("ASEVG002", result.Code);
+            Assert.Null(result.Summary);
+        }
+    }
+
+    [Fact]
     public async Task VerifyAsync_ShouldRejectManifestRunIdentityMismatch()
     {
         await using var fixture = await GateFixture.CreateAsync();
@@ -202,6 +252,46 @@ public sealed class EvidencePullRequestGateVerifierTests
         Assert.Equal("ASEVG006", unavailable.Code);
         Assert.All([movedBase, movedHead, wrongJob, wrongCheckout, failedJob], result => Assert.Equal("ASEVG007", result.Code));
         Assert.All([unavailable, movedBase, movedHead, wrongJob, wrongCheckout, failedJob], result => Assert.NotNull(result.Summary));
+    }
+
+    [Fact]
+    public async Task VerifyAsync_ShouldRejectForkedOrSubstitutedCurrentAuthority()
+    {
+        await using var fixture = await GateFixture.CreateAsync();
+        var invalidSnapshots = new[]
+        {
+            fixture.Authority with { Repository = "other/AppSurface" },
+            fixture.Authority with { EventName = "pull_request" },
+            fixture.Authority with { WorkflowId = "other-workflow.yml" },
+            fixture.Authority with { RunIdentity = fixture.RunIdentity with { HeadRepositoryId = 999 } },
+            fixture.Authority with { RunIdentity = fixture.RunIdentity with { WorkflowRunAttempt = 2 } },
+            fixture.Authority with { SubjectJobConclusion = "cancelled" },
+        };
+
+        foreach (var snapshot in invalidSnapshots)
+        {
+            var result = await fixture.VerifyAsync(authority: snapshot);
+
+            Assert.False(result.IsEligible);
+            Assert.Equal("ASEVG007", result.Code);
+            Assert.NotNull(result.Summary);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyAsync_ShouldFailClosedWhenTrustedReadersThrow()
+    {
+        await using var fixture = await GateFixture.CreateAsync();
+        var artifactFailure = await fixture.VerifyAsync(artifactVerifier: new ThrowingArtifactVerifier());
+        var authorityFailure = await fixture.VerifyAsync(authorityProvider: new ThrowingAuthorityProvider());
+
+        Assert.False(artifactFailure.IsEligible);
+        Assert.Equal("ASEVG010", artifactFailure.Code);
+        Assert.NotNull(artifactFailure.Summary);
+        Assert.Equal(["compile"], artifactFailure.Summary.MissingObligationIds);
+        Assert.False(authorityFailure.IsEligible);
+        Assert.Equal("ASEVG006", authorityFailure.Code);
+        Assert.NotNull(authorityFailure.Summary);
     }
 
     [Fact]
@@ -562,12 +652,28 @@ public sealed class EvidencePullRequestGateVerifierTests
             CancellationToken cancellationToken = default) => Task.FromResult(result);
     }
 
+    private sealed class ThrowingArtifactVerifier : IEvidencePullRequestGateArtifactVerifier
+    {
+        public Task<bool> VerifyArtifactsAsync(
+            string trustedArtifactHandoffRootPath,
+            EvidencePlan verifiedPlan,
+            EvidenceManifest candidateManifest,
+            CancellationToken cancellationToken = default) => throw new IOException("Artifact reader failed.");
+    }
+
     private sealed class FakeAuthorityProvider(EvidencePullRequestGateAuthoritySnapshot? snapshot)
         : IEvidencePullRequestGateAuthorityProvider
     {
         public Task<EvidencePullRequestGateAuthoritySnapshot?> ReadFreshAsync(
             EvidencePullRequestGateExpectedIdentity expectedIdentity,
             CancellationToken cancellationToken = default) => Task.FromResult(snapshot);
+    }
+
+    private sealed class ThrowingAuthorityProvider : IEvidencePullRequestGateAuthorityProvider
+    {
+        public Task<EvidencePullRequestGateAuthoritySnapshot?> ReadFreshAsync(
+            EvidencePullRequestGateExpectedIdentity expectedIdentity,
+            CancellationToken cancellationToken = default) => throw new IOException("Authority reader failed.");
     }
 
     private sealed class GateFixture : IAsyncDisposable
