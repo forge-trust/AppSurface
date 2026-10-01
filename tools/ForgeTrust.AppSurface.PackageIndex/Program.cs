@@ -122,6 +122,10 @@ internal static class Program
     /// <param name="publishStableAsync">Optional stable publish workflow override used by tests.</param>
     /// <param name="smokeInstallAsync">Optional smoke install workflow override used by tests.</param>
     /// <param name="inspectPythonParserCandidateAsync">Optional Python parser candidate-proof override used by tests.</param>
+    /// <param name="preflightCommandRunner">
+    /// Optional external-command runner used by the exact-bundle runtime-preflight carrier. When omitted, the carrier
+    /// launches its production consumer command through <see cref="CliWrapCommandRunner"/>.
+    /// </param>
     /// <returns><c>0</c> when the command succeeds; otherwise a non-zero exit code.</returns>
     internal static async Task<int> RunAsync(
         string[] args,
@@ -133,7 +137,8 @@ internal static class Program
         Func<PackagePublishRequest, CancellationToken, Task<PackagePublishLedger>>? publishPrereleaseAsync = null,
         Func<PackagePublishRequest, CancellationToken, Task<PackagePublishLedger>>? publishStableAsync = null,
         Func<PackageSmokeInstallRequest, CancellationToken, Task<PackageSmokeInstallReport>>? smokeInstallAsync = null,
-        Func<PythonParserCandidateProofRequest, CancellationToken, Task<PythonParserCandidateProofReport>>? inspectPythonParserCandidateAsync = null)
+        Func<PythonParserCandidateProofRequest, CancellationToken, Task<PythonParserCandidateProofReport>>? inspectPythonParserCandidateAsync = null,
+        IExternalCommandRunner? preflightCommandRunner = null)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(standardOut);
@@ -183,7 +188,7 @@ internal static class Program
             if (normalizedCommand == VerifyPreflightArtifactsCommand)
             {
                 var proofOptions = DurablePreflightArtifactProofCommandOptions.Parse(args.Skip(1).ToArray(), currentDirectory);
-                var proof = new DurablePreflightArtifactProof(new CliWrapCommandRunner());
+                var proof = new DurablePreflightArtifactProof(preflightCommandRunner ?? new CliWrapCommandRunner());
                 DurablePreflightArtifactProofResult result;
                 if (proofOptions.Mode == "candidate")
                 {
