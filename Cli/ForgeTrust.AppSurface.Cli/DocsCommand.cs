@@ -337,6 +337,16 @@ internal sealed partial class DocsVerifyArchiveCommand : ICommand
     public string? TrustedReleaseRootPath { get; set; }
 
     /// <summary>
+    /// Gets the maximum byte size accepted for a rewritten HTML or root search index file in the published tree.
+    /// </summary>
+    /// <remarks>
+    /// Omit this option to use the 4 MiB runtime default. Set it to the same value configured on a host that
+    /// mounts a larger archive; supported values are 1 through 33,554,432 bytes (32 MiB).
+    /// </remarks>
+    [CommandOption("max-rewritten-file-size-bytes", Description = "Maximum rewritten HTML or search-index.json size in bytes (default: 4194304; maximum: 33554432).")]
+    public long? MaxRewrittenFileSizeBytes { get; set; }
+
+    /// <summary>
     /// Executes the command through the CliFx console integration.
     /// </summary>
     /// <param name="console">Console abstraction used to register cancellation handling.</param>
@@ -361,6 +371,14 @@ internal sealed partial class DocsVerifyArchiveCommand : ICommand
             throw new CommandException("The --version option is required.");
         }
 
+        if (MaxRewrittenFileSizeBytes is { } maxRewrittenFileSizeBytes
+            && (maxRewrittenFileSizeBytes < AppSurfaceDocsVersioningOptions.MinMaxRewrittenFileSizeBytes
+                || maxRewrittenFileSizeBytes > AppSurfaceDocsVersioningOptions.MaxMaxRewrittenFileSizeBytes))
+        {
+            throw new CommandException(
+                $"The --max-rewritten-file-size-bytes option must be between {AppSurfaceDocsVersioningOptions.MinMaxRewrittenFileSizeBytes} and {AppSurfaceDocsVersioningOptions.MaxMaxRewrittenFileSizeBytes} bytes.");
+        }
+
         var catalogPath = Path.GetFullPath(CatalogPath);
         var service = new AppSurfaceDocsVersionCatalogService(
             new AppSurfaceDocsOptions
@@ -369,7 +387,9 @@ internal sealed partial class DocsVerifyArchiveCommand : ICommand
                 {
                     Enabled = true,
                     CatalogPath = catalogPath,
-                    TrustedReleaseRootPath = TrustedReleaseRootPath
+                    TrustedReleaseRootPath = TrustedReleaseRootPath,
+                    MaxRewrittenFileSizeBytes = MaxRewrittenFileSizeBytes
+                        ?? AppSurfaceDocsVersioningOptions.DefaultMaxRewrittenFileSizeBytes
                 }
             },
             new ArchiveVerifyWebHostEnvironment(Path.GetDirectoryName(catalogPath) ?? Directory.GetCurrentDirectory()),

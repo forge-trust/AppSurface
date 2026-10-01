@@ -1,11 +1,27 @@
+using System.Diagnostics;
+using System.IO.Compression;
+using System.Text;
+using System.Text.Json;
 using DotNet.Testcontainers.Builders;
+using ForgeTrust.AppSurface.Durable.Provider;
+using ForgeTrust.AppSurface.Flow;
+using ForgeTrust.AppSurface.Workers;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Testcontainers.PostgreSql;
+using Xunit.Abstractions;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 
 public sealed class PostgreSqlSchemaIntegrationTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public PostgreSqlSchemaIntegrationTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
     private const long MigrationAdvisoryLock = 4_707_181_168_775_217_740;
     private const string LockNotAvailableSqlState = "55P03";
     private const string RoleRecipeDatabase = "appsurface_durable";
@@ -996,16 +1012,20 @@ public sealed class PostgreSqlSchemaIntegrationTests
     [Fact]
     public async Task RoleRecipe_RejectsUnsafeRolesAndPrivilegesAndRemovesPreexistingRuntimeOwnership()
     {
+        _output.WriteLine("RoleRecipe unsafe-role test: locating repository and packing provider.");
         var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-        var recipePath = TestPathUtils.PathUnder(repositoryRoot, "Durable/configure-postgresql-roles.sql");
+        var packagedRecipe = await PackagedRoleRecipeAsync(repositoryRoot, _output.WriteLine);
         const string containerRecipePath = "/tmp/configure-postgresql-roles.sql";
+        _output.WriteLine("RoleRecipe unsafe-role test: package extracted; constructing PostgreSQL container.");
         await using var container = new PostgreSqlBuilder(PostgreSqlTestContainerImage.Reference)
             .WithDatabase(RoleRecipeDatabase)
             .WithUsername(RoleRecipeUsername)
             .WithPassword(RoleRecipePassword)
-            .WithResourceMapping(File.ReadAllBytes(recipePath), containerRecipePath)
+            .WithResourceMapping(packagedRecipe, containerRecipePath)
             .Build();
-        await container.StartAsync();
+        _output.WriteLine("RoleRecipe unsafe-role test: starting PostgreSQL container.");
+        await StartRoleRecipeContainerAsync(container, _output.WriteLine);
+        _output.WriteLine("RoleRecipe unsafe-role test: PostgreSQL container started.");
         await using var dataSource = NpgsqlDataSource.Create(container.GetConnectionString());
         await new PostgreSqlDurableRuntimeSchemaManager(dataSource).ApplyAsync();
         await using (var roles = dataSource.CreateCommand(
@@ -1036,45 +1056,130 @@ public sealed class PostgreSqlSchemaIntegrationTests
             CREATE ROLE downstream_login LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             GRANT durable_owner TO owner_inheriting_runtime;
             GRANT member_dispatcher TO member_runtime;
-            GRANT TRUNCATE ON appsurface_durable.work TO direct_privilege_dispatcher;
-            GRANT CREATE ON SCHEMA appsurface_durable TO direct_privilege_runtime;
-            GRANT UPDATE (work_name) ON appsurface_durable.work TO column_privilege_runtime;
-            GRANT UPDATE ON SEQUENCE appsurface_durable.scope_history_event_id_seq TO sequence_privilege_dispatcher;
-            GRANT EXECUTE ON FUNCTION appsurface_durable.discover_work_dispatch(text[], text[], integer)
-                TO grant_option_dispatcher WITH GRANT OPTION;
-            GRANT USAGE ON SCHEMA appsurface_durable TO schema_grant_option_runtime WITH GRANT OPTION;
-            GRANT CREATE ON SCHEMA appsurface_durable TO dispatcher_privilege_parent;
-            GRANT TRIGGER ON appsurface_durable.work TO runtime_privilege_parent;
             GRANT dispatcher_privilege_parent TO inherited_privilege_dispatcher WITH INHERIT FALSE, SET TRUE;
             GRANT runtime_privilege_parent TO inherited_privilege_runtime WITH INHERIT FALSE, SET TRUE;
             GRANT downstream_dispatcher TO downstream_login;
-            ALTER TABLE appsurface_durable.work OWNER TO durable_runtime;
             """))
         {
             await roles.ExecuteNonQueryAsync();
         }
 
+        var baseline = await RunRoleRecipeAsync(
+            container,
+            containerRecipePath,
+            "durable_owner",
+            CreateRolePairsManifest(("durable_dispatcher", "durable_runtime", "full")));
+        Assert.True(
+            baseline.ExitCode == 0,
+            $"The clean baseline role recipe failed. stdout: {baseline.Stdout} stderr: {baseline.Stderr}");
+
+        // A matching policy name outside the Durable schema must not hide the missing
+        // runtime policy from the relation-scoped reconciliation branch. The PUBLIC
+        // runtime policy baseline remains, so the bootstrap precheck still applies.
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "DROP POLICY runtime_heartbeat_runtime_role ON appsurface_durable.runtime_heartbeat; " +
+            "CREATE SCHEMA unrelated_policy_schema; " +
+            "CREATE TABLE unrelated_policy_schema.runtime_heartbeat (id integer); " +
+            "ALTER TABLE unrelated_policy_schema.runtime_heartbeat ENABLE ROW LEVEL SECURITY; " +
+            "CREATE POLICY runtime_heartbeat_runtime_role ON unrelated_policy_schema.runtime_heartbeat USING (true) WITH CHECK (true);");
+        var unrelatedPolicyName = await RunRoleRecipeAsync(
+            container,
+            containerRecipePath,
+            "durable_owner",
+            CreateRolePairsManifest(("durable_dispatcher", "durable_runtime", "full")));
+        Assert.True(
+            unrelatedPolicyName.ExitCode == 0,
+            $"The role recipe did not recreate the missing Durable runtime policy when an unrelated schema had the same policy name. " +
+            $"stdout: {unrelatedPolicyName.Stdout} stderr: {unrelatedPolicyName.Stderr}");
+        await using (var reconciledPolicy = dataSource.CreateCommand(
+            "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_policy policy " +
+            "JOIN pg_catalog.pg_class relation ON relation.oid = policy.polrelid " +
+            "JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace " +
+            "WHERE namespace.nspname = 'appsurface_durable' AND relation.relname = 'runtime_heartbeat' " +
+            "AND policy.polname = 'runtime_heartbeat_runtime_role');"))
+        {
+            Assert.True((bool)(await reconciledPolicy.ExecuteScalarAsync())!);
+        }
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "DROP SCHEMA unrelated_policy_schema CASCADE;");
+
+        var manifestedPrivilegeCases = new[]
+        {
+            (Setup: "GRANT TRUNCATE ON appsurface_durable.work TO durable_runtime;", Cleanup: "REVOKE TRUNCATE ON appsurface_durable.work FROM durable_runtime;", Expected: "Dispatcher, scoped runtime, or retention operator role has an effective durable-table privilege outside the package allowlist."),
+            (Setup: "GRANT CREATE ON SCHEMA appsurface_durable TO durable_runtime;", Cleanup: "REVOKE CREATE ON SCHEMA appsurface_durable FROM durable_runtime;", Expected: "Dispatcher, scoped runtime, and retention operator roles must not have schema CREATE or grant options."),
+            (Setup: "GRANT UPDATE (work_name) ON appsurface_durable.work TO durable_runtime;", Cleanup: "REVOKE UPDATE (work_name) ON appsurface_durable.work FROM durable_runtime;", Expected: "Dispatcher, scoped runtime, or retention operator role has an effective durable-column privilege outside the package allowlist."),
+            (Setup: "GRANT UPDATE ON SEQUENCE appsurface_durable.scope_history_event_id_seq TO durable_dispatcher;", Cleanup: "REVOKE UPDATE ON SEQUENCE appsurface_durable.scope_history_event_id_seq FROM durable_dispatcher;", Expected: "Dispatcher, scoped runtime, or retention operator role has an effective durable-sequence privilege outside the package allowlist."),
+            (Setup: "GRANT EXECUTE ON FUNCTION appsurface_durable.discover_work_dispatch(text[], text[], integer) TO durable_dispatcher WITH GRANT OPTION;", Cleanup: "REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION appsurface_durable.discover_work_dispatch(text[], text[], integer) FROM durable_dispatcher;", Expected: "Dispatcher, scoped runtime, or retention operator role has an effective durable-function privilege outside the package allowlist."),
+            (Setup: "GRANT USAGE ON SCHEMA appsurface_durable TO durable_runtime WITH GRANT OPTION;", Cleanup: "REVOKE GRANT OPTION FOR USAGE ON SCHEMA appsurface_durable FROM durable_runtime;", Expected: "Dispatcher, scoped runtime, and retention operator roles must not have schema CREATE or grant options."),
+        };
+        foreach (var item in manifestedPrivilegeCases)
+        {
+            await ExecuteNonQueryAsync(dataSource, item.Setup);
+            var hostileManifestedPrivilege = await RunRoleRecipeAsync(
+                container,
+                containerRecipePath,
+                "durable_owner",
+                CreateRolePairsManifest(("durable_dispatcher", "durable_runtime", "full")));
+            var output = $"{hostileManifestedPrivilege.Stdout}\n{hostileManifestedPrivilege.Stderr}";
+            Assert.NotEqual(0, hostileManifestedPrivilege.ExitCode);
+            Assert.Contains(item.Expected, output, StringComparison.Ordinal);
+            Assert.DoesNotContain("Rejected unmanifested Durable role principal(s)", output, StringComparison.Ordinal);
+            await ExecuteNonQueryAsync(dataSource, item.Cleanup);
+        }
+
+        await ExecuteNonQueryAsync(dataSource, "ALTER TABLE appsurface_durable.work OWNER TO durable_runtime;");
+        var runtimeOwnedRelationSnapshot = await ReadRoleRecipeCatalogSnapshotAsync(dataSource);
+        var runtimeOwnedRelation = await RunRoleRecipeAsync(
+            container,
+            containerRecipePath,
+            "durable_owner",
+            CreateRolePairsManifest(("durable_dispatcher", "durable_runtime", "full")));
+        Assert.NotEqual(0, runtimeOwnedRelation.ExitCode);
+        var runtimeOwnedRelationOutput = $"{runtimeOwnedRelation.Stdout}\n{runtimeOwnedRelation.Stderr}";
+        Assert.Contains(
+            "Rejected Durable ownership by manifest service role",
+            runtimeOwnedRelationOutput,
+            StringComparison.Ordinal);
+        Assert.Contains("durable_runtime", runtimeOwnedRelationOutput, StringComparison.Ordinal);
+        Assert.Contains("appsurface_durable.work", runtimeOwnedRelationOutput, StringComparison.Ordinal);
+        Assert.Equal(runtimeOwnedRelationSnapshot, await ReadRoleRecipeCatalogSnapshotAsync(dataSource));
+
+        // Repair using the container's bootstrap superuser; the role recipe must never
+        // erase the runtime owner's effective authority by silently transferring it.
+        await ExecuteNonQueryAsync(dataSource, "ALTER TABLE appsurface_durable.work OWNER TO durable_owner;");
+
         var rejected = new[]
         {
-            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "durable_dispatcher", Expected: "must be distinct"),
-            (Owner: "durable_owner", Dispatcher: "bypass_dispatcher", Runtime: "durable_runtime", Expected: "must be LOGIN roles without SUPERUSER"),
-            (Owner: "durable_owner", Dispatcher: "createdb_dispatcher", Runtime: "durable_runtime", Expected: "must be LOGIN roles without SUPERUSER"),
-            (Owner: "durable_owner", Dispatcher: "nologin_dispatcher", Runtime: "durable_runtime", Expected: "must be LOGIN roles without SUPERUSER"),
-            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "owner_inheriting_runtime", Expected: "exact login leaves with no role memberships"),
-            (Owner: "durable_owner", Dispatcher: "member_dispatcher", Runtime: "member_runtime", Expected: "exact login leaves with no role memberships"),
-            (Owner: "durable_owner", Dispatcher: "direct_privilege_dispatcher", Runtime: "durable_runtime", Expected: "effective durable-table privilege outside the package allowlist"),
-            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "direct_privilege_runtime", Expected: "schema CREATE or grant options"),
-            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "column_privilege_runtime", Expected: "effective durable-column privilege outside the package allowlist"),
-            (Owner: "durable_owner", Dispatcher: "sequence_privilege_dispatcher", Runtime: "durable_runtime", Expected: "effective durable-sequence privilege outside the package allowlist"),
-            (Owner: "durable_owner", Dispatcher: "grant_option_dispatcher", Runtime: "durable_runtime", Expected: "effective durable-function privilege outside the package allowlist"),
-            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "schema_grant_option_runtime", Expected: "schema CREATE or grant options"),
-            (Owner: "durable_owner", Dispatcher: "inherited_privilege_dispatcher", Runtime: "durable_runtime", Expected: "exact login leaves with no role memberships"),
-            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "inherited_privilege_runtime", Expected: "exact login leaves with no role memberships"),
-            (Owner: "durable_owner", Dispatcher: "downstream_dispatcher", Runtime: "durable_runtime", Expected: "exact login leaves with no role memberships"),
+            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "durable_dispatcher", Expected: "Manifest roles must resolve to distinct restricted", Setup: (string?)null, Cleanup: (string?)null),
+            (Owner: "durable_owner", Dispatcher: "bypass_dispatcher", Runtime: "durable_runtime", Expected: "restricted, membership-free LOGIN leaves", Setup: (string?)null, Cleanup: (string?)null),
+            (Owner: "durable_owner", Dispatcher: "createdb_dispatcher", Runtime: "durable_runtime", Expected: "restricted, membership-free LOGIN leaves", Setup: (string?)null, Cleanup: (string?)null),
+            (Owner: "durable_owner", Dispatcher: "nologin_dispatcher", Runtime: "durable_runtime", Expected: "restricted, membership-free LOGIN leaves", Setup: (string?)null, Cleanup: (string?)null),
+            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "owner_inheriting_runtime", Expected: "restricted, membership-free LOGIN leaves", Setup: (string?)null, Cleanup: (string?)null),
+            (Owner: "durable_owner", Dispatcher: "member_dispatcher", Runtime: "member_runtime", Expected: "restricted, membership-free LOGIN leaves", Setup: (string?)null, Cleanup: (string?)null),
+            (Owner: "durable_owner", Dispatcher: "direct_privilege_dispatcher", Runtime: "durable_runtime", Expected: "Rejected unmanifested Durable role principal(s)", Setup: "GRANT TRUNCATE ON appsurface_durable.work TO direct_privilege_dispatcher;", Cleanup: "REVOKE TRUNCATE ON appsurface_durable.work FROM direct_privilege_dispatcher;"),
+            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "direct_privilege_runtime", Expected: "Rejected unmanifested Durable role principal(s)", Setup: "GRANT CREATE ON SCHEMA appsurface_durable TO direct_privilege_runtime;", Cleanup: "REVOKE CREATE ON SCHEMA appsurface_durable FROM direct_privilege_runtime;"),
+            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "column_privilege_runtime", Expected: "Rejected unmanifested Durable role principal(s)", Setup: "GRANT UPDATE (work_name) ON appsurface_durable.work TO column_privilege_runtime;", Cleanup: "REVOKE UPDATE (work_name) ON appsurface_durable.work FROM column_privilege_runtime;"),
+            (Owner: "durable_owner", Dispatcher: "sequence_privilege_dispatcher", Runtime: "durable_runtime", Expected: "Rejected unmanifested Durable role principal(s)", Setup: "GRANT UPDATE ON SEQUENCE appsurface_durable.scope_history_event_id_seq TO sequence_privilege_dispatcher;", Cleanup: "REVOKE UPDATE ON SEQUENCE appsurface_durable.scope_history_event_id_seq FROM sequence_privilege_dispatcher;"),
+            (Owner: "durable_owner", Dispatcher: "grant_option_dispatcher", Runtime: "durable_runtime", Expected: "Rejected unmanifested Durable role principal(s)", Setup: "GRANT EXECUTE ON FUNCTION appsurface_durable.discover_work_dispatch(text[], text[], integer) TO grant_option_dispatcher WITH GRANT OPTION;", Cleanup: "REVOKE ALL ON FUNCTION appsurface_durable.discover_work_dispatch(text[], text[], integer) FROM grant_option_dispatcher;"),
+            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "schema_grant_option_runtime", Expected: "Rejected unmanifested Durable role principal(s)", Setup: "GRANT USAGE ON SCHEMA appsurface_durable TO schema_grant_option_runtime WITH GRANT OPTION;", Cleanup: "REVOKE ALL ON SCHEMA appsurface_durable FROM schema_grant_option_runtime;"),
+            (Owner: "durable_owner", Dispatcher: "inherited_privilege_dispatcher", Runtime: "durable_runtime", Expected: "restricted, membership-free LOGIN leaves", Setup: (string?)null, Cleanup: (string?)null),
+            (Owner: "durable_owner", Dispatcher: "durable_dispatcher", Runtime: "inherited_privilege_runtime", Expected: "restricted, membership-free LOGIN leaves", Setup: (string?)null, Cleanup: (string?)null),
+            (Owner: "durable_owner", Dispatcher: "downstream_dispatcher", Runtime: "durable_runtime", Expected: "restricted, membership-free LOGIN leaves", Setup: (string?)null, Cleanup: (string?)null),
         };
         foreach (var item in rejected)
         {
-            var result = await RunRoleRecipeAsync(container, containerRecipePath, item.Owner, item.Dispatcher, item.Runtime);
+            if (item.Setup is not null)
+            {
+                await ExecuteNonQueryAsync(dataSource, item.Setup);
+            }
+
+            var result = await RunRoleRecipeAsync(
+                container,
+                containerRecipePath,
+                item.Owner,
+                CreateRolePairsManifest((item.Dispatcher, item.Runtime, "full")));
             Assert.True(
                 result.ExitCode != 0,
                 $"Expected role recipe case ({item.Owner}, {item.Dispatcher}, {item.Runtime}) to fail. " +
@@ -1083,7 +1188,26 @@ public sealed class PostgreSqlSchemaIntegrationTests
             Assert.True(
                 output.Contains(item.Expected, StringComparison.Ordinal),
                 $"Expected role recipe case ({item.Owner}, {item.Dispatcher}, {item.Runtime}) to contain '{item.Expected}'. Output: {output}");
+
+            if (item.Cleanup is not null)
+            {
+                await ExecuteNonQueryAsync(dataSource, item.Cleanup);
+            }
         }
+
+        // The complete-manifest check correctly rejects all seeded hostile ACL principals before later catalog proofs.
+        // Remove that fixture drift here so the following RLS, PUBLIC, and ownership cases reach their own validators.
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA appsurface_durable FROM direct_privilege_dispatcher; " +
+            "REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA appsurface_durable FROM sequence_privilege_dispatcher; " +
+            "REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA appsurface_durable FROM grant_option_dispatcher; " +
+            "REVOKE ALL PRIVILEGES ON SCHEMA appsurface_durable FROM direct_privilege_runtime, schema_grant_option_runtime; " +
+            "REVOKE durable_owner FROM owner_inheriting_runtime; " +
+            "REVOKE member_dispatcher FROM member_runtime; " +
+            "REVOKE dispatcher_privilege_parent FROM inherited_privilege_dispatcher; " +
+            "REVOKE runtime_privilege_parent FROM inherited_privilege_runtime; " +
+            "REVOKE downstream_dispatcher FROM downstream_login;");
 
         await ExecuteNonQueryAsync(
             dataSource,
@@ -1092,13 +1216,13 @@ public sealed class PostgreSqlSchemaIntegrationTests
             container,
             containerRecipePath,
             "durable_owner",
-            "durable_dispatcher",
-            "durable_runtime");
+            CreateRolePairsManifest(("durable_dispatcher", "durable_runtime", "full")));
         Assert.NotEqual(0, disabledRls.ExitCode);
-        Assert.Contains(
-            "row-level security flags must exactly match",
-            $"{disabledRls.Stdout}\n{disabledRls.Stderr}",
-            StringComparison.Ordinal);
+        Assert.True(
+            $"{disabledRls.Stdout}\n{disabledRls.Stderr}".Contains(
+                "row-level security flags must exactly match",
+                StringComparison.Ordinal),
+            $"Expected the disabled-RLS diagnostic. stdout: {disabledRls.Stdout} stderr: {disabledRls.Stderr}");
         await ExecuteNonQueryAsync(
             dataSource,
             "ALTER TABLE appsurface_durable.work ENABLE ROW LEVEL SECURITY;");
@@ -1106,17 +1230,18 @@ public sealed class PostgreSqlSchemaIntegrationTests
         await ExecuteNonQueryAsync(
             dataSource,
             "CREATE POLICY work_permissive_bypass ON appsurface_durable.work USING (true) WITH CHECK (true);");
+        var hostilePolicySnapshot = await ReadRoleRecipeCatalogSnapshotAsync(dataSource);
         var permissivePolicy = await RunRoleRecipeAsync(
             container,
             containerRecipePath,
             "durable_owner",
-            "durable_dispatcher",
-            "durable_runtime");
+            CreateRolePairsManifest(("durable_dispatcher", "durable_runtime", "full")));
         Assert.NotEqual(0, permissivePolicy.ExitCode);
         Assert.Contains(
             "row-level security policies must exactly match",
             $"{permissivePolicy.Stdout}\n{permissivePolicy.Stderr}",
             StringComparison.Ordinal);
+        Assert.Equal(hostilePolicySnapshot, await ReadRoleRecipeCatalogSnapshotAsync(dataSource));
         await ExecuteNonQueryAsync(
             dataSource,
             "DROP POLICY work_permissive_bypass ON appsurface_durable.work;");
@@ -1128,13 +1253,12 @@ public sealed class PostgreSqlSchemaIntegrationTests
             container,
             containerRecipePath,
             "durable_owner",
-            "durable_dispatcher",
-            "durable_runtime");
+            CreateRolePairsManifest(("durable_dispatcher", "durable_runtime", "full")));
         Assert.NotEqual(0, publicPrivilege.ExitCode);
-        Assert.Contains(
-            "schema CREATE or grant options",
-            $"{publicPrivilege.Stdout}\n{publicPrivilege.Stderr}",
-            StringComparison.Ordinal);
+        var publicPrivilegeOutput = $"{publicPrivilege.Stdout}\n{publicPrivilege.Stderr}";
+        Assert.True(
+            publicPrivilegeOutput.Contains("Unexpected PUBLIC privilege or grant option exists", StringComparison.Ordinal),
+            $"Expected the PUBLIC privilege diagnostic. stdout: {publicPrivilege.Stdout} stderr: {publicPrivilege.Stderr}");
         await ExecuteNonQueryAsync(
             dataSource,
             "REVOKE CREATE ON SCHEMA appsurface_durable FROM PUBLIC;");
@@ -1146,11 +1270,10 @@ public sealed class PostgreSqlSchemaIntegrationTests
             container,
             containerRecipePath,
             "durable_owner",
-            "durable_dispatcher",
-            "database_owner_runtime");
+            CreateRolePairsManifest(("durable_dispatcher", "database_owner_runtime", "full")));
         Assert.NotEqual(0, databaseOwner.ExitCode);
         Assert.Contains(
-            "must not own any database",
+            "Manifest roles must resolve to distinct restricted, membership-free LOGIN leaves",
             $"{databaseOwner.Stdout}\n{databaseOwner.Stderr}",
             StringComparison.Ordinal);
         await ExecuteNonQueryAsync(
@@ -1169,7 +1292,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
                     'appsurface_durable.flow_dispatch',
                     'SELECT') AS direct_dispatcher_cannot_read_flow_dispatch,
                 (
-                    SELECT owner_role.rolname = 'durable_runtime'
+                    SELECT owner_role.rolname = 'durable_owner'
                     FROM pg_catalog.pg_class AS object
                     JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.relnamespace
                     JOIN pg_catalog.pg_roles AS owner_role ON owner_role.oid = object.relowner
@@ -1187,28 +1310,28 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         await ExecuteNonQueryAsync(
             dataSource,
-            """
-            GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO PUBLIC;
-            GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO durable_dispatcher;
-            GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer)
-                TO durable_runtime WITH GRANT OPTION;
-            GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO durable_retention;
-            GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO unrelated_login;
-            """);
+            "ALTER TABLE appsurface_durable.runtime_heartbeat OWNER TO database_owner_runtime; " +
+            "DROP POLICY runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat; " +
+            "CREATE POLICY runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat " +
+            "FOR ALL TO database_owner_runtime USING (true) WITH CHECK (true); " +
+            "GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO direct_privilege_runtime;");
         var unrelatedRuntimeGrant = await RunRoleRecipeAsync(
             container,
             containerRecipePath,
             "durable_owner",
-            "durable_dispatcher",
-            "durable_runtime");
+            CreateRolePairsManifest(("durable_dispatcher", "durable_runtime", "full")));
         Assert.NotEqual(0, unrelatedRuntimeGrant.ExitCode);
-        Assert.Contains(
-            "runtime_due_dispatch_health(integer) must be executable only by the scoped runtime role",
-            $"{unrelatedRuntimeGrant.Stdout}\n{unrelatedRuntimeGrant.Stderr}",
-            StringComparison.Ordinal);
+        var unrelatedRuntimeGrantOutput = $"{unrelatedRuntimeGrant.Stdout}\n{unrelatedRuntimeGrant.Stderr}";
+        Assert.Contains("Rejected unmanifested Durable role principal(s)", unrelatedRuntimeGrantOutput, StringComparison.Ordinal);
+        Assert.Contains("Rejected unmanifested Durable role principal(s): direct_privilege_runtime", unrelatedRuntimeGrantOutput, StringComparison.Ordinal);
+        Assert.DoesNotContain("database_owner_runtime", unrelatedRuntimeGrantOutput, StringComparison.Ordinal);
         await ExecuteNonQueryAsync(
             dataSource,
-            "REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM unrelated_login;");
+            "REVOKE ALL ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) FROM direct_privilege_runtime; " +
+            "ALTER TABLE appsurface_durable.runtime_heartbeat OWNER TO durable_owner; " +
+            "DROP POLICY runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat; " +
+            "CREATE POLICY runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat " +
+            "FOR ALL TO durable_owner USING (true) WITH CHECK (true);");
 
         await using var lockConnection = await dataSource.OpenConnectionAsync();
         await using var lockTransaction = await lockConnection.BeginTransactionAsync();
@@ -1221,14 +1344,15 @@ public sealed class PostgreSqlSchemaIntegrationTests
             await holdRuntimeFence.ExecuteNonQueryAsync();
         }
 
+        var catalogBeforeLockWait = await ReadRoleRecipeCatalogSnapshotAsync(dataSource);
         var acceptedTask = RunRoleRecipeAsync(
             container,
             containerRecipePath,
             "durable_owner",
-            "durable_dispatcher",
-            "durable_runtime");
-        await WaitForBackendAsync(dataSource, RoleRecipeApplicationName);
+            CreateRolePairsManifest(("durable_dispatcher", "durable_runtime", "full")));
+        await WaitForRoleRecipeLockPollingBackendAsync(dataSource, RoleRecipeApplicationName);
         Assert.False(acceptedTask.IsCompleted);
+        Assert.Equal(catalogBeforeLockWait, await ReadRoleRecipeCatalogSnapshotAsync(dataSource));
         await lockTransaction.CommitAsync();
         var accepted = await acceptedTask;
         Assert.True(
@@ -1458,8 +1582,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
             container,
             containerRecipePath,
             "durable_owner",
-            "durable_dispatcher",
-            "durable_runtime");
+            CreateRolePairsManifest(("durable_dispatcher", "durable_runtime", "full")));
         Assert.NotEqual(0, overloadedFunction.ExitCode);
         Assert.Contains(
             "effective durable-function privilege outside the package allowlist",
@@ -1720,8 +1843,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
             container,
             containerRecipePath,
             "durable_owner",
-            "durable_dispatcher",
-            "durable_runtime");
+            CreateRolePairsManifest(("durable_dispatcher", "durable_runtime", "full")));
         Assert.True(
             reapplied.ExitCode == 0,
             $"Role recipe reapply failed with exit {reapplied.ExitCode}. stdout: {reapplied.Stdout} stderr: {reapplied.Stderr}");
@@ -2482,6 +2604,725 @@ public sealed class PostgreSqlSchemaIntegrationTests
     }
 
     [Fact]
+    public async Task RoleRecipe_ReconcilesFullAndWorkOnlyPairsAndRejectsOmissionAtomically()
+    {
+        _output.WriteLine("RoleRecipe pair-reconciliation test: locating repository and packing provider.");
+        var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var packagedRecipe = await PackagedRoleRecipeAsync(repositoryRoot, _output.WriteLine);
+        const string containerRecipePath = "/tmp/configure-postgresql-roles.sql";
+        _output.WriteLine("RoleRecipe pair-reconciliation test: package extracted; constructing PostgreSQL container.");
+        await using var container = new PostgreSqlBuilder(PostgreSqlTestContainerImage.Reference)
+            .WithDatabase(RoleRecipeDatabase)
+            .WithUsername(RoleRecipeUsername)
+            .WithPassword(RoleRecipePassword)
+            .WithResourceMapping(packagedRecipe, containerRecipePath)
+            .Build();
+        _output.WriteLine("RoleRecipe pair-reconciliation test: starting PostgreSQL container.");
+        await StartRoleRecipeContainerAsync(container, _output.WriteLine);
+        _output.WriteLine("RoleRecipe pair-reconciliation test: PostgreSQL container started; applying schema.");
+        await using var dataSource = NpgsqlDataSource.Create(container.GetConnectionString());
+        await new PostgreSqlDurableRuntimeSchemaManager(dataSource).ApplyAsync();
+        await ExecuteNonQueryAsync(
+            dataSource,
+            """
+            CREATE ROLE durable_owner NOLOGIN NOSUPERUSER NOBYPASSRLS;
+            CREATE ROLE durable_dispatcher LOGIN PASSWORD 'durable-dispatcher-test-password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE durable_runtime LOGIN PASSWORD 'durable-runtime-test-password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE durable_retention LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            """);
+
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(dataSource);
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "role-pair-tests", "initial");
+        var storeId = (await schema.GetStatusAsync()).StoreId;
+        var forwardingManifest = CreateRolePairsManifest(("durable_dispatcher", "durable_runtime", "full"));
+        var firstPairApplied = await RunRoleRecipeAsync(
+            container,
+            containerRecipePath,
+            "durable_owner",
+            forwardingManifest);
+        Assert.True(
+            firstPairApplied.ExitCode == 0,
+            $"Initial forwarding-pair role recipe failed. stdout: {firstPairApplied.Stdout} stderr: {firstPairApplied.Stderr}");
+
+        await AssertForwardingDispatcherCapabilitiesAsync(dataSource);
+        await AssertForwardingFlowScheduleDiscoveryAsync(
+            container.GetConnectionString(), DispatcherRoleTestPassword);
+        await RunRegisteredWorkThroughProviderAsync(
+            container.GetConnectionString(), "durable_dispatcher", DispatcherRoleTestPassword,
+            "durable_runtime", RuntimeRoleTestPassword, epoch, storeId,
+            "forwarding-before-enrollment", "forwarding-before-enrollment");
+
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "CREATE ROLE source_dispatcher LOGIN PASSWORD 'durable-dispatcher-test-password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS; " +
+            "CREATE ROLE source_runtime LOGIN PASSWORD 'durable-runtime-test-password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;");
+        var fullManifest = CreateRolePairsManifest(
+            ("durable_dispatcher", "durable_runtime", "full"),
+            ("source_dispatcher", "source_runtime", "work_only"));
+        var applied = await RunRoleRecipeAsync(container, containerRecipePath, "durable_owner", fullManifest);
+        Assert.True(applied.ExitCode == 0, $"Two-pair role recipe failed. stdout: {applied.Stdout} stderr: {applied.Stderr}");
+
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "ALTER FUNCTION appsurface_durable.discover_work_dispatch(text[], text[], integer) OWNER TO source_runtime;");
+        var serviceOwnedFunctionSnapshot = await ReadRoleRecipeCatalogSnapshotAsync(dataSource);
+        var serviceOwnedFunction = await RunRoleRecipeAsync(
+            container,
+            containerRecipePath,
+            "durable_owner",
+            fullManifest);
+        Assert.NotEqual(0, serviceOwnedFunction.ExitCode);
+        var serviceOwnedFunctionOutput = $"{serviceOwnedFunction.Stdout}\n{serviceOwnedFunction.Stderr}";
+        Assert.Contains("Rejected Durable ownership by manifest service role", serviceOwnedFunctionOutput, StringComparison.Ordinal);
+        Assert.Contains("source_runtime", serviceOwnedFunctionOutput, StringComparison.Ordinal);
+        Assert.Contains("discover_work_dispatch", serviceOwnedFunctionOutput, StringComparison.Ordinal);
+        Assert.Equal(serviceOwnedFunctionSnapshot, await ReadRoleRecipeCatalogSnapshotAsync(dataSource));
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "ALTER FUNCTION appsurface_durable.discover_work_dispatch(text[], text[], integer) OWNER TO durable_owner;");
+
+        var beforeMissingManifest = await ReadRoleRecipeCatalogSnapshotAsync(dataSource);
+        var missingManifest = await container.ExecAsync(
+            [
+                "env",
+                $"PGAPPNAME={RoleRecipeApplicationName}",
+                "psql",
+                "-U", RoleRecipeUsername,
+                "-d", RoleRecipeDatabase,
+                "-v", "migration_owner_role=durable_owner",
+                "-v", "retention_operator_role=durable_retention",
+                "-f", containerRecipePath,
+            ]).WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.NotEqual(0, missingManifest.ExitCode);
+        Assert.Contains(
+            "role_pairs_json",
+            $"{missingManifest.Stdout}\n{missingManifest.Stderr}",
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(beforeMissingManifest, await ReadRoleRecipeCatalogSnapshotAsync(dataSource));
+        await AssertForwardingDispatcherCapabilitiesAsync(dataSource);
+        await AssertForwardingFlowScheduleDiscoveryAsync(
+            container.GetConnectionString(), DispatcherRoleTestPassword);
+        await RunRegisteredWorkThroughProviderAsync(
+            container.GetConnectionString(), "durable_dispatcher", DispatcherRoleTestPassword,
+            "durable_runtime", RuntimeRoleTestPassword, epoch, storeId,
+            "forwarding-after-enrollment", "forwarding-after-enrollment");
+        await RunRegisteredWorkThroughProviderAsync(
+            container.GetConnectionString(), "source_dispatcher", DispatcherRoleTestPassword,
+            "source_runtime", RuntimeRoleTestPassword, epoch, storeId,
+            "source-work-only", "source-work-only");
+        await AssertSourcePumpSurfaceRefusedAsync(
+            container.GetConnectionString(), epoch, storeId, DurableRuntimeSurface.All);
+        await AssertSourcePumpSurfaceRefusedAsync(
+            container.GetConnectionString(), epoch, storeId, DurableRuntimeSurface.Flow);
+        await AssertSourcePumpSurfaceRefusedAsync(
+            container.GetConnectionString(), epoch, storeId, DurableRuntimeSurface.Schedule);
+
+        await using (var capabilities = dataSource.CreateCommand(
+            """
+            SELECT has_schema_privilege('source_dispatcher', 'appsurface_durable', 'USAGE'),
+                   has_function_privilege(
+                       'source_dispatcher',
+                       'appsurface_durable.discover_work_dispatch(text[], text[], integer)',
+                       'EXECUTE'),
+                   has_function_privilege(
+                       'durable_dispatcher',
+                       'appsurface_durable.discover_work_dispatch(text[], text[], integer)',
+                       'EXECUTE'),
+                   has_table_privilege('durable_dispatcher', 'appsurface_durable.flow_dispatch', 'SELECT'),
+                   has_function_privilege(
+                       'durable_dispatcher',
+                       'appsurface_durable.claim_schedule_dispatch(text, interval)',
+                       'EXECUTE'),
+                   has_function_privilege(
+                       'durable_runtime',
+                       'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)',
+                       'EXECUTE'),
+                   has_function_privilege(
+                       'source_runtime',
+                       'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)',
+                       'EXECUTE'),
+                   NOT has_function_privilege(
+                       'durable_dispatcher',
+                       'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)',
+                       'EXECUTE'),
+                   NOT has_function_privilege(
+                       'source_dispatcher',
+                       'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)',
+                       'EXECUTE'),
+                   NOT has_table_privilege('source_dispatcher', 'appsurface_durable.flow_dispatch', 'SELECT'),
+                   NOT has_function_privilege(
+                       'source_dispatcher',
+                       'appsurface_durable.claim_schedule_dispatch(text, interval)',
+                       'EXECUTE'),
+                   NOT has_table_privilege('source_dispatcher', 'appsurface_durable.work', 'SELECT'),
+                   NOT has_sequence_privilege(
+                       'source_dispatcher',
+                       'appsurface_durable.scope_history_event_id_seq',
+                       'USAGE')
+            """))
+        {
+            await using var reader = await capabilities.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            for (var ordinal = 0; ordinal < reader.FieldCount; ordinal++)
+            {
+                Assert.True(reader.GetBoolean(ordinal), $"Capability assertion {ordinal} failed.");
+            }
+            Assert.False(await reader.ReadAsync());
+        }
+
+        await using (var sourceDataSource = CreateRoleDataSource(container.GetConnectionString(), "source_dispatcher", DispatcherRoleTestPassword))
+        await using (var sourceConnection = await sourceDataSource.OpenConnectionAsync())
+        {
+            await using (var setRole = new NpgsqlCommand("SET ROLE source_dispatcher;", sourceConnection))
+            {
+                await setRole.ExecuteNonQueryAsync();
+            }
+
+            try
+            {
+                await using var discovery = new NpgsqlCommand(
+                    "SELECT count(*) FROM appsurface_durable.discover_work_dispatch(ARRAY['tests.no_candidate'], ARRAY['v1'], 1);",
+                    sourceConnection);
+                Assert.Equal(0L, (long)(await discovery.ExecuteScalarAsync())!);
+
+                var directRead = await Assert.ThrowsAsync<PostgresException>(async () =>
+                {
+                    await using var command = new NpgsqlCommand(
+                        "SELECT count(*) FROM appsurface_durable.work;",
+                        sourceConnection);
+                    await command.ExecuteScalarAsync();
+                });
+                Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, directRead.SqlState);
+
+                var scheduleClaim = await Assert.ThrowsAsync<PostgresException>(async () =>
+                {
+                    await using var command = new NpgsqlCommand(
+                        "SELECT * FROM appsurface_durable.claim_schedule_dispatch('role-pair-test', interval '1 minute');",
+                        sourceConnection);
+                    await command.ExecuteNonQueryAsync();
+                });
+                Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, scheduleClaim.SqlState);
+
+                var flowRead = await Assert.ThrowsAsync<PostgresException>(async () =>
+                {
+                    await using var command = new NpgsqlCommand(
+                        "SELECT count(*) FROM appsurface_durable.flow_dispatch;",
+                        sourceConnection);
+                    await command.ExecuteScalarAsync();
+                });
+                Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, flowRead.SqlState);
+            }
+            finally
+            {
+                await using var resetRole = new NpgsqlCommand("RESET ROLE;", sourceConnection);
+                await resetRole.ExecuteNonQueryAsync();
+            }
+        }
+
+        var beforeRejectedRun = await ReadRoleRecipeCatalogSnapshotAsync(dataSource);
+        var repeated = await RunRoleRecipeAsync(
+            container,
+            containerRecipePath,
+            "durable_owner",
+            fullManifest);
+        Assert.True(
+            repeated.ExitCode == 0,
+            $"Identical two-pair rerun failed. stdout: {repeated.Stdout} stderr: {repeated.Stderr}");
+        var afterRepeatedRun = await ReadRoleRecipeCatalogSnapshotAsync(dataSource);
+        Assert.True(
+            string.Equals(beforeRejectedRun, afterRepeatedRun, StringComparison.Ordinal),
+            $"Identical manifest rerun changed catalog state. Before: {beforeRejectedRun} After: {afterRepeatedRun}");
+
+        var omittedManifest = CreateRolePairsManifest(("source_dispatcher", "source_runtime", "work_only"));
+        var omitted = await RunRoleRecipeAsync(
+            container,
+            containerRecipePath,
+            "durable_owner",
+            omittedManifest);
+        Assert.NotEqual(0, omitted.ExitCode);
+        Assert.Equal(beforeRejectedRun, await ReadRoleRecipeCatalogSnapshotAsync(dataSource));
+
+        var omittedSourcePair = await RunRoleRecipeAsync(
+            container,
+            containerRecipePath,
+            "durable_owner",
+            forwardingManifest);
+        Assert.NotEqual(0, omittedSourcePair.ExitCode);
+        Assert.Contains("source_dispatcher", omittedSourcePair.Stderr + omittedSourcePair.Stdout, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(beforeRejectedRun, await ReadRoleRecipeCatalogSnapshotAsync(dataSource));
+
+        var invalidProfileManifest = CreateRolePairsManifest(
+            ("durable_dispatcher", "durable_runtime", "full"),
+            ("source_dispatcher", "source_runtime", "all"));
+        var invalidProfile = await RunRoleRecipeAsync(
+            container,
+            containerRecipePath,
+            "durable_owner",
+            invalidProfileManifest);
+        Assert.NotEqual(0, invalidProfile.ExitCode);
+        Assert.Equal(beforeRejectedRun, await ReadRoleRecipeCatalogSnapshotAsync(dataSource));
+
+        var malformedManifests = new[]
+        {
+            (Json: "{", Expected: "Invalid role_pairs_json"),
+            (Json: "{\"version\":1,\"pairs\":[]}", Expected: "Invalid role_pairs_json"),
+            (Json: "{\"version\":1,\"pairs\":[" + string.Join(",", Enumerable.Repeat("{}", 33)) + "]}", Expected: "Invalid role_pairs_json"),
+            (Json: fullManifest.Replace("\"version\":1", "\"version\":1,\"extra\":true", StringComparison.Ordinal), Expected: "Invalid role_pairs_json"),
+            (Json: fullManifest.Replace("\"version\":1", "\"version\":1,\"version\":1", StringComparison.Ordinal), Expected: "Invalid role_pairs_json"),
+            (Json: fullManifest.Replace("\"dispatcher_profile\":\"work_only\"", "\"dispatcher_profile\":\"work_only\",\"dispatcher_profile\":\"work_only\"", StringComparison.Ordinal), Expected: "Invalid role_pairs_json entry"),
+            (Json: fullManifest.Replace(",\"dispatcher_profile\":\"work_only\"", string.Empty, StringComparison.Ordinal), Expected: "Invalid role_pairs_json entry"),
+            (Json: fullManifest.Replace("\"dispatcher_profile\":\"work_only\"", "\"dispatcher_profile\":\"work_only\",\"unknown\":true", StringComparison.Ordinal), Expected: "Invalid role_pairs_json entry"),
+            (Json: fullManifest.Replace("source_dispatcher", "source\\ndispatcher", StringComparison.Ordinal), Expected: "Invalid role_pairs_json entry"),
+            (Json: fullManifest.Replace("source_dispatcher", new string('x', 64), StringComparison.Ordinal), Expected: "Invalid role_pairs_json entry"),
+            (Json: fullManifest.Replace("source_dispatcher", "missing_source_dispatcher", StringComparison.Ordinal), Expected: "Manifest roles must resolve to distinct restricted"),
+            (Json: CreateRolePairsManifest(
+                ("durable_dispatcher", "durable_runtime", "full"),
+                ("durable_dispatcher", "source_runtime", "work_only")), Expected: "Manifest roles must resolve to distinct restricted"),
+        };
+        foreach (var malformed in malformedManifests)
+        {
+            var rejectedManifest = await RunRoleRecipeAsync(
+                container,
+                containerRecipePath,
+                "durable_owner",
+                malformed.Json);
+            Assert.NotEqual(0, rejectedManifest.ExitCode);
+            Assert.Contains(
+                malformed.Expected,
+                $"{rejectedManifest.Stdout}\n{rejectedManifest.Stderr}",
+                StringComparison.Ordinal);
+            Assert.Equal(beforeRejectedRun, await ReadRoleRecipeCatalogSnapshotAsync(dataSource));
+        }
+
+        var narrowedManifest = CreateRolePairsManifest(
+            ("durable_dispatcher", "durable_runtime", "work_only"),
+            ("source_dispatcher", "source_runtime", "work_only"));
+        var narrowed = await RunRoleRecipeAsync(container, containerRecipePath, "durable_owner", narrowedManifest);
+        Assert.NotEqual(0, narrowed.ExitCode);
+        Assert.Equal(beforeRejectedRun, await ReadRoleRecipeCatalogSnapshotAsync(dataSource));
+
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "REVOKE EXECUTE ON FUNCTION appsurface_durable.discover_work_dispatch(text[], text[], integer) FROM source_dispatcher;");
+        var beforeForcedRollback = await ReadRoleRecipeCatalogSnapshotAsync(dataSource);
+        var forcedRollback = await RunRoleRecipeAsync(
+            container,
+            containerRecipePath,
+            "durable_owner",
+            fullManifest,
+            forceFailure: true);
+        Assert.NotEqual(0, forcedRollback.ExitCode);
+        Assert.Contains(
+            "Forced role-recipe test failure immediately before COMMIT",
+            $"{forcedRollback.Stdout}\n{forcedRollback.Stderr}",
+            StringComparison.Ordinal);
+        Assert.Equal(beforeForcedRollback, await ReadRoleRecipeCatalogSnapshotAsync(dataSource));
+        var restoredNarrowGrant = await RunRoleRecipeAsync(container, containerRecipePath, "durable_owner", fullManifest);
+        Assert.Equal(0, restoredNarrowGrant.ExitCode);
+        Assert.True(await HasSourceWorkDiscoveryAsync(dataSource));
+
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "GRANT SELECT ON appsurface_durable.flow_dispatch TO source_dispatcher;");
+        var driftedSnapshot = await ReadRoleRecipeCatalogSnapshotAsync(dataSource);
+        var drifted = await RunRoleRecipeAsync(
+            container,
+            containerRecipePath,
+            "durable_owner",
+            fullManifest);
+        Assert.NotEqual(0, drifted.ExitCode);
+        Assert.Equal(driftedSnapshot, await ReadRoleRecipeCatalogSnapshotAsync(dataSource));
+
+        await ExecuteNonQueryAsync(
+            dataSource,
+            "REVOKE SELECT ON appsurface_durable.flow_dispatch FROM source_dispatcher;");
+        var expandedManifest = CreateRolePairsManifest(
+            ("durable_dispatcher", "durable_runtime", "full"),
+            ("source_dispatcher", "source_runtime", "full"));
+        var expanded = await RunRoleRecipeAsync(container, containerRecipePath, "durable_owner", expandedManifest);
+        Assert.True(
+            expanded.ExitCode == 0,
+            $"Reviewed work_only-to-full expansion failed. stdout: {expanded.Stdout} stderr: {expanded.Stderr}");
+        await using var expandedCapabilities = dataSource.CreateCommand(
+            "SELECT has_table_privilege('source_dispatcher', 'appsurface_durable.flow_dispatch', 'SELECT') " +
+            "AND has_function_privilege('source_dispatcher', " +
+            "'appsurface_durable.claim_schedule_dispatch(text, interval)', 'EXECUTE');");
+        Assert.True((bool)(await expandedCapabilities.ExecuteScalarAsync())!);
+    }
+
+    private static async Task<bool> HasSourceWorkDiscoveryAsync(NpgsqlDataSource dataSource)
+    {
+        await using var command = dataSource.CreateCommand(
+            "SELECT has_function_privilege('source_dispatcher', " +
+            "'appsurface_durable.discover_work_dispatch(text[], text[], integer)', 'EXECUTE');");
+        return (bool)(await command.ExecuteScalarAsync())!;
+    }
+
+    private static async Task AssertForwardingDispatcherCapabilitiesAsync(NpgsqlDataSource dataSource)
+    {
+        await using var capabilities = dataSource.CreateCommand(
+            "SELECT has_table_privilege('durable_dispatcher', 'appsurface_durable.flow_dispatch', 'SELECT'), " +
+            "has_function_privilege('durable_dispatcher', 'appsurface_durable.claim_schedule_dispatch(text, interval)', 'EXECUTE'), " +
+            "has_function_privilege('durable_dispatcher', 'appsurface_durable.discover_work_dispatch(text[], text[], integer)', 'EXECUTE');");
+        await using var reader = await capabilities.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        for (var ordinal = 0; ordinal < reader.FieldCount; ordinal++)
+        {
+            Assert.True(reader.GetBoolean(ordinal), $"Forwarding capability assertion {ordinal} failed.");
+        }
+    }
+
+    private static async Task AssertForwardingFlowScheduleDiscoveryAsync(string connectionString, string password)
+    {
+        await using var dispatcher = CreateRoleDataSource(connectionString, "durable_dispatcher", password);
+        await using var connection = await dispatcher.OpenConnectionAsync();
+        await using (var flowDiscovery = new NpgsqlCommand(
+            "SELECT count(*) FROM appsurface_durable.flow_dispatch;",
+            connection))
+        {
+            _ = await flowDiscovery.ExecuteScalarAsync();
+        }
+
+        await using var scheduleDiscovery = new NpgsqlCommand(
+            "SELECT count(*) FROM appsurface_durable.claim_schedule_dispatch('role-pair-forwarding-proof', interval '1 minute');",
+            connection);
+        Assert.Equal(0L, (long)(await scheduleDiscovery.ExecuteScalarAsync())!);
+    }
+
+    private static NpgsqlDataSource CreateRoleDataSource(string connectionString, string username, string password)
+    {
+        var builder = new NpgsqlConnectionStringBuilder(connectionString)
+        {
+            Username = username,
+            Password = password,
+            Pooling = false,
+        };
+        return NpgsqlDataSource.Create(builder.ConnectionString);
+    }
+
+    private static async Task RunRegisteredWorkThroughProviderAsync(
+        string connectionString,
+        string dispatcherRole,
+        string dispatcherPassword,
+        string runtimeRole,
+        string runtimePassword,
+        Guid epoch,
+        Guid storeId,
+        string scope,
+        string workerId)
+    {
+        await using var dispatcherDataSource = CreateRoleDataSource(connectionString, dispatcherRole, dispatcherPassword);
+        await using var runtimeDataSource = CreateRoleDataSource(connectionString, runtimeRole, runtimePassword);
+        var registration = new RoleRecipeWorkRegistration();
+        var services = new ServiceCollection();
+        services.AddSingleton<DurableWorkRegistration>(registration);
+        services.AddAppSurfaceDurablePostgreSql(
+            dispatcherDataSource,
+            runtimeDataSource,
+            new PostgreSqlDurableWorkOptions(epoch, storeId),
+            new PostgreSqlDurableScheduleOptions(runtimeRole),
+            options =>
+            {
+                options.WorkerId = workerId;
+                options.SendWakeNotifications = false;
+            });
+        await using var provider = services.BuildServiceProvider();
+        var client = provider.GetRequiredService<IDurableWorkClient>();
+        var accepted = await client.EnqueueAsync(new DurableWorkRequest(
+            new DurableScopeId(scope),
+            new DurableCommandId(scope),
+            $"{scope}-provider-key",
+            RoleRecipeWorkRegistration.Name,
+            "v1",
+            registration.InputCodec.EncodeObject(Encoding.UTF8.GetBytes("routing-test")),
+            DurableProviderSafety.Idempotent));
+        Assert.True(accepted.IsSuccess, accepted.Problem?.Problem);
+
+        var result = await provider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
+            new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work));
+        Assert.Equal(1, result.Discovered);
+        Assert.Equal(1, result.Claimed);
+        Assert.Equal(1, result.Processed);
+        Assert.Equal(0, result.Failed);
+    }
+
+    private static async Task AssertSourcePumpSurfaceRefusedAsync(
+        string connectionString,
+        Guid epoch,
+        Guid storeId,
+        DurableRuntimeSurface surfaces)
+    {
+        await using var dispatcherDataSource = CreateRoleDataSource(
+            connectionString,
+            "source_dispatcher",
+            DispatcherRoleTestPassword);
+        await using var runtimeDataSource = CreateRoleDataSource(
+            connectionString,
+            "source_runtime",
+            RuntimeRoleTestPassword);
+        var registration = new RoleRecipeWorkRegistration();
+        var services = new ServiceCollection();
+        services.AddSingleton<DurableWorkRegistration>(registration);
+        services.AddAppSurfaceDurablePostgreSql(
+            dispatcherDataSource,
+            runtimeDataSource,
+            new PostgreSqlDurableWorkOptions(epoch, storeId),
+            new PostgreSqlDurableScheduleOptions("source_runtime"),
+            options =>
+            {
+                options.WorkerId = $"source-refused-{surfaces}";
+                options.SendWakeNotifications = false;
+            });
+        await using var provider = services.BuildServiceProvider();
+
+        var exception = await Assert.ThrowsAsync<PostgresException>(async () =>
+            await provider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
+                new DurableRuntimePumpRequest(maximumItems: 1, surfaces: surfaces)));
+
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, exception.SqlState);
+    }
+
+    private sealed class RoleRecipeWorkRegistration : DurableWorkRegistration
+    {
+        internal const string Name = "tests.role-recipe.registered-work";
+
+        internal RoleRecipeWorkRegistration()
+            : base(
+                Name,
+                "v1",
+                DurableProviderSafety.Idempotent,
+                new PostgreSqlOpaqueTestCodec("tests.role-recipe.input", "v1"),
+                new PostgreSqlOpaqueTestCodec("tests.role-recipe.result", "v1"))
+        {
+        }
+
+        internal IDurablePayloadCodec InputCodec => WorkCodec;
+
+        public override bool CanReconcile => false;
+
+        public override DurablePreparedWork Prepare(IServiceProvider services, DurableWorkExecutionContext work)
+        {
+            _ = WorkCodec.DecodeObject(work.Payload);
+            return new RoleRecipePreparedWork(ResultCodec.EncodeObject(Encoding.UTF8.GetBytes("processed")));
+        }
+
+        public override ValueTask<DurableEncodedPayload> InvokeAsync(
+            IServiceProvider services,
+            DurableWorkExecutionContext work,
+            CancellationToken cancellationToken = default) => Prepare(services, work).InvokeAsync(cancellationToken);
+
+        public override ValueTask<DurableEncodedEffectReconciliation> ReconcileAsync(
+            IServiceProvider services,
+            DurableWorkExecutionContext work,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Idempotent role recipe test work does not reconcile.");
+    }
+
+    private sealed class RoleRecipePreparedWork(DurableEncodedPayload result) : DurablePreparedWork
+    {
+        public override ValueTask<DurableEncodedPayload> InvokeAsync(CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(result);
+    }
+
+    private static async Task<string> ReadRoleRecipeCatalogSnapshotAsync(NpgsqlDataSource dataSource)
+    {
+        await using var command = dataSource.CreateCommand(
+            """
+            WITH target_roles AS
+            (
+                SELECT oid, rolname
+                FROM pg_catalog.pg_roles
+                WHERE rolname IN
+                    ('durable_dispatcher', 'durable_runtime', 'source_dispatcher', 'source_runtime')
+            ),
+            durable_schema AS
+            (
+                SELECT namespace.oid, namespace.nspacl, owner_role.rolname AS owner_name
+                FROM pg_catalog.pg_namespace AS namespace
+                JOIN pg_catalog.pg_roles AS owner_role ON owner_role.oid = namespace.nspowner
+                WHERE namespace.nspname = 'appsurface_durable'
+            ),
+            relations AS
+            (
+                SELECT relation.oid, relation.relname, relation.relkind, relation.relacl,
+                       owner_role.rolname AS owner_name
+                FROM pg_catalog.pg_class AS relation
+                JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+                JOIN pg_catalog.pg_roles AS owner_role ON owner_role.oid = relation.relowner
+                WHERE namespace.nspname = 'appsurface_durable'
+                  AND relation.relkind IN ('r', 'p', 'v', 'm', 'f')
+            ),
+            sequences AS
+            (
+                SELECT sequence.oid, sequence.relname, sequence.relacl,
+                       owner_role.rolname AS owner_name
+                FROM pg_catalog.pg_class AS sequence
+                JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = sequence.relnamespace
+                JOIN pg_catalog.pg_roles AS owner_role ON owner_role.oid = sequence.relowner
+                WHERE namespace.nspname = 'appsurface_durable' AND sequence.relkind = 'S'
+            ),
+            functions AS
+            (
+                SELECT routine.oid, routine.proname, routine.proacl,
+                       pg_catalog.pg_get_function_identity_arguments(routine.oid) AS arguments,
+                       owner_role.rolname AS owner_name
+                FROM pg_catalog.pg_proc AS routine
+                JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = routine.pronamespace
+                JOIN pg_catalog.pg_roles AS owner_role ON owner_role.oid = routine.proowner
+                WHERE namespace.nspname = 'appsurface_durable'
+            )
+            SELECT pg_catalog.md5(pg_catalog.jsonb_build_object(
+                'schema',
+                (
+                    SELECT pg_catalog.jsonb_build_object(
+                        'oid', durable_schema.oid,
+                        'owner', durable_schema.owner_name,
+                        'acl', CASE WHEN durable_schema.nspacl IS NULL THEN NULL ELSE coalesce((
+                            SELECT pg_catalog.jsonb_agg(acl_item::text ORDER BY acl_item::text)
+                            FROM pg_catalog.unnest(durable_schema.nspacl) AS acl_items(acl_item)
+                        ), '[]'::jsonb) END,
+                        'effective', coalesce((
+                            SELECT pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+                                'role', target_roles.rolname,
+                                'usage', pg_catalog.has_schema_privilege(target_roles.oid, durable_schema.oid, 'USAGE'),
+                                'create', pg_catalog.has_schema_privilege(target_roles.oid, durable_schema.oid, 'CREATE'),
+                                'usage_grant_option', pg_catalog.has_schema_privilege(target_roles.oid, durable_schema.oid, 'USAGE WITH GRANT OPTION'),
+                                'create_grant_option', pg_catalog.has_schema_privilege(target_roles.oid, durable_schema.oid, 'CREATE WITH GRANT OPTION')
+                            ) ORDER BY target_roles.rolname)
+                            FROM target_roles
+                        ), '[]'::jsonb)
+                    )
+                    FROM durable_schema
+                ),
+                'relations', coalesce((
+                    SELECT pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+                        'oid', relations.oid,
+                        'name', relations.relname,
+                        'kind', relations.relkind,
+                        'owner', relations.owner_name,
+                        'acl', CASE WHEN relations.relacl IS NULL THEN NULL ELSE coalesce((
+                            SELECT pg_catalog.jsonb_agg(acl_item::text ORDER BY acl_item::text)
+                            FROM pg_catalog.unnest(relations.relacl) AS acl_items(acl_item)
+                        ), '[]'::jsonb) END,
+                        'effective', coalesce((
+                            SELECT pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+                                'role', target_roles.rolname,
+                                'select', pg_catalog.has_table_privilege(target_roles.oid, relations.oid, 'SELECT'),
+                                'insert', pg_catalog.has_table_privilege(target_roles.oid, relations.oid, 'INSERT'),
+                                'update', pg_catalog.has_table_privilege(target_roles.oid, relations.oid, 'UPDATE'),
+                                'delete', pg_catalog.has_table_privilege(target_roles.oid, relations.oid, 'DELETE'),
+                                'truncate', pg_catalog.has_table_privilege(target_roles.oid, relations.oid, 'TRUNCATE'),
+                                'references', pg_catalog.has_table_privilege(target_roles.oid, relations.oid, 'REFERENCES'),
+                                'trigger', pg_catalog.has_table_privilege(target_roles.oid, relations.oid, 'TRIGGER'),
+                                'select_grant_option', pg_catalog.has_table_privilege(target_roles.oid, relations.oid, 'SELECT WITH GRANT OPTION'),
+                                'insert_grant_option', pg_catalog.has_table_privilege(target_roles.oid, relations.oid, 'INSERT WITH GRANT OPTION'),
+                                'update_grant_option', pg_catalog.has_table_privilege(target_roles.oid, relations.oid, 'UPDATE WITH GRANT OPTION'),
+                                'delete_grant_option', pg_catalog.has_table_privilege(target_roles.oid, relations.oid, 'DELETE WITH GRANT OPTION'),
+                                'truncate_grant_option', pg_catalog.has_table_privilege(target_roles.oid, relations.oid, 'TRUNCATE WITH GRANT OPTION'),
+                                'references_grant_option', pg_catalog.has_table_privilege(target_roles.oid, relations.oid, 'REFERENCES WITH GRANT OPTION'),
+                                'trigger_grant_option', pg_catalog.has_table_privilege(target_roles.oid, relations.oid, 'TRIGGER WITH GRANT OPTION')
+                            ) ORDER BY target_roles.rolname)
+                            FROM target_roles
+                        ), '[]'::jsonb)
+                    ) ORDER BY relations.relname)
+                    FROM relations
+                ), '[]'::jsonb),
+                'columns', coalesce((
+                    SELECT pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+                        'relation_oid', relation.oid,
+                        'relation', relation.relname,
+                        'column', attribute.attname,
+                        'acl', CASE WHEN attribute.attacl IS NULL THEN NULL ELSE coalesce((
+                            SELECT pg_catalog.jsonb_agg(acl_item::text ORDER BY acl_item::text)
+                            FROM pg_catalog.unnest(attribute.attacl) AS acl_items(acl_item)
+                        ), '[]'::jsonb) END,
+                        'effective', coalesce((
+                            SELECT pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+                                'role', target_roles.rolname,
+                                'select', pg_catalog.has_column_privilege(target_roles.oid, relation.oid, attribute.attnum, 'SELECT'),
+                                'insert', pg_catalog.has_column_privilege(target_roles.oid, relation.oid, attribute.attnum, 'INSERT'),
+                                'update', pg_catalog.has_column_privilege(target_roles.oid, relation.oid, attribute.attnum, 'UPDATE'),
+                                'references', pg_catalog.has_column_privilege(target_roles.oid, relation.oid, attribute.attnum, 'REFERENCES'),
+                                'select_grant_option', pg_catalog.has_column_privilege(target_roles.oid, relation.oid, attribute.attnum, 'SELECT WITH GRANT OPTION'),
+                                'insert_grant_option', pg_catalog.has_column_privilege(target_roles.oid, relation.oid, attribute.attnum, 'INSERT WITH GRANT OPTION'),
+                                'update_grant_option', pg_catalog.has_column_privilege(target_roles.oid, relation.oid, attribute.attnum, 'UPDATE WITH GRANT OPTION'),
+                                'references_grant_option', pg_catalog.has_column_privilege(target_roles.oid, relation.oid, attribute.attnum, 'REFERENCES WITH GRANT OPTION')
+                            ) ORDER BY target_roles.rolname)
+                            FROM target_roles
+                        ), '[]'::jsonb)
+                    ) ORDER BY relation.relname, attribute.attnum)
+                    FROM pg_catalog.pg_attribute AS attribute
+                    JOIN relations AS relation ON relation.oid = attribute.attrelid
+                    WHERE attribute.attnum > 0 AND NOT attribute.attisdropped
+                ), '[]'::jsonb),
+                'sequences', coalesce((
+                    SELECT pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+                        'oid', sequences.oid,
+                        'name', sequences.relname,
+                        'owner', sequences.owner_name,
+                        'acl', CASE WHEN sequences.relacl IS NULL THEN NULL ELSE coalesce((
+                            SELECT pg_catalog.jsonb_agg(acl_item::text ORDER BY acl_item::text)
+                            FROM pg_catalog.unnest(sequences.relacl) AS acl_items(acl_item)
+                        ), '[]'::jsonb) END,
+                        'effective', coalesce((
+                            SELECT pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+                                'role', target_roles.rolname,
+                                'usage', pg_catalog.has_sequence_privilege(target_roles.oid, sequences.oid, 'USAGE'),
+                                'select', pg_catalog.has_sequence_privilege(target_roles.oid, sequences.oid, 'SELECT'),
+                                'update', pg_catalog.has_sequence_privilege(target_roles.oid, sequences.oid, 'UPDATE'),
+                                'usage_grant_option', pg_catalog.has_sequence_privilege(target_roles.oid, sequences.oid, 'USAGE WITH GRANT OPTION'),
+                                'select_grant_option', pg_catalog.has_sequence_privilege(target_roles.oid, sequences.oid, 'SELECT WITH GRANT OPTION'),
+                                'update_grant_option', pg_catalog.has_sequence_privilege(target_roles.oid, sequences.oid, 'UPDATE WITH GRANT OPTION')
+                            ) ORDER BY target_roles.rolname)
+                            FROM target_roles
+                        ), '[]'::jsonb)
+                    ) ORDER BY sequences.relname)
+                    FROM sequences
+                ), '[]'::jsonb),
+                'functions', coalesce((
+                    SELECT pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+                        'oid', functions.oid,
+                        'name', functions.proname,
+                        'arguments', functions.arguments,
+                        'owner', functions.owner_name,
+                        'acl', CASE WHEN functions.proacl IS NULL THEN NULL ELSE coalesce((
+                            SELECT pg_catalog.jsonb_agg(acl_item::text ORDER BY acl_item::text)
+                            FROM pg_catalog.unnest(functions.proacl) AS acl_items(acl_item)
+                        ), '[]'::jsonb) END,
+                        'effective', coalesce((
+                            SELECT pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+                                'role', target_roles.rolname,
+                                'execute', pg_catalog.has_function_privilege(target_roles.oid, functions.oid, 'EXECUTE'),
+                                'execute_grant_option', pg_catalog.has_function_privilege(target_roles.oid, functions.oid, 'EXECUTE WITH GRANT OPTION')
+                            ) ORDER BY target_roles.rolname)
+                            FROM target_roles
+                        ), '[]'::jsonb)
+                    ) ORDER BY functions.proname, functions.arguments)
+                    FROM functions
+                ), '[]'::jsonb),
+                'policies', coalesce((
+                    SELECT pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+                        'oid', policy.oid,
+                        'relation_oid', policy.polrelid,
+                        'name', policy.polname,
+                        'command', policy.polcmd,
+                        'permissive', policy.polpermissive,
+                        'roles', policy.polroles::text,
+                        'using', pg_catalog.pg_get_expr(policy.polqual, policy.polrelid),
+                        'check', pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid)
+                    ) ORDER BY policy.polrelid, policy.polname)
+                    FROM pg_catalog.pg_policy AS policy
+                    JOIN pg_catalog.pg_class AS relation ON relation.oid = policy.polrelid
+                    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+                    WHERE namespace.nspname = 'appsurface_durable'
+                ), '[]'::jsonb)
+            )::text);
+            """);
+        return (string)(await command.ExecuteScalarAsync())!;
+    }
+
+    [Fact]
     public async Task RenamedMigrationHistory_FailsClosed()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
@@ -2926,6 +3767,106 @@ public sealed class PostgreSqlSchemaIntegrationTests
     private static ValueTask<int> WaitForBackendAsync(NpgsqlDataSource dataSource, string applicationName)
         => WaitForBackendAsync(dataSource, applicationName, "advisory");
 
+    private static async Task<byte[]> PackagedRoleRecipeAsync(string repositoryRoot, Action<string> report)
+    {
+        var projectPath = TestPathUtils.PathUnder(
+            repositoryRoot,
+            "Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj");
+        var canonicalRecipePath = TestPathUtils.PathUnder(repositoryRoot, "Durable/configure-postgresql-roles.sql");
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Debug";
+        var packageDirectory = Path.Combine(Path.GetTempPath(), $"appsurface-role-recipe-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(packageDirectory);
+        try
+        {
+            report("RoleRecipe package stage: starting dotnet pack (60-second timeout, single MSBuild node).");
+            var startInfo = new ProcessStartInfo("dotnet")
+            {
+                WorkingDirectory = repositoryRoot,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            startInfo.ArgumentList.Add("pack");
+            startInfo.ArgumentList.Add(projectPath);
+            startInfo.ArgumentList.Add("--no-build");
+            startInfo.ArgumentList.Add("--no-restore");
+            startInfo.ArgumentList.Add("--verbosity");
+            startInfo.ArgumentList.Add("minimal");
+            startInfo.ArgumentList.Add("-m:1");
+            startInfo.ArgumentList.Add("-nr:false");
+            startInfo.ArgumentList.Add("--configuration");
+            startInfo.ArgumentList.Add(configuration);
+            startInfo.ArgumentList.Add("--output");
+            startInfo.ArgumentList.Add(packageDirectory);
+            startInfo.ArgumentList.Add("-p:PackageVersion=0.0.0-role-pairs-test");
+
+            using var process = Process.Start(startInfo)
+                ?? throw new InvalidOperationException("Could not start dotnet pack for the PostgreSQL provider.");
+            var stdout = process.StandardOutput.ReadToEndAsync();
+            var stderr = process.StandardError.ReadToEndAsync();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            try
+            {
+                await process.WaitForExitAsync(timeout.Token);
+            }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+            {
+                report("RoleRecipe package stage: dotnet pack timed out; terminating its process tree.");
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch (InvalidOperationException)
+                {
+                    // The process exited between timeout observation and termination.
+                }
+
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                var timedOutOutput = await stdout.WaitAsync(TimeSpan.FromSeconds(10));
+                var timedOutError = await stderr.WaitAsync(TimeSpan.FromSeconds(10));
+                throw new TimeoutException(
+                    $"dotnet pack exceeded 60 seconds. stdout: {timedOutOutput} stderr: {timedOutError}");
+            }
+
+            var output = await stdout;
+            var error = await stderr;
+            Assert.True(
+                process.ExitCode == 0,
+                $"Could not pack the PostgreSQL provider. stdout: {output} stderr: {error}");
+
+            var packagePath = Assert.Single(Directory.GetFiles(packageDirectory, "*.nupkg"));
+            report($"RoleRecipe package stage: pack exited successfully; extracting {Path.GetFileName(packagePath)}.");
+            using var package = ZipFile.OpenRead(packagePath);
+            var entry = package.GetEntry("contentFiles/any/any/configure-postgresql-roles.sql");
+            Assert.NotNull(entry);
+            await using var content = entry!.Open();
+            using var recipe = new MemoryStream();
+            await content.CopyToAsync(recipe);
+            var packagedBytes = recipe.ToArray();
+            Assert.Equal(await File.ReadAllBytesAsync(canonicalRecipePath), packagedBytes);
+            report($"RoleRecipe package stage: extracted {packagedBytes.Length} byte-identical recipe bytes.");
+            return packagedBytes;
+        }
+        finally
+        {
+            Directory.Delete(packageDirectory, recursive: true);
+        }
+    }
+
+    private static async Task StartRoleRecipeContainerAsync(PostgreSqlContainer container, Action<string> report)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        try
+        {
+            await container.StartAsync(timeout.Token);
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        {
+            report("RoleRecipe container stage: PostgreSQL startup exceeded 90 seconds.");
+            throw new TimeoutException("The RoleRecipe PostgreSQL container did not start within 90 seconds.");
+        }
+    }
+
     private static async ValueTask<int> WaitForBackendByApplicationNameAsync(
         NpgsqlDataSource dataSource,
         string applicationName)
@@ -2979,22 +3920,41 @@ public sealed class PostgreSqlSchemaIntegrationTests
         PostgreSqlContainer container,
         string recipePath,
         string owner,
-        string dispatcher,
-        string runtime,
-        string retention = "durable_retention") =>
-        container.ExecAsync(
-            [
-                "env",
-                $"PGAPPNAME={RoleRecipeApplicationName}",
-                "psql",
-                "-U", RoleRecipeUsername,
-                "-d", RoleRecipeDatabase,
-                "-v", $"migration_owner_role={owner}",
-                "-v", $"dispatcher_role={dispatcher}",
-                "-v", $"runtime_role={runtime}",
-                "-v", $"retention_operator_role={retention}",
-                "-f", recipePath,
-            ]);
+        string rolePairsJson,
+        string retention = "durable_retention",
+        bool forceFailure = false)
+    {
+        var arguments = new List<string>
+        {
+            "env",
+            $"PGAPPNAME={RoleRecipeApplicationName}",
+            "psql",
+            "-U", RoleRecipeUsername,
+            "-d", RoleRecipeDatabase,
+            "-v", $"migration_owner_role={owner}",
+            "-v", $"role_pairs_json={rolePairsJson}",
+            "-v", $"retention_operator_role={retention}",
+        };
+        if (forceFailure)
+        {
+            arguments.AddRange(["-v", "role_recipe_test_force_failure=true"]);
+        }
+
+        arguments.AddRange(["-f", recipePath]);
+        return container.ExecAsync(arguments);
+    }
+
+    private static string CreateRolePairsManifest(params (string Dispatcher, string Runtime, string Profile)[] pairs) =>
+        JsonSerializer.Serialize(new
+        {
+            version = 1,
+            pairs = pairs.Select(pair => new
+            {
+                dispatcher = pair.Dispatcher,
+                runtime = pair.Runtime,
+                dispatcher_profile = pair.Profile,
+            }),
+        });
 
     private static async ValueTask ExecuteNonQueryAsync(NpgsqlDataSource dataSource, string sql)
     {
@@ -3056,5 +4016,32 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         throw new TimeoutException($"The migration session did not begin waiting for the {waitEvent} lock.");
+    }
+
+    private static async ValueTask<int> WaitForRoleRecipeLockPollingBackendAsync(
+        NpgsqlDataSource dataSource,
+        string applicationName)
+    {
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            await using var command = dataSource.CreateCommand(
+                """
+                SELECT pid
+                FROM pg_catalog.pg_stat_activity
+                WHERE application_name = @application_name
+                  AND state = 'active'
+                  AND query LIKE '%pg_try_advisory_xact_lock%'
+                LIMIT 1;
+                """);
+            command.Parameters.AddWithValue("application_name", applicationName);
+            if (await command.ExecuteScalarAsync() is int backendPid)
+            {
+                return backendPid;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100));
+        }
+
+        throw new TimeoutException("The role-recipe session did not enter its advisory-lock polling block.");
     }
 }

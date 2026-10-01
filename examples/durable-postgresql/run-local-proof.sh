@@ -9,18 +9,24 @@ CONTAINER_NAME="appsurface-durable-proof-$$"
 MIGRATION_OWNER_ROLE="appsurface_durable_owner"
 DISPATCHER_ROLE="appsurface_durable_dispatcher"
 RUNTIME_ROLE="appsurface_durable_runtime"
+SOURCE_DISPATCHER_ROLE="appsurface_durable_source_dispatcher"
+SOURCE_RUNTIME_ROLE="appsurface_durable_source_runtime"
 RETENTION_ROLE="appsurface_durable_retention"
+ROLE_PAIRS_MANIFEST="$ROOT_DIR/examples/durable-postgresql/role-pairs.example.json"
 STARTED_AT_SECONDS="$(date +%s)"
 POSTGRES_ADMIN_PASSWORD="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
 MIGRATION_OWNER_PASSWORD="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
 DISPATCHER_PASSWORD="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
 RUNTIME_PASSWORD="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+SOURCE_DISPATCHER_PASSWORD="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+SOURCE_RUNTIME_PASSWORD="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
 RETENTION_PASSWORD="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
 FOREGROUND_PID=""
 FOREGROUND_PID_FILE="$(mktemp -t appsurface-durable-proof-pid.XXXXXX)"
 RUNTIME_EPOCH_FILE="$(mktemp -t appsurface-durable-proof-epoch.XXXXXX)"
 ROLE_SQL_FILE="$(mktemp -t appsurface-durable-proof-roles.XXXXXX)"
 LOCAL_PORT_FILE="$(mktemp -t appsurface-durable-proof-port.XXXXXX)"
+OMISSION_OUTPUT_FILE="$(mktemp -t appsurface-durable-proof-omission.XXXXXX)"
 INTERRUPT_REQUESTED=0
 LAUNCHING_FOREGROUND=0
 MAX_TIMEOUT_SECONDS=86400
@@ -71,7 +77,7 @@ cleanup_container() {
 }
 cleanup() {
   cleanup_container
-  rm -f "$FOREGROUND_PID_FILE" "$RUNTIME_EPOCH_FILE" "$ROLE_SQL_FILE" "$LOCAL_PORT_FILE"
+  rm -f "$FOREGROUND_PID_FILE" "$RUNTIME_EPOCH_FILE" "$ROLE_SQL_FILE" "$LOCAL_PORT_FILE" "$OMISSION_OUTPUT_FILE"
 }
 terminate_foreground() {
   local pid="${FOREGROUND_PID:-}"
@@ -187,6 +193,8 @@ printf -v ROLE_SQL '%s\n' \
   "CREATE ROLE $MIGRATION_OWNER_ROLE LOGIN PASSWORD '$MIGRATION_OWNER_PASSWORD' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;" \
   "CREATE ROLE $DISPATCHER_ROLE LOGIN PASSWORD '$DISPATCHER_PASSWORD' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;" \
   "CREATE ROLE $RUNTIME_ROLE LOGIN PASSWORD '$RUNTIME_PASSWORD' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;" \
+  "CREATE ROLE $SOURCE_DISPATCHER_ROLE LOGIN PASSWORD '$SOURCE_DISPATCHER_PASSWORD' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;" \
+  "CREATE ROLE $SOURCE_RUNTIME_ROLE LOGIN PASSWORD '$SOURCE_RUNTIME_PASSWORD' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;" \
   "CREATE ROLE $RETENTION_ROLE LOGIN PASSWORD '$RETENTION_PASSWORD' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;" \
   "GRANT CREATE ON DATABASE $DATABASE_NAME TO $MIGRATION_OWNER_ROLE;"
 printf '%s\n' "$ROLE_SQL" > "$ROLE_SQL_FILE"
@@ -210,21 +218,121 @@ run_foreground dotnet run --project "$ROOT_DIR/Cli/ForgeTrust.AppSurface.Cli" \
   --apply
 printf '[ok] durable schema applied through the package-required version\n'
 
+printf -v FORWARDING_ROLE_PAIRS_JSON \
+  '{"version":1,"pairs":[{"dispatcher":"%s","runtime":"%s","dispatcher_profile":"full"}]}' \
+  "$DISPATCHER_ROLE" "$RUNTIME_ROLE"
 run_foreground docker exec -i "$CONTAINER_NAME" \
   psql -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE_NAME" \
   -v migration_owner_role="$MIGRATION_OWNER_ROLE" \
-  -v dispatcher_role="$DISPATCHER_ROLE" \
-  -v runtime_role="$RUNTIME_ROLE" \
+  -v role_pairs_json="$FORWARDING_ROLE_PAIRS_JSON" \
   -v retention_operator_role="$RETENTION_ROLE" \
   -f - < "$ROOT_DIR/Durable/configure-postgresql-roles.sql" >/dev/null
-printf '[ok] canonical PostgreSQL roles reconciled\n'
+printf '[ok] forwarding role pair reconciled\n'
 
 run_foreground dotnet run --project "$ROOT_DIR/Cli/ForgeTrust.AppSurface.Cli" \
   --configuration Release \
   --no-build \
   -- durable schema preflight \
   --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION
-printf '[ok] schema 11 runtime-role structural preflight passed\n'
+printf '[ok] schema 11 single-pair structural preflight passed before second-pair enrollment\n'
+
+ROLE_PAIRS_JSON="$(<"$ROLE_PAIRS_MANIFEST")"
+run_foreground docker exec -i "$CONTAINER_NAME" \
+  psql -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE_NAME" \
+  -v migration_owner_role="$MIGRATION_OWNER_ROLE" \
+  -v role_pairs_json="$ROLE_PAIRS_JSON" \
+  -v retention_operator_role="$RETENTION_ROLE" \
+  -f - < "$ROOT_DIR/Durable/configure-postgresql-roles.sql" >/dev/null
+printf '[ok] complete two-pair PostgreSQL manifest reconciled\n'
+
+run_foreground docker exec -i "$CONTAINER_NAME" \
+  psql -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE_NAME" \
+  -v migration_owner_role="$MIGRATION_OWNER_ROLE" \
+  -v role_pairs_json="$ROLE_PAIRS_JSON" \
+  -v retention_operator_role="$RETENTION_ROLE" \
+  -f - < "$ROOT_DIR/Durable/configure-postgresql-roles.sql" >/dev/null
+printf '[ok] identical complete-manifest rerun succeeded\n'
+
+if run_foreground docker exec -i "$CONTAINER_NAME" \
+  psql -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE_NAME" \
+  -v migration_owner_role="$MIGRATION_OWNER_ROLE" \
+  -v role_pairs_json="$FORWARDING_ROLE_PAIRS_JSON" \
+  -v retention_operator_role="$RETENTION_ROLE" \
+  -f - < "$ROOT_DIR/Durable/configure-postgresql-roles.sql" > "$OMISSION_OUTPUT_FILE" 2>&1; then
+  printf 'The role recipe accepted an omitted installed pair; expected a fail-closed refusal.\n' >&2
+  exit 1
+fi
+if ! grep -Fq 'Rejected unmanifested Durable role principal(s):' "$OMISSION_OUTPUT_FILE" \
+  || ! grep -Fq "$SOURCE_DISPATCHER_ROLE" "$OMISSION_OUTPUT_FILE"; then
+  printf 'The omitted-pair recipe failed without the expected Source-role refusal; inspect PostgreSQL connectivity and recipe diagnostics.\n' >&2
+  exit 1
+fi
+printf '[ok] omitted-pair manifest was refused\n'
+
+run_foreground docker exec -i "$CONTAINER_NAME" \
+  psql -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE_NAME" \
+  -v source_dispatcher_role="$SOURCE_DISPATCHER_ROLE" -f - <<'SQL'
+SELECT has_schema_privilege(:'source_dispatcher_role', 'appsurface_durable', 'USAGE')
+   AND NOT has_schema_privilege(:'source_dispatcher_role', 'appsurface_durable', 'CREATE')
+   AND has_function_privilege(:'source_dispatcher_role',
+       'appsurface_durable.discover_work_dispatch(text[],text[],integer)', 'EXECUTE')
+   AND NOT EXISTS (
+       SELECT 1
+       FROM pg_catalog.pg_class AS relation
+       JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+       WHERE namespace.nspname = 'appsurface_durable'
+         AND relation.relkind IN ('r', 'p', 'v', 'm', 'f')
+         AND (
+             has_table_privilege(:'source_dispatcher_role', relation.oid, 'SELECT')
+             OR has_table_privilege(:'source_dispatcher_role', relation.oid, 'INSERT')
+             OR has_table_privilege(:'source_dispatcher_role', relation.oid, 'UPDATE')
+             OR has_table_privilege(:'source_dispatcher_role', relation.oid, 'DELETE')
+             OR has_table_privilege(:'source_dispatcher_role', relation.oid, 'TRUNCATE')
+             OR has_table_privilege(:'source_dispatcher_role', relation.oid, 'REFERENCES')
+             OR has_table_privilege(:'source_dispatcher_role', relation.oid, 'TRIGGER')
+             OR EXISTS (
+                 SELECT 1
+                 FROM pg_catalog.pg_attribute AS attribute
+                 CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('REFERENCES')) AS privilege(name)
+                 WHERE attribute.attrelid = relation.oid
+                   AND attribute.attnum > 0
+                   AND NOT attribute.attisdropped
+                   AND has_column_privilege(
+                       :'source_dispatcher_role', relation.oid, attribute.attnum, privilege.name)
+             )
+         )
+   )
+   AND NOT EXISTS (
+       SELECT 1
+       FROM pg_catalog.pg_class AS sequence
+       JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = sequence.relnamespace
+       WHERE namespace.nspname = 'appsurface_durable'
+         AND sequence.relkind = 'S'
+         AND (
+             has_sequence_privilege(:'source_dispatcher_role', sequence.oid, 'USAGE')
+             OR has_sequence_privilege(:'source_dispatcher_role', sequence.oid, 'SELECT')
+             OR has_sequence_privilege(:'source_dispatcher_role', sequence.oid, 'UPDATE')
+         )
+   )
+   AND NOT EXISTS (
+       SELECT 1
+       FROM pg_catalog.pg_proc AS routine
+       JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = routine.pronamespace
+       WHERE namespace.nspname = 'appsurface_durable'
+         AND routine.oid <> 'appsurface_durable.discover_work_dispatch(text[],text[],integer)'::regprocedure
+         AND has_function_privilege(:'source_dispatcher_role', routine.oid, 'EXECUTE')
+   ) AS proof_passed
+\gset
+\if :proof_passed
+  \echo 'Work-only dispatcher privilege proof passed.'
+\else
+  \echo 'Work-only dispatcher privilege proof failed.'
+  SELECT 1 / 0;
+\endif
+SQL
+printf '[ok] Work-only dispatcher has Work discovery and no direct Flow/Schedule authority\n'
+printf '[run-local-proof] reviewed manifest SHA-256: '
+shasum -a 256 "$ROLE_PAIRS_MANIFEST"
 
 run_foreground docker exec "$CONTAINER_NAME" \
   psql -Aqt -U postgres -d "$DATABASE_NAME" -c 'SELECT gen_random_uuid();' > "$RUNTIME_EPOCH_FILE"

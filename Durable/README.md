@@ -25,7 +25,10 @@ not make Slice 4 a hosted runtime.
 
 For the champion-tier upgrade path, start with the [Durable operational-assessment adoption guide](operational-assessments.md).
 It explains the computed health predicates, direct authoritative admission, exhaustive attempt handling, diagnostics,
-schema `9 -> 10` rollout, role reconciliation, and the supported `v0.2.0-preview.8` binary rollback boundary.
+schema `9 -> 10` rollout, complete PostgreSQL role-pair reconciliation, and the supported `v0.2.0-preview.8`
+binary rollback boundary. For the canonical manifest and exact grants, use the
+[PostgreSQL provider role-recipe reference](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#role-recipe-contract)
+and its [two-pair local walkthrough](../examples/durable-postgresql/README.md#version-1-role-pair-walkthrough).
 
 For host and module tests, use the [Durable Testing package guide](ForgeTrust.AppSurface.Durable.Testing/README.md)
 for its six health-state defaults, authoritative pump-admission scenario, timeout handling, history retention, and
@@ -41,7 +44,8 @@ public, testable contracts without friend access to the application package. The
 The application package registers only passive registries. A provider is selected explicitly by the host. The PostgreSQL
 provider adds explicit migrations (`0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`,
 `0004_schedule_protocol`, `0005_runtime_heartbeat`, `0006_flow_trace_context`, `0007_flow_retention`,
-`0008_flow_repair`, `0009_work_contract_discovery`, and `0010_runtime_health_observation`) plus one-operation-at-a-time Work, Flow, and Work-first Schedule
+`0008_flow_repair`, `0009_work_contract_discovery`, `0010_runtime_health_observation`, and
+`0011_runtime_heartbeat_retention`) plus one-operation-at-a-time Work, Flow, and Work-first Schedule
 persistence with versioned W3C
 causal evidence, verified retention, and evidence-first Flow repair. PostgreSQL registration remains passive; an
 application explicitly adds one bounded polling host through
@@ -87,6 +91,13 @@ online commands accept no connection-string argument and never print connection 
 For recovery, inspect status first, produce a corrected and reviewed forward-only script, then retry the intended
 operation. Never delete or rewrite migration history. The [`durable-postgresql` example](../examples/durable-postgresql/README.md)
 is a local proof of the boundaries above, not production operations guidance.
+
+The role recipe takes a complete version-1 `role_pairs_json` manifest on every run. Each pair explicitly chooses
+`full` or `work_only`; omission is not retirement. After schema 11, the reviewed deployment manifest is the authority
+for the complete pair set, and the recipe refuses omissions it can observe in package ACLs or policy targets. Compare
+the exact reviewed manifest file with the prior release record because a privileged actor could erase every catalog
+trace of a former pair. The recipe is transactional, but policy DDL can wait briefly on active work. See the
+[operator rollout and rollback order](operational-assessments.md#migration-and-role-reconciliation).
 
 Typed Work authoring is documented in the [typed Work definition migration guide](migrations/typed-work-definitions-v1.md).
 It is a syntax and rollout guide; the existing PostgreSQL workload remains the evidence for acceptance and terminal

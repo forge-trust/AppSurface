@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Razor.TagHelpers;
 namespace ForgeTrust.RazorWire.TagHelpers;
 
 /// <summary>
-/// A Tag Helper that enhances a standard <c>&lt;form&gt;</c> element with RazorWire/Turbo features.
+/// A Tag Helper that enhances a standard <c>&lt;form&gt;</c> element with RazorWire/Turbo features and loading ownership.
 /// </summary>
 [HtmlTargetElement("form", Attributes = "rw-active")]
 public class RazorWireFormTagHelper : TagHelper
@@ -15,7 +15,7 @@ public class RazorWireFormTagHelper : TagHelper
     /// <summary>
     /// Initializes a new instance of the <see cref="RazorWireFormTagHelper"/> class.
     /// </summary>
-    /// <param name="options">RazorWire options used to determine failed-form defaults.</param>
+    /// <param name="options">RazorWire options used to determine failed-form and loading defaults.</param>
     public RazorWireFormTagHelper(RazorWireOptions options)
     {
         _options = options;
@@ -25,6 +25,12 @@ public class RazorWireFormTagHelper : TagHelper
     /// Gets or sets a value indicating whether RazorWire/Turbo enhancement is enabled for this form.
     /// Defaults to <c>true</c>.
     /// </summary>
+    /// <remarks>
+    /// When enabled and <see cref="RazorWireOptions.Forms"/>.<see cref="RazorWireFormOptions.Loading"/> is enabled,
+    /// the helper emits <c>data-rw-loading="true"</c> unless the form opts out with
+    /// <c>data-rw-loading="off"</c>. Setting this property to <see langword="false"/> disables Turbo enhancement and
+    /// removes the loading ownership marker.
+    /// </remarks>
     [HtmlAttributeName("rw-active")]
     public bool Enabled { get; set; } = true;
 
@@ -48,7 +54,7 @@ public class RazorWireFormTagHelper : TagHelper
     public string? Antiforgery { get; set; }
 
     /// <summary>
-    /// Processes a form tag by removing attributes that start with "rw-" and configuring Turbo attributes based on the tag helper's properties.
+    /// Processes an active form by applying its Turbo, loading, anti-forgery, and failed-form conventions.
     /// </summary>
     /// <param name="context">The context for the current tag helper execution.</param>
     /// <param name="output">The tag helper output whose attributes will be modified.</param>
@@ -61,6 +67,8 @@ public class RazorWireFormTagHelper : TagHelper
         {
             output.Attributes.Remove(attr);
         }
+
+        ApplyFormLoadingConvention(output);
 
         if (!Enabled)
         {
@@ -79,6 +87,30 @@ public class RazorWireFormTagHelper : TagHelper
         ApplyAntiforgeryConvention(output);
 
         ApplyFormFailureConvention(output);
+    }
+
+    private void ApplyFormLoadingConvention(TagHelperOutput output)
+    {
+        var configuredMode = output.Attributes["data-rw-loading"]?.Value?.ToString();
+        var isOptedOut = string.Equals(configuredMode, "off", StringComparison.OrdinalIgnoreCase);
+        if (!Enabled || !_options.Forms.Loading.Enabled)
+        {
+            if (!isOptedOut)
+            {
+                var loadingAttribute = output.Attributes["data-rw-loading"];
+                if (loadingAttribute is not null)
+                {
+                    output.Attributes.Remove(loadingAttribute);
+                }
+            }
+
+            return;
+        }
+
+        if (!isOptedOut)
+        {
+            output.Attributes.SetAttribute("data-rw-loading", "true");
+        }
     }
 
     private void ApplyAntiforgeryConvention(TagHelperOutput output)

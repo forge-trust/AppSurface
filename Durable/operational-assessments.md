@@ -10,6 +10,12 @@ reference remains in the [Durable](README.md), [Provider](ForgeTrust.AppSurface.
 
 ## Audience and boundary
 
+For shared-store deployments with separately identified worker lanes, this guide is the operator start page. The
+[PostgreSQL provider reference](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#role-recipe-contract) defines the
+version-1 manifest and exact grant profiles; the [local two-pair walkthrough](../examples/durable-postgresql/README.md#version-1-role-pair-walkthrough)
+shows a disposable database proof. The boundary is deployed credentials and operational identity on one store, not
+PostgreSQL-enforced row isolation by lane.
+
 | You are | Start with | The provider decides | Your application still owns |
 | --- | --- | --- | --- |
 | Existing worker host | [existing-host recipe](#existing-host-recipe) | Store observation, schema/epoch compatibility, admission, pass bookkeeping | Process lifetime, traffic readiness, retry policy, authorization |
@@ -202,9 +208,26 @@ scope ids, or aggregate ids.
 | Exception before execution | Malformed data, undefined object, unclassified provider failure, or caller cancellation | Preserve and diagnose the original exception; fix the provider/store contract or cancellation owner | Do not classify or silently retry from exception text | Application execution did not begin |
 | Exception after execution begins | Application failure, finalization failure, or cleanup failure | Inspect durable state and the original exception; cleanup is bounded and secondary | Do not retry automatically | Execution may have begun; do not treat it as a safe refusal |
 
+## Shared-store role-pair choice
+
+| Choice | What it provides | Operational cost and boundary |
+| --- | --- | --- |
+| One shared pair | Lowest credential and review overhead | Both lanes share deployed identity; it does not meet a separate-lane credential/audit requirement. |
+| Two pairs on one store | Distinct dispatcher/runtime credentials and secret rotation per deployed lane, with one StoreId and active epoch | One shared failure domain and database. Existing RLS scopes and Work registration rules retain their meaning; neither role pair nor a Work selector partitions rows by lane. |
+| Separate stores | Independent database failure domains and store-level access administration | Requires separate StoreIds/epochs and explicit cross-store coordination; it changes the shared-store semantics. Use it when that tradeoff is desired. |
+
+Require a separately designed PostgreSQL row partition or separate store when the security requirement is independent
+database-enforced row authorization or failure isolation. Transaction-local `scope_id` is caller-set execution context,
+and Work discovery contract arrays are routing selectors; neither authenticates a lane. The `work_only` profile removes
+direct Durable SQL access from its dispatcher, but it does not narrow the paired runtime's reviewed SQL grant set.
+
 ## Migration and role reconciliation
 
-The #794 rollout is migration-first and forward-only:
+The following is the historical #794 schema-10 rollout sequence. The role recipe matching the #794 release was paired with
+migration 0010; the current packaged recipe also references the heartbeat-pruning function introduced by migration
+0011. For current package deployments, apply all migrations through 0011 before running the matching package recipe.
+
+That historical #794 rollout was migration-first and forward-only:
 
 1. Drain/stop every durable worker and Schedule writer, disable external activators, and hold the reviewed maintenance
    window through migration 10. Its partial lease-expiry index uses transactional `CREATE INDEX`, so Schedule writes
@@ -213,25 +236,75 @@ The #794 rollout is migration-first and forward-only:
    and a later retry.
 2. Generate and review the exact script from the installed version.
 3. Verify that the configured migration owner already owns the schema-9
-   `runtime_due_dispatch_health(integer)` function. If ownership drifted, run
-   [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
-   with the intended migration owner before applying the migration. Migration 0010 deliberately fails before DDL
-   rather than replacing a function owned by another principal.
+   `runtime_due_dispatch_health(integer)` function. If ownership drift requires correction before migration, stop and
+   use a separately reviewed repair invocation against the currently installed schema; this is not the normal
+   post-migration pair-enrollment run. Migration 0010 deliberately fails before DDL rather than replacing a function
+   owned by another principal.
 4. Apply migration `0010_runtime_health_observation` with that migration owner through the generated script or the
    explicit CLI apply command, taking schema 9 to schema 10. The embedded `.sql` resource is a checksum-bound migration
    fragment whose `SET LOCAL` relies on the package-generated transaction wrapper; do not pass the fragment directly
    to `psql`.
-5. Rerun the role recipe
-   to reconcile object ownership, `PUBLIC EXECUTE`, and the four restricted login leaves.
+5. For the historical schema-10 rollout, use the [schema-10 single-pair role recipe](https://github.com/forge-trust/AppSurface/blob/e0618ac8/Durable/configure-postgresql-roles.sql)
+   from the matching source commit with its single-pair role arguments to reconcile object ownership,
+   `PUBLIC EXECUTE`, and the restricted dispatcher/runtime roles. That source snapshot's provider package did not include the
+   recipe in `contentFiles`; that recipe predates version-1 `role_pairs_json`, so do not pass it a current manifest.
+   Keep the exact source commit and role inputs with the release record.
 6. Run schema `status` and `preflight`, verify the active epoch and StoreId, then smoke-test the old supported reader.
 7. Deploy the #794 binary, exercise health and both pump interfaces, and re-enable activation.
 
-The role recipe remains required after the migration even when the function signature is unchanged. It must leave the
-migration owner as the owner of package objects/functions, revoke `PUBLIC EXECUTE`, grant the runtime role only the
-reviewed aggregate observation/heartbeat capabilities, and keep dispatcher, runtime, and retention roles distinct
-restricted login leaves. Registration stays passive: it never applies this migration or repairs grants at startup.
+For current package deployments, apply migration 0011 before running the matching released package's recipe with the
+complete reviewed version-1 `role_pairs_json` manifest. The #794 historical schema-10 reconciliation above is
+specific to that release and its single-pair recipe. The role recipe remains required after the applicable migration
+even when the function signature is unchanged. It must leave the
+migration owner as the owner of package objects/functions, revoke package-schema `PUBLIC` privileges, grant each
+runtime only its reviewed scoped runtime capabilities (including documented heartbeat rights), and keep every
+dispatcher/runtime pair plus the retention role as distinct restricted login leaves. Registration stays passive: it
+never applies this migration or repairs grants at startup.
 
-With `APPSURFACE_DURABLE_MIGRATION_CONNECTION` naming the migration-owner connection, the review/apply sequence is:
+The version-1 manifest has exactly `version: 1` and `pairs` (1–32 entries); each pair has exactly `dispatcher`,
+`runtime`, and required `dispatcher_profile` (`full` or `work_only`). The profile matrix and full schema are in the
+[provider reference](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#role-recipe-contract). A typical conversion
+keeps the existing forwarding pair as `full` and adds the Source pair as `work_only`. No profile is implicit. Every
+role recipe rerun uses the same complete reviewed manifest; an old one-pair rerun after enrollment must refuse before
+mutation. An identical rerun preserves policy OIDs, policy definitions/targets, ACLs, owners, and effective privileges.
+The recipe can reject omitted principals visible in managed policy targets and package ACLs, but catalog inference
+cannot detect a prior pair after a privileged actor has erased all its catalog traces. Compare the exact file against
+the prior release record for that reason.
+
+For certificate evidence, hash the exact UTF-8 bytes of the reviewed manifest passed to the recipe and record the file
+path, SHA-256 digest, pair role names/profiles, released package version, schema version, both lane surface settings,
+and confirmation that both lanes use the same authoritative StoreId and active epoch. A whitespace or ordering edit
+changes the digest and needs re-review. State the claim as a **deployed-lane credential boundary**; do not claim
+PostgreSQL row isolation. The AppSurface release owner supplies package/recipe evidence; the deployment/certificate
+owner confirms the live role slots, host configuration, StoreId/epoch, and activation evidence. The certificate must
+use the words “deployed-lane boundary” and explicitly disclaim PostgreSQL-enforced per-lane row isolation.
+
+For the Source lane, set `HostedSurfaces = DurableRuntimeSurface.Work` and pass `DurableRuntimeSurface.Work` to every
+direct pump and recovery request. The provider default is `All`; a Work-only dispatcher cannot make a mistakenly
+selected Flow or Schedule pass succeed. Prove Work discovery/pump and recovery, and verify direct Durable table,
+column, sequence, Flow, and Schedule access is denied. The local example checks source dispatcher grants while its
+existing end-to-end workload remains on the forwarding connection; use the deployment's real Source worker for
+certificate pump evidence.
+
+Keep Source processing closed until migration, complete-manifest reconciliation, exact preflight, the before/after
+forwarding proof, Source Work-only privilege and pump proof, and certificate review pass. The recipe is atomic, but
+policy DDL and its advisory lock can briefly wait on work; drain within the bounded maintenance procedure and do not
+promise zero blocking. On any error keep Source closed and repair/roll forward with the full manifest. Never use a
+one-pair manifest, broad grant, or destructive schema rollback as recovery. Pair retirement and profile narrowing
+require a separately reviewed procedure.
+
+The schema-11-capable role recipe grants heartbeat pruning to every authorized runtime and no dispatcher. The current
+schema-11 CLI preflight still checks one runtime role and rejects the catalog after a second pair is enrolled. The
+[local walkthrough](../examples/durable-postgresql/README.md#version-1-role-pair-walkthrough) runs that preflight on
+the forwarding-only configuration before adding the second pair, then proves both pairs' SQL privileges and the
+forwarding workload. Keep Source activation closed until [#795](https://github.com/forge-trust/AppSurface/issues/795)
+replaces the single-runtime check with an exact restricted runtime-role set matching the manifest, policies, and
+function allowlists. Its release gate includes a real schema-10-to-11 upgrade and both-pair reproof.
+
+For the historical #794 rollout, run this sequence from the
+[schema-10 source snapshot](https://github.com/forge-trust/AppSurface/tree/e0618ac8), with
+`APPSURFACE_DURABLE_MIGRATION_CONNECTION` naming the migration-owner connection. The current checkout's CLI applies
+through 0011 and does not produce this 9-to-10-only script.
 
 ```console
 $ dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
@@ -242,10 +315,11 @@ $ dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
 $ dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
     durable schema script --from-version 9 \
     --output /tmp/appsurface-durable-9-to-10.sql
-# Review the generated file; it must contain only migration 0010 for this upgrade.
+# Review the generated file; for the historical #794 upgrade it must contain only migration 0010.
 
-# If the schema-9 function is not already owned by appsurface_durable_owner, run the canonical role recipe here
-# before applying the migration. Healthy installations skip this repair-only invocation.
+# Historical #794 only: if the schema-9 function is not already owned by appsurface_durable_owner, run that
+# release's matching role recipe here before applying the migration. Never use the current recipe before 0011.
+# Healthy installations skip this repair-only invocation.
 
 $ dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
     durable schema apply \
@@ -284,7 +358,7 @@ recipe. The additive migration remains in place; do not delete migration rows or
 
 | Binary | Schema 9 | Schema 10 | Action |
 | --- | --- | --- | --- |
-| #794 binary | Upgrade required | Current/compatible | Apply migration and roles before activation |
+| #794 binary | Upgrade required | Current/compatible | Apply migration, reconcile the complete manifest from the matching package, and preflight before activation |
 | `v0.2.0-preview.8` | Current/compatible | Compatible Work reader/writer: its published range includes 10 and migration 0010 preserves the Work discovery function signature | Stop activation, deploy this binary, smoke-test status/health/heartbeat/real Work, then decide whether to continue; this exact-package proof makes no Flow or Schedule rollback claim |
 | Pre-`0009` binary | Not a supported post-role-recipe rollback | Not supported | Keep stopped; repair forward or restore the reviewed role posture |
 

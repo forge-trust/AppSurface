@@ -275,6 +275,150 @@ public sealed class TailwindTaskResolverTests : IDisposable
     }
 
     [Fact]
+    public async Task Resolver_TaskAssemblyStreamsLargeBinaryThroughTheProductionHttpPipeline()
+    {
+        var payload = Enumerable.Range(0, 240_000).Select(static value => (byte)(value * 31)).ToArray();
+        var manifest = TaskInternal.TailwindReleaseManifest.LoadFromFile(WriteControlledManifest(payload));
+        var asset = manifest.GetAsset("linux-x64");
+        using var client = new HttpClient(new TaskHttpMessageHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("sha256sums.txt", StringComparison.Ordinal))
+            {
+                return CreateHttpResponse(HttpStatusCode.OK, CreateChecksums(asset, payload));
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new ChunkedReadStream(payload, 7_111))
+            };
+        }));
+        var resolver = new TaskInternal.TailwindCliResolver(manifest, httpClient: client);
+
+        var resolved = await resolver.ResolveAsync(
+            new TaskInternal.TailwindCliResolverOptions(null, _tempRoot, Path.Join(_tempRoot, "large-cache"), manifest.Version, asset.Rid),
+            CancellationToken.None);
+
+        Assert.Equal(TaskInternal.TailwindCliCacheState.Acquired, resolved.CacheState);
+        Assert.Equal(payload, await File.ReadAllBytesAsync(resolved.Path));
+        Assert.Equal(asset.Sha256, Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(resolved.Path))).ToLowerInvariant());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Resolver_TaskAssemblyMapsNonRetryableHttpResponsesWithoutRetry(bool failChecksumRequest)
+    {
+        var payload = Encoding.UTF8.GetBytes("non-retryable response task binary");
+        var manifest = TaskInternal.TailwindReleaseManifest.LoadFromFile(WriteControlledManifest(payload));
+        var asset = manifest.GetAsset("linux-x64");
+        var requests = 0;
+        using var client = new HttpClient(new TaskHttpMessageHandler(request =>
+        {
+            requests++;
+            if (failChecksumRequest || !request.RequestUri!.AbsolutePath.EndsWith("sha256sums.txt", StringComparison.Ordinal))
+            {
+                return CreateHttpResponse(HttpStatusCode.NotFound, Array.Empty<byte>());
+            }
+
+            return CreateHttpResponse(HttpStatusCode.OK, CreateChecksums(asset, payload));
+        }));
+        var resolver = new TaskInternal.TailwindCliResolver(manifest, httpClient: client);
+
+        var exception = await Assert.ThrowsAsync<TaskInternal.TailwindCliResolutionException>(() => resolver.ResolveAsync(
+            new TaskInternal.TailwindCliResolverOptions(null, _tempRoot, Path.Join(_tempRoot, "http-cache"), manifest.Version, asset.Rid),
+            CancellationToken.None));
+
+        Assert.Equal(TaskInternal.TailwindCliResolutionFailure.NetworkFailure, exception.Failure);
+        Assert.Equal(failChecksumRequest ? 1 : 2, requests);
+    }
+
+    [Fact]
+    public async Task Resolver_TaskAssemblyRejectsUnknownLengthBinaryThatExceedsConfiguredLimit()
+    {
+        var payload = Encoding.UTF8.GetBytes("known trusted small task binary");
+        var oversized = Enumerable.Repeat((byte)0x5a, 257).ToArray();
+        var manifest = TaskInternal.TailwindReleaseManifest.LoadFromFile(WriteControlledManifest(payload));
+        var asset = manifest.GetAsset("linux-x64");
+        using var client = new HttpClient(new TaskHttpMessageHandler(request =>
+            request.RequestUri!.AbsolutePath.EndsWith("sha256sums.txt", StringComparison.Ordinal)
+                ? CreateHttpResponse(HttpStatusCode.OK, CreateChecksums(asset, payload))
+                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new ChunkedReadStream(oversized, 11)) }));
+        var resolver = new TaskInternal.TailwindCliResolver(manifest, httpClient: client, maximumBinaryBytes: 128);
+
+        var exception = await Assert.ThrowsAsync<TaskInternal.TailwindCliResolutionException>(() => resolver.ResolveAsync(
+            new TaskInternal.TailwindCliResolverOptions(null, _tempRoot, Path.Join(_tempRoot, "bounded-cache"), manifest.Version, asset.Rid),
+            CancellationToken.None));
+
+        Assert.Equal(TaskInternal.TailwindCliResolutionFailure.DownloadSizeLimit, exception.Failure);
+        Assert.Empty(Directory.EnumerateFiles(Path.Join(_tempRoot, "bounded-cache"), "*.partial-*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task Resolver_TaskAssemblyRejectsOversizedChecksumBeforeDownloadingBinary()
+    {
+        var payload = Encoding.UTF8.GetBytes("trusted task binary");
+        var manifest = TaskInternal.TailwindReleaseManifest.LoadFromFile(WriteControlledManifest(payload));
+        var asset = manifest.GetAsset("linux-x64");
+        var binaryRequests = 0;
+        var resolver = new TaskInternal.TailwindCliResolver(manifest, (uri, _) =>
+        {
+            if (uri.AbsolutePath.EndsWith("sha256sums.txt", StringComparison.Ordinal))
+            {
+                return Task.FromResult(new byte[1024 * 1024 + 1]);
+            }
+
+            binaryRequests++;
+            return Task.FromResult(payload);
+        });
+
+        var exception = await Assert.ThrowsAsync<TaskInternal.TailwindCliResolutionException>(() => resolver.ResolveAsync(
+            new TaskInternal.TailwindCliResolverOptions(null, _tempRoot, Path.Join(_tempRoot, "checksum-limit-cache"), manifest.Version, asset.Rid),
+            CancellationToken.None));
+
+        Assert.Equal(TaskInternal.TailwindCliResolutionFailure.DownloadSizeLimit, exception.Failure);
+        Assert.Equal(0, binaryRequests);
+    }
+
+    [Fact]
+    public async Task Resolver_TaskAssemblyPreservesVerifiedEntryWhenOwnedArtifactCleanupFails()
+    {
+        var payload = Encoding.UTF8.GetBytes("verified task binary survives cleanup failure");
+        var manifest = TaskInternal.TailwindReleaseManifest.LoadFromFile(WriteControlledManifest(payload));
+        var asset = manifest.GetAsset("linux-x64");
+        var resolver = new TaskInternal.TailwindCliResolver(
+            manifest,
+            (uri, _) => Task.FromResult(CreateDownload(uri, asset, payload)),
+            deleteFile: _ => throw new IOException("simulated cleanup failure"));
+
+        var resolved = await resolver.ResolveAsync(
+            new TaskInternal.TailwindCliResolverOptions(null, _tempRoot, Path.Join(_tempRoot, "cleanup-cache"), manifest.Version, asset.Rid),
+            CancellationToken.None);
+
+        Assert.Equal(TaskInternal.TailwindCliCacheState.Acquired, resolved.CacheState);
+        Assert.Equal(payload, await File.ReadAllBytesAsync(resolved.Path));
+    }
+
+    [Fact]
+    public async Task Resolver_TaskAssemblyRejectsInvalidConfiguredCachePathBeforeDownload()
+    {
+        var downloadCalls = 0;
+        var manifest = TaskInternal.TailwindReleaseManifest.LoadFromFile(GetRepositoryManifestPath());
+        var resolver = new TaskInternal.TailwindCliResolver(manifest, (_, _) =>
+        {
+            downloadCalls++;
+            return Task.FromResult(Array.Empty<byte>());
+        });
+
+        var exception = await Assert.ThrowsAsync<TaskInternal.TailwindCliResolutionException>(() => resolver.ResolveAsync(
+            new TaskInternal.TailwindCliResolverOptions(null, _tempRoot, "bad\0cache", manifest.Version, "linux-x64"),
+            CancellationToken.None));
+
+        Assert.Equal(TaskInternal.TailwindCliResolutionFailure.InvalidCache, exception.Failure);
+        Assert.IsType<ArgumentException>(exception.InnerException);
+        Assert.Equal(0, downloadCalls);
+    }
+
+    [Fact]
     public async Task Resolver_RejectsAReleaseWhoseChecksumDisagreesWithThePinnedDigest()
     {
         var payload = Encoding.UTF8.GetBytes("untrusted task executable");
@@ -696,6 +840,39 @@ public sealed class TailwindTaskResolverTests : IDisposable
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(responseFactory(request));
         }
+    }
+
+    private sealed class ChunkedReadStream(byte[] bytes, int chunkSize) : Stream
+    {
+        private int _position;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var length = Math.Min(Math.Min(count, chunkSize), bytes.Length - _position);
+            Array.Copy(bytes, _position, buffer, offset, length);
+            _position += length;
+            return length;
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var length = Math.Min(Math.Min(buffer.Length, chunkSize), bytes.Length - _position);
+            bytes.AsMemory(_position, length).CopyTo(buffer);
+            _position += length;
+            return ValueTask.FromResult(length);
+        }
+
+        public override void Flush() => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private static string CreateManifestJson(Func<string, string> binaryNameForRid)

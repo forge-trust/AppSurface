@@ -14,10 +14,14 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
     private const string MigrationOwnerRole = "appsurface_durable_owner";
     private const string DispatcherRole = "appsurface_durable_dispatcher";
     private const string RuntimeRole = "appsurface_durable_runtime";
+    private const string SourceDispatcherRole = "appsurface_durable_source_dispatcher";
+    private const string SourceRuntimeRole = "appsurface_durable_source_runtime";
     private const string RetentionOperatorRole = "appsurface_durable_retention";
     private const string MigrationOwnerPassword = "durable-owner-test-password";
     private const string DispatcherPassword = "durable-dispatcher-test-password";
     private const string RuntimePassword = "durable-runtime-test-password";
+    private const string SourceDispatcherPassword = "durable-source-dispatcher-test-password";
+    private const string SourceRuntimePassword = "durable-source-runtime-test-password";
     private const string RetentionOperatorPassword = "durable-retention-test-password";
     private const string RoleRecipeContainerPath = "/tmp/configure-postgresql-roles.sql";
     private const string PostgreSqlImage =
@@ -57,25 +61,32 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
         Assert.Equal(1, await DurablePostgreSqlLocalExample.RunAsync(["verify-local"], CancellationToken.None));
 
         await new PostgreSqlDurableRuntimeSchemaManager(administratorDataSource).ApplyAsync();
-        var roleRecipe = await container.ExecAsync(
-            [
-                "env",
-                "PGAPPNAME=durable-local-example-coverage",
-                "psql",
-                "-U", AdministratorUser,
-                "-d", DatabaseName,
-                "-v", $"migration_owner_role={MigrationOwnerRole}",
-                "-v", $"dispatcher_role={DispatcherRole}",
-                "-v", $"runtime_role={RuntimeRole}",
-                "-v", $"retention_operator_role={RetentionOperatorRole}",
-                "-f", RoleRecipeContainerPath,
-            ]);
+        var roleRecipe = await RunRoleRecipeAsync(container, "durable-local-example-forwarding",
+            $"{{\"version\":1,\"pairs\":[{{\"dispatcher\":\"{DispatcherRole}\",\"runtime\":\"{RuntimeRole}\",\"dispatcher_profile\":\"full\"}}]}}");
         Assert.True(
             roleRecipe.ExitCode == 0,
             $"Role recipe failed with exit {roleRecipe.ExitCode}. stdout: {roleRecipe.Stdout} stderr: {roleRecipe.Stderr}");
 
         Assert.Equal(0, await DurablePostgreSqlLocalExample.RunAsync(["schema-bootstrap-dev"], CancellationToken.None));
-        Assert.Equal(1, await DurablePostgreSqlLocalExample.RunAsync(["schema-bootstrap-dev"], CancellationToken.None));
+        var finalVerification = await CaptureCommandAsync("verify-local");
+        Assert.True(
+            finalVerification.ExitCode == 0,
+            $"Final verify-local failed. stdout: {finalVerification.Output} stderr: {finalVerification.Error}");
+        await AssertProofStateAsync(administratorDataSource, Guid.Parse(runtimeEpoch));
+
+        roleRecipe = await RunRoleRecipeAsync(container, "durable-local-example-two-pair",
+            $"{{\"version\":1,\"pairs\":[{{\"dispatcher\":\"{DispatcherRole}\",\"runtime\":\"{RuntimeRole}\",\"dispatcher_profile\":\"full\"}},{{\"dispatcher\":\"{SourceDispatcherRole}\",\"runtime\":\"{SourceRuntimeRole}\",\"dispatcher_profile\":\"work_only\"}}]}}");
+        Assert.True(
+            roleRecipe.ExitCode == 0,
+            $"Two-pair role recipe failed with exit {roleRecipe.ExitCode}. stdout: {roleRecipe.Stdout} stderr: {roleRecipe.Stderr}");
+        await AssertDispatcherCannotReadFlowDispatchAsync(container.GetConnectionString());
+        await AssertForwardingDispatcherCapabilitiesAsync(administratorDataSource);
+        await AssertProofStateAsync(administratorDataSource, Guid.Parse(runtimeEpoch));
+
+        var repeatedBootstrap = await CaptureCommandAsync("schema-bootstrap-dev");
+        Assert.Equal(1, repeatedBootstrap.ExitCode);
+        Assert.Contains("Command failed with InvalidOperationException.", repeatedBootstrap.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain("[schema-bootstrap-dev] active epoch initialized", repeatedBootstrap.Output, StringComparison.Ordinal);
         using (var mismatchedEpoch = new EnvironmentVariableScope("APPSURFACE_DURABLE_RUNTIME_EPOCH", Guid.NewGuid().ToString("D")))
         {
             Assert.Equal(1, await DurablePostgreSqlLocalExample.RunAsync(["verify-local"], CancellationToken.None));
@@ -88,16 +99,27 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
             Assert.Equal(1, await DurablePostgreSqlLocalExample.RunAsync(["verify-local"], CancellationToken.None));
         }
 
-        await using (var runtimeSeedDataSource = NpgsqlDataSource.Create(
-                         ConnectionStringForRole(container.GetConnectionString(), RuntimeRole, RuntimePassword)))
-        {
-            await DurablePostgreSqlLocalExample.SeedRetentionProofAsync(runtimeSeedDataSource, Guid.Parse(runtimeEpoch), CancellationToken.None);
-            await DurablePostgreSqlLocalExample.SeedRetentionProofAsync(runtimeSeedDataSource, Guid.Parse(runtimeEpoch), CancellationToken.None);
-        }
-
-        Assert.Equal(0, await DurablePostgreSqlLocalExample.RunAsync(["verify-local"], CancellationToken.None));
-        await AssertProofStateAsync(administratorDataSource, Guid.Parse(runtimeEpoch));
         AssertWorkerSchemaGuardRejectsEveryChange();
+    }
+
+    private static async Task<(int ExitCode, string Output, string Error)> CaptureCommandAsync(string command)
+    {
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        var previousOutput = Console.Out;
+        var previousError = Console.Error;
+        Console.SetOut(output);
+        Console.SetError(error);
+        try
+        {
+            var exitCode = await DurablePostgreSqlLocalExample.RunAsync([command], CancellationToken.None);
+            return (exitCode, output.ToString(), error.ToString());
+        }
+        finally
+        {
+            Console.SetOut(previousOutput);
+            Console.SetError(previousError);
+        }
     }
 
     [Fact]
@@ -135,19 +157,8 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
         await CreateTutorialRolesAsync(administratorDataSource);
         await new PostgreSqlDurableRuntimeSchemaManager(administratorDataSource).ApplyAsync();
 
-        var roleRecipe = await container.ExecAsync(
-            [
-                "env",
-                "PGAPPNAME=durable-local-example-invalid-state",
-                "psql",
-                "-U", AdministratorUser,
-                "-d", DatabaseName,
-                "-v", $"migration_owner_role={MigrationOwnerRole}",
-                "-v", $"dispatcher_role={DispatcherRole}",
-                "-v", $"runtime_role={RuntimeRole}",
-                "-v", $"retention_operator_role={RetentionOperatorRole}",
-                "-f", RoleRecipeContainerPath,
-            ]);
+        var roleRecipe = await RunRoleRecipeAsync(container, "durable-local-example-invalid-state",
+            $"{{\"version\":1,\"pairs\":[{{\"dispatcher\":\"{DispatcherRole}\",\"runtime\":\"{RuntimeRole}\",\"dispatcher_profile\":\"full\"}}]}}");
         Assert.True(
             roleRecipe.ExitCode == 0,
             $"Role recipe failed with exit {roleRecipe.ExitCode}. stdout: {roleRecipe.Stdout} stderr: {roleRecipe.Stderr}");
@@ -379,6 +390,8 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
             CREATE ROLE {MigrationOwnerRole} LOGIN PASSWORD '{MigrationOwnerPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE {DispatcherRole} LOGIN PASSWORD '{DispatcherPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE {RuntimeRole} LOGIN PASSWORD '{RuntimePassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE {SourceDispatcherRole} LOGIN PASSWORD '{SourceDispatcherPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+            CREATE ROLE {SourceRuntimeRole} LOGIN PASSWORD '{SourceRuntimePassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             CREATE ROLE {RetentionOperatorRole} LOGIN PASSWORD '{RetentionOperatorPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             """);
         await command.ExecuteNonQueryAsync();
@@ -404,6 +417,67 @@ public sealed class DurablePostgreSqlLocalExampleIntegrationTests
     {
         await using var command = administratorDataSource.CreateCommand(sql);
         await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task<(long? ExitCode, string Stdout, string Stderr)> RunRoleRecipeAsync(
+        PostgreSqlContainer container,
+        string applicationName,
+        string manifest)
+    {
+        var result = await container.ExecAsync(
+            [
+                "env",
+                $"PGAPPNAME={applicationName}",
+                "psql",
+                "-U", AdministratorUser,
+                "-d", DatabaseName,
+                "-v", $"migration_owner_role={MigrationOwnerRole}",
+                "-v", $"role_pairs_json={manifest}",
+                "-v", $"retention_operator_role={RetentionOperatorRole}",
+                "-f", RoleRecipeContainerPath,
+            ]);
+        return (result.ExitCode, result.Stdout, result.Stderr);
+    }
+
+    private static async Task AssertDispatcherCannotReadFlowDispatchAsync(string administratorConnectionString)
+    {
+        await using var dispatcherDataSource = NpgsqlDataSource.Create(
+            ConnectionStringForRole(administratorConnectionString, SourceDispatcherRole, SourceDispatcherPassword));
+        foreach (var table in new[]
+                 {
+                     "dispatch",
+                     "work",
+                     "flow_dispatch",
+                     "flow_instance",
+                     "schedule_definition",
+                     "schedule_dispatch",
+                 })
+        {
+            await using var command = dispatcherDataSource.CreateCommand($"SELECT count(*) FROM appsurface_durable.{table};");
+            var exception = await Assert.ThrowsAsync<PostgresException>(() => command.ExecuteScalarAsync());
+            Assert.Equal("42501", exception.SqlState);
+        }
+    }
+
+    private static async Task AssertForwardingDispatcherCapabilitiesAsync(NpgsqlDataSource administratorDataSource)
+    {
+        await using var command = administratorDataSource.CreateCommand(
+            """
+            SELECT has_schema_privilege('appsurface_durable_dispatcher', 'appsurface_durable', 'USAGE')
+               AND has_table_privilege(
+                   'appsurface_durable_dispatcher',
+                   'appsurface_durable.flow_dispatch',
+                   'SELECT')
+               AND has_function_privilege(
+                   'appsurface_durable_dispatcher',
+                   'appsurface_durable.claim_schedule_dispatch(text, interval)',
+                   'EXECUTE')
+               AND has_function_privilege(
+                   'appsurface_durable_dispatcher',
+                   'appsurface_durable.discover_work_dispatch(text[], text[], integer)',
+                   'EXECUTE');
+            """);
+        Assert.True((bool)(await command.ExecuteScalarAsync())!);
     }
 
     private static string ConnectionStringForRole(string administratorConnectionString, string role, string password)

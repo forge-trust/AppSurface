@@ -291,14 +291,16 @@ public class RazorWireCacheOptions
 }
 
 /// <summary>
-/// Represents configuration options for failed <c>rw-active</c> form submissions.
+/// Represents configuration options for <c>rw-active</c> form failure handling and loading feedback.
 /// </summary>
 /// <remarks>
 /// These options control the package convention for server failures from enhanced forms. The global
 /// <see cref="EnableFailureUx"/> switch has highest precedence: when it is <see langword="false"/>, RazorWire skips
 /// request markers, runtime lifecycle events, default fallback rendering, and development anti-forgery diagnostics even
 /// if <see cref="FailureMode"/> or a form-level attribute asks for them. Leave the global switch enabled and use
-/// <see cref="FailureMode"/> or per-form <c>data-rw-form-failure</c> values when an app wants more targeted behavior.
+/// <see cref="FailureMode"/> or per-form <c>data-rw-form-failure</c> values when an app wants more targeted failure
+/// behavior. Loading feedback is configured independently through <see cref="Loading"/>; disabling failure UX does not
+/// disable form loading feedback.
 /// </remarks>
 public class RazorWireFormOptions
 {
@@ -315,6 +317,17 @@ public class RazorWireFormOptions
     /// overrides <see cref="FailureMode"/> plus any per-form <c>data-rw-form-failure</c> setting.
     /// </remarks>
     public bool EnableFailureUx { get; set; } = true;
+
+    /// <summary>
+    /// Gets loading-feedback options for enhanced forms.
+    /// </summary>
+    /// <remarks>
+    /// Loading is independent of <see cref="EnableFailureUx"/>. When loading is enabled, forms can opt out with
+    /// <c>data-rw-loading="off"</c>, or override the duplicate-submission default with
+    /// <c>data-rw-loading-lock="true"</c> or <c>data-rw-loading-lock="false"</c>. Invalid lock values use the global
+    /// <see cref="RazorWireFormLoadingOptions.PreventDuplicateSubmissions"/> setting.
+    /// </remarks>
+    public RazorWireFormLoadingOptions Loading { get; } = new();
 
     /// <summary>
     /// Gets or sets the package-level failed-form behavior.
@@ -357,6 +370,48 @@ public class RazorWireFormOptions
     /// Gets configuration options for RazorWire anti-forgery token refresh behavior.
     /// </summary>
     public RazorWireFormAntiforgeryOptions Antiforgery { get; } = new();
+}
+
+/// <summary>
+/// Represents package-level loading-feedback settings for enhanced form submissions.
+/// </summary>
+/// <remarks>
+/// Loading feedback applies only to enabled <c>rw-active</c> forms. It is independent of failed-form UX and does not
+/// provide server-side idempotency; applications must still protect side-effecting endpoints against duplicate requests.
+/// </remarks>
+public class RazorWireFormLoadingOptions
+{
+    /// <summary>
+    /// Gets or sets a value indicating whether RazorWire loading feedback is enabled globally.
+    /// Defaults to <see langword="true"/>.
+    /// </summary>
+    /// <remarks>
+    /// When disabled, RazorWire does not add its form-loading ownership marker and the loading runtime must not show
+    /// indicators, the fallback bar, or apply the loading-layer duplicate-submission guard. Failed-form behavior is
+    /// unaffected.
+    /// </remarks>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets whether the package-owned top bar is shown when no applicable app-authored loading indicator exists.
+    /// Defaults to <see langword="true"/>.
+    /// </summary>
+    /// <remarks>
+    /// A selected app indicator takes precedence over the fallback. When this option is <see langword="false"/> and no
+    /// app indicator applies, RazorWire intentionally shows no loading visual for that submission.
+    /// </remarks>
+    public bool ShowFallbackBar { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets whether RazorWire blocks a second submission of the same form while its first submission is pending.
+    /// Defaults to <see langword="true"/>.
+    /// </summary>
+    /// <remarks>
+    /// A form may override this default with <c>data-rw-loading-lock="true"</c> or
+    /// <c>data-rw-loading-lock="false"</c>; invalid values fall back to this setting. This browser-side guard is a user
+    /// experience feature and does not replace server-side idempotency or other protection for side effects.
+    /// </remarks>
+    public bool PreventDuplicateSubmissions { get; set; } = true;
 }
 
 /// <summary>
