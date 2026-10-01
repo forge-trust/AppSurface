@@ -32,15 +32,25 @@ internal sealed class GitHubActionsEvidenceAuthorityProvider : IEvidencePullRequ
     }
 
     /// <summary>Creates the production provider from trusted GitHub Actions environment values.</summary>
-    internal static GitHubActionsEvidenceAuthorityProvider? TryCreateFromEnvironment()
+    internal static GitHubActionsEvidenceAuthorityProvider? TryCreateFromEnvironment() =>
+        TryCreateFromEnvironment(Environment.GetEnvironmentVariable);
+
+    /// <summary>Creates a provider from a caller-supplied environment reader for deterministic validation.</summary>
+    /// <remarks>
+    /// The caller must supply only trusted process environment values. A missing or malformed bearer token or
+    /// HTTPS API endpoint returns <see langword="null"/>; this factory does not attest a subject checkout.
+    /// The returned provider owns its HTTP client and must be disposed.
+    /// </remarks>
+    internal static GitHubActionsEvidenceAuthorityProvider? TryCreateFromEnvironment(Func<string, string?> readEnvironment)
     {
-        var token = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
+        ArgumentNullException.ThrowIfNull(readEnvironment);
+        var token = readEnvironment("GITHUB_TOKEN");
         if (string.IsNullOrWhiteSpace(token) || token.Length > 4096 || token.Any(char.IsControl))
         {
             return null;
         }
 
-        var apiAddressText = Environment.GetEnvironmentVariable("GITHUB_API_URL") ?? "https://api.github.com";
+        var apiAddressText = readEnvironment("GITHUB_API_URL") ?? "https://api.github.com";
         if (!Uri.TryCreate(apiAddressText, UriKind.Absolute, out var apiAddress)
             || apiAddress.Scheme != Uri.UriSchemeHttps
             || apiAddress.UserInfo.Length != 0
