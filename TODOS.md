@@ -62,3 +62,71 @@
 
 - **What:** Add a source analyzer and optional codemod for legacy dotted AppSurface configuration-key call sites. **Why:** Runtime diagnostics can identify executed paths, but they cannot prove that every attribute, direct read, audit registration, provider mapping, and dormant branch has migrated. **Pros:** Gives maintainers a compile-time inventory and automates safe `.` to `:` replacements. **Cons:** The analyzer would freeze grammar and API assumptions too early if built before the typed key and migration diagnostics stabilize. **Context:** The logical-key contract deliberately keeps only one permanent colon syntax and uses bounded compatibility input; the analyzer should consume the final parser rules rather than reimplementing them. **Effort estimate:** L (human team) -> M with CC+gstack. **Priority:** P2. **Depends on / blocked by:** Stable `AppSurfaceConfigKey`, application-boundary parser, diagnostic codes, and release-train policy.
 - **What:** Add a credentialed Google Secret Manager contract proof for explicit mappings, convention ids, versions, and exact provenance. **Why:** The fake transport proves AppSurface behavior but cannot prove deployed IAM, API resource validation, or response-name behavior. **Pros:** Catches provider drift before a release and validates the exact native-resource contract. **Cons:** Requires a dedicated project, credential rotation, cleanup, cost controls, and a trust-boundary design for CI. **Context:** Keep the default provider suite deterministic and value-safe; run the live proof as a separate protected release verification rather than enumerating unclaimed secrets. **Effort estimate:** M (human team) -> S with CC+gstack. **Priority:** P2. **Depends on / blocked by:** Stable Google codec/resource-claim contract and approved CI credential design.
+
+## EvidenceHost follow-ups (#777)
+
+### Reusable EvidenceHost workflow for another repository
+
+**What:** Design a versioned consumer input/output and reusable GitHub workflow after AppSurface's required gate has a second adopter.
+**Why:** The first reference should prove the trust boundary before it becomes a compatibility promise.
+**Pros:** Easier adoption and one maintained workflow contract.
+**Cons:** Public versioning, support and security obligations may outgrow the first adopter's needs.
+**Context:** [The #777 design](docs/designs/issue-777-policy-driven-ci-evidence-gate.md) deliberately keeps the runner AppSurface-owned; start from its validated policy/producer matrix, pilot results and [implementation plan](docs/plans/issue-777-policy-driven-ci-evidence-gate-implementation.md).
+**Effort:** L
+**Priority:** P3
+**Depends on:** #777 shipped and a real second adopter.
+
+### Fork check publisher without same-repository promotion
+
+**What:** Evaluate a base-owned PR-eligible check publisher for fork contributions if the measured exact-SHA promotion cost is too high.
+**Why:** #777's fork observation is intentionally ineligible for its required gate.
+**Pros:** Could reduce maintainer promotion work while retaining a verified head-attached check.
+**Cons:** Adds a new authenticated publication and provenance boundary.
+**Context:** Use the #777 pilot's fork frequency, turnaround and failure records; never turn a manual dispatch or label into an eligible claim.
+**Effort:** L
+**Priority:** P3
+**Depends on:** #777 fork pilot and a measured maintainer burden.
+
+### Self-hosted EvidenceHost runner support
+
+**What:** Add an external reaper and runner isolation proof for persistent or self-hosted EvidenceHost runners.
+**Why:** #777 relies on ephemeral VM destruction when its local-only resources lose their runner.
+**Pros:** Broader deployment options for repositories with a self-hosted compute need.
+**Cons:** A persistent runner needs a new cleanup lifetime, network boundary and operations owner.
+**Context:** Keep GitHub-hosted ephemeral PR jobs as the #777 reference; use a concrete adopter and failure model before changing that guarantee.
+**Effort:** L
+**Priority:** P3
+**Depends on:** #777 rollout and a self-hosted runner adopter.
+
+### Merge-queue EvidenceHost event support
+
+**What:** Add `merge_group` event handling and revalidate required-check identity when AppSurface adopts merge queue.
+**Why:** A PR-head check cannot automatically authorize a synthetic merge-group revision.
+**Pros:** EvidenceHost can stay a required gate when queueing is enabled.
+**Cons:** New event identity, source-diff and freshness semantics require live proof.
+**Context:** #777 gates ordinary PRs with strict freshness. Reuse its capture/verify boundary for a separately defined merge-group identity.
+**Effort:** M
+**Priority:** P3
+**Depends on:** #777 rollout and a merge-queue adoption decision.
+
+### Evidence-backed release publication
+
+**What:** Design a publisher that consumes only object-bound, digest-matching `ReleaseComplete` artifacts under a verified immutable tag rule.
+**Why:** #777's release invocation is non-mutating; a claim alone cannot close a moving-tag check/use window.
+**Pros:** Publication could inherit the same verified evidence identity.
+**Cons:** Introduces an irreversible release side effect and a new authorization boundary.
+**Context:** Start with #777's V2 tag binding and protected release pilot. Revalidate remote tag immutability and artifact bytes immediately before and throughout publication use.
+**Effort:** L
+**Priority:** P3
+**Depends on:** #777 release proof, immutable tag policy and separate publisher approval.
+
+### Hosted EvidenceHost dashboard
+
+**What:** Consider a hosted view only if maintainers cannot diagnose real gate failures from the bounded GitHub summary, manifest and runbook.
+**Why:** A dashboard would add hosting and retention before the first adopter proves a need.
+**Pros:** Could centralize long-term evidence trends for multiple adopters.
+**Cons:** Adds cost, permissions, sensitive-data handling and another source of truth.
+**Context:** #777 records local and GitHub artifacts only. Collect actual diagnostic failures before proposing a service.
+**Effort:** XL
+**Priority:** P4
+**Depends on:** Measured multi-adopter diagnostic need after #777.
