@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { transformSync } from 'esbuild';
+import { buildSync } from 'esbuild';
 import vm from 'node:vm';
 
 const runtimePath = new URL('../wwwroot/razorwire/razorwire.js', import.meta.url);
@@ -2698,7 +2699,7 @@ function loadRuntime(runtimeOptions = {}) {
   context.globalThis = context;
   vm.createContext(context);
   const runtimeSource = runtimeOptions.authoredRuntime
-    ? transformSync(readFileSync(authoredRuntimePath, 'utf8'), { loader: 'ts', target: 'es2020' }).code
+    ? buildSync({ entryPoints: [fileURLToPath(authoredRuntimePath)], bundle: true, write: false, format: 'iife', target: 'es2020' }).outputFiles[0].text
     : readFileSync(runtimePath, 'utf8');
   vm.runInContext(runtimeSource, context);
   if (runtimeOptions.pageNavigation) {
