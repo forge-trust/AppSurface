@@ -155,10 +155,12 @@ internal sealed class GitHubActionsEvidenceAuthorityProvider : IEvidencePullRequ
 
             if (!jobFound
                 || !TryGetInt64(selectedJob, "run_id", out var jobRunId)
-                || !TryGetInt64(selectedJob, "run_attempt", out var jobAttempt)
                 || !TryGetString(selectedJob, "conclusion", out var conclusion)
                 || jobRunId != workflowRunId
-                || jobAttempt != runAttempt)
+                // The attempt-specific jobs endpoint selects the attempt. GitHub's documented
+                // job shape does not include run_attempt; validate it if the API supplies it.
+                || (selectedJob.TryGetProperty("run_attempt", out _)
+                    && (!TryGetInt64(selectedJob, "run_attempt", out var jobAttempt) || jobAttempt != runAttempt)))
             {
                 return null;
             }

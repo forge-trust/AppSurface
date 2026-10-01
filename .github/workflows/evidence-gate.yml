@@ -210,6 +210,59 @@ jobs:
           path: ${{ runner.temp }}/evidence-gate-verifier-inputs
           merge-multiple: false
 
+      - name: Recapture the current pull-request revision for independent verification
+        if: ${{ needs.controller-capture.result == 'success' && needs.credentialless-subject.result == 'success' }}
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 "$GITHUB_WORKSPACE/trusted/scripts/evidence-gate-controller.py" \
+            --event "$GITHUB_EVENT_PATH" \
+            --output "$RUNNER_TEMP/evidence-gate-verifier-capture" \
+            --target-branch main
+          test -f "$RUNNER_TEMP/evidence-gate-verifier-capture/pull-request-run-identity.json"
+
+      - name: Set up the trusted verifier
+        if: ${{ needs.controller-capture.result == 'success' && needs.credentialless-subject.result == 'success' }}
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Recompute the host manifest and rehearse independent verification
+        if: ${{ needs.controller-capture.result == 'success' && needs.credentialless-subject.result == 'success' }}
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          capture="$RUNNER_TEMP/evidence-gate-verifier-capture"
+          inputs="$RUNNER_TEMP/evidence-gate-verifier-inputs"
+          handoff="$inputs/evidence-gate-controller-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          plan="$handoff/evidence-plan.json"
+          project="$GITHUB_WORKSPACE/trusted/tools/ForgeTrust.AppSurface.EvidenceGate/ForgeTrust.AppSurface.EvidenceGate.csproj"
+          policy="$GITHUB_WORKSPACE/trusted/.appsurface/evidence/evidence.policy.json"
+          identity="$RUNNER_TEMP/evidence-gate-expected-identity.json"
+          host="$RUNNER_TEMP/evidence-gate-rehearsal-host"
+          verdict="$RUNNER_TEMP/evidence-gate-rehearsal-verdict"
+
+          python3 "$GITHUB_WORKSPACE/trusted/scripts/evidence-gate-verifier-context.py" \
+            --fresh-identity "$capture/pull-request-run-identity.json" \
+            --output "$identity"
+          dotnet restore "$project" --locked-mode --verbosity quiet
+          host_status=0
+          dotnet run --no-restore --project "$project" -- run \
+            --plan "$plan" --policy "$policy" \
+            --repository "$capture/repository.git" --output-dir "$host" || host_status=$?
+          if [[ ! -f "$host/evidence-manifest.json" ]]; then
+            echo "The trusted host did not produce a bounded manifest (exit $host_status)." >&2
+            exit 1
+          fi
+          dotnet run --no-restore --project "$project" -- verify-gate \
+            --plan "$plan" --manifest "$host/evidence-manifest.json" \
+            --policy "$policy" --repository "$capture/repository.git" \
+            --identity "$identity" --output-dir "$verdict"
+
       - name: Report the unavailable authorization seams and fail closed
         if: ${{ always() }}
         shell: bash
@@ -225,9 +278,13 @@ jobs:
             printf '%s\n' "- Controller capture job: $CONTROLLER_RESULT"
             printf '%s\n' "- Credentialless subject job: $SUBJECT_RESULT"
             echo '- Subject handoff: controller snapshot execution is wired; the fixed result is always non-claiming.'
+            echo '- Trusted verifier: the current PR and subject job are reread for a non-claiming rehearsal when both upstream jobs succeed.'
             echo '- OCI prerequisite: a digest-pinned image must already exist in the rootless local image store and contain the locked offline feed.'
             echo '- Checkout/isolation attestation: unavailable to the verdict; no trusted verifier consumes an attestation.'
-            echo '- Trusted gate verdict: unavailable; host registrations and complete producer verification are not established.'
+            echo '- Required gate verdict: unavailable; host registrations and complete producer verification are not established.'
           } >> "$GITHUB_STEP_SUMMARY"
+          if [[ -f "$RUNNER_TEMP/evidence-gate-rehearsal-verdict/evidence-gate-summary.md" ]]; then
+            cat "$RUNNER_TEMP/evidence-gate-rehearsal-verdict/evidence-gate-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo 'ASEGH003: Non-claiming pilot scaffold. No trusted verifier or complete producer registrations are available.'
           exit 1

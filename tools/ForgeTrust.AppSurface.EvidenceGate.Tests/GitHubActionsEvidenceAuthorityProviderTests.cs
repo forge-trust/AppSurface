@@ -66,6 +66,26 @@ public sealed class GitHubActionsEvidenceAuthorityProviderTests
         Assert.Equal(new[] { PullRequestPath, WorkflowRunPath, JobsPath }, handler.Requests);
     }
 
+    [Fact]
+    public async Task ProviderAcceptsDocumentedJobShapeWithoutRunAttemptField()
+    {
+        var handler = new GitHubApiFixtureHandler(
+            BaseRevision,
+            PullRequestHeadRevision,
+            (path, body) => path == JobsPath
+                ? new ApiResponse(HttpStatusCode.OK, RemoveJsonProperty(body, "jobs.0.run_attempt"))
+                : null);
+        using var httpClient = new HttpClient(handler);
+        using var authorityProvider = new GitHubActionsEvidenceAuthorityProvider(httpClient, new Uri("https://api.example.test/"));
+
+        var snapshot = await authorityProvider.ReadFreshAsync(CreateExpectedIdentity());
+
+        Assert.NotNull(snapshot);
+        Assert.Equal("success", snapshot.SubjectJobConclusion);
+        Assert.Equal(string.Empty, snapshot.SubjectJobHeadRevision);
+        Assert.Equal(new[] { PullRequestPath, WorkflowRunPath, JobsPath }, handler.Requests);
+    }
+
     [Theory]
     [MemberData(nameof(AuthorityMismatchCases))]
     public async Task ProviderRejectsRepositoryRunAndJobAssociationsThatDoNotMatchExpectedIdentity(
@@ -317,6 +337,29 @@ public sealed class GitHubActionsEvidenceAuthorityProviderTests
         else
         {
             throw new InvalidOperationException($"Fixture JSON path '{propertyPath}' does not exist.");
+        }
+
+        return root.ToJsonString();
+    }
+
+    private static string RemoveJsonProperty(string body, string propertyPath)
+    {
+        var root = JsonNode.Parse(body) ?? throw new InvalidOperationException("Fixture JSON must have a root value.");
+        var propertyNames = propertyPath.Split('.');
+        JsonNode? parent = root;
+        for (var index = 0; index < propertyNames.Length - 1; index++)
+        {
+            parent = parent switch
+            {
+                JsonArray array when int.TryParse(propertyNames[index], out var arrayIndex) => array[arrayIndex],
+                JsonObject jsonObject => jsonObject[propertyNames[index]],
+                _ => null,
+            } ?? throw new InvalidOperationException($"Fixture JSON path '{propertyPath}' does not exist.");
+        }
+
+        if (parent is not JsonObject objectParent || !objectParent.Remove(propertyNames[^1]))
+        {
+            throw new InvalidOperationException($"Fixture JSON property '{propertyPath}' does not exist.");
         }
 
         return root.ToJsonString();
