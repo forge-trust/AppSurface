@@ -44,7 +44,10 @@ Blocked audit, continuation 2: the preceding continuation was no progress, not a
 - Enhancement: one scoped `$enhance` cycle after implementation; focused additional coverage loops only from concrete gate evidence.
 - QA: feature is CLI/SDK/CI, so browser QA is inapplicable. Execute real planning/mode/help/worker/packed CLI+SDK flows and documented snippets.
 - Formatting, analyzers/XML docs, hostile/neighboring unit tests, isolated fatal workers, real consumer/platform proof and controlled downstream gate are required.
-- Draft PR only, Conventional Commit title, `Fixes #779`, attach the created PR to this chat. No push or PR before required gates pass.
+- Draft PR only, Conventional Commit title, attach the created PR to this chat. The approved
+  [preliminary scope](issue-779-preliminary-proof.md) references #779 without closing it; the complete
+  implementation adds `Fixes #779` after all acceptance requirements pass. No push or PR before
+  the applicable required gates pass.
 
 ## Remaining facets
 
@@ -571,3 +574,34 @@ No product/test, deadline, skip, environment requirement, coverage threshold or 
 base was changed. These completed recovery checks support one fresh unchanged full attempt 11;
 they do not waive its gate. Preliminary draft creation and all post-Ubuntu integration
 remain pending as defined in the [staged scope](issue-779-preliminary-proof.md).
+
+### Coverage attempt 11 and focused startup diagnosis
+
+The unchanged `./scripts/coverage-solution.sh` ran at clean
+`0b451392f3517ef84ccf3a367b3f2b5bfafd54f7`, against `origin/main` at
+`4aa8329c76f4279ad319747f9f3c14b9b8de51ef`. All **54/54** projects completed;
+the build reported **zero warnings/errors**. The wrapper exited **1 / ASCOV120**,
+with **17 failed / 44 passed** in AuthAspNetCoreDevAuthExample.Tests and the other
+53 projects successful. JUnit totals are **15,011 passed / 17 failed / 4 skipped**.
+Raw merged coverage is **95.11% line / 89.04% branch**. The official aggregate and
+patch gates were not reached; their exit and patch measurements remain unavailable.
+Duration was 1,442.952 seconds. The terminal archive is
+`/private/tmp/issue779-coverage-attempt11-evidence/`; the wrapper's owned process group
+and the fixture child PIDs named in its diagnostics were absent at the final check.
+
+Most auth failures reached `PREFLIGHT,BUILD` but emitted no fixture `build` event.
+Some reached `LAUNCH,READINESS` or later stages. These observations locate the
+failures more narrowly than a general timeout, but do not establish a shared cause.
+The full wrapper remains failed. A fresh scoped Enhance invocation, with the default
+four-cycle budget, is investigating this exact evidence through the actual CLI
+collector runner and owned-process sampling. No production or test repair has been
+selected, and no deadline, skip, environment requirement or gate policy was changed.
+
+Private preparation also repaired the saved-artifact consistency verifier against
+an observed GitHub API response: an unqualified workflow path is accepted, the PR
+head is distinct from the workflow merge checkout, and the exact downloaded ZIP
+digest and extracted report bytes are checked. Synthetic controls exited **0**;
+these fabricated fixtures establish neither CI execution nor runtime admission.
+The verifier and invocation notes are under
+`/private/tmp/issue779-proof-acceptance-preparation/`. Actual Ubuntu observations,
+preliminary publication and all remaining protected integration are still required.
