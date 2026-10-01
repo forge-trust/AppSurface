@@ -309,3 +309,40 @@ The merge preserves both independent TODO additions. Newer `main` release baseli
 five-snapshot repair: parent inspection confirmed preview.11 plus the newly merged dialog release content.
 The final preliminary diff therefore changes no PNG. Current-base integration precedes a new unchanged
 full coverage command and fresh ship review.
+
+### Property encoding repair during attempt 4
+
+Installed CLI observation `capture008` at `cf6d3aa7` exposed a raw decoder exception for a policy with
+an invalid UTF-8 property name, instead of the documented `ASEVD205` diagnostic. Native review
+confirmed the P2 at `Utf8JsonReader.GetString()` in the uniqueness preflight. The repair catches
+`InvalidOperationException` only around that property decoding operation and translates it to the
+existing generic `JsonException` boundary without retaining the original exception or input.
+
+Public regressions cover invalid UTF-8, UTF-8 encoded surrogate bytes, lone high and low escaped
+surrogates, counted chunked streams, policy/plan/manifest CLI mappings, and valid Unicode/paired
+surrogate controls. The scoped native re-review reported no actionable finding (static review only).
+An isolated build under `/private/tmp` compiled but seven neighboring coverage-fixture tests could
+not locate repository files. Repeating the same filter with isolated artifacts inside the checkout
+passed **170/170**, exit **0**, with no compiler/analyzer/documentation warning matches:
+
+```bash
+dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj \
+  --artifacts-path TestResults/issue779-encoding-validation \
+  --filter 'FullyQualifiedName~Evidence' --verbosity minimal
+```
+
+Log: `/private/tmp/issue779-encoding-validation-repo.log`. Default build assemblies were not replaced,
+so coverage attempt 4 continues to measure the pre-repair committed `cf6d3aa7` candidate only. It has
+already reproduced **6/61** auth fixture deadline failures; their bounded diagnostics do not prove
+a common fixture or verifier cause. Deadlines, gate command and thresholds remain unchanged.
+An isolated auth reproduction and fresh packed CLI/SDK encoding proof are delegated. A final
+committed full gate must validate this repair before publication.
+
+Regression proof used the new test assembly in the isolated checkout artifact directory, temporarily
+substituting only its Contracts DLL with the original committed DLL. All **10/10** malformed-property
+cases failed with the old raw `InvalidOperationException`, exit **1**. Restoring the repaired DLL and
+running those cases plus the valid Unicode control passed **11/11**, exit **0**. Repository default
+assemblies were unchanged. Logs: `/private/tmp/issue779-encoding-red.stdout.log`,
+`/private/tmp/issue779-encoding-red.json` and `/private/tmp/issue779-encoding-green.log`.
+Scoped whitespace formatting and diff checks exited **0**. Python verifier controls passed **4/4**;
+the mechanism launcher passed shell syntax validation and all 14 checked documentation destinations exist.

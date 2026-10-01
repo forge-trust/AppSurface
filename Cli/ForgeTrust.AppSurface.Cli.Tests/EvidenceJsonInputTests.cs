@@ -174,6 +174,38 @@ public sealed class EvidenceJsonInputTests
         Assert.Null(exception.InnerException);
     }
 
+    [Theory]
+    [InlineData("FF")]
+    [InlineData("ED A0 80")]
+    [InlineData("5C 75 44 38 30 30")]
+    [InlineData("5C 75 44 43 30 30")]
+    public async Task Deserialize_RejectsInvalidPropertyEncodingWithSafeJsonException(string encodedProperty)
+    {
+        var property = Convert.FromHexString(encodedProperty.Replace(" ", "", StringComparison.Ordinal));
+        byte[] json = [.. "{\""u8.ToArray(), .. property, .. "\":\"unicode-secret-canary\"}"u8.ToArray()];
+
+        var spanFailure = Assert.Throws<JsonException>(() => EvidenceCanonicalJson.Deserialize<JsonElement>(json));
+        await using var stream = new ChunkedNonSeekableStream(json, maximumChunkBytes: 1);
+        var streamFailure = await Assert.ThrowsAsync<JsonException>(async () =>
+            await EvidenceCanonicalJson.DeserializeAsync<JsonElement>(stream));
+
+        foreach (var failure in new[] { spanFailure, streamFailure })
+        {
+            Assert.DoesNotContain("unicode-secret-canary", failure.ToString(), StringComparison.Ordinal);
+            Assert.Null(failure.InnerException);
+        }
+    }
+
+    [Fact]
+    public void Deserialize_AcceptsValidUnicodePropertyNamesAndSurrogatePairs()
+    {
+        var value = EvidenceCanonicalJson.Deserialize<JsonElement>(
+            "{\"é\":1,\"\\uD83D\\uDE00\":2}"u8);
+
+        Assert.Equal(1, value.GetProperty("é").GetInt32());
+        Assert.Equal(2, value.GetProperty("😀").GetInt32());
+    }
+
     [Fact]
     public void Deserialize_RejectsNegativeAndRaisedLimits()
     {

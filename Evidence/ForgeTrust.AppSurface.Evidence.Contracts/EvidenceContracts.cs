@@ -944,7 +944,17 @@ public static class EvidenceCanonicalJson
                             properties ??= reusableSets.Count > 0
                                 ? reusableSets.Pop()
                                 : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                            var propertyName = reader.GetString()!;
+                            string propertyName;
+                            try
+                            {
+                                propertyName = reader.GetString()!;
+                            }
+                            catch (InvalidOperationException)
+                            {
+                                // GetString uses this exception for invalid UTF-8 and unpaired surrogate escapes.
+                                throw new JsonException("Evidence JSON contains an invalid property name.");
+                            }
+
                             if (!properties.Add(propertyName))
                             {
                                 throw new JsonException("Evidence JSON contains duplicate or case-colliding object properties.");

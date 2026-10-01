@@ -161,6 +161,40 @@ public sealed class EvidenceCliJsonInputTests
         Assert.Equal(input == "policy" ? "ASEVD204" : "ASEVD208", exception.Code);
     }
 
+    [Theory]
+    [InlineData("policy", false)]
+    [InlineData("plan", false)]
+    [InlineData("manifest", false)]
+    [InlineData("policy", true)]
+    [InlineData("plan", true)]
+    [InlineData("manifest", true)]
+    public async Task Workflow_MapsInvalidPropertyEncodingToSafeDiagnostic(string input, bool escapedSurrogate)
+    {
+        using var directory = TestDirectory.Create();
+        var paths = await CreateInputsAsync(directory.Path);
+        byte[] property = escapedSurrogate ? "\\uD800"u8.ToArray() : [0xff];
+        byte[] json = [.. "{\""u8.ToArray(), .. property, .. "\":\"unicode-secret-canary\"}"u8.ToArray()];
+        await File.WriteAllBytesAsync(paths[input], json);
+
+        var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
+        var exception = await Assert.ThrowsAsync<EvidenceCliException>(async () =>
+        {
+            if (input == "policy")
+            {
+                await workflow.DoctorAsync(
+                    new EvidencePlanningRequest(paths["policy"], ["docs/readme.md"], null), CancellationToken.None);
+            }
+            else
+            {
+                await workflow.VerifyAsync(paths["plan"], paths["manifest"], CancellationToken.None);
+            }
+        });
+
+        Assert.Equal(input == "policy" ? "ASEVD205" : "ASEVD209", exception.Code);
+        Assert.DoesNotContain("unicode-secret-canary", exception.ToString(), StringComparison.Ordinal);
+        Assert.Null(exception.InnerException);
+    }
+
     private static async Task<Dictionary<string, string>> CreateInputsAsync(string root)
     {
         var profile = new EvidenceProfile("docs", EvidenceProfileScope.Targeted, [], [], []);
