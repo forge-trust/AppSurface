@@ -30,6 +30,7 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
     private readonly DurableRuntimeAdmissionGate _admission;
     private readonly ILogger<PostgreSqlDurableRuntimePump> _logger;
     private readonly PostgreSqlDurablePassExecutor _passExecutor;
+    private readonly PostgreSqlDurableHeartbeatMaintenance? _heartbeatMaintenance;
     private readonly bool _requiresExternalSchemaPrecheck;
     private readonly DurableRuntimeTurnScheduler _turnScheduler = new();
     private readonly SemaphoreSlim _passGate = new(1, 1);
@@ -79,7 +80,8 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
         IDurableRuntimeExecutionBoundary executionBoundary,
         DurableRuntimeAdmissionGate admission,
         ILogger<PostgreSqlDurableRuntimePump> logger,
-        PostgreSqlDurablePassExecutor? passExecutor)
+        PostgreSqlDurablePassExecutor? passExecutor,
+        PostgreSqlDurableHeartbeatMaintenance? heartbeatMaintenance = null)
     {
         _registration = registration ?? throw new ArgumentNullException(nameof(registration));
         _schemaManager = schemaManager ?? throw new ArgumentNullException(nameof(schemaManager));
@@ -94,6 +96,7 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
         _admission = admission ?? throw new ArgumentNullException(nameof(admission));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _passExecutor = passExecutor ?? RunPassAsync;
+        _heartbeatMaintenance = heartbeatMaintenance;
         _requiresExternalSchemaPrecheck = schemaManager is not PostgreSqlDurableRuntimeSchemaManager;
     }
 
@@ -265,6 +268,8 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
                     throw new InvalidDataException(
                         $"Unknown durable store admission result '{storeAdmission.Kind}'.");
             }
+
+            _heartbeatMaintenance?.SignalAdmittedPass();
 
             DurableRuntimePumpResult result;
             phase = PostgreSqlDurablePumpPhase.Executing;

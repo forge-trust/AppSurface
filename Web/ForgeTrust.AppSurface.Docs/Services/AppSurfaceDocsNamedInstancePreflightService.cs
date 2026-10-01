@@ -79,7 +79,8 @@ internal sealed class AppSurfaceDocsNamedInstancePreflightService : IHostedLifec
                 await new AppSurfaceDocsHarvestFailurePreflightService(
                         runtime.Options,
                         runtime.Aggregator,
-                        _loggerFactory.CreateLogger<AppSurfaceDocsHarvestFailurePreflightService>())
+                        _loggerFactory.CreateLogger<AppSurfaceDocsHarvestFailurePreflightService>(),
+                        runtime.HarvestCoordinator)
                     .StartAsync(cancellationToken);
             }
             catch (Exception exception) when (exception is not OperationCanceledException

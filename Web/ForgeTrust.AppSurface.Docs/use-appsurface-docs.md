@@ -490,7 +490,7 @@ AppSurface Docs starts the first source-backed harvest during application startu
 }
 ```
 
-Use `StartupMode=Background` for normal hosts, `Blocking` for hosts that must finish docs warmup before accepting traffic, and `Disabled` only when you intentionally want the old first-request lazy harvest. Strict startup failure still comes from `Harvest:FailOnFailure=true`; when strict mode is enabled, startup waits for harvest health and fails only when every active harvester fails.
+Use `StartupMode=Background` for normal hosts, `Blocking` for hosts that must finish docs warmup before accepting traffic, and `Disabled` only when you intentionally want the old first-request lazy harvest. Strict startup failure still comes from `Harvest:FailOnFailure=true`; when strict mode is enabled, startup waits for harvest health and fails only when every active harvester fails. Blocking and strict startup share readiness with docs requests, so completed warmup does not show a harvesting placeholder even with a zero request-wait budget.
 
 For manual UI testing, set the `Testing*Delay*Milliseconds` knobs to positive values. `TestingPreHarvestDelayMilliseconds` pauses after the run is published but before any harvester starts, `TestingDelayPerHarvesterMilliseconds` pauses each harvester after it reports `Running`, and `TestingDelayPerDocumentMilliseconds` paces each **real positive parser-output report** once for every document in that report. It does not delay zero-output source inspection. For example, `TestingPreHarvestDelayMilliseconds=1000` and `TestingDelayPerDocumentMilliseconds=150` make the live observatory easy to inspect locally. Keep every knob at `0` for production traffic.
 

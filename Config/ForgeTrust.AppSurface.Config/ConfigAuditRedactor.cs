@@ -110,6 +110,11 @@ internal sealed class ConfigAuditRedactor
         IReadOnlyList<ConfigAuditSourceRecord> sources,
         ConfigAuditSensitivity entrySensitivity = ConfigAuditSensitivity.Unknown)
     {
+        if (value is IConfigSecretValue secret)
+        {
+            return new RedactedValue(secret.HasValue ? Placeholder : null, secret.HasValue);
+        }
+
         if (IsSensitive(key, sources, entrySensitivity))
         {
             return new RedactedValue(Placeholder, true);

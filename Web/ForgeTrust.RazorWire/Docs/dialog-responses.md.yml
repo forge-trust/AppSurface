@@ -1,0 +1,9 @@
+title: Dialog Responses
+page_type: guide
+sequence_key: razorwire-proof
+order: 65
+related_pages:
+  - Web/ForgeTrust.RazorWire/README.md
+  - Web/ForgeTrust.RazorWire/Docs/form-failures.md
+  - Web/ForgeTrust.RazorWire/Docs/form-loading.md
+  - examples/razorwire-mvc/README.md

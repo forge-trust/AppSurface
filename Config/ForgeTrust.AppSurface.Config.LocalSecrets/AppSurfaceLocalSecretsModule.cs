@@ -26,6 +26,8 @@ public sealed class AppSurfaceLocalSecretsModule : IAppSurfaceModule
         services.TryAddSingleton<IAppSurfaceLocalSecretStore, PlatformAppSurfaceLocalSecretStore>();
         services.AddSingleton<AppSurfaceLocalSecretProvider>();
         services.AddSingleton<IConfigProvider>(sp => sp.GetRequiredService<AppSurfaceLocalSecretProvider>());
+        services.AddSingleton<IConfigCompositionValueProvider>(sp => sp.GetRequiredService<AppSurfaceLocalSecretProvider>());
+        services.AddSingleton<IConfigProviderClaimInspector>(sp => sp.GetRequiredService<AppSurfaceLocalSecretProvider>());
     }
 
     /// <inheritdoc />

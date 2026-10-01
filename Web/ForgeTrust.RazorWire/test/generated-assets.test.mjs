@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { copiedThirdPartyOutputs, copyThirdPartyOutput, generatedOutputs } from '../assets/scripts/build.mjs';
+import { gzipSync } from 'node:zlib';
+import { authoredOutputs, copiedThirdPartyOutputs, copyThirdPartyOutput, generatedOutputs } from '../assets/scripts/build.mjs';
 import { runGeneratedAssetVerification } from '../assets/scripts/verify-generated.mjs';
 
 const runtimePath = new URL('../wwwroot/razorwire/razorwire.js', import.meta.url);
@@ -17,6 +18,8 @@ const pageNavigationPath = new URL('../wwwroot/razorwire/page-navigation.js', im
 const sectionCopyPath = new URL('../wwwroot/razorwire/section-copy.js', import.meta.url);
 const sectionCopySourcePath = new URL('../assets/src/section-copy.ts', import.meta.url);
 const formInteractionsPath = new URL('../wwwroot/razorwire/form-interactions.js', import.meta.url);
+const loadingCssPath = new URL('../wwwroot/razorwire/razorwire.loading.css', import.meta.url);
+const loadingCssSourcePath = new URL('../assets/src/razorwire.loading.css', import.meta.url);
 const turboPath = new URL('../wwwroot/razorwire/turbo.es2017-umd.js', import.meta.url);
 const packageRoot = new URL('../', import.meta.url);
 const packageRootPath = fileURLToPath(packageRoot);
@@ -28,6 +31,10 @@ test('generated runtime outputs keep provenance banners and public package paths
   const pageNavigation = readFileSync(pageNavigationPath, 'utf8');
   const sectionCopy = readFileSync(sectionCopyPath, 'utf8');
   const formInteractions = readFileSync(formInteractionsPath, 'utf8');
+  const dialogCss = readFileSync(new URL('../wwwroot/razorwire/razorwire-dialog.css', import.meta.url), 'utf8');
+  assert.match(dialogCss, /^\/\* Generated from assets\/src\/dialog-responses\.css\./);
+  assert.match(dialogCss, /data-rw-dialog/);
+  assert.match(dialogCss, /--rw-dialog-width/);
 
   assert.match(runtime, /^\/\/ Generated from assets\/src\/razorwire\.ts\./);
   assert.match(islands, /^\/\/ Generated from assets\/src\/razorwire\.islands\.ts\./);
@@ -54,6 +61,34 @@ test('generated runtime outputs keep provenance banners and public package paths
   assert.match(sectionCopy, /data-rw-section-copy/);
   assert.match(formInteractions, /formInteractionsManager/);
   assert.match(formInteractions, /data-rw-form-collection/);
+});
+
+test('loading fallback CSS is a budgeted CSP-safe static web asset and embedded resource', () => {
+  assert.equal(authoredOutputs.length, 1);
+  const asset = authoredOutputs[0];
+  const source = readFileSync(loadingCssSourcePath);
+  const output = readFileSync(loadingCssPath);
+  const css = output.toString('utf8');
+  const project = readFileSync(new URL('ForgeTrust.RazorWire.csproj', packageRoot), 'utf8');
+  const gzipSize = gzipSync(output).length;
+
+  assert.equal(asset.label, 'razorwire.loading.css');
+  assert.equal(path.resolve(asset.entry), fileURLToPath(loadingCssSourcePath));
+  assert.equal(path.resolve(asset.output), fileURLToPath(loadingCssPath));
+  assert.equal(output.equals(source), true);
+  assert.ok(output.length <= asset.rawBytes, `CSS size ${output.length} exceeds ${asset.rawBytes} bytes.`);
+  assert.ok(gzipSize <= asset.gzipBytes, `Gzip CSS size ${gzipSize} exceeds ${asset.gzipBytes} bytes.`);
+  assert.match(css, /\[data-rw-loading-fallback\]\[hidden\]\s*\{\s*display:\s*none\s*!important;/);
+  assert.match(css, /html\[data-rw-loading-turbo-bar="suppress"\]\s+\.turbo-progress-bar/);
+  assert.match(css, /var\(--rw-ui-accent,/);
+  assert.match(css, /--rw-loading-fallback-/);
+  assert.match(css, /env\(safe-area-inset-(?:top|left|right),/);
+  assert.match(css, /@media\s*\(prefers-reduced-motion:\s*reduce\)/);
+  assert.match(css, /@media\s*\(forced-colors:\s*active\)/);
+  assert.doesNotMatch(css, /<style\b|style\s*=|@import\b/i);
+  assert.doesNotMatch(css, /content:\s*["'][^"']+["']/);
+  assert.match(project, /<EmbeddedResource Include="wwwroot\\razorwire\\razorwire\.loading\.css" LogicalName="RazorWireEmbeddedAssets\/razorwire\/razorwire\.loading\.css" \/>/);
+  assert.match(project, /<StaticWebAssetBasePath>_content\/\$\(AssemblyName\)<\/StaticWebAssetBasePath>/);
 });
 
 test('authored form failure product event keeps failure mode separate from response kind', () => {
@@ -345,11 +380,12 @@ test('third-party copy rejects output bytes that change after the copy', async (
 test('generated verifier emits actionable stale-output diagnostics', () => {
   const verifier = readFileSync(new URL('assets/scripts/verify-generated.mjs', packageRoot), 'utf8');
 
-  assert.match(verifier, /RWASSET003 RazorWire generated assets are stale/);
+  assert.match(verifier, /RWASSET003 RazorWire generated or authored assets are stale/);
   assert.match(verifier, /behavior-kit\.js/);
   assert.match(verifier, /page-navigation\.js/);
   assert.match(verifier, /section-copy\.js/);
   assert.match(verifier, /form-interactions\.js/);
+  assert.match(verifier, /razorwire\.loading\.css/);
   assert.match(verifier, /turbo\.es2017-umd\.js/);
   assert.match(verifier, /RWASSET004 RazorWire copied third-party assets are stale/);
   assert.match(verifier, /Problem:/);
@@ -381,6 +417,28 @@ test('generated verifier rejects a stale copied Turbo output with its exact path
   assert.equal(status, 1);
   assert.match(errors.join('\n'), /RWASSET004 RazorWire copied third-party assets are stale/);
   assert.match(errors.join('\n'), /Web[/\\]ForgeTrust\.RazorWire[/\\]wwwroot[/\\]razorwire[/\\]turbo\.es2017-umd\.js/);
+});
+
+test('generated verifier rejects a stale authored loading stylesheet with its exact path', () => {
+  const outputPath = path.join('Web', 'ForgeTrust.RazorWire', 'wwwroot', 'razorwire', 'razorwire.loading.css');
+  const errors = [];
+  let cssReadCount = 0;
+  const status = runGeneratedAssetVerification({
+    readOutput: output => {
+      if (output === outputPath) {
+        cssReadCount += 1;
+        return cssReadCount === 1 ? 'old authored css' : 'rebuilt authored css';
+      }
+
+      return 'unchanged output';
+    },
+    spawnBuild: () => ({ status: 0 }),
+    writeError: message => errors.push(message)
+  });
+
+  assert.equal(status, 1);
+  assert.match(errors.join('\n'), /RWASSET003 RazorWire generated or authored assets are stale/);
+  assert.match(errors.join('\n'), /Web[/\\]ForgeTrust\.RazorWire[/\\]wwwroot[/\\]razorwire[/\\]razorwire\.loading\.css/);
 });
 
 test('generated verifier reports non-ENOENT spawn failures', () => {

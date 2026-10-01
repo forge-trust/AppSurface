@@ -37,6 +37,12 @@ public sealed class LocalSecretsRegistrationTests
         Assert.Same(
             provider.GetRequiredService<AppSurfaceLocalSecretProvider>(),
             provider.GetServices<IConfigProvider>().Single(config => config is AppSurfaceLocalSecretProvider));
+        Assert.Same(
+            provider.GetRequiredService<AppSurfaceLocalSecretProvider>(),
+            provider.GetRequiredService<IConfigCompositionValueProvider>());
+        Assert.Same(
+            provider.GetRequiredService<AppSurfaceLocalSecretProvider>(),
+            provider.GetRequiredService<IConfigProviderClaimInspector>());
     }
 
     [Fact]

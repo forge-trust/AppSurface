@@ -670,7 +670,7 @@ AppSurface Docs starts the initial harvest in the background by default. If a us
 `AppSurfaceDocs:Harvest:StartupMode` accepts:
 
 - `Background`: default. Startup schedules the memoized initial harvest and returns immediately unless strict failure mode is enabled.
-- `Blocking`: startup waits for the initial harvest to complete.
+- `Blocking`: startup waits for the initial harvest to complete. Requests share that completed warmup, so the first request serves content even when its wait budget is `0`.
 - `Disabled`: startup does not pre-warm the docs cache; the first docs request starts harvest work.
 
 `InitialRequestWaitBudgetMilliseconds` controls how long a docs request waits for the initial harvest before showing the observatory. The default is `350`. Set it to `0` when you want the observatory immediately for any pending first harvest. Set it higher when a host usually harvests quickly and you prefer to avoid showing the progress page for sub-second starts.
@@ -1064,7 +1064,7 @@ Set `AppSurfaceDocs:Harvest:FailOnFailure` to `true` when a host should fail dur
 
 Strict mode is built for CI and export hosts that publish docs artifacts. It prevents an all-failed harvest from becoming an empty or untrustworthy release tree. Leave it off for general public runtime hosts unless failing the whole application is the right operational posture for that host.
 
-The startup preflight calls `DocAggregator.GetHarvestHealthAsync(CancellationToken)` and reuses the normal cached docs snapshot. It does not run a second harvester pipeline. `Healthy`, `Empty`, and `Degraded` snapshots continue startup; only aggregate `Failed` throws `AppSurfaceDocsHarvestFailedException`.
+The startup preflight shares the initial harvest task with docs requests through [AppSurfaceDocsHarvestCoordinator](Services/AppSurfaceDocsHarvestCoordinator.cs). Hosts that remove this optional coordinator continue to warm the normal cached snapshot through `DocAggregator.GetHarvestHealthAsync(CancellationToken)`. Neither path runs a second harvester pipeline. `Healthy`, `Empty`, and `Degraded` snapshots continue startup; only aggregate `Failed` throws `AppSurfaceDocsHarvestFailedException`.
 
 Disabled optional harvesters do not count as successful empty harvesters for strict mode. For example, a disabled JavaScript harvester cannot mask Markdown and C# harvesters that both failed.
 
@@ -2431,6 +2431,8 @@ AppSurface Docs does not regenerate these trees at request time. It resolves ext
 ### Published tree rewrite limit
 
 `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes` is a public resource guard for published release trees. The default is `4194304` bytes (4 MiB), chosen to cover the generated AppSurface 0.1.0 docs archive while staying well below the supported ceiling. Hosts with larger generated docs can raise the value up to `33554432` bytes (32 MiB), but raising it increases per-request memory exposure for public rewritten HTML and search-index requests.
+
+The `0.2.0-preview.11` exact docs tree has an 8,741,119-byte root `search-index.json`. Hosts that mount that archive through AppSurface Docs must set `AppSurfaceDocs__Versioning__MaxRewrittenFileSizeBytes=16777216` (16 MiB) before adding its catalog entry; the 4 MiB default marks the archive unavailable. Static Pages serves the exported file directly. The [archive verification command](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-docs-verify-archive) needs the matching `--max-rewritten-file-size-bytes 16777216` option when checking that tree.
 
 Use the limit for exported `.html` pages and the root `search-index.json` only. It is not a general docs file-size policy, it does not cap source harvesting, and it does not block images, fonts, CSS, JavaScript, or other streamed assets. When AppSurface Docs rejects an oversized rewritten artifact, diagnostics include the artifact type, observed size, configured limit, `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes`, the failure outcome, and this section name. Remediate by shrinking or re-exporting the artifact, or by setting a larger explicit limit within the supported range.
 

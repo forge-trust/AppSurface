@@ -4,6 +4,7 @@ using ForgeTrust.AppSurface.Flow;
 using ForgeTrust.AppSurface.Workers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Npgsql;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
@@ -49,6 +50,12 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         var result = await provider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
             new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work));
 
+        var registrationObservation = DurableWorkRegistryObservation.Capture(
+            provider.GetRequiredService<IDurableWorkRegistry>(),
+            SuccessfulWorkRegistration.Name,
+            "v1");
+        Assert.Equal(SuccessfulWorkRegistration.Name, registrationObservation.WorkName);
+        Assert.Equal("v1", registrationObservation.WorkVersion);
         Assert.Equal(1, result.Discovered);
         Assert.Equal(1, result.Claimed);
         Assert.Equal(1, result.Processed);
@@ -58,6 +65,8 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.True(snapshot.IsSuccess);
         Assert.Equal(DurableWorkState.Succeeded, snapshot.Value!.State);
         Assert.Equal("runtime-pump-key", snapshot.Value.ProviderKey);
+        Assert.Equal(registrationObservation.WorkName, snapshot.Value.WorkName);
+        Assert.Equal(registrationObservation.WorkVersion, snapshot.Value.WorkVersion);
         Assert.Equal(DurableRuntimeHealthState.Healthy, (await provider.GetRequiredService<IDurableRuntimeHealth>().GetAsync()).State);
     }
 
@@ -175,6 +184,11 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             DurableProviderSafety.ProviderKeyed));
         Assert.True(accepted.IsSuccess);
 
+        var registrationObservation = DurableWorkRegistryObservation.Capture(
+            provider.GetRequiredService<IDurableWorkRegistry>(),
+            registration.WorkName,
+            registration.WorkVersion);
+
         var result = await provider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
             new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work));
         var snapshot = await provider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
@@ -184,6 +198,8 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.True(snapshot.IsSuccess);
         Assert.Equal(DurableWorkState.Succeeded, snapshot.Value!.State);
         Assert.Equal("completed", snapshot.Value.TerminalCode);
+        Assert.Equal(registrationObservation.WorkName, snapshot.Value.WorkName);
+        Assert.Equal(registrationObservation.WorkVersion, snapshot.Value.WorkVersion);
     }
 
     [Fact]
@@ -1027,6 +1043,11 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             DurableProviderSafety.Idempotent));
         Assert.True(accepted.IsSuccess);
 
+        var registrationObservation = DurableWorkRegistryObservation.Capture(
+            provider.GetRequiredService<IDurableWorkRegistry>(),
+            FailingWorkRegistration.Name,
+            "v1");
+
         var result = await provider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
             new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work));
 
@@ -1039,6 +1060,8 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.True(snapshot.IsSuccess);
         Assert.Equal(DurableWorkState.Suspended, snapshot.Value!.State);
         Assert.Equal(DurableProblemCodes.AmbiguousExternalOutcome, snapshot.Value!.TerminalCode);
+        Assert.Equal(registrationObservation.WorkName, snapshot.Value.WorkName);
+        Assert.Equal(registrationObservation.WorkVersion, snapshot.Value.WorkVersion);
     }
 
     [Fact]
@@ -1220,6 +1243,11 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             DurableProviderSafety.Idempotent));
         Assert.True(accepted.IsSuccess);
 
+        var registrationObservation = DurableWorkRegistryObservation.Capture(
+            provider.GetRequiredService<IDurableWorkRegistry>(),
+            SuccessfulWorkRegistration.Name,
+            "v1");
+
         await using (var update = database.DataSource.CreateCommand(
             "UPDATE appsurface_durable.work SET revision = revision + 1 WHERE scope_id = @scope_id AND work_id = @work_id;"))
         {
@@ -1237,6 +1265,11 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.Equal(1, result.Deferred);
         Assert.Equal(0, result.Failed);
         Assert.False(result.HasMore);
+        var snapshot = await provider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
+            new DurableWorkGetRequest(scope, accepted.Value!.WorkId));
+        Assert.True(snapshot.IsSuccess);
+        Assert.Equal(registrationObservation.WorkName, snapshot.Value!.WorkName);
+        Assert.Equal(registrationObservation.WorkVersion, snapshot.Value.WorkVersion);
     }
 
     [Fact]
@@ -1303,7 +1336,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         await schema.ApplyAsync();
         var epoch = Guid.NewGuid();
         await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "lease-renewal");
-        var registration = new SlowWorkRegistration();
+        var registration = new BlockingWorkRegistration();
         var services = new ServiceCollection();
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
@@ -1316,7 +1349,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
                 options.WorkerId = "runtime-pump-lease-worker";
                 options.SendWakeNotifications = false;
                 options.IdlePollingInterval = TimeSpan.FromMilliseconds(20);
-                options.HeartbeatStaleAfter = TimeSpan.FromSeconds(1);
+                options.HeartbeatStaleAfter = TimeSpan.FromSeconds(3);
             });
         await using var provider = services.BuildServiceProvider();
         var scope = new DurableScopeId("runtime-pump-lease-scope");
@@ -1324,7 +1357,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             scope,
             new DurableCommandId("runtime-pump-lease-command"),
             "runtime-pump-lease-key",
-            SlowWorkRegistration.Name,
+            BlockingWorkRegistration.Name,
             "v1",
             registration.InputCodec.EncodeObject(Encoding.UTF8.GetBytes("input")),
             DurableProviderSafety.Idempotent,
@@ -1333,16 +1366,57 @@ public sealed class PostgreSqlDurableRuntimePumpTests
                 maximumElapsedTime: TimeSpan.FromMinutes(1),
                 initialRetryDelay: TimeSpan.FromMilliseconds(10),
                 maximumRetryDelay: TimeSpan.FromMilliseconds(10),
-                leaseDuration: TimeSpan.FromSeconds(2),
+                // Observe maintenance directly instead of making success depend on a two-second runner deadline.
+                leaseDuration: TimeSpan.FromSeconds(30),
                 renewalCadence: TimeSpan.FromMilliseconds(200),
                 maximumLeaseLifetime: TimeSpan.FromMinutes(1),
                 backoffAlgorithm: "exponential-v1")));
         Assert.True(accepted.IsSuccess);
 
-        var result = await provider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
-            new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work));
+        var store = new ObservedLeaseRenewalWorkStore(database.DataSource, epoch);
+        var pump = CreatePump(provider, store);
+        var health = provider.GetRequiredService<IDurableRuntimeHealth>();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var running = pump.RunOnceAsync(
+            new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work),
+            deadline.Token).AsTask();
+
+        try
+        {
+            await registration.Started.Task.WaitAsync(deadline.Token);
+            var initial = await health.GetAsync(deadline.Token);
+            Assert.NotNull(initial.LastHeartbeatAtUtc);
+
+            var renewal = await store.FirstRenewal.Task.WaitAsync(deadline.Token);
+            Assert.NotNull(renewal.Renewed);
+            Assert.True(renewal.Renewed.LeaseExpiresAtUtc > renewal.Original.LeaseExpiresAtUtc);
+
+            while (true)
+            {
+                Assert.False(running.IsCompleted);
+                var active = await health.GetAsync(deadline.Token);
+                Assert.NotNull(active.LastHeartbeatAtUtc);
+                if (active.LastHeartbeatAtUtc > initial.LastHeartbeatAtUtc)
+                {
+                    Assert.True(active.IsPassActive);
+                    Assert.Equal(DurableRuntimeHealthState.Healthy, active.State);
+                    break;
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(20), deadline.Token);
+            }
+        }
+        finally
+        {
+            registration.Complete.TrySetResult(registration.CompletionResult);
+            await running.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+
+        var result = await running;
 
         Assert.Equal(1, result.Processed);
+        Assert.Equal(0, result.Deferred);
+        Assert.Equal(0, result.Failed);
         var snapshot = await provider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
             new DurableWorkGetRequest(scope, accepted.Value!.WorkId));
         Assert.True(snapshot.IsSuccess);
@@ -1457,6 +1531,82 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         var result = await running.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Equal(1, result.Failed);
+        var snapshot = await provider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
+            new DurableWorkGetRequest(scope, accepted.Value!.WorkId));
+        Assert.True(snapshot.IsSuccess);
+        Assert.Equal(DurableWorkState.Suspended, snapshot.Value!.State);
+        Assert.Equal(DurableProblemCodes.AmbiguousExternalOutcome, snapshot.Value.TerminalCode);
+    }
+
+    [Fact]
+    public async Task DurableHostScenario_TimeoutRetainsPostPermitInvocationUntilPostgreSqlPersistsAmbiguousOutcome()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "scenario-timeout-after-permit");
+        var registration = new BlockingWorkRegistration();
+        var services = new ServiceCollection();
+        services.AddSingleton<DurableWorkRegistration>(registration);
+        services.AddAppSurfaceDurablePostgreSql(
+            database.DataSource,
+            database.CreateDataSource(),
+            new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options =>
+            {
+                options.WorkerId = "runtime-pump-scenario-timeout-worker";
+                options.SendWakeNotifications = false;
+            });
+        await using var provider = services.BuildServiceProvider();
+        var scope = new DurableScopeId("runtime-pump-scenario-timeout-scope");
+        var accepted = await provider.GetRequiredService<IDurableWorkClient>().EnqueueAsync(new DurableWorkRequest(
+            scope,
+            new DurableCommandId("runtime-pump-scenario-timeout-command"),
+            "runtime-pump-scenario-timeout-key",
+            BlockingWorkRegistration.Name,
+            "v1",
+            registration.InputCodec.EncodeObject(Encoding.UTF8.GetBytes("input")),
+            DurableProviderSafety.Idempotent));
+        Assert.True(accepted.IsSuccess);
+
+        var health = provider.GetRequiredService<IDurableRuntimeHealth>();
+        var admission = provider.GetRequiredService<IDurableRuntimePumpAdmission>();
+        var request = new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work);
+        var clock = new MonotonicTimeProvider();
+        var scenario = new DurableHostScenario(
+            health,
+            admission,
+            request,
+            timeProvider: clock,
+            observationTimeout: TimeSpan.FromSeconds(1),
+            overallTimeout: TimeSpan.FromSeconds(10));
+        var assessment = await scenario.AssessHealthAsync();
+        Assert.Equal(DurableRuntimeHealthState.NotStarted, assessment.Snapshot.State);
+
+        using var cancellation = new CancellationTokenSource();
+        var run = scenario.RunDirectPumpOnceAsync(cancellation.Token);
+        await registration.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await clock.WaitForTimerAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        clock.Advance(TimeSpan.FromSeconds(1));
+        var timeout = await Assert.ThrowsAsync<DurableScenarioTimeoutException>(() => run.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        Assert.Equal(DurableScenarioPhase.Pump, timeout.Phase);
+        Assert.Equal(DurableScenarioTimeoutReason.Observation, timeout.Reason);
+        var invocation = Assert.IsType<DurableScenarioPumpInvocation>(timeout.Invocation);
+        Assert.True(timeout.InvocationStarted);
+        Assert.True(timeout.ExecutionStatusUnknown);
+        Assert.Same(request, invocation.Request);
+        Assert.Same(assessment, invocation.Assessment);
+        Assert.Same(invocation, Assert.Single(scenario.PumpInvocations));
+        Assert.False(invocation.Completion.IsCompleted);
+
+        cancellation.Cancel();
+        var attempt = await invocation.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(DurableRuntimePumpAttemptKind.Completed, attempt.Kind);
+        Assert.Equal(1, attempt.Result!.Failed);
+
         var snapshot = await provider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
             new DurableWorkGetRequest(scope, accepted.Value!.WorkId));
         Assert.True(snapshot.IsSuccess);
@@ -1829,6 +1979,11 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             DurableProviderSafety.Idempotent));
         Assert.True(accepted.IsSuccess);
 
+        var registrationObservation = DurableWorkRegistryObservation.Capture(
+            provider.GetRequiredService<IDurableWorkRegistry>(),
+            BlockingWorkRegistration.Name,
+            "v1");
+
         var running = provider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
             new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work)).AsTask();
         await registration.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -1845,6 +2000,11 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.Equal(0, result.Processed);
         Assert.Equal(1, result.Deferred);
         Assert.Equal(0, result.Failed);
+        var snapshot = await provider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
+            new DurableWorkGetRequest(scope, accepted.Value!.WorkId));
+        Assert.True(snapshot.IsSuccess);
+        Assert.Equal(registrationObservation.WorkName, snapshot.Value!.WorkName);
+        Assert.Equal(registrationObservation.WorkVersion, snapshot.Value.WorkVersion);
     }
 
     [Fact]
@@ -3007,6 +3167,20 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             throw new InvalidOperationException("Idempotent test Work does not reconcile.");
     }
 
+    private sealed class MonotonicTimeProvider : FakeTimeProvider
+    {
+        private readonly TaskCompletionSource _firstTimerCreated = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal Task WaitForTimerAsync() => _firstTimerCreated.Task;
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = base.CreateTimer(callback, state, dueTime, period);
+            _firstTimerCreated.TrySetResult();
+            return timer;
+        }
+    }
+
     private sealed class StartedFailingWorkRegistration : DurableWorkRegistration
     {
         internal const string Name = "tests.runtime-pump.started-failure";
@@ -3079,38 +3253,24 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             throw new InvalidOperationException("Idempotent test Work does not reconcile.");
     }
 
-    private sealed class SlowWorkRegistration : DurableWorkRegistration
+    /// <summary>Observes a real PostgreSQL lease-renewal result without replacing the store's fencing behavior.</summary>
+    private sealed class ObservedLeaseRenewalWorkStore(NpgsqlDataSource dataSource, Guid runtimeEpoch)
+        : PostgreSqlDurableWorkStore(dataSource, runtimeEpoch)
     {
-        internal const string Name = "tests.runtime-pump.slow";
+        /// <summary>Completes after the first database renewal attempt, including a refused renewal.</summary>
+        internal TaskCompletionSource<(PostgreSqlDurableWorkClaim Original, PostgreSqlDurableWorkClaim? Renewed)>
+            FirstRenewal
+        { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        internal SlowWorkRegistration()
-            : base(
-                Name,
-                "v1",
-                DurableProviderSafety.Idempotent,
-                new PostgreSqlOpaqueTestCodec("tests.runtime-pump.slow.input", "v1"),
-                new PostgreSqlOpaqueTestCodec("tests.runtime-pump.slow.result", "v1"))
+        /// <inheritdoc />
+        internal override async ValueTask<PostgreSqlDurableWorkClaim?> RenewLeaseAsync(
+            PostgreSqlDurableWorkClaim claim,
+            CancellationToken cancellationToken = default)
         {
+            var renewed = await base.RenewLeaseAsync(claim, cancellationToken);
+            FirstRenewal.TrySetResult((claim, renewed));
+            return renewed;
         }
-
-        internal IDurablePayloadCodec InputCodec => WorkCodec;
-
-        public override bool CanReconcile => false;
-
-        public override DurablePreparedWork Prepare(IServiceProvider services, DurableWorkExecutionContext work) =>
-            new SlowPreparedWork(ResultCodec.EncodeObject(Encoding.UTF8.GetBytes("result")));
-
-        public override ValueTask<DurableEncodedPayload> InvokeAsync(
-            IServiceProvider services,
-            DurableWorkExecutionContext work,
-            CancellationToken cancellationToken = default) =>
-            Prepare(services, work).InvokeAsync(cancellationToken);
-
-        public override ValueTask<DurableEncodedEffectReconciliation> ReconcileAsync(
-            IServiceProvider services,
-            DurableWorkExecutionContext work,
-            CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException("Idempotent test Work does not reconcile.");
     }
 
     private sealed class DelayedLeaseRenewalWorkStore : PostgreSqlDurableWorkStore
@@ -3212,15 +3372,6 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             fail.Wait(cancellationToken);
             return ValueTask.FromException<DurableEncodedPayload>(
                 new InvalidOperationException("Simulated provider failure after start."));
-        }
-    }
-
-    private sealed class SlowPreparedWork(DurableEncodedPayload result) : DurablePreparedWork
-    {
-        public override async ValueTask<DurableEncodedPayload> InvokeAsync(CancellationToken cancellationToken = default)
-        {
-            await Task.Delay(TimeSpan.FromMilliseconds(850), cancellationToken);
-            return result;
         }
     }
 

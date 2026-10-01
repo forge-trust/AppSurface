@@ -1,0 +1,96 @@
+:root {
+  --rw-loading-fallback-z-index: 1000;
+  --rw-loading-fallback-block-size: 2.5rem;
+  --rw-loading-fallback-surface: #fff;
+  --rw-loading-fallback-color: #111827;
+  --rw-loading-fallback-border: rgb(17 24 39 / 18%);
+  --rw-loading-fallback-shadow: 0 0.125rem 0.5rem rgb(17 24 39 / 14%);
+  --rw-loading-fallback-progress-size: 0.1875rem;
+}
+
+/* The runtime supplies the accessible status text and toggles the hidden attribute. */
+[data-rw-loading-fallback] {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline: 0;
+  z-index: var(--rw-loading-fallback-z-index, 1000);
+  box-sizing: border-box;
+  min-block-size: calc(var(--rw-loading-fallback-block-size, 2.5rem) + env(safe-area-inset-top, 0px));
+  padding-block-start: env(safe-area-inset-top, 0px);
+  padding-inline-start: max(0.75rem, env(safe-area-inset-left, 0px));
+  padding-inline-end: max(0.75rem, env(safe-area-inset-right, 0px));
+  display: flex;
+  align-items: center;
+  color: var(--rw-loading-fallback-color, #111827);
+  background: var(--rw-loading-fallback-surface, #fff);
+  border-block-end: 1px solid var(--rw-loading-fallback-border, rgb(17 24 39 / 18%));
+  border-inline-start: 0.25rem solid var(--rw-ui-accent, #2563eb);
+  box-shadow: var(--rw-loading-fallback-shadow, 0 0.125rem 0.5rem rgb(17 24 39 / 14%));
+  font: var(--rw-ui-font, inherit);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+[data-rw-loading-fallback][hidden] {
+  display: none !important;
+}
+
+[data-rw-loading-fallback]::after {
+  position: absolute;
+  inset-inline-start: -35%;
+  inset-block-end: 0;
+  inline-size: 35%;
+  block-size: var(--rw-loading-fallback-progress-size, 0.1875rem);
+  background: var(--rw-ui-accent, #2563eb);
+  content: "";
+  pointer-events: none;
+  animation: rw-loading-fallback-travel 1.3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+[data-rw-loading-fallback]:dir(rtl)::after {
+  animation-name: rw-loading-fallback-travel-rtl;
+}
+
+@keyframes rw-loading-fallback-travel {
+  to {
+    transform: translateX(400%);
+  }
+}
+
+@keyframes rw-loading-fallback-travel-rtl {
+  to {
+    transform: translateX(-400%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-rw-loading-fallback]::after,
+  [data-rw-loading-fallback]:dir(rtl)::after {
+    inset-inline-start: 0;
+    inline-size: 100%;
+    animation: none;
+  }
+}
+
+@media (forced-colors: active) {
+  [data-rw-loading-fallback] {
+    color: CanvasText;
+    background: Canvas;
+    border-color: CanvasText;
+    box-shadow: none;
+    forced-color-adjust: auto;
+  }
+
+  [data-rw-loading-fallback]::after,
+  [data-rw-loading-fallback]:dir(rtl)::after {
+    inset-inline-start: 0;
+    inline-size: 100%;
+    background: Highlight;
+    animation: none;
+  }
+}
+
+html[data-rw-loading-turbo-bar="suppress"] .turbo-progress-bar {
+  display: none;
+}

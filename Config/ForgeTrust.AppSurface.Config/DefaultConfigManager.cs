@@ -9,17 +9,26 @@ internal sealed class DefaultConfigManager : IConfigManager
     private readonly IEnvironmentConfigProvider _environmentProvider;
     private readonly IReadOnlyList<IConfigProvider> _otherProviders;
     private readonly ILogger<DefaultConfigManager> _logger;
+    private readonly ConfigCompositionEngine _composition;
     private readonly IConfigKeyInputParser _parser;
     private readonly ConfigResourceOptions _limits;
 
     /// <summary>Captures provider order and finalized parser/resource options without activating wrappers.</summary>
+    /// <param name="environmentProvider">The environment configuration provider.</param>
+    /// <param name="otherProviders">The collection of other configuration providers.</param>
+    /// <param name="logger">The logger for configuration events.</param>
+    /// <param name="parser">The application-input parser.</param>
+    /// <param name="resourceOptions">Limits for diagnostics and resolution.</param>
+    /// <param name="declarations">The finalized declaration registry.</param>
+    /// <param name="composition">The shared secret composition authority.</param>
     public DefaultConfigManager(
         IEnvironmentConfigProvider environmentProvider,
         IEnumerable<IConfigProvider>? otherProviders,
         ILogger<DefaultConfigManager> logger,
         IConfigKeyInputParser? parser = null,
         IOptions<ConfigResourceOptions>? resourceOptions = null,
-        ConfigDeclarationRegistry? declarations = null)
+        ConfigDeclarationRegistry? declarations = null,
+        ConfigCompositionEngine? composition = null)
     {
         ArgumentNullException.ThrowIfNull(environmentProvider);
         ArgumentNullException.ThrowIfNull(logger);
@@ -27,10 +36,21 @@ internal sealed class DefaultConfigManager : IConfigManager
         _otherProviders = otherProviders?.Where(provider => provider is not IEnvironmentConfigProvider)
             .OrderByDescending(provider => provider.Priority).ToArray() ?? [];
         _logger = logger;
+        _composition = composition ?? new ConfigCompositionEngine(environmentProvider, _otherProviders,
+            _otherProviders.OfType<IConfigSecretProvider>(), _otherProviders.OfType<IConfigSecretDeclarationSource>(),
+            new AppSurfaceConfigOptions(), TimeProvider.System);
         _parser = parser ?? new ConfigKeyInputParser(Options.Create(new AppSurfaceConfigKeyOptions()));
         _limits = (resourceOptions?.Value ?? new ConfigResourceOptions()).Snapshot();
         // DI constructs the complete registry before manager use, even when no wrapper is requested.
         _ = declarations?.Entries;
+    }
+
+    /// <summary>Preserves manual construction with a shared composition authority.</summary>
+    internal DefaultConfigManager(IEnvironmentConfigProvider environmentProvider,
+        IEnumerable<IConfigProvider>? otherProviders, ILogger<DefaultConfigManager> logger,
+        ConfigCompositionEngine composition)
+        : this(environmentProvider, otherProviders, logger, parser: null, composition: composition)
+    {
     }
 
     /// <inheritdoc />
@@ -44,6 +64,14 @@ internal sealed class DefaultConfigManager : IConfigManager
         if (key.InputOrigin == ConfigKeyInputOrigin.TranslatedDot)
         {
             ReportNotice(request, "Application", ConfigDiagnosticCatalog.LegacyDot(key));
+        }
+
+        if (_composition.ContainsSecrets(typeof(T)))
+        {
+            var composed = _composition.Execute(environment, key, typeof(T));
+            if (composed.State == ConfigCompositionRootState.Failed)
+                throw new ConfigurationCompositionException(environment, key.Value, composed.Failures);
+            return composed.Value is null ? default : (T)composed.Value;
         }
 
         var result = Resolve<T>(_environmentProvider, request);

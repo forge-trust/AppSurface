@@ -91,11 +91,19 @@ public sealed class DurableOperationalAssessmentDocumentationRegressionTests
         {
             CopySourceDocument(repoRoot, sourceRoot, "README.md");
             CopySourceDocument(repoRoot, sourceRoot, "Durable/operational-assessments.md");
-            CopySourceDocument(repoRoot, sourceRoot, "releases/unreleased.md");
-            CopySourceDocument(
-                repoRoot,
-                sourceRoot,
-                "releases/unreleased.entries/2026-09-10-durable-operational-assessments.md");
+            const string entryPath = "releases/unreleased.entries/2026-09-10-durable-operational-assessments.md";
+            var entryIsUnreleased = File.Exists(TestPathUtils.PathUnder(repoRoot, entryPath));
+            var releaseNotePath = entryIsUnreleased
+                ? "releases/unreleased.md"
+                : "releases/v0.2.0-preview.9.md";
+            var releaseNoteRoute = entryIsUnreleased
+                ? "/docs/releases/unreleased"
+                : "/docs/releases/v0.2.0-preview.9";
+            CopySourceDocument(repoRoot, sourceRoot, releaseNotePath);
+            if (entryIsUnreleased)
+            {
+                CopySourceDocument(repoRoot, sourceRoot, entryPath);
+            }
 
             var builder = AppSurfaceDocsStandaloneHost.CreateBuilder([]);
             builder.ConfigureAppConfiguration(
@@ -105,6 +113,7 @@ public sealed class DurableOperationalAssessmentDocumentationRegressionTests
                         {
                             ["AppSurfaceDocs:Source:RepositoryRoot"] = sourceRoot,
                             ["AppSurfaceDocs:Harvest:StartupMode"] = nameof(AppSurfaceDocsHarvestStartupMode.Blocking),
+                            ["AppSurfaceDocs:Harvest:InitialRequestWaitBudgetMilliseconds"] = "0",
                         }));
             builder.ConfigureWebHost(webHost => webHost.UseUrls("http://127.0.0.1:0"));
 
@@ -122,7 +131,7 @@ public sealed class DurableOperationalAssessmentDocumentationRegressionTests
                 };
                 using var requests = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
-                using var releaseResponse = await client.GetAsync("/docs/releases/unreleased", requests.Token);
+                using var releaseResponse = await client.GetAsync(releaseNoteRoute, requests.Token);
                 var releaseHtml = await releaseResponse.Content.ReadAsStringAsync(requests.Token);
                 using var guideResponse = await client.GetAsync(
                     "/docs/durable/operational-assessments",

@@ -41,6 +41,13 @@ public sealed class AppSurfaceGoogleSecretManagerOptions
     public bool AllowLatestVersion { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether a failed raw whole-root base stops fallback to lower-priority bases.
+    /// </summary>
+    /// <remarks>Applies only when this provider supplies a raw whole-root base for a <see cref="Secret{T}"/> root.
+    /// File-declared scalar references and the logical-key provider contract always report claimed failures.</remarks>
+    public bool FailClosedOnProviderFailure { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets the bounded timeout for one Secret Manager lookup.
     /// </summary>
     public TimeSpan LookupTimeout { get; set; } = TimeSpan.FromSeconds(5);
@@ -77,6 +84,7 @@ public sealed class AppSurfaceGoogleSecretManagerOptions
             ProjectId = ProjectId,
             DefaultVersion = DefaultVersion,
             AllowLatestVersion = AllowLatestVersion,
+            FailClosedOnProviderFailure = FailClosedOnProviderFailure,
             LookupTimeout = LookupTimeout,
             CacheTtl = CacheTtl,
             CacheCapacity = CacheCapacity,
@@ -140,6 +148,12 @@ public sealed class AppSurfaceGoogleSecretManagerOptions
         _conventions.Add(new AppSurfaceGoogleSecretConvention(logicalKeyPrefix, secretIdPrefix, version));
         return this;
     }
+
+    /// <summary>Copies host settings and registration collections for a single provider's lifetime.</summary>
+    /// <returns>An isolated options instance owned exclusively by the provider.</returns>
+    /// <remarks>Mappings and conventions contain only immutable strings. Copying their collections prevents
+    /// later additions or host-option changes from altering validation, access, or cache identity.</remarks>
+    internal AppSurfaceGoogleSecretManagerOptions CreateSnapshot() => Snapshot();
 
     /// <summary>Enables a convention resolver under a parsed logical-key prefix.</summary>
     /// <param name="logicalKeyPrefix">The required logical-key prefix that the convention may claim.</param>

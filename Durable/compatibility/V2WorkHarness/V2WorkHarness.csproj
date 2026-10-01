@@ -26,7 +26,7 @@
   <Target Name="RequireV2CompatibilityPackage"
           BeforeTargets="Restore;Build">
     <Error Condition="'$(V2PackageVersion)' != '0.2.0-preview.8'"
-           Text="V2WorkHarness must restore and build against exactly ForgeTrust.AppSurface.Durable.PostgreSql 0.2.0-preview.8." />
+           Text="V2WorkHarness must restore and build against exactly ForgeTrust.AppSurface.Durable.PostgreSql 0.2.0-preview.8, the immediately previous published package." />
   </Target>
 
 </Project>

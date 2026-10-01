@@ -64,6 +64,37 @@ public sealed class GoogleSecretManagerConfigProviderTests
     }
 
     [Fact]
+    public void Options_CreateSnapshot_CopiesSettingsAndRegistrationCollections()
+    {
+        var options = new AppSurfaceGoogleSecretManagerOptions
+        {
+            ProjectId = "project",
+            DefaultVersion = "5",
+            LookupTimeout = TimeSpan.FromSeconds(3),
+            CacheTtl = TimeSpan.FromMinutes(2),
+            CacheCapacity = 7,
+            MaxAdHocClaims = 8,
+            FailClosedOnProviderFailure = false
+        };
+        options.MapSecret("Service:ApiKey", "api-key");
+        options.EnableConventionResolver("Payments", "shared-");
+
+        var snapshot = options.CreateSnapshot();
+        options.ProjectId = "changed";
+        options.MapSecret("Added", "added");
+        options.EnableConventionResolver("Added", "shared-");
+
+        Assert.Equal("project", snapshot.ProjectId);
+        Assert.Equal(TimeSpan.FromSeconds(3), snapshot.LookupTimeout);
+        Assert.Equal(TimeSpan.FromMinutes(2), snapshot.CacheTtl);
+        Assert.Equal(7, snapshot.CacheCapacity);
+        Assert.Equal(8, snapshot.MaxAdHocClaims);
+        Assert.False(snapshot.FailClosedOnProviderFailure);
+        Assert.Equal("Service:ApiKey", Assert.Single(snapshot.Mappings).LogicalKey);
+        Assert.Equal("Payments", Assert.Single(snapshot.Conventions).LogicalKeyPrefix);
+    }
+
+    [Fact]
     public void Resolve_Should_ReturnMappedSecretAndConvertType()
     {
         var provider = CreateProvider(

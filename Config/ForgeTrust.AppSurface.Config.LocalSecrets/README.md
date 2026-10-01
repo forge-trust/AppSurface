@@ -14,6 +14,21 @@ dotnet package add ForgeTrust.AppSurface.Config.LocalSecrets
 Register `AppSurfaceLocalSecretsModule` beside your Config module. Environment variables still win, LocalSecrets sits
 above file configuration, and only a true missing local secret falls through to files.
 
+For roots that contain inline secret destinations, the module exposes the same LocalSecrets singleton as
+`IConfigCompositionValueProvider` and `IConfigProviderClaimInspector`. The raw adapter returns stored text before typed
+conversion, marks contributions sensitive, and preserves the existing posture, identity, missing, and terminal rules.
+LocalSecrets remains a whole-root base provider and does not implement the version-aware `IConfigSecretProvider` contract.
+
+For typed file-declared secret destinations, read the [canonical reference guide](../ForgeTrust.AppSurface.Config/docs/file-secret-references.md) and run
+the [network-free golden path](../../examples/file-secret-references/README.md). LocalSecrets can participate as a sensitive
+raw base contribution; it does not reinterpret a remote descriptor or perform provider-specific reference resolution.
+
+## Typed file-declared secret references
+
+When a root contains `Secret<T>`, LocalSecrets supplies a lower scalar contribution only when its complete root is selected.
+The composition engine then applies exact environment values last. A file descriptor naming Google remains a Google
+reference, and LocalSecrets does not make a disabled remote declaration perform a local or remote read.
+
 For Linux, AppSurface treats `secret-tool` as an external command with an explicit trust boundary. By default it uses
 only `/usr/bin/secret-tool`, then `/bin/secret-tool`. It does not execute `secret-tool` from `PATH`; a PATH match is
 reported only as ignored diagnostic context.

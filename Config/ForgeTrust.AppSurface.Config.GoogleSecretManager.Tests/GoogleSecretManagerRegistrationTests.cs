@@ -31,9 +31,14 @@ public sealed class GoogleSecretManagerRegistrationTests
         Assert.Same(
             provider.GetRequiredService<GoogleSecretManagerConfigProvider>(),
             provider.GetServices<IConfigProvider>().Single(config => config is GoogleSecretManagerConfigProvider));
-        Assert.Collection(
+        var concrete = provider.GetRequiredService<GoogleSecretManagerConfigProvider>();
+        Assert.Same(concrete, provider.GetServices<IConfigSecretProvider>().Single(config => config is GoogleSecretManagerConfigProvider));
+        Assert.Same(concrete, provider.GetServices<IConfigSecretDeclarationSource>().Single());
+        Assert.Same(concrete, provider.GetServices<IConfigCompositionValueProvider>().Single(config => config is GoogleSecretManagerConfigProvider));
+        Assert.Same(concrete, provider.GetServices<IConfigProviderClaimInspector>().Single());
+        Assert.Contains(
             provider.GetServices<IValidateOptions<AppSurfaceGoogleSecretManagerOptions>>(),
-            validator => Assert.IsType<AppSurfaceGoogleSecretManagerDeclarationValidator>(validator));
+            validator => validator is AppSurfaceGoogleSecretManagerDeclarationValidator);
     }
 
     [Fact]

@@ -1,0 +1,204 @@
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder
+  constructor public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder()
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot Build()
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot BuildContradictoryForTest()
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder ForState(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthState state)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder WithActiveRuntimeEpoch(System.Nullable<System.Guid> value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder WithConfiguredRuntimeEpoch(System.Guid value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder WithDueDispatchCount(System.Int64 value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder WithEpochCompatible(System.Boolean value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder WithHostedSurfaces(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeSurface value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder WithInstalledSchemaVersion(System.Int32 value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder WithIsDraining(System.Boolean value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder WithIsPassActive(System.Boolean value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder WithLastHeartbeatAtUtc(System.Nullable<System.DateTimeOffset> value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder WithLastSuccessfulSweepAtUtc(System.Nullable<System.DateTimeOffset> value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder WithObservedAtUtc(System.DateTimeOffset value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder WithOldestDueAge(System.Nullable<System.TimeSpan> value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder WithOldestDueAtUtc(System.Nullable<System.DateTimeOffset> value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder WithProblemCode(System.String? value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder WithRequiredSchemaVersion(System.Int32 value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder WithSchemaCompatible(System.Boolean value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder WithStartedAtUtc(System.Nullable<System.DateTimeOffset> value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder WithWorkerId(System.String value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder WithWorkerInstanceId(System.Nullable<System.Guid> value)
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableHostScenario
+  constructor public ForgeTrust.AppSurface.Durable.Testing.DurableHostScenario(ForgeTrust.AppSurface.Durable.Provider.IDurableRuntimeHealth health, ForgeTrust.AppSurface.Durable.Provider.IDurableRuntimePumpAdmission admission, ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest request, System.TimeProvider? timeProvider = null, System.Nullable<System.TimeSpan> observationTimeout = null, System.Nullable<System.TimeSpan> overallTimeout = null)
+  method public System.Int32 ClearCompletedPumpInvocations()
+  method public System.Threading.Tasks.Task<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpAttempt> RunDirectPumpOnceAsync(System.Threading.CancellationToken cancellationToken = default)
+  method public System.Threading.Tasks.Task<ForgeTrust.AppSurface.Durable.Testing.DurableScenarioHealthAssessment> AssessHealthAsync(System.Threading.CancellationToken cancellationToken = default)
+  property public ForgeTrust.AppSurface.Durable.Testing.DurableScenarioHealthAssessment? LatestAssessment { get: public; }
+  property public System.Collections.Generic.IReadOnlyList<ForgeTrust.AppSurface.Durable.Testing.DurableScenarioPumpInvocation> PumpInvocations { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableRuntimeDrainTransition : System.IEquatable<ForgeTrust.AppSurface.Durable.Testing.DurableRuntimeDrainTransition>
+  constructor public ForgeTrust.AppSurface.Durable.Testing.DurableRuntimeDrainTransition(System.Int64 Sequence, System.Boolean IsDraining)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableRuntimeDrainTransition <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Testing.DurableRuntimeDrainTransition? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public System.Void Deconstruct(out System.Int64 Sequence, out System.Boolean IsDraining)
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Testing.DurableRuntimeDrainTransition? left, ForgeTrust.AppSurface.Durable.Testing.DurableRuntimeDrainTransition? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Testing.DurableRuntimeDrainTransition? left, ForgeTrust.AppSurface.Durable.Testing.DurableRuntimeDrainTransition? right)
+  property public System.Boolean IsDraining { get: public; init: public; }
+  property public System.Int64 Sequence { get: public; init: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpAttemptBuilder
+  constructor public ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpAttemptBuilder()
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpAttempt Build()
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpAttemptBuilder WithKind(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpAttemptKind value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpAttemptBuilder WithProblemCode(System.String? value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpAttemptBuilder WithResult(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpResult? value)
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpCall : System.IEquatable<ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpCall>
+  constructor public ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpCall(System.Int64 Sequence, System.Int64 Generation, ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpCallKind Kind, ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest Request, System.Int32 MaximumItems, System.TimeSpan TimeBudget, ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeSurface Surfaces, System.Object? Result = null, System.Exception? Exception = null, System.Boolean CancellationRequestedAtCompletion = false, System.Boolean IsCompleted = false)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpCall <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpCall? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public System.Void Deconstruct(out System.Int64 Sequence, out System.Int64 Generation, out ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpCallKind Kind, out ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest Request, out System.Int32 MaximumItems, out System.TimeSpan TimeBudget, out ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeSurface Surfaces, out System.Object? Result, out System.Exception? Exception, out System.Boolean CancellationRequestedAtCompletion, out System.Boolean IsCompleted)
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpCall? left, ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpCall? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpCall? left, ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpCall? right)
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest Request { get: public; init: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeSurface Surfaces { get: public; init: public; }
+  property public ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpCallKind Kind { get: public; init: public; }
+  property public System.Boolean CancellationRequestedAtCompletion { get: public; init: public; }
+  property public System.Boolean IsCompleted { get: public; init: public; }
+  property public System.Exception? Exception { get: public; init: public; }
+  property public System.Int32 MaximumItems { get: public; init: public; }
+  property public System.Int64 Generation { get: public; init: public; }
+  property public System.Int64 Sequence { get: public; init: public; }
+  property public System.Object? Result { get: public; init: public; }
+  property public System.TimeSpan TimeBudget { get: public; init: public; }
+type public enum ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpCallKind : System.Int32
+  enum-member Admission = 0
+  enum-member Pump = 1
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpRequestBuilder
+  constructor public ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpRequestBuilder()
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest Build()
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpRequestBuilder WithMaximumItems(System.Int32 value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpRequestBuilder WithSurfaces(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeSurface value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpRequestBuilder WithTimeBudget(System.TimeSpan value)
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpResultBuilder
+  constructor public ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpResultBuilder()
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpResult Build()
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpResultBuilder WithCounts(System.Int32 discovered, System.Int32 claimed, System.Int32 processed, System.Int32 deferred, System.Int32 failed)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpResultBuilder WithElapsed(System.TimeSpan value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpResultBuilder WithHasMore(System.Boolean value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpResultBuilder WithNextDueAtUtc(System.Nullable<System.DateTimeOffset> value)
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableScenarioHealthAssessment : System.IEquatable<ForgeTrust.AppSurface.Durable.Testing.DurableScenarioHealthAssessment>
+  constructor public ForgeTrust.AppSurface.Durable.Testing.DurableScenarioHealthAssessment(System.Int64 Sequence, ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot Snapshot)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableScenarioHealthAssessment <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Testing.DurableScenarioHealthAssessment? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public System.Void Deconstruct(out System.Int64 Sequence, out ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot Snapshot)
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Testing.DurableScenarioHealthAssessment? left, ForgeTrust.AppSurface.Durable.Testing.DurableScenarioHealthAssessment? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Testing.DurableScenarioHealthAssessment? left, ForgeTrust.AppSurface.Durable.Testing.DurableScenarioHealthAssessment? right)
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot Snapshot { get: public; init: public; }
+  property public System.Int64 Sequence { get: public; init: public; }
+type public enum ForgeTrust.AppSurface.Durable.Testing.DurableScenarioPhase : System.Int32
+  enum-member Health = 0
+  enum-member Pump = 1
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableScenarioPumpInvocation
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest Request { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Testing.DurableScenarioHealthAssessment Assessment { get: public; }
+  property public System.Int64 Sequence { get: public; }
+  property public System.Threading.Tasks.Task<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpAttempt> Completion { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableScenarioTimeoutException : System.TimeoutException, System.Runtime.Serialization.ISerializable
+  property public ForgeTrust.AppSurface.Durable.Testing.DurableScenarioPhase Phase { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Testing.DurableScenarioPumpInvocation? Invocation { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Testing.DurableScenarioTimeoutReason Reason { get: public; }
+  property public System.Boolean ExecutionStatusUnknown { get: public; }
+  property public System.Boolean InvocationStarted { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.Testing.DurableScenarioTimeoutReason : System.Int32
+  enum-member Observation = 0
+  enum-member Overall = 1
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableWorkBindingObservation : System.IEquatable<ForgeTrust.AppSurface.Durable.Testing.DurableWorkBindingObservation>
+  constructor public ForgeTrust.AppSurface.Durable.Testing.DurableWorkBindingObservation(System.Object Definition, System.String WorkName, System.String WorkVersion)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableWorkBindingObservation <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Testing.DurableWorkBindingObservation? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public System.Void Deconstruct(out System.Object Definition, out System.String WorkName, out System.String WorkVersion)
+  method public static ForgeTrust.AppSurface.Durable.Testing.DurableWorkBindingObservation Capture<TWork, TResult, TExecutor>(ForgeTrust.AppSurface.Durable.DurableWorkBinding<TWork, TResult, TExecutor> binding) where TExecutor : class, ForgeTrust.AppSurface.Workers.IDurableWorkerExecutor<TWork, TResult>
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Testing.DurableWorkBindingObservation? left, ForgeTrust.AppSurface.Durable.Testing.DurableWorkBindingObservation? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Testing.DurableWorkBindingObservation? left, ForgeTrust.AppSurface.Durable.Testing.DurableWorkBindingObservation? right)
+  property public System.Object Definition { get: public; init: public; }
+  property public System.String WorkName { get: public; init: public; }
+  property public System.String WorkVersion { get: public; init: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableWorkDefinitionObservation : System.IEquatable<ForgeTrust.AppSurface.Durable.Testing.DurableWorkDefinitionObservation>
+  constructor public ForgeTrust.AppSurface.Durable.Testing.DurableWorkDefinitionObservation(System.String WorkName, System.String WorkVersion, System.String WorkCodecName, System.String WorkCodecVersion, System.Type WorkPayloadType, ForgeTrust.AppSurface.Durable.DurableDataClassification WorkClassification, System.String WorkRetentionPolicyId, System.String ResultCodecName, System.String ResultCodecVersion, System.Type ResultPayloadType, ForgeTrust.AppSurface.Durable.DurableDataClassification ResultClassification, System.String ResultRetentionPolicyId, ForgeTrust.AppSurface.Durable.DurableProviderSafety ProviderSafety, ForgeTrust.AppSurface.Durable.DurableWorkRetryPolicy DefaultRetryPolicy)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableWorkDefinitionObservation <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Testing.DurableWorkDefinitionObservation? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public System.Void Deconstruct(out System.String WorkName, out System.String WorkVersion, out System.String WorkCodecName, out System.String WorkCodecVersion, out System.Type WorkPayloadType, out ForgeTrust.AppSurface.Durable.DurableDataClassification WorkClassification, out System.String WorkRetentionPolicyId, out System.String ResultCodecName, out System.String ResultCodecVersion, out System.Type ResultPayloadType, out ForgeTrust.AppSurface.Durable.DurableDataClassification ResultClassification, out System.String ResultRetentionPolicyId, out ForgeTrust.AppSurface.Durable.DurableProviderSafety ProviderSafety, out ForgeTrust.AppSurface.Durable.DurableWorkRetryPolicy DefaultRetryPolicy)
+  method public static ForgeTrust.AppSurface.Durable.Testing.DurableWorkDefinitionObservation Capture<TWork, TResult>(ForgeTrust.AppSurface.Durable.DurableWorkDefinition<TWork, TResult> definition)
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Testing.DurableWorkDefinitionObservation? left, ForgeTrust.AppSurface.Durable.Testing.DurableWorkDefinitionObservation? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Testing.DurableWorkDefinitionObservation? left, ForgeTrust.AppSurface.Durable.Testing.DurableWorkDefinitionObservation? right)
+  property public ForgeTrust.AppSurface.Durable.DurableDataClassification ResultClassification { get: public; init: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableDataClassification WorkClassification { get: public; init: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableProviderSafety ProviderSafety { get: public; init: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkRetryPolicy DefaultRetryPolicy { get: public; init: public; }
+  property public System.String ResultCodecName { get: public; init: public; }
+  property public System.String ResultCodecVersion { get: public; init: public; }
+  property public System.String ResultRetentionPolicyId { get: public; init: public; }
+  property public System.String WorkCodecName { get: public; init: public; }
+  property public System.String WorkCodecVersion { get: public; init: public; }
+  property public System.String WorkName { get: public; init: public; }
+  property public System.String WorkRetentionPolicyId { get: public; init: public; }
+  property public System.String WorkVersion { get: public; init: public; }
+  property public System.Type ResultPayloadType { get: public; init: public; }
+  property public System.Type WorkPayloadType { get: public; init: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableWorkRegistryObservation : System.IEquatable<ForgeTrust.AppSurface.Durable.Testing.DurableWorkRegistryObservation>
+  constructor public ForgeTrust.AppSurface.Durable.Testing.DurableWorkRegistryObservation(System.String WorkName, System.String WorkVersion, ForgeTrust.AppSurface.Durable.DurableWorkRegistration Registration)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableWorkRegistryObservation <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Testing.DurableWorkRegistryObservation? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public System.Void Deconstruct(out System.String WorkName, out System.String WorkVersion, out ForgeTrust.AppSurface.Durable.DurableWorkRegistration Registration)
+  method public static ForgeTrust.AppSurface.Durable.Testing.DurableWorkRegistryObservation Capture(ForgeTrust.AppSurface.Durable.IDurableWorkRegistry registry, System.String workName, System.String workVersion)
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Testing.DurableWorkRegistryObservation? left, ForgeTrust.AppSurface.Durable.Testing.DurableWorkRegistryObservation? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Testing.DurableWorkRegistryObservation? left, ForgeTrust.AppSurface.Durable.Testing.DurableWorkRegistryObservation? right)
+  property public ForgeTrust.AppSurface.Durable.DurableWorkRegistration Registration { get: public; init: public; }
+  property public System.String WorkName { get: public; init: public; }
+  property public System.String WorkVersion { get: public; init: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableWorkRequestBuilder<TWork, TResult> where TWork : notnull
+  constructor public ForgeTrust.AppSurface.Durable.Testing.DurableWorkRequestBuilder<TWork, TResult>(ForgeTrust.AppSurface.Durable.DurableWorkDefinition<TWork, TResult> definition)
+  method public ForgeTrust.AppSurface.Durable.DurableWorkRequest Build()
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableWorkRequestBuilder<TWork, TResult> WithCommand(ForgeTrust.AppSurface.Durable.DurableCommandId value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableWorkRequestBuilder<TWork, TResult> WithDueAtUtc(System.Nullable<System.DateTimeOffset> value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableWorkRequestBuilder<TWork, TResult> WithIdempotencyKey(System.String value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableWorkRequestBuilder<TWork, TResult> WithRetryPolicy(ForgeTrust.AppSurface.Durable.DurableWorkRetryPolicy? value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableWorkRequestBuilder<TWork, TResult> WithScope(ForgeTrust.AppSurface.Durable.DurableScopeId value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableWorkRequestBuilder<TWork, TResult> WithWork(TWork value)
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableWorkerEnvelopeBuilder<TPayload>
+  constructor public ForgeTrust.AppSurface.Durable.Testing.DurableWorkerEnvelopeBuilder<TPayload>()
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableWorkerEnvelopeBuilder<TPayload> WithCorrelation(ForgeTrust.AppSurface.Workers.DurableWorkerCorrelation value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableWorkerEnvelopeBuilder<TPayload> WithExecutionIdentity(ForgeTrust.AppSurface.Workers.DurableWorkerExecutionIdentity value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableWorkerEnvelopeBuilder<TPayload> WithOutcome(ForgeTrust.AppSurface.Workers.DurableWorkerProjectionOutcome value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableWorkerEnvelopeBuilder<TPayload> WithPayload(TPayload? value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableWorkerEnvelopeBuilder<TPayload> WithReasonCode(System.String value)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableWorkerEnvelopeBuilder<TPayload> WithRetryability(ForgeTrust.AppSurface.Workers.DurableWorkerRetryability value)
+  method public ForgeTrust.AppSurface.Workers.DurableWorkerEnvelope<TPayload> Build()
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.FakeDurableRuntimeDrainControl : ForgeTrust.AppSurface.Durable.Provider.IDurableRuntimeDrainControl
+  constructor public ForgeTrust.AppSurface.Durable.Testing.FakeDurableRuntimeDrainControl()
+  method public System.Threading.Tasks.ValueTask BeginDrainAsync(System.Threading.CancellationToken cancellationToken = default)
+  method public System.Threading.Tasks.ValueTask ResumeAsync(System.Threading.CancellationToken cancellationToken = default)
+  property public System.Boolean IsDraining { get: public; }
+  property public System.Collections.Immutable.ImmutableArray<ForgeTrust.AppSurface.Durable.Testing.DurableRuntimeDrainTransition> History { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.FakeDurableRuntimeHealth : ForgeTrust.AppSurface.Durable.Provider.IDurableRuntimeHealth
+  constructor public ForgeTrust.AppSurface.Durable.Testing.FakeDurableRuntimeHealth(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot snapshot)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot> GetAsync(System.Threading.CancellationToken cancellationToken = default)
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot Snapshot { get: public; set: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.RecordingDurableRuntimePump : ForgeTrust.AppSurface.Durable.Provider.IDurableRuntimePump, ForgeTrust.AppSurface.Durable.Provider.IDurableRuntimePumpAdmission
+  constructor public ForgeTrust.AppSurface.Durable.Testing.RecordingDurableRuntimePump()
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpAttempt> TryRunOnceAsync(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpResult> RunOnceAsync(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest request, System.Threading.CancellationToken cancellationToken = default)
+  method public System.Void ClearHistory()
+  property public System.Collections.Immutable.ImmutableArray<ForgeTrust.AppSurface.Durable.Testing.DurableRuntimePumpCall> History { get: public; }
+  property public System.Func<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpAttempt>>? Admission { get: public; set: public; }
+  property public System.Func<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpResult>>? Pump { get: public; set: public; }

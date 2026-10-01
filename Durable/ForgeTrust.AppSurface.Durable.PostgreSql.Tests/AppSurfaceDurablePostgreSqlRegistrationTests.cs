@@ -248,7 +248,7 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
             .AddWorkerHost()
             .AddWorkerHost();
 
-        Assert.Single(services, descriptor => descriptor.ServiceType == typeof(IHostedService));
+        Assert.Equal(2, services.Count(descriptor => descriptor.ServiceType == typeof(IHostedService)));
         Assert.Single(services, descriptor => descriptor.ServiceType == typeof(PostgreSqlDurableHostedServiceMarker));
     }
 

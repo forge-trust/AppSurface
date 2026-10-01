@@ -214,12 +214,32 @@ public class RazorWireWebModuleTests
             };
 
             using var runtimeResponse = await client.GetAsync("/_content/ForgeTrust.RazorWire/razorwire/razorwire.js");
+            using var dialogCssResponse = await client.GetAsync("/_content/ForgeTrust.RazorWire/razorwire/razorwire-dialog.css");
+            Assert.Equal(HttpStatusCode.OK, dialogCssResponse.StatusCode);
+            Assert.Equal("text/css", dialogCssResponse.Content.Headers.ContentType?.MediaType);
+            Assert.Contains("[data-rw-dialog]", await dialogCssResponse.Content.ReadAsStringAsync(), StringComparison.Ordinal);
             Assert.Equal(HttpStatusCode.OK, runtimeResponse.StatusCode);
             Assert.Equal("text/javascript", runtimeResponse.Content.Headers.ContentType?.MediaType);
             Assert.Contains(
                 "Generated from assets/src/razorwire.ts",
                 await runtimeResponse.Content.ReadAsStringAsync(),
                 StringComparison.Ordinal);
+
+            using var loadingCssResponse = await client.GetAsync("/_content/ForgeTrust.RazorWire/razorwire/razorwire.loading.css");
+            Assert.Equal(HttpStatusCode.OK, loadingCssResponse.StatusCode);
+            Assert.Equal("text/css", loadingCssResponse.Content.Headers.ContentType?.MediaType);
+            Assert.Contains(
+                "[data-rw-loading-fallback]",
+                await loadingCssResponse.Content.ReadAsStringAsync(),
+                StringComparison.Ordinal);
+
+            using var loadingCssHeadRequest = new HttpRequestMessage(
+                HttpMethod.Head,
+                "/_content/ForgeTrust.RazorWire/razorwire/razorwire.loading.css");
+            using var loadingCssHeadResponse = await client.SendAsync(loadingCssHeadRequest);
+            Assert.Equal(HttpStatusCode.OK, loadingCssHeadResponse.StatusCode);
+            Assert.Equal("text/css", loadingCssHeadResponse.Content.Headers.ContentType?.MediaType);
+            Assert.True(loadingCssHeadResponse.Content.Headers.ContentLength > 0);
 
             using var islandsRequest = new HttpRequestMessage(HttpMethod.Head, "/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js");
             using var islandsResponse = await client.SendAsync(islandsRequest);

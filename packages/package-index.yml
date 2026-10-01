@@ -34,8 +34,8 @@ packages:
     commercial_status: commercial_ready
     release_track: coordinated
     order: 20
-    use_when: Add this when your AppSurface modules need strongly typed configuration primitives, source-aware audit reports, or sanitized config-diff support instead of ad hoc configuration lookups.
-    includes: AppSurfaceConfigModule, typed config objects, configuration providers, source-aware audit reports, sanitized audit diff helpers, and explicit configuration access patterns.
+    use_when: Add this when your AppSurface modules need strongly typed configuration, [file declared scalar secret references](../Config/ForgeTrust.AppSurface.Config/docs/file-secret-references.md), source-aware audit reports, or sanitized config-diff support.
+    includes: AppSurfaceConfigModule, typed config objects, Secret<T> scalar destinations with atomic file descriptors and exact environment rescue, bounded provider resolution, source-aware audit reports, sanitized audit diff helpers, and explicit configuration access patterns.
     does_not_include: Web hosting, UI docs, caching, LocalSecrets local machine posture, or a remote/team vault system.
     start_here_path: Config/ForgeTrust.AppSurface.Config/README.md
     expected_dependency_package_ids:
@@ -85,11 +85,11 @@ packages:
     commercial_status: commercial_ready
     release_track: coordinated
     order: 26
-    use_when: Add this after Config when an AppSurface app running on Google Cloud should resolve explicitly mapped configuration secrets from Google Secret Manager while keeping environment variables as the emergency override.
-    includes: AppSurfaceGoogleSecretManagerModule, explicit logical-key to Secret Manager mappings, optional scoped convention resolver, fail-closed terminal diagnostics for claimed keys, Google client and transfer test seams, source-aware config audit integration, UTF-8 text conversion through AppSurface Config, and CLI-assisted declared LocalSecrets or Google transfer to existing Google secrets or a named local test namespace.
+    use_when: Add this after Config when an AppSurface app running on Google Cloud should resolve explicitly mapped configuration secrets or [file-declared `Secret<T>` references](../Config/ForgeTrust.AppSurface.Config/docs/file-secret-references.md) from Google Secret Manager while keeping environment variables as the emergency override.
+    includes: AppSurfaceGoogleSecretManagerModule, explicit logical-key to Secret Manager mappings, [file-declared `Secret<T>` references](../Config/ForgeTrust.AppSurface.Config/docs/file-secret-references.md), optional scoped convention resolver, fail-closed terminal diagnostics for claimed keys, Google client and transfer test seams, source-aware config audit integration, UTF-8 text conversion through AppSurface Config, and CLI-assisted declared LocalSecrets or Google transfer to existing Google secrets or a named local test namespace.
     does_not_include: Secret creation, deletion, disable/destroy operations, rotation, IAM provisioning, Terraform or gcloud workflows, generic multi-cloud vault abstraction, background refresh, or runtime credential minting.
     start_here_path: Config/ForgeTrust.AppSurface.Config.GoogleSecretManager/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Config.GoogleSecretManager` after Config when production-like Google Cloud hosts should read mapped AppSurface config secrets from Secret Manager with fail-closed diagnostics.
+    recipe_summary: Add `ForgeTrust.AppSurface.Config.GoogleSecretManager` after Config when production-like Google Cloud hosts should read mapped secrets or [file declared scalar references](../Config/ForgeTrust.AppSurface.Config/docs/file-secret-references.md) from Secret Manager with fail-closed diagnostics.
     depends_on:
       - ForgeTrust.AppSurface.Config
     expected_dependency_package_ids:
@@ -392,6 +392,26 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Durable
       - ForgeTrust.AppSurface.Durable.Provider
+  - project: Durable/ForgeTrust.AppSurface.Durable.Testing/ForgeTrust.AppSurface.Durable.Testing.csproj
+    release_guidance_variant: default
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_track: coordinated
+    order: 49
+    use_when: Add this to test projects that need production-validated Durable health and pump fixtures, recorded provider calls, bounded host scenarios, or typed Work contract observations.
+    includes: Health snapshot, pump request/result/attempt, typed Work request, and native worker envelope builders; health and drain fakes; recording pump histories; timeout-aware host scenario handles; typed Work definition, registry, and binding observations.
+    does_not_include: Persistence simulation, PostgreSQL, ASP.NET Core, a test framework, assertion library, authorization policy, retry loop, HTTP mapping, or proof of real-provider behavior.
+    start_here_path: Durable/ForgeTrust.AppSurface.Durable.Testing/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Durable.Testing` to test projects for deterministic Durable fixtures and host-admission observations; keep PostgreSQL conformance tests for persistence and recovery truth, and upgrade it with matching Durable and Provider preview packages.
+    depends_on:
+      - ForgeTrust.AppSurface.Durable
+      - ForgeTrust.AppSurface.Durable.Provider
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Durable
+      - ForgeTrust.AppSurface.Durable.Provider
   - project: Durable/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost.csproj
     classification: excluded
     publish_decision: do_not_publish
@@ -673,11 +693,11 @@ packages:
     commercial_status: commercial_ready
     release_track: coordinated
     order: 100
-    use_when: Add this when you want reactive Razor fragments, Turbo-style page updates, server-sent streams, islands, lifecycle-safe app-authored root or page-lifecycle behaviors, local declarative form interactions, or passive auth-result UI projection without moving to a separate frontend app.
-    includes: RazorWire modules, TagHelpers, the same-origin bundled Turbo 8.0.23 runtime with custom and host-managed sourcing policies, stream helpers, result-bearing stream authorization, Razor fragment updates, hybrid island support, failed-form UX, page navigation, section copy, Behavior Kit root and lifecycle registrations for app-authored progressive enhancement, stable form interactions for conditional targets and one-dimensional model-bound collections, and passive auth projection helpers over ForgeTrust.AppSurface.Auth results.
+    use_when: Add this when you want reactive Razor fragments, Turbo-style page updates, server-sent streams, islands, explicit server-selected dialog responses, lifecycle-safe app-authored root or page-lifecycle behaviors, local declarative form interactions, or passive auth-result UI projection without moving to a separate frontend app.
+    includes: RazorWire modules, TagHelpers, the same-origin bundled Turbo 8.0.23 runtime with custom and host-managed sourcing policies, stream helpers, result-bearing stream authorization, Razor fragment updates, one accessible flow-scoped dialog shell for explicitly selected MVC responses with handled validation and explicit close, hybrid island support, failed-form UX, page navigation, section copy, Behavior Kit root and lifecycle registrations for app-authored progressive enhancement, stable form interactions for conditional targets and one-dimensional model-bound collections, and passive auth projection helpers over ForgeTrust.AppSurface.Auth results.
     does_not_include: Compatibility guarantees for host-managed Turbo versions other than 8.0.23, ownership of cross-origin Turbo metadata or load order, OpenAPI generation, API reference UI, Tailwind asset compilation, ASP.NET Core policy evaluation, authentication schemes, cookies, OIDC, ASP.NET Identity, challenge or forbid execution, redirects, DevAuth persona controls, endpoint authorization, policy definitions, or a general frontend framework.
     start_here_path: Web/ForgeTrust.RazorWire/README.md
-    recipe_summary: Add `ForgeTrust.RazorWire` when you want reactive Razor UI, Turbo-style streams, server-rendered islands, lifecycle-safe app-authored root or page-lifecycle behaviors, local declarative form interactions, or passive auth-result UI projection.
+    recipe_summary: Add `ForgeTrust.RazorWire` when you want reactive Razor UI, Turbo-style streams, server-rendered islands, or explicit [dialog responses](../Web/ForgeTrust.RazorWire/Docs/dialog-responses.md), lifecycle-safe app-authored root or page-lifecycle behaviors, local declarative form interactions, or passive auth-result UI projection.
     depends_on:
       - ForgeTrust.AppSurface.Auth
       - ForgeTrust.AppSurface.Intelligence

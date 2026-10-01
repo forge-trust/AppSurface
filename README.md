@@ -93,6 +93,8 @@ This approach aims to:
 - [**ForgeTrust.AppSurface.Durable.Provider**](./Durable/ForgeTrust.AppSurface.Durable.Provider/README.md) – Public runtime-provider and operator SPI for claims, bounded activation, health, drain, recovery, controlled repair, and verified Flow-retention lifecycle contracts.
 - [**ForgeTrust.AppSurface.Durable.PostgreSql**](./Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) – Public-preview PostgreSQL provider for passive storage registration, explicit schema management, atomic Work acceptance, manually driven Flow persistence, [Work-first Schedule storage](./Durable/schedule-protocol-v1.md), and verified per-Flow retention; hosted processing requires an explicit `AddWorkerHost()` opt-in.
 
+For bounded cleanup of old PostgreSQL runtime heartbeat identities, use the [schema-11 retention and deployment guide](./Durable/heartbeat-retention-operations.md).
+
 The Durable packages are coordinated public previews. The [Durable operational-assessment adoption guide](./Durable/operational-assessments.md) is the task-oriented entry point for existing-host upgrades, the four-kind admission contract, schema/role rollout, diagnostics, and rollback. The [Slice 7 discovery and reconciliation guide](./Durable/README.md#slice-7-discovery-and-reconciliation) documents schema ownership, the `durable schema` command family, and the local proof boundary; production support remains outside the preview contract.
 
 ### [Console](./Console/README.md)
@@ -381,7 +383,9 @@ dotnet run --project examples/razorwire-mvc/RazorWireWebExample.csproj
 
 For the intentional validation-failure shape, run `dotnet run --project examples/config-validation`.
 
-The RazorWire MVC example includes a failed-form UX page at `/Reactivity/FormFailures` that shows server-handled validation, development anti-forgery diagnostics, default fallback rendering, and consumer styling hooks.
+The [RazorWire MVC example](./examples/razorwire-mvc/README.md#server-selected-dialogs) includes explicit [server-selected dialog responses](./Web/ForgeTrust.RazorWire/Docs/dialog-responses.md) at `/Reactivity/DialogResponses`, with status responses, follow-up forms, validation, and full HTML fallbacks.
+
+The RazorWire MVC example includes a failed-form UX page at `/Reactivity/FormFailures` that shows server-handled validation, development anti-forgery diagnostics, default fallback rendering, and consumer styling hooks. It also includes `/Reactivity/FormLoading` for local and shared status indicators, the package fallback, and Turbo Frame loading; see the [Form Loading Feedback guide](./Web/ForgeTrust.RazorWire/Docs/form-loading.md) for the public contract.
 
 ## Release notes and upgrade policy
 

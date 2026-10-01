@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 namespace ForgeTrust.RazorWire.TagHelpers;
 
 /// <summary>
-/// Tag helper for rendering the necessary RazorWire scripts.
+/// Tag helper for rendering the necessary RazorWire scripts and dialog stylesheet.
 /// </summary>
 [HtmlTargetElement("rw:scripts")]
 public class RazorWireScriptsTagHelper : TagHelper
@@ -100,8 +100,14 @@ public class RazorWireScriptsTagHelper : TagHelper
     /// <param name="context">The current tag helper context.</param>
     /// <param name="output">The tag helper output that will be modified to contain the script elements and have no wrapper tag.</param>
     /// <remarks>
-    /// The generated runtime script includes data attributes for form failure UX, development diagnostics, split-origin
-    /// live origin, hybrid credential behavior, and the lazy anti-forgery token endpoint. The helper normalizes
+    /// The generated runtime script includes data attributes for form failure UX and loading feedback, development
+    /// diagnostics, split-origin live origin, hybrid credential behavior, and the lazy anti-forgery token endpoint. The
+    /// helper normalizes <see cref="RazorWireFormOptions.Loading"/> into <c>data-rw-form-loading-enabled</c>,
+    /// <c>data-rw-form-loading-show-fallback-bar</c>, and
+    /// <c>data-rw-form-loading-prevent-duplicate-submissions</c> attributes on the RazorWire runtime script. When
+    /// <see cref="RazorWireFormLoadingOptions.Enabled"/> is enabled, the stylesheet is emitted as a versioned link at
+    /// <c>/_content/ForgeTrust.RazorWire/razorwire/razorwire.loading.css</c> under the current request path base; its
+    /// visual rules are external so the fallback remains compatible with a strict style-src policy. The helper normalizes
     /// <see cref="RazorWireOptions.Hybrid"/>.<see cref="RazorWireHybridOptions.LiveOrigin"/> before emitting it so the
     /// browser receives only an origin, never a path-bearing URL. The anti-forgery endpoint is emitted relative to the
     /// current request path base so applications mounted under a virtual directory refresh tokens from the live app path.
@@ -111,6 +117,9 @@ public class RazorWireScriptsTagHelper : TagHelper
     /// Turbo is emitted first according to <see cref="RazorWireOptions.Turbo"/>. Bundled and custom modes preserve the
     /// current request path base and static-asset versioning. Host-managed mode emits no Turbo tag and requires the host
     /// to finish loading a compatible Turbo runtime before this output executes.
+    /// A versioned same-origin <c>razorwire-dialog.css</c> link supplies the package-owned dialog shell styles,
+    /// including for a server response that opens the first dialog after initial page load. Dialogs do not require
+    /// inline style elements. See <c>Docs/dialog-responses.md</c> for CSS variables and the opt-in server API.
     /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// Thrown when <see cref="RazorWireOptions.Hybrid"/>.<see cref="RazorWireHybridOptions.LiveOrigin"/> is not an
@@ -126,10 +135,21 @@ public class RazorWireScriptsTagHelper : TagHelper
         var pathBase = ViewContext.HttpContext.Request.PathBase;
 
         var turboScript = BuildTurboScript(pathBase);
+        var loadingCss = string.Empty;
+        if (_options.Forms.Loading.Enabled)
+        {
+            var loadingCssPath = HtmlEncoder.Default.Encode(_fileVersionProvider.AddFileVersionToPath(
+                pathBase,
+                "/_content/ForgeTrust.RazorWire/razorwire/razorwire.loading.css"));
+            loadingCss = $"<link rel=\"stylesheet\" href=\"{loadingCssPath}\" />";
+        }
 
         var razorwireJs = _fileVersionProvider.AddFileVersionToPath(
             pathBase,
             "/_content/ForgeTrust.RazorWire/razorwire/razorwire.js");
+        var dialogCss = HtmlEncoder.Default.Encode(_fileVersionProvider.AddFileVersionToPath(
+            pathBase,
+            "/_content/ForgeTrust.RazorWire/razorwire/razorwire-dialog.css"));
         var islandsJs = _fileVersionProvider.AddFileVersionToPath(
             pathBase,
             "/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js");
@@ -153,6 +173,11 @@ public class RazorWireScriptsTagHelper : TagHelper
             ? _options.Forms.FailureMode.ToString().ToLowerInvariant()
             : "off";
         var failureUxEnabled = _options.Forms.EnableFailureUx.ToString().ToLowerInvariant();
+        var formLoadingEnabled = _options.Forms.Loading.Enabled.ToString().ToLowerInvariant();
+        var formLoadingFallbackEnabled = _options.Forms.Loading.ShowFallbackBar.ToString().ToLowerInvariant();
+        var formLoadingDuplicatePreventionEnabled = _options.Forms.Loading.PreventDuplicateSubmissions
+            .ToString()
+            .ToLowerInvariant();
         var productIntelligenceOptions = _productIntelligenceOptions?.Value;
         var productIntelligenceEnabled = (productIntelligenceOptions is not null
                                          && (productIntelligenceOptions.ExperimentalEventsEnabled
@@ -171,8 +196,10 @@ public class RazorWireScriptsTagHelper : TagHelper
 
         // Turbo, when package-ordered, precedes the custom RazorWire island loader.
         var scripts = $@"
+{loadingCss}
 {turboScript}
-<script src=""{razorwireJs}"" data-rw-development-diagnostics=""{diagnosticsEnabled.ToString().ToLowerInvariant()}"" data-rw-form-failure-enabled=""{failureUxEnabled}"" data-rw-form-failure-mode=""{failureMode}"" data-rw-default-failure-message=""{defaultFailureMessage}"" data-rw-live-origin=""{liveOrigin}"" data-rw-hybrid-credentials=""{credentialsMode}"" data-rw-antiforgery-endpoint=""{antiforgeryEndpoint}"" data-rw-product-intelligence-enabled=""{productIntelligenceEnabled}""></script>
+<link rel=""stylesheet"" href=""{dialogCss}"" />
+<script src=""{razorwireJs}"" data-rw-development-diagnostics=""{diagnosticsEnabled.ToString().ToLowerInvariant()}"" data-rw-form-failure-enabled=""{failureUxEnabled}"" data-rw-form-failure-mode=""{failureMode}"" data-rw-default-failure-message=""{defaultFailureMessage}"" data-rw-form-loading-enabled=""{formLoadingEnabled}"" data-rw-form-loading-show-fallback-bar=""{formLoadingFallbackEnabled}"" data-rw-form-loading-prevent-duplicate-submissions=""{formLoadingDuplicatePreventionEnabled}"" data-rw-live-origin=""{liveOrigin}"" data-rw-hybrid-credentials=""{credentialsMode}"" data-rw-antiforgery-endpoint=""{antiforgeryEndpoint}"" data-rw-product-intelligence-enabled=""{productIntelligenceEnabled}""></script>
 <script src=""{islandsJs}""></script>
 ";
 

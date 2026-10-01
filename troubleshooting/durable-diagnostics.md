@@ -1,5 +1,7 @@
 # Durable contract diagnostics
 
+For schema-11 runtime heartbeat maintenance, use the [retention operations guide](../Durable/heartbeat-retention-operations.md#recover-and-diagnose). A pending migration 0011 preflight means the downtime migration has not been applied; drain workers, apply it as migration owner, reconcile roles, then require a passing runtime-role preflight. A migration advisory-lock or index table-lock timeout means activation remains closed until the blocker is resolved and the same forward migration succeeds. Role drift means rerun the canonical role recipe and structural preflight. Repeated prune failures mean inspect database reachability and exact grants, then retry or pause via a new provider registration. Cleanup failures alone do not change Work readiness.
+
 AppSurface Durable uses append-only `ASDURxxx` codes. Messages and operator history must contain safe Problem, Cause,
 Fix, and Docs guidance and must never include credentials, provider response bodies, tokenized URLs, email content, or
 child-sensitive data.
