@@ -67,7 +67,9 @@ internal static class EvidenceHostRunner
                 try
                 {
                     var policyBytes = await ReadBoundedAsync(policyPath, MaximumInputBytes, cancellationToken).ConfigureAwait(false);
-                    verifiedPolicy = DeserializeCanonical<EvidencePolicy>(policyBytes);
+                    // The policy is read from the trusted base checkout, whose checked-in JSON is
+                    // formatted for review. Its parsed value is independently closed against Git.
+                    verifiedPolicy = EvidenceCanonicalJson.Deserialize<EvidencePolicy>(policyBytes);
                     EvidencePlanner.ValidateGatePolicy(verifiedPolicy);
                     await EvidenceRevisionPlanBuilder.VerifyAsync(
                         new EvidencePlanner(),

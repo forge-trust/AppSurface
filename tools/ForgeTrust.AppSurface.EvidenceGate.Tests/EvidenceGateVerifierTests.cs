@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Planner;
 using ForgeTrust.AppSurface.EvidenceGate;
@@ -42,6 +43,35 @@ public sealed class EvidenceGateVerifierTests
         Assert.Equal(EvidenceGateResultRenderer.RenderMarkdown(result), markdown);
         Assert.Contains("Verdict: **eligible**", markdown, StringComparison.Ordinal);
         Assert.Contains("Verified claim: `NoEvidenceRequired`", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VerifyGateAcceptsReviewedFormattedPolicyFromBaseCheckout()
+    {
+        using var fixture = await VerifyFixture.CreateAsync();
+        using var policyDocument = JsonDocument.Parse(await File.ReadAllBytesAsync(fixture.PolicyPath));
+        await File.WriteAllTextAsync(
+            fixture.PolicyPath,
+            JsonSerializer.Serialize(policyDocument.RootElement, new JsonSerializerOptions { WriteIndented = true }) + "\n");
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceGateVerifier.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.ManifestPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.IdentityPath,
+            fixture.OutputDirectory,
+            null,
+            fixture.AuthorityProvider,
+            null,
+            stdout,
+            stderr);
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(stderr.ToString());
+        Assert.Contains("ASEVG000", stdout.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

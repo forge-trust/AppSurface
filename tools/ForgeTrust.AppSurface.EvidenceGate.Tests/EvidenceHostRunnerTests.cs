@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Planner;
 using ForgeTrust.AppSurface.EvidenceGate;
@@ -134,7 +135,6 @@ public sealed class EvidenceHostRunnerTests
     [Theory]
     [InlineData("missing")]
     [InlineData("malformed")]
-    [InlineData("noncanonical")]
     public async Task UntrustedOrUnavailablePolicyCannotProduceACompleteClaim(string policyFailure)
     {
         using var fixture = await GateFixture.CreateAsync(docsOnly: true);
@@ -145,9 +145,6 @@ public sealed class EvidenceHostRunnerTests
                 break;
             case "malformed":
                 await File.WriteAllTextAsync(fixture.PolicyPath, "{invalid-json");
-                break;
-            case "noncanonical":
-                await File.AppendAllTextAsync(fixture.PolicyPath, " ");
                 break;
         }
 
@@ -167,6 +164,32 @@ public sealed class EvidenceHostRunnerTests
         var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(manifestPath));
         Assert.Equal(EvidenceExecutionVerdict.Invalid, manifest.ExecutionVerdict);
         Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+    }
+
+    [Fact]
+    public async Task ReviewedFormattedPolicyCanProduceAnEmptyHostClaim()
+    {
+        using var fixture = await GateFixture.CreateAsync(docsOnly: true);
+        using var policyDocument = JsonDocument.Parse(await File.ReadAllBytesAsync(fixture.PolicyPath));
+        await File.WriteAllTextAsync(
+            fixture.PolicyPath,
+            JsonSerializer.Serialize(policyDocument.RootElement, new JsonSerializerOptions { WriteIndented = true }) + "\n");
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.OutputDirectory,
+            stdout,
+            stderr);
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(stderr.ToString());
+        var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(
+            await File.ReadAllBytesAsync(Path.Join(fixture.OutputDirectory, "evidence-manifest.json")));
+        Assert.Equal(EvidenceClaimKind.NoEvidenceRequired, manifest.ClaimKind);
     }
 
     [Fact]

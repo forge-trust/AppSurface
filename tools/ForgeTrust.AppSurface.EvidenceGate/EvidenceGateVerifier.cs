@@ -43,7 +43,9 @@ internal static class EvidenceGateVerifier
 
             var plan = DeserializeCanonical<EvidencePlan>(planBytes);
             var manifest = DeserializeCanonical<EvidenceManifest>(manifestBytes);
-            var policy = DeserializeCanonical<EvidencePolicy>(policyBytes);
+            // The base-owned policy is a reviewed source file, not an artifact handoff.
+            // Parse its value while retaining byte-canonical requirements on untrusted inputs.
+            var policy = EvidenceCanonicalJson.Deserialize<EvidencePolicy>(policyBytes);
             var identity = DeserializeCanonical<EvidencePullRequestGateExpectedIdentity>(identityBytes);
 
             var result = await EvidencePullRequestGateVerifier.VerifyAsync(
