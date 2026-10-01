@@ -223,6 +223,17 @@ jobs:
             --target-branch main
           test -f "$RUNNER_TEMP/evidence-gate-verifier-capture/pull-request-run-identity.json"
 
+      - name: Bind the downloaded handoff to the fresh Git tree
+        if: ${{ needs.controller-capture.result == 'success' && needs.credentialless-subject.result == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          handoff="$RUNNER_TEMP/evidence-gate-verifier-inputs/evidence-gate-controller-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          python3 "$GITHUB_WORKSPACE/trusted/scripts/evidence-gate-handoff.py" verify \
+            --handoff-directory "$handoff" \
+            --fresh-capture-directory "$RUNNER_TEMP/evidence-gate-verifier-capture" \
+            --output-plan "$RUNNER_TEMP/evidence-gate-verified-plan.json"
+
       - name: Set up the trusted verifier
         if: ${{ needs.controller-capture.result == 'success' && needs.credentialless-subject.result == 'success' }}
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -237,9 +248,7 @@ jobs:
         run: |
           set -euo pipefail
           capture="$RUNNER_TEMP/evidence-gate-verifier-capture"
-          inputs="$RUNNER_TEMP/evidence-gate-verifier-inputs"
-          handoff="$inputs/evidence-gate-controller-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          plan="$handoff/evidence-plan.json"
+          plan="$RUNNER_TEMP/evidence-gate-verified-plan.json"
           project="$GITHUB_WORKSPACE/trusted/tools/ForgeTrust.AppSurface.EvidenceGate/ForgeTrust.AppSurface.EvidenceGate.csproj"
           policy="$GITHUB_WORKSPACE/trusted/.appsurface/evidence/evidence.policy.json"
           identity="$RUNNER_TEMP/evidence-gate-expected-identity.json"
@@ -278,7 +287,7 @@ jobs:
             printf '%s\n' "- Controller capture job: $CONTROLLER_RESULT"
             printf '%s\n' "- Credentialless subject job: $SUBJECT_RESULT"
             echo '- Subject handoff: controller snapshot execution is wired; the fixed result is always non-claiming.'
-            echo '- Trusted verifier: the current PR and subject job are reread for a non-claiming rehearsal when both upstream jobs succeed.'
+            echo '- Trusted verifier: the handoff is rebound to a fresh Git capture, then the current PR and subject job are reread for a non-claiming rehearsal.'
             echo '- OCI prerequisite: a digest-pinned image must already exist in the rootless local image store and contain the locked offline feed.'
             echo '- Checkout/isolation attestation: unavailable to the verdict; no trusted verifier consumes an attestation.'
             echo '- Required gate verdict: unavailable; host registrations and complete producer verification are not established.'

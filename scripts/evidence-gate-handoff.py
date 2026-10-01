@@ -1034,6 +1034,52 @@ def _write_subject_result(path: Path, value: Mapping[str, Any]) -> None:
     _write_regular_file(parent / path.name, encoded)
 
 
+def verify_handoff(
+    *,
+    handoff_directory: str | os.PathLike[str],
+    fresh_capture_directory: str | os.PathLike[str],
+    output_plan: str | os.PathLike[str],
+) -> None:
+    """Copy a downloaded plan only after binding its bundle to fresh trusted Git state.
+
+    This runs in the base-owned verifier job, not the credentialless subject. It
+    validates the entire bounded handoff, compares the captured identity and
+    diff with an independent current-PR recapture, and checks every archive
+    blob and mode against that fresh Git tree. The copied plan is still
+    independently resolved by the .NET gate verifier before any claim.
+    """
+    handoff = _new_path(handoff_directory, "downloaded handoff")
+    capture = _new_path(fresh_capture_directory, "fresh verifier capture")
+    output = Path(output_plan).absolute()
+    _new_path(output.parent, "verified plan output parent")
+    if not capture.is_dir() or capture.is_symlink():
+        raise HandoffError("ASEHB001", "The fresh verifier capture is not a physical directory.")
+
+    entries = _safe_regular_children(handoff)
+    manifest, _ = _read_json(entries.get("handoff.json", handoff / "missing"), 128 * 1024, "The controller handoff manifest")
+    identity, archive_path, plan = _validate_bundle_directory(handoff, manifest)
+    if manifest.get("Mode") != "SubjectSnapshot" or identity is None or archive_path is None or plan is None:
+        raise HandoffError("ASEHB001", "The verifier requires a same-repository subject snapshot.")
+
+    fresh_identity, _ = _read_json(
+        capture / "pull-request-run-identity.json", 64 * 1024, "The fresh verifier pull-request identity"
+    )
+    _validate_identity(fresh_identity)
+    if fresh_identity != identity:
+        raise HandoffError("ASEHB001", "The downloaded handoff differs from the fresh pull-request identity.")
+    fresh_diff = _read_regular_file(capture / "source.diff", MAX_SOURCE_DIFF_BYTES, "The fresh verifier source diff")
+    if hashlib.sha256(fresh_diff).hexdigest() != manifest["SourceDiffSha256"]:
+        raise HandoffError("ASEHB001", "The downloaded handoff differs from the fresh source diff.")
+    repository = capture / "repository.git"
+    if not repository.is_dir() or repository.is_symlink():
+        raise HandoffError("ASEHB003", "The fresh trusted Git object store is unavailable.")
+    inventory = _run_git_tree_inventory(repository, identity["HeadRevision"])
+    _scan_archive(archive_path, inventory)
+
+    plan_bytes = _read_regular_file(entries["evidence-plan.json"], MAX_EVIDENCE_PLAN_BYTES, "The verified EvidencePlan")
+    _write_regular_file(output, plan_bytes)
+
+
 def execute_handoff(
     *,
     handoff_directory: str | os.PathLike[str],
@@ -1162,6 +1208,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     execute.add_argument("--scratch-directory", required=True)
     execute.add_argument("--result", required=True)
     execute.add_argument("--image-digest", default=None)
+    verify = subparsers.add_parser("verify", help="Bind the downloaded handoff to a fresh trusted PR recapture.")
+    verify.add_argument("--handoff-directory", required=True)
+    verify.add_argument("--fresh-capture-directory", required=True)
+    verify.add_argument("--output-plan", required=True)
     arguments = parser.parse_args(argv)
     try:
         if arguments.command == "create":
@@ -1172,6 +1222,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 plan_file=arguments.plan_file,
             )
             print(f"evidence-gate-handoff: {outcome} controller handoff prepared.")
+            return 0
+        if arguments.command == "verify":
+            verify_handoff(
+                handoff_directory=arguments.handoff_directory,
+                fresh_capture_directory=arguments.fresh_capture_directory,
+                output_plan=arguments.output_plan,
+            )
+            print("evidence-gate-handoff: current-revision handoff verified for trusted planning.")
             return 0
         environment: dict[str, str] = dict(os.environ)
         if arguments.image_digest is None:

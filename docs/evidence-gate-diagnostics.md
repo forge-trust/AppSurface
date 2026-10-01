@@ -30,7 +30,7 @@ The checked-in `pull_request_target` workflow is a separate scaffold. Its contro
 
 ## `ASEHB`: private controller-to-subject handoff
 
-These codes come from [`evidence-gate-handoff.py`](../scripts/evidence-gate-handoff.py) or the workflow's fixed result fallback. A successful handoff or subject run is still non-claiming; the trusted verifier must independently authorize the final PR check.
+These codes come from the `create`, `execute`, and `verify` modes of [`evidence-gate-handoff.py`](../scripts/evidence-gate-handoff.py) or the workflow's fixed result fallback. The trusted `verify` mode also rejects a downloaded archive or plan that differs from a fresh capture of the current Git tree. A successful handoff or subject run is still non-claiming; the trusted verifier must independently authorize the final PR check.
 
 | Code | Cause | Safe fix |
 | --- | --- | --- |

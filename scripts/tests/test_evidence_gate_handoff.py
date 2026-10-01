@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stdout
 import importlib.util
 import hashlib
+import io
 import json
 from pathlib import Path
 import shutil
@@ -253,6 +255,58 @@ def launch_subject(*, subject_checkout, image_digest, scratch_directory, profile
             result = json.loads(result_path.read_text(encoding="utf-8"))
             self.assertFalse(result["claimEligible"])
             self.assertEqual("ASEHB008", result["diagnostic"]["code"])
+
+    def test_trusted_verifier_copies_only_a_bundle_matching_fresh_git_state(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="evidence-gate-verify-handoff-") as temporary:
+            root = Path(temporary).resolve()
+            capture, scripts, plan_file = self._capture(root)
+            output = root / "handoff"
+            self._create(capture, scripts, plan_file, output)
+            verified_plan = root / "verified-plan.json"
+
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    0,
+                    handoff.main(
+                        [
+                            "verify",
+                            "--handoff-directory", str(output),
+                            "--fresh-capture-directory", str(capture),
+                            "--output-plan", str(verified_plan),
+                        ]
+                    ),
+                )
+
+            self.assertEqual(plan_file.read_bytes(), verified_plan.read_bytes())
+            with self.assertRaises(handoff.HandoffError):
+                handoff.verify_handoff(
+                    handoff_directory=output,
+                    fresh_capture_directory=capture,
+                    output_plan=verified_plan,
+                )
+
+    def test_trusted_verifier_rejects_stale_identity_or_changed_diff(self) -> None:
+        for mismatch in ("identity", "diff"):
+            with self.subTest(mismatch=mismatch), tempfile.TemporaryDirectory(prefix="evidence-gate-stale-handoff-") as temporary:
+                root = Path(temporary).resolve()
+                capture, scripts, plan_file = self._capture(root)
+                output = root / "handoff"
+                self._create(capture, scripts, plan_file, output)
+                verified_plan = root / "verified-plan.json"
+                if mismatch == "identity":
+                    identity, _ = handoff._read_json(capture / "pull-request-run-identity.json", 64 * 1024, "test identity")
+                    identity["WorkflowRunAttempt"] = 2
+                    (capture / "pull-request-run-identity.json").write_bytes(handoff._canonical_json(identity))
+                else:
+                    (capture / "source.diff").write_bytes(b"a later exact source diff\n")
+
+                with self.assertRaises(handoff.HandoffError):
+                    handoff.verify_handoff(
+                        handoff_directory=output,
+                        fresh_capture_directory=capture,
+                        output_plan=verified_plan,
+                    )
+                self.assertFalse(verified_plan.exists())
 
     def test_empty_documentation_only_profile_succeeds_without_oci(self) -> None:
         with tempfile.TemporaryDirectory(prefix="evidence-gate-docs-only-") as temporary:
