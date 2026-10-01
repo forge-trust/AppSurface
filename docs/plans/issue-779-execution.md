@@ -373,3 +373,48 @@ formatting and diff checks exited **0**. Actual rebuilt CLI `doctor --policy ''`
 only the expected `ASEVD204` diagnostic. Logs: `/private/tmp/issue779-path-validation2.log`,
 `/private/tmp/issue779-path-format.log` and `/private/tmp/issue779-empty-policy-fixed.stderr.log`.
 The next full gate must measure this final committed repair; fresh packed CLI/SDK QA is in progress.
+
+
+### Final preliminary reviews, packed preparation and coverage attempt 6
+
+The unchanged wrapper ran on clean committed `fc56d8b9899294a268925e134bf41f95bc17d60a`
+against `origin/main` at `4aa8329c76f4279ad319747f9f3c14b9b8de51ef`. All **54/54** project
+entries finished; **53 passed**, and the CLI suite reported **14 failed / 1710 passed**. Every
+failure was a Durable schema container case after Testcontainers' initial Docker availability
+check timed out on both local Unix sockets. The wrapper exited **1 / ASCOV120** before its
+aggregate/patch gate. The build had **zero warnings / zero errors**. Auth **61/61**, Docs
+**3083/3083** and visual integration **193/193** passed. Evidence is retained in
+`/private/tmp/issue779-coverage-attempt6.log` and its numeric `.exit` file.
+
+The separate diagnostic threshold command used the generated attempt-6 report and unchanged
+95/85 aggregate and patch thresholds, the existing 0.5-point tolerance, `origin/main`, and
+`codecov` patch-line mode. It exited **0**, measuring **95.10% line / 89.03% branch** and
+**98.33% patch line / 100.00% patch branch**. This diagnostic does **not** turn the failed
+full wrapper into a pass. It establishes that no uncovered changed-code path currently fails
+those thresholds; a successful fresh unchanged full wrapper remains mandatory.
+
+Docker subsequently returned its server version and HTTP 200 `/_ping` on both sockets.
+The exact formerly failing prune-signature theory, rerun without building and with the
+coverage collector, passed **3/3**, exit **0**, in 17 seconds with no stderr. Command:
+`dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --configuration Debug --no-build --no-restore --filter FullyQualifiedName~Retention_preflight_rejects_prune_routine_signature_drift --collect:"XPlat Code Coverage" --results-directory /private/tmp/issue779-docker-repro/test-results`.
+Evidence: `/private/tmp/issue779-docker-repro/exit.json`. This supports a fresh full-run retry;
+it does not prove the earlier outage's cause. No Docker restart, prune, test skip, timeout
+increase, gate override or source repair was selected for that transient failure.
+
+Generated-doc checks at `fc56d8b9` exited **0**: PackageIndex `verify` confirmed both generated
+indexes and release guidance, and MarkdownSnippets `verify` confirmed snippets. Each direct
+existing-Debug-DLL invocation was bounded at 180 seconds; logs and numeric metadata are under
+`/private/tmp/issue779-generated-doc-verify/`. Changed Markdown had no snippet markers.
+
+The native adversarial review raised an **INVESTIGATE** about planning work proportional to
+policy rules times changed paths. Parent inspection confirms that `EvidencePlanner.Resolve`
+and its per-path full-rule scan are unchanged from `origin/main`; policy cardinality has no
+new bound in this staged implementation. The [preliminary scope](issue-779-preliminary-proof.md)
+adds a counted byte ceiling and strict ingestion, preserving existing planner semantics. It
+makes no claim that this ceiling bounds CPU work. Introducing rule/path limits would change
+existing valid-policy semantics and requires a separately specified compatibility decision;
+there is no confirmed regression in the current patch. Record this as a non-blocking existing
+planner limitation for the full implementation's budget review, with no speculative count cap.
+The review inspected tests/fixtures in summary mode only and ran no processes. The separate
+mechanism review read the fixture sources and found no actionable static defect; actual Ubuntu
+execution remains required. Final scoped review and packed CLI/SDK terminal results remain pending.
