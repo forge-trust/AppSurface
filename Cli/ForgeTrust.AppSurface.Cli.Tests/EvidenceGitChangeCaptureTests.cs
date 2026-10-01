@@ -295,6 +295,39 @@ public sealed class EvidenceGitChangeCaptureTests
             () => workflow.ExplainAsync(pathOnly with { GateMode = false, PullRequestRunIdentityFile = "identity.json" }, CancellationToken.None))).Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ResolveForPullRequest_ShouldRejectIncompleteControllerRunIdentity()
+    {
+        using var repository = new GitFixture();
+        File.WriteAllText(Path.Join(repository.Path, "readme.md"), "base\n");
+        repository.Run("add", "readme.md");
+        repository.Commit("base");
+        var baseRevision = repository.Run("rev-parse", "HEAD").Trim();
+        File.WriteAllText(Path.Join(repository.Path, "readme.md"), "head\n");
+        repository.Run("add", "readme.md");
+        repository.Commit("head");
+        var headRevision = repository.Run("rev-parse", "HEAD").Trim();
+        var snapshot = await EvidenceGitChangeCapture.CaptureAsync(repository.Path, baseRevision, headRevision);
+        var valid = new EvidencePullRequestRunIdentity(123, 123, 777, "main", 456, 1);
+        var invalid = new[]
+        {
+            valid with { RepositoryId = 0 },
+            valid with { HeadRepositoryId = 0 },
+            valid with { PullRequestNumber = 0 },
+            valid with { TargetBranch = "" },
+            valid with { TargetBranch = new string('m', 129) },
+            valid with { WorkflowRunId = 0 },
+            valid with { WorkflowRunAttempt = 0 },
+        };
+
+        foreach (var runIdentity in invalid)
+        {
+            var exception = Assert.Throws<EvidencePlanningException>(() =>
+                EvidenceRevisionPlanBuilder.ResolveForPullRequest(new EvidencePlanner(), CreateGatePolicy(), snapshot, runIdentity));
+            Assert.Equal("ASEVD140", exception.Code);
+        }
+    }
+
     private static EvidencePolicy CreateGatePolicy()
     {
         var all = new EvidenceProfile(
