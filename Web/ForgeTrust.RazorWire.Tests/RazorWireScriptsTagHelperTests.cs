@@ -217,6 +217,25 @@ public class RazorWireScriptsTagHelperTests
     }
 
     [Fact]
+    public void Process_HtmlEncodesDialogStylesheetVersionProviderResult()
+    {
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(A<PathString>._, A<string>._))
+            .ReturnsLazily(call => call.GetArgument<string>(1)!);
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
+                "/my-app",
+                "/_content/ForgeTrust.RazorWire/razorwire/razorwire-dialog.css"))
+            .Returns("/_content/ForgeTrust.RazorWire/razorwire/razorwire-dialog.css?value=\"<&");
+
+        _helper.Process(_context, _output);
+
+        var content = _output.Content.GetContent();
+        Assert.Contains(
+            "<link rel=\"stylesheet\" href=\"/_content/ForgeTrust.RazorWire/razorwire/razorwire-dialog.css?value=&quot;&lt;&amp;\" />",
+            content);
+        Assert.DoesNotContain("value=\"<&", content);
+    }
+
+    [Fact]
     public void Process_WithHostManagedTurbo_OmitsTurboScript()
     {
         var options = new RazorWireOptions();

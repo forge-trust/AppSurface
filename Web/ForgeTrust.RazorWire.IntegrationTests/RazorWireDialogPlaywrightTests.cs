@@ -138,6 +138,95 @@ public sealed class RazorWireDialogPlaywrightTests
     }
 
     [Fact]
+    public async Task InlineStatusFallback_ThenStreamOpenUpdatesOnlyTheDialogTarget()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await page.GotoAsync($"{_fixture.BaseUrl}{DialogStatusPath}");
+        var inlineStatus = page.Locator("section[aria-labelledby='inline-status-heading'] p").Last;
+        var originalStatus = await inlineStatus.InnerTextAsync();
+
+        await ClickAndWaitForResponseAsync(page, StatusLinkSelector, DialogStatusPath, HttpMethod.Get.Method);
+        await WaitForDialogTitleAsync(page, "Service status");
+        await WaitForTextAsync(page, "[data-rw-dialog] #dialog-proof-after", "Ordered update applied");
+
+        Assert.Equal(originalStatus, await inlineStatus.InnerTextAsync());
+        Assert.Equal(1, await page.Locator("#dialog-proof-after").CountAsync());
+        Assert.Equal("inline-dialog-proof-after", await inlineStatus.GetAttributeAsync("id"));
+    }
+
+    [Fact]
+    public async Task InlineFormFallback_ThenStreamOpenKeepsIdsAndValidationSeparate()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await page.GotoAsync($"{_fixture.BaseUrl}{DialogPagePath}");
+        await page.Locator($"form[action*='{SaveDialogPath}']").EvaluateAsync("form => form.dataset.turbo = 'false'");
+        await OpenSaveDialogAsync(page);
+        await page.WaitForURLAsync($"**{SaveDialogPath}");
+        var inlineForm = page.Locator("section[aria-labelledby='inline-dialog-form-heading'] form");
+        await inlineForm.Locator("input[name=Name]").FillAsync("Inline Reader");
+        var inlineErrors = await inlineForm.Locator("[data-rw-form-errors]").InnerTextAsync();
+
+        await OpenSaveDialogAsync(page);
+        await WaitForDialogTitleAsync(page, "Complete the save");
+        foreach (var id in new[] { "dialog-form", "dialog-errors", "Name" })
+        {
+            Assert.Equal(1, await page.Locator($"#{id}").CountAsync());
+            Assert.Equal(1, await page.Locator($"#inline-{id}").CountAsync());
+        }
+
+        Assert.Equal("inline-Name", await inlineForm.Locator("label").GetAttributeAsync("for"));
+        Assert.Equal("Name", await page.Locator("[data-rw-dialog] label").GetAttributeAsync("for"));
+        Assert.Equal("inline-dialog-errors", await inlineForm.GetAttributeAsync("data-rw-form-failure-target"));
+        await page.Locator("[data-rw-dialog] input[name=Name]").FillAsync("   ");
+        await SubmitAndWaitForResponseAsync(page, "#dialog-form", CompleteDialogPath, StatusCodes.Status422UnprocessableEntity);
+        await WaitForTextAsync(page, "[data-rw-dialog] #dialog-errors", "required");
+
+        Assert.Equal("Inline Reader", await inlineForm.Locator("input[name=Name]").InputValueAsync());
+        Assert.Equal(inlineErrors, await inlineForm.Locator("[data-rw-form-errors]").InnerTextAsync());
+        Assert.Equal("   ", await page.Locator("[data-rw-dialog] input[name=Name]").InputValueAsync());
+        Assert.Equal("Name", await page.EvaluateAsync<string>("() => document.activeElement?.id || ''"));
+    }
+
+    [Theory]
+    [InlineData("post")]
+    [InlineData("delete")]
+    public async Task TurboMethodLink_WithoutStreamMarkerOpensAndPreservesInsideFlowAndOpener(string method)
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await page.GotoAsync($"{_fixture.BaseUrl}{DialogPagePath}");
+        await page.EvaluateAsync(
+            "method => { const link = document.createElement('a'); link.id = 'method-dialog-opener'; " +
+            "link.href = '/Reactivity/DialogMethod'; link.dataset.turboMethod = method; " +
+            "link.textContent = 'Check with method'; document.body.append(link); }", method);
+        await using var route = await ControlledStreamRoute.InstallAsync(page, "**/Reactivity/DialogMethod");
+        await page.Locator("#method-dialog-opener").ClickAsync();
+        var opening = await route.NextRequestAsync();
+        Assert.Equal(method.ToUpperInvariant(), opening.Route.Request.Method);
+        Assert.Null(opening.Correlation.Flow);
+        opening.Respond(OpenCommand(opening.Correlation, "Method dialog", "<p>Method result</p>"));
+        await WaitForDialogTitleAsync(page, "Method dialog");
+        var originalFlow = await ReadLiveFlowAsync(page);
+
+        await page.Locator("[data-rw-dialog-body]").EvaluateAsync(
+            "(body, method) => { const link = document.createElement('a'); link.id = 'inside-method-link'; " +
+            "link.href = '/Reactivity/DialogMethod'; link.dataset.turboMethod = method; " +
+            "link.textContent = 'Refresh with method'; body.append(link); }", method);
+        await page.Locator("#inside-method-link").ClickAsync();
+        var inside = await route.NextRequestAsync();
+        Assert.Equal(originalFlow, inside.Correlation.Flow);
+        Assert.True(inside.Correlation.Order > opening.Correlation.Order);
+        inside.Respond(OpenCommand(inside.Correlation, "Refreshed method dialog", "<p>Refreshed</p>"));
+        await WaitForDialogTitleAsync(page, "Refreshed method dialog");
+        Assert.NotEqual(originalFlow, await ReadLiveFlowAsync(page));
+        Assert.Equal(1, await page.Locator("[data-rw-dialog][open]").CountAsync());
+        await page.Locator("[data-rw-dialog-close]").ClickAsync();
+        Assert.True(await page.Locator("#method-dialog-opener").EvaluateAsync<bool>("link => document.activeElement === link"));
+    }
+
+    [Fact]
     public async Task StreamGetFromDialogLink_KeepsCapturedFlowReusesBodyTargetAndReturnsFocusToPageOpener()
     {
         await using var context = await _fixture.Browser.NewContextAsync();
@@ -319,7 +408,7 @@ public sealed class RazorWireDialogPlaywrightTests
         Assert.Contains("no-store", await statusResponse.HeaderValueAsync("Cache-Control") ?? string.Empty, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(0, await page.Locator("turbo-stream, [data-rw-dialog]").CountAsync());
         Assert.Equal(0, await page.Locator("#dialog-form").CountAsync());
-        Assert.Contains("HTML fallback displays this status inline", await page.Locator("#dialog-proof-after").InnerTextAsync());
+        Assert.Contains("HTML fallback displays this status inline", await page.Locator("#inline-dialog-proof-after").InnerTextAsync());
 
         await page.GotoAsync($"{_fixture.BaseUrl}{DialogPagePath}");
         var saveResponse = await SubmitAndWaitForResponseAsync(
@@ -330,26 +419,26 @@ public sealed class RazorWireDialogPlaywrightTests
         Assert.Equal(StatusCodes.Status200OK, saveResponse.Status);
         Assert.Contains("no-store", await saveResponse.HeaderValueAsync("Cache-Control") ?? string.Empty, StringComparison.OrdinalIgnoreCase);
         await page.WaitForURLAsync($"**{SaveDialogPath}");
-        Assert.Equal(1, await page.Locator("#dialog-form").CountAsync());
+        Assert.Equal(1, await page.Locator("#inline-dialog-form").CountAsync());
 
         // Value: protects=HTML validation retains input and no-store caching; fails_when=invalid POST loses its form;
         // why_new=the existing fallback journey covered only valid POST; seam=none.
-        await page.Locator("#Name").FillAsync("A");
+        await page.Locator("#inline-Name").FillAsync("A");
         var validationResponse = await SubmitAndWaitForResponseAsync(
             page,
-            "#dialog-form",
+            "#inline-dialog-form",
             CompleteDialogPath,
             StatusCodes.Status422UnprocessableEntity);
         Assert.Contains("no-store", await validationResponse.HeaderValueAsync("Cache-Control") ?? string.Empty, StringComparison.OrdinalIgnoreCase);
         await page.WaitForURLAsync($"**{CompleteDialogPath}");
-        await WaitForTextAsync(page, "#dialog-errors", "Name must be at least 2 characters.");
-        Assert.Equal("A", await page.InputValueAsync("#Name"));
+        await WaitForTextAsync(page, "#inline-dialog-errors", "Name must be at least 2 characters.");
+        Assert.Equal("A", await page.InputValueAsync("#inline-Name"));
         Assert.Equal(0, await page.Locator("turbo-stream, [data-rw-dialog]").CountAsync());
 
-        await page.Locator("#Name").FillAsync("Ada Lovelace");
+        await page.Locator("#inline-Name").FillAsync("Ada Lovelace");
         var submitResponse = await SubmitAndWaitForResponseAsync(
             page,
-            "#dialog-form",
+            "#inline-dialog-form",
             CompleteDialogPath,
             expectedStatus: null);
 
@@ -381,9 +470,10 @@ public sealed class RazorWireDialogPlaywrightTests
             $"form[action*='{SaveDialogPath}']",
             SaveDialogPath,
             StatusCodes.Status200OK);
-        await page.Locator("#Name").FillAsync("Antiforgery check");
+        var formSelector = javascriptEnabled ? "#dialog-form" : "#inline-dialog-form";
+        await page.Locator(formSelector).Locator("input[name=Name]").FillAsync("Antiforgery check");
 
-        var token = page.Locator("#dialog-form input[name='__RequestVerificationToken']");
+        var token = page.Locator(formSelector).Locator("input[name='__RequestVerificationToken']");
         Assert.Equal(1, await token.CountAsync());
         if (invalidToken)
         {
@@ -396,7 +486,7 @@ public sealed class RazorWireDialogPlaywrightTests
 
         var response = await SubmitAndWaitForResponseAsync(
             page,
-            "#dialog-form",
+            formSelector,
             CompleteDialogPath,
             StatusCodes.Status400BadRequest);
 
@@ -1056,8 +1146,10 @@ public sealed class RazorWireDialogPlaywrightTests
         Assert.Equal(0, await page.Locator("[data-rw-dialog] [data-rw-form-error-generated=true]").CountAsync());
     }
 
-    [Fact]
-    public async Task CancelledInsideLinkConfirmation_DoesNotPoisonTheNextOutsideRequestToTheSameUrl()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancelledInsideLinkConfirmation_DoesNotPoisonTheNextOutsideRequestToTheSameUrl(bool methodLink)
     {
         await using var context = await _fixture.Browser.NewContextAsync();
         var page = await context.NewPageAsync();
@@ -1065,8 +1157,9 @@ public sealed class RazorWireDialogPlaywrightTests
         await ClickAndWaitForResponseAsync(page, StatusLinkSelector, DialogStatusPath, HttpMethod.Get.Method);
         await WaitForDialogTitleAsync(page, "Service status");
         await page.Locator("[data-rw-dialog-body]").EvaluateAsync(
-            "body => { const link = document.createElement('a'); link.id='cancelled-dialog-link'; " +
-            "link.href='/Reactivity/DialogStatus'; link.dataset.turboStream=''; link.dataset.turboConfirm='Refresh?'; body.append(link); }");
+            "(body, methodLink) => { const link = document.createElement('a'); link.id='cancelled-dialog-link'; " +
+            "link.href='/Reactivity/DialogStatus'; if (methodLink) link.dataset.turboMethod='post'; " +
+            "else link.dataset.turboStream=''; link.dataset.turboConfirm='Refresh?'; body.append(link); }", methodLink);
         var confirmation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         page.Dialog += async (_, dialog) => { await dialog.DismissAsync(); confirmation.TrySetResult(); };
         await page.Locator("#cancelled-dialog-link").EvaluateAsync("link => link.click()");

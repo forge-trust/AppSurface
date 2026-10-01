@@ -692,8 +692,9 @@ public class RazorWireStreamBuilder
     /// <remarks>
     /// Snapshots the dialog slot before awaiting renderers and validates request correlation when a dialog is present.
     /// After successful rendering, echoes a correlated request UUID in the response's <c>X-RazorWire-Request</c> header
-    /// so handled validation can be associated with its submission. Callers own the response content type, status,
-    /// and handled-form header; prefer <see cref="BuildResult(int?)"/> when returning a controller response.
+    /// when the response has not started, so handled validation can be associated with its submission. Once response
+    /// headers are read-only, the header is left unchanged. Callers own the response content type, status, and
+    /// handled-form header; prefer <see cref="BuildResult(int?)"/> when returning a controller response.
     /// See <c>Docs/dialog-responses.md</c> for the complete presentation contract.
     /// </remarks>
     public async Task<string> RenderAsync(
@@ -721,7 +722,7 @@ public class RazorWireStreamBuilder
             sb.Append(html);
         }
 
-        if (metadata is not null)
+        if (metadata is not null && !viewContext.HttpContext.Response.HasStarted)
         {
             viewContext.HttpContext.Response.Headers[RazorWireRequestMetadata.ResponseRequestHeaderName] =
                 metadata.RequestId.ToString("D", System.Globalization.CultureInfo.InvariantCulture);

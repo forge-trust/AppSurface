@@ -147,9 +147,9 @@ public class RazorWireScriptsTagHelper : TagHelper
         var razorwireJs = _fileVersionProvider.AddFileVersionToPath(
             pathBase,
             "/_content/ForgeTrust.RazorWire/razorwire/razorwire.js");
-        var dialogCss = _fileVersionProvider.AddFileVersionToPath(
+        var dialogCss = HtmlEncoder.Default.Encode(_fileVersionProvider.AddFileVersionToPath(
             pathBase,
-            "/_content/ForgeTrust.RazorWire/razorwire/razorwire-dialog.css");
+            "/_content/ForgeTrust.RazorWire/razorwire/razorwire-dialog.css"));
         var islandsJs = _fileVersionProvider.AddFileVersionToPath(
             pathBase,
             "/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js");

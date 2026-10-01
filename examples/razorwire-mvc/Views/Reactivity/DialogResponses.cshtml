@@ -2,6 +2,10 @@
 
 @{
     ViewData["Title"] = "Dialog Responses";
+    var inlineViewData = new Microsoft.AspNetCore.Mvc.ViewFeatures.ViewDataDictionary(ViewData)
+    {
+        ["DialogIdPrefix"] = "inline-"
+    };
 }
 
 <div class="space-y-8">
@@ -48,7 +52,7 @@
     {
         <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="inline-status-heading">
             <h2 id="inline-status-heading" class="text-lg font-semibold text-slate-950">HTML status fallback</h2>
-            <partial name="_DialogStatus" model="Model.Status" />
+            <partial name="_DialogStatus" model="Model.Status" view-data="inlineViewData" />
         </section>
     }
 
@@ -56,7 +60,7 @@
     {
         <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="inline-dialog-form-heading">
             <h2 id="inline-dialog-form-heading" class="text-lg font-semibold text-slate-950">HTML form fallback</h2>
-            <partial name="_DialogForm" model="Model.Form" />
+            <partial name="_DialogForm" model="Model.Form" view-data="inlineViewData" />
         </section>
     }
 

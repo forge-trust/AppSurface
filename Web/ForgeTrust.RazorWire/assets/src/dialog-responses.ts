@@ -61,7 +61,8 @@ export class DialogResponseManager {
 
     private captureLink(event: MouseEvent) {
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
-        const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[data-turbo-stream]') : null;
+        const link = event.target instanceof Element
+            ? event.target.closest<HTMLAnchorElement>('a[data-turbo-stream],a[data-turbo-method]') : null;
         if (!link || link.closest('[data-turbo="false"]') || link.hasAttribute('download')) return;
         const provenance = { trigger: link, flow: this.shell?.contains(link) ? this.flow : null };
         // Turbo appends its temporary form synchronously during this click,
@@ -72,7 +73,8 @@ export class DialogResponseManager {
             for (const record of records) {
                 for (const node of record.addedNodes) {
                     if (node instanceof HTMLFormElement && node.hidden
-                        && node.getAttribute('data-turbo') === 'true' && node.hasAttribute('data-turbo-stream')) {
+                        && node.getAttribute('data-turbo') === 'true'
+                        && (node.hasAttribute('data-turbo-stream') || link.hasAttribute('data-turbo-method'))) {
                         this.linkForms.set(node, provenance);
                     }
                 }

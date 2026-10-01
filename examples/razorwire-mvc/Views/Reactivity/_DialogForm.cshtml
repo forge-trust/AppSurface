@@ -1,20 +1,26 @@
 @model RazorWireWebExample.Models.DialogResponseFormModel
 
-<form id="dialog-form"
+@{
+    var idPrefix = ViewData["DialogIdPrefix"] as string ?? string.Empty;
+    var nameId = idPrefix + nameof(Model.Name);
+}
+
+<form id="@(idPrefix + "dialog-form")"
       asp-controller="Reactivity"
       asp-action="CompleteDialog"
       method="post"
       rw-active="true"
-      data-rw-form-failure-target="dialog-errors"
+      data-rw-form-failure-target="@(idPrefix + "dialog-errors")"
       class="space-y-4">
-    <div id="dialog-errors"
+    <div id="@(idPrefix + "dialog-errors")"
          data-rw-form-errors
          asp-validation-summary="All"
          class="text-sm font-medium text-rose-700"></div>
 
     <div class="space-y-1">
-        <label asp-for="Name" class="block text-sm font-medium text-slate-800">Name</label>
+        <label asp-for="Name" for="@nameId" class="block text-sm font-medium text-slate-800">Name</label>
         <input asp-for="Name"
+               id="@nameId"
                autocomplete="name"
                class="block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30" />
         <span asp-validation-for="Name" class="text-sm text-rose-700"></span>

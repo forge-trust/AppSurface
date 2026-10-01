@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using FakeItEasy;
 using ForgeTrust.RazorWire.Bridge;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.AspNetCore.Mvc.ViewEngines;
@@ -139,6 +140,25 @@ public sealed class RazorWireDialogBuilderTests
         Assert.Contains(message is null ? "<template></template>" : "<template>&lt;strong&gt;A&amp;B&lt;/strong&gt;</template>", html);
         Assert.DoesNotContain("<strong>", html);
         Assert.DoesNotContain("<Title", html);
+    }
+
+    [Fact]
+    public async Task RenderAsync_WhenResponseStarted_DoesNotEchoRequestHeader()
+    {
+        using var context = CreateContext();
+        var responseFeature = A.Fake<IHttpResponseFeature>();
+        var readOnlyHeaders = new HeaderDictionary { IsReadOnly = true };
+        A.CallTo(() => responseFeature.Headers).Returns(readOnlyHeaders);
+        A.CallTo(() => responseFeature.HasStarted).Returns(true);
+        context.ActionContext.HttpContext.Features.Set<IHttpResponseFeature>(responseFeature);
+
+        var builder = new RazorWireStreamBuilder().OpenDialog("Title", "Body");
+        var html = await builder.RenderAsync(CreateViewContext(context));
+
+        Assert.Contains("dialog-command=\"open\"", html);
+        Assert.True(readOnlyHeaders.IsReadOnly);
+        Assert.True(responseFeature.HasStarted);
+        Assert.Empty(readOnlyHeaders);
     }
 
     [Theory]
