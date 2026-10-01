@@ -56,33 +56,49 @@ internal sealed class DurableRoleManifest
             throw InputError("Manifest file could not be read.");
         }
 
-        byte[] bytes;
-        var oversized = false;
         try
         {
-            await using var stream = new FileStream(
-                path,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read,
-                bufferSize: 4096,
-                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            await using var stream = OpenManifestStream(path);
+            return await ReadStreamAsync(stream, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException)
+        {
+            throw InputError("Manifest file could not be read.");
+        }
+    }
+
+    /// <summary>Reads and validates a bounded manifest from a caller-owned stream.</summary>
+    /// <remarks>
+    /// This internal file-boundary seam reads forward once and never disposes, seeks or retains the stream.
+    /// It permits deterministic partial-read cancellation and I/O failure verification without changing
+    /// the public CLI input contract. Parsing occurs only after a complete bounded read; failures contain
+    /// neither stream contents nor provider exception text. The caller owns stream cleanup.
+    /// </remarks>
+    /// <param name="stream">Readable stream positioned at the start of the complete UTF-8 manifest.</param>
+    /// <param name="cancellationToken">Cancels before or during a read; partial bytes are never accepted.</param>
+    /// <returns>The same immutable manifest and exact-byte digest as the path-based reader.</returns>
+    /// <exception cref="ArgumentNullException">The stream is null.</exception>
+    /// <exception cref="ArgumentException">The read fails, exceeds 64 KiB, or contains an invalid manifest.</exception>
+    /// <exception cref="OperationCanceledException">The read is cancelled.</exception>
+    internal static async ValueTask<DurableRoleManifest> ReadStreamAsync(Stream stream, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        cancellationToken.ThrowIfCancellationRequested();
+        byte[] bytes;
+        try
+        {
             var buffer = new byte[MaximumBytes + 1];
             var length = 0;
             while (length < buffer.Length)
             {
                 var read = await stream.ReadAsync(buffer.AsMemory(length), cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
                 if (read == 0)
                 {
                     break;
                 }
 
                 length += read;
-            }
-
-            if (length > MaximumBytes)
-            {
-                oversized = true;
             }
 
             bytes = buffer[..length];
@@ -96,12 +112,30 @@ internal sealed class DurableRoleManifest
             throw InputError("Manifest file could not be read.");
         }
 
-        if (oversized)
+        if (bytes.Length > MaximumBytes)
         {
             throw InputError("Manifest exceeds the 65536-byte limit.");
         }
 
         return Parse(bytes);
+    }
+
+    private static FileStream OpenManifestStream(string path)
+    {
+        try
+        {
+            return new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 4096,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException)
+        {
+            throw InputError("Manifest file could not be read.");
+        }
     }
 
     /// <summary>Validates strict UTF-8 JSON and constructs an immutable manifest without retaining the input memory.</summary>

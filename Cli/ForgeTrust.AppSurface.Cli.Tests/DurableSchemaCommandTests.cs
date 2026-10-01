@@ -213,6 +213,61 @@ public sealed class DurableSchemaCommandTests
     }
 
     [Fact]
+    public async Task Preflight_cancelled_before_manifest_read_never_opens_a_provider_or_prints_success()
+    {
+        var service = new FakeDurableSchemaCommandService();
+        var command = CreatePreflightCommand(service);
+        using var console = new FakeInMemoryConsole();
+        _ = console.RegisterCancellationHandler();
+        console.RequestCancellation();
+
+        var error = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
+
+        Assert.Contains("durable preflight timeout failed", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, service.PreflightCallCount);
+        Assert.False(service.OnlineOperationCalled);
+        Assert.Empty(console.ReadOutputString());
+        Assert.DoesNotContain(command.RolePairsFile!, error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(DurableRuntimeSchemaCompatibility.Missing)]
+    [InlineData(DurableRuntimeSchemaCompatibility.UpgradeRequired)]
+    [InlineData(DurableRuntimeSchemaCompatibility.StoreTooNew)]
+    [InlineData(DurableRuntimeSchemaCompatibility.Inconsistent)]
+    public async Task Preflight_provider_schema_exception_preserves_safe_compatibility_diagnostic(
+        DurableRuntimeSchemaCompatibility compatibility)
+    {
+        const string secretConnection = "Host=secret.example;Password=do-not-print";
+        const string serverDetail = "schema-exception-sentinel-845";
+        var status = new DurableRuntimeSchemaStatus(
+            compatibility,
+            Guid.NewGuid(),
+            activeRuntimeEpoch: null,
+            installedVersion: 10,
+            requiredVersion: 11,
+            minimumReaderVersion: 10,
+            maximumReaderVersion: 10,
+            minimumWriterVersion: 10,
+            maximumWriterVersion: 10,
+            appliedVersions: [10],
+            pendingVersions: [11],
+            problem: serverDetail);
+        using var environment = new EnvironmentVariableScope("APPSURFACE_DURABLE_CONNECTION", secretConnection);
+        var service = new FakeDurableSchemaCommandService { PreflightException = new DurableRuntimeSchemaException(status) };
+        using var console = new FakeInMemoryConsole();
+
+        var error = await Assert.ThrowsAsync<CommandException>(async () => await CreatePreflightCommand(service).ExecuteAsync(console));
+
+        Assert.Contains($"preflight is {compatibility}", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(secretConnection, error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(serverDetail, error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("structural preflight failed", error.Message, StringComparison.Ordinal);
+        Assert.Empty(console.ReadOutputString());
+        Assert.Equal(1, service.PreflightCallCount);
+    }
+
+    [Fact]
     public async Task Apply_requires_explicit_confirmation_before_reading_the_connection_variable()
     {
         var service = new FakeDurableSchemaCommandService

@@ -303,6 +303,156 @@ public sealed class DurableRoleManifestTests
         }
     }
 
+    [Fact]
+    public async Task ReadStreamAsync_waits_for_complete_input_and_does_not_own_the_stream()
+    {
+        var bytes = StrictUtf8.GetBytes(Manifest("dispatcher", "runtime"));
+        using var stream = new ControlledManifestStream(bytes, maximumReadSize: 2);
+
+        var result = await DurableRoleManifest.ReadStreamAsync(stream, CancellationToken.None);
+
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(bytes)), result.Sha256);
+        Assert.Equal(bytes.Length, stream.BytesRead);
+        Assert.True(stream.ReadCount > 1);
+        Assert.False(stream.IsDisposed);
+    }
+
+    [Fact]
+    public async Task ReadStreamAsync_cancellation_after_valid_partial_bytes_never_returns_a_manifest()
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var stream = new ControlledManifestStream(StrictUtf8.GetBytes(Manifest("d", "r")),
+            maximumReadSize: 4, blockAfterFirstRead: true);
+        var read = DurableRoleManifest.ReadStreamAsync(stream, cancellation.Token).AsTask();
+        try
+        {
+            await stream.PendingRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(read.IsCompleted);
+
+            await cancellation.CancelAsync();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await read);
+            Assert.Equal(2, stream.ReadCount);
+            Assert.Equal(4, stream.BytesRead);
+            Assert.False(stream.IsDisposed);
+        }
+        finally
+        {
+            await cancellation.CancelAsync();
+            _ = await Record.ExceptionAsync(async () => await read);
+        }
+    }
+
+    [Theory]
+    [InlineData("io")]
+    [InlineData("access")]
+    [InlineData("unsupported")]
+    [InlineData("argument")]
+    [InlineData("security")]
+    public async Task ReadStreamAsync_failure_after_valid_partial_bytes_is_fixed_and_secret_safe(string failure)
+    {
+        const string marker = "stream-secret-marker-845";
+        Exception exception = failure switch
+        {
+            "io" => new IOException(marker),
+            "access" => new UnauthorizedAccessException(marker),
+            "unsupported" => new NotSupportedException(marker),
+            "argument" => new ArgumentException(marker),
+            "security" => new System.Security.SecurityException(marker),
+            _ => throw new InvalidOperationException()
+        };
+        using var stream = new ControlledManifestStream(StrictUtf8.GetBytes(Manifest("d", "r")),
+            maximumReadSize: 4, readFailure: exception);
+
+        var error = await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await DurableRoleManifest.ReadStreamAsync(stream, CancellationToken.None));
+
+        Assert.Equal("Manifest file could not be read.", error.Message);
+        Assert.DoesNotContain(marker, error.ToString(), StringComparison.Ordinal);
+        Assert.Null(error.InnerException);
+        Assert.Equal(2, stream.ReadCount);
+        Assert.Equal(4, stream.BytesRead);
+        Assert.False(stream.IsDisposed);
+    }
+
+    [Fact]
+    public async Task ReadStreamAsync_rejects_null_and_precancellation_before_reading()
+    {
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await DurableRoleManifest.ReadStreamAsync((Stream)null!, CancellationToken.None));
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+        using var stream = new ControlledManifestStream(StrictUtf8.GetBytes(Manifest("d", "r")));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await DurableRoleManifest.ReadStreamAsync(stream, cancellation.Token));
+        Assert.Equal(0, stream.ReadCount);
+        Assert.False(stream.IsDisposed);
+    }
+
+    [Fact]
+    public async Task ReadStreamAsync_rejects_cancellation_returned_by_a_stream_that_ignores_the_token()
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var stream = new ControlledManifestStream(StrictUtf8.GetBytes(Manifest("d", "r")),
+            onEndOfInput: () => cancellation.Cancel());
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await DurableRoleManifest.ReadStreamAsync(stream, cancellation.Token));
+
+        Assert.Equal(2, stream.ReadCount);
+        Assert.False(stream.IsDisposed);
+    }
+
+    /// <summary>Provides actual stream reads with a deterministic pending or failed read after a valid prefix.</summary>
+    private sealed class ControlledManifestStream(byte[] bytes, int maximumReadSize = int.MaxValue,
+        bool blockAfterFirstRead = false, Exception? readFailure = null, Action? onEndOfInput = null) : Stream
+    {
+        public TaskCompletionSource PendingRead { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int BytesRead { get; private set; }
+        public int ReadCount { get; private set; }
+        public bool IsDisposed { get; private set; }
+        public override bool CanRead => !IsDisposed;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ReadCount++;
+            if (ReadCount > 1 && readFailure is not null)
+            {
+                throw readFailure;
+            }
+            if (blockAfterFirstRead && ReadCount > 1)
+            {
+                PendingRead.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            if (BytesRead < bytes.Length)
+            {
+                var count = Math.Min(Math.Min(buffer.Length, maximumReadSize), bytes.Length - BytesRead);
+                bytes.AsMemory(BytesRead, count).CopyTo(buffer);
+                BytesRead += count;
+                return count;
+            }
+            onEndOfInput?.Invoke();
+            return 0;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            IsDisposed = true;
+            base.Dispose(disposing);
+        }
+    }
+
     private static string Manifest(string dispatcher, string runtime) =>
         $"{{\"version\":1,\"pairs\":[{{\"dispatcher\":{System.Text.Json.JsonSerializer.Serialize(dispatcher)},\"runtime\":{System.Text.Json.JsonSerializer.Serialize(runtime)},\"dispatcher_profile\":\"full\"}}]}}";
 

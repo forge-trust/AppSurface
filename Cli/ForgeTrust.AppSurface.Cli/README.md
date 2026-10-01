@@ -131,6 +131,8 @@ CLI-owned internal contract, not a public PostgreSQL provider preflight API. Ord
 continue to use provider status; the documented internal `ReadStatusInTransactionAsync` seam exists only to reuse
 compatibility checks inside this operation's already-owned snapshot.
 
+`DurableRoleManifest.ReadAsync(path, cancellationToken)` owns the file stream and delegates its single bounded read to the internal `ReadStreamAsync(stream, cancellationToken)` boundary. The stream overload reads forward from the current position, accepts at most 65,536 bytes, hashes and parses only complete input, and never seeks, retains, or disposes the caller-owned stream. It preserves partial-read cancellation and maps read failures to a fixed secret-safe input error. Internal callers must dispose their stream even when reading or validation fails; the public CLI continues to require a manifest file path.
+
 `ReadCallerAsync(connection, transaction, request, cancellationToken)` classifies the credential inside that same
 snapshot. It neither opens a connection nor changes session identity or owns the transaction. It resolves
 `session_user` and `current_user` to catalog OIDs and rejects an assumed role or changed backend before returning
