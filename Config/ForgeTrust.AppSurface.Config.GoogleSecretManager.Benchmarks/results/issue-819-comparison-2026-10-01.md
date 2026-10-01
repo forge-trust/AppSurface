@@ -2,7 +2,7 @@
 
 Rerun on October 1, 2026 using the exact `origin/main` base commit
 `4aa8329c76f4279ad319747f9f3c14b9b8de51ef` for both sides. The baseline was built from that clean source snapshot.
-The candidate used the same base plus the uncommitted provider/request working-tree patch after the audit admission fix. The v3 harness source was
+The candidate used the same base plus the provider/request patch after the cleanup-scheduler and audit-admission coverage fixes. The v3 harness source was
 copied unchanged into the baseline snapshot, and its source fingerprints and workload controls match the candidate.
 The complete unedited records are the [baseline JSONL](issue-819-origin-main-2026-10-01.jsonl),
 [candidate JSONL](issue-819-candidate-2026-10-01.jsonl), and
@@ -10,8 +10,8 @@ The complete unedited records are the [baseline JSONL](issue-819-origin-main-202
 
 | Field | Baseline | Candidate |
 | --- | --- | --- |
-| Source | Clean `4aa8329c76f4279ad319747f9f3c14b9b8de51ef` (`origin/main` at run) | Same base plus uncommitted provider/request patch |
-| Provider/request patch SHA-256 against base | — | `e6465d2569a932795aae2cc1d9de15a1a472689bf2d7d5107b9077e047ba5956` |
+| Source | Clean `4aa8329c76f4279ad319747f9f3c14b9b8de51ef` (`origin/main` at run) | Same base plus the committed #819 provider/request patch |
+| Provider/request patch SHA-256 against base | — | `fd9bb2b1b5be8f337504299e2e5c8ece6e3061f836ddc3a0407213e9c3addaea` |
 | Harness ID | `issue-819-google-mapped-fake-v3` | Same |
 | Harness `Program.cs` SHA-256 | `091ab949e6de34613992f405e55bcb51ef024a32fbd990fe36ca9aefa1209675` | Same |
 | Harness project SHA-256 | `c7923f7a0afc71bfc1343efdbd24aa85a9bea06be26ffe52f135494bc5b85507` | Same |
@@ -34,12 +34,12 @@ them to individual scenarios. Per-scenario summaries contain no ThreadPool or pr
 
 | Scenario | Baseline elapsed median (min–max; spread) | Candidate elapsed median (min–max; spread) | Max active fake calls, baseline/candidate |
 | --- | ---: | ---: | ---: |
-| Distinct-resource cold | 51.4551 (51.3630–72.4516; 21.0886) | 52.2490 (52.1464–69.1720; 17.0256) | 16 / 16 |
-| Same-resource cold contention | 50.8377 (50.5025–51.5718; 1.0693) | 52.2831 (50.9275–52.4266; 1.4991) | 1 / 1 |
-| Warm-cache control | 0.5006 (0.3490–2.2559; 1.9069) | 0.2788 (0.2377–0.3844; 0.1467) | 0 / 0 |
+| Distinct-resource cold | 51.4551 (51.3630–72.4516; 21.0886) | 52.4571 (52.1586–75.3689; 23.2103) | 16 / 16 |
+| Same-resource cold contention | 50.8377 (50.5025–51.5718; 1.0693) | 51.6095 (50.5687–52.5882; 2.0195) | 1 / 1 |
+| Warm-cache control | 0.5006 (0.3490–2.2559; 1.9069) | 0.4912 (0.2587–1.0788; 0.8201) | 0 / 0 |
 
-Suite-wide maximum sampled ThreadPool count: **17 baseline / 2 candidate**. Suite-wide maximum sampled process-thread
-count: **46 baseline / 31 candidate**. These are process-level indicators and do not identify which thread called the
+Suite-wide maximum sampled ThreadPool count: **17 baseline / 4 candidate**. Suite-wide maximum sampled process-thread
+count: **46 baseline / 33 candidate**. These are process-level indicators and do not identify which thread called the
 fake client. The separate [mapped proof](../README.md) checks cold-owner managed-thread identity and shared-flight
 behavior directly.
 
