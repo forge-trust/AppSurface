@@ -418,3 +418,30 @@ planner limitation for the full implementation's budget review, with no speculat
 The review inspected tests/fixtures in summary mode only and ran no processes. The separate
 mechanism review read the fixture sources and found no actionable static defect; actual Ubuntu
 execution remains required. Final scoped review and packed CLI/SDK terminal results remain pending.
+
+
+### Nested typed-contract validation repair
+
+Final scoped review confirmed that `Deserialize<EvidencePlan[]>` could return an unsupported
+`2.0` plan because version/collection validation previously examined only the root object.
+Public regression proof on the isolated checkout artifacts reproduced the bypass: the new
+invalid-container test failed, while its supported-container neighbor passed, exit **1**.
+
+Deserialization now attaches validation to each typed Contracts object via
+`DefaultJsonTypeInfoResolver.OnDeserialized`. Array, dictionary and caller-defined wrapper
+roots therefore apply the same supported-version and known collection checks as direct
+roots. Raw `JsonElement` stays untyped; no authentication or admission authority is added.
+The [Contracts reference](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md#bounded-json-input)
+and public XML contract document this behavior. Regressions include plan arrays, manifest
+dictionaries, a caller wrapper, null producer items inside a profile array, a streamed
+manifest list and canonical/structural-verification positive controls.
+
+After the repair, the fresh Evidence filter passed **178/178**, numeric exit **0**, with
+no compiler/analyzer/documentation warnings matched in the log. Command:
+`dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --artifacts-path TestResults/issue779-wrapped-validation --filter FullyQualifiedName~Evidence --verbosity minimal`.
+Red/green logs: `/private/tmp/issue779-wrapped-red.log` and
+`/private/tmp/issue779-wrapped-green.log`. Scoped whitespace format exited **0**;
+`git diff --check`, four Python verifier controls and launcher shell syntax passed.
+The watcher was instructed to stop the just-started attempt 7 before code replacement;
+its exact terminal result remains pending. A new committed full run and refreshed packed
+Contracts/SDK proof are required for this repair before publication.

@@ -32,6 +32,8 @@ All deserialization entry points reject malformed JSON, duplicate or case-collid
 
 `Serialize<T>` retains the existing canonical output, including numeric output for undefined enum values supplied by in-process callers. Such numeric enum input is rejected by deserialization; producing bytes does not grant evidence authority. The strict enum converter is used only when reading.
 
+Schema and contract-collection checks run for every typed contract object that is deserialized, including values inside arrays, lists, dictionaries, or caller-defined wrapper objects. Wrapping an `EvidencePlan` or `EvidenceManifest` does not bypass its supported-version check. A raw `JsonElement` remains untyped JSON; deserializing it does not validate it as an Evidence contract or grant authority.
+
 The span overload cannot limit memory already allocated by its caller. Prefer the counted stream overload at an untrusted file or stream boundary, and do not use a stream length check as a substitute for counted reading. These methods validate structure and format; they do not authenticate who supplied the JSON or make a plan trusted.
 
 `EvidenceClaimKind.TargetedComplete` is eligible for a pull-request gate; `ReleaseComplete` is eligible only for a release gate and requires `ValidatedNotAttested` envelope status. `ObservationOnly` is deliberately informative, never gate-eligible. `NoEvidenceRequired` is valid only when the selected profile declares no resources, producers, or obligations.

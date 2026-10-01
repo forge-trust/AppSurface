@@ -12,6 +12,44 @@ public sealed class EvidenceJsonShapeTests
 {
     private const string SecretCanary = "schema-secret-canary-779";
 
+    [Fact]
+    public async Task Deserialize_ValidatesContractsInsideCollectionsAndWrappers()
+    {
+        // Regression: typed containers must not bypass the supported schema or collection-item checks.
+        var fixture = CreateFixture();
+        var invalidPlan = fixture.Plan with { ContractVersion = "2.0" };
+        var invalidManifest = fixture.Manifest with { ContractVersion = "2.0" };
+        AssertSafeJsonException<EvidencePlan[]>(EvidenceCanonicalJson.Serialize(new[] { invalidPlan }));
+        AssertSafeJsonException<Dictionary<string, EvidenceManifest>>(EvidenceCanonicalJson.Serialize(
+            new Dictionary<string, EvidenceManifest> { [SecretCanary] = invalidManifest }));
+        AssertSafeJsonException<WrappedPlan>(EvidenceCanonicalJson.Serialize(new WrappedPlan(invalidPlan)));
+        AssertSafeJsonException<EvidenceProfile[]>(EvidenceCanonicalJson.Serialize(
+            new[] { fixture.Profile with { Producers = new EvidenceProducerDeclaration[] { null! } } }));
+
+        await using var stream = new MemoryStream(EvidenceCanonicalJson.Serialize(new[] { invalidManifest }));
+        var exception = await Assert.ThrowsAsync<JsonException>(async () =>
+            await EvidenceCanonicalJson.DeserializeAsync<List<EvidenceManifest>>(stream));
+        Assert.DoesNotContain(SecretCanary, exception.Message, StringComparison.Ordinal);
+        Assert.Null(exception.InnerException);
+    }
+
+    [Fact]
+    public void Deserialize_PreservesSupportedContractsInsideCollectionsAndWrappers()
+    {
+        var fixture = CreateFixture();
+        var plans = EvidenceCanonicalJson.Deserialize<EvidencePlan[]>(EvidenceCanonicalJson.Serialize(new[] { fixture.Plan }));
+        var manifests = EvidenceCanonicalJson.Deserialize<Dictionary<string, EvidenceManifest>>(
+            EvidenceCanonicalJson.Serialize(new Dictionary<string, EvidenceManifest> { ["current"] = fixture.Manifest }));
+        var wrapped = EvidenceCanonicalJson.Deserialize<WrappedPlan>(EvidenceCanonicalJson.Serialize(new WrappedPlan(fixture.Plan)));
+
+        Assert.Equal(EvidenceCanonicalJson.Serialize(fixture.Plan), EvidenceCanonicalJson.Serialize(Assert.Single(plans)));
+        Assert.Equal(EvidenceCanonicalJson.Serialize(fixture.Manifest), EvidenceCanonicalJson.Serialize(manifests["current"]));
+        Assert.Equal(EvidenceCanonicalJson.Serialize(fixture.Plan), EvidenceCanonicalJson.Serialize(wrapped.Plan));
+        Assert.True(EvidenceManifestBuilder.Verify(wrapped.Plan, manifests["current"]));
+    }
+
+    private sealed record WrappedPlan(EvidencePlan Plan);
+
     public static TheoryData<string, string, string> NullCollectionCases => new()
     {
         { "EvidencePolicy.Profiles", "policy", "Profiles" },

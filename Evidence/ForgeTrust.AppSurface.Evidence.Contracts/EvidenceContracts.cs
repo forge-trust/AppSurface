@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace ForgeTrust.AppSurface.Evidence.Contracts;
 
@@ -758,6 +759,7 @@ public static class EvidenceCanonicalJson
     /// not contain null items. Optional nullable members and constructor defaults remain supported.
     /// Unknown properties are ignored for additive compatibility, and plan and manifest values
     /// must declare the currently supported contract version (<c>1.0</c>).
+    /// These checks also apply to typed contract values nested in caller-owned collections or wrapper objects.
     /// </summary>
     /// <typeparam name="TValue">Value type to deserialize.</typeparam>
     /// <param name="utf8Json">JSON bytes already held in memory.</param>
@@ -804,8 +806,6 @@ public static class EvidenceCanonicalJson
             throw new JsonException("Evidence JSON is empty or does not contain the requested contract.");
         }
 
-        ValidateCollectionItems(value);
-        ValidateContractVersion(value);
         return value;
     }
 
@@ -848,10 +848,26 @@ public static class EvidenceCanonicalJson
 
     private static JsonSerializerOptions CreateDeserializerOptions()
     {
+        var resolver = new DefaultJsonTypeInfoResolver();
+        resolver.Modifiers.Add(static typeInfo =>
+        {
+            if (typeInfo.Kind == JsonTypeInfoKind.Object
+                && typeInfo.Type.Assembly == typeof(EvidencePolicy).Assembly)
+            {
+                // Validate each typed contract when it is materialized, including contracts inside
+                // caller-owned arrays, dictionaries or wrappers. Root-only checks miss those values.
+                typeInfo.OnDeserialized = static value =>
+                {
+                    ValidateCollectionItems(value);
+                    ValidateContractVersion(value);
+                };
+            }
+        });
         var options = new JsonSerializerOptions(SerializerOptions)
         {
             RespectNullableAnnotations = true,
             RespectRequiredConstructorParameters = true,
+            TypeInfoResolver = resolver,
         };
         options.Converters.Clear();
         options.Converters.Add(new StrictStringEnumConverterFactory());
