@@ -48,3 +48,5 @@ Coverage execution uses the same fail-mode [watchdog and no-dump VSTest hang pol
 - Do not hand-edit generated artifacts; use `verify`.
 
 Read next: the [CLI command reference](../../Cli/ForgeTrust.AppSurface.Cli/README.md), [contracts](../ForgeTrust.AppSurface.Evidence.Contracts/README.md), and the [EvidenceHost cookbook](../../guides/evidencehost-cookbook.md).
+
+Input error categories are determined when opening the file: a missing file or directory reports `ASEVD204` for policy and `ASEVD208` for plan/manifest. Access denial and other read failures report `ASEVD205` and `ASEVD209`, respectively; path existence metadata does not override the actual open result. See the [bounded input contract](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#bounded-json-input).

@@ -138,11 +138,16 @@ public sealed class EvidenceJsonInputTests
     }
 
     [Fact]
-    public void Serialize_RejectsUndefinedEnumInsteadOfEmittingNumericAuthority()
+    public void Serialize_PreservesUndefinedEnumBytesWhileDeserializeRejectsThem()
     {
         var profile = new EvidenceProfile("invalid", (EvidenceProfileScope)int.MaxValue, [], [], []);
 
-        Assert.Throws<JsonException>(() => EvidenceCanonicalJson.Serialize(profile));
+        var json = EvidenceCanonicalJson.Serialize(profile);
+
+        Assert.Equal(
+            "{\"Id\":\"invalid\",\"Obligations\":[],\"Producers\":[],\"Resources\":[],\"Scope\":2147483647}",
+            Encoding.UTF8.GetString(json));
+        Assert.Throws<JsonException>(() => EvidenceCanonicalJson.Deserialize<EvidenceProfile>(json));
     }
 
     [Fact]

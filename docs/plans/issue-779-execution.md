@@ -6,7 +6,7 @@ Goal: implement the [approved EvidenceHost plan](../designs/issue-779-evidenceho
 
 - Dedicated branch: `codex/make-it-so-evidencehost-779`, initially from `5dc141db81009348538d3f6b7634a99ccb34cd99`, fast-forwarded to `origin/main` at `fd0b124e16a35b85ee16acde799834af407e18de`. Existing approved plan, test-plan and `TODOS.md` changes belong to #779 and are preserved.
 - GitHub access: repository `forge-trust/AppSurface`, default branch `main`, viewer permission `ADMIN`; issue #779 remains open. This does not confer a recorded CI-owner acceptance.
-- Durable Make It So goal exists. The user has resolved the prior ownership blocker; work continues toward the same objective. No implementation commit or PR exists yet.
+- Durable Make It So goal exists. The user has resolved the prior ownership blocker; work continues toward the same objective. The preparatory implementation is committed; no PR exists yet.
 - Read the actual workflow, existing host/CLI entry points and registered claim/parser paths. [Consumer acceptance record](../evidence/issue779-consumer-acceptance.md) records the existing unsupported workflow and required proof.
 - The user selected **A** on 2026-09-30: AppSurface's GitHub Actions workflows are the first consumer, and Andrew is the CI owner. The next step is actual process/filesystem/supervision proof; ownership confirmation alone admits no platform. A provisional Linux proof is now prepared; see the consumer acceptance record.
 - [Gate inventory](../evidence/issue779-gate-inventory.md) is complete. External consumers remain unknown. Existing CLI targeted/no-evidence gates, Aspire observation resources and public builder status-enum authority require coordinated migration; no protected downstream manifest gate currently exists in this repository.
@@ -194,3 +194,100 @@ exit **0**, with no warning/error matches: `/private/tmp/issue779-json-shape.log
 adversarial pass found no actionable Contracts/CLI defect after the deserializer-only repair; no outside
 review or full runner/lifecycle completion is implied. Final formatting and committed full-gate verification
 follow this checkpoint.
+
+## Committed preparatory slice and coverage attempt 2
+
+- Commits: `c3b80e8b` (five inspected release screenshots), `13e14c30` (bounded JSON, planning doctor,
+  tests/docs and candidate Linux fixtures), and `2d27b0d5` (approved-plan whitespace). The working tree
+  was clean when the unchanged full gate began against `origin/main` at `fd0b124e`.
+- Coverage watcher `01a0f5f2-d68b-7771-b1b9-3884662da9de` owns attempt 2 and its terminal exit:
+  `/private/tmp/issue779-coverage-attempt2.log`. Do not run another full gate concurrently.
+- Final native review found a P3 serialization compatibility regression: installing the strict enum
+  converter in shared options changed `Serialize` for undefined enums. Restore its established
+  `JsonStringEnumConverter` output, keep the strict reader exclusively in deserializer options, and
+  verify both canonical numeric bytes and input rejection through the public API. The source/test/docs
+  repair is written while attempt 2 executes previously built assemblies; no rebuild was started.
+  Thus attempt 2 binds the preceding committed candidate, and cannot validate this repair.
+- Attempt 2 reproduced four auth verifier timeouts (three HTTP failure controls and the leading-zero
+  readiness timeout). Isolated earlier 61/61 success does not diagnose their cause. Dedicated read-only
+  investigations now own authentication and docs process paths; no timeouts or tests are relaxed.
+- Packed CLI/SDK QA worker `01a0f5f5-5c8e-7431-967a-84e325ac135c` owns the isolated package trial
+  `/private/tmp/issue779-packed.RItPkkt8`. Await its observed terminal outcomes. Affected package
+  probes must be refreshed after the serialization repair.
+
+The user's staged route remains approved. Public admission/provider API freeze and full #779 completion
+still depend on actual Linux runner proof followed by the remaining protected integration.
+
+### Attempt 2 terminal result
+
+The unchanged wrapper exited **1** with `ASCOV120` after all **54/54** project entries completed.
+Build: **zero warnings / zero errors**. Only AuthAspNetCoreDevAuthExample.Tests failed: **4 failed,
+57 passed**. Docs.Tests passed **3083/3083** and RazorWire.IntegrationTests passed **193/193**.
+Raw merged coverage was **95.09% line / 89.01% branch**; the wrapper did not reach its threshold or
+patch gate, so these figures are not a pass. Numeric exit: `/private/tmp/issue779-coverage-attempt2.exit`.
+The enum repair was written after this run's build and is excluded from its code-validation claim.
+
+The next evidence-backed action is to retain bounded auth fixture timeout output/events, then reproduce
+those same four cases without changing their deadlines. Refresh affected enum/unit/packed evidence after
+formatting. A third full wrapper run is required on the final committed candidate after focused fixes.
+Packed package checks at `2d27b0d5` passed with separate process exits/streams in
+`/private/tmp/issue779-packed.RItPkkt8/report.json`; these validate the old snapshot and need enum refresh.
+
+### Coverage repair review progress
+
+The final review's P3 shared enum-converter regression was accepted and corrected. Serialization retains the
+prior `JsonStringEnumConverter` behavior, and deserializer options exclusively use the strict input converter.
+The public regression verifies exact numeric output for an undefined enum and rejection when those bytes
+are consumed. Formatting exited **0**, and diff checks passed. A fresh CLI Evidence run and package refresh
+are delegated; no fresh pass is asserted until their terminal results arrive.
+
+The initial packed trial also emitted `NU5118` for a duplicated Contracts README package item. The package
+project's redundant `None Include` was removed because the repository's `Directory.Build.targets` already
+updates and packs that README. The refreshed archive must include exactly one README and have no NU5118.
+
+Docs investigation found no established cause for the earlier hang, and current full-suite success means
+no speculative Docs source repair is selected. Its possible unbounded post-timeout helper waits are not
+claimed as this failure's cause. Authentication diagnostics/reproduction remain the concrete gate work.
+
+The [preliminary proof scope](issue-779-preliminary-proof.md) records the approved staged deliverables and
+post-PR runner checks, while preserving the full acceptance objective and excluded Trusted platforms.
+
+### Fresh focused fixes and reproduction
+
+- Native review identified one additional P3: `File.Exists` prechecks could classify inaccessible inputs as
+  missing before the actual open seam. Both CLI readers now classify missing-file/directory exceptions
+  at open time as `ASEVD204`/`ASEVD208`, and map denied/invalid/other reads to `ASEVD205`/`ASEVD209`.
+  Six missing-file/directory controls and deleted physical paths with injected access denial verify these
+  outcomes. The reviewer accepted the repaired hunks; fresh caller validation is pending.
+- Post-enum-fix CLI Evidence run passed **153/153** (6 seconds; numeric exit **0** reported by its process
+  record). This predates the six new caller cases and is not final validation. A .NET workload-verification
+  host warning was observed, separate from compiler/analyzer/XML warnings.
+- Auth fixture diagnostics now retain only bounded stage/event categories and owned PID states on timeout,
+  excluding raw responses and environment values. The first diagnostic compile failed on a local name
+  collision; a follow-up rename overreached the parameter guard. Both errors were corrected in place.
+  The third focused collector run passed all **4/4** original failure controls with numeric exit **0** and
+  unchanged deadlines (HTTP controls approximately 1 second each; leading-zero control approximately
+  9 seconds): `/private/tmp/issue779-auth-timeout-repro3.log`. No causal auth source fix is inferred.
+- Final formatting exited **0**. The fresh CLI Evidence run passed **159/159**, with numeric exit **0**:
+  `/private/tmp/issue779-enum-refresh-attempt2-20261001/logs/cli-evidence-attempt2.meta.json`.
+  The next full wrapper must measure all committed fixes and diagnostics.
+
+### Refreshed package and preparatory review checkpoint
+
+The exact local package version `0.1.0-issue779-proof.20261001.2` was installed into an owned temporary
+tool directory. Help, starter initialization, doctor with `GITHUB_ACTIONS=true`, and targeted explain
+exited **0** with their expected output and owned artifacts. Duplicate-property and null-profile policies
+exited **1** with `ASEVD205`. Doctor remained `unverified` and created no execution manifest.
+
+The SDK consumer restored Contracts from the local feed alone and built with zero warnings/errors.
+Its counted nonseekable stream, additive/case-compatible round-trip, required/null member and item,
+optional default, unsupported-version and undefined-enum compatibility checks all passed. Undefined enum
+serialization retained numeric output and deserialization rejected it. Both refreshed packages contain
+exactly one root README; neither pack log has `NU5118`. The parent retrieved the overall process's numeric
+exit **0**. Commands, separate streams, package hashes and consumed source hashes are recorded in
+`/private/tmp/issue779-enum-refresh-attempt2-20261001/packed-refresh-report.json`.
+
+A fresh native preparatory review reported no actionable finding, with test/fixture payloads explicitly
+reviewed in summary mode only. Outside Claude Code remains unavailable. This is scoped review evidence;
+full coverage, ship review and actual Ubuntu mechanism proof remain required. Python verifier controls
+passed **4/4**, and the mechanism script passed shell syntax validation. No Trusted platform is admitted.

@@ -281,17 +281,16 @@ internal sealed class EvidenceCliWorkflow
 
     private async Task<EvidencePolicy> ReadPolicyAsync(string policyPath, CancellationToken cancellationToken)
     {
-        if (!File.Exists(policyPath))
-        {
-            throw new EvidenceCliException("ASEVD204", $"Evidence policy '{policyPath}' does not exist.", "Run 'appsurface evidence init --sample' or pass --policy with a checked-in policy path.");
-        }
-
         try
         {
             await using var stream = _jsonFileAccess.OpenRead(policyPath);
             return await EvidenceCanonicalJson.DeserializeAsync<EvidencePolicy>(
                 stream,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            throw new EvidenceCliException("ASEVD204", $"Evidence policy '{policyPath}' does not exist.", "Run 'appsurface evidence init --sample' or pass --policy with a checked-in policy path.");
         }
         catch (Exception exception) when (exception is JsonException or InvalidDataException or IOException or UnauthorizedAccessException)
         {
@@ -405,17 +404,16 @@ internal sealed class EvidenceCliWorkflow
 
     private async Task<TValue> ReadCanonicalAsync<TValue>(string path, CancellationToken cancellationToken)
     {
-        if (!File.Exists(path))
-        {
-            throw new EvidenceCliException("ASEVD208", $"Evidence file '{path}' does not exist.", "Pass paths from the same generated evidence output directory.");
-        }
-
         try
         {
             await using var stream = _jsonFileAccess.OpenRead(path);
             return await EvidenceCanonicalJson.DeserializeAsync<TValue>(
                 stream,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            throw new EvidenceCliException("ASEVD208", $"Evidence file '{path}' does not exist.", "Pass paths from the same generated evidence output directory.");
         }
         catch (Exception exception) when (exception is JsonException or InvalidDataException or IOException or UnauthorizedAccessException)
         {

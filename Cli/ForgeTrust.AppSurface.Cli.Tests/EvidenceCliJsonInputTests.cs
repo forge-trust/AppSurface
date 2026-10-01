@@ -107,6 +107,7 @@ public sealed class EvidenceCliJsonInputTests
     {
         using var directory = TestDirectory.Create();
         var paths = await CreateInputsAsync(directory.Path);
+        File.Delete(paths[input]);
         var workflow = new EvidenceCliWorkflow(new EvidencePlanner(), jsonFileAccess: new FailingInputAccess(paths[input]));
 
         var exception = await Assert.ThrowsAsync<EvidenceCliException>(async () =>
@@ -124,6 +125,40 @@ public sealed class EvidenceCliJsonInputTests
 
         Assert.Equal(input == "policy" ? "ASEVD205" : "ASEVD209", exception.Code);
         Assert.DoesNotContain("json-secret-canary", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("policy", false)]
+    [InlineData("plan", false)]
+    [InlineData("manifest", false)]
+    [InlineData("policy", true)]
+    [InlineData("plan", true)]
+    [InlineData("manifest", true)]
+    public async Task Workflow_MapsMissingInputsWhenOpeningFiles(string input, bool missingDirectory)
+    {
+        using var directory = TestDirectory.Create();
+        var paths = await CreateInputsAsync(directory.Path);
+        File.Delete(paths[input]);
+        if (missingDirectory)
+        {
+            paths[input] = Path.Join(directory.Path, "missing-directory", input + ".json");
+        }
+
+        var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
+        var exception = await Assert.ThrowsAsync<EvidenceCliException>(async () =>
+        {
+            if (input == "policy")
+            {
+                await workflow.DoctorAsync(
+                    new EvidencePlanningRequest(paths["policy"], ["docs/readme.md"], null), CancellationToken.None);
+            }
+            else
+            {
+                await workflow.VerifyAsync(paths["plan"], paths["manifest"], CancellationToken.None);
+            }
+        });
+
+        Assert.Equal(input == "policy" ? "ASEVD204" : "ASEVD208", exception.Code);
     }
 
     private static async Task<Dictionary<string, string>> CreateInputsAsync(string root)

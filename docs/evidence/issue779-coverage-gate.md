@@ -19,3 +19,10 @@ The [packed coverage smoke script](../../scripts/coverage-run-package-smoke.sh) 
 Audit revision: `fd0b124e16a35b85ee16acde799834af407e18de`, initially equal to `origin/main`. The initial audit was read-only. The first unchanged full lane subsequently ran on this revision with the task worktree dirty. All 54 project entries completed, but the command exited **1** with `ASCOV120` after four test projects failed. The wrapper did not run its threshold/patch gate. Raw merged Cobertura measured 95.07% line and 89.00% branch coverage; these figures are not a gate pass. See the [execution attempt record](../plans/issue-779-execution.md#staged-proof-route-approved-2026-10-01) for failed suites and focused repairs. Official patch coverage remains unavailable.
 
 Fresh full-lane results are required after the final code/test changes and immediately before [Make It So shipping](../plans/issue-779-execution.md#required-checks). Store each attempt's revision, worktree state, exit status, uncovered paths and focused repair in that execution record.
+
+Attempt 2 ran the committed candidate `2d27b0d5` against unchanged local `origin/main` at `fd0b124e`.
+All 54 projects completed and the build reported zero warnings/errors, but four auth fixture deadline
+failures made the wrapper exit **1 / ASCOV120**. Docs and visual suites passed. Raw merged coverage was
+95.09% line / 89.01% branch; the official aggregate/patch gate was not reached. See the
+[attempt 2 terminal record](../plans/issue-779-execution.md#attempt-2-terminal-result). A serialization
+compatibility repair written after this run's build also requires new validation and committed coverage.

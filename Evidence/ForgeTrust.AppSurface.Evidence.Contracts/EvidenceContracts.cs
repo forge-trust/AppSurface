@@ -841,14 +841,22 @@ public static class EvidenceCanonicalJson
         PropertyNameCaseInsensitive = true,
         WriteIndented = false,
         MaxDepth = 64,
-        Converters = { new StrictStringEnumConverterFactory() },
+        Converters = { new JsonStringEnumConverter() },
     };
 
-    private static readonly JsonSerializerOptions DeserializerOptions = new(SerializerOptions)
+    private static readonly JsonSerializerOptions DeserializerOptions = CreateDeserializerOptions();
+
+    private static JsonSerializerOptions CreateDeserializerOptions()
     {
-        RespectNullableAnnotations = true,
-        RespectRequiredConstructorParameters = true,
-    };
+        var options = new JsonSerializerOptions(SerializerOptions)
+        {
+            RespectNullableAnnotations = true,
+            RespectRequiredConstructorParameters = true,
+        };
+        options.Converters.Clear();
+        options.Converters.Add(new StrictStringEnumConverterFactory());
+        return options;
+    }
 
     private static async ValueTask<byte[]> ReadBoundedInputAsync(
         Stream source,
@@ -931,31 +939,31 @@ public static class EvidenceCanonicalJson
                         objectScopes.Push(null);
                         break;
                     case JsonTokenType.PropertyName:
-                    {
-                        var properties = objectScopes.Pop();
-                        properties ??= reusableSets.Count > 0
-                            ? reusableSets.Pop()
-                            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                        var propertyName = reader.GetString()!;
-                        if (!properties.Add(propertyName))
                         {
-                            throw new JsonException("Evidence JSON contains duplicate or case-colliding object properties.");
-                        }
+                            var properties = objectScopes.Pop();
+                            properties ??= reusableSets.Count > 0
+                                ? reusableSets.Pop()
+                                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                            var propertyName = reader.GetString()!;
+                            if (!properties.Add(propertyName))
+                            {
+                                throw new JsonException("Evidence JSON contains duplicate or case-colliding object properties.");
+                            }
 
-                        objectScopes.Push(properties);
-                        break;
-                    }
+                            objectScopes.Push(properties);
+                            break;
+                        }
                     case JsonTokenType.EndObject:
-                    {
-                        var properties = objectScopes.Pop();
-                        if (properties is not null)
                         {
-                            properties.Clear();
-                            reusableSets.Push(properties);
-                        }
+                            var properties = objectScopes.Pop();
+                            if (properties is not null)
+                            {
+                                properties.Clear();
+                                reusableSets.Push(properties);
+                            }
 
-                        break;
-                    }
+                            break;
+                        }
                 }
             }
         }
@@ -1083,13 +1091,7 @@ public static class EvidenceCanonicalJson
 
         public override void Write(Utf8JsonWriter writer, TEnum value, JsonSerializerOptions options)
         {
-            var name = Enum.GetName(value);
-            if (name is null)
-            {
-                throw new JsonException();
-            }
-
-            writer.WriteStringValue(name);
+            throw new NotSupportedException("The strict enum converter is for Evidence JSON input only.");
         }
     }
 
