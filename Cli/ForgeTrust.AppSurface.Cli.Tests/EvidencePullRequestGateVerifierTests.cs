@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Planner;
 using ForgeTrust.AppSurface.Testing;
@@ -233,7 +234,7 @@ public sealed class EvidencePullRequestGateVerifierTests
     [Fact]
     public async Task NoFollowArtifactVerifier_ShouldRejectForgedDigestMissingFileAndSymlinkOnLinux()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!SupportsNoFollowVerifier)
         {
             return;
         }
@@ -248,6 +249,10 @@ public sealed class EvidencePullRequestGateVerifierTests
         var forged = ReplaceArtifact(fixture.Manifest, artifact with { Sha256 = new string('0', 64) });
         Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, fixture.Plan, forged));
 
+        var linkedRoot = Path.Join(Path.GetDirectoryName(fixture.ArtifactRoot)!, "handoff-link");
+        Directory.CreateSymbolicLink(linkedRoot, fixture.ArtifactRoot);
+        Assert.False(await verifier.VerifyArtifactsAsync(linkedRoot, fixture.Plan, fixture.Manifest));
+
         File.Delete(fixture.ArtifactPath);
         Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, fixture.Plan, fixture.Manifest));
 
@@ -258,9 +263,218 @@ public sealed class EvidencePullRequestGateVerifierTests
     }
 
     [Fact]
+    public async Task NoFollowArtifactVerifier_ShouldRejectSizeMismatchAndNonRegularFileOnLinux()
+    {
+        if (!SupportsNoFollowVerifier)
+        {
+            return;
+        }
+
+        await using var fixture = await GateFixture.CreateAsync();
+        var verifier = new EvidencePullRequestGateNoFollowArtifactVerifier();
+        var artifact = fixture.Manifest.ProducerResults.Single().Artifacts!.Single();
+
+        File.WriteAllBytes(fixture.ArtifactPath, new byte[checked((int)artifact.LengthBytes + 1)]);
+        Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, fixture.Plan, fixture.Manifest));
+
+        File.Delete(fixture.ArtifactPath);
+        Directory.CreateDirectory(fixture.ArtifactPath);
+        Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, fixture.Plan, fixture.Manifest));
+    }
+
+    [Fact]
+    public async Task NoFollowArtifactVerifier_ShouldRejectInvalidArtifactMetadataAndTraversalOnLinux()
+    {
+        if (!SupportsNoFollowVerifier)
+        {
+            return;
+        }
+
+        await using var fixture = await GateFixture.CreateAsync();
+        var verifier = new EvidencePullRequestGateNoFollowArtifactVerifier();
+        var artifact = fixture.Manifest.ProducerResults.Single().Artifacts!.Single();
+        var invalidArtifacts = new[]
+        {
+            artifact with { LogicalName = "undeclared" },
+            artifact with { MediaType = "application/json" },
+            artifact with { LengthBytes = artifact.LengthBytes + 1 },
+            artifact with { RelativePath = "../outside.txt" },
+            artifact with { RelativePath = "other/build.txt" },
+            artifact with { RelativePath = "reports\\build.txt" },
+            artifact with { RelativePath = "reports/bad\nname.txt" },
+            artifact with { Sha256 = "not-a-sha256" },
+        };
+
+        foreach (var invalidArtifact in invalidArtifacts)
+        {
+            Assert.False(await verifier.VerifyArtifactsAsync(
+                fixture.ArtifactRoot,
+                fixture.Plan,
+                ReplaceArtifacts(fixture.Manifest, [invalidArtifact])));
+        }
+
+        var producer = fixture.Plan.Profile.Producers.Single();
+        var traversalProducer = producer with { Id = "../outside" };
+        var traversalPlan = fixture.Plan with
+        {
+            Profile = fixture.Plan.Profile with { Producers = [traversalProducer] },
+        };
+        var traversalResult = fixture.Manifest.ProducerResults.Single() with { ProducerId = traversalProducer.Id };
+        var traversalManifest = ReplaceProducerResults(fixture.Manifest, [traversalResult]);
+
+        Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, traversalPlan, traversalManifest));
+    }
+
+    [Fact]
+    public async Task NoFollowArtifactVerifier_ShouldRejectDuplicateResultsAndArtifactsOnLinux()
+    {
+        if (!SupportsNoFollowVerifier)
+        {
+            return;
+        }
+
+        await using var fixture = await GateFixture.CreateAsync();
+        var verifier = new EvidencePullRequestGateNoFollowArtifactVerifier();
+        var producerResult = fixture.Manifest.ProducerResults.Single();
+        var artifact = producerResult.Artifacts!.Single();
+
+        var duplicateProducerResults = ReplaceProducerResults(fixture.Manifest, [producerResult, producerResult]);
+        var missingProducerResult = ReplaceProducerResults(fixture.Manifest, []);
+        var duplicateArtifacts = ReplaceArtifacts(fixture.Manifest, [artifact, artifact]);
+        var unexpectedProducerResult = ReplaceProducerResults(
+            fixture.Manifest,
+            [producerResult, new EvidenceProducerResult("unexpected", EvidenceProducerOutcome.Passed, [])]);
+
+        Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, fixture.Plan, duplicateProducerResults));
+        Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, fixture.Plan, missingProducerResult));
+        Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, fixture.Plan, duplicateArtifacts));
+        Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, fixture.Plan, unexpectedProducerResult));
+    }
+
+    [Fact]
+    public async Task NoFollowArtifactVerifier_ShouldRejectHardLinkedArtifactOnLinux()
+    {
+        if (!SupportsNoFollowVerifier)
+        {
+            return;
+        }
+
+        await using var fixture = await GateFixture.CreateAsync();
+        var verifier = new EvidencePullRequestGateNoFollowArtifactVerifier();
+        var producer = fixture.Plan.Profile.Producers.Single();
+        var secondSlot = new EvidenceArtifactSlot("report-copy", "reports", "text/plain", Required: false, MaximumBytes: 1024);
+        var plan = fixture.Plan with
+        {
+            Profile = fixture.Plan.Profile with
+            {
+                Producers = [producer with { ArtifactSlots = [.. producer.ArtifactSlots, secondSlot] }],
+            },
+        };
+        var linkedArtifactPath = Path.Join(Path.GetDirectoryName(fixture.ArtifactPath)!, "copy.txt");
+        Assert.Equal(0, CreateHardLink(fixture.ArtifactPath, linkedArtifactPath));
+
+        var artifact = fixture.Manifest.ProducerResults.Single().Artifacts!.Single();
+        var linkedArtifact = artifact with { LogicalName = secondSlot.LogicalName, RelativePath = "reports/copy.txt" };
+        var manifest = ReplaceArtifacts(fixture.Manifest, [artifact, linkedArtifact]);
+
+        Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, plan, manifest));
+    }
+
+    [Fact]
+    public async Task NoFollowArtifactVerifier_ShouldStopAtMaximumVerifiedFileCountOnLinux()
+    {
+        const int maximumFileCount = EvidenceNoFollowArtifactExtractionLimits.MaximumAllowedFileCount;
+        const int fileCountAboveLimit = maximumFileCount + 1;
+        await using var fixture = await GateFixture.CreateAsync();
+        var verifier = new EvidencePullRequestGateNoFollowArtifactVerifier();
+        var slots = Enumerable.Range(0, fileCountAboveLimit)
+            .Select(index => new EvidenceArtifactSlot($"slot-{index:D2}", "reports", "text/plain", Required: false, MaximumBytes: 0))
+            .ToArray();
+        var targetedProfile = fixture.Policy.Profiles.Single(profile => profile.Id == "targeted");
+        var producer = targetedProfile.Producers.Single() with { ArtifactSlots = slots };
+        var updatedPolicy = fixture.Policy with
+        {
+            Profiles = fixture.Policy.Profiles
+                .Select(profile => profile.Id == targetedProfile.Id
+                    ? profile with { Producers = [producer] }
+                    : profile)
+                .ToArray(),
+        };
+        var plan = new EvidencePlanner().ResolveForGate(updatedPolicy, fixture.Plan.ChangedPaths);
+        var producerRoot = Path.GetDirectoryName(Path.GetDirectoryName(fixture.ArtifactPath)!)!;
+        var writer = new EvidenceArtifactWriter(producer, producerRoot);
+        for (var index = 0; index < fileCountAboveLimit; index++)
+        {
+            await writer.WriteAsync(slots[index].LogicalName, $"reports/empty-{index:D2}.txt", ReadOnlyMemory<byte>.Empty);
+        }
+
+        var artifacts = writer.WrittenArtifacts;
+        Assert.Equal(fileCountAboveLimit, producer.ArtifactSlots.Count);
+        Assert.Equal(fileCountAboveLimit, artifacts.Count);
+        Assert.True(EvidenceArtifactValidation.AreValid(producer, artifacts));
+        var manifestAtLimit = EvidenceManifestBuilder.Build(
+            plan,
+            [new EvidenceProducerResult("build", EvidenceProducerOutcome.Passed, ["build/passed"], Artifacts: artifacts.Take(maximumFileCount).ToArray())]);
+        var manifestAboveLimit = EvidenceManifestBuilder.Build(
+            plan,
+            [new EvidenceProducerResult("build", EvidenceProducerOutcome.Passed, ["build/passed"], Artifacts: artifacts)]);
+
+        if (!SupportsNoFollowVerifier)
+        {
+            return;
+        }
+
+        Assert.True(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, plan, manifestAtLimit));
+        Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, plan, manifestAboveLimit));
+    }
+
+    [Fact]
+    public async Task NoFollowArtifactVerifier_ShouldFailClosedOutsideSupportedLinuxArchitectures()
+    {
+        if (SupportsNoFollowVerifier)
+        {
+            return;
+        }
+
+        await using var fixture = await GateFixture.CreateAsync();
+        var verifier = new EvidencePullRequestGateNoFollowArtifactVerifier();
+
+        Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, fixture.Plan, fixture.Manifest));
+    }
+
+    [Fact]
+    public async Task NoFollowArtifactVerifier_ShouldAcceptEmptyProfileWithoutArtifactFiles()
+    {
+        if (!SupportsNoFollowVerifier)
+        {
+            return;
+        }
+
+        await using var fixture = await GateFixture.CreateAsync(documentationOnly: true);
+        var verifier = new EvidencePullRequestGateNoFollowArtifactVerifier();
+
+        Assert.True(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, fixture.Plan, fixture.Manifest));
+    }
+
+    [Fact]
+    public async Task NoFollowArtifactVerifier_ShouldPropagateCancellation()
+    {
+        await using var fixture = await GateFixture.CreateAsync();
+        var verifier = new EvidencePullRequestGateNoFollowArtifactVerifier();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => verifier.VerifyArtifactsAsync(
+            fixture.ArtifactRoot,
+            fixture.Plan,
+            fixture.Manifest,
+            cancellation.Token));
+    }
+
+    [Fact]
     public async Task VerifyAsync_ShouldRejectRecomputedManifestWithForgedArtifactHash()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!SupportsNoFollowVerifier)
         {
             return;
         }
@@ -281,15 +495,32 @@ public sealed class EvidencePullRequestGateVerifierTests
     }
 
     private static EvidenceManifest ReplaceArtifact(EvidenceManifest manifest, EvidenceArtifactResult replacement)
+        => ReplaceArtifacts(manifest, [replacement]);
+
+    private static EvidenceManifest ReplaceArtifacts(
+        EvidenceManifest manifest,
+        IReadOnlyList<EvidenceArtifactResult> replacements,
+        string producerId = "build")
     {
-        var producer = Assert.Single(manifest.ProducerResults);
-        var updated = manifest with
-        {
-            ProducerResults = [producer with { Artifacts = [replacement] }],
-            ManifestDigest = string.Empty,
-        };
+        var producerResults = manifest.ProducerResults
+            .Select(producer => producer.ProducerId == producerId ? producer with { Artifacts = replacements } : producer)
+            .ToArray();
+        return ReplaceProducerResults(manifest, producerResults);
+    }
+
+    private static EvidenceManifest ReplaceProducerResults(
+        EvidenceManifest manifest,
+        IReadOnlyList<EvidenceProducerResult> producerResults)
+    {
+        var updated = manifest with { ProducerResults = producerResults, ManifestDigest = string.Empty };
         return updated with { ManifestDigest = EvidenceDigest.CanonicalSha256(updated) };
     }
+
+    [DllImport("libc", EntryPoint = "link", SetLastError = true)]
+    private static extern int CreateHardLink(string existingPath, string newPath);
+
+    private static bool SupportsNoFollowVerifier =>
+        OperatingSystem.IsLinux() && RuntimeInformation.ProcessArchitecture is Architecture.X64 or Architecture.Arm64;
 
     private sealed class FakeArtifactVerifier(bool result) : IEvidencePullRequestGateArtifactVerifier
     {

@@ -145,10 +145,14 @@ public sealed class EvidencePullRequestGateNoFollowArtifactVerifier : IEvidenceP
     private const long OpenAt2SyscallNumber = 437;
     private const ulong OpenReadOnly = 0;
     private const ulong OpenCloseOnExec = 0x0008_0000;
-    private const ulong OpenNoFollow = 0x0002_0000;
+    private const ulong OpenNoFollowX64 = 0x0002_0000;
+    private const ulong OpenNoFollowArm64 = 0x0000_8000;
     private const ulong OpenNonBlocking = 0x0000_0800;
     private const ulong OpenNoControllingTerminal = 0x0000_0100;
-    private const ulong OpenDirectory = 0x0001_0000;
+    private const ulong OpenDirectoryX64 = 0x0001_0000;
+    private const ulong OpenDirectoryArm64 = 0x0000_4000;
+    private static ulong OpenNoFollow => RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? OpenNoFollowArm64 : OpenNoFollowX64;
+    private static ulong OpenDirectory => RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? OpenDirectoryArm64 : OpenDirectoryX64;
     private const ulong ResolveNoMagicLinks = 0x02;
     private const ulong ResolveNoSymlinks = 0x04;
     private const ulong ResolveBeneath = 0x08;
