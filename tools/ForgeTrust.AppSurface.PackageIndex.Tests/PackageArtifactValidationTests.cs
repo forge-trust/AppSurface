@@ -4887,6 +4887,14 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var coverageRunRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface coverage run");
         Assert.Contains("--exclude-test-project", coverageRunRequest.Arguments);
         Assert.Contains("**/Smoke.Browser.Tests.csproj", coverageRunRequest.Arguments);
+        var patchTargetGateRequest = Assert.Single(
+            commandRunner.Requests,
+            request => request.OperationName == "appsurface coverage gate patch targets");
+        var repositoryRootIndex = patchTargetGateRequest.Arguments.ToList().IndexOf("--repository-root");
+        Assert.InRange(repositoryRootIndex, 0, patchTargetGateRequest.Arguments.Count - 2);
+        Assert.Equal(
+            patchTargetGateRequest.WorkingDirectory,
+            patchTargetGateRequest.Arguments[repositoryRootIndex + 1]);
         Assert.Contains(
             "Smoke.Browser.Tests/Smoke.Browser.Tests.csproj",
             report.Commands.Single(command => command.OperationName == "appsurface coverage run").StandardOutput,
