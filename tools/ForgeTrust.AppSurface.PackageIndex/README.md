@@ -98,6 +98,11 @@ runtime and verifies their persisted state before upgrading. Actual registered p
 execution runs after migration and reconciliation. This modeled baseline does not claim historical binary
 compatibility. Guard-loss negatives use a separate disposable database with the same package bytes, roles and store
 identity, retaining canceled lane facts until the fixture container is disposed.
+The consumer also tests an observer failure while a real provider Work operation waits on a table lock in another
+disposable database. The controller must cancel and await its lane child and guard monitor before releasing that
+lock, verify the owned sessions and fence are gone, and withhold the receipt. Failure or timeout during this cleanup
+blocks the candidate proof. The same checked cleanup covers observation and backend-termination errors in the
+guard-loss probes; an elapsed wait alone never counts as a drained child.
 
 Candidate proof runs for each bundle in both release channels before the artifact manifest can authorize publication.
 A failed command or missing, incomplete, mismatched or stale receipt leaves that gate closed. The published smoke

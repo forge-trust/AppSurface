@@ -142,6 +142,20 @@ internal static class DisposableProofController
                 options.ReceiptPath);
             durations["guard_loss_negative_proof_ms"] = timer.Elapsed.TotalMilliseconds;
 
+            // Keep the observer-failure regression independent of earlier cancelled lane
+            // facts. It runs the same public provider lanes and exact candidate recipe.
+            timer.Restart();
+            await CreateDatabaseAsync(admin, "preflight_observer_failure", owner);
+            var observerFailureOwner = Connection(admin, "preflight_observer_failure", owner, ownerPassword, false);
+            await ApplyWithExactCliAsync(cliPath, observerFailureOwner);
+            await SetStoreIdAsync(observerFailureOwner, disposableStoreId);
+            await InitializeEpochAsync(observerFailureOwner, disposableEpoch);
+            await ApplyPackagedRecipeAsync(pg, "preflight_observer_failure", owner, options.RolePairsPath);
+            await VerifyLaneObservationFailureCleanupAsync(admin, observerFailureOwner,
+                BuildLanePairs(pairs, dispatchPasswords, runtimePasswords), disposableStoreId, disposableEpoch,
+                options.ReceiptPath);
+            durations["lane_observer_failure_cleanup_ms"] = timer.Elapsed.TotalMilliseconds;
+
             if (scenarioResults.Count != 4 || allResults.Count != 14
                 || allResults.Count(r => r.Caller == "runtime") != 9
                 || allResults.Count(r => r.Caller == "owner-diagnostic") != 5)
@@ -301,8 +315,11 @@ internal static class DisposableProofController
         };
     }
 
+    // The optional observer deliberately faults only after a real executing provider
+    // lane has been observed. It is an in-assembly failure-cleanup regression seam.
     private static async Task<GuardLossEvidence> VerifyLaneGuardLossAsync(string adminCs, string ownerCs,
-        LaneProofRolePair[] pairs, Guid storeId, Guid epoch, string receiptPath)
+        LaneProofRolePair[] pairs, Guid storeId, Guid epoch, string receiptPath,
+        Action<int, int, Task, Task>? executingLaneObserved = null)
     {
         if (File.Exists(receiptPath) || Directory.Exists(receiptPath))
             throw new InvalidOperationException("A receipt path existed before lane guard-loss injection.");
@@ -314,31 +331,119 @@ internal static class DisposableProofController
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token, lost.Token);
         using var gate = new SemaphoreSlim(1, 1);
         var monitor = MonitorOwnerGuardAsync(guard, gate, stop.Token, lost);
-        var backendPid = await VerifyGuardAsync(guard, gate, linked.Token);
-        var pass = RunLaneProofAsync(ObserverConnectionForDatabase(adminCs, ownerCs), ownerCs, pairs, epoch, storeId, linked.Token);
-        var activeLaneBackendPid = await WaitForExecutingLaneBackendAsync(adminCs, ownerCs, pairs, pass, deadline.Token);
-        var terminated = await TerminateBackendAsync(adminCs, backendPid);
-        if (!terminated)
-            throw new InvalidOperationException("Lane guard-loss injection could not terminate its real PostgreSQL backend.");
-        try { await pass.WaitAsync(TimeSpan.FromSeconds(12)); }
-        catch (Exception) when (lost.IsCancellationRequested) { }
+        Task<LaneProofEvidence>? pass = null;
+        try
+        {
+            var backendPid = await VerifyGuardAsync(guard, gate, linked.Token);
+            pass = RunLaneProofAsync(ObserverConnectionForDatabase(adminCs, ownerCs), ownerCs, pairs, epoch, storeId, linked.Token);
+            var activeLaneBackendPid = await WaitForExecutingLaneBackendAsync(adminCs, ownerCs, pairs, pass, deadline.Token);
+            executingLaneObserved?.Invoke(backendPid, activeLaneBackendPid, pass, monitor);
+            var terminated = await TerminateBackendAsync(adminCs, backendPid);
+            if (!terminated)
+                throw new InvalidOperationException("Lane guard-loss injection could not terminate its real PostgreSQL backend.");
+            try { await pass.WaitAsync(TimeSpan.FromSeconds(12)); }
+            catch (Exception) when (lost.IsCancellationRequested) { }
+            if (!lost.IsCancellationRequested || !pass.IsCompleted)
+                throw new InvalidOperationException("Actual lane proof did not cancel and drain after owner guard loss.");
+            if (!pass.IsCanceled && !pass.IsFaulted)
+                throw new InvalidOperationException("Lane proof unexpectedly completed successfully after guard loss.");
+            var receiptWithheld = !File.Exists(receiptPath) && !Directory.Exists(receiptPath);
+            if (!receiptWithheld)
+                throw new InvalidOperationException("The lane guard-loss child unexpectedly published a receipt.");
+            return new GuardLossEvidence(backendPid, activeLaneBackendPid, storeId, epoch,
+                ChildPassStarted: true, ChildPassObservedExecuting: activeLaneBackendPid > 0,
+                BackendTerminated: terminated, CancellationObserved: lost.IsCancellationRequested,
+                ChildDrained: true, FailedChildReceiptWithheld: receiptWithheld);
+        }
         finally
         {
+            // Initial probing, observation, and termination can fail before guard loss.
+            // Cancel and drain both owned tasks before disposing their guard or tokens.
+            linked.Cancel();
             stop.Cancel();
-            try { await monitor.WaitAsync(TimeSpan.FromSeconds(5)); }
-            catch (Exception) when (lost.IsCancellationRequested) { }
+            try
+            {
+                if (pass is not null)
+                    await DrainGuardLossTaskAsync(pass, TimeSpan.FromSeconds(15));
+            }
+            finally
+            {
+                await DrainGuardLossTaskAsync(monitor, TimeSpan.FromSeconds(5));
+            }
         }
-        if (!lost.IsCancellationRequested || !pass.IsCompleted)
-            throw new InvalidOperationException("Actual lane proof did not cancel and drain after owner guard loss.");
-        if (!pass.IsCanceled && !pass.IsFaulted)
-            throw new InvalidOperationException("Lane proof unexpectedly completed successfully after guard loss.");
-        var receiptWithheld = !File.Exists(receiptPath) && !Directory.Exists(receiptPath);
-        if (!receiptWithheld)
-            throw new InvalidOperationException("The lane guard-loss child unexpectedly published a receipt.");
-        return new GuardLossEvidence(backendPid, activeLaneBackendPid, storeId, epoch,
-            ChildPassStarted: true, ChildPassObservedExecuting: activeLaneBackendPid > 0,
-            BackendTerminated: terminated, CancellationObserved: lost.IsCancellationRequested,
-            ChildDrained: pass.IsCompleted && monitor.IsCompleted, FailedChildReceiptWithheld: receiptWithheld);
+    }
+
+    // Completed task faults are expected negative evidence. An uncompleted cleanup
+    // timeout remains a failure, so it cannot be reported as successful drainage.
+    private static async Task DrainGuardLossTaskAsync(Task task, TimeSpan timeout)
+    {
+        try { await task.WaitAsync(timeout); }
+        catch (Exception) when (task.IsCompleted && !task.IsCompletedSuccessfully) { }
+    }
+
+    /// <summary>
+    /// Runs the disposable regression for observation failure after real lane launch.
+    /// Requires an initialized, reconciled fixture with no other service-role sessions;
+    /// owns an admin table-lock transaction and the negative probe's guard and children.
+    /// The lock keeps provider Work execution pending until cancellation, making the
+    /// task-drain assertions deterministic. Success requires both tasks terminal before
+    /// releasing that lock, absent lane/guard sessions and fence, and no receipt.
+    /// </summary>
+    /// <remarks>
+    /// This in-assembly test seam consumes synthetic fixture credentials only. It never
+    /// returns activation evidence or reconciles roles. Cleanup timeouts remain failures.
+    /// </remarks>
+    internal static async Task VerifyLaneObservationFailureCleanupAsync(string adminCs, string ownerCs,
+        LaneProofRolePair[] pairs, Guid storeId, Guid epoch, string receiptPath)
+    {
+        var guardPid = 0;
+        var executingPid = 0;
+        Task? child = null;
+        Task? monitor = null;
+        using var regressionDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        await using var blocker = await OpenNonPooledAsync(ObserverConnectionForDatabase(adminCs, ownerCs), regressionDeadline.Token);
+        await using var blockingTransaction = await blocker.BeginTransactionAsync(regressionDeadline.Token);
+        await using (var lockWork = new NpgsqlCommand("LOCK TABLE appsurface_durable.work IN SHARE MODE;", blocker, blockingTransaction))
+            await lockWork.ExecuteNonQueryAsync(regressionDeadline.Token);
+        var injected = new InvalidOperationException("Intentional executing-lane observation failure.");
+        try
+        {
+            await VerifyLaneGuardLossAsync(adminCs, ownerCs, pairs, storeId, epoch, receiptPath,
+                (guard, executing, laneTask, monitorTask) =>
+                {
+                    guardPid = guard;
+                    executingPid = executing;
+                    child = laneTask;
+                    monitor = monitorTask;
+                    throw injected;
+                });
+            throw new InvalidOperationException("An executing-lane observer failure unexpectedly returned evidence.");
+        }
+        catch (InvalidOperationException exception) when (ReferenceEquals(exception, injected)) { }
+
+        if (guardPid <= 0 || executingPid <= 0 || guardPid == executingPid
+            || child is null || !child.IsCompleted || child.IsCompletedSuccessfully
+            || monitor is null || !monitor.IsCompleted)
+            throw new InvalidOperationException("The observer failure was not injected during real lane execution.");
+        using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await using var observer = await OpenNonPooledAsync(adminCs, cleanup.Token);
+        var database = new NpgsqlConnectionStringBuilder(ownerCs).Database;
+        var roles = pairs.SelectMany(pair => new[] { pair.DispatcherRole, pair.RuntimeRole }).ToArray();
+        await using var command = new NpgsqlCommand("""
+            SELECT NOT EXISTS (SELECT 1 FROM pg_catalog.pg_stat_activity
+                               WHERE pid = @guard OR pid = @executing
+                                  OR (datname = @database AND usename = ANY(@roles)))
+               AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_locks
+                               WHERE pid = @guard AND locktype = 'advisory');
+            """, observer);
+        command.Parameters.AddWithValue("guard", guardPid);
+        command.Parameters.AddWithValue("executing", executingPid);
+        command.Parameters.AddWithValue("database", database ?? throw new InvalidOperationException("The fixture database identity is missing."));
+        command.Parameters.AddWithValue("roles", roles);
+        while (await command.ExecuteScalarAsync(cleanup.Token) is not true)
+            await Task.Delay(TimeSpan.FromMilliseconds(25), cleanup.Token);
+        if (File.Exists(receiptPath) || Directory.Exists(receiptPath))
+            throw new InvalidOperationException("Observer failure cleanup published a consumer receipt.");
     }
 
     private static async Task<ActivationGuardLossEvidence> VerifyActivationGuardLossAsync(string adminCs,
@@ -354,7 +459,7 @@ internal static class DisposableProofController
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token, lost.Token);
         using var gate = new SemaphoreSlim(1, 1);
         var monitor = MonitorOwnerGuardAsync(guard, gate, stop.Token, lost);
-        var backendPid = await VerifyGuardAsync(guard, gate, linked.Token);
+        var backendPid = 0;
         var workStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var drainVerified = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var hook = new FixtureActivationCheckpointHook(async (point, token) =>
@@ -366,10 +471,12 @@ internal static class DisposableProofController
             if (point == FixtureActivationCheckpoint.WorkInvocationStartedBeforeCompletion)
                 await Task.Delay(Timeout.InfiniteTimeSpan, token);
         });
-        var activation = FixtureActivationProof.StartAsync(ownerCs, pair, storeId, epoch, linked.Token, hook);
+        Task<FixtureActivationLease>? activation = null;
         var terminated = false;
         try
         {
+            backendPid = await VerifyGuardAsync(guard, gate, linked.Token);
+            activation = FixtureActivationProof.StartAsync(ownerCs, pair, storeId, epoch, linked.Token, hook);
             await workStarted.Task.WaitAsync(TimeSpan.FromSeconds(12), deadline.Token);
             terminated = await TerminateBackendAsync(adminCs, backendPid);
             if (!terminated)
@@ -379,17 +486,23 @@ internal static class DisposableProofController
         }
         finally
         {
+            linked.Cancel();
             stop.Cancel();
-            try { await monitor.WaitAsync(TimeSpan.FromSeconds(5)); }
-            catch (Exception) when (lost.IsCancellationRequested) { }
-            if (!activation.IsCompleted)
+            try
             {
-                lost.Cancel();
-                try { await activation.WaitAsync(TimeSpan.FromSeconds(15)); }
-                catch { }
+                if (activation is not null)
+                {
+                    await DrainGuardLossTaskAsync(activation, TimeSpan.FromSeconds(15));
+                    if (activation.IsCompletedSuccessfully)
+                        await activation.Result.DisposeAsync();
+                }
+            }
+            finally
+            {
+                await DrainGuardLossTaskAsync(monitor, TimeSpan.FromSeconds(5));
             }
         }
-        if (!lost.IsCancellationRequested || !activation.IsCompleted || (!activation.IsCanceled && !activation.IsFaulted))
+        if (activation is null || !lost.IsCancellationRequested || !activation.IsCompleted || (!activation.IsCanceled && !activation.IsFaulted))
             throw new InvalidOperationException("Real fixture activation did not cancel after guard loss during its Work handler.");
         await drainVerified.Task.WaitAsync(TimeSpan.FromSeconds(15), deadline.Token);
         var persisted = await ReadGuardLostActivationHeartbeatAsync(ownerCs, epoch);
