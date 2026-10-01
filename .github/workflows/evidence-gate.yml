@@ -1,0 +1,201 @@
+name: Evidence gate pilot (non-claiming)
+
+on:
+  pull_request_target:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - edited
+
+permissions: {}
+
+concurrency:
+  group: evidence-gate-pilot-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  controller-capture:
+    name: Evidence gate controller capture (non-claiming)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout the workflow's trusted base revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Capture the exact pull-request revision pair
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          capture_directory="$RUNNER_TEMP/evidence-gate-capture"
+          handoff_directory="$RUNNER_TEMP/evidence-gate-handoff"
+
+          python3 "$GITHUB_WORKSPACE/trusted/scripts/evidence-gate-controller.py" \
+            --event "$GITHUB_EVENT_PATH" \
+            --output "$capture_directory" \
+            --target-branch main
+
+          install -d -m 700 "$handoff_directory"
+          if [[ -f "$capture_directory/source.diff" && ! -L "$capture_directory/source.diff" \
+            && -f "$capture_directory/pull-request-run-identity.json" \
+            && ! -L "$capture_directory/pull-request-run-identity.json" ]]; then
+            install -m 600 "$capture_directory/source.diff" "$handoff_directory/source.diff"
+            install -m 600 "$capture_directory/pull-request-run-identity.json" \
+              "$handoff_directory/pull-request-run-identity.json"
+          elif [[ -f "$capture_directory/observation.json" && ! -L "$capture_directory/observation.json" ]]; then
+            install -m 600 "$capture_directory/observation.json" "$handoff_directory/observation.json"
+          else
+            echo 'The controller did not produce one recognized bounded handoff.' >&2
+            exit 1
+          fi
+
+          python3 - "$handoff_directory" <<'PY'
+          import os
+          from pathlib import Path
+          import stat
+          import sys
+
+          root = Path(sys.argv[1])
+          entries = list(root.iterdir())
+          names = {entry.name for entry in entries}
+          valid = (
+              names == {"source.diff", "pull-request-run-identity.json"}
+              or names == {"observation.json"}
+          )
+          if not valid or len(entries) != len(names):
+              raise SystemExit("The controller handoff file set is invalid.")
+          total = 0
+          for entry in entries:
+              metadata = entry.lstat()
+              if not stat.S_ISREG(metadata.st_mode):
+                  raise SystemExit("The controller handoff contains a non-regular file.")
+              total += metadata.st_size
+          if total > 20 * 1024 * 1024 + 64 * 1024:
+              raise SystemExit("The controller handoff exceeds its byte limit.")
+          PY
+
+      - name: Upload the bounded same-run handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: evidence-gate-controller-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence-gate-handoff/*
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          include-hidden-files: false
+
+  credentialless-subject:
+    name: Evidence gate subject (credentialless, non-claiming)
+    needs: controller-capture
+    if: ${{ needs.controller-capture.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Download this run's controller handoff
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: evidence-gate-controller-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence-gate-controller-handoff
+
+      - name: Validate the bounded handoff without executing pull-request content
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/evidence-gate-controller-handoff" <<'PY'
+          from pathlib import Path
+          import stat
+          import sys
+
+          root = Path(sys.argv[1])
+          entries = list(root.iterdir())
+          names = {entry.name for entry in entries}
+          if not (
+              names == {"source.diff", "pull-request-run-identity.json"}
+              or names == {"observation.json"}
+          ) or len(entries) != len(names):
+              raise SystemExit("The downloaded controller handoff file set is invalid.")
+          total = 0
+          for entry in entries:
+              metadata = entry.lstat()
+              if not stat.S_ISREG(metadata.st_mode):
+                  raise SystemExit("The downloaded handoff contains a non-regular file.")
+              total += metadata.st_size
+          if total > 20 * 1024 * 1024 + 64 * 1024:
+              raise SystemExit("The downloaded controller handoff exceeds its byte limit.")
+          PY
+          printf '%s\n' '{"claimEligible":false,"execution":"not-run","schemaVersion":1}' \
+            > "$RUNNER_TEMP/evidence-gate-subject-result.json"
+
+      - name: Upload the fixed non-claiming subject result
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: evidence-gate-subject-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence-gate-subject-result.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          include-hidden-files: false
+
+  trusted-verifier:
+    name: Evidence gate verifier (non-claiming; intentionally fails closed)
+    needs:
+      - controller-capture
+      - credentialless-subject
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout the workflow's trusted base revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Download same-run handoffs when both producer jobs succeeded
+        if: ${{ needs.controller-capture.result == 'success' && needs.credentialless-subject.result == 'success' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: evidence-gate-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence-gate-verifier-inputs
+          merge-multiple: false
+
+      - name: Report the unavailable authorization seams and fail closed
+        if: ${{ always() }}
+        shell: bash
+        env:
+          CONTROLLER_RESULT: ${{ needs.controller-capture.result }}
+          SUBJECT_RESULT: ${{ needs.credentialless-subject.result }}
+        run: |
+          {
+            echo '## AppSurface evidence gate pilot'
+            echo ''
+            echo 'This base-owned verifier scaffold is deliberately non-claiming and must not be made required.'
+            echo ''
+            printf '%s\n' "- Controller capture job: $CONTROLLER_RESULT"
+            printf '%s\n' "- Credentialless subject job: $SUBJECT_RESULT"
+            echo '- Subject execution: not run; no reviewed subject image or producer handoff is configured.'
+            echo '- Checkout/isolation attestation: unavailable; workflow/job metadata does not attest the consumed checkout.'
+            echo '- Trusted gate verdict: unavailable; host registrations and complete producer verification are not established.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo 'ASEGH003: Non-claiming pilot scaffold. Subject execution and trusted checkout/isolation attestation are not implemented.'
+          exit 1

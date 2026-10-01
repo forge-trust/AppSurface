@@ -382,8 +382,11 @@ internal static class ReleaseEvidence
     internal static string ComputeSha256Hex(string content)
     {
         var bytes = Encoding.UTF8.GetBytes(content);
-        return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        return ComputeSha256Hex(bytes);
     }
+
+    internal static string ComputeSha256Hex(ReadOnlySpan<byte> content) =>
+        Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
 
     private static bool TryReadSchema(
         string evidenceJson,

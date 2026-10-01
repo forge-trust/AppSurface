@@ -1,0 +1,525 @@
+{
+  "id": "appsurface-pr-evidence",
+  "version": "1",
+  "conservativeProfileId": "pr-conservative",
+  "profiles": [
+    {
+      "id": "documentation-only",
+      "scope": "Targeted",
+      "resources": [],
+      "producers": [],
+      "obligations": []
+    },
+    {
+      "id": "code-coverage",
+      "scope": "Targeted",
+      "resources": [],
+      "producers": [
+        {
+          "id": "coverage",
+          "kind": "coverage",
+          "version": "1.0.0",
+          "requiredResources": [],
+          "assertionIds": ["appsurface/coverage/overall-and-patch-thresholds@1"],
+          "artifactSlots": [
+            { "logicalName": "cobertura", "relativeRoot": "coverage/cobertura", "mediaType": "application/xml", "required": true, "maximumBytes": 20971520 },
+            { "logicalName": "gate-report", "relativeRoot": "coverage/report", "mediaType": "text/markdown", "required": true, "maximumBytes": 1048576 },
+            { "logicalName": "diagnostics", "relativeRoot": "coverage/diagnostics", "mediaType": "application/json", "required": false, "maximumBytes": 4194304 }
+          ],
+          "timeoutSeconds": 1200,
+          "coverageGate": {
+            "minLinePercent": 95,
+            "minBranchPercent": 85,
+            "minPatchLinePercent": 95,
+            "minPatchBranchPercent": 85,
+            "patchLineMode": "codecov",
+            "tolerancePercent": 0.5
+          }
+        }
+      ],
+      "obligations": [
+        {
+          "id": "behavioral-coverage",
+          "riskClass": "behavioral-code",
+          "rationale": "Changed executable code must meet the AppSurface overall and patch coverage thresholds.",
+          "requiredProducerIds": ["coverage"],
+          "requiredAssertionId": "appsurface/coverage/overall-and-patch-thresholds@1"
+        }
+      ]
+    },
+    {
+      "id": "postgresql-integration",
+      "scope": "Targeted",
+      "resources": [
+        { "id": "postgresql-16-5", "readiness": "aspire_health", "deadlineSeconds": 180, "requires": [] },
+        { "id": "locked-package-inputs", "readiness": "completion", "deadlineSeconds": 300, "requires": [] }
+      ],
+      "producers": [
+        {
+          "id": "coverage",
+          "kind": "coverage",
+          "version": "1.0.0",
+          "requiredResources": [],
+          "assertionIds": ["appsurface/coverage/overall-and-patch-thresholds@1"],
+          "artifactSlots": [
+            { "logicalName": "cobertura", "relativeRoot": "coverage/cobertura", "mediaType": "application/xml", "required": true, "maximumBytes": 20971520 },
+            { "logicalName": "gate-report", "relativeRoot": "coverage/report", "mediaType": "text/markdown", "required": true, "maximumBytes": 1048576 },
+            { "logicalName": "diagnostics", "relativeRoot": "coverage/diagnostics", "mediaType": "application/json", "required": false, "maximumBytes": 4194304 }
+          ],
+          "timeoutSeconds": 1200,
+          "coverageGate": {
+            "minLinePercent": 95,
+            "minBranchPercent": 85,
+            "minPatchLinePercent": 95,
+            "minPatchBranchPercent": 85,
+            "patchLineMode": "codecov",
+            "tolerancePercent": 0.5
+          }
+        },
+        {
+          "id": "postgresql-contract",
+          "kind": "postgresql-integration",
+          "version": "1.0.0",
+          "requiredResources": ["postgresql-16-5"],
+          "assertionIds": ["appsurface/durable/postgresql-16.5-assertions@1"],
+          "artifactSlots": [
+            { "logicalName": "scenario-results", "relativeRoot": "postgresql/scenarios", "mediaType": "application/json", "required": true, "maximumBytes": 4194304 },
+            { "logicalName": "run-metadata", "relativeRoot": "postgresql/run", "mediaType": "application/json", "required": true, "maximumBytes": 262144 }
+          ],
+          "timeoutSeconds": 900
+        },
+        {
+          "id": "package-contract",
+          "kind": "package-contract",
+          "version": "1.0.0",
+          "requiredResources": ["locked-package-inputs"],
+          "assertionIds": [
+            "appsurface/package/locked-restore-build@1",
+            "appsurface/package/artifact-manifest-and-digests@1"
+          ],
+          "artifactSlots": [
+            { "logicalName": "package-manifest", "relativeRoot": "packages/manifest", "mediaType": "application/json", "required": true, "maximumBytes": 2097152 },
+            { "logicalName": "validation-report", "relativeRoot": "packages/validation", "mediaType": "application/json", "required": true, "maximumBytes": 4194304 },
+            { "logicalName": "nupkg-digest-index", "relativeRoot": "packages/digests", "mediaType": "application/json", "required": true, "maximumBytes": 4194304 },
+            { "logicalName": "nupkg-bundle", "relativeRoot": "packages/nupkg", "mediaType": "application/zip", "required": true, "maximumBytes": 268435456 }
+          ],
+          "timeoutSeconds": 1800
+        }
+      ],
+      "obligations": [
+        {
+          "id": "behavioral-coverage",
+          "riskClass": "behavioral-code",
+          "rationale": "Changed executable code must meet the AppSurface overall and patch coverage thresholds.",
+          "requiredProducerIds": ["coverage"],
+          "requiredAssertionId": "appsurface/coverage/overall-and-patch-thresholds@1"
+        },
+        {
+          "id": "postgresql-integration-contract",
+          "riskClass": "resource-backed-integration",
+          "rationale": "Durable PostgreSQL changes require real assertions against a disposable PostgreSQL 16.5 service.",
+          "requiredProducerIds": ["postgresql-contract"],
+          "requiredAssertionId": "appsurface/durable/postgresql-16.5-assertions@1"
+        },
+        {
+          "id": "package-locked-build-and-artifacts",
+          "riskClass": "package-artifacts",
+          "rationale": "Package changes require locked restore and build, contract validation, a package manifest, and exact package digests.",
+          "requiredProducerIds": ["package-contract"],
+          "requiredAssertionId": "appsurface/package/locked-restore-build@1"
+        }
+      ]
+    },
+    {
+      "id": "keycloak-theme-integration",
+      "scope": "Targeted",
+      "resources": [
+        { "id": "keycloak-pinned-image", "readiness": "aspire_health", "deadlineSeconds": 240, "requires": [] },
+        { "id": "locked-package-inputs", "readiness": "completion", "deadlineSeconds": 300, "requires": [] }
+      ],
+      "producers": [
+        {
+          "id": "coverage",
+          "kind": "coverage",
+          "version": "1.0.0",
+          "requiredResources": [],
+          "assertionIds": ["appsurface/coverage/overall-and-patch-thresholds@1"],
+          "artifactSlots": [
+            { "logicalName": "cobertura", "relativeRoot": "coverage/cobertura", "mediaType": "application/xml", "required": true, "maximumBytes": 20971520 },
+            { "logicalName": "gate-report", "relativeRoot": "coverage/report", "mediaType": "text/markdown", "required": true, "maximumBytes": 1048576 },
+            { "logicalName": "diagnostics", "relativeRoot": "coverage/diagnostics", "mediaType": "application/json", "required": false, "maximumBytes": 4194304 }
+          ],
+          "timeoutSeconds": 1200,
+          "coverageGate": {
+            "minLinePercent": 95,
+            "minBranchPercent": 85,
+            "minPatchLinePercent": 95,
+            "minPatchBranchPercent": 85,
+            "patchLineMode": "codecov",
+            "tolerancePercent": 0.5
+          }
+        },
+        {
+          "id": "keycloak-theme-contract",
+          "kind": "keycloak-theme-integration",
+          "version": "1.0.0",
+          "requiredResources": ["keycloak-pinned-image"],
+          "assertionIds": ["appsurface/keycloak/served-theme-assets@1"],
+          "artifactSlots": [
+            { "logicalName": "theme-proof", "relativeRoot": "keycloak/theme", "mediaType": "application/json", "required": true, "maximumBytes": 1048576 },
+            { "logicalName": "theme-summary", "relativeRoot": "keycloak/summary", "mediaType": "text/markdown", "required": true, "maximumBytes": 524288 },
+            { "logicalName": "runtime-metadata", "relativeRoot": "keycloak/runtime", "mediaType": "application/json", "required": true, "maximumBytes": 262144 }
+          ],
+          "timeoutSeconds": 600
+        },
+        {
+          "id": "package-contract",
+          "kind": "package-contract",
+          "version": "1.0.0",
+          "requiredResources": ["locked-package-inputs"],
+          "assertionIds": [
+            "appsurface/package/locked-restore-build@1",
+            "appsurface/package/artifact-manifest-and-digests@1"
+          ],
+          "artifactSlots": [
+            { "logicalName": "package-manifest", "relativeRoot": "packages/manifest", "mediaType": "application/json", "required": true, "maximumBytes": 2097152 },
+            { "logicalName": "validation-report", "relativeRoot": "packages/validation", "mediaType": "application/json", "required": true, "maximumBytes": 4194304 },
+            { "logicalName": "nupkg-digest-index", "relativeRoot": "packages/digests", "mediaType": "application/json", "required": true, "maximumBytes": 4194304 },
+            { "logicalName": "nupkg-bundle", "relativeRoot": "packages/nupkg", "mediaType": "application/zip", "required": true, "maximumBytes": 268435456 }
+          ],
+          "timeoutSeconds": 1800
+        }
+      ],
+      "obligations": [
+        {
+          "id": "behavioral-coverage",
+          "riskClass": "behavioral-code",
+          "rationale": "Changed executable code must meet the AppSurface overall and patch coverage thresholds.",
+          "requiredProducerIds": ["coverage"],
+          "requiredAssertionId": "appsurface/coverage/overall-and-patch-thresholds@1"
+        },
+        {
+          "id": "keycloak-theme-rendering",
+          "riskClass": "resource-backed-integration",
+          "rationale": "Keycloak theme changes require a disposable pinned service and proof that the expected stylesheet is served.",
+          "requiredProducerIds": ["keycloak-theme-contract"],
+          "requiredAssertionId": "appsurface/keycloak/served-theme-assets@1"
+        },
+        {
+          "id": "package-locked-build-and-artifacts",
+          "riskClass": "package-artifacts",
+          "rationale": "Package changes require locked restore and build, contract validation, a package manifest, and exact package digests.",
+          "requiredProducerIds": ["package-contract"],
+          "requiredAssertionId": "appsurface/package/locked-restore-build@1"
+        }
+      ]
+    },
+    {
+      "id": "package-release-preparation",
+      "scope": "Targeted",
+      "resources": [
+        { "id": "locked-package-inputs", "readiness": "completion", "deadlineSeconds": 300, "requires": [] }
+      ],
+      "producers": [
+        {
+          "id": "coverage",
+          "kind": "coverage",
+          "version": "1.0.0",
+          "requiredResources": [],
+          "assertionIds": ["appsurface/coverage/overall-and-patch-thresholds@1"],
+          "artifactSlots": [
+            { "logicalName": "cobertura", "relativeRoot": "coverage/cobertura", "mediaType": "application/xml", "required": true, "maximumBytes": 20971520 },
+            { "logicalName": "gate-report", "relativeRoot": "coverage/report", "mediaType": "text/markdown", "required": true, "maximumBytes": 1048576 },
+            { "logicalName": "diagnostics", "relativeRoot": "coverage/diagnostics", "mediaType": "application/json", "required": false, "maximumBytes": 4194304 }
+          ],
+          "timeoutSeconds": 1200,
+          "coverageGate": {
+            "minLinePercent": 95,
+            "minBranchPercent": 85,
+            "minPatchLinePercent": 95,
+            "minPatchBranchPercent": 85,
+            "patchLineMode": "codecov",
+            "tolerancePercent": 0.5
+          }
+        },
+        {
+          "id": "package-contract",
+          "kind": "package-contract",
+          "version": "1.0.0",
+          "requiredResources": ["locked-package-inputs"],
+          "assertionIds": [
+            "appsurface/package/locked-restore-build@1",
+            "appsurface/package/artifact-manifest-and-digests@1"
+          ],
+          "artifactSlots": [
+            { "logicalName": "package-manifest", "relativeRoot": "packages/manifest", "mediaType": "application/json", "required": true, "maximumBytes": 2097152 },
+            { "logicalName": "validation-report", "relativeRoot": "packages/validation", "mediaType": "application/json", "required": true, "maximumBytes": 4194304 },
+            { "logicalName": "nupkg-digest-index", "relativeRoot": "packages/digests", "mediaType": "application/json", "required": true, "maximumBytes": 4194304 },
+            { "logicalName": "nupkg-bundle", "relativeRoot": "packages/nupkg", "mediaType": "application/zip", "required": true, "maximumBytes": 268435456 }
+          ],
+          "timeoutSeconds": 1800
+        },
+        {
+          "id": "release-preparation-contract",
+          "kind": "release-preparation-contract",
+          "version": "1.0.0",
+          "requiredResources": ["locked-package-inputs"],
+          "assertionIds": ["appsurface/release/preparation-base-and-artifacts-verified@1"],
+          "artifactSlots": [
+            { "logicalName": "preparation-projection", "relativeRoot": "release/preparation", "mediaType": "application/json", "required": true, "maximumBytes": 2097152 },
+            { "logicalName": "prepared-artifact-digests", "relativeRoot": "release/digests", "mediaType": "application/json", "required": true, "maximumBytes": 2097152 }
+          ],
+          "timeoutSeconds": 900
+        }
+      ],
+      "obligations": [
+        {
+          "id": "behavioral-coverage",
+          "riskClass": "behavioral-code",
+          "rationale": "Changed executable code must meet the AppSurface overall and patch coverage thresholds.",
+          "requiredProducerIds": ["coverage"],
+          "requiredAssertionId": "appsurface/coverage/overall-and-patch-thresholds@1"
+        },
+        {
+          "id": "package-locked-build-and-artifacts",
+          "riskClass": "package-artifacts",
+          "rationale": "Package changes require locked restore and build, contract validation, a package manifest, and exact package digests.",
+          "requiredProducerIds": ["package-contract"],
+          "requiredAssertionId": "appsurface/package/locked-restore-build@1"
+        },
+        {
+          "id": "release-preparation-evidence",
+          "riskClass": "release-preparation",
+          "rationale": "Release-preparation changes require the validated V2 preparation base and digest-bound non-mutating evidence.",
+          "requiredProducerIds": ["release-preparation-contract"],
+          "requiredAssertionId": "appsurface/release/preparation-base-and-artifacts-verified@1"
+        }
+      ]
+    },
+    {
+      "id": "pr-conservative",
+      "scope": "Targeted",
+      "resources": [
+        { "id": "postgresql-16-5", "readiness": "aspire_health", "deadlineSeconds": 180, "requires": [] },
+        { "id": "keycloak-pinned-image", "readiness": "aspire_health", "deadlineSeconds": 240, "requires": [] },
+        { "id": "locked-package-inputs", "readiness": "completion", "deadlineSeconds": 300, "requires": [] }
+      ],
+      "producers": [
+        {
+          "id": "coverage",
+          "kind": "coverage",
+          "version": "1.0.0",
+          "requiredResources": [],
+          "assertionIds": ["appsurface/coverage/overall-and-patch-thresholds@1"],
+          "artifactSlots": [
+            { "logicalName": "cobertura", "relativeRoot": "coverage/cobertura", "mediaType": "application/xml", "required": true, "maximumBytes": 20971520 },
+            { "logicalName": "gate-report", "relativeRoot": "coverage/report", "mediaType": "text/markdown", "required": true, "maximumBytes": 1048576 },
+            { "logicalName": "diagnostics", "relativeRoot": "coverage/diagnostics", "mediaType": "application/json", "required": false, "maximumBytes": 4194304 }
+          ],
+          "timeoutSeconds": 1200,
+          "coverageGate": {
+            "minLinePercent": 95,
+            "minBranchPercent": 85,
+            "minPatchLinePercent": 95,
+            "minPatchBranchPercent": 85,
+            "patchLineMode": "codecov",
+            "tolerancePercent": 0.5
+          }
+        },
+        {
+          "id": "control-plane-validation",
+          "kind": "control-plane-validation",
+          "version": "1.0.0",
+          "requiredResources": [],
+          "assertionIds": ["appsurface/control-plane/base-owned-validation@1"],
+          "artifactSlots": [
+            { "logicalName": "validation-report", "relativeRoot": "control-plane/report", "mediaType": "application/json", "required": true, "maximumBytes": 1048576 }
+          ],
+          "timeoutSeconds": 300
+        },
+        {
+          "id": "postgresql-contract",
+          "kind": "postgresql-integration",
+          "version": "1.0.0",
+          "requiredResources": ["postgresql-16-5"],
+          "assertionIds": ["appsurface/durable/postgresql-16.5-assertions@1"],
+          "artifactSlots": [
+            { "logicalName": "scenario-results", "relativeRoot": "postgresql/scenarios", "mediaType": "application/json", "required": true, "maximumBytes": 4194304 },
+            { "logicalName": "run-metadata", "relativeRoot": "postgresql/run", "mediaType": "application/json", "required": true, "maximumBytes": 262144 }
+          ],
+          "timeoutSeconds": 900
+        },
+        {
+          "id": "keycloak-theme-contract",
+          "kind": "keycloak-theme-integration",
+          "version": "1.0.0",
+          "requiredResources": ["keycloak-pinned-image"],
+          "assertionIds": ["appsurface/keycloak/served-theme-assets@1"],
+          "artifactSlots": [
+            { "logicalName": "theme-proof", "relativeRoot": "keycloak/theme", "mediaType": "application/json", "required": true, "maximumBytes": 1048576 },
+            { "logicalName": "theme-summary", "relativeRoot": "keycloak/summary", "mediaType": "text/markdown", "required": true, "maximumBytes": 524288 },
+            { "logicalName": "runtime-metadata", "relativeRoot": "keycloak/runtime", "mediaType": "application/json", "required": true, "maximumBytes": 262144 }
+          ],
+          "timeoutSeconds": 600
+        },
+        {
+          "id": "package-contract",
+          "kind": "package-contract",
+          "version": "1.0.0",
+          "requiredResources": ["locked-package-inputs"],
+          "assertionIds": [
+            "appsurface/package/locked-restore-build@1",
+            "appsurface/package/artifact-manifest-and-digests@1"
+          ],
+          "artifactSlots": [
+            { "logicalName": "package-manifest", "relativeRoot": "packages/manifest", "mediaType": "application/json", "required": true, "maximumBytes": 2097152 },
+            { "logicalName": "validation-report", "relativeRoot": "packages/validation", "mediaType": "application/json", "required": true, "maximumBytes": 4194304 },
+            { "logicalName": "nupkg-digest-index", "relativeRoot": "packages/digests", "mediaType": "application/json", "required": true, "maximumBytes": 4194304 },
+            { "logicalName": "nupkg-bundle", "relativeRoot": "packages/nupkg", "mediaType": "application/zip", "required": true, "maximumBytes": 268435456 }
+          ],
+          "timeoutSeconds": 1800
+        },
+        {
+          "id": "release-preparation-contract",
+          "kind": "release-preparation-contract",
+          "version": "1.0.0",
+          "requiredResources": ["locked-package-inputs"],
+          "assertionIds": ["appsurface/release/preparation-base-and-artifacts-verified@1"],
+          "artifactSlots": [
+            { "logicalName": "preparation-projection", "relativeRoot": "release/preparation", "mediaType": "application/json", "required": true, "maximumBytes": 2097152 },
+            { "logicalName": "prepared-artifact-digests", "relativeRoot": "release/digests", "mediaType": "application/json", "required": true, "maximumBytes": 2097152 }
+          ],
+          "timeoutSeconds": 900
+        }
+      ],
+      "obligations": [
+        {
+          "id": "behavioral-coverage",
+          "riskClass": "behavioral-code",
+          "rationale": "Changed executable code must meet the AppSurface overall and patch coverage thresholds.",
+          "requiredProducerIds": ["coverage"],
+          "requiredAssertionId": "appsurface/coverage/overall-and-patch-thresholds@1"
+        },
+        {
+          "id": "control-plane-integrity",
+          "riskClass": "trusted-control-plane",
+          "rationale": "Workflow, policy, runner, host, and gate implementation changes require base-owned validation and cannot waive evidence.",
+          "requiredProducerIds": ["control-plane-validation"],
+          "requiredAssertionId": "appsurface/control-plane/base-owned-validation@1"
+        },
+        {
+          "id": "postgresql-integration-contract",
+          "riskClass": "resource-backed-integration",
+          "rationale": "Durable PostgreSQL changes require real assertions against a disposable PostgreSQL 16.5 service.",
+          "requiredProducerIds": ["postgresql-contract"],
+          "requiredAssertionId": "appsurface/durable/postgresql-16.5-assertions@1"
+        },
+        {
+          "id": "keycloak-theme-rendering",
+          "riskClass": "resource-backed-integration",
+          "rationale": "Keycloak theme changes require a disposable pinned service and proof that the expected stylesheet is served.",
+          "requiredProducerIds": ["keycloak-theme-contract"],
+          "requiredAssertionId": "appsurface/keycloak/served-theme-assets@1"
+        },
+        {
+          "id": "package-locked-build-and-artifacts",
+          "riskClass": "package-artifacts",
+          "rationale": "Package changes require locked restore and build, contract validation, a package manifest, and exact package digests.",
+          "requiredProducerIds": ["package-contract"],
+          "requiredAssertionId": "appsurface/package/locked-restore-build@1"
+        },
+        {
+          "id": "release-preparation-evidence",
+          "riskClass": "release-preparation",
+          "rationale": "Release-preparation changes require the validated V2 preparation base and digest-bound non-mutating evidence.",
+          "requiredProducerIds": ["release-preparation-contract"],
+          "requiredAssertionId": "appsurface/release/preparation-base-and-artifacts-verified@1"
+        }
+      ]
+    },
+    {
+      "id": "protected-release",
+      "scope": "Release",
+      "resources": [],
+      "producers": [
+        {
+          "id": "release-inspection",
+          "kind": "release-inspection",
+          "version": "1.0.0",
+          "requiredResources": [],
+          "assertionIds": ["appsurface/release/protected-tag-and-preparation-base@1"],
+          "artifactSlots": [
+            { "logicalName": "release-projection", "relativeRoot": "release/projection", "mediaType": "application/json", "required": true, "maximumBytes": 2097152 },
+            { "logicalName": "release-digest-index", "relativeRoot": "release/digests", "mediaType": "application/json", "required": true, "maximumBytes": 2097152 }
+          ],
+          "timeoutSeconds": 600
+        }
+      ],
+      "obligations": [
+        {
+          "id": "protected-release-subject",
+          "riskClass": "protected-release",
+          "rationale": "Only a protected release invocation may attest the tag object, peeled commit, validated preparation base, and exact package digests without publishing.",
+          "requiredProducerIds": ["release-inspection"],
+          "requiredAssertionId": "appsurface/release/protected-tag-and-preparation-base@1"
+        }
+      ]
+    }
+  ],
+  "rules": [
+    { "id": "documentation-reference", "pattern": "docs/*.md", "profileId": "documentation-only" },
+    { "id": "documentation-guides", "pattern": "guides/*.md", "profileId": "documentation-only" },
+    { "id": "documentation-start-here", "pattern": "start-here/*.md", "profileId": "documentation-only" },
+    { "id": "documentation-root-readme", "pattern": "README.md", "profileId": "documentation-only" },
+    { "id": "documentation-contributor-guide", "pattern": "CONTRIBUTING.md", "profileId": "documentation-only" },
+    { "id": "control-github", "pattern": ".github/**", "profileId": "pr-conservative" },
+    { "id": "control-policy", "pattern": ".appsurface/**", "profileId": "pr-conservative" },
+    { "id": "control-design-documents", "pattern": "docs/designs/**", "profileId": "pr-conservative" },
+    { "id": "control-issue-plans", "pattern": "docs/plans/**", "profileId": "pr-conservative" },
+    { "id": "control-policy-matrix", "pattern": "docs/evidence-gate-policy-matrix.md", "profileId": "pr-conservative" },
+    { "id": "control-rollout-guide", "pattern": "docs/evidence-gate-rollout.md", "profileId": "pr-conservative" },
+    { "id": "control-diagnostics-guide", "pattern": "docs/evidence-gate-diagnostics.md", "profileId": "pr-conservative" },
+    { "id": "control-scripts", "pattern": "scripts/**", "profileId": "pr-conservative" },
+    { "id": "control-agent-guidance", "pattern": "AGENTS.md", "profileId": "pr-conservative" },
+    { "id": "control-nested-agent-guidance", "pattern": "**/AGENTS.md", "profileId": "pr-conservative" },
+    { "id": "control-evidence-implementation", "pattern": "Evidence/**", "profileId": "pr-conservative" },
+    { "id": "control-evidence-cli", "pattern": "Cli/ForgeTrust.AppSurface.Cli/**", "profileId": "pr-conservative" },
+    { "id": "control-evidence-cli-tests", "pattern": "Cli/ForgeTrust.AppSurface.Cli.Tests/**", "profileId": "pr-conservative" },
+    { "id": "coverage-csharp", "pattern": "**/*.cs", "profileId": "code-coverage" },
+    { "id": "package-project-files", "pattern": "**/*.csproj", "profileId": "package-release-preparation" },
+    { "id": "unknown-typescript", "pattern": "**/*.ts", "profileId": "pr-conservative" },
+    { "id": "unknown-tsx", "pattern": "**/*.tsx", "profileId": "pr-conservative" },
+    { "id": "unknown-javascript", "pattern": "**/*.js", "profileId": "pr-conservative" },
+    { "id": "unknown-css", "pattern": "**/*.css", "profileId": "pr-conservative" },
+    { "id": "unknown-scss", "pattern": "**/*.scss", "profileId": "pr-conservative" },
+    { "id": "unknown-razor", "pattern": "**/*.razor", "profileId": "pr-conservative" },
+    { "id": "unknown-sql", "pattern": "**/*.sql", "profileId": "pr-conservative" },
+    { "id": "integration-durable-postgresql", "pattern": "Durable/**", "profileId": "postgresql-integration" },
+    { "id": "integration-durable-package-projects", "pattern": "Durable/**/*.csproj", "profileId": "pr-conservative", "precedence": 1 },
+    { "id": "integration-durable-package-locks", "pattern": "Durable/**/packages.lock.json", "profileId": "pr-conservative", "precedence": 1 },
+    { "id": "integration-durable-postgresql-example", "pattern": "examples/durable-postgresql/**", "profileId": "postgresql-integration" },
+    { "id": "integration-keycloak-theme", "pattern": "Web/ForgeTrust.AppSurface.Web.Tailwind/**", "profileId": "keycloak-theme-integration" },
+    { "id": "integration-keycloak-theme-package-projects", "pattern": "Web/ForgeTrust.AppSurface.Web.Tailwind/**/*.csproj", "profileId": "pr-conservative", "precedence": 1 },
+    { "id": "integration-keycloak-theme-package-locks", "pattern": "Web/ForgeTrust.AppSurface.Web.Tailwind/**/packages.lock.json", "profileId": "pr-conservative", "precedence": 1 },
+    { "id": "integration-keycloak-library", "pattern": "Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/**", "profileId": "keycloak-theme-integration" },
+    { "id": "integration-keycloak-library-package-projects", "pattern": "Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/**/*.csproj", "profileId": "pr-conservative", "precedence": 1 },
+    { "id": "integration-keycloak-library-package-locks", "pattern": "Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/**/packages.lock.json", "profileId": "pr-conservative", "precedence": 1 },
+    { "id": "integration-keycloak-apphost", "pattern": "examples/auth-aspire-keycloak-apphost/**", "profileId": "keycloak-theme-integration" },
+    { "id": "integration-keycloak-examples", "pattern": "examples/auth-aspire-keycloak-*/**", "profileId": "keycloak-theme-integration" },
+    { "id": "packages-index", "pattern": "packages/**", "profileId": "package-release-preparation" },
+    { "id": "packages-tool", "pattern": "tools/ForgeTrust.AppSurface.PackageIndex/**", "profileId": "package-release-preparation" },
+    { "id": "packages-lockfiles", "pattern": "**/packages.lock.json", "profileId": "package-release-preparation" },
+    { "id": "packages-msbuild-files", "pattern": "**/*.props", "profileId": "package-release-preparation" },
+    { "id": "packages-msbuild-targets", "pattern": "**/*.targets", "profileId": "package-release-preparation" },
+    { "id": "packages-pnpm-lockfile", "pattern": "**/pnpm-lock.yaml", "profileId": "package-release-preparation" },
+    { "id": "packages-dotnet-build-config", "pattern": "Directory.Build.*", "profileId": "package-release-preparation" },
+    { "id": "packages-directory-package-config", "pattern": "Directory.Packages.props", "profileId": "package-release-preparation" },
+    { "id": "packages-sdk-config", "pattern": "global.json", "profileId": "package-release-preparation" },
+    { "id": "packages-nuget-config", "pattern": "NuGet.config", "profileId": "package-release-preparation" },
+    { "id": "packages-gate-config", "pattern": "NuGet.package-gate.config", "profileId": "package-release-preparation" },
+    { "id": "release-preparation-tool", "pattern": "tools/ForgeTrust.AppSurface.Release/**", "profileId": "package-release-preparation" },
+    { "id": "release-preparation-documents", "pattern": "releases/**", "profileId": "package-release-preparation" },
+    { "id": "release-preparation-version", "pattern": "VERSION", "profileId": "package-release-preparation" },
+    { "id": "release-preparation-changelog", "pattern": "CHANGELOG.md", "profileId": "package-release-preparation" }
+  ]
+}

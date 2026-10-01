@@ -20,6 +20,32 @@ public sealed class EvidencePlanner
         ArgumentNullException.ThrowIfNull(changedPaths);
 
         ValidatePolicy(policy);
+        return ResolveValidated(policy, changedPaths);
+    }
+
+    /// <summary>
+    /// Resolves a plan for a pull-request gate after verifying that mixed targeted profiles
+    /// cannot lose requirements when selection falls back to the conservative profile.
+    /// </summary>
+    /// <param name="policy">Versioned consumer policy used by the trusted gate.</param>
+    /// <param name="changedPaths">Explicit normalized changed paths, including both sides of renames.</param>
+    /// <returns>A hash-bound evidence plan whose mixed-profile fallback is validated as a superset.</returns>
+    /// <remarks>
+    /// This is an opt-in gate API. <see cref="Resolve(EvidencePolicy, IReadOnlyList{NormalizedDiffPath})"/>
+    /// and <see cref="ValidatePolicy(EvidencePolicy)"/> retain their local v1 behavior and do not
+    /// enforce cross-profile closure.
+    /// </remarks>
+    public EvidencePlan ResolveForGate(EvidencePolicy policy, IReadOnlyList<NormalizedDiffPath> changedPaths)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        ArgumentNullException.ThrowIfNull(changedPaths);
+
+        ValidateGatePolicy(policy);
+        return ResolveValidated(policy, changedPaths);
+    }
+
+    private static EvidencePlan ResolveValidated(EvidencePolicy policy, IReadOnlyList<NormalizedDiffPath> changedPaths)
+    {
         if (changedPaths.Count == 0)
         {
             throw new EvidencePlanningException(
@@ -128,6 +154,240 @@ public sealed class EvidencePlanner
             }
         }
     }
+
+    /// <summary>
+    /// Validates that a policy's conservative fallback preserves every requirement from each
+    /// rule-selected targeted profile that may participate in a mixed pull-request diff.
+    /// </summary>
+    /// <param name="policy">Policy to validate before using it for a pull-request gate.</param>
+    /// <remarks>
+    /// The check includes resources and their readiness declarations, producers and their resource
+    /// wiring, assertions, artifact slots, and obligations. Additional conservative requirements
+    /// are allowed. Targeted profiles with no evidence requirements, such as an explicit docs-only
+    /// profile, are valid and contribute no requirements to the superset check. Release profiles
+    /// are outside this pull-request check and need their own event and eligibility validation.
+    /// Existing local v1 callers may continue to use <see cref="ValidatePolicy(EvidencePolicy)"/>.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="policy"/> is <see langword="null"/>.</exception>
+    /// <exception cref="EvidencePlanningException">The policy is invalid or its conservative profile
+    /// omits or weakens a targeted profile requirement.</exception>
+    public static void ValidateGatePolicy(EvidencePolicy policy)
+    {
+        ValidatePolicy(policy);
+
+        var profiles = policy.Profiles.ToDictionary(static profile => profile.Id, StringComparer.Ordinal);
+        var conservativeProfile = profiles[policy.ConservativeProfileId];
+        if (conservativeProfile.Scope != EvidenceProfileScope.Targeted)
+        {
+            throw new EvidencePlanningException(
+                "ASEVD129",
+                $"Conservative profile '{conservativeProfile.Id}' is not a targeted pull-request profile.",
+                "Use a targeted PR policy and validate release profiles only in the protected release context.");
+        }
+
+        var releaseRule = policy.Rules.FirstOrDefault(rule => profiles[rule.ProfileId].Scope != EvidenceProfileScope.Targeted);
+        if (releaseRule is not null)
+        {
+            throw new EvidencePlanningException(
+                "ASEVD129",
+                $"Pull-request gate rule '{releaseRule.Id}' selects non-targeted profile '{releaseRule.ProfileId}'.",
+                "Map pull-request changes to targeted profiles; select release profiles only from the validated protected release context.");
+        }
+
+        var targetedProfiles = policy.Rules
+            .Select(rule => profiles[rule.ProfileId])
+            .DistinctBy(static profile => profile.Id, StringComparer.Ordinal)
+            .Where(profile => !string.Equals(profile.Id, conservativeProfile.Id, StringComparison.Ordinal))
+            .OrderBy(static profile => profile.Id, StringComparer.Ordinal);
+
+        foreach (var targetedProfile in targetedProfiles)
+        {
+            ValidateConservativeProfileSuperset(conservativeProfile, targetedProfile);
+        }
+    }
+
+    private static void ValidateConservativeProfileSuperset(EvidenceProfile conservativeProfile, EvidenceProfile targetedProfile)
+    {
+        var conservativeResources = conservativeProfile.Resources.ToDictionary(static resource => resource.Id, StringComparer.Ordinal);
+        foreach (var requiredResource in targetedProfile.Resources.OrderBy(static resource => resource.Id, StringComparer.Ordinal))
+        {
+            if (!conservativeResources.TryGetValue(requiredResource.Id, out var candidateResource))
+            {
+                throw GatePolicyValidationFailure(
+                    conservativeProfile,
+                    targetedProfile,
+                    $"resource '{requiredResource.Id}'",
+                    "the declaration is missing");
+            }
+
+            if (!string.Equals(candidateResource.Readiness, requiredResource.Readiness, StringComparison.Ordinal)
+                || candidateResource.DeadlineSeconds > requiredResource.DeadlineSeconds)
+            {
+                throw GatePolicyValidationFailure(
+                    conservativeProfile,
+                    targetedProfile,
+                    $"resource '{requiredResource.Id}'",
+                    "the readiness mode or deadline is weaker than the targeted declaration");
+            }
+
+            var missingDependency = requiredResource.Requires
+                .Where(dependencyId => !candidateResource.Requires.Contains(dependencyId, StringComparer.Ordinal))
+                .OrderBy(static dependencyId => dependencyId, StringComparer.Ordinal)
+                .FirstOrDefault();
+            if (missingDependency is not null)
+            {
+                throw GatePolicyValidationFailure(
+                    conservativeProfile,
+                    targetedProfile,
+                    $"resource dependency '{missingDependency}' for resource '{requiredResource.Id}'",
+                    "the dependency is missing");
+            }
+        }
+
+        var conservativeProducers = conservativeProfile.Producers.ToDictionary(static producer => producer.Id, StringComparer.Ordinal);
+        foreach (var requiredProducer in targetedProfile.Producers.OrderBy(static producer => producer.Id, StringComparer.Ordinal))
+        {
+            if (!conservativeProducers.TryGetValue(requiredProducer.Id, out var candidateProducer))
+            {
+                throw GatePolicyValidationFailure(
+                    conservativeProfile,
+                    targetedProfile,
+                    $"producer '{requiredProducer.Id}'",
+                    "the declaration is missing");
+            }
+
+            if (!string.Equals(candidateProducer.Kind, requiredProducer.Kind, StringComparison.Ordinal)
+                || !string.Equals(candidateProducer.Version, requiredProducer.Version, StringComparison.Ordinal)
+                || candidateProducer.TimeoutSeconds > requiredProducer.TimeoutSeconds
+                || !PreservesCoverageGate(candidateProducer.CoverageGate, requiredProducer.CoverageGate))
+            {
+                throw GatePolicyValidationFailure(
+                    conservativeProfile,
+                    targetedProfile,
+                    $"producer '{requiredProducer.Id}'",
+                    "the kind, version, deadline, or coverage gate does not preserve the targeted declaration");
+            }
+
+            var missingResource = requiredProducer.RequiredResources
+                .Where(resourceId => !candidateProducer.RequiredResources.Contains(resourceId, StringComparer.Ordinal))
+                .OrderBy(static resourceId => resourceId, StringComparer.Ordinal)
+                .FirstOrDefault();
+            if (missingResource is not null)
+            {
+                throw GatePolicyValidationFailure(
+                    conservativeProfile,
+                    targetedProfile,
+                    $"resource '{missingResource}' required by producer '{requiredProducer.Id}'",
+                    "the producer no longer requires it");
+            }
+
+            var missingAssertion = requiredProducer.AssertionIds
+                .Where(assertionId => !candidateProducer.AssertionIds.Contains(assertionId, StringComparer.Ordinal))
+                .OrderBy(static assertionId => assertionId, StringComparer.Ordinal)
+                .FirstOrDefault();
+            if (missingAssertion is not null)
+            {
+                throw GatePolicyValidationFailure(
+                    conservativeProfile,
+                    targetedProfile,
+                    $"assertion '{missingAssertion}' on producer '{requiredProducer.Id}'",
+                    "the assertion is missing");
+            }
+
+            var conservativeArtifactSlots = candidateProducer.ArtifactSlots.ToDictionary(static slot => slot.LogicalName, StringComparer.Ordinal);
+            foreach (var requiredSlot in requiredProducer.ArtifactSlots.OrderBy(static slot => slot.LogicalName, StringComparer.Ordinal))
+            {
+                if (!conservativeArtifactSlots.TryGetValue(requiredSlot.LogicalName, out var candidateSlot))
+                {
+                    throw GatePolicyValidationFailure(
+                        conservativeProfile,
+                        targetedProfile,
+                        $"artifact slot '{requiredProducer.Id}/{requiredSlot.LogicalName}'",
+                        "the declaration is missing");
+                }
+
+                if (!string.Equals(candidateSlot.RelativeRoot, requiredSlot.RelativeRoot, StringComparison.Ordinal)
+                    || !string.Equals(candidateSlot.MediaType, requiredSlot.MediaType, StringComparison.Ordinal)
+                    || (requiredSlot.Required && !candidateSlot.Required)
+                    || candidateSlot.MaximumBytes > requiredSlot.MaximumBytes)
+                {
+                    throw GatePolicyValidationFailure(
+                        conservativeProfile,
+                        targetedProfile,
+                        $"artifact slot '{requiredProducer.Id}/{requiredSlot.LogicalName}'",
+                        "its root, media type, required flag, or byte limit weakens the targeted declaration");
+                }
+            }
+        }
+
+        var conservativeObligations = conservativeProfile.Obligations.ToDictionary(static obligation => obligation.Id, StringComparer.Ordinal);
+        foreach (var requiredObligation in targetedProfile.Obligations.OrderBy(static obligation => obligation.Id, StringComparer.Ordinal))
+        {
+            if (!conservativeObligations.TryGetValue(requiredObligation.Id, out var candidateObligation))
+            {
+                throw GatePolicyValidationFailure(
+                    conservativeProfile,
+                    targetedProfile,
+                    $"obligation '{requiredObligation.Id}'",
+                    "the declaration is missing");
+            }
+
+            if (!string.Equals(candidateObligation.RiskClass, requiredObligation.RiskClass, StringComparison.Ordinal)
+                || !string.Equals(candidateObligation.Rationale, requiredObligation.Rationale, StringComparison.Ordinal)
+                || !string.Equals(candidateObligation.RequiredAssertionId, requiredObligation.RequiredAssertionId, StringComparison.Ordinal))
+            {
+                throw GatePolicyValidationFailure(
+                    conservativeProfile,
+                    targetedProfile,
+                    $"obligation '{requiredObligation.Id}'",
+                    "its risk class, rationale, or required assertion does not preserve the targeted declaration");
+            }
+
+            var missingProducer = requiredObligation.RequiredProducerIds
+                .Where(producerId => !candidateObligation.RequiredProducerIds.Contains(producerId, StringComparer.Ordinal))
+                .OrderBy(static producerId => producerId, StringComparer.Ordinal)
+                .FirstOrDefault();
+            if (missingProducer is not null)
+            {
+                throw GatePolicyValidationFailure(
+                    conservativeProfile,
+                    targetedProfile,
+                    $"producer '{missingProducer}' required by obligation '{requiredObligation.Id}'",
+                    "the obligation no longer requires it");
+            }
+        }
+    }
+
+    private static EvidencePlanningException GatePolicyValidationFailure(
+        EvidenceProfile conservativeProfile,
+        EvidenceProfile targetedProfile,
+        string requirement,
+        string detail) =>
+        new(
+            "ASEVD129",
+            $"Conservative profile '{conservativeProfile.Id}' does not preserve {requirement} required by targeted profile '{targetedProfile.Id}': {detail}.",
+            "Add the missing or equivalent requirement to the conservative profile, or use an explicit combined profile for the pull-request paths.");
+
+    private static bool PreservesCoverageGate(
+        EvidenceCoverageGateRequirements? candidate,
+        EvidenceCoverageGateRequirements? required)
+    {
+        if (required is null)
+        {
+            return true;
+        }
+
+        return candidate is not null
+            && candidate.MinLinePercent >= required.MinLinePercent
+            && candidate.MinBranchPercent >= required.MinBranchPercent
+            && OptionalThresholdIsPreserved(candidate.MinPatchLinePercent, required.MinPatchLinePercent)
+            && OptionalThresholdIsPreserved(candidate.MinPatchBranchPercent, required.MinPatchBranchPercent)
+            && string.Equals(candidate.PatchLineMode, required.PatchLineMode, StringComparison.OrdinalIgnoreCase)
+            && candidate.TolerancePercent <= required.TolerancePercent;
+    }
+
+    private static bool OptionalThresholdIsPreserved(decimal? candidate, decimal? required) =>
+        required is null || (candidate is { } candidateValue && candidateValue >= required.Value);
 
     private static void ValidateProfile(EvidenceProfile profile)
     {

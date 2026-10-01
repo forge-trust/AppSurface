@@ -144,6 +144,42 @@ internal sealed class EvidenceCliWorkflow
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
         var policy = await ReadPolicyAsync(request.PolicyPath, cancellationToken).ConfigureAwait(false);
+        var revisionRequested = request.BaseRevision is not null || request.HeadRevision is not null;
+        if (request.PullRequestRunIdentityFile is not null && !revisionRequested)
+        {
+            throw new EvidenceCliException("ASEVD233", "PR/run identity requires revision-bound planning.", "Supply complete --base-revision and --head-revision with the exact --diff-file.");
+        }
+
+        if (revisionRequested)
+        {
+            if (request.BaseRevision is null || request.HeadRevision is null || request.DiffFile is null || request.Paths.Count != 0)
+            {
+                throw new EvidenceCliException("ASEVD230", "Revision-bound planning requires --base-revision, --head-revision and --diff-file, without --path.", "Supply complete Git commit IDs and a byte-exact diff captured from that pair.");
+            }
+
+            var captured = await EvidenceGitChangeCapture.CaptureAsync(
+                request.RepositoryPath ?? Directory.GetCurrentDirectory(),
+                request.BaseRevision,
+                request.HeadRevision,
+                cancellationToken).ConfigureAwait(false);
+            var supplied = await ReadDiffSnapshotAsync(request.DiffFile, cancellationToken).ConfigureAwait(false);
+            if (!captured.SourceDiff.Span.SequenceEqual(supplied.Bytes.Span))
+            {
+                throw new EvidenceCliException("ASEVD231", "The supplied diff bytes do not match the exact Git commit pair.", "Regenerate --diff-file from the complete --base-revision and --head-revision using the documented fixed Git options.");
+            }
+
+            var runIdentity = request.PullRequestRunIdentityFile is null
+                ? null
+                : await ReadCanonicalAsync<EvidencePullRequestRunIdentity>(request.PullRequestRunIdentityFile, cancellationToken).ConfigureAwait(false);
+            var plan = EvidenceRevisionPlanBuilder.ResolveForPullRequest(_planner, policy, captured, runIdentity);
+            return new EvidencePlanningResolution(plan, supplied);
+        }
+
+        if (request.GateMode)
+        {
+            throw new EvidenceCliException("ASEVD230", "Gate mode requires revision-bound planning.", "Supply --base-revision, --head-revision and --diff-file; path-only local plans cannot authorize a gate.");
+        }
+
         var inputs = await ReadPathsAndSnapshotAsync(request, cancellationToken).ConfigureAwait(false);
         return new EvidencePlanningResolution(_planner.Resolve(policy, inputs.Paths), inputs.Snapshot);
     }
@@ -190,7 +226,9 @@ internal sealed class EvidenceCliWorkflow
     public async Task<(EvidencePlan Plan, EvidenceManifest Manifest)> VerifyAsync(
         string planPath,
         string manifestPath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? trustedPolicyPath = null,
+        string? repositoryPath = null)
     {
         var plan = await ReadCanonicalAsync<EvidencePlan>(planPath, cancellationToken).ConfigureAwait(false);
         var manifest = await ReadCanonicalAsync<EvidenceManifest>(manifestPath, cancellationToken).ConfigureAwait(false);
@@ -205,7 +243,22 @@ internal sealed class EvidenceCliWorkflow
         EvidencePlan resolvedPlan;
         try
         {
-            resolvedPlan = _planner.Resolve(plan.PolicySnapshot, plan.ChangedPaths);
+            if (string.Equals(plan.ContractVersion, "2.0", StringComparison.Ordinal))
+            {
+                if (trustedPolicyPath is null || repositoryPath is null)
+                {
+                    throw new EvidenceCliException("ASEVD232", "Revision-bound verification requires a trusted policy and Git object store.", "Pass --policy from the trusted base and --repository containing both exact commits.");
+                }
+
+                var trustedPolicy = await ReadPolicyAsync(trustedPolicyPath, cancellationToken).ConfigureAwait(false);
+                await EvidenceRevisionPlanBuilder.VerifyAsync(
+                    _planner, trustedPolicy, repositoryPath, plan, cancellationToken).ConfigureAwait(false);
+                resolvedPlan = plan;
+            }
+            else
+            {
+                resolvedPlan = _planner.Resolve(plan.PolicySnapshot, plan.ChangedPaths);
+            }
         }
         catch (EvidencePlanningException exception)
         {
@@ -236,11 +289,29 @@ internal sealed class EvidenceCliWorkflow
         return string.Join(
             Environment.NewLine,
             $"Evidence plan: {plan.Profile.Id} ({plan.Profile.Scope.ToString().ToLowerInvariant()})",
+            $"Plan digest: {plan.PlanDigest}",
+            string.Equals(plan.ContractVersion, "2.0", StringComparison.Ordinal)
+                ? $"Revisions: {plan.BaseRevision![..12]}..{plan.HeadRevision![..12]} (source diff {plan.SourceDiffDigest})"
+                : "Revisions: local v1 input (not a CI gate authorization)",
             $"Why: {string.Join(", ", plan.MatchedRuleIds)}",
-            $"Changed paths: {string.Join(", ", plan.ChangedPaths.Select(static path => path.Path))}",
+            $"Changed paths ({plan.ChangedPaths.Count}): {FormatChangedPaths(plan.ChangedPaths)}",
             $"Obligations: {obligations}",
             $"Required producers: {FormatIds(plan.Profile.Producers.Select(static producer => producer.Id))}",
             $"Required resources: {FormatIds(plan.Profile.Resources.Select(static resource => resource.Id))}");
+    }
+
+    private static string FormatChangedPaths(IReadOnlyList<NormalizedDiffPath> paths)
+    {
+        const int maximumDisplayedPaths = 12;
+        const int maximumPathCharacters = 100;
+        var displayed = paths.Take(maximumDisplayedPaths)
+            .Select(path => path.Path.Length <= maximumPathCharacters
+                ? path.Path
+                : string.Concat(path.Path.AsSpan(0, maximumPathCharacters), "…"));
+        var result = string.Join(", ", displayed);
+        return paths.Count > maximumDisplayedPaths
+            ? $"{result}, … (+{paths.Count - maximumDisplayedPaths} more)"
+            : result;
     }
 
     /// <summary>
@@ -387,18 +458,44 @@ internal sealed class EvidenceCliWorkflow
 
     private static async Task<TValue> ReadCanonicalAsync<TValue>(string path, CancellationToken cancellationToken)
     {
-        if (!File.Exists(path))
-        {
-            throw new EvidenceCliException("ASEVD208", $"Evidence file '{path}' does not exist.", "Pass paths from the same generated evidence output directory.");
-        }
-
         try
         {
-            return EvidenceCanonicalJson.Deserialize<TValue>(await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false));
+            const int maximumEvidenceBytes = 4 * 1024 * 1024;
+            await using var source = File.OpenRead(path);
+            await using var captured = new MemoryStream();
+            var buffer = new byte[80 * 1024];
+            while (true)
+            {
+                var count = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                if (count == 0)
+                {
+                    break;
+                }
+
+                if (captured.Length + count > maximumEvidenceBytes)
+                {
+                    throw new EvidenceCliException("ASEVD209", "Evidence JSON exceeds the 4 MiB verification limit.", "Keep plans and manifests bounded; do not embed raw test output.");
+                }
+
+                await captured.WriteAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
+            }
+
+            var bytes = captured.ToArray();
+            var value = EvidenceCanonicalJson.Deserialize<TValue>(bytes);
+            if (!EvidenceCanonicalJson.Serialize(value).AsSpan().SequenceEqual(bytes))
+            {
+                throw new EvidenceCliException("ASEVD209", "Evidence JSON is not canonical.", "Use unedited evidence-plan.json and evidence-manifest.json generated by AppSurface.");
+            }
+
+            return value;
         }
         catch (JsonException exception)
         {
             throw new EvidenceCliException("ASEVD209", $"Evidence file '{path}' is not valid JSON: {exception.Message}", "Regenerate evidence instead of editing the output.");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw new EvidenceCliException("ASEVD208", $"Evidence file '{path}' could not be read.", "Pass readable plan and manifest files from the same generated evidence output directory.");
         }
     }
 
@@ -517,7 +614,15 @@ internal sealed class EvidenceCliWorkflow
 /// <summary>
 /// Describes a policy and explicit changed-path input for an EvidenceHost planning operation.
 /// </summary>
-internal sealed record EvidencePlanningRequest(string PolicyPath, IReadOnlyList<string> Paths, string? DiffFile);
+internal sealed record EvidencePlanningRequest(
+    string PolicyPath,
+    IReadOnlyList<string> Paths,
+    string? DiffFile,
+    string? BaseRevision = null,
+    string? HeadRevision = null,
+    string? RepositoryPath = null,
+    bool GateMode = false,
+    string? PullRequestRunIdentityFile = null);
 
 /// <summary>
 /// Binds a resolved plan to the immutable diff bytes used to derive its changed paths.

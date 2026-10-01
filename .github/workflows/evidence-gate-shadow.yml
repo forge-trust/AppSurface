@@ -1,0 +1,99 @@
+name: evidence-gate-shadow.yml
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  push:
+    branches: [main]
+    paths:
+      - .appsurface/**
+      - Evidence/**
+      - tools/ForgeTrust.AppSurface.EvidenceGate/**
+      - tools/ForgeTrust.AppSurface.EvidenceGate.Tests/**
+      - tools/ForgeTrust.AppSurface.Release/**
+      - .github/workflows/evidence-gate*.yml
+      - scripts/evidence-gate-*
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evidence-gate-shadow-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  non-claiming-contract-check:
+    name: Evidence gate shadow (non-claiming)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout candidate code for non-claiming validation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore focused evidence tests with lock files
+        run: |
+          dotnet restore Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --locked-mode
+          dotnet restore tools/ForgeTrust.AppSurface.EvidenceGate.Tests/ForgeTrust.AppSurface.EvidenceGate.Tests.csproj --locked-mode
+          dotnet restore tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj --locked-mode
+      - name: Validate policy, revision, verifier, and extraction contracts
+        run: >-
+          dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj
+          --no-restore
+          --filter "FullyQualifiedName~Evidence|FullyQualifiedName~AppSurfaceEvidencePolicyTests"
+      - name: Validate first-party host behavior
+        run: dotnet test tools/ForgeTrust.AppSurface.EvidenceGate.Tests/ForgeTrust.AppSurface.EvidenceGate.Tests.csproj --no-restore
+      - name: Validate non-mutating release inspection
+        run: >-
+          dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj
+          --no-restore
+          --filter "FullyQualifiedName~Release"
+      - name: Validate controller capture and credentialless subject isolation
+        run: python3 -m unittest discover -s scripts/tests -p 'test_evidence_gate_*.py'
+      - name: Rehearse exact docs-only plan, host, and local verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture_dir="$(mktemp -d)"
+          git clone --quiet docs/fixtures/issue-777-docs-only/repository.bundle "$fixture_dir/repository"
+          base_revision="$(python3 -c 'import json; print(json.load(open("docs/fixtures/issue-777-docs-only/fixture.json"))["baseRevision"])')"
+          head_revision="$(python3 -c 'import json; print(json.load(open("docs/fixtures/issue-777-docs-only/fixture.json"))["headRevision"])')"
+          policy=docs/fixtures/issue-777-docs-only/policy.json
+          dotnet run --project Cli/ForgeTrust.AppSurface.Cli --no-restore -- evidence explain \
+            --policy "$policy" --repository "$fixture_dir/repository" \
+            --base-revision "$base_revision" --head-revision "$head_revision" \
+            --diff-file docs/fixtures/issue-777-docs-only/source.diff --gate-mode \
+            --output "$fixture_dir/explain"
+          dotnet run --project tools/ForgeTrust.AppSurface.EvidenceGate --no-restore -- run \
+            --plan "$fixture_dir/explain/evidence-plan.json" --policy "$policy" \
+            --repository "$fixture_dir/repository" --output-dir "$fixture_dir/host"
+          dotnet run --project Cli/ForgeTrust.AppSurface.Cli --no-restore -- evidence verify \
+            "$fixture_dir/host/evidence-manifest.json" \
+            --plan "$fixture_dir/host/evidence-plan.json" --policy "$policy" \
+            --repository "$fixture_dir/repository"
+          python3 - "$fixture_dir" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          root = Path(sys.argv[1])
+          explained = json.loads((root / "explain/evidence-plan.json").read_text())
+          hosted = json.loads((root / "host/evidence-plan.json").read_text())
+          manifest = json.loads((root / "host/evidence-manifest.json").read_text())
+          assert explained["PlanDigest"] == hosted["PlanDigest"]
+          assert hosted["Profile"]["Id"] == "documentation-only"
+          assert manifest["ClaimKind"] == "NoEvidenceRequired"
+          assert manifest["Eligibility"] == "PullRequestGate"
+          PY
+      - name: Explain shadow status
+        if: ${{ always() }}
+        run: |
+          {
+            echo '## AppSurface evidence gate shadow'
+            echo ''
+            echo 'This branch-owned check validates implementation contracts only. It is not the base-owned verifier, does not issue an EvidenceHost claim, and must not be configured as the required evidence check.'
+          } >> "$GITHUB_STEP_SUMMARY"

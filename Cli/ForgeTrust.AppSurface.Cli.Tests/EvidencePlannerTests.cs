@@ -96,6 +96,274 @@ public sealed class EvidencePlannerTests
     }
 
     [Fact]
+    public void ResolveForGate_ShouldUseConservativeProfileForDocumentationAndCodeDiff()
+    {
+        var documentation = CreateNoEvidenceProfile();
+        var code = CreateCoverageProfile(EvidenceProfileScope.Targeted) with { Id = "code" };
+        var policy = CreateGatePolicy(code with { Id = "conservative" }, documentation, code);
+
+        var plan = new EvidencePlanner().ResolveForGate(
+            policy,
+            [GatePath(0, "readme.md"), GatePath(1, "Feature.cs")]);
+
+        Assert.Equal("conservative", plan.Profile.Id);
+        Assert.Contains("conservative:conservative", plan.MatchedRuleIds, StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateGatePolicy_ShouldKeepLegacyLocalV1ValidationAndSelectionCompatible()
+    {
+        var targetedResourceProfile = CreateRequirementProfile("integration");
+        var conservative = CreateCoverageProfile(EvidenceProfileScope.Targeted) with { Id = "conservative" };
+        var policy = CreateGatePolicy(conservative, targetedResourceProfile);
+
+        EvidencePlanner.ValidatePolicy(policy);
+        var localPlan = new EvidencePlanner().Resolve(policy, [GatePath(0, "integration.cs"), new NormalizedDiffPath("unmapped/file.cs")]);
+
+        Assert.Equal("conservative", localPlan.Profile.Id);
+        AssertGatePolicyFailure(policy, "resource 'database'");
+    }
+
+    [Fact]
+    public void ResolveForGate_ShouldPreserveResourceAndCodeRequirementsInMixedProfile()
+    {
+        var integration = CreateRequirementProfile("integration");
+        var code = CreateCoverageProfile(EvidenceProfileScope.Targeted) with { Id = "code" };
+        var conservative = MergeProfiles("conservative", integration, code);
+        var policy = CreateGatePolicy(conservative, integration, code);
+
+        var plan = new EvidencePlanner().ResolveForGate(
+            policy,
+            [GatePath(0, "database-tests.cs"), GatePath(1, "Feature.cs")]);
+
+        Assert.Equal("conservative", plan.Profile.Id);
+        Assert.Contains(plan.Profile.Resources, resource => resource.Id == "database");
+        Assert.Contains(plan.Profile.Producers, producer => producer.Id == "integration-tests");
+        Assert.Contains(plan.Profile.Producers, producer => producer.Id == "coverage");
+    }
+
+    [Fact]
+    public void ResolveForGate_ShouldPreserveResourceRequirementsInDocumentationAndResourceDiff()
+    {
+        var documentation = CreateNoEvidenceProfile();
+        var integration = CreateRequirementProfile("integration");
+        var conservative = MergeProfiles("conservative", integration);
+        var policy = CreateGatePolicy(conservative, documentation, integration);
+
+        var plan = new EvidencePlanner().ResolveForGate(
+            policy,
+            [GatePath(0, "guide.md"), GatePath(1, "database-tests.cs")]);
+
+        Assert.Equal("conservative", plan.Profile.Id);
+        Assert.Contains(plan.Profile.Resources, resource => resource.Id == "database");
+        Assert.Contains(plan.Profile.Producers, producer => producer.RequiredResources.Contains("database", StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void ResolveForGate_ShouldPreserveControlPlaneRequirementsWhenRenameCrossesProfileRules()
+    {
+        var documentation = CreateNoEvidenceProfile();
+        var controlPlane = CreateRequirementProfile("control-plane");
+        var conservative = MergeProfiles("conservative", controlPlane);
+        var policy = CreateGatePolicy(conservative, documentation, controlPlane);
+
+        var plan = new EvidencePlanner().ResolveForGate(
+            policy,
+            [new NormalizedDiffPath("gate/0/evidence-guide.md", "renamed", "gate/1/evidence.policy.json")]);
+
+        Assert.Equal("conservative", plan.Profile.Id);
+        Assert.Contains("target-0", plan.MatchedRuleIds, StringComparer.Ordinal);
+        Assert.Contains("target-1", plan.MatchedRuleIds, StringComparer.Ordinal);
+        Assert.Contains(plan.Profile.Producers, producer => producer.Id == "integration-tests");
+    }
+
+    [Fact]
+    public void ValidateGatePolicy_ShouldRejectMissingProducer()
+    {
+        var targeted = CreateRequirementProfile("integration");
+        var otherwiseValid = CreateCoverageProfile(EvidenceProfileScope.Targeted) with
+        {
+            Id = "conservative",
+            Resources = targeted.Resources,
+        };
+
+        AssertGatePolicyFailure(CreateGatePolicy(otherwiseValid, targeted), "producer 'integration-tests'");
+    }
+
+    [Fact]
+    public void ValidateGatePolicy_ShouldRejectMissingResource()
+    {
+        var targeted = CreateRequirementProfile("integration");
+        var otherwiseValid = targeted with
+        {
+            Id = "conservative",
+            Resources = [],
+            Producers = [targeted.Producers[0] with { RequiredResources = [] }],
+        };
+
+        AssertGatePolicyFailure(CreateGatePolicy(otherwiseValid, targeted), "resource 'database'");
+    }
+
+    [Fact]
+    public void ValidateGatePolicy_ShouldRejectMissingAssertion()
+    {
+        var targeted = CreateRequirementProfile("integration");
+        var otherwiseValid = targeted with
+        {
+            Id = "conservative",
+            Producers = [targeted.Producers[0] with { AssertionIds = ["integration/ready@2"] }],
+            Obligations = [targeted.Obligations[0] with { RequiredAssertionId = "integration/ready@2" }],
+        };
+
+        AssertGatePolicyFailure(CreateGatePolicy(otherwiseValid, targeted), "assertion 'integration/passed@1'");
+    }
+
+    [Fact]
+    public void ValidateGatePolicy_ShouldRejectMissingArtifactSlot()
+    {
+        var targeted = CreateRequirementProfile("integration");
+        var otherwiseValid = targeted with
+        {
+            Id = "conservative",
+            Producers = [targeted.Producers[0] with { ArtifactSlots = [] }],
+        };
+
+        AssertGatePolicyFailure(CreateGatePolicy(otherwiseValid, targeted), "artifact slot 'integration-tests/report'");
+    }
+
+    [Fact]
+    public void ValidateGatePolicy_ShouldRejectMissingObligation()
+    {
+        var targeted = CreateRequirementProfile("integration");
+        var otherwiseValid = targeted with { Id = "conservative", Obligations = [] };
+
+        AssertGatePolicyFailure(CreateGatePolicy(otherwiseValid, targeted), "obligation 'integration'");
+    }
+
+    [Fact]
+    public void ValidateGatePolicy_ShouldRejectAWeakenedResourceDependency()
+    {
+        var database = new EvidenceResourceDeclaration("database", "aspire_health", 30, []);
+        var migration = new EvidenceResourceDeclaration("migration", "completion", 30, ["database"]);
+        var targeted = CreateRequirementProfile("integration") with
+        {
+            Resources = [database, migration],
+            Producers = [CreateRequirementProfile("integration").Producers[0] with { RequiredResources = ["migration"] }],
+        };
+        var otherwiseValid = targeted with
+        {
+            Id = "conservative",
+            Resources = [database, migration with { Requires = [] }],
+        };
+
+        AssertGatePolicyFailure(CreateGatePolicy(otherwiseValid, targeted), "resource dependency 'database'");
+    }
+
+    [Fact]
+    public void ValidateGatePolicy_ShouldRejectAProducerThatNoLongerRequiresATargetedResource()
+    {
+        var targeted = CreateRequirementProfile("integration");
+        var otherwiseValid = targeted with
+        {
+            Id = "conservative",
+            Producers = [targeted.Producers[0] with { RequiredResources = [] }],
+        };
+
+        AssertGatePolicyFailure(CreateGatePolicy(otherwiseValid, targeted), "resource 'database' required by producer 'integration-tests'");
+    }
+
+    [Fact]
+    public void ValidateGatePolicy_ShouldRejectWeakenedArtifactBounds()
+    {
+        var targeted = CreateRequirementProfile("integration");
+        var otherwiseValid = targeted with
+        {
+            Id = "conservative",
+            Producers =
+            [
+                targeted.Producers[0] with
+                {
+                    ArtifactSlots = [targeted.Producers[0].ArtifactSlots[0] with { MaximumBytes = 2048 }],
+                },
+            ],
+        };
+
+        AssertGatePolicyFailure(CreateGatePolicy(otherwiseValid, targeted), "artifact slot 'integration-tests/report'");
+    }
+
+    [Fact]
+    public void ValidateGatePolicy_ShouldRejectAnObligationThatNoLongerRequiresItsProducer()
+    {
+        var targeted = CreateRequirementProfile("integration");
+        var coverage = CreateCoverageProfile(EvidenceProfileScope.Targeted);
+        var coverageProducer = coverage.Producers[0] with
+        {
+            AssertionIds = [.. coverage.Producers[0].AssertionIds, targeted.Obligations[0].RequiredAssertionId],
+        };
+        var otherwiseValid = new EvidenceProfile(
+            "conservative",
+            EvidenceProfileScope.Targeted,
+            targeted.Resources,
+            [targeted.Producers[0], coverageProducer],
+            [
+                targeted.Obligations[0] with { RequiredProducerIds = ["coverage"] },
+                coverage.Obligations[0],
+            ]);
+
+        AssertGatePolicyFailure(CreateGatePolicy(otherwiseValid, targeted), "producer 'integration-tests' required by obligation 'integration'");
+    }
+
+    [Fact]
+    public void ResolveForGate_ShouldAcceptAConservativeSupersetWithAdditionalEvidence()
+    {
+        var targeted = CreateRequirementProfile("integration");
+        var additionalResource = new EvidenceResourceDeclaration("cache", "completion", 45, []);
+        var requiredProducer = targeted.Producers[0] with
+        {
+            RequiredResources = ["database", "cache"],
+            AssertionIds = ["integration/passed@1", "integration/details@1"],
+            ArtifactSlots =
+            [
+                targeted.Producers[0].ArtifactSlots[0] with { MaximumBytes = 512 },
+                new EvidenceArtifactSlot("details", "integration", "application/json", Required: false, MaximumBytes: 256),
+            ],
+        };
+        var coverage = CreateCoverageProfile(EvidenceProfileScope.Targeted);
+        var conservative = new EvidenceProfile(
+            "conservative",
+            EvidenceProfileScope.Targeted,
+            [.. targeted.Resources, additionalResource],
+            [requiredProducer, coverage.Producers[0]],
+            [
+                targeted.Obligations[0],
+                coverage.Obligations[0],
+            ]);
+        var policy = CreateGatePolicy(conservative, targeted);
+
+        var plan = new EvidencePlanner().ResolveForGate(policy, [GatePath(0, "integration.cs"), new NormalizedDiffPath("unmapped/file.cs")]);
+
+        Assert.Equal("conservative", plan.Profile.Id);
+        Assert.Contains(plan.Profile.Resources, resource => resource.Id == "cache");
+        Assert.Contains(plan.Profile.Producers, producer => producer.Id == "coverage");
+        Assert.Contains(plan.Profile.Producers.Single(producer => producer.Id == "integration-tests").ArtifactSlots, slot => slot.LogicalName == "details");
+    }
+
+    [Fact]
+    public void ResolveForGate_ShouldKeepExplicitEmptyTargetedDocumentationProfile()
+    {
+        var documentation = CreateNoEvidenceProfile();
+        var code = CreateCoverageProfile(EvidenceProfileScope.Targeted);
+        var policy = CreateGatePolicy(code with { Id = "conservative" }, documentation, code);
+
+        var plan = new EvidencePlanner().ResolveForGate(policy, [GatePath(0, "guide.md")]);
+        var manifest = EvidenceManifestBuilder.Build(plan, []);
+
+        Assert.Equal("no-evidence", plan.Profile.Id);
+        Assert.Empty(plan.Profile.Producers);
+        Assert.Equal(EvidenceClaimKind.NoEvidenceRequired, manifest.ClaimKind);
+    }
+
+    [Fact]
     public void UnifiedDiffReader_ShouldReadAddedDeletedAndModifiedPaths()
     {
         var paths = EvidenceUnifiedDiffReader.Read(
@@ -851,6 +1119,52 @@ public sealed class EvidencePlannerTests
 
         Assert.Equal(code, exception.Code);
     }
+
+    private static void AssertGatePolicyFailure(EvidencePolicy policy, string expectedRequirement)
+    {
+        var exception = Assert.Throws<EvidencePlanningException>(() => EvidencePlanner.ValidateGatePolicy(policy));
+
+        Assert.Equal("ASEVD129", exception.Code);
+        Assert.Contains(expectedRequirement, exception.Message, StringComparison.Ordinal);
+    }
+
+    private static EvidencePolicy CreateGatePolicy(EvidenceProfile conservative, params EvidenceProfile[] targetedProfiles)
+    {
+        var profiles = new List<EvidenceProfile> { conservative };
+        profiles.AddRange(targetedProfiles);
+        var rules = targetedProfiles
+            .Select((profile, index) => new EvidencePolicyRule($"target-{index}", $"gate/{index}/*", profile.Id))
+            .ToArray();
+
+        return new EvidencePolicy("gate-policy", "1", conservative.Id, profiles, rules);
+    }
+
+    private static EvidenceProfile MergeProfiles(string id, params EvidenceProfile[] profiles) => new(
+        id,
+        EvidenceProfileScope.Targeted,
+        profiles.SelectMany(static profile => profile.Resources).ToArray(),
+        profiles.SelectMany(static profile => profile.Producers).ToArray(),
+        profiles.SelectMany(static profile => profile.Obligations).ToArray());
+
+    private static EvidenceProfile CreateRequirementProfile(string id)
+    {
+        var assertionId = "integration/passed@1";
+        return new EvidenceProfile(
+            id,
+            EvidenceProfileScope.Targeted,
+            [new EvidenceResourceDeclaration("database", "aspire_health", 30, [])],
+            [new EvidenceProducerDeclaration(
+                "integration-tests",
+                "integration-tests",
+                "1.0.0",
+                ["database"],
+                [assertionId],
+                [new EvidenceArtifactSlot("report", "integration", "application/json", Required: true, MaximumBytes: 1024)],
+                60)],
+            [new EvidenceObligation("integration", "integration", "The integration profile must pass.", ["integration-tests"], assertionId)]);
+    }
+
+    private static NormalizedDiffPath GatePath(int profileIndex, string path) => new($"gate/{profileIndex}/{path}");
 
     private static EvidencePolicy CreatePolicy() => new(
         "sample",
