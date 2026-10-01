@@ -39,6 +39,8 @@ internal sealed class GitHubActionsEvidenceAuthorityProvider : IEvidencePullRequ
     /// <remarks>
     /// The caller must supply only trusted process environment values. A missing or malformed bearer token or
     /// HTTPS API endpoint returns <see langword="null"/>; this factory does not attest a subject checkout.
+    /// Its fresh API snapshot may authorize only an explicitly empty profile, because the checkout revision
+    /// remains blank until an independent subject-job attestor is registered.
     /// The returned provider owns its HTTP client and must be disposed.
     /// </remarks>
     internal static GitHubActionsEvidenceAuthorityProvider? TryCreateFromEnvironment(Func<string, string?> readEnvironment)
@@ -84,15 +86,6 @@ internal sealed class GitHubActionsEvidenceAuthorityProvider : IEvidencePullRequ
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(expectedIdentity);
-        // GitHub workflow/job head_sha values identify event/job metadata. In particular,
-        // pull_request_target jobs can report the base-side workflow SHA while manually
-        // checking out a PR head. They are not checkout attestations. Fail closed until a
-        // separate trusted provider can bind the actual subject checkout to this exact job.
-        if (_checkoutAttestationProvider is null)
-        {
-            return null;
-        }
-
         try
         {
             var repository = expectedIdentity.Repository.Split('/', 2);
@@ -178,19 +171,29 @@ internal sealed class GitHubActionsEvidenceAuthorityProvider : IEvidencePullRequ
                 workflowRunId,
                 checked((int)runAttempt));
 
-            var attestation = await _checkoutAttestationProvider.AttestAsync(
-                expectedIdentity,
-                authorityIdentity,
-                expectedJobId.ToString(CultureInfo.InvariantCulture),
-                headRevision,
-                cancellationToken).ConfigureAwait(false);
-            if (attestation is null
-                || !string.Equals(attestation.Repository, expectedIdentity.Repository, StringComparison.OrdinalIgnoreCase)
-                || attestation.RunIdentity != authorityIdentity
-                || !string.Equals(attestation.SubjectJobId, expectedJobId.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
-                || !string.Equals(attestation.SubjectCheckoutRevision, headRevision, StringComparison.Ordinal))
+            // GitHub workflow/job head_sha is event metadata, not proof of the checkout
+            // consumed by a pull_request_target subject job. Leave that field empty when
+            // no independent attestor exists. Only an explicitly empty profile can use
+            // a fresh PR/run/job observation without a subject checkout.
+            var checkoutRevision = string.Empty;
+            if (_checkoutAttestationProvider is not null)
             {
-                return null;
+                var attestation = await _checkoutAttestationProvider.AttestAsync(
+                    expectedIdentity,
+                    authorityIdentity,
+                    expectedJobId.ToString(CultureInfo.InvariantCulture),
+                    headRevision,
+                    cancellationToken).ConfigureAwait(false);
+                if (attestation is null
+                    || !string.Equals(attestation.Repository, expectedIdentity.Repository, StringComparison.OrdinalIgnoreCase)
+                    || attestation.RunIdentity != authorityIdentity
+                    || !string.Equals(attestation.SubjectJobId, expectedJobId.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                    || !string.Equals(attestation.SubjectCheckoutRevision, headRevision, StringComparison.Ordinal))
+                {
+                    return null;
+                }
+
+                checkoutRevision = attestation.SubjectCheckoutRevision;
             }
 
             return new EvidencePullRequestGateAuthoritySnapshot(
@@ -201,7 +204,7 @@ internal sealed class GitHubActionsEvidenceAuthorityProvider : IEvidencePullRequ
                 workflowId.ToString(CultureInfo.InvariantCulture),
                 authorityIdentity,
                 expectedJobId.ToString(CultureInfo.InvariantCulture),
-                attestation.SubjectCheckoutRevision,
+                checkoutRevision,
                 conclusion);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

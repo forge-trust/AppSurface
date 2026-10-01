@@ -50,6 +50,37 @@ public sealed class EvidencePullRequestGateVerifierTests
     }
 
     [Fact]
+    public async Task VerifyAsync_ShouldAllowNoCheckoutAttestationOnlyForExplicitEmptyProfile()
+    {
+        await using var documentation = await GateFixture.CreateAsync(documentationOnly: true);
+        var noCheckout = documentation.Authority with
+        {
+            SubjectJobHeadRevision = string.Empty,
+            SubjectEnvelopeAttested = false,
+        };
+
+        var documentationResult = await documentation.VerifyAsync(
+            authority: noCheckout,
+            trustedArtifactHandoffRootPath: null,
+            artifactVerifier: null,
+            omitArtifactRoot: true,
+            useFakeArtifactVerifier: false);
+
+        Assert.True(documentationResult.IsEligible);
+        Assert.Equal("ASEVG000", documentationResult.Code);
+
+        await using var code = await GateFixture.CreateAsync();
+        var codeResult = await code.VerifyAsync(authority: code.Authority with
+        {
+            SubjectJobHeadRevision = string.Empty,
+            SubjectEnvelopeAttested = false,
+        });
+
+        Assert.False(codeResult.IsEligible);
+        Assert.Equal("ASEVG007", codeResult.Code);
+    }
+
+    [Fact]
     public async Task VerifyAsync_ShouldFailClosedWhenNonemptyProfileHasNoTrustedArtifactRoot()
     {
         await using var fixture = await GateFixture.CreateAsync();

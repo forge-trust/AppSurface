@@ -50,16 +50,20 @@ public sealed class GitHubActionsEvidenceAuthorityProviderTests
     }
 
     [Fact]
-    public async Task ProviderFailsClosedWithoutSeparateCheckoutAttestor()
+    public async Task ProviderReportsFreshPrAndJobButNoCheckoutWithoutSeparateAttestor()
     {
-        var handler = new UnexpectedRequestHandler();
+        var handler = new GitHubApiFixtureHandler(BaseRevision, PullRequestHeadRevision);
         using var httpClient = new HttpClient(handler);
         using var authorityProvider = new GitHubActionsEvidenceAuthorityProvider(httpClient, new Uri("https://api.example.test/"));
 
         var snapshot = await authorityProvider.ReadFreshAsync(CreateExpectedIdentity());
 
-        Assert.Null(snapshot);
-        Assert.Equal(0, handler.RequestCount);
+        Assert.NotNull(snapshot);
+        Assert.Equal(BaseRevision, snapshot.BaseRevision);
+        Assert.Equal(PullRequestHeadRevision, snapshot.HeadRevision);
+        Assert.Equal(string.Empty, snapshot.SubjectJobHeadRevision);
+        Assert.False(snapshot.SubjectEnvelopeAttested);
+        Assert.Equal(new[] { PullRequestPath, WorkflowRunPath, JobsPath }, handler.Requests);
     }
 
     [Theory]

@@ -30,7 +30,7 @@ public sealed record EvidencePullRequestGateExpectedIdentity(
 /// <param name="WorkflowId">Workflow associated with the subject job.</param>
 /// <param name="RunIdentity">Authoritative PR, repository, run, and attempt identity.</param>
 /// <param name="SubjectJobId">Subject job identity.</param>
-/// <param name="SubjectJobHeadRevision">Commit checked out by the subject job.</param>
+/// <param name="SubjectJobHeadRevision">Commit independently attested as the subject job checkout, or an empty string when no checkout was attested. Only an explicitly empty profile may be eligible in the latter case.</param>
 /// <param name="SubjectJobConclusion">Authoritative terminal job conclusion.</param>
 /// <param name="SubjectEnvelopeAttested">Whether an independent trusted observation confirmed the subject job's isolation envelope.</param>
 public sealed record EvidencePullRequestGateAuthoritySnapshot(
@@ -957,8 +957,8 @@ public static class EvidencePullRequestGateVerifier
         && current.HeadRevision == plan.HeadRevision
         && string.Equals(current.WorkflowId, expected.WorkflowId, StringComparison.Ordinal)
         && string.Equals(current.SubjectJobId, expected.SubjectJobId, StringComparison.Ordinal)
-        && current.SubjectJobHeadRevision == plan.HeadRevision
-        && (IsEmptyProfile(plan.Profile) || current.SubjectEnvelopeAttested)
+        && (IsEmptyProfile(plan.Profile)
+            || (current.SubjectJobHeadRevision == plan.HeadRevision && current.SubjectEnvelopeAttested))
         && string.Equals(current.SubjectJobConclusion, "success", StringComparison.OrdinalIgnoreCase);
 
     private static bool HasValidExpectedIdentity(EvidencePullRequestGateExpectedIdentity identity) =>
