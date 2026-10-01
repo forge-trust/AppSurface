@@ -979,6 +979,50 @@ public sealed class GoogleSecretManagerConcurrencyContractTests
         }
     }
 
+    [Fact]
+    public async Task CleanupSchedulingFailure_RetiresCompletedFlightAfterOnlyWaiterCancels()
+    {
+        using var client = new SequencedGatedClient((Resource, "first-result"), (Resource, "second-result"));
+        var cleanupScheduler = new RejectingCleanupScheduler();
+        var options = new AppSurfaceGoogleSecretManagerOptions { ProjectId = "project", CacheTtl = null };
+        options.MapSecret("Payments:One", Resource);
+        var provider = new GoogleSecretManagerConfigProvider(
+            Options.Create(options), client, serviceProvider: null, timeProvider: null,
+            flightCleanupScheduler: cleanupScheduler);
+        using var cancellation = new CancellationTokenSource();
+        using var cancelledScope = new ConfigResolutionScope(cancellation.Token);
+        var cancelledOwner = Start(provider, "Payments:One", cancelledScope);
+        PendingResolution? next = null;
+        try
+        {
+            await client.Started(1).WaitAsync(Timeout);
+            cancelledOwner.WaitUntilBlocked();
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelledOwner.Result.WaitAsync(Timeout));
+
+            client.Release(1);
+            await client.Finished(1).WaitAsync(Timeout);
+            Assert.True(SpinWait.SpinUntil(() => cleanupScheduler.QueueAttempts == 1, Timeout));
+            Assert.Equal(0, provider.PublishedFlightCount);
+
+            next = Start(provider, "Payments:One");
+            await client.Started(2).WaitAsync(Timeout);
+            next.WaitUntilBlocked();
+            client.Release(2);
+            AssertFound("second-result", await next.Result.WaitAsync(Timeout));
+            Assert.Equal(2, client.Calls);
+        }
+        finally
+        {
+            client.Release(1);
+            client.Release(2);
+            try { await cancelledOwner.Result.WaitAsync(Timeout); }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+            if (next is not null) await next.Result.WaitAsync(Timeout);
+            await client.Finished(1).WaitAsync(Timeout);
+        }
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -1302,6 +1346,23 @@ public sealed class GoogleSecretManagerConcurrencyContractTests
         internal void RejectFirstQueue() => _releaseFirstQueue.Set();
 
         public void Dispose() => _releaseFirstQueue.Dispose();
+    }
+
+    private sealed class RejectingCleanupScheduler : TaskScheduler
+    {
+        private int _queueAttempts;
+
+        internal int QueueAttempts => Volatile.Read(ref _queueAttempts);
+
+        protected override IEnumerable<Task> GetScheduledTasks() => [];
+
+        protected override void QueueTask(Task task)
+        {
+            Interlocked.Increment(ref _queueAttempts);
+            throw new InvalidOperationException("test-cleanup-scheduler-rejected-flight");
+        }
+
+        protected override bool TryExecuteTaskInline(Task task, bool taskWasPreviouslyQueued) => false;
     }
 
     private sealed class GatedClient(params (string Resource, string Value)[] values) : IAppSurfaceGoogleSecretManagerClient, IDisposable

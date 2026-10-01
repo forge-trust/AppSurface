@@ -117,24 +117,33 @@ internal sealed class ConfigResolutionScope : IDisposable
         {
             _remoteConcurrency!.Wait(CancellationToken);
             lease = new RemoteLookupLease(_remoteConcurrency);
-            // A slot can become available at the same instant the deadline cancels the
-            // previous holder. SemaphoreSlim may grant that slot to a queued waiter even
-            // though its token is now cancelled; such a grant is not audit admission.
-            if (CancellationToken.IsCancellationRequested)
-            {
-                lease.Dispose();
-                lease = null;
-                diagnostic = MarkAuditDeadline();
-                return false;
-            }
-
-            return true;
+            return ConfirmRemoteLookupAdmission(ref lease, out diagnostic);
         }
         catch (OperationCanceledException) when (!_callerCancellation.IsCancellationRequested)
         {
             diagnostic = MarkAuditDeadline();
             return false;
         }
+    }
+
+    /// <summary>
+    /// Confirms a newly granted audit lease while the shared deadline is still live.
+    /// A grant racing with cancellation is disposed and reported as incomplete audit evidence.
+    /// This internal boundary is also used to verify that post-grant cancellation releases the slot.
+    /// </summary>
+    internal bool ConfirmRemoteLookupAdmission(ref IDisposable? lease, out ConfigProviderTerminalDiagnostic? diagnostic)
+    {
+        diagnostic = null;
+        // SemaphoreSlim may grant a queued waiter a slot just as its token is cancelled.
+        if (!CancellationToken.IsCancellationRequested)
+        {
+            return true;
+        }
+
+        lease!.Dispose();
+        lease = null;
+        diagnostic = MarkAuditDeadline();
+        return false;
     }
 
     /// <summary>Records a deadline without converting explicit caller cancellation to an audit failure.</summary>

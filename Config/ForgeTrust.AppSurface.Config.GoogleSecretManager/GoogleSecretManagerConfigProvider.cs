@@ -155,6 +155,9 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
     /// <inheritdoc />
     public string Id => ProviderId;
 
+    /// <summary>Gets the number of published flights for deterministic retirement tests without exposing resource identities.</summary>
+    internal int PublishedFlightCount => _inFlight.Count;
+
     /// <inheritdoc />
     public ConfigSecretReferenceValidation ValidateReference(ConfigSecretReference reference)
     {
@@ -571,10 +574,12 @@ public sealed class GoogleSecretManagerConfigProvider : IConfigProvider, IConfig
     {
         try
         {
-            _ = flight.Completion.ContinueWith(
-                _ => _inFlight.TryRemove(new KeyValuePair<string, PayloadFlight>(resourceName, flight)),
+            // Completion has already been published; queue retirement directly so a
+            // rejecting scheduler throws here and the fallback can remove this holder.
+            _ = Task.Factory.StartNew(
+                () => _inFlight.TryRemove(new KeyValuePair<string, PayloadFlight>(resourceName, flight)),
                 CancellationToken.None,
-                TaskContinuationOptions.ExecuteSynchronously,
+                TaskCreationOptions.DenyChildAttach,
                 _flightCleanupScheduler);
         }
         catch (Exception)
