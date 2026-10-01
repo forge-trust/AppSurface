@@ -598,6 +598,387 @@ public sealed class GoogleSecretManagerConcurrencyContractTests
         }
     }
 
+    [Fact]
+    public async Task UncancellableColdWinner_FetchesOnResolverThreadAndWarmHitSkipsClient()
+    {
+        using var client = new GatedClient((Resource, "inline-result"));
+        var provider = CreateProvider(client, options => options.MapSecret("Payments:One", Resource));
+        var owner = Start(provider, "Payments:One");
+        try
+        {
+            await client.AllStarted.Task.WaitAsync(Timeout);
+            owner.WaitUntilBlocked();
+            Assert.Equal(owner.ManagedThreadId, Assert.Single(client.ThreadIds));
+
+            client.Release.Set();
+            AssertFound("inline-result", await owner.Result.WaitAsync(Timeout));
+            AssertFound("inline-result", provider.Resolve<string>(Request("payments:one")));
+            Assert.Equal(1, client.Calls);
+        }
+        finally
+        {
+            client.Release.Set();
+            await owner.Result.WaitAsync(Timeout);
+        }
+    }
+
+    [Fact]
+    public async Task CancellableWinner_AndUncancellableJoinerShareWorkerOwnedFlight()
+    {
+        using var client = new GatedClient((Resource, "shared-result"));
+        var provider = CreateProvider(client, options => options.MapSecret("Payments:One", Resource));
+        using var cancellation = new CancellationTokenSource();
+        using var ownerScope = new ConfigResolutionScope(cancellation.Token);
+        var owner = Start(provider, "Payments:One", ownerScope);
+        PendingResolution? joiner = null;
+        try
+        {
+            await client.AllStarted.Task.WaitAsync(Timeout);
+            owner.WaitUntilBlocked();
+            joiner = Start(provider, "payments:one");
+            joiner.WaitUntilBlocked();
+
+            Assert.NotEqual(owner.ManagedThreadId, Assert.Single(client.ThreadIds));
+            Assert.Equal(1, client.Calls);
+            client.Release.Set();
+            AssertFound("shared-result", await owner.Result.WaitAsync(Timeout));
+            AssertFound("shared-result", await joiner.Result.WaitAsync(Timeout));
+            Assert.Equal(1, client.Calls);
+        }
+        finally
+        {
+            client.Release.Set();
+            await owner.Result.WaitAsync(Timeout);
+            if (joiner is not null) await joiner.Result.WaitAsync(Timeout);
+        }
+    }
+
+    [Fact]
+    public async Task AuditWinner_AndUncancellableJoinerShareWorkerOwnedFlight()
+    {
+        using var client = new GatedClient((Resource, "audit-owned-result"));
+        var provider = CreateProvider(client, options => options.MapSecret("Payments:One", Resource));
+        using var auditScope = new ConfigResolutionScope(auditOptions: new ConfigResourceOptions
+        {
+            AuditTimeout = TimeSpan.FromSeconds(5),
+            MaxAuditRemoteLookups = 2,
+            MaxAuditConcurrency = 1
+        });
+        var owner = StartAudit(provider, "Payments:One", auditScope);
+        PendingResolution? joiner = null;
+        try
+        {
+            await client.AllStarted.Task.WaitAsync(Timeout);
+            joiner = Start(provider, "payments:one");
+            joiner.WaitUntilBlocked();
+            Assert.Equal(1, client.Calls);
+
+            client.Release.Set();
+            var audit = await owner.Result.WaitAsync(Timeout);
+            Assert.Equal(ConfigAuditEntryState.Resolved, audit.State);
+            Assert.Equal("audit-owned-result", audit.Value);
+            AssertFound("audit-owned-result", await joiner.Result.WaitAsync(Timeout));
+            Assert.Equal(1, client.Calls);
+        }
+        finally
+        {
+            client.Release.Set();
+            await owner.Result.WaitAsync(Timeout);
+            if (joiner is not null) await joiner.Result.WaitAsync(Timeout);
+        }
+    }
+
+    [Fact]
+    public async Task AuditJoinerDeadline_ExpiresWhileInlineOwnerStillOwnsFetch()
+    {
+        using var client = new GatedClient((Resource, "inline-result"));
+        var provider = CreateProvider(client, options => options.MapSecret("Payments:One", Resource));
+        var owner = Start(provider, "Payments:One");
+        using var auditScope = new ConfigResolutionScope(auditOptions: new ConfigResourceOptions
+        {
+            AuditTimeout = TimeSpan.FromSeconds(2),
+            MaxAuditRemoteLookups = 1,
+            MaxAuditConcurrency = 1
+        });
+        PendingAuditResolution? joiner = null;
+        try
+        {
+            await client.AllStarted.Task.WaitAsync(Timeout);
+            owner.WaitUntilBlocked();
+            joiner = StartAudit(provider, "payments:one", auditScope);
+            joiner.WaitUntilBlocked();
+            var audit = await joiner.Result.WaitAsync(Timeout);
+
+            Assert.Equal(ConfigAuditEntryState.Invalid, audit.State);
+            Assert.Equal("config-audit-deadline", Assert.Single(audit.Diagnostics).Code);
+            Assert.Equal("config-audit-deadline", auditScope.IncompleteAuditDiagnostic!.Code);
+            Assert.False(owner.Result.IsCompleted);
+            Assert.Equal(1, client.Calls);
+
+            client.Release.Set();
+            AssertFound("inline-result", await owner.Result.WaitAsync(Timeout));
+            Assert.Equal(1, client.Calls);
+        }
+        finally
+        {
+            client.Release.Set();
+            await owner.Result.WaitAsync(Timeout);
+            if (joiner is not null) await joiner.Result.WaitAsync(Timeout);
+        }
+    }
+
+    [Fact]
+    public async Task AuditConcurrencyLease_SerializesDistinctFetchesWhileDeadlineIsLive()
+    {
+        const string secondResource = "projects/project/secrets/shared-payments--two/versions/stable";
+        using var client = new SequencedGatedClient((Resource, "first-result"), (secondResource, "second-result"));
+        var provider = CreateProvider(client, options =>
+        {
+            options.CacheTtl = null;
+            options.MapSecret("Payments:One", Resource);
+            options.MapSecret("Payments:Two", secondResource);
+        });
+        using var scope = new ConfigResolutionScope(auditOptions: new ConfigResourceOptions
+        {
+            AuditTimeout = TimeSpan.FromSeconds(5),
+            MaxAuditRemoteLookups = 2,
+            MaxAuditConcurrency = 1
+        });
+        var first = Start(provider, "Payments:One", scope);
+        PendingResolution? second = null;
+        try
+        {
+            await client.Started(1).WaitAsync(Timeout);
+            first.WaitUntilBlocked();
+            second = Start(provider, "Payments:Two", scope);
+            second.WaitUntilBlocked();
+
+            Assert.False(scope.CancellationToken.IsCancellationRequested);
+            Assert.False(second.Result.IsCompleted);
+            Assert.Equal(1, client.Calls);
+
+            client.Release(1);
+            AssertFound("first-result", await first.Result.WaitAsync(Timeout));
+            await client.Started(2).WaitAsync(Timeout);
+            second.WaitUntilBlocked();
+            Assert.Equal(2, client.Calls);
+
+            client.Release(2);
+            AssertFound("second-result", await second.Result.WaitAsync(Timeout));
+        }
+        finally
+        {
+            client.Release(1);
+            client.Release(2);
+            await first.Result.WaitAsync(Timeout);
+            if (second is not null) await second.Result.WaitAsync(Timeout);
+        }
+    }
+
+    [Fact]
+    public async Task AuditDeadline_RejectsQueuedAndLaterLookupsWhileAdmittedFetchFinishes()
+    {
+        const string secondResource = "projects/project/secrets/shared-payments--two/versions/stable";
+        const string thirdResource = "projects/project/secrets/shared-payments--three/versions/stable";
+        using var client = new SequencedGatedClient((Resource, "first-result"), (secondResource, "second-result"), (thirdResource, "third-result"));
+        var provider = CreateProvider(client, options =>
+        {
+            options.CacheTtl = null;
+            options.MapSecret("Payments:One", Resource);
+            options.MapSecret("Payments:Two", secondResource);
+            options.MapSecret("Payments:Three", thirdResource);
+        });
+        using var scope = new ConfigResolutionScope(auditOptions: new ConfigResourceOptions
+        {
+            AuditTimeout = TimeSpan.FromSeconds(2),
+            MaxAuditRemoteLookups = 3,
+            MaxAuditConcurrency = 1
+        });
+        var first = Start(provider, "Payments:One", scope);
+        PendingResolution? second = null;
+        try
+        {
+            await client.Started(1).WaitAsync(Timeout);
+            first.WaitUntilBlocked();
+            second = Start(provider, "Payments:Two", scope);
+            second.WaitUntilBlocked();
+            await WaitForCancellationAsync(scope.CancellationToken);
+
+            AssertAuditDeadline(await first.Result.WaitAsync(Timeout));
+            AssertAuditDeadline(await second.Result.WaitAsync(Timeout));
+            Assert.Equal(1, client.Calls);
+            AssertAuditDeadline(provider.Resolve<string>(Request("Payments:Three", scope)));
+            Assert.Equal(1, client.Calls);
+
+            client.Release(1);
+            await client.Finished(1).WaitAsync(Timeout);
+        }
+        finally
+        {
+            client.Release(1);
+            client.Release(2);
+            client.Release(3);
+            await first.Result.WaitAsync(Timeout);
+            if (second is not null) await second.Result.WaitAsync(Timeout);
+            await client.Finished(1).WaitAsync(Timeout);
+        }
+    }
+
+    [Fact]
+    public async Task AuditWorkerAdmittedBeforeDeadline_MayEnterClientAfterDeadline()
+    {
+        using var client = new GatedClient((Resource, "admitted-result"));
+        var workerScheduler = new HeldCleanupScheduler();
+        var options = new AppSurfaceGoogleSecretManagerOptions { ProjectId = "project", CacheTtl = null };
+        options.MapSecret("Payments:One", Resource);
+        var provider = new GoogleSecretManagerConfigProvider(
+            Options.Create(options), client, serviceProvider: null, timeProvider: null,
+            flightWorkerScheduler: workerScheduler);
+        using var scope = new ConfigResolutionScope(auditOptions: new ConfigResourceOptions
+        {
+            AuditTimeout = TimeSpan.FromSeconds(2),
+            MaxAuditRemoteLookups = 1,
+            MaxAuditConcurrency = 1
+        });
+        var admittedOwner = StartAudit(provider, "Payments:One", scope);
+        Task<bool>? runningWorker = null;
+        try
+        {
+            await workerScheduler.Queued.Task.WaitAsync(Timeout);
+            Assert.Equal(0, client.Calls);
+
+            await WaitForCancellationAsync(scope.CancellationToken);
+            var expiredWait = await admittedOwner.Result.WaitAsync(Timeout);
+            Assert.Equal(ConfigAuditEntryState.Invalid, expiredWait.State);
+            Assert.Equal("config-audit-deadline", Assert.Single(expiredWait.Diagnostics).Code);
+            Assert.Equal(0, client.Calls);
+
+            var rejected = provider.Resolve<string>(Request("Payments:One", scope));
+            AssertAuditDeadline(rejected);
+            Assert.Equal(0, client.Calls);
+
+            runningWorker = Task.Run(workerScheduler.RunNext);
+            await client.AllStarted.Task.WaitAsync(Timeout);
+            Assert.Equal(1, client.Calls);
+            client.Release.Set();
+            Assert.True(await runningWorker.WaitAsync(Timeout));
+            await client.Finished.Task.WaitAsync(Timeout);
+        }
+        finally
+        {
+            client.Release.Set();
+            if (runningWorker is not null) await runningWorker.WaitAsync(Timeout);
+            workerScheduler.Drain();
+            await admittedOwner.Result.WaitAsync(Timeout);
+            if (client.Calls > 0) await client.Finished.Task.WaitAsync(Timeout);
+        }
+    }
+
+    [Fact]
+    public async Task WorkerSchedulingFailure_CompletesAndRetiresPublishedFlightForRetry()
+    {
+        using var client = new SequencedGatedClient((Resource, "retry-result"));
+        using var workerScheduler = new GateFirstRejectionThenRunScheduler();
+        var options = new AppSurfaceGoogleSecretManagerOptions { ProjectId = "project", CacheTtl = null };
+        options.MapSecret("Payments:One", Resource);
+        var provider = new GoogleSecretManagerConfigProvider(
+            Options.Create(options), client, serviceProvider: null, timeProvider: null,
+            flightWorkerScheduler: workerScheduler);
+        using var cancellation = new CancellationTokenSource();
+        using var scope = new ConfigResolutionScope(cancellation.Token);
+
+        var owner = Start(provider, "Payments:One", scope);
+        PendingResolution? joiner = null;
+        try
+        {
+            await workerScheduler.FirstQueueAttempt.Task.WaitAsync(Timeout);
+            joiner = Start(provider, "payments:one");
+            joiner.WaitUntilBlocked();
+            workerScheduler.RejectFirstQueue();
+
+            var schedulingFailure = await Record.ExceptionAsync(async () => await owner.Result.WaitAsync(Timeout));
+            var joinerFailure = await Record.ExceptionAsync(async () => await joiner.Result.WaitAsync(Timeout));
+            Assert.IsType<TaskSchedulerException>(schedulingFailure);
+            Assert.Same(schedulingFailure, joinerFailure);
+            Assert.Contains("test-worker-scheduler-rejected-first-flight", schedulingFailure.ToString(), StringComparison.Ordinal);
+            Assert.Equal(1, workerScheduler.QueueAttempts);
+            Assert.Equal(0, client.Calls);
+
+            // The same resource must publish a new flight and reach the client after the failed holder retires.
+            client.Release(1);
+            var retry = provider.Resolve<string>(Request("Payments:One", scope));
+            AssertFound("retry-result", retry);
+            Assert.Equal(2, workerScheduler.QueueAttempts);
+            Assert.Equal(1, client.Calls);
+            await client.Finished(1).WaitAsync(Timeout);
+        }
+        finally
+        {
+            workerScheduler.RejectFirstQueue();
+            client.Release(1);
+            try { await owner.Result.WaitAsync(Timeout); }
+            catch (TaskSchedulerException) { }
+            if (joiner is not null)
+            {
+                try { await joiner.Result.WaitAsync(Timeout); }
+                catch (TaskSchedulerException) { }
+            }
+            if (client.Calls > 0) await client.Finished(1).WaitAsync(Timeout);
+        }
+    }
+
+    [Fact]
+    public async Task LateCompletedFlightCleanup_CannotRemoveItsReplacementFlight()
+    {
+        using var client = new SequencedGatedClient((Resource, "old-result"), (Resource, "replacement-result"));
+        var cleanupScheduler = new HeldCleanupScheduler();
+        var options = new AppSurfaceGoogleSecretManagerOptions { ProjectId = "project", CacheTtl = null };
+        options.MapSecret("Payments:One", Resource);
+        var provider = new GoogleSecretManagerConfigProvider(
+            Options.Create(options), client, serviceProvider: null, timeProvider: null, flightCleanupScheduler: cleanupScheduler);
+        using var cancellation = new CancellationTokenSource();
+        using var cancelledScope = new ConfigResolutionScope(cancellation.Token);
+        var cancelledOwner = Start(provider, "Payments:One", cancelledScope);
+        PendingResolution? replacement = null;
+        PendingResolution? joiner = null;
+        try
+        {
+            await client.Started(1).WaitAsync(Timeout);
+            cancelledOwner.WaitUntilBlocked();
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelledOwner.Result.WaitAsync(Timeout));
+
+            client.Release(1);
+            await client.Finished(1).WaitAsync(Timeout);
+            await cleanupScheduler.Queued.Task.WaitAsync(Timeout);
+
+            replacement = Start(provider, "Payments:One");
+            await client.Started(2).WaitAsync(Timeout);
+            replacement.WaitUntilBlocked();
+            Assert.True(cleanupScheduler.RunNext());
+
+            joiner = Start(provider, "payments:one");
+            joiner.WaitUntilBlocked();
+            Assert.Equal(2, client.Calls);
+
+            client.Release(2);
+            AssertFound("replacement-result", await replacement.Result.WaitAsync(Timeout));
+            AssertFound("replacement-result", await joiner.Result.WaitAsync(Timeout));
+            Assert.Equal(2, client.Calls);
+        }
+        finally
+        {
+            client.Release(1);
+            client.Release(2);
+            cleanupScheduler.Drain();
+            try { await cancelledOwner.Result.WaitAsync(Timeout); }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+            if (replacement is not null) await replacement.Result.WaitAsync(Timeout);
+            if (joiner is not null) await joiner.Result.WaitAsync(Timeout);
+            await client.Finished(1).WaitAsync(Timeout);
+        }
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -764,6 +1145,9 @@ public sealed class GoogleSecretManagerConcurrencyContractTests
     private static PendingResolution Start(GoogleSecretManagerConfigProvider provider, string key, ConfigResolutionScope? scope = null) =>
         new(() => provider.Resolve<string>(Request(key, scope)));
 
+    private static PendingAuditResolution StartAudit(GoogleSecretManagerConfigProvider provider, string key, ConfigResolutionScope scope) =>
+        new(() => provider.ResolveForAudit(Request(key, scope), typeof(string), ConfigAuditSourceRole.Base));
+
     private static void AssertFound(string expected, ConfigProviderValueResult<string> result)
     {
         Assert.Equal(ConfigProviderValueStatus.Found, result.Status);
@@ -776,6 +1160,21 @@ public sealed class GoogleSecretManagerConcurrencyContractTests
         Assert.Null(result.Value);
         Assert.Equal("config-key-collision", result.Diagnostic!.Code);
         Assert.DoesNotContain("must-not-be-selected", result.Diagnostic.ToDisplayString(), StringComparison.Ordinal);
+    }
+
+    private static void AssertAuditDeadline(ConfigProviderValueResult<string> result)
+    {
+        Assert.Equal(ConfigProviderValueStatus.Terminal, result.Status);
+        Assert.Null(result.Value);
+        Assert.Equal("config-audit-deadline", result.Diagnostic!.Code);
+    }
+
+    private static async Task WaitForCancellationAsync(CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested) return;
+        var canceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var registration = cancellationToken.Register(() => canceled.TrySetResult());
+        await canceled.Task.WaitAsync(Timeout);
     }
 
     // Dedicated threads avoid pool starvation from the synchronous provider contract. After the
@@ -805,12 +1204,46 @@ public sealed class GoogleSecretManagerConcurrencyContractTests
         }
 
         internal Task<ConfigProviderValueResult<string>> Result => _completion.Task;
+        internal int ManagedThreadId => _thread.ManagedThreadId;
 
         internal void WaitUntilBlocked()
         {
             Assert.True(SpinWait.SpinUntil(() => Result.IsCompleted
                 || (Volatile.Read(ref _enteredResolution) != 0
                     && (_thread.ThreadState & ThreadState.WaitSleepJoin) != 0), Timeout), "Resolution did not reach its bounded wait.");
+            Assert.False(Result.IsCompleted);
+        }
+    }
+
+    private sealed class PendingAuditResolution
+    {
+        private readonly Thread _thread;
+        private int _enteredResolution;
+        private readonly TaskCompletionSource<ConfigProviderAuditResolution> _completion =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal PendingAuditResolution(Func<ConfigProviderAuditResolution> resolve)
+        {
+            _thread = new Thread(() =>
+            {
+                try
+                {
+                    Volatile.Write(ref _enteredResolution, 1);
+                    _completion.TrySetResult(resolve());
+                }
+                catch (Exception exception) { _completion.TrySetException(exception); }
+            })
+            { IsBackground = true };
+            _thread.Start();
+        }
+
+        internal Task<ConfigProviderAuditResolution> Result => _completion.Task;
+
+        internal void WaitUntilBlocked()
+        {
+            Assert.True(SpinWait.SpinUntil(() => Result.IsCompleted
+                || (Volatile.Read(ref _enteredResolution) != 0
+                    && (_thread.ThreadState & ThreadState.WaitSleepJoin) != 0), Timeout), "Audit resolution did not reach its bounded wait.");
             Assert.False(Result.IsCompleted);
         }
     }
@@ -836,6 +1269,39 @@ public sealed class GoogleSecretManagerConcurrencyContractTests
             while (_queued.TryDequeue(out var task))
                 TryExecuteTask(task);
         }
+
+        internal bool RunNext() => _queued.TryDequeue(out var task) && TryExecuteTask(task);
+    }
+
+    private sealed class GateFirstRejectionThenRunScheduler : TaskScheduler, IDisposable
+    {
+        private readonly ManualResetEventSlim _releaseFirstQueue = new(false);
+        private int _queueAttempts;
+
+        internal int QueueAttempts => Volatile.Read(ref _queueAttempts);
+        internal TaskCompletionSource FirstQueueAttempt { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override IEnumerable<Task> GetScheduledTasks() => [];
+
+        protected override void QueueTask(Task task)
+        {
+            if (Interlocked.Increment(ref _queueAttempts) == 1)
+            {
+                FirstQueueAttempt.TrySetResult();
+                if (!_releaseFirstQueue.Wait(Timeout))
+                    throw new TimeoutException("The test did not release the rejected worker schedule.");
+                throw new InvalidOperationException("test-worker-scheduler-rejected-first-flight");
+            }
+
+            if (!TryExecuteTask(task))
+                throw new InvalidOperationException("The test worker task could not be executed.");
+        }
+
+        protected override bool TryExecuteTaskInline(Task task, bool taskWasPreviouslyQueued) => false;
+
+        internal void RejectFirstQueue() => _releaseFirstQueue.Set();
+
+        public void Dispose() => _releaseFirstQueue.Dispose();
     }
 
     private sealed class GatedClient(params (string Resource, string Value)[] values) : IAppSurfaceGoogleSecretManagerClient, IDisposable
@@ -843,22 +1309,72 @@ public sealed class GoogleSecretManagerConcurrencyContractTests
         private int _calls;
         internal int Calls => Volatile.Read(ref _calls);
         internal ConcurrentQueue<string> Requested { get; } = new();
+        internal ConcurrentQueue<int> ThreadIds { get; } = new();
         internal TaskCompletionSource AllStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource Finished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal ManualResetEventSlim Release { get; } = new(false);
         internal bool FailFirstFetch { get; init; }
 
         public AppSurfaceGoogleSecretPayload AccessSecretVersion(string resourceName, TimeSpan timeout)
         {
+            ThreadIds.Enqueue(Environment.CurrentManagedThreadId);
             Requested.Enqueue(resourceName);
             var call = Interlocked.Increment(ref _calls);
             if (call >= values.Length) AllStarted.TrySetResult();
-            if (!Release.Wait(Timeout)) throw new TimeoutException("The test did not release its client gate.");
-            if (FailFirstFetch && call == 1) throw new IOException("client-failure-sentinel");
-            var value = values.Single(item => StringComparer.Ordinal.Equals(item.Resource, resourceName)).Value;
-            return new AppSurfaceGoogleSecretPayload(Encoding.UTF8.GetBytes(value), resourceName);
+            try
+            {
+                if (!Release.Wait(Timeout)) throw new TimeoutException("The test did not release its client gate.");
+                if (FailFirstFetch && call == 1) throw new IOException("client-failure-sentinel");
+                var value = values.Single(item => StringComparer.Ordinal.Equals(item.Resource, resourceName)).Value;
+                return new AppSurfaceGoogleSecretPayload(Encoding.UTF8.GetBytes(value), resourceName);
+            }
+            finally
+            {
+                Finished.TrySetResult();
+            }
         }
 
         public void Dispose() => Release.Dispose();
+    }
+
+    private sealed class SequencedGatedClient(params (string Resource, string Value)[] values) : IAppSurfaceGoogleSecretManagerClient, IDisposable
+    {
+        private readonly ManualResetEventSlim[] _releases = values.Select(_ => new ManualResetEventSlim(false)).ToArray();
+        private readonly TaskCompletionSource[] _started = values
+            .Select(_ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).ToArray();
+        private readonly TaskCompletionSource[] _finished = values
+            .Select(_ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).ToArray();
+        private int _calls;
+
+        internal int Calls => Volatile.Read(ref _calls);
+        internal Task Started(int call) => _started[call - 1].Task;
+        internal Task Finished(int call) => _finished[call - 1].Task;
+        internal void Release(int call) => _releases[call - 1].Set();
+
+        public AppSurfaceGoogleSecretPayload AccessSecretVersion(string resourceName, TimeSpan timeout)
+        {
+            var call = Interlocked.Increment(ref _calls);
+            if (call > values.Length) throw new InvalidOperationException("The test observed an unexpected extra client call.");
+            var index = call - 1;
+            _started[index].TrySetResult();
+            try
+            {
+                if (!_releases[index].Wait(Timeout)) throw new TimeoutException("The test did not release its client gate.");
+                var response = values[index];
+                if (!StringComparer.Ordinal.Equals(response.Resource, resourceName))
+                    throw new InvalidOperationException("The test client call order did not match the expected resource.");
+                return new AppSurfaceGoogleSecretPayload(Encoding.UTF8.GetBytes(response.Value), response.Resource);
+            }
+            finally
+            {
+                _finished[index].TrySetResult();
+            }
+        }
+
+        public void Dispose()
+        {
+            foreach (var release in _releases) release.Dispose();
+        }
     }
 
     private sealed class MutableClient(AppSurfaceGoogleSecretPayload payload) : IAppSurfaceGoogleSecretManagerClient

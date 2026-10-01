@@ -78,6 +78,9 @@ internal sealed class ConfigResolutionScope : IDisposable
     /// Reserves one uncached remote lookup and a concurrency slot within the operation deadline.
     /// Dispose the lease after the caller stops waiting; this never cancels a shared fetch.
     /// Cached reads need no reservation. A rejected reservation must not start a remote operation.
+    /// Successful lease acquisition while the shared token is live is the admission boundary: a worker admitted before cancellation
+    /// may be queued or enter its synchronous client call after the deadline. A new request arriving
+    /// after cancellation cannot acquire a lease or start a worker.
     /// </summary>
     internal bool TryAcquireRemoteLookup(out IDisposable? lease, out ConfigProviderTerminalDiagnostic? diagnostic)
     {
@@ -114,6 +117,17 @@ internal sealed class ConfigResolutionScope : IDisposable
         {
             _remoteConcurrency!.Wait(CancellationToken);
             lease = new RemoteLookupLease(_remoteConcurrency);
+            // A slot can become available at the same instant the deadline cancels the
+            // previous holder. SemaphoreSlim may grant that slot to a queued waiter even
+            // though its token is now cancelled; such a grant is not audit admission.
+            if (CancellationToken.IsCancellationRequested)
+            {
+                lease.Dispose();
+                lease = null;
+                diagnostic = MarkAuditDeadline();
+                return false;
+            }
+
             return true;
         }
         catch (OperationCanceledException) when (!_callerCancellation.IsCancellationRequested)

@@ -15,6 +15,26 @@ Google Secret Manager. Environment variables remain the top emergency override. 
 appsettings defaults < LocalSecrets < Google Secret Manager < environment variables
 ```
 
+## Mapped Google reads
+
+The public `IConfigManager.GetValue<T>` calls are synchronous and have no cancellation-token parameter. For a cold
+mapped Google lookup, the caller that wins a new exact-resource flight runs `Fetch` inline, including the synchronous
+client call, on its own managed thread; callers joining that resource wait on its published holder and share its result.
+A tokenless joiner may wait for the winner. A warm successful cache hit skips the flight. A winning internal
+token-bearing ordinary provider request or public audit request uses a `TaskScheduler` worker so its caller can stop
+waiting; a joiner follows the existing flight and never starts another one. Cancellation ends the wait, while an
+already-started synchronous client call may continue until its configured timeout. Audit admission is successful
+remote-lookup lease acquisition: an admitted worker can be queued or enter the client after the audit deadline, while a
+new request in the cancelled scope cannot acquire a lease or start work. An audit joiner of an inline startup flight
+does not create an audit worker.
+
+These details apply to the mapped provider path; file-declared `Secret<T>` references use a separate direct client path.
+See the Google package's [mapped lookup scheduling and troubleshooting reference](../ForgeTrust.AppSurface.Config.GoogleSecretManager/README.md#mapped-lookup-scheduling),
+the [internal request/scope contract](ConfigProviderRequest.cs), and its
+[credential-free mapped proof and pinned fake workload](../ForgeTrust.AppSurface.Config.GoogleSecretManager.Benchmarks/README.md).
+Ordinary configuration lookups expose no token knob; audit deadlines and bounds are documented in the
+[configuration audit guide](#configuration-audit-reports).
+
 For the typed file declaration contract, supported scalar destinations, atomic descriptor layers, exact environment rescue,
 safe diagnostics, and migration from `MapSecret(...)`, start with the [canonical file declared secret references guide](docs/file-secret-references.md)
 and its [network-free executable golden path](../../examples/file-secret-references/README.md).
