@@ -586,7 +586,7 @@ Resolve/ResolveForAudit                              Mapped cold startup
   [GAP] publish inert holder -> sole winner             [★★★ EXISTING] denied/unavailable safe diagnostic
   [GAP] inline owner -> same-thread Fetch                [★★ EXISTING] later failure retry
   [GAP] audit/token winner -> one worker                 [GAP] #833 stale uncached result under delayed cleanup
-  [GAP] joiner reaches own wait before owner finishes   [GAP] runnable mapped proof command from README
+  [GAP] joiner reaches own wait before owner finishes   [GAP] executable mapped proof command from README
   [★★ EXISTING] waiter cancellation isolation           [GAP] same benchmark runner on both revisions
   [GAP] worker scheduling failure completes holder     No UI route or LLM eval scope.
   [★★ EXISTING] Fetch RPC/timeout safe mapping
@@ -626,7 +626,7 @@ No new deploy step, data migration or runtime flag is needed. Rollback is provid
 
 - [ ] **T1 (P1, human: ~4h / agent: ~40m)** — Provider: implement inert holder, winner mode, exception completion and exact retirement while preserving #833. Surfaced by architecture and code-quality review. Files: `GoogleSecretManagerConfigProvider.cs`; verify with focused Google tests and formatting.
 - [ ] **T2 (P1, human: ~4h / agent: ~45m)** — Tests: prove owner-thread identity, mixed winners, delayed worker start, audit admission, cancelled scope and completed-holder retirement. Surfaced by test review and native E1/E2. Files: Google concurrency/provider test projects; verify with focused xUnit suite and solution coverage when practical.
-- [ ] **T3 (P2, human: ~2h / agent: ~35m)** — Benchmark and docs: run a pinned fake-client workload on both revisions, record raw value-free results, update linked Google/Config references and runnable proof. Surfaced by performance and DX review. Files: benchmark/test harness and package references; verify the documented command as written.
+- [ ] **T3 (P2, human: ~2h / agent: ~35m)** — Benchmark and docs: run a pinned fake-client workload on both revisions, record raw value-free results, update linked Google/Config references and executable proof. Surfaced by performance and DX review. Files: benchmark/test harness and package references; verify the documented command as written.
 
 Sequential implementation is appropriate because the provider is the only production module being changed. A docs/benchmark lane can prepare independently after its workload contract is pinned; final integration and focused tests are sequential. No worktree parallelization is required.
 
@@ -654,7 +654,7 @@ Sequential implementation is appropriate because the provider is the only produc
 | 5 | CEO | Add cancelled-audit-scope admission regression | Mechanical | Completeness | One linked token must close new reservations | Transfer lease to worker |
 | 6 | CEO | Complete and retire holder if worker startup fails | Mechanical | Failure safety | Published holder must never strand joiners | Leave faulted startup pending |
 | 7 | DX | Label ordinary token reads as internal and audit deadline as public | Factual correction | API accuracy | Manager API has no token parameter | Add public cancellation API |
-| 8 | DX | Make mapped-provider proof and benchmark runnable with one pinned workload | Mechanical | Reproducibility | Current plan lacked a comparable command and format | Treat independently rebuilt fake workloads as comparable |
+| 8 | DX | Make mapped-provider proof and benchmark executable with one pinned workload | Mechanical | Reproducibility | Current plan lacked a comparable command and format | Treat independently rebuilt fake workloads as comparable |
 | 9 | Eng | Define audit admission at successful lease reservation | Factual correction | Ordering clarity | Worker dispatch/client entry can race with deadline | Promise client entry before deadline |
 | 10 | Eng | Define normal winner retirement and exact completed-holder helping | Factual correction | Ownership clarity | #833 permits a later caller to retire a completed flight | Claim only winner can remove a completed holder |
 
