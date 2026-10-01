@@ -9,57 +9,21 @@ internal static class Program
 
     public static async Task<int> Main(string[] args)
     {
-        if (args.Length == 1 && string.Equals(args[0], "--help", StringComparison.Ordinal))
+        if (IsHelp(args))
         {
-            Console.Out.WriteLine(RunUsage);
-            Console.Out.WriteLine(VerifyUsage);
-            Console.Out.WriteLine("The run command reports host execution only. Gate verification is a separate trusted-controller operation.");
-            Console.Out.WriteLine("verify-gate exits successfully only when the independent verifier confirms eligibility against current GitHub PR and subject-job state.");
-            return 0;
+            return await RunAsync(args, Console.Out, Console.Error).ConfigureAwait(false);
         }
 
         if (args.Length > 0 && string.Equals(args[0], "verify-gate", StringComparison.Ordinal))
         {
-            if (!TryParseVerify(args, out var verificationOptions))
+            if (!TryParseVerify(args, out _))
             {
-                Console.Error.WriteLine("ASEGG001: Invalid command arguments. " + VerifyUsage);
-                return 64;
-            }
-
-            using var verificationCancellation = new CancellationTokenSource();
-            ConsoleCancelEventHandler verificationCancelHandler = (_, eventArgs) =>
-            {
-                eventArgs.Cancel = true;
-                verificationCancellation.Cancel();
-            };
-            Console.CancelKeyPress += verificationCancelHandler;
-            using GitHubActionsEvidenceAuthorityProvider? authorityProvider = GitHubActionsEvidenceAuthorityProvider.TryCreateFromEnvironment();
-            try
-            {
-                return await EvidenceGateVerifier.ExecuteAsync(
-                    verificationOptions.PlanPath,
-                    verificationOptions.ManifestPath,
-                    verificationOptions.PolicyPath,
-                    verificationOptions.RepositoryPath,
-                    verificationOptions.IdentityPath,
-                    verificationOptions.OutputDirectory,
-                    verificationOptions.ArtifactHandoffRootPath,
-                    (IEvidencePullRequestGateAuthorityProvider?)authorityProvider ?? new UnavailableEvidenceAuthorityProvider(),
-                    artifactVerifier: new EvidencePullRequestGateNoFollowArtifactVerifier(),
-                    Console.Out,
-                    Console.Error,
-                    verificationCancellation.Token).ConfigureAwait(false);
-            }
-            finally
-            {
-                Console.CancelKeyPress -= verificationCancelHandler;
+                return await RunAsync(args, Console.Out, Console.Error).ConfigureAwait(false);
             }
         }
-
-        if (!TryParse(args, out var options))
+        else if (!TryParse(args, out _))
         {
-            Console.Error.WriteLine("ASEGH001: Invalid command arguments. " + RunUsage);
-            return 64;
+            return await RunAsync(args, Console.Out, Console.Error).ConfigureAwait(false);
         }
 
         using var cancellation = new CancellationTokenSource();
@@ -71,19 +35,90 @@ internal static class Program
         Console.CancelKeyPress += cancelHandler;
         try
         {
-            return await EvidenceHostRunner.ExecuteAsync(
-                options.PlanPath,
-                options.PolicyPath,
-                options.RepositoryPath,
-                options.OutputDirectory,
-                Console.Out,
-                Console.Error,
-                cancellation.Token).ConfigureAwait(false);
+            return await RunAsync(args, Console.Out, Console.Error, cancellation.Token).ConfigureAwait(false);
         }
         finally
         {
             Console.CancelKeyPress -= cancelHandler;
         }
+    }
+
+    /// <summary>Dispatches one EvidenceGate command using the supplied output writers.</summary>
+    /// <remarks>
+    /// This internal entry point contains the same argument parsing and execution routing used by
+    /// <see cref="Main(string[])"/>. Supplying writers lets in-process callers observe command output
+    /// without replacing the process-wide <see cref="Console.Out"/> or <see cref="Console.Error"/>.
+    /// Invalid arguments return 64; command execution retains the host and verifier exit codes.
+    /// </remarks>
+    internal static async Task<int> RunAsync(
+        string[] args,
+        TextWriter standardOutput,
+        TextWriter standardError,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(standardOutput);
+        ArgumentNullException.ThrowIfNull(standardError);
+
+        if (IsHelp(args))
+        {
+            standardOutput.WriteLine(RunUsage);
+            standardOutput.WriteLine(VerifyUsage);
+            standardOutput.WriteLine("The run command reports host execution only. Gate verification is a separate trusted-controller operation.");
+            standardOutput.WriteLine("verify-gate exits successfully only when the independent verifier confirms eligibility against current GitHub PR and subject-job state.");
+            return 0;
+        }
+
+        if (args.Length > 0 && string.Equals(args[0], "verify-gate", StringComparison.Ordinal))
+        {
+            if (!TryParseVerify(args, out var verificationOptions))
+            {
+                standardError.WriteLine("ASEGG001: Invalid command arguments. " + VerifyUsage);
+                return 64;
+            }
+
+            return await ExecuteVerifyAsync(verificationOptions, standardOutput, standardError, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!TryParse(args, out var options))
+        {
+            standardError.WriteLine("ASEGH001: Invalid command arguments. " + RunUsage);
+            return 64;
+        }
+
+        return await EvidenceHostRunner.ExecuteAsync(
+            options.PlanPath,
+            options.PolicyPath,
+            options.RepositoryPath,
+            options.OutputDirectory,
+            standardOutput,
+            standardError,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static bool IsHelp(string[] args) =>
+        args.Length == 1 && string.Equals(args[0], "--help", StringComparison.Ordinal);
+
+    private static async Task<int> ExecuteVerifyAsync(
+        VerifyOptions verificationOptions,
+        TextWriter standardOutput,
+        TextWriter standardError,
+        CancellationToken cancellationToken)
+    {
+        using GitHubActionsEvidenceAuthorityProvider? authorityProvider = GitHubActionsEvidenceAuthorityProvider.TryCreateFromEnvironment();
+        return await EvidenceGateVerifier.ExecuteAsync(
+            verificationOptions.PlanPath,
+            verificationOptions.ManifestPath,
+            verificationOptions.PolicyPath,
+            verificationOptions.RepositoryPath,
+            verificationOptions.IdentityPath,
+            verificationOptions.OutputDirectory,
+            verificationOptions.ArtifactHandoffRootPath,
+            (IEvidencePullRequestGateAuthorityProvider?)authorityProvider ?? new UnavailableEvidenceAuthorityProvider(),
+            artifactVerifier: new EvidencePullRequestGateNoFollowArtifactVerifier(),
+            standardOutput,
+            standardError,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private static bool TryParse(string[] args, out RunOptions options)

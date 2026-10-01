@@ -110,6 +110,90 @@ public sealed class EvidenceHostRunnerTests
     }
 
     [Fact]
+    public async Task SyntacticallyMalformedPlanFailsBeforeHostCreation()
+    {
+        using var fixture = await GateFixture.CreateAsync(docsOnly: true);
+        await File.WriteAllTextAsync(fixture.PlanPath, "{invalid-json");
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.OutputDirectory,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGH103", stderr.ToString(), StringComparison.Ordinal);
+        Assert.Empty(stdout.ToString());
+        Assert.False(File.Exists(Path.Join(fixture.OutputDirectory, "evidence-manifest.json")));
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("malformed")]
+    [InlineData("noncanonical")]
+    public async Task UntrustedOrUnavailablePolicyCannotProduceACompleteClaim(string policyFailure)
+    {
+        using var fixture = await GateFixture.CreateAsync(docsOnly: true);
+        switch (policyFailure)
+        {
+            case "missing":
+                File.Delete(fixture.PolicyPath);
+                break;
+            case "malformed":
+                await File.WriteAllTextAsync(fixture.PolicyPath, "{invalid-json");
+                break;
+            case "noncanonical":
+                await File.AppendAllTextAsync(fixture.PolicyPath, " ");
+                break;
+        }
+
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        var exitCode = await EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.OutputDirectory,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains(policyFailure == "missing" ? "ASEGH102" : "ASEGH103", stderr.ToString(), StringComparison.Ordinal);
+        var manifestPath = Path.Join(fixture.OutputDirectory, "evidence-manifest.json");
+        var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(manifestPath));
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, manifest.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+    }
+
+    [Fact]
+    public async Task ExistingOutputFileCannotBeReplacedByAHostRun()
+    {
+        using var fixture = await GateFixture.CreateAsync(docsOnly: true);
+        Directory.CreateDirectory(fixture.OutputDirectory);
+        var manifestPath = Path.Join(fixture.OutputDirectory, "evidence-manifest.json");
+        await File.WriteAllTextAsync(manifestPath, "previous-output");
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.OutputDirectory,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGH108", stderr.ToString(), StringComparison.Ordinal);
+        Assert.Equal("previous-output", await File.ReadAllTextAsync(manifestPath));
+        Assert.False(File.Exists(Path.Join(fixture.OutputDirectory, "evidence-summary.json")));
+    }
+
+    [Fact]
     public async Task ParseableNonCanonicalPlanEmitsInvalidManifestAndFails()
     {
         using var fixture = await GateFixture.CreateAsync(docsOnly: true);
