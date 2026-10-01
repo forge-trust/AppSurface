@@ -332,7 +332,7 @@ curl --silent --show-error --include "$BASE_URL/ready"
 ```
 
 The CLI inspection uses PascalCase names. Work ID, revision, and timestamps vary; expect `State` `Succeeded`,
-`AttemptNumber` `1`, a non-null `TerminalAtUtc`, and `TerminalCode` null. The final readiness probe returns HTTP 200
+`AttemptNumber` `1`, a non-null `TerminalAtUtc`, and `TerminalCode` `completed`. The final readiness probe returns HTTP 200
 with `observedHealthState` `Healthy` and `isReady` true:
 
 ```json
@@ -345,7 +345,7 @@ with `observedHealthState` `Healthy` and `isReady` true:
   "AcceptedAtUtc": "<acceptance-UTC-timestamp>",
   "UpdatedAtUtc": "<generated-UTC-timestamp>",
   "TerminalAtUtc": "<generated-UTC-timestamp>",
-  "TerminalCode": null
+  "TerminalCode": "completed"
 }
 ```
 
