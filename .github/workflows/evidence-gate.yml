@@ -229,9 +229,11 @@ jobs:
         run: |
           set -euo pipefail
           handoff="$RUNNER_TEMP/evidence-gate-verifier-inputs/evidence-gate-controller-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          subject="$RUNNER_TEMP/evidence-gate-verifier-inputs/evidence-gate-subject-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/evidence-gate-subject-result.json"
           python3 "$GITHUB_WORKSPACE/trusted/scripts/evidence-gate-handoff.py" verify \
             --handoff-directory "$handoff" \
             --fresh-capture-directory "$RUNNER_TEMP/evidence-gate-verifier-capture" \
+            --subject-result "$subject" \
             --output-plan "$RUNNER_TEMP/evidence-gate-verified-plan.json"
 
       - name: Set up the trusted verifier
@@ -287,7 +289,7 @@ jobs:
             printf '%s\n' "- Controller capture job: $CONTROLLER_RESULT"
             printf '%s\n' "- Credentialless subject job: $SUBJECT_RESULT"
             echo '- Subject handoff: controller snapshot execution is wired; the fixed result is always non-claiming.'
-            echo '- Trusted verifier: the handoff is rebound to a fresh Git capture, then the current PR and subject job are reread for a non-claiming rehearsal.'
+            echo '- Trusted verifier: the handoff and subject result are rebound to a fresh Git capture, then the current PR and subject job are reread for a non-claiming rehearsal.'
             echo '- OCI prerequisite: a digest-pinned image must already exist in the rootless local image store and contain the locked offline feed.'
             echo '- Checkout/isolation attestation: unavailable to the verdict; no trusted verifier consumes an attestation.'
             echo '- Required gate verdict: unavailable; host registrations and complete producer verification are not established.'

@@ -1038,6 +1038,7 @@ def verify_handoff(
     *,
     handoff_directory: str | os.PathLike[str],
     fresh_capture_directory: str | os.PathLike[str],
+    subject_result_file: str | os.PathLike[str],
     output_plan: str | os.PathLike[str],
 ) -> None:
     """Copy a downloaded plan only after binding its bundle to fresh trusted Git state.
@@ -1075,6 +1076,36 @@ def verify_handoff(
         raise HandoffError("ASEHB003", "The fresh trusted Git object store is unavailable.")
     inventory = _run_git_tree_inventory(repository, identity["HeadRevision"])
     _scan_archive(archive_path, inventory)
+
+    subject_raw = _read_regular_file(Path(subject_result_file), MAX_RESULT_BYTES, "The credentialless subject result")
+    if not subject_raw.endswith(b"\n"):
+        raise HandoffError("ASEHB001", "The credentialless subject result is not newline-terminated canonical JSON.")
+    try:
+        subject_result = json.loads(
+            subject_raw[:-1], object_pairs_hook=_unique_object, parse_constant=_reject_json_constant
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RecursionError):
+        raise HandoffError("ASEHB001", "The credentialless subject result is malformed JSON.") from None
+    if not isinstance(subject_result, dict) or _canonical_json(subject_result) + b"\n" != subject_raw:
+        raise HandoffError("ASEHB001", "The credentialless subject result is not canonical JSON.")
+    diagnostic = subject_result.get("diagnostic")
+    if (
+        type(subject_result.get("schemaVersion")) is not int
+        or subject_result["schemaVersion"] != 1
+        or subject_result.get("claimEligible") is not False
+        or subject_result.get("mode") != "SubjectSnapshot"
+        or subject_result.get("workflowRunId") != str(identity["WorkflowRunId"])
+        or subject_result.get("workflowRunAttempt") != str(identity["WorkflowRunAttempt"])
+        or subject_result.get("headRevision") != identity["HeadRevision"]
+        or subject_result.get("snapshotSha256") != manifest["SnapshotArchiveSha256"]
+        or subject_result.get("profileId") != plan["Profile"]["Id"]
+        or subject_result.get("execution") != "completed"
+        or type(subject_result.get("exitCode")) is not int
+        or subject_result["exitCode"] != 0
+        or not isinstance(diagnostic, dict)
+        or diagnostic.get("code") != "ASEHB010"
+    ):
+        raise HandoffError("ASEHB001", "The credentialless subject result does not match this successful handoff.")
 
     plan_bytes = _read_regular_file(entries["evidence-plan.json"], MAX_EVIDENCE_PLAN_BYTES, "The verified EvidencePlan")
     _write_regular_file(output, plan_bytes)
@@ -1211,6 +1242,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     verify = subparsers.add_parser("verify", help="Bind the downloaded handoff to a fresh trusted PR recapture.")
     verify.add_argument("--handoff-directory", required=True)
     verify.add_argument("--fresh-capture-directory", required=True)
+    verify.add_argument("--subject-result", required=True)
     verify.add_argument("--output-plan", required=True)
     arguments = parser.parse_args(argv)
     try:
@@ -1227,6 +1259,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             verify_handoff(
                 handoff_directory=arguments.handoff_directory,
                 fresh_capture_directory=arguments.fresh_capture_directory,
+                subject_result_file=arguments.subject_result,
                 output_plan=arguments.output_plan,
             )
             print("evidence-gate-handoff: current-revision handoff verified for trusted planning.")

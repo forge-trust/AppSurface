@@ -259,9 +259,12 @@ def launch_subject(*, subject_checkout, image_digest, scratch_directory, profile
     def test_trusted_verifier_copies_only_a_bundle_matching_fresh_git_state(self) -> None:
         with tempfile.TemporaryDirectory(prefix="evidence-gate-verify-handoff-") as temporary:
             root = Path(temporary).resolve()
-            capture, scripts, plan_file = self._capture(root)
+            capture, scripts, _ = self._capture(root)
+            plan_file = self._write_plan(root, capture, profile_id="documentation-only")
             output = root / "handoff"
             self._create(capture, scripts, plan_file, output)
+            subject_exit, subject_result = self._execute(output, root)
+            self.assertEqual(0, subject_exit)
             verified_plan = root / "verified-plan.json"
 
             with redirect_stdout(io.StringIO()):
@@ -272,6 +275,7 @@ def launch_subject(*, subject_checkout, image_digest, scratch_directory, profile
                             "verify",
                             "--handoff-directory", str(output),
                             "--fresh-capture-directory", str(capture),
+                            "--subject-result", str(subject_result),
                             "--output-plan", str(verified_plan),
                         ]
                     ),
@@ -282,6 +286,7 @@ def launch_subject(*, subject_checkout, image_digest, scratch_directory, profile
                 handoff.verify_handoff(
                     handoff_directory=output,
                     fresh_capture_directory=capture,
+                    subject_result_file=subject_result,
                     output_plan=verified_plan,
                 )
 
@@ -289,9 +294,12 @@ def launch_subject(*, subject_checkout, image_digest, scratch_directory, profile
         for mismatch in ("identity", "diff"):
             with self.subTest(mismatch=mismatch), tempfile.TemporaryDirectory(prefix="evidence-gate-stale-handoff-") as temporary:
                 root = Path(temporary).resolve()
-                capture, scripts, plan_file = self._capture(root)
+                capture, scripts, _ = self._capture(root)
+                plan_file = self._write_plan(root, capture, profile_id="documentation-only")
                 output = root / "handoff"
                 self._create(capture, scripts, plan_file, output)
+                subject_exit, subject_result = self._execute(output, root)
+                self.assertEqual(0, subject_exit)
                 verified_plan = root / "verified-plan.json"
                 if mismatch == "identity":
                     identity, _ = handoff._read_json(capture / "pull-request-run-identity.json", 64 * 1024, "test identity")
@@ -304,9 +312,42 @@ def launch_subject(*, subject_checkout, image_digest, scratch_directory, profile
                     handoff.verify_handoff(
                         handoff_directory=output,
                         fresh_capture_directory=capture,
+                        subject_result_file=subject_result,
                         output_plan=verified_plan,
                     )
                 self.assertFalse(verified_plan.exists())
+
+    def test_trusted_verifier_rejects_a_forged_subject_result(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="evidence-gate-forged-result-") as temporary:
+            root = Path(temporary).resolve()
+            capture, scripts, _ = self._capture(root)
+            plan_file = self._write_plan(root, capture, profile_id="documentation-only")
+            output = root / "handoff"
+            self._create(capture, scripts, plan_file, output)
+            subject_exit, subject_result = self._execute(output, root)
+            self.assertEqual(0, subject_exit)
+            valid_result = json.loads(subject_result.read_bytes())
+            for field, value in (
+                ("headRevision", "0" * 40),
+                ("workflowRunAttempt", "2"),
+                ("snapshotSha256", "0" * 64),
+                ("profileId", "code-coverage"),
+                ("claimEligible", True),
+                ("execution", "failed"),
+                ("exitCode", 2),
+                ("diagnostic", {"code": "ASEHB009", "message": "failed"}),
+            ):
+                with self.subTest(field=field):
+                    result = dict(valid_result, **{field: value})
+                    subject_result.write_bytes(handoff._canonical_json(result) + b"\n")
+                    with self.assertRaises(handoff.HandoffError):
+                        handoff.verify_handoff(
+                            handoff_directory=output,
+                            fresh_capture_directory=capture,
+                            subject_result_file=subject_result,
+                            output_plan=root / "verified-plan.json",
+                        )
+                    self.assertFalse((root / "verified-plan.json").exists())
 
     def test_empty_documentation_only_profile_succeeds_without_oci(self) -> None:
         with tempfile.TemporaryDirectory(prefix="evidence-gate-docs-only-") as temporary:
