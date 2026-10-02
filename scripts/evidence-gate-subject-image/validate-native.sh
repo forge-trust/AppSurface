@@ -24,6 +24,7 @@ image_tag='appsurface-subject-native-validation:local'
 rid_project_relative='Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests'
 rid_project="$repository_root/$rid_project_relative/ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests.csproj"
 mkdir -m 0700 "$global_packages" "$context" "$cold_root"
+export NUGET_PACKAGES="$global_packages"
 
 check_no_untracked_rid_locks() {
   local untracked_path

@@ -18,7 +18,10 @@ of 1 or 2 and a ``dependencies`` object. ``Direct``, ``Transitive``, and
 and a canonical base64 SHA-512 ``contentHash``. ``Project`` entries are
 validated as project references and do not become feed packages. Repeated
 case-insensitive package ID/version pairs are emitted once; conflicting
-content hashes fail closed. Package archives are located at the exact NuGet
+content hashes fail closed. Project SDK packages, which NuGet does not record
+in project locks, are admitted only through the reviewed ID/version/content-hash
+pins below and only when an included project declares that exact SDK. Package
+archives are located at the exact NuGet
 global-packages layout ``<id-lower>/<version-lower>/<id-lower>.<version-lower>.nupkg``.
 
 The destination must not exist. It is created with exclusive directory/file
@@ -88,6 +91,9 @@ PACKAGE_VERSION_PATTERN = re.compile(
     r"(?:\.(?:0|[1-9][0-9]*))?"
     r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?\Z"
 )
+PROJECT_SDK_PACKAGE_PINS = {
+    ("aspire.apphost.sdk", "13.4.4"): "yYcwwYub6sFzgtrnYJHrq6Q3F+fQYQd1r7aRCDShQHqNAYO8/ObfW/jXv0eTcbwlag7Oz33RRYbMnW8QMVi5qg==",
+}
 
 
 class OfflineFeedError(Exception):
@@ -227,7 +233,7 @@ def _is_lock_filename(name: str) -> bool:
     return name.startswith("packages") and name.endswith(".lock.json")
 
 
-def _selected_project_lock_name(project_bytes: bytes) -> str:
+def _selected_project_inputs(project_bytes: bytes) -> tuple[str, list[_LockedPackage]]:
     if b"<!DOCTYPE" in project_bytes.upper() or b"<!ENTITY" in project_bytes.upper():
         raise _fail("A selected project contains unsupported XML declarations.")
     try:
@@ -236,13 +242,28 @@ def _selected_project_lock_name(project_bytes: bytes) -> str:
         raise _fail("A selected project is malformed XML.") from None
     if document.tag.rsplit("}", 1)[-1] != "Project":
         raise _fail("A selected project has an unsupported root element.")
+    built_in_sdk = document.attrib.get("Sdk")
+    if built_in_sdk not in {None, "Microsoft.NET.Sdk", "Microsoft.NET.Sdk.Web", "Microsoft.NET.Sdk.Razor"}:
+        raise _fail("A selected project declares an unreviewed root project SDK.")
+    project_sdks: list[_LockedPackage] = []
+    for element in document.iter():
+        if element.tag.rsplit("}", 1)[-1] != "Sdk":
+            continue
+        if set(element.attrib) != {"Name", "Version"}:
+            raise _fail("A selected project has an incomplete project SDK declaration.")
+        sdk_id = _validate_package_id(element.attrib["Name"]).lower()
+        sdk_version = _validate_version(element.attrib["Version"]).lower()
+        pinned_hash = PROJECT_SDK_PACKAGE_PINS.get((sdk_id, sdk_version))
+        if pinned_hash is None:
+            raise _fail("A selected project declares an unreviewed project SDK package.")
+        project_sdks.append(_LockedPackage(sdk_id, sdk_version, _decode_content_hash(pinned_hash)))
     configured_paths = [
         element.text
         for element in document.iter()
         if element.tag.rsplit("}", 1)[-1] == "NuGetLockFilePath"
     ]
     if not configured_paths:
-        return "packages.lock.json"
+        return "packages.lock.json", project_sdks
     if len(configured_paths) != 1 or configured_paths[0] is None:
         raise _fail("A selected project has an ambiguous NuGet lock path.")
     configured = configured_paths[0].strip()
@@ -252,7 +273,7 @@ def _selected_project_lock_name(project_bytes: bytes) -> str:
     relative = _relative_checkout_path(selected, "A selected project lock path")
     if len(relative.parts) != 1 or not _is_lock_filename(relative.name):
         raise _fail("A selected project lock must be a packages*.lock.json file beside the project.")
-    return relative.name
+    return relative.name, project_sdks
 
 
 def _relative_checkout_path(value: Any, name: str, required_suffix: str | None = None) -> Path:
@@ -322,7 +343,7 @@ def _read_physical_file(path: Path, expected_size: int, maximum_bytes: int, name
 
 def _select_lock_files(
     checkout: Path, solution_relative_path: str | os.PathLike[str], limits: FeedLimits
-) -> list[tuple[Path, int]]:
+) -> tuple[list[tuple[Path, int]], list[_LockedPackage]]:
     solution_relative = _relative_checkout_path(os.fspath(solution_relative_path), "The solution path", ".slnx")
     solution_path, solution_size = _physical_checkout_file(
         checkout,
@@ -361,6 +382,7 @@ def _select_lock_files(
         raise _fail("The trusted solution lists a project more than once.")
 
     selected_directories: dict[Path, set[str]] = {}
+    project_sdks: list[_LockedPackage] = []
     total_project_bytes = 0
     for project_relative in project_paths:
         project_path, project_size = _physical_checkout_file(
@@ -378,9 +400,9 @@ def _select_lock_files(
             limits.max_project_file_bytes,
             "A selected project",
         )
-        selected_directories.setdefault(project_path.parent, set()).add(
-            _selected_project_lock_name(project_bytes)
-        )
+        selected_lock_name, selected_sdks = _selected_project_inputs(project_bytes)
+        selected_directories.setdefault(project_path.parent, set()).add(selected_lock_name)
+        project_sdks.extend(selected_sdks)
 
     lock_files: dict[Path, int] = {}
     selected_entry_count = 0
@@ -418,7 +440,7 @@ def _select_lock_files(
 
     if not lock_files:
         raise _fail("The trusted solution's project directories contain no packages*.lock.json inputs.")
-    return sorted(lock_files.items(), key=lambda item: item[0].relative_to(checkout).as_posix())
+    return sorted(lock_files.items(), key=lambda item: item[0].relative_to(checkout).as_posix()), project_sdks
 
 
 def _read_lock_file(path: Path, expected_size: int, limits: FeedLimits) -> bytes:
@@ -506,7 +528,7 @@ def _parse_lock(raw: bytes) -> list[_LockedPackage]:
 
 
 def _collect_locked_packages(
-    lock_files: list[tuple[Path, int]], limits: FeedLimits
+    lock_files: list[tuple[Path, int]], project_sdks: list[_LockedPackage], limits: FeedLimits
 ) -> dict[tuple[str, str], _LockedPackage]:
     total_lock_bytes = 0
     packages: dict[tuple[str, str], _LockedPackage] = {}
@@ -521,6 +543,13 @@ def _collect_locked_packages(
             packages[package.identity] = previous or package
             if len(packages) > limits.max_packages:
                 raise _fail("Lock files exceed the distinct-package-count limit.")
+    for package in project_sdks:
+        previous = packages.get(package.identity)
+        if previous is not None and previous.content_hash != package.content_hash:
+            raise _fail("A project SDK pin disagrees with a lock package contentHash.")
+        packages[package.identity] = previous or package
+        if len(packages) > limits.max_packages:
+            raise _fail("Project SDK packages exceed the distinct-package-count limit.")
     if not packages:
         raise _fail("The lock files contain no NuGet package archives.")
     return packages
@@ -925,8 +954,8 @@ def build_offline_feed(
         raise _fail("The trusted checkout and NuGet global cache must be separate physical trees.")
     output_parent, output_path = _new_output_location(output_directory, checkout_root, cache_root)
 
-    lock_files = _select_lock_files(checkout_root, solution_relative_path, limits)
-    packages = _collect_locked_packages(lock_files, limits)
+    lock_files, project_sdks = _select_lock_files(checkout_root, solution_relative_path, limits)
+    packages = _collect_locked_packages(lock_files, project_sdks, limits)
     archives = _locate_archives(cache_root, packages, limits)
 
     parent_fd = _open_directory_descriptor(output_parent)

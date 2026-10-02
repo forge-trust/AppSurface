@@ -209,6 +209,87 @@ class EvidenceGateBuildOfflineFeedTests(unittest.TestCase):
 
         self.assertEqual(1, result.package_count)
 
+    def test_declared_pinned_project_sdk_is_verified_and_added_to_offline_feed(self) -> None:
+        package_id, entry, package_bytes = self.package_entry()
+        self.write_lock("AppHost/packages.lock.json", {package_id: entry})
+        (self.checkout / "AppHost/Synthetic.csproj").write_text(
+            '<Project Sdk="Microsoft.NET.Sdk"><Sdk Name="Aspire.AppHost.Sdk" Version="13.4.4" /></Project>',
+            encoding="utf-8",
+        )
+        sdk_bytes = b"synthetic Aspire project SDK archive"
+        self.cache_package(package_id, "1.2.3", package_bytes)
+        self.cache_package("Aspire.AppHost.Sdk", "13.4.4", sdk_bytes)
+
+        with patch.dict(
+            offline_feed.PROJECT_SDK_PACKAGE_PINS,
+            {("aspire.apphost.sdk", "13.4.4"): self.content_hash(sdk_bytes)},
+        ):
+            result = self.build()
+
+        self.assertEqual(2, result.package_count)
+        self.assertEqual(
+            {"example.package.1.2.3.nupkg", "aspire.apphost.sdk.13.4.4.nupkg"},
+            {path.name for path in self.output.iterdir()},
+        )
+        self.assertEqual(2, len(self.verifier_calls))
+
+    def test_unreviewed_project_sdk_version_fails_before_feed_creation(self) -> None:
+        package_id, entry, package_bytes = self.package_entry()
+        self.write_lock("AppHost/packages.lock.json", {package_id: entry})
+        (self.checkout / "AppHost/Synthetic.csproj").write_text(
+            '<Project Sdk="Microsoft.NET.Sdk"><Sdk Name="Aspire.AppHost.Sdk" Version="13.4.5" /></Project>',
+            encoding="utf-8",
+        )
+        self.cache_package(package_id, "1.2.3", package_bytes)
+
+        with self.assertRaisesRegex(offline_feed.OfflineFeedError, "unreviewed project SDK package"):
+            self.build()
+
+        self.assertFalse(self.output.exists())
+
+    def test_project_sdk_pin_conflicting_with_lock_hash_fails_closed(self) -> None:
+        package_id, entry, package_bytes = self.package_entry(
+            package_id="Aspire.AppHost.Sdk", version="13.4.4", package_bytes=b"different archive"
+        )
+        self.write_lock("AppHost/packages.lock.json", {package_id: entry})
+        (self.checkout / "AppHost/Synthetic.csproj").write_text(
+            '<Project Sdk="Microsoft.NET.Sdk"><Sdk Name="Aspire.AppHost.Sdk" Version="13.4.4" /></Project>',
+            encoding="utf-8",
+        )
+        self.cache_package(package_id, "13.4.4", package_bytes)
+
+        with self.assertRaisesRegex(offline_feed.OfflineFeedError, "pin disagrees"):
+            self.build()
+
+        self.assertFalse(self.output.exists())
+
+    def test_pinned_project_sdk_missing_from_cache_fails_before_feed_creation(self) -> None:
+        package_id, entry, package_bytes = self.package_entry()
+        self.write_lock("AppHost/packages.lock.json", {package_id: entry})
+        (self.checkout / "AppHost/Synthetic.csproj").write_text(
+            '<Project Sdk="Microsoft.NET.Sdk"><Sdk Name="Aspire.AppHost.Sdk" Version="13.4.4" /></Project>',
+            encoding="utf-8",
+        )
+        self.cache_package(package_id, "1.2.3", package_bytes)
+
+        with self.assertRaisesRegex(offline_feed.OfflineFeedError, "missing from the supplied NuGet global cache"):
+            self.build()
+
+        self.assertFalse(self.output.exists())
+
+    def test_unreviewed_root_project_sdk_fails_before_feed_creation(self) -> None:
+        package_id, entry, package_bytes = self.package_entry()
+        self.write_lock("AppHost/packages.lock.json", {package_id: entry})
+        (self.checkout / "AppHost/Synthetic.csproj").write_text(
+            '<Project Sdk="Unreviewed.Build.Sdk" />', encoding="utf-8"
+        )
+        self.cache_package(package_id, "1.2.3", package_bytes)
+
+        with self.assertRaisesRegex(offline_feed.OfflineFeedError, "unreviewed root project SDK"):
+            self.build()
+
+        self.assertFalse(self.output.exists())
+
     def test_conflicting_content_hashes_fail_before_output_creation(self) -> None:
         package_id, first, first_bytes = self.package_entry(package_bytes=b"first")
         _package_id, conflicting, _conflicting_bytes = self.package_entry(package_bytes=b"second")
