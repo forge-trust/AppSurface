@@ -395,6 +395,7 @@ def _git_environment() -> dict[str, str]:
             "GIT_CONFIG_GLOBAL": "NUL" if os.name == "nt" else os.devnull,
             "GIT_CONFIG_COUNT": "0",
             "GIT_CONFIG_PARAMETERS": "",
+            "GIT_NO_REPLACE_OBJECTS": "1",
             "GIT_EXTERNAL_DIFF": "",
             "GIT_DIFF_OPTS": "",
             "GIT_PAGER": "cat",

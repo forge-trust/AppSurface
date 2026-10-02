@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Planner;
@@ -59,6 +60,27 @@ public sealed class EvidenceHostRunnerTests
         Assert.Equal(0, exitCode);
         Assert.Empty(stderr.ToString());
         Assert.Contains("profile=approved-empty-profile", stdout.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HostStatusPreservesSafeProfileIdentifierPunctuation()
+    {
+        using var fixture = await GateFixture.CreateAsync(docsOnly: true, emptyProfileId: "approved_empty.profile");
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.OutputDirectory,
+            stdout,
+            stderr);
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(stderr.ToString());
+        Assert.Contains("profile=approved_empty.profile", stdout.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("profile=[invalid-token]", stdout.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -241,6 +263,32 @@ public sealed class EvidenceHostRunnerTests
     {
         using var fixture = await GateFixture.CreateAsync(docsOnly: true);
         await File.WriteAllTextAsync(fixture.PlanPath, "{invalid-json");
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.OutputDirectory,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGH103", stderr.ToString(), StringComparison.Ordinal);
+        Assert.Empty(stdout.ToString());
+        Assert.False(File.Exists(Path.Join(fixture.OutputDirectory, "evidence-manifest.json")));
+    }
+
+    [Fact]
+    public async Task PlanWithUnpairedUnicodeSurrogateCannotProduceHostOutputs()
+    {
+        using var fixture = await GateFixture.CreateAsync(docsOnly: true);
+        var planJson = await File.ReadAllTextAsync(fixture.PlanPath);
+        Assert.Contains("\"documentation-only\"", planJson, StringComparison.Ordinal);
+        await File.WriteAllTextAsync(
+            fixture.PlanPath,
+            planJson.Replace("\"documentation-only\"", "\"\\uD800\"", StringComparison.Ordinal));
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
 
@@ -757,6 +805,45 @@ public sealed class EvidenceHostRunnerTests
         Assert.Contains("ASEGH130", stderr.ToString(), StringComparison.Ordinal);
         Assert.False(File.Exists(Path.Join(fixture.OutputDirectory, "evidence-manifest.json")));
     }
+
+    [Fact]
+    public async Task CancellationWhileReadingTrustedPolicyReturnsCancelledHostResultOnLinux()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        using var fixture = await GateFixture.CreateAsync(docsOnly: true);
+        File.Delete(fixture.PolicyPath);
+        Assert.Equal(0, MakeFifo(fixture.PolicyPath, 0x180));
+        using var cancellation = new CancellationTokenSource();
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        var execution = Task.Run(() => EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.OutputDirectory,
+            stdout,
+            stderr,
+            cancellation.Token));
+
+        using (new FileStream(fixture.PolicyPath, FileMode.Open, FileAccess.Write, FileShare.Read))
+        {
+            cancellation.Cancel();
+            var exitCode = await execution.WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Equal(130, exitCode);
+        }
+
+        Assert.Contains("ASEGH130", stderr.ToString(), StringComparison.Ordinal);
+        Assert.Empty(stdout.ToString());
+        Assert.False(File.Exists(Path.Join(fixture.OutputDirectory, "evidence-manifest.json")));
+    }
+
+    [DllImport("libc", EntryPoint = "mkfifo", SetLastError = true)]
+    private static extern int MakeFifo([MarshalAs(UnmanagedType.LPUTF8Str)] string path, uint mode);
 
     private sealed class ThrowingTextWriter(Exception exception) : StringWriter
     {

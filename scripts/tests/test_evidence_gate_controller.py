@@ -632,6 +632,7 @@ class EvidenceGateControllerTests(unittest.TestCase):
         self.assertEqual(command, args[0])
         self.assertIsInstance(args[0], list)
         self.assertIs(kwargs["shell"], False)
+        self.assertEqual("1", kwargs["env"]["GIT_NO_REPLACE_OBJECTS"])
         self.assertNotIn("GITHUB_TOKEN", kwargs["env"])
         self.assertNotIn(TOKEN, repr(kwargs))
 

@@ -361,7 +361,11 @@ podman_smoke_cleanup() {
       [[ "$exit_code" -ne 0 ]] || exit_code=1
     fi
   fi
-  if [[ "$scratch_host_mounted" == true ]]; then
+  # A failed container removal may leave the bind mount in use. Keep the host
+  # mount attached for runner retirement instead of detaching it underneath a
+  # container that may still be running.
+  if [[ "$scratch_host_mounted" == true \
+    && ( "$podman_container_created" != true || "$podman_container_removed" == true ) ]]; then
     if timeout --signal=TERM --kill-after=5s 30s sudo -n umount "$scratch_host_mount"; then
       scratch_host_mounted=false
       scratch_host_unmount_succeeded=true

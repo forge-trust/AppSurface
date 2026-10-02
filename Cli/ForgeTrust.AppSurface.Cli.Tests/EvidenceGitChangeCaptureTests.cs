@@ -6,6 +6,12 @@ using ForgeTrust.AppSurface.Evidence.Planner;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
+[CollectionDefinition(nameof(GitProcessEnvironmentCollection), DisableParallelization = true)]
+public sealed class GitProcessEnvironmentCollection
+{
+}
+
+[Collection(nameof(GitProcessEnvironmentCollection))]
 public sealed class EvidenceGitChangeCaptureTests
 {
     [Fact]
@@ -140,6 +146,128 @@ public sealed class EvidenceGitChangeCaptureTests
         Assert.Contains(snapshot.ChangedPaths, path => path.Path == "code.cs" && path.Kind == "modified");
         Assert.DoesNotContain(snapshot.ChangedPaths, path => path.Path == "unrelated.txt");
         Assert.Contains("diff --git", Encoding.UTF8.GetString(snapshot.SourceDiff.Span), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Capture_ShouldIgnoreInheritedGitRepositoryOverrides()
+    {
+        using var repository = new GitFixture();
+        File.WriteAllText(Path.Join(repository.Path, "readme.md"), "before\n");
+        repository.Run("add", "readme.md");
+        repository.Commit("base");
+        var baseRevision = repository.Run("rev-parse", "HEAD").Trim();
+        File.WriteAllText(Path.Join(repository.Path, "readme.md"), "after\n");
+        repository.Run("add", "readme.md");
+        repository.Commit("head");
+        var headRevision = repository.Run("rev-parse", "HEAD").Trim();
+
+        var originalGitDirectory = Environment.GetEnvironmentVariable("GIT_DIR");
+        var originalWorkTree = Environment.GetEnvironmentVariable("GIT_WORK_TREE");
+        try
+        {
+            Environment.SetEnvironmentVariable("GIT_DIR", Path.Join(repository.Path, "untrusted-git-dir"));
+            Environment.SetEnvironmentVariable("GIT_WORK_TREE", Path.Join(repository.Path, "untrusted-work-tree"));
+
+            var snapshot = await EvidenceGitChangeCapture.CaptureAsync(repository.Path, baseRevision, headRevision);
+
+            Assert.Equal(baseRevision, snapshot.BaseRevision);
+            Assert.Equal(headRevision, snapshot.HeadRevision);
+            Assert.Contains(snapshot.ChangedPaths, path => path.Path == "readme.md" && path.Kind == "modified");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("GIT_DIR", originalGitDirectory);
+            Environment.SetEnvironmentVariable("GIT_WORK_TREE", originalWorkTree);
+        }
+    }
+
+    [Fact]
+    public async Task Verify_ShouldIgnoreGitReplaceRefsWhenCheckingExactRevisionSnapshot()
+    {
+        using var repository = new GitFixture();
+        File.WriteAllText(Path.Join(repository.Path, "readme.md"), "before\n");
+        repository.Run("add", "readme.md");
+        repository.Commit("base");
+        var baseRevision = repository.Run("rev-parse", "HEAD").Trim();
+        File.WriteAllText(Path.Join(repository.Path, "readme.md"), "after\n");
+        repository.Run("add", "readme.md");
+        repository.Commit("head");
+        var headRevision = repository.Run("rev-parse", "HEAD").Trim();
+        var snapshot = await EvidenceGitChangeCapture.CaptureAsync(repository.Path, baseRevision, headRevision);
+
+        File.WriteAllText(Path.Join(repository.Path, "replacement.txt"), "replacement tree\n");
+        repository.Run("add", "replacement.txt");
+        repository.Commit("replacement");
+        var replacementRevision = repository.Run("rev-parse", "HEAD").Trim();
+        repository.Run("replace", headRevision, replacementRevision);
+
+        var originalNoReplaceObjects = Environment.GetEnvironmentVariable("GIT_NO_REPLACE_OBJECTS");
+        try
+        {
+            Environment.SetEnvironmentVariable("GIT_NO_REPLACE_OBJECTS", null);
+            Assert.Contains("replacement.txt", repository.Run("diff", "--name-only", baseRevision, headRevision), StringComparison.Ordinal);
+
+            await EvidenceGitChangeCapture.VerifyAsync(repository.Path, snapshot);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("GIT_NO_REPLACE_OBJECTS", originalNoReplaceObjects);
+        }
+    }
+
+    [Fact]
+    public async Task Verify_ShouldRejectSnapshotWhenExactCommitObjectIsRemoved()
+    {
+        using var repository = new GitFixture();
+        File.WriteAllText(Path.Join(repository.Path, "readme.md"), "before\n");
+        repository.Run("add", "readme.md");
+        repository.Commit("base");
+        var baseRevision = repository.Run("rev-parse", "HEAD").Trim();
+        File.WriteAllText(Path.Join(repository.Path, "readme.md"), "after\n");
+        repository.Run("add", "readme.md");
+        repository.Commit("head");
+        var headRevision = repository.Run("rev-parse", "HEAD").Trim();
+        var snapshot = await EvidenceGitChangeCapture.CaptureAsync(repository.Path, baseRevision, headRevision);
+
+        var headObject = Path.Join(repository.Path, ".git", "objects", headRevision[..2], headRevision[2..]);
+        Assert.True(File.Exists(headObject));
+        File.Delete(headObject);
+
+        var exception = await Assert.ThrowsAsync<EvidencePlanningException>(() =>
+            EvidenceGitChangeCapture.VerifyAsync(repository.Path, snapshot));
+
+        Assert.Equal("ASEVD136", exception.Code);
+    }
+
+    [Fact]
+    public async Task Capture_ShouldReportWhenGitExecutableIsUnavailable()
+    {
+        using var repository = new GitFixture();
+        File.WriteAllText(Path.Join(repository.Path, "readme.md"), "before\n");
+        repository.Run("add", "readme.md");
+        repository.Commit("base");
+        var baseRevision = repository.Run("rev-parse", "HEAD").Trim();
+        File.WriteAllText(Path.Join(repository.Path, "readme.md"), "after\n");
+        repository.Run("add", "readme.md");
+        repository.Commit("head");
+        var headRevision = repository.Run("rev-parse", "HEAD").Trim();
+        var emptyPath = Directory.CreateDirectory(Path.Join(repository.Path, "empty-path")).FullName;
+
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+        try
+        {
+            Environment.SetEnvironmentVariable("PATH", emptyPath);
+
+            var exception = await Assert.ThrowsAsync<EvidencePlanningException>(() =>
+                EvidenceGitChangeCapture.CaptureAsync(repository.Path, baseRevision, headRevision));
+
+            Assert.Equal("ASEVD136", exception.Code);
+            Assert.Contains("unavailable", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+        }
     }
 
     [Fact]
@@ -386,6 +514,34 @@ public sealed class EvidenceGitChangeCaptureTests
                 EvidenceRevisionPlanBuilder.ResolveForPullRequest(new EvidencePlanner(), CreateGatePolicy(), snapshot, runIdentity));
             Assert.Equal("ASEVD140", exception.Code);
         }
+    }
+
+    [Fact]
+    public async Task ResolveForPullRequest_ShouldRejectReleaseOnlyRuleBeforeIssuingAClaim()
+    {
+        using var repository = new GitFixture();
+        File.WriteAllText(Path.Join(repository.Path, "VERSION"), "1.0.0\n");
+        repository.Run("add", "VERSION");
+        repository.Commit("base");
+        var baseRevision = repository.Run("rev-parse", "HEAD").Trim();
+        File.WriteAllText(Path.Join(repository.Path, "VERSION"), "1.0.1\n");
+        repository.Run("add", "VERSION");
+        repository.Commit("head");
+        var headRevision = repository.Run("rev-parse", "HEAD").Trim();
+        var snapshot = await EvidenceGitChangeCapture.CaptureAsync(repository.Path, baseRevision, headRevision);
+        var policy = CreateGatePolicy();
+        var conservative = policy.Profiles.Single(profile => profile.Id == policy.ConservativeProfileId);
+        var release = conservative with { Id = "release", Scope = EvidenceProfileScope.Release };
+        policy = policy with
+        {
+            Profiles = [.. policy.Profiles, release],
+            Rules = [.. policy.Rules, new EvidencePolicyRule("version", "VERSION", "release")],
+        };
+
+        var exception = Assert.Throws<EvidencePlanningException>(() =>
+            EvidenceRevisionPlanBuilder.ResolveForPullRequest(new EvidencePlanner(), policy, snapshot));
+
+        Assert.Equal("ASEVD129", exception.Code);
     }
 
     private static EvidencePolicy CreateGatePolicy()

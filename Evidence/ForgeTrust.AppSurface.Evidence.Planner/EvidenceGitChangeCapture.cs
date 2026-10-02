@@ -61,7 +61,8 @@ public sealed class EvidenceGitChangeSnapshot
 /// <remarks>
 /// Supply a trusted bare or object-only checkout containing both commits. The caller is responsible
 /// for fetching the exact objects, pinning the Git version in CI, and independently checking current
-/// PR or tag identity before a gate verdict. This type never reads the ambient checkout's HEAD.
+/// PR or tag identity before a gate verdict. This type never reads the ambient checkout's HEAD
+/// and disables Git replacement refs so those refs cannot reinterpret a supplied object ID.
 /// </remarks>
 public static class EvidenceGitChangeCapture
 {
@@ -357,6 +358,7 @@ public static class EvidenceGitChangeCapture
         start.Environment["GIT_CONFIG_GLOBAL"] = OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
         start.Environment["GIT_CONFIG_COUNT"] = "0";
         start.Environment["GIT_CONFIG_PARAMETERS"] = string.Empty;
+        start.Environment["GIT_NO_REPLACE_OBJECTS"] = "1";
         start.Environment["GIT_EXTERNAL_DIFF"] = string.Empty;
         start.Environment["GIT_DIFF_OPTS"] = string.Empty;
         start.Environment["GIT_PAGER"] = "cat";

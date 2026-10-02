@@ -352,6 +352,36 @@ public sealed class EvidenceNoFollowArtifactExtractorTests
     }
 
     [Fact]
+    public async Task ExtractAsync_ShouldRejectScratchSymlinkTargetingProcFileDescriptorPath()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            await AssertUnsupportedPlatformFailsClosedAsync();
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        Directory.CreateDirectory(temp.ScratchRoot);
+        Directory.CreateDirectory(temp.ArtifactRoot);
+        Directory.CreateDirectory(Path.Join(temp.ScratchRoot, "subject"));
+        await File.WriteAllTextAsync(Path.Join(temp.ScratchRoot, "subject", "report.bin"), "inside");
+        using var root = OpenTrustedRoot(temp.ScratchRoot);
+        var rootDescriptorPath = $"/proc/self/fd/{root.DangerousGetHandle().ToInt32()}";
+        File.CreateSymbolicLink(
+            Path.Join(temp.ScratchRoot, "subject", "magic-report.bin"),
+            $"{rootDescriptorPath}/subject/report.bin");
+        var writer = CreateWriter(temp.ArtifactRoot);
+
+        await Assert.ThrowsAnyAsync<IOException>(() => EvidenceNoFollowArtifactExtractor.ExtractAsync(
+            root,
+            writer,
+            [new EvidenceNoFollowArtifact("report", "subject/magic-report.bin", "reports/report.bin")]));
+
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.False(File.Exists(Path.Join(temp.ArtifactRoot, "reports", "report.bin")));
+    }
+
+    [Fact]
     public async Task ExtractAsync_ShouldRejectHardlinksDirectoriesAndAggregateByteOverflow()
     {
         if (!OperatingSystem.IsLinux())
@@ -707,6 +737,45 @@ public sealed class EvidenceNoFollowArtifactExtractorTests
             cancellationToken: cancellation.Token));
 
         Assert.True(cancellation.IsCancellationRequested);
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.False(File.Exists(Path.Join(temp.ArtifactRoot, "reports", "report.bin")));
+    }
+
+    [Fact]
+    public async Task ExtractAsyncForTesting_ShouldConvertItsDeadlineCancellationToTimeout()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            await AssertUnsupportedPlatformFailsClosedAsync();
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        Directory.CreateDirectory(temp.ScratchRoot);
+        Directory.CreateDirectory(temp.ArtifactRoot);
+        Directory.CreateDirectory(Path.Join(temp.ScratchRoot, "subject"));
+        await File.WriteAllBytesAsync(Path.Join(temp.ScratchRoot, "subject", "empty.bin"), []);
+        using var root = OpenTrustedRoot(temp.ScratchRoot);
+        var writer = CreateWriter(temp.ArtifactRoot);
+        var checkpointReached = false;
+
+        void WaitPastDeadline(string sourceRelativePath)
+        {
+            Assert.Equal("subject/empty.bin", sourceRelativePath);
+            checkpointReached = true;
+            Thread.Sleep(TimeSpan.FromSeconds(3));
+        }
+
+        var exception = await Assert.ThrowsAsync<TimeoutException>(() =>
+            EvidenceNoFollowArtifactExtractor.ExtractAsyncForTesting(
+                root,
+                writer,
+                [new EvidenceNoFollowArtifact("report", "subject/empty.bin", "reports/report.bin")],
+                WaitPastDeadline,
+                new EvidenceNoFollowArtifactExtractionLimits { MaximumDuration = TimeSpan.FromSeconds(2) }));
+
+        Assert.Contains("exceeded", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(checkpointReached);
         Assert.Empty(writer.WrittenArtifacts);
         Assert.False(File.Exists(Path.Join(temp.ArtifactRoot, "reports", "report.bin")));
     }

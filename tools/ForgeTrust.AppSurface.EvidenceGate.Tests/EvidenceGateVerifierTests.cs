@@ -1,8 +1,10 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Planner;
 using ForgeTrust.AppSurface.EvidenceGate;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.EvidenceGate.Tests;
 
@@ -43,6 +45,79 @@ public sealed class EvidenceGateVerifierTests
         Assert.Equal(EvidenceGateResultRenderer.RenderMarkdown(result), markdown);
         Assert.Contains("Verdict: **eligible**", markdown, StringComparison.Ordinal);
         Assert.Contains("Verified claim: `NoEvidenceRequired`", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VerifyGateRejectsArtifactBytesChangedAfterTheirManifestDigestWasCaptured()
+    {
+        using var fixture = await VerifyFixture.CreateAsync(includeArtifactEvidence: true);
+        var artifactPath = fixture.GetArtifactPath();
+        var changedBytes = await File.ReadAllBytesAsync(artifactPath);
+        changedBytes[0] = changedBytes[0] == (byte)'{' ? (byte)'[' : (byte)'{';
+        await File.WriteAllBytesAsync(artifactPath, changedBytes);
+
+        var result = await EvidencePullRequestGateVerifier.VerifyAsync(
+            new EvidencePlanner(),
+            fixture.Policy,
+            fixture.RepositoryPath,
+            fixture.ExpectedIdentity,
+            fixture.AuthorityProvider,
+            fixture.ArtifactHandoffRootPath,
+            new EvidencePullRequestGateNoFollowArtifactVerifier(),
+            fixture.Plan,
+            fixture.Manifest);
+
+        Assert.False(result.IsEligible);
+        Assert.Equal("ASEVG010", result.Code);
+        Assert.Contains("review-obligation", result.Summary!.MissingObligationIds);
+    }
+
+    [Fact]
+    public async Task VerifyGateRequiresNoFollowVerificationBeforeIssuingAnArtifactClaim()
+    {
+        using var fixture = await VerifyFixture.CreateAsync(includeArtifactEvidence: true);
+        var result = await EvidencePullRequestGateVerifier.VerifyAsync(
+            new EvidencePlanner(),
+            fixture.Policy,
+            fixture.RepositoryPath,
+            fixture.ExpectedIdentity,
+            fixture.AuthorityProvider,
+            fixture.ArtifactHandoffRootPath,
+            new EvidencePullRequestGateNoFollowArtifactVerifier(),
+            fixture.Plan,
+            fixture.Manifest);
+
+        if (OperatingSystem.IsLinux() && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture is System.Runtime.InteropServices.Architecture.X64 or System.Runtime.InteropServices.Architecture.Arm64)
+        {
+            Assert.True(result.IsEligible);
+            Assert.Equal("ASEVG000", result.Code);
+        }
+        else
+        {
+            Assert.False(result.IsEligible);
+            Assert.Equal("ASEVG010", result.Code);
+        }
+    }
+
+    [Fact]
+    public async Task NoFollowArtifactVerifierFailsClosedOnPlatformLimitOrSymlink()
+    {
+        using var fixture = await VerifyFixture.CreateAsync(includeArtifactEvidence: true);
+        if (OperatingSystem.IsLinux() && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture is System.Runtime.InteropServices.Architecture.X64 or System.Runtime.InteropServices.Architecture.Arm64)
+        {
+            var artifactPath = fixture.GetArtifactPath();
+            var outsidePath = Path.Join(fixture.RootPath, "outside-artifact.json");
+            await File.WriteAllTextAsync(outsidePath, "{\"review\":\"complete\"}\n");
+            File.Delete(artifactPath);
+            File.CreateSymbolicLink(artifactPath, outsidePath);
+        }
+
+        var verified = await new EvidencePullRequestGateNoFollowArtifactVerifier().VerifyArtifactsAsync(
+            fixture.ArtifactHandoffRootPath!,
+            fixture.Plan,
+            fixture.Manifest);
+
+        Assert.False(verified);
     }
 
     [Fact]
@@ -356,19 +431,45 @@ public sealed class EvidenceGateVerifierTests
         Assert.False(File.Exists(Path.Join(fixture.OutputDirectory, "evidence-gate-verification.json")));
     }
 
-    private sealed class VerifyFixture(string root, string repositoryPath, string planPath, string manifestPath, string policyPath, string identityPath, string outputDirectory, IEvidencePullRequestGateAuthorityProvider authorityProvider) : IDisposable
+    private sealed class VerifyFixture(
+        string root,
+        string repositoryPath,
+        string planPath,
+        string manifestPath,
+        string policyPath,
+        string identityPath,
+        string outputDirectory,
+        EvidencePolicy policy,
+        EvidencePullRequestGateExpectedIdentity expectedIdentity,
+        EvidencePlan plan,
+        EvidenceManifest manifest,
+        string? artifactHandoffRootPath,
+        IEvidencePullRequestGateAuthorityProvider authorityProvider) : IDisposable
     {
+        public string RootPath { get; } = root;
         public string RepositoryPath { get; } = repositoryPath;
         public string PlanPath { get; } = planPath;
         public string ManifestPath { get; } = manifestPath;
         public string PolicyPath { get; } = policyPath;
         public string IdentityPath { get; } = identityPath;
         public string OutputDirectory { get; } = outputDirectory;
+        public EvidencePolicy Policy { get; } = policy;
+        public EvidencePullRequestGateExpectedIdentity ExpectedIdentity { get; } = expectedIdentity;
+        public EvidencePlan Plan { get; } = plan;
+        public EvidenceManifest Manifest { get; } = manifest;
+        public string? ArtifactHandoffRootPath { get; } = artifactHandoffRootPath;
         public IEvidencePullRequestGateAuthorityProvider AuthorityProvider { get; } = authorityProvider;
+
+        public string GetArtifactPath() => Path.Join(
+            ArtifactHandoffRootPath ?? throw new InvalidOperationException("The fixture has no artifact handoff."),
+            "review-evidence",
+            "review",
+            "report.json");
 
         public static async Task<VerifyFixture> CreateAsync(
             EvidencePullRequestGateAuthoritySnapshot? authority = null,
-            bool authorityUnavailable = false)
+            bool authorityUnavailable = false,
+            bool includeArtifactEvidence = false)
         {
             var root = Path.Join(Path.GetTempPath(), "appsurface-verifygate-" + Guid.NewGuid().ToString("N"));
             var repository = Path.Join(root, "repository");
@@ -385,26 +486,47 @@ public sealed class EvidenceGateVerifierTests
             await GitAsync(repository, "commit", "--quiet", "-m", "docs");
             var headRevision = (await GitAsync(repository, "rev-parse", "HEAD")).Trim();
 
-            var profile = new EvidenceProfile("documentation-only", EvidenceProfileScope.Targeted, [], [], []);
-            var conservativeProducer = new EvidenceProducerDeclaration(
-                "conservative-review",
+            var artifactSlot = new EvidenceArtifactSlot("review-report", "review", "application/json", true, 1024);
+            var artifactProducer = new EvidenceProducerDeclaration(
+                "review-evidence",
                 "manual_review",
                 "1",
                 [],
                 ["review-complete"],
-                [],
+                [artifactSlot],
                 60);
+            var artifactObligation = new EvidenceObligation(
+                "review-obligation",
+                "review",
+                "Review the changed documentation.",
+                [artifactProducer.Id],
+                "review-complete");
+            var profile = includeArtifactEvidence
+                ? new EvidenceProfile("documentation-only", EvidenceProfileScope.Targeted, [], [artifactProducer], [artifactObligation])
+                : new EvidenceProfile("documentation-only", EvidenceProfileScope.Targeted, [], [], []);
+            var conservativeProducer = includeArtifactEvidence
+                ? artifactProducer
+                : new EvidenceProducerDeclaration(
+                    "conservative-review",
+                    "manual_review",
+                    "1",
+                    [],
+                    ["review-complete"],
+                    [],
+                    60);
             var conservativeProfile = new EvidenceProfile(
                 "conservative",
                 EvidenceProfileScope.Targeted,
                 [],
                 [conservativeProducer],
-                [new EvidenceObligation(
-                    "conservative-obligation",
-                    "conservative",
-                    "Review changes without a more specific rule.",
-                    [conservativeProducer.Id],
-                    "review-complete")]);
+                includeArtifactEvidence
+                    ? [artifactObligation]
+                    : [new EvidenceObligation(
+                        "conservative-obligation",
+                        "conservative",
+                        "Review changes without a more specific rule.",
+                        [conservativeProducer.Id],
+                        "review-complete")]);
             var policy = new EvidencePolicy(
                 "verify-gate-tests",
                 "1",
@@ -420,7 +542,32 @@ public sealed class EvidenceGateVerifierTests
                 runIdentity);
             var snapshot = await EvidenceGitChangeCapture.CaptureAsync(repository, baseRevision, headRevision);
             var plan = EvidenceRevisionPlanBuilder.ResolveForPullRequest(new EvidencePlanner(), policy, snapshot, runIdentity);
-            var manifest = EvidenceManifestBuilder.Build(plan, []);
+            string? artifactHandoffRootPath = null;
+            IReadOnlyList<EvidenceProducerResult> producerResults = [];
+            if (includeArtifactEvidence)
+            {
+                var artifactBytes = System.Text.Encoding.UTF8.GetBytes("{\"review\":\"complete\"}\n");
+                var artifactResult = new EvidenceArtifactResult(
+                    artifactSlot.LogicalName,
+                    "review/report.json",
+                    artifactSlot.MediaType,
+                    artifactBytes.Length,
+                    Convert.ToHexString(SHA256.HashData(artifactBytes)).ToLowerInvariant());
+                artifactHandoffRootPath = Path.Join(root, "artifact-handoff");
+                var artifactPath = TestPathUtils.PathUnder(artifactHandoffRootPath, artifactProducer.Id, artifactResult.RelativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(artifactPath)!);
+                await File.WriteAllBytesAsync(artifactPath, artifactBytes);
+                producerResults =
+                [
+                    new EvidenceProducerResult(
+                        artifactProducer.Id,
+                        EvidenceProducerOutcome.Passed,
+                        ["review-complete"],
+                        Artifacts: [artifactResult]),
+                ];
+            }
+
+            var manifest = EvidenceManifestBuilder.Build(plan, producerResults);
             if (!authorityUnavailable && authority is null)
             {
                 authority = new EvidencePullRequestGateAuthoritySnapshot(
@@ -432,7 +579,8 @@ public sealed class EvidenceGateVerifierTests
                     runIdentity,
                     expectedIdentity.SubjectJobId,
                     headRevision,
-                    "success");
+                    "success",
+                    includeArtifactEvidence);
             }
 
             var planPath = Path.Join(root, "plan.json");
@@ -452,6 +600,11 @@ public sealed class EvidenceGateVerifierTests
                 policyPath,
                 identityPath,
                 Path.Join(root, "output"),
+                policy,
+                expectedIdentity,
+                plan,
+                manifest,
+                artifactHandoffRootPath,
                 new SnapshotAuthorityProvider(authority));
         }
 
@@ -459,7 +612,7 @@ public sealed class EvidenceGateVerifierTests
         {
             try
             {
-                Directory.Delete(root, recursive: true);
+                Directory.Delete(RootPath, recursive: true);
             }
             catch (IOException)
             {
