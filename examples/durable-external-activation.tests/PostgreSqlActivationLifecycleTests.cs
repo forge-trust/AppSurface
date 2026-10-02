@@ -55,7 +55,8 @@ public sealed class PostgreSqlActivationLifecycleTests
             .SetSampler(new AlwaysOnSampler())
             .AddProcessor(new SimpleActivityExportProcessor(new LifecycleExporter(exported)))
             .Build();
-        using var activation = await fixture.Client.PostAsync("/private/durable/activate", new ByteArrayContent([]));
+        using var activationContent = new ByteArrayContent([]);
+        using var activation = await fixture.Client.PostAsync("/private/durable/activate", activationContent);
         Assert.Equal(HttpStatusCode.OK, activation.StatusCode);
         using var activationBody = JsonDocument.Parse(await activation.Content.ReadAsStringAsync());
         var result = activationBody.RootElement;
@@ -133,7 +134,8 @@ public sealed class PostgreSqlActivationLifecycleTests
         await using var fixture = await PostgreSqlActivationFixture.StartAsync();
         var receipt = await fixture.AcceptAsync("draining");
         await fixture.Services.GetRequiredService<IDurableRuntimeDrainControl>().BeginDrainAsync();
-        using var response = await fixture.Client.PostAsync("/private/durable/activate", new ByteArrayContent([]));
+        using var activationContent = new ByteArrayContent([]);
+        using var response = await fixture.Client.PostAsync("/private/durable/activate", activationContent);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("Draining", body.RootElement.GetProperty("outcome").GetString());
@@ -152,9 +154,11 @@ public sealed class PostgreSqlActivationLifecycleTests
         var secondReceipt = await fixture.AcceptAsync("second-receipt");
         Assert.NotEqual(firstReceipt.WorkId, secondReceipt.WorkId);
 
+        using var firstActivationContent = new ByteArrayContent([]);
+        using var secondActivationContent = new ByteArrayContent([]);
         var responses = await Task.WhenAll(
-            fixture.Client.PostAsync("/private/durable/activate", new ByteArrayContent([])),
-            fixture.Client.PostAsync("/private/durable/activate", new ByteArrayContent([])));
+            fixture.Client.PostAsync("/private/durable/activate", firstActivationContent),
+            fixture.Client.PostAsync("/private/durable/activate", secondActivationContent));
         try
         {
             var processedCounts = new List<int>();
@@ -211,7 +215,8 @@ public sealed class PostgreSqlActivationLifecycleTests
         var receipt = await fixture.AcceptAsync("lost-response");
         var failure = await Record.ExceptionAsync(async () =>
         {
-            using var response = await fixture.Client.PostAsync("/private/durable/activate", new ByteArrayContent([]));
+            using var activationContent = new ByteArrayContent([]);
+            using var response = await fixture.Client.PostAsync("/private/durable/activate", activationContent);
             _ = await response.Content.ReadAsStringAsync();
         });
         Assert.True(failure is HttpRequestException or OperationCanceledException, $"Expected a disconnected response, received {failure?.GetType().Name ?? "success"}.");

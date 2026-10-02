@@ -420,7 +420,8 @@ public sealed class ActivationCliTests
         Assert.Equal(ForgeTrust.AppSurface.Durable.DurableWorkState.Ready, persisted.State);
         Assert.Equal(workId, persisted.WorkId.Value);
 
-        using var activation = await fixture.Client.PostAsync("/private/durable/activate", new ByteArrayContent([]));
+        using var activationContent = new ByteArrayContent([]);
+        using var activation = await fixture.Client.PostAsync("/private/durable/activate", activationContent);
         Assert.Equal(HttpStatusCode.OK, activation.StatusCode);
         using var activationDocument = JsonDocument.Parse(await activation.Content.ReadAsStringAsync());
         Assert.Equal("Completed", activationDocument.RootElement.GetProperty("outcome").GetString());

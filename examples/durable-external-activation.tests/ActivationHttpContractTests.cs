@@ -209,7 +209,8 @@ public sealed class ActivationHttpContractTests
             dependencies);
         host.Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ActivationTestHost.ValidToken);
 
-        using var response = await host.Client.PostAsync("/private/durable/activate", new ByteArrayContent([]));
+        using var activationContent = new ByteArrayContent([]);
+        using var response = await host.Client.PostAsync("/private/durable/activate", activationContent);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var call = Assert.Single(dependencies.Activation.Calls);
 
