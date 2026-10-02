@@ -30,6 +30,103 @@ def portable_runtime_workspace():
             yield str(child)
 
 
+class SourceInventoryProofTests(unittest.TestCase):
+    SHARED_EXECUTION_SOURCES = (
+        "Evidence/ForgeTrust.AppSurface.Evidence.Coverage/EvidenceRestrictedCoverageProducer.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Coverage/EvidenceRestrictedCoverageTransport.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Coverage/EvidenceRestrictedCoverageProducerFactory.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceRestrictedProducerLease.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceWorkerExecution.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceLinuxApplicationProtocol.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Planner/EvidenceClosedApplicationCatalogue.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceHostBootstrap.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceRestrictedAspireApplication.cs",
+    )
+    PREVIOUS_SOURCES = (
+        "Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceRestrictedCoverageProducer.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceRestrictedCoverageTransport.cs",
+    )
+
+    @contextmanager
+    def inventory(self):
+        """Exercise real required files in a disposable checkout without runtime execution."""
+        with tempfile.TemporaryDirectory() as directory, patch.object(proof, "ROOT", Path(directory)):
+            contents = {}
+            for path in proof.source_paths():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                relative = path.relative_to(proof.ROOT).as_posix()
+                contents[relative] = ("fixture source: " + relative + "\n").encode("utf-8")
+                path.write_bytes(contents[relative])
+            yield proof.ROOT, contents
+
+    def test_shared_single_copy_and_dependency_inputs_bind_exact_file_bytes(self):
+        with self.inventory() as (root, contents):
+            relative_paths = [path.relative_to(root).as_posix() for path in proof.source_paths()]
+            self.assertEqual(len(relative_paths), len(set(relative_paths)))
+            self.assertTrue(set(self.SHARED_EXECUTION_SOURCES).issubset(relative_paths))
+            for package in ("Contracts", "Planner", "Coverage", "Cli", "Aspire"):
+                directory = "Evidence/ForgeTrust.AppSurface.Evidence." + package
+                self.assertIn(directory + "/ForgeTrust.AppSurface.Evidence." + package + ".csproj", relative_paths)
+                self.assertIn(directory + "/packages.lock.json", relative_paths)
+            for relative in self.PREVIOUS_SOURCES:
+                self.assertNotIn(relative, relative_paths)
+                self.assertFalse((root / relative).exists())
+            hashes, digest = proof.hash_sources()
+            expected = {relative: hashlib.sha256(data).hexdigest() for relative, data in contents.items()}
+            self.assertEqual(hashes, expected)
+            canonical = json.dumps(expected, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            self.assertEqual(digest, hashlib.sha256(canonical).hexdigest())
+
+    def test_previous_copy_directory_or_dangling_link_rejects_inventory(self):
+        for relative in self.PREVIOUS_SOURCES:
+            for kind in ("file", "directory", "dangling-link"):
+                with self.subTest(relative=relative, kind=kind), self.inventory() as (root, _):
+                    previous = root / relative
+                    if kind == "file":
+                        previous.write_bytes(b"stale implementation")
+                    elif kind == "directory":
+                        previous.mkdir()
+                    else:
+                        previous.symlink_to("missing-implementation.cs")
+                    with self.assertRaisesRegex(proof.ProofFailure, "previous location"):
+                        proof.hash_sources()
+
+    def test_each_missing_shared_execution_source_rejects_inventory(self):
+        for relative in self.SHARED_EXECUTION_SOURCES:
+            with self.subTest(relative=relative), self.inventory() as (root, _):
+                (root / relative).unlink()
+                with self.assertRaisesRegex(proof.ProofFailure, "missing or unsafe"):
+                    proof.hash_sources()
+
+    def test_linked_or_nonregular_shared_sources_cannot_replace_required_bytes(self):
+        for relative in self.SHARED_EXECUTION_SOURCES:
+            for kind in ("link", "dangling-link", "directory"):
+                with self.subTest(relative=relative, kind=kind), self.inventory() as (root, _):
+                    target = root / relative
+                    target.unlink()
+                    if kind == "directory":
+                        target.mkdir()
+                    elif kind == "link":
+                        replacement = root / "replacement.cs"
+                        replacement.write_bytes(b"different bytes")
+                        target.symlink_to(replacement)
+                    else:
+                        target.symlink_to("missing-implementation.cs")
+                    with self.assertRaisesRegex(proof.ProofFailure, "missing or unsafe"):
+                        proof.hash_sources()
+
+    def test_shared_source_mutation_changes_only_its_binding_and_canonical_digest(self):
+        for relative in self.SHARED_EXECUTION_SOURCES:
+            with self.subTest(relative=relative), self.inventory() as (root, _):
+                before, before_digest = proof.hash_sources()
+                changed = b"changed shared execution source\n"
+                (root / relative).write_bytes(changed)
+                after, after_digest = proof.hash_sources()
+                self.assertEqual(after[relative], hashlib.sha256(changed).hexdigest())
+                self.assertEqual([name for name in before if before[name] != after[name]], [relative])
+                self.assertNotEqual(after_digest, before_digest)
+
+
 class TrustedRejectionProofTests(unittest.TestCase):
     def test_only_the_exact_missing_proof_rejection_counts(self):
         cases = (
