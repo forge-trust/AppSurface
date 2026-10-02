@@ -19,6 +19,7 @@ internal static class ReleaseInspectMachineAuthority
     /// <param name="tag">Annotated release tag matching the version.</param>
     /// <param name="baseRef">Protected branch name that must contain the tag commit.</param>
     /// <param name="cancellationToken">Cancellation for the bounded Git inspection.</param>
+    /// <param name="commandRunner">Optional trusted command runner for an in-process caller or deterministic contract test.</param>
     /// <returns>The same bounded V2 machine result emitted by <c>inspect --machine-json</c>.</returns>
     /// <exception cref="ArgumentException">A required request value is missing.</exception>
     /// <exception cref="ReleaseToolException">The tag or its V2 release evidence is invalid.</exception>
@@ -27,7 +28,8 @@ internal static class ReleaseInspectMachineAuthority
         string versionText,
         string tag,
         string baseRef,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        ICommandRunner? commandRunner = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(versionText);
@@ -58,7 +60,7 @@ internal static class ReleaseInspectMachineAuthority
             AllowExistingTargets: false,
             BaseRef: ReleasePublishCommand.NormalizeBaseRef(baseRef));
         var workspace = new ReleaseWorkspace(options.RepositoryRoot);
-        var resolver = new ReleaseTaggedProjectionResolver(workspace, new ProcessCommandRunner());
+        var resolver = new ReleaseTaggedProjectionResolver(workspace, commandRunner ?? new ProcessCommandRunner());
         var projection = await resolver.ResolveMachineInspectAsync(options, cancellationToken).ConfigureAwait(false);
         var result = ReleaseInspectMachineResult.FromProjection(options, projection);
 

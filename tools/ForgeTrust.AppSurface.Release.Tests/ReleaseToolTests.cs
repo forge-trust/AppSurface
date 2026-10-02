@@ -805,6 +805,44 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task InProcessInspectBridgeMatchesTheCliMachineResultForTheSameValidatedTag()
+    {
+        await SeedRepositoryAsync();
+        var runner = await CreateSuccessfulV2InspectRunnerAsync();
+        var cli = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--base-ref", "release/0.1.0", "--machine-json"],
+            runner);
+
+        var inProcess = await ReleaseInspectMachineAuthority.InspectAsync(
+            _repositoryRoot,
+            "0.1.0-preview.1",
+            "v0.1.0-preview.1",
+            "release/0.1.0",
+            commandRunner: runner);
+
+        Assert.Equal(0, cli.ExitCode);
+        Assert.Equal(cli.Stdout.TrimEnd('\r', '\n'), inProcess.SerializeBounded());
+        Assert.Equal(4, runner.Calls.Count(call => call == "git rev-parse --verify refs/tags/v0.1.0-preview.1"));
+        Assert.DoesNotContain(runner.Calls, call => call.StartsWith("gh ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task InProcessInspectBridgeRejectsMismatchedTagBeforeAnyGitCall()
+    {
+        var runner = new FakeCommandRunner();
+
+        var failure = await Assert.ThrowsAsync<ReleaseToolException>(() => ReleaseInspectMachineAuthority.InspectAsync(
+            _repositoryRoot,
+            "0.1.0-preview.1",
+            "v0.1.0-preview.2",
+            "main",
+            commandRunner: runner));
+
+        Assert.Equal("release-tag-version-mismatch", failure.Diagnostic.Code);
+        Assert.Empty(runner.Calls);
+    }
+
+    [Fact]
     public async Task InspectWithoutMachineJsonKeepsDefaultProjectionOutput()
     {
         await SeedRepositoryAsync();
