@@ -12,6 +12,14 @@ is candidate-controlled and supplies no protected-base or Trusted acceptance. Th
 requires exact missing-proof rejection and structural verification of the collected plan/manifest. These tests and
 the preliminary mechanism observations have different source and execution bindings; one cannot substitute for the other.
 
+The runtime driver requires explicit zero-warning subject and CLI builds, then publishes the same CLI configuration
+with `--no-build --no-restore`. It preserves six raw build/publish stdout/stderr logs in the public proof directory,
+including on build or validation failure, and records their combined digest when the proof completes. The CLI build
+requires the repository's pinned Node/pnpm asset prerequisites, which the candidate workflow installs. Before launching,
+the generated temporary parent becomes root-owned and traversable; the launcher separately restricts tool and output
+children to the worker. Private build homes and caches keep their restrictive permissions. The disposable VM retains
+the private workspace after either result for diagnosis; it is never reused or uploaded as a proof artifact.
+
 ## Run
 
 On a disposable Ubuntu 24.04 VM with systemd 255+, cgroup v2, Python 3, a C compiler, .NET 10 and passwordless

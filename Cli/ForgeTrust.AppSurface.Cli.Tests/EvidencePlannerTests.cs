@@ -288,6 +288,64 @@ public sealed class EvidencePlannerTests
         Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
     }
 
+    [Theory]
+    [InlineData(EvidenceProducerOutcome.Failed)]
+    [InlineData(EvidenceProducerOutcome.Flaky)]
+    [InlineData(EvidenceProducerOutcome.TimedOut)]
+    [InlineData(EvidenceProducerOutcome.Unavailable)]
+    [InlineData(EvidenceProducerOutcome.Cancelled)]
+    [InlineData(EvidenceProducerOutcome.SkippedNotRequired)]
+    public void ManifestBuilder_ShouldKeepUnsuccessfulProducerIncompleteWhenRequiredArtifactsAreAbsent(EvidenceProducerOutcome outcome)
+    {
+        var plan = CreateRequiredArtifactPlan();
+        var result = new EvidenceProducerResult("coverage", outcome, ["coverage/assertion@1"]);
+
+        var manifest = EvidenceAdmissionTestFixture.BuildTrusted(plan, [result]);
+
+        Assert.Equal(EvidenceExecutionVerdict.Incomplete, manifest.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+        Assert.Equal(EvidenceClaimEligibility.None, manifest.Eligibility);
+        Assert.Empty(manifest.ClosedObligationIds);
+        Assert.Equal(["coverage"], manifest.UnmediatedObligationIds);
+        Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
+        Assert.False(EvidenceArtifactValidation.AreValid(Assert.Single(plan.Profile.Producers), result.Artifacts));
+    }
+
+    [Fact]
+    public void ManifestBuilder_ShouldValidatePartialArtifactsWithoutPromotingAnUnsuccessfulProducer()
+    {
+        var plan = CreateRequiredArtifactPlan();
+        var artifact = new EvidenceArtifactResult("report", "coverage/result.txt", "text/plain", 2, new string('a', 64));
+        var result = new EvidenceProducerResult("coverage", EvidenceProducerOutcome.Failed, ["coverage/assertion@1"], Artifacts: [artifact]);
+
+        var manifest = EvidenceAdmissionTestFixture.BuildTrusted(plan, [result]);
+
+        Assert.Equal(EvidenceExecutionVerdict.Incomplete, manifest.ExecutionVerdict);
+        Assert.Equal(artifact, Assert.Single(Assert.Single(manifest.ProducerResults).Artifacts!));
+        Assert.Equal(EvidenceClaimEligibility.None, manifest.Eligibility);
+        Assert.Empty(manifest.ClosedObligationIds);
+        Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
+        Assert.False(EvidenceArtifactValidation.AreValid(Assert.Single(plan.Profile.Producers), result.Artifacts));
+    }
+
+    [Theory]
+    [InlineData("coverage/result.txt", "bad-digest")]
+    [InlineData("../escape.txt", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    public void ManifestBuilder_ShouldRejectMalformedPartialArtifactsFromAnUnsuccessfulProducer(string relativePath, string digest)
+    {
+        var plan = CreateRequiredArtifactPlan();
+        var artifact = new EvidenceArtifactResult("report", relativePath, "text/plain", 2, digest);
+        var result = new EvidenceProducerResult("coverage", EvidenceProducerOutcome.Failed, ["coverage/assertion@1"], Artifacts: [artifact]);
+
+        var manifest = EvidenceAdmissionTestFixture.BuildTrusted(plan, [result]);
+
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, manifest.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+        Assert.Equal(EvidenceClaimEligibility.None, manifest.Eligibility);
+        Assert.Empty(manifest.ClosedObligationIds);
+        Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
+    }
+
     [Fact]
     public async Task ArtifactWriter_ShouldAllowOnlyDeclaredContainedArtifacts()
     {
@@ -874,6 +932,22 @@ public sealed class EvidencePlannerTests
         var exception = Assert.Throws<EvidencePlanningException>(action);
 
         Assert.Equal(code, exception.Code);
+    }
+
+    private static EvidencePlan CreateRequiredArtifactPlan()
+    {
+        var profile = new EvidenceProfile(
+            "artifact-coverage",
+            EvidenceProfileScope.Targeted,
+            [],
+            [new EvidenceProducerDeclaration(
+                "coverage", "coverage", "1.0.0", [], ["coverage/assertion@1"],
+                [new EvidenceArtifactSlot("report", "coverage", "text/plain", Required: true, MaximumBytes: 128),
+                    new EvidenceArtifactSlot("detail", "coverage", "text/plain", Required: true, MaximumBytes: 128)],
+                60)],
+            [new EvidenceObligation("coverage", "behavior", "Coverage reports are required.", ["coverage"], "coverage/assertion@1")]);
+        var policy = new EvidencePolicy("artifact", "1", "artifact-coverage", [profile], []);
+        return new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("src/Feature.cs")]);
     }
 
     private static EvidencePolicy CreatePolicy() => new(

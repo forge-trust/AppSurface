@@ -662,8 +662,22 @@ public static class EvidenceArtifactValidation
     /// </summary>
     /// <param name="producer">Producer declaration that owns the slots.</param>
     /// <param name="artifacts">Producer-returned artifact metadata.</param>
-    /// <returns><see langword="true"/> when every artifact is declared, bounded, and valid.</returns>
+    /// <returns><see langword="true"/> when every artifact is declared, bounded, and valid and every required slot is present.</returns>
     public static bool AreValid(EvidenceProducerDeclaration producer, IReadOnlyList<EvidenceArtifactResult>? artifacts)
+        => AreValid(producer, artifacts, requireRequiredSlots: true);
+
+    /// <summary>
+    /// Validates all returned metadata, allowing a terminal unsuccessful producer to omit artifacts it could not produce.
+    /// </summary>
+    /// <param name="producer">Producer declaration that owns the slots.</param>
+    /// <param name="artifacts">Producer-returned artifact metadata.</param>
+    /// <param name="requireRequiredSlots">Whether successful completion requires every declared required slot.</param>
+    /// <returns>Whether the returned metadata satisfies the declaration and the requested completeness check.</returns>
+    /// <remarks>Disabling the completeness check never permits undeclared or malformed metadata and cannot close an obligation.</remarks>
+    internal static bool AreValid(
+        EvidenceProducerDeclaration producer,
+        IReadOnlyList<EvidenceArtifactResult>? artifacts,
+        bool requireRequiredSlots)
     {
         ArgumentNullException.ThrowIfNull(producer);
         artifacts ??= [];
@@ -715,7 +729,7 @@ public static class EvidenceArtifactValidation
             }
         }
 
-        return producer.ArtifactSlots.Where(static slot => slot.Required)
+        return !requireRequiredSlots || producer.ArtifactSlots.Where(static slot => slot.Required)
             .All(slot => artifacts.Any(artifact => string.Equals(artifact.LogicalName, slot.LogicalName, StringComparison.Ordinal)));
     }
 
@@ -1347,7 +1361,8 @@ public static class EvidenceManifestBuilder
             || results.Any(pair => !producerDeclarations.TryGetValue(pair.Key, out var declaration)
                 || pair.Value.SatisfiedAssertionIds.Any(assertion =>
                     !declaration.AssertionIds.Contains(assertion, StringComparer.Ordinal))
-                || !EvidenceArtifactValidation.AreValid(declaration, pair.Value.Artifacts));
+                || !EvidenceArtifactValidation.AreValid(
+                    declaration, pair.Value.Artifacts, requireRequiredSlots: pair.Value.Outcome == EvidenceProducerOutcome.Passed));
         long aggregateArtifactBytes = 0;
         foreach (var artifact in producerResults.SelectMany(static result => result.Artifacts ?? []))
         {

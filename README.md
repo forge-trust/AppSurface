@@ -125,33 +125,22 @@ The Durable packages are coordinated public previews. The [Durable operational-a
 
 #### Aspire caller migration
 
-Aspire callers must select an explicit mode and run inside the separately supervised Linux worker. The old
-`RunAsync(bool observationOnly)` overload remains only as a source-compatibility failure: its default/`false`
-form returns `ASEVD400`, and `true` returns `ASEVD402`, both before the registration callback runs. The old
-`EvidenceAspireApplication.StartAsync(builder)` entry likewise returns `ASEVD400` before building the supplied
-builder. Use the host-owned deferred application factory so builder creation, configuration, build, and start
-all occur after protected admission:
+The legacy `RunAsync(bool observationOnly)` overload remains for source compatibility and always rejects before
+the registration callback runs: omission or `false` returns `ASEVD401`, and `true` returns `ASEVD402`. The public
+`EvidenceAspireApplication.StartAsync(builder)` entry returns `ASEVD400` before building the supplied builder.
 
-```csharp
-var host = EvidenceHostBootstrap.Create(plan, registration =>
-{
-    registration.AddResource(resourceDeclaration, readinessProbe);
-    registration.AddProducer(producerDeclaration, producer);
-    registration.SetApplicationFactory(() => CreateDistributedApplicationBuilder());
-});
+The explicit `EvidenceExecutionRequest` is the migration target and requires an independently armed protected
+Linux worker. The production Aspire application-factory path remains unavailable: a configured factory rejects
+with `ASEVD407` before invocation, and a resource-bearing Observation profile rejects with `ASEVD406`. The
+[Aspire factory and registration example](./Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#explicit-supervised-bootstrap)
+describes the provisional API shape for a future accepted resource lane.
 
-var manifest = await host.RunAsync(
-    new EvidenceExecutionRequest(EvidenceExecutionMode.Observation, protectedControlSocket),
-    cancellationToken);
-```
-
-Each resource and producer registration must match the complete selected declaration. Observation is restricted
-to a protected, dependency-free targeted profile with no resource declarations or protected secrets. Trusted
-execution requires protected consumer acceptance and a registered verifier; until that proof is available,
-shared admission rejects Trusted runs with `ASEVD407`. The request does not itself provide supervision or
-acceptance. The current implementation supports the protected Linux launcher and its authenticated control
-channel; Windows, macOS, and unrelated long-lived host processes are unsupported. See the
-[EvidenceHost guide](./start-here/evidencehost.md) for the trust boundary, diagnostics, and migration constraints.
+Observation is restricted to a protected, dependency-free targeted profile with no resources or protected
+secrets and produces informational evidence. Trusted admission remains closed on every provider and platform
+pending full consumer and CI proof; the current production context rejects it with `ASEVD407`. The Linux launcher
+is a candidate mechanism whose complete consumer and platform proof remains pending. Windows, macOS, and unrelated
+long-lived host processes are unsupported. See the
+[migration and support reference](./docs/evidence/evidencehost-migration.md) for the current API and proof boundaries.
 
 ### [Dependency](./Dependency/README.md)
 

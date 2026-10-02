@@ -321,11 +321,11 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
     }
 
     /// <summary>
-    /// Validates envelope and registrations, waits for resources, runs selected producers, and collects a manifest.
+    /// Rejects legacy Boolean execution before configuration, output allocation, or callback invocation.
     /// </summary>
-    /// <param name="observationOnly">Whether the caller intentionally requests a non-gate observation.</param>
-    /// <param name="cancellationToken">Caller cancellation for the complete bounded lifecycle.</param>
-    /// <returns>A terminal immutable manifest.</returns>
+    /// <param name="observationOnly">Omission or false rejects with ASEVD401; true rejects with ASEVD402.</param>
+    /// <param name="cancellationToken">Retained for source compatibility; no lifecycle is started.</param>
+    /// <returns>A task faulted with <see cref="EvidenceAdmissionException"/> containing the migration diagnostic.</returns>
     [Obsolete("Use RunAsync(EvidenceExecutionRequest) with a supported protected worker. The legacy Boolean cannot select admission.")]
     public Task<EvidenceManifest> RunAsync(bool observationOnly = false, CancellationToken cancellationToken = default)
     {

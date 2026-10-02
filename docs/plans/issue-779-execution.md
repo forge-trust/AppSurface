@@ -980,3 +980,54 @@ remains pending. The descriptor regression passes one test across all twelve
 scenario rows. A revised Linux runner executes focused CLI/Aspire consumer checks
 under a fresh root broker before the longer exact solution gate, which gets its
 own new broker. Focused success does not replace the unchanged gate.
+
+### Native caller failures and focused recovery (2026-10-02)
+
+[Native run 37018837795](https://github.com/forge-trust/AppSurface/actions/runs/37018837795)
+verified all 2707 captured source files before and after execution. It passed 39 launcher,
+two runtime-driver, one twelve-scenario descriptor, five POSIX lifecycle and sixteen
+control-protocol mechanism cases. The CLI Evidence filter recorded **316 passed / 12 failed**,
+including passing native retained-root and mode-conflict cleanup regressions. Aspire and
+the unchanged solution gate were not reached. Artifact `11231723272` retains the logs.
+
+Nine failures reproduced with the broker fixture's execute-only temporary ancestors:
+the shared coverage output lease opens each ancestor with `O_RDONLY | O_DIRECTORY`.
+The same built tests passed **9/9** with readable ancestors and failed **9/9** with
+execute-only ancestors. The fixture now grants the worker group read/search on its
+root-owned parent and worker-root directories without granting write or subject access.
+The protected report data and production path guards are unchanged. The output-quota
+assertion now requires the host's discarded terminal callback result, no closed obligation
+and no gate eligibility. Bounded synthetic diagnostics make future caller failures visible.
+
+A confirmed manifest defect required absent reports even after producer failure, making
+otherwise valid unsuccessful runs `Invalid`. Structural construction now permits missing
+required slots for unsuccessful outcomes and reports `Incomplete`; returned partial
+metadata remains fully validated. Public artifact validation and successful producer
+completeness remain strict. The focused planner suite passed **46/46**, exit **0**, with no
+warnings, failures or skips, including missing-report and malformed-partial regressions.
+
+[Current systemd run 37019675947](https://github.com/forge-trust/AppSurface/actions/runs/37019675947)
+stopped before launch because publish did not emit the build summary required by the
+proof driver. The driver now verifies an explicit warning-as-error, zero-warning CLI
+build before publishing that exact configuration without rebuilding, and retains six
+raw build/publish streams with their combined digest. The driver's portable controls
+pass **9/9**, exit **0**. Its generated private parent becomes root-owned and traversable
+before launch; protected tool/output children retain their narrower launcher permissions.
+The disposable runner retains that private workspace for diagnosis. A fresh source
+snapshot, native caller run, actual systemd Observation and unchanged solution gate are
+still required. No current acceptance decision or Trusted support is asserted.
+
+The direct broker's empty-packages Cobertura fixture exposed an independent positive-control
+error: ReportGenerator exited zero but recalculated zero valid items, which the actual CLI
+numeric gate rejected with `ASCOV006`. A private measured-class candidate with one covered
+line and a fully covered two-way branch passed the exact pinned reporter and actual gate,
+both exit **0**, at **100% line / 100% branch**. The meaningful report replaces only synthetic
+fixture data. Separately, that measured report still rejects execute-only ancestors with
+`ASCOV019`/`ASCOV109`, confirming that numerical and permission failures are distinct.
+
+The native build also exposed a pre-existing Tailwind warning: ANSI SGR styling prevented
+the stderr classifier from recognizing its informational version banner. Classification
+now ignores only complete SGR sequences, preserving raw output and error severity for
+real warnings and unknown or incomplete controls. Focused process/classifier tests pass
+**40/40**, exit **0**, with no warnings or skips. No warning suppression or coverage
+policy change was used.

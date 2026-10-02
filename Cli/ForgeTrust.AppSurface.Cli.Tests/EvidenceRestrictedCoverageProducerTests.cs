@@ -31,7 +31,8 @@ public sealed class EvidenceRestrictedCoverageProducerTests
 
         var result = await producer.RunAsync(declaration, Path.Join(directory.Path, "subject.slnx"), null, writer, CancellationToken.None);
 
-        Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
+        Assert.True(result.Outcome == EvidenceProducerOutcome.Passed,
+            $"Expected Passed, actual {result.Outcome}. Diagnostic: {result.Diagnostic}");
         Assert.Equal(new[] { AssertionId }, result.SatisfiedAssertionIds);
         Assert.Equal(1, transport.RunCount);
         Assert.Equal(1, transport.CollectCount);
@@ -68,7 +69,8 @@ public sealed class EvidenceRestrictedCoverageProducerTests
 
         var result = await producer.RunAsync(declaration, Path.Join(directory.Path, "subject.slnx"), null, writer, CancellationToken.None);
 
-        Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
+        Assert.True(result.Outcome == EvidenceProducerOutcome.Passed,
+            $"Expected Passed, actual {result.Outcome}. Diagnostic: {result.Diagnostic}");
         Assert.Equal(new[] { AssertionId }, result.SatisfiedAssertionIds);
         Assert.Empty(result.Artifacts!);
     }
@@ -112,8 +114,11 @@ public sealed class EvidenceRestrictedCoverageProducerTests
 
         var result = await producer.RunAsync(declaration, Path.Join(directory.Path, "subject.slnx"), null, writer, CancellationToken.None);
 
-        Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+        Assert.True(result.Outcome == EvidenceProducerOutcome.Failed,
+            $"Expected Failed, actual {result.Outcome}. Diagnostic: {result.Diagnostic}");
         Assert.Empty(result.SatisfiedAssertionIds);
+        Assert.True(result.Artifacts is { Count: 1 },
+            $"Expected the declared numeric gate artifact. Diagnostic: {result.Diagnostic}");
         var gatePath = TestPathUtils.PathUnder(artifactsDirectory, result.Artifacts!.Single().RelativePath);
         Assert.Contains("\"passed\": false", await File.ReadAllTextAsync(gatePath), StringComparison.Ordinal);
         Assert.Contains("Coverage gate failed", result.Diagnostic, StringComparison.Ordinal);

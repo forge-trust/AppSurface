@@ -50,6 +50,10 @@ A complete claim is deliberately conservative:
 
 An unavailable capability, timeout, skipped producer, incomplete test profile, or failed assertion therefore produces `None`, not a partial success. This is how EvidenceHost distinguishes an observation from evidence that can mediate risk.
 
+Required artifact slots are part of successful producer completion. A `Passed` result that omits a required slot makes the manifest `Invalid`. An unsuccessful producer may omit outputs it could not produce; valid absent or partial outputs leave its manifest `Incomplete`, with no closed obligation or gate eligibility. All returned metadata must still name declared slots and satisfy the byte, media type, digest and containment rules, regardless of outcome. Malformed partial outputs remain `Invalid`.
+
+The public `EvidenceArtifactValidation.AreValid(producer, artifacts)` always checks every required slot, including when `artifacts` is null or empty. Use it to check complete artifact sets. The manifest builder and structural verifier share an internal overload that relaxes only required-slot presence for unsuccessful outcomes; it neither grants runtime admission nor skips metadata validation. Use the [runtime admission and gate evaluation APIs](#runtime-admission-and-gate-evaluation) to construct or consume a claim.
+
 ## Runtime admission and gate evaluation
 
 Runtime claim construction is separate from JSON structure and from downstream authorization:
