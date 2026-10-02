@@ -899,6 +899,39 @@ public sealed class EvidencePullRequestGateVerifierTests
     }
 
     [Fact]
+    public async Task NoFollowArtifactVerifier_ShouldAcceptEmptyProfileWithFilesystemRootOnLinux()
+    {
+        if (!SupportsNoFollowVerifier)
+        {
+            return;
+        }
+
+        await using var fixture = await GateFixture.CreateAsync(documentationOnly: true);
+        var verifier = new EvidencePullRequestGateNoFollowArtifactVerifier();
+
+        Assert.True(await verifier.VerifyArtifactsAsync(
+            Path.GetPathRoot(fixture.ArtifactRoot)!,
+            fixture.Plan,
+            fixture.Manifest));
+    }
+
+    [Fact]
+    public async Task NoFollowArtifactVerifier_ShouldRejectRegularFileAsTrustedRootOnLinux()
+    {
+        if (!SupportsNoFollowVerifier)
+        {
+            return;
+        }
+
+        await using var fixture = await GateFixture.CreateAsync();
+        var verifier = new EvidencePullRequestGateNoFollowArtifactVerifier();
+        var fileRoot = Path.Join(Path.GetDirectoryName(fixture.ArtifactRoot)!, "handoff-file");
+        await File.WriteAllTextAsync(fileRoot, "not a directory");
+
+        Assert.False(await verifier.VerifyArtifactsAsync(fileRoot, fixture.Plan, fixture.Manifest));
+    }
+
+    [Fact]
     public async Task NoFollowArtifactVerifier_ShouldPropagateCancellation()
     {
         await using var fixture = await GateFixture.CreateAsync();

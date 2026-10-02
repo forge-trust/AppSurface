@@ -1,8 +1,11 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
+
+[assembly: InternalsVisibleTo("ForgeTrust.AppSurface.Cli.Tests")]
 
 namespace ForgeTrust.AppSurface.Evidence.Contracts;
 
@@ -114,12 +117,60 @@ public static class EvidenceNoFollowArtifactExtractor
     /// A later failure does not roll back artifacts already completed earlier in the same call because the writer
     /// exposes no batch transaction.
     /// </remarks>
-    public static async Task<IReadOnlyList<EvidenceArtifactResult>> ExtractAsync(
+    public static Task<IReadOnlyList<EvidenceArtifactResult>> ExtractAsync(
         SafeFileHandle trustedScratchRoot,
         EvidenceArtifactWriter writer,
         IReadOnlyList<EvidenceNoFollowArtifact> artifacts,
         EvidenceNoFollowArtifactExtractionLimits? limits = null,
+        CancellationToken cancellationToken = default) =>
+        ExtractCoreAsync(
+            trustedScratchRoot,
+            writer,
+            artifacts,
+            limits,
+            cancellationToken,
+            afterFirstPassBeforeSecondPass: null);
+
+    /// <summary>
+    /// Runs extraction with a deterministic checkpoint for source-mutation verification tests.
+    /// </summary>
+    /// <param name="trustedScratchRoot">Already-open handle to the trusted scratch directory. The extractor borrows it for this call.</param>
+    /// <param name="writer">Writer that owns the declared destination slots and artifact root.</param>
+    /// <param name="artifacts">Explicit source-to-destination mappings. Directories are never enumerated.</param>
+    /// <param name="afterFirstPassBeforeSecondPass">Trusted test callback invoked after each source's streamed pass and initial metadata check, immediately before its verification pass.</param>
+    /// <param name="limits">Optional stricter file-count, aggregate-byte, and duration limits.</param>
+    /// <param name="cancellationToken">Caller cancellation token.</param>
+    /// <returns>The metadata for artifacts completed by this call, in input order.</returns>
+    /// <remarks>
+    /// This internal entry point exists only to make source-mutation tests deterministic. Production callers use
+    /// <see cref="ExtractAsync(SafeFileHandle, EvidenceArtifactWriter, IReadOnlyList{EvidenceNoFollowArtifact}, EvidenceNoFollowArtifactExtractionLimits?, CancellationToken)"/>,
+    /// which does not accept a callback.
+    /// </remarks>
+    internal static Task<IReadOnlyList<EvidenceArtifactResult>> ExtractAsyncForTesting(
+        SafeFileHandle trustedScratchRoot,
+        EvidenceArtifactWriter writer,
+        IReadOnlyList<EvidenceNoFollowArtifact> artifacts,
+        Action<string> afterFirstPassBeforeSecondPass,
+        EvidenceNoFollowArtifactExtractionLimits? limits = null,
         CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(afterFirstPassBeforeSecondPass);
+        return ExtractCoreAsync(
+            trustedScratchRoot,
+            writer,
+            artifacts,
+            limits,
+            cancellationToken,
+            afterFirstPassBeforeSecondPass);
+    }
+
+    private static async Task<IReadOnlyList<EvidenceArtifactResult>> ExtractCoreAsync(
+        SafeFileHandle trustedScratchRoot,
+        EvidenceArtifactWriter writer,
+        IReadOnlyList<EvidenceNoFollowArtifact> artifacts,
+        EvidenceNoFollowArtifactExtractionLimits? limits,
+        CancellationToken cancellationToken,
+        Action<string>? afterFirstPassBeforeSecondPass)
     {
         ArgumentNullException.ThrowIfNull(trustedScratchRoot);
         ArgumentNullException.ThrowIfNull(writer);
@@ -218,7 +269,10 @@ public static class EvidenceNoFollowArtifactExtractor
                     openedFile.Snapshot,
                     checked((long)openedFile.Snapshot.Size),
                     startedTimestamp,
-                    effectiveLimits.MaximumDuration);
+                    effectiveLimits.MaximumDuration,
+                    afterFirstPassBeforeSecondPass is null
+                        ? null
+                        : () => afterFirstPassBeforeSecondPass(openedFile.Request.SourceRelativePath));
 
                 var result = await writer.WriteAsync(
                     openedFile.Request.LogicalName,
@@ -468,6 +522,7 @@ public static class EvidenceNoFollowArtifactExtractor
         private readonly long _expectedLength;
         private readonly long _startedTimestamp;
         private readonly TimeSpan _maximumDuration;
+        private readonly Action? _afterFirstPassBeforeSecondPass;
         private readonly IncrementalHash _firstPassHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         private long _bytesRead;
         private bool _validated;
@@ -478,7 +533,8 @@ public static class EvidenceNoFollowArtifactExtractor
             FileSnapshot initialSnapshot,
             long expectedLength,
             long startedTimestamp,
-            TimeSpan maximumDuration)
+            TimeSpan maximumDuration,
+            Action? afterFirstPassBeforeSecondPass)
         {
             _source = source;
             _handle = handle;
@@ -486,6 +542,7 @@ public static class EvidenceNoFollowArtifactExtractor
             _expectedLength = expectedLength;
             _startedTimestamp = startedTimestamp;
             _maximumDuration = maximumDuration;
+            _afterFirstPassBeforeSecondPass = afterFirstPassBeforeSecondPass;
         }
 
         public override bool CanRead => true;
@@ -505,19 +562,8 @@ public static class EvidenceNoFollowArtifactExtractor
         public override int Read(byte[] buffer, int offset, int count)
         {
             ArgumentNullException.ThrowIfNull(buffer);
-            return Read(buffer.AsSpan(offset, count));
-        }
-
-        public override int Read(Span<byte> buffer)
-        {
-            var bytesRead = _source.Read(buffer);
-            ProcessFirstPassBytes(buffer[..bytesRead]);
-            if (bytesRead == 0)
-            {
-                ValidateAtEndAsync(CancellationToken.None).GetAwaiter().GetResult();
-            }
-
-            return bytesRead;
+            _ = buffer.AsSpan(offset, count);
+            throw new NotSupportedException("No-follow artifact extraction reads source streams asynchronously.");
         }
 
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
@@ -530,12 +576,6 @@ public static class EvidenceNoFollowArtifactExtractor
             }
 
             return bytesRead;
-        }
-
-        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
-        {
-            ArgumentNullException.ThrowIfNull(buffer);
-            return ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
         }
 
         public override void Flush() => throw new NotSupportedException();
@@ -588,6 +628,7 @@ public static class EvidenceNoFollowArtifactExtractor
 
             EnsureUnchanged(_initialSnapshot, ReadSnapshot(_handle));
             var firstDigest = _firstPassHash.GetHashAndReset();
+            _afterFirstPassBeforeSecondPass?.Invoke();
             _source.Position = 0;
 
             using var secondPassHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);

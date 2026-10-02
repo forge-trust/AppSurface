@@ -426,6 +426,57 @@ public sealed class EvidenceNoFollowArtifactExtractorTests
         Assert.Equal(new byte[] { 9, 8, 7 }, await File.ReadAllBytesAsync(Path.Join(temp.ScratchRoot, "subject", "report.bin")));
     }
 
+    [Theory]
+    [InlineData("replace")]
+    [InlineData("append")]
+    [InlineData("touch")]
+    public async Task ExtractAsyncForTesting_ShouldRejectSourceMutationBeforeTheVerificationPass(string mutation)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            await AssertUnsupportedPlatformFailsClosedAsync();
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        Directory.CreateDirectory(temp.ScratchRoot);
+        Directory.CreateDirectory(temp.ArtifactRoot);
+        Directory.CreateDirectory(Path.Join(temp.ScratchRoot, "subject"));
+        var sourcePath = Path.Join(temp.ScratchRoot, "subject", "report.bin");
+        await File.WriteAllBytesAsync(sourcePath, [1, 2, 3]);
+        using var root = OpenTrustedRoot(temp.ScratchRoot);
+        var writer = CreateWriter(temp.ArtifactRoot);
+
+        void MutateSource(string sourceRelativePath)
+        {
+            Assert.Equal("subject/report.bin", sourceRelativePath);
+            if (mutation == "append")
+            {
+                using var changedSource = new FileStream(sourcePath, FileMode.Append, FileAccess.Write, FileShare.Read);
+                changedSource.WriteByte(4);
+                return;
+            }
+
+            if (mutation == "touch")
+            {
+                File.SetLastWriteTimeUtc(sourcePath, File.GetLastWriteTimeUtc(sourcePath).AddSeconds(-2));
+                return;
+            }
+
+            Assert.Equal("replace", mutation);
+            File.WriteAllBytes(sourcePath, [9, 8, 7]);
+        }
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => EvidenceNoFollowArtifactExtractor.ExtractAsyncForTesting(
+            root,
+            writer,
+            [new EvidenceNoFollowArtifact("report", "subject/report.bin", "reports/report.bin")],
+            MutateSource));
+
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.False(File.Exists(Path.Join(temp.ArtifactRoot, "reports", "report.bin")));
+    }
+
     [Fact]
     public async Task ExtractAsync_ShouldRejectFifoWithoutBlockingOrWriting()
     {

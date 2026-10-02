@@ -91,11 +91,14 @@ else
     rid_preflight_diagnostic='untracked-rid-specific-lock-file'
   elif [[ "$host_sdk_rid" != 'linux-x64' ]]; then
     rid_preflight_diagnostic='host-sdk-rid-does-not-match-image'
-  elif [[ "${host_lock_file##*/}" != 'packages.linux-x64.lock.json' ]]; then
+  elif [[ "$host_lock_file" != 'packages.linux-x64.lock.json' ]]; then
     rid_preflight_diagnostic='host-lock-file-does-not-select-linux-x64'
   elif ! git -C "$repository_root" ls-files --error-unmatch -- \
-    "$rid_project_relative/${host_lock_file##*/}" >/dev/null 2>&1; then
+    "$rid_project_relative/$host_lock_file" >/dev/null 2>&1; then
     rid_preflight_diagnostic='selected-linux-x64-lock-is-not-tracked'
+  elif [[ ! -f "$repository_root/$rid_project_relative/$host_lock_file" \
+    || -L "$repository_root/$rid_project_relative/$host_lock_file" ]]; then
+    rid_preflight_diagnostic='selected-linux-x64-lock-is-not-a-regular-file'
   elif ! dotnet restore "$rid_project" --locked-mode \
     --disable-parallel -m:1 --packages "$global_packages" --verbosity minimal; then
     if ! check_no_untracked_rid_locks; then
@@ -172,7 +175,7 @@ podman_created_inspect_path="$work_root/podman-created-inspect.json"
 podman_final_inspect_path="$work_root/podman-final-inspect.json"
 podman_created_checks_path="$work_root/podman-created-checks.json"
 podman_final_checks_path="$work_root/podman-final-checks.json"
-podman_container_name="appsurface-subject-smoke-$$"
+podman_container_name="appsurface-subject-smoke-$$-${work_root##*.}"
 podman_container_id='unavailable'
 podman_cli_path='unavailable'
 podman_version='unavailable'
@@ -340,9 +343,13 @@ podman_smoke_cleanup() {
   fi
   if [[ "$podman_create_attempted" == true && "$podman_cleanup_succeeded" != true ]]; then
     podman_cleanup_attempted=true
+    cleanup_container="$podman_container_name"
+    if [[ "$podman_container_created" == true ]]; then
+      cleanup_container="$podman_container_id"
+    fi
     if timeout --signal=TERM --kill-after=5s 30s \
       "$podman_cli_path" --remote=false rm --force --ignore \
-        "$podman_container_name" >/dev/null 2>&1; then
+        "$cleanup_container" >/dev/null 2>&1; then
       podman_cleanup_succeeded=true
       if [[ "$podman_container_created" == true ]]; then
         podman_container_removed=true
@@ -620,15 +627,32 @@ state = container.get("State") or {}
 security = host.get("SecurityOpt")
 mounts = container.get("Mounts") or []
 scratch = [mount for mount in mounts if isinstance(mount, dict) and mount.get("Destination") == "/scratch"]
+effective_caps = container.get("EffectiveCaps")
+bounding_caps = container.get("BoundingCaps")
+reported_capability_sets_empty = (
+    isinstance(effective_caps, list) and isinstance(bounding_caps, list)
+    and not effective_caps and not bounding_caps
+    and host.get("CapAdd") in (None, [])
+)
+expected_default_caps = {
+    "CAP_CHOWN", "CAP_DAC_OVERRIDE", "CAP_FOWNER", "CAP_FSETID", "CAP_KILL",
+    "CAP_NET_BIND_SERVICE", "CAP_SETFCAP", "CAP_SETGID", "CAP_SETPCAP",
+    "CAP_SETUID", "CAP_SYS_CHROOT",
+}
+drop_presentation = host.get("CapDrop")
+reported_drop_request = (
+    isinstance(drop_presentation, list)
+    and expected_default_caps.issubset(drop_presentation)
+    and all(isinstance(capability, str) for capability in drop_presentation)
+    and len(drop_presentation) == len(set(drop_presentation))
+    and host.get("CapAdd") in (None, [])
+)
 checks = {
     "networkNone": host.get("NetworkMode") == "none",
     "readOnlyRoot": host.get("ReadonlyRootfs") is True,
     "fixedNonRootUser": config.get("User") == f"{sys.argv[3]}:{sys.argv[4]}",
-    "capabilitiesDropped": (
-        isinstance(container.get("EffectiveCaps"), list)
-        and isinstance(container.get("BoundingCaps"), list)
-        and not container["EffectiveCaps"] and not container["BoundingCaps"]
-        and host.get("CapAdd") in (None, [])
+    "capabilityDropRequest": reported_capability_sets_empty or (
+        effective_caps is None and bounding_caps is None and reported_drop_request
     ),
     "noNewPrivileges": isinstance(security, list) and any(
         value in ("no-new-privileges", "no-new-privileges:true") for value in security
@@ -647,6 +671,13 @@ print(json.dumps({
         "bounding": container.get("BoundingCaps"),
         "added": host.get("CapAdd"),
         "dropPresentation": host.get("CapDrop"),
+    },
+    "resourceAndNamespacePresentation": {
+        key: host.get(key) for key in (
+            "PidMode", "IpcMode", "UTSMode", "CgroupnsMode", "UsernsMode",
+            "PidsLimit", "Memory", "NanoCpus", "CpuQuota", "CpuPeriod",
+            "Privileged",
+        )
     },
     "state": state,
 }, sort_keys=True))
@@ -707,7 +738,7 @@ podman_phase='cleanup'
 podman_cleanup_attempted=true
 if ! timeout --signal=TERM --kill-after=5s 30s \
   "$podman_cli_path" --remote=false rm --force --ignore \
-  "$podman_container_name" >/dev/null 2>&1; then
+  "$podman_container_id" >/dev/null 2>&1; then
   podman_status='failed'
   podman_diagnostic='container-cleanup-failed'
   podman_fail "$podman_phase" "$podman_diagnostic"
@@ -748,7 +779,7 @@ cat > "$cold_root/offline-nuget.config" <<'CONFIG'
   </packageSources>
 </configuration>
 CONFIG
-sudo chown -R 65532:65532 "$cold_root"
+timeout --signal=TERM --kill-after=5s 120s sudo -n chown -R 65532:65532 "$cold_root"
 
 if timeout --signal=TERM --kill-after=10s 16m \
   docker run --rm --platform linux/amd64 \

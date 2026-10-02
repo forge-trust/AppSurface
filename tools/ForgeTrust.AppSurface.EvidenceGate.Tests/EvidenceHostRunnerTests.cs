@@ -373,6 +373,28 @@ public sealed class EvidenceHostRunnerTests
     }
 
     [Fact]
+    public async Task OutputPathThatIsAFileFailsSafely()
+    {
+        using var fixture = await GateFixture.CreateAsync(docsOnly: true);
+        await File.WriteAllTextAsync(fixture.OutputDirectory, "output-path-file");
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.OutputDirectory,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGH102", stderr.ToString(), StringComparison.Ordinal);
+        Assert.Empty(stdout.ToString());
+        Assert.Equal("output-path-file", await File.ReadAllTextAsync(fixture.OutputDirectory));
+    }
+
+    [Fact]
     public async Task ParseableNonCanonicalPlanEmitsInvalidManifestAndFails()
     {
         using var fixture = await GateFixture.CreateAsync(docsOnly: true);
