@@ -22,6 +22,8 @@ internal enum EvidenceClosedBundleRole
     Dependency,
     /// <summary>Closed immutable application input.</summary>
     DeclaredInput,
+    /// <summary>Read-only managed dependency manifest ending in .deps.json.</summary>
+    DependencyManifest,
 }
 
 /// <summary>Compile-owned bundle metadata; relative names never select an executable from a request.</summary>
@@ -146,6 +148,72 @@ internal static partial class EvidenceClosedApplicationCatalogue
         }
         VerifyCandidateBinding(entry, ComputeCatalogueDigest(CompiledEntries), policy, plan, binding);
         return entry;
+    }
+
+    /// <summary>Resolves authenticated v2 application metadata against the immutable compiled table.</summary>
+    /// <param name="policy">Complete independently read protected policy.</param>
+    /// <param name="plan">Independently re-resolved plan for the protected changed paths.</param>
+    /// <param name="descriptor">Root-authenticated worker descriptor; its metadata cannot enroll an entry.</param>
+    /// <returns>Exact compiled registration data, without granting admission or starting an application.</returns>
+    internal static EvidenceClosedApplicationDefinition Resolve(
+        EvidencePolicy policy, EvidencePlan plan, EvidenceLinuxWorkerDescriptor descriptor) =>
+        Resolve(policy, plan, CreateBinding(descriptor, policy, plan));
+
+    /// <summary>Copies every v2 application field into the catalogue's typed comparison shape.</summary>
+    /// <param name="descriptor">Authenticated worker and application facts; never a source of registrations.</param>
+    /// <param name="policy">Complete protected policy used to validate declaration bounds.</param>
+    /// <param name="plan">Protected plan whose selected profile carries these declarations.</param>
+    /// <returns>A defensive metadata snapshot for exact compiled-entry comparison, not a lease or proof.</returns>
+    /// <remarks>
+    /// Provider, platform and schema are copied from the descriptor rather than supplied by this adapter.
+    /// SDK version is checked here because the binding shape does not contain it. Candidate verification
+    /// remains a structural control; only Resolve selects a compiled entry, and admission remains separate.
+    /// </remarks>
+    internal static EvidenceClosedApplicationBinding CreateBinding(EvidenceLinuxWorkerDescriptor descriptor,
+        EvidencePolicy policy, EvidencePlan plan)
+    {
+        Require(descriptor is not null && descriptor.Schema == "evidence-worker-linux-v2"
+            && descriptor.Application is not null && policy is not null && plan is not null && plan.Profile is not null);
+        var application = descriptor.Application;
+        Require(Id(application.ApplicationId) && Id(application.ApplicationVersion) && Id(application.BuildId)
+            && Hash(application.CatalogueDigest) && Hash(application.EntryDigest) && application.AspireSdkVersion == "13.4.4"
+            && Count(application.Resources, EvidenceProfileLimits.MaximumResources)
+            && Count(application.Producers, EvidenceProfileLimits.MaximumProducers)
+            && Count(application.BundleFiles, MaximumBundleFiles) && application.BundleFiles.All(static item => item is not null)
+            && application.Capabilities is not null);
+        ValidatePolicyBounds(policy with
+        {
+            Profiles = [plan.Profile with { Resources = application.Resources, Producers = application.Producers }],
+            Rules = [],
+        });
+        var files = ReadOnly(application.BundleFiles.Select(static item => new EvidenceClosedBundleFile(
+            item.RelativePath, item.Role switch
+            {
+                EvidenceLinuxApplicationBundleRole.AppHost => EvidenceClosedBundleRole.AppHost,
+                EvidenceLinuxApplicationBundleRole.AppHostRuntimeConfiguration => EvidenceClosedBundleRole.AppHostRuntimeConfiguration,
+                EvidenceLinuxApplicationBundleRole.Resource => EvidenceClosedBundleRole.Resource,
+                EvidenceLinuxApplicationBundleRole.ResourceRuntimeConfiguration => EvidenceClosedBundleRole.ResourceRuntimeConfiguration,
+                EvidenceLinuxApplicationBundleRole.Dcp => EvidenceClosedBundleRole.Dcp,
+                EvidenceLinuxApplicationBundleRole.DcpExtension => EvidenceClosedBundleRole.DcpExtension,
+                EvidenceLinuxApplicationBundleRole.Dependency => EvidenceClosedBundleRole.Dependency,
+                EvidenceLinuxApplicationBundleRole.DeclaredInput => EvidenceClosedBundleRole.DeclaredInput,
+                EvidenceLinuxApplicationBundleRole.DependencyManifest => EvidenceClosedBundleRole.DependencyManifest,
+                _ => throw Invalid(),
+            }, item.LengthBytes, item.Sha256, item.Mode)));
+        var grants = application.Capabilities;
+        ValidateCapabilities(new(grants.ReadOnlyInputs, grants.ScratchBytes, grants.MemoryBytes, grants.MaximumTasks,
+            grants.MaximumOutputBytes, grants.StartSeconds, grants.StoppingSeconds));
+        var capabilities = new EvidenceClosedApplicationCapabilities(ReadOnly(grants.ReadOnlyInputs), grants.ScratchBytes,
+            grants.MemoryBytes, grants.MaximumTasks, grants.MaximumOutputBytes, grants.StartSeconds, grants.StoppingSeconds);
+        var identities = new EvidenceClosedApplicationIdentities(descriptor.WorkerUid, descriptor.WorkerGid,
+            descriptor.SubjectUid, descriptor.SubjectGid, application.ApplicationUid, application.ApplicationGid,
+            application.ResultsGid, application.ResourceAccessGid);
+        ValidateBundle(files);
+        ValidateIdentities(identities);
+        return new(application.ApplicationId, application.ApplicationVersion, application.BuildId,
+            application.CatalogueDigest, application.EntryDigest, descriptor.Provider, descriptor.Platform, descriptor.Schema,
+            ReadOnly(application.Resources.Select(FreezeResource)), ReadOnly(application.Producers.Select(FreezeProducer)),
+            files, capabilities, identities);
     }
 
     /// <summary>Validates and defensively snapshots candidate metadata; cannot enroll it in Resolve.</summary>
@@ -279,6 +347,8 @@ internal static partial class EvidenceClosedApplicationCatalogue
             if (item.Role is EvidenceClosedBundleRole.AppHost or EvidenceClosedBundleRole.Resource) Require(item.RelativePath.EndsWith(".dll", StringComparison.Ordinal));
             if (item.Role is EvidenceClosedBundleRole.AppHostRuntimeConfiguration or EvidenceClosedBundleRole.ResourceRuntimeConfiguration)
                 Require(item.RelativePath.EndsWith(".runtimeconfig.json", StringComparison.Ordinal));
+            if (item.Role == EvidenceClosedBundleRole.DependencyManifest)
+                Require(item.RelativePath.EndsWith(".deps.json", StringComparison.Ordinal));
             Require(!files.Any(other => other != item && other.RelativePath.StartsWith(item.RelativePath + "/", StringComparison.OrdinalIgnoreCase)));
         }
         foreach (var role in new[] { EvidenceClosedBundleRole.AppHost, EvidenceClosedBundleRole.AppHostRuntimeConfiguration,
