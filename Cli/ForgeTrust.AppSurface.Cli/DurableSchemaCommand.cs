@@ -137,37 +137,83 @@ internal sealed partial class DurableSchemaApplyCommand(IDurableSchemaCommandSer
     }
 }
 
-/// <summary>Fails noninteractively unless the installed schema supports this runtime's readers and writers.</summary>
-[Command("durable schema preflight", Description = "Fail unless the durable schema is compatible with this runtime package.")]
+/// <summary>Verifies a complete reviewed role manifest and schema in one fenced, read-only snapshot.</summary>
+/// <remarks>
+/// Both inputs are mandatory even for one pair. Input validation precedes connection resolution. Runtime
+/// evidence covers only the observed credential; activation requires every distinct runtime and the continuous
+/// application-owned guard described in Durable/heartbeat-retention-operations.md.
+/// </remarks>
+[Command("durable schema preflight", Description = "Verify schema and the complete reviewed role set using runtime or owner-diagnostic credentials.")]
 internal sealed partial class DurableSchemaPreflightCommand(IDurableSchemaCommandService service) : DurableSchemaOnlineCommandBase(service)
 {
+    /// <summary>Gets or sets the complete reviewed version-1 UTF-8 manifest path, including for one pair.</summary>
+    [CommandOption("role-pairs-file", Description = "Required complete reviewed version-1 role manifest (1–32 pairs, strict UTF-8, at most 64 KiB). Required for one pair too.")]
+    public string? RolePairsFile { get; set; }
+
+    /// <summary>Gets or sets the independently reviewed migration-owner role; no catalog-derived default exists.</summary>
+    [CommandOption("migration-owner-role", Description = "Required independently reviewed migration-owner role name, distinct from every manifest role.")]
+    public string? MigrationOwnerRole { get; set; }
+
     /// <inheritdoc />
     public override async ValueTask ExecuteAsync(IConsole console)
     {
         ArgumentNullException.ThrowIfNull(console);
-        var status = await RunOnlineAsync(
-            ResolveConnectionString(),
-            console.RegisterCancellationHandler(),
-            Service.GetStatusAsync).ConfigureAwait(false);
-        if (!status.IsCompatible)
+        var cancellationToken = console.RegisterCancellationHandler();
+        DurablePreflightRequest request;
+        try
         {
-            throw new CommandException(DurableSchemaDiagnostics.PreflightFailure(
-                status.Compatibility,
-                status.Compatibility == DurableRuntimeSchemaCompatibility.UpgradeRequired
-                    && status.PendingVersions is [11]));
+            if (RolePairsFile is null || MigrationOwnerRole is null)
+            {
+                throw new ArgumentException("Both --role-pairs-file and --migration-owner-role are required, including for one pair.");
+            }
+
+            var manifest = await DurableRoleManifest.ReadAsync(RolePairsFile, cancellationToken).ConfigureAwait(false);
+            request = new DurablePreflightRequest(manifest, MigrationOwnerRole);
+        }
+        catch (ArgumentException)
+        {
+            throw new CommandException(DurableSchemaDiagnostics.ManifestInputFailure());
+        }
+        catch (OperationCanceledException)
+        {
+            throw new CommandException(DurableSchemaDiagnostics.PreflightOperationFailure("timeout"));
         }
 
-        var failedChecks = await RunOnlineAsync(
-            ResolveConnectionString(),
-            console.RegisterCancellationHandler(),
-            Service.VerifyRetentionPreflightAsync).ConfigureAwait(false);
-        if (failedChecks.Count != 0)
+        string connectionString;
+        try
         {
-            throw new CommandException(DurableSchemaDiagnostics.RetentionStructureFailure(failedChecks));
+            connectionString = ResolveConnectionString();
+        }
+        catch (CommandException)
+        {
+            throw new CommandException(DurableSchemaDiagnostics.PreflightOperationFailure("connection_input"));
+        }
+
+        var result = await RunOnlineAsync(
+            connectionString, cancellationToken,
+            async (connection, token) =>
+            {
+                var evidence = await Service.PreflightAsync(connection, request, token).ConfigureAwait(false);
+                DurableSchemaPreflightVerifier.ValidateEvidenceResult(evidence, request);
+                return evidence;
+            }, preflightDiagnostics: true).ConfigureAwait(false);
+        if (!result.Status.IsCompatible)
+        {
+            throw new CommandException(DurableSchemaDiagnostics.PreflightFailure(
+                result.Status.Compatibility,
+                result.Status.Compatibility == DurableRuntimeSchemaCompatibility.UpgradeRequired
+                    && result.Status.PendingVersions is [11]));
+        }
+
+        if (result.FailedChecks.Count != 0)
+        {
+            throw new CommandException(DurableSchemaDiagnostics.RetentionStructureFailure(result.FailedChecks));
         }
 
         await console.Output.WriteLineAsync(
-            $"Compatible: durable schema {status.InstalledVersion.ToString(CultureInfo.InvariantCulture)}; runtime requires {status.RequiredVersion.ToString(CultureInfo.InvariantCulture)}.").ConfigureAwait(false);
+            $"Compatible: durable schema {result.Status.InstalledVersion.ToString(CultureInfo.InvariantCulture)}; runtime requires {result.Status.RequiredVersion.ToString(CultureInfo.InvariantCulture)}.").ConfigureAwait(false);
+        await console.Output.WriteLineAsync(
+            $"caller={result.CallerEvidenceKind}; pair={result.PairIndex?.ToString(CultureInfo.InvariantCulture) ?? "none"}; role={System.Text.Json.JsonSerializer.Serialize(result.CallerRole)}; owner={System.Text.Json.JsonSerializer.Serialize(request.MigrationOwnerRole)}; runtimes={request.Manifest.Pairs.Length.ToString(CultureInfo.InvariantCulture)}; manifest_sha256={request.Manifest.Sha256}; store_id={result.StoreId:D}; active_epoch={result.ActiveRuntimeEpoch?.ToString("D", CultureInfo.InvariantCulture) ?? "null"}.").ConfigureAwait(false);
     }
 }
 
@@ -219,7 +265,8 @@ internal abstract class DurableSchemaOnlineCommandBase(IDurableSchemaCommandServ
         string connectionString,
         CancellationToken cancellationToken,
         Func<string, CancellationToken, ValueTask<T>> operation,
-        TimeSpan? operationTimeout = null)
+        TimeSpan? operationTimeout = null,
+        bool preflightDiagnostics = false)
     {
         ArgumentNullException.ThrowIfNull(operation);
         var timeout = operationTimeout ?? OnlineOperationTimeout;
@@ -234,27 +281,55 @@ internal abstract class DurableSchemaOnlineCommandBase(IDurableSchemaCommandServ
         {
             return await operation(connectionString, deadline.Token).ConfigureAwait(false);
         }
+        catch (DurablePreflightException exception)
+        {
+            throw new CommandException(DurableSchemaDiagnostics.PreflightOperationFailure(exception.Category));
+        }
         catch (DurableRuntimeSchemaException exception)
         {
+            if (preflightDiagnostics)
+            {
+                throw new CommandException(DurableSchemaDiagnostics.PreflightFailure(exception.Status.Compatibility));
+            }
             throw new CommandException(DurableSchemaDiagnostics.SchemaIncompatible(exception.Status.Compatibility));
+        }
+        catch (Exception exception) when (preflightDiagnostics && exception is (InvalidDataException or InvalidOperationException))
+        {
+            throw new CommandException(DurableSchemaDiagnostics.PreflightOperationFailure("catalog_result"));
         }
         catch (OperationCanceledException) when (deadline.IsCancellationRequested)
         {
+            if (preflightDiagnostics)
+            {
+                throw new CommandException(DurableSchemaDiagnostics.PreflightOperationFailure("timeout"));
+            }
             throw new CommandException(
                 $"Durable schema operation was canceled or exceeded its {FormatOnlineOperationTimeout(timeout)} deadline. Check PostgreSQL readiness or the package advisory lock, then retry.");
         }
         catch (NpgsqlException)
         {
+            if (preflightDiagnostics)
+            {
+                throw new CommandException(DurableSchemaDiagnostics.PreflightOperationFailure("database_operation"));
+            }
             throw new CommandException(
                 "Durable schema database operation failed. Check PostgreSQL reachability, role grants, and the package advisory lock; connection and server details were not printed.");
         }
         catch (TimeoutException)
         {
+            if (preflightDiagnostics)
+            {
+                throw new CommandException(DurableSchemaDiagnostics.PreflightOperationFailure("timeout"));
+            }
             throw new CommandException(
                 $"Durable schema database operation timed out after its {FormatOnlineOperationTimeout(timeout)} deadline. Check PostgreSQL readiness or the package advisory lock, then retry.");
         }
         catch (ArgumentException)
         {
+            if (preflightDiagnostics)
+            {
+                throw new CommandException(DurableSchemaDiagnostics.PreflightOperationFailure("connection_input"));
+            }
             throw new CommandException(
                 "Durable schema connection configuration is invalid. Check the named environment variable without printing its value, then retry.");
         }
@@ -296,8 +371,9 @@ internal interface IDurableSchemaCommandService
     /// <summary>Reads compatibility without mutation.</summary>
     ValueTask<DurableSchemaStatusView> GetStatusAsync(string connectionString, CancellationToken cancellationToken);
 
-    /// <summary>Verifies the installed heartbeat-retention function, grants, runtime role, and index structure.</summary>
-    ValueTask<IReadOnlyList<string>> VerifyRetentionPreflightAsync(string connectionString, CancellationToken cancellationToken);
+    /// <summary>Reads compatibility, caller identity and every complete-manifest structural check in one fenced snapshot.</summary>
+    /// <remarks>Owns one nonpooled session through checked cleanup; the request is validated before database access.</remarks>
+    ValueTask<DurablePreflightResult> PreflightAsync(string connectionString, DurablePreflightRequest request, CancellationToken cancellationToken);
 
     /// <summary>Generates deterministic migration SQL without opening a connection.</summary>
     string GenerateScript(int fromVersion);
@@ -309,179 +385,6 @@ internal interface IDurableSchemaCommandService
 /// <summary>Production CLI adapter that creates and disposes a short-lived Npgsql data source per online command.</summary>
 internal sealed class DurableSchemaCommandService : IDurableSchemaCommandService
 {
-    private const string RetentionStructurePreflightSql =
-        """
-        WITH heartbeat AS
-        (
-            SELECT relation.oid, relation.relrowsecurity, relation.relforcerowsecurity, relation.relowner, namespace.nspowner
-            FROM pg_catalog.pg_class AS relation
-            JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
-            WHERE namespace.nspname = 'appsurface_durable'
-              AND relation.relname = 'runtime_heartbeat'
-              AND relation.relkind = 'r'
-        ),
-        runtime_role AS
-        (
-            SELECT role.oid
-            FROM heartbeat
-            JOIN pg_catalog.pg_policy AS policy ON policy.polrelid = heartbeat.oid
-            CROSS JOIN LATERAL unnest(policy.polroles) AS policy_role(role_oid)
-            JOIN pg_catalog.pg_roles AS role ON role.oid = policy_role.role_oid
-            WHERE cardinality(policy.polroles) = 1
-              AND policy.polname = 'runtime_heartbeat_runtime_role'
-              AND role.rolname <> 'public'
-              AND NOT role.rolsuper
-              AND NOT role.rolbypassrls
-            GROUP BY role.oid
-            HAVING count(*) = 1
-        ),
-        retention_function AS
-        (
-            SELECT procedure.*, namespace.nspowner
-            FROM pg_catalog.pg_proc AS procedure
-            JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = procedure.pronamespace
-            JOIN heartbeat ON namespace.nspowner = heartbeat.nspowner
-            WHERE namespace.nspname = 'appsurface_durable'
-              AND procedure.proname = 'prune_runtime_heartbeats'
-              AND procedure.prokind = 'f'
-              AND procedure.prorettype = 'pg_catalog.int4'::pg_catalog.regtype::oid
-              AND NOT procedure.proretset
-              AND procedure.pronargs = 4
-              AND procedure.proargtypes[0] = 'pg_catalog.interval'::pg_catalog.regtype::oid
-              AND procedure.proargtypes[1] = 'pg_catalog.int4'::pg_catalog.regtype::oid
-              AND procedure.proargtypes[2] = 'pg_catalog.text'::pg_catalog.regtype::oid
-              AND procedure.proargtypes[3] = 'pg_catalog.uuid'::pg_catalog.regtype::oid
-        ),
-        retention_index AS
-        (
-            SELECT index_class.oid, index_meta.*
-            FROM heartbeat
-            JOIN pg_catalog.pg_index AS index_meta ON index_meta.indrelid = heartbeat.oid
-            JOIN pg_catalog.pg_class AS index_class ON index_class.oid = index_meta.indexrelid
-            JOIN pg_catalog.pg_am AS access_method ON access_method.oid = index_class.relam
-            WHERE index_class.relname = 'ix_runtime_heartbeat_retention'
-              AND access_method.amname = 'btree'
-              AND index_meta.indisvalid
-              AND index_meta.indisready
-              AND NOT index_meta.indisunique
-              AND index_meta.indnkeyatts = 2
-              AND index_meta.indnatts = 2
-              AND index_meta.indpred IS NULL
-              AND index_meta.indexprs IS NULL
-              -- B-tree indoption 0 is ASC NULLS LAST, matching the pruning query's ORDER BY.
-              AND index_meta.indoption[0] = 0
-              AND index_meta.indoption[1] = 0
-              AND
-              (
-                  SELECT array_agg(attribute.attname ORDER BY key.ordinality)
-                  FROM unnest(index_meta.indkey) WITH ORDINALITY AS key(attnum, ordinality)
-                  JOIN pg_catalog.pg_attribute AS attribute
-                    ON attribute.attrelid = heartbeat.oid AND attribute.attnum = key.attnum
-              ) = ARRAY['last_heartbeat_at', 'worker_id']::name[]
-              AND
-              (
-                  SELECT array_agg(opclass.opcname ORDER BY key.ordinality)
-                  FROM unnest(index_meta.indclass) WITH ORDINALITY AS key(opclass_oid, ordinality)
-                  JOIN pg_catalog.pg_opclass AS opclass ON opclass.oid = key.opclass_oid
-                  JOIN pg_catalog.pg_am AS opclass_method ON opclass_method.oid = opclass.opcmethod
-                  JOIN pg_catalog.pg_namespace AS opclass_namespace ON opclass_namespace.oid = opclass.opcnamespace
-                  WHERE opclass_method.amname = 'btree'
-                    AND opclass_namespace.nspname = 'pg_catalog'
-              ) = ARRAY['timestamptz_ops', 'text_ops']::name[]
-        )
-        , checks AS
-        (
-            SELECT
-                (SELECT count(*) = 1 FROM heartbeat WHERE relrowsecurity AND relforcerowsecurity) AS forced_rls,
-                (SELECT count(*) = 1 FROM runtime_role) AS runtime_role,
-                (SELECT count(*) = 1 FROM retention_function) AS function_signature,
-                EXISTS (SELECT 1 FROM heartbeat, retention_function AS routine WHERE routine.proowner = heartbeat.nspowner) AS function_owner,
-                EXISTS (SELECT 1 FROM retention_function WHERE prosecdef) AS security_definer,
-                EXISTS (SELECT 1 FROM retention_function WHERE proconfig = ARRAY['search_path=pg_catalog, appsurface_durable, pg_temp']::text[]) AS search_path,
-                EXISTS
-                (
-                    SELECT 1 FROM heartbeat
-                    CROSS JOIN runtime_role
-                    WHERE (SELECT count(*) = 2 FROM pg_catalog.pg_policy AS any_policy WHERE any_policy.polrelid = heartbeat.oid)
-                    AND EXISTS
-                    (
-                        SELECT 1 FROM pg_catalog.pg_policy AS policy
-                        WHERE policy.polrelid = heartbeat.oid
-                          AND policy.polname = 'runtime_heartbeat_runtime_role'
-                          AND policy.polcmd = '*'
-                          AND policy.polpermissive
-                          AND cardinality(policy.polroles) = 1
-                          AND policy.polroles[1] = runtime_role.oid
-                          AND pg_catalog.pg_get_expr(policy.polqual, policy.polrelid) = 'true'
-                          AND pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid) = 'true'
-                    )
-                    AND EXISTS
-                    (
-                        SELECT 1 FROM pg_catalog.pg_policy AS policy
-                        CROSS JOIN retention_function AS routine
-                        WHERE policy.polrelid = heartbeat.oid
-                          AND policy.polname = 'runtime_heartbeat_migration_owner'
-                          AND policy.polcmd = '*'
-                          AND policy.polpermissive
-                          AND cardinality(policy.polroles) = 1
-                          AND policy.polroles[1] = heartbeat.nspowner
-                          AND routine.proowner = heartbeat.nspowner
-                          AND heartbeat.relowner = heartbeat.nspowner
-                          AND pg_catalog.pg_get_expr(policy.polqual, policy.polrelid) = 'true'
-                          AND pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid) = 'true'
-                    )
-                ) AS heartbeat_policies,
-                EXISTS
-                (
-                    SELECT 1 FROM runtime_role, retention_function AS routine
-                    WHERE NOT EXISTS
-                    (
-                        SELECT 1
-                        FROM pg_catalog.aclexplode(COALESCE(routine.proacl, pg_catalog.acldefault('f', routine.proowner))) AS privilege
-                        WHERE privilege.privilege_type = 'EXECUTE'
-                          AND privilege.grantee NOT IN (routine.proowner, runtime_role.oid)
-                    )
-                    AND EXISTS
-                    (
-                        SELECT 1
-                        FROM pg_catalog.aclexplode(COALESCE(routine.proacl, pg_catalog.acldefault('f', routine.proowner))) AS privilege
-                        WHERE privilege.grantee = runtime_role.oid
-                          AND privilege.privilege_type = 'EXECUTE'
-                          AND NOT privilege.is_grantable
-                    )
-                    AND NOT EXISTS
-                    (
-                        SELECT 1
-                        FROM pg_catalog.aclexplode(COALESCE(routine.proacl, pg_catalog.acldefault('f', routine.proowner))) AS privilege
-                        WHERE privilege.grantee = 0 AND privilege.privilege_type = 'EXECUTE'
-                    )
-                ) AS function_acl,
-                (SELECT count(*) = 0 FROM runtime_role, pg_catalog.pg_auth_members AS membership
-                 WHERE membership.roleid = runtime_role.oid OR membership.member = runtime_role.oid) AS role_membership,
-                EXISTS
-                (
-                    SELECT 1 FROM heartbeat, runtime_role
-                    WHERE NOT pg_catalog.has_table_privilege(runtime_role.oid, heartbeat.oid, 'DELETE')
-                      AND NOT pg_catalog.has_table_privilege(runtime_role.oid, heartbeat.oid, 'TRUNCATE')
-                ) AS runtime_table_privileges,
-                (SELECT count(*) = 1 FROM retention_index) AS retention_index
-        )
-        SELECT array_remove(ARRAY[
-            CASE WHEN NOT forced_rls THEN 'forced_rls' END,
-            CASE WHEN NOT runtime_role THEN 'runtime_role' END,
-            CASE WHEN NOT function_signature THEN 'function_signature' END,
-            CASE WHEN NOT function_owner THEN 'function_owner' END,
-            CASE WHEN NOT security_definer THEN 'security_definer' END,
-            CASE WHEN NOT search_path THEN 'search_path' END,
-            CASE WHEN NOT heartbeat_policies THEN 'heartbeat_policies' END,
-            CASE WHEN NOT function_acl THEN 'function_acl' END,
-            CASE WHEN NOT role_membership THEN 'role_membership' END,
-            CASE WHEN NOT runtime_table_privileges THEN 'runtime_table_privileges' END,
-            CASE WHEN NOT retention_index THEN 'retention_index' END
-        ]::text[], NULL)
-        FROM checks;
-        """;
-
     /// <inheritdoc />
     public async ValueTask<DurableSchemaStatusView> GetStatusAsync(string connectionString, CancellationToken cancellationToken)
     {
@@ -491,17 +394,9 @@ internal sealed class DurableSchemaCommandService : IDurableSchemaCommandService
     }
 
     /// <inheritdoc />
-    public async ValueTask<IReadOnlyList<string>> VerifyRetentionPreflightAsync(string connectionString, CancellationToken cancellationToken)
-    {
-        await using var dataSource = NpgsqlDataSource.Create(RequireConnectionString(connectionString));
-        await using var command = dataSource.CreateCommand(RetentionStructurePreflightSql);
-        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-        return MapRetentionPreflightResult(result);
-    }
-
-    /// <summary>Maps the catalog query result to failed checks, failing closed for unexpected result shapes.</summary>
-    internal static IReadOnlyList<string> MapRetentionPreflightResult(object? result) =>
-        result is string[] failedChecks ? failedChecks : ["catalog_result"];
+    public ValueTask<DurablePreflightResult> PreflightAsync(
+        string connectionString, DurablePreflightRequest request, CancellationToken cancellationToken) =>
+        DurableSchemaPreflightVerifier.VerifyAsync(RequireConnectionString(connectionString), request, cancellationToken);
 
     /// <inheritdoc />
     public string GenerateScript(int fromVersion)
@@ -572,8 +467,33 @@ internal static class DurableSchemaDiagnostics
 
     /// <summary>Builds a fixed, secret-safe failure for schema-11 structure or privilege drift.</summary>
     internal static string RetentionStructureFailure(IReadOnlyList<string> failedChecks) =>
-        "Problem: durable schema 0011 structural preflight failed. Cause: the retention function, runtime grants, role membership, or index does not match the required contract. Fix: apply the reviewed role recipe, then rerun preflight using both migration-owner and runtime-role connections. Do not activate until both pass. Docs: " +
-        DocumentationPath + " Failed checks: " + string.Join(", ", failedChecks) + ".";
+        "Problem: durable schema 0011 structural preflight failed. Cause: the function, runtime grants, role membership, or index does not match the complete reviewed contract. Fix: inspect the named checks, obtain a reviewed repair (the role recipe may refuse broader drift), then rerun with the unchanged complete manifest under every distinct runtime credential. Owner diagnostics do not count as runtime evidence. Keep activation closed until the continuously guarded combined gate passes. Docs: " +
+        PreflightDocumentationPath + " Failed checks: " + string.Join(", ", failedChecks) + ".";
+
+    private const string PreflightDocumentationPath = "https://github.com/forge-trust/AppSurface/blob/main/Durable/heartbeat-retention-operations.md#deploy-schema-11";
+
+    /// <summary>Returns a fixed input diagnostic without echoing paths, JSON, role input or provider errors.</summary>
+    internal static string ManifestInputFailure() =>
+        "Problem: durable preflight manifest_input failed before database access. Cause: --role-pairs-file and --migration-owner-role are required, including for one pair, and must satisfy the complete strict UTF-8 version-1 manifest and independent owner contract. Fix: review the complete file (64 KiB, depth 8, 1–32 pairs, 63 UTF-8 byte role names), its exact byte hash and the disjoint owner; then rerun every distinct runtime with the unchanged file. Docs: " + PreflightDocumentationPath;
+
+    /// <summary>Returns a fixed bounded-operation diagnostic; only trusted category names are rendered.</summary>
+    internal static string PreflightOperationFailure(string category)
+    {
+        var (safeCategory, cause, fix) = category switch
+        {
+            "connection_input" => ("connection_input", "The connection environment name, value, or PostgreSQL configuration is invalid.",
+                "Set the named environment variable to the reviewed credential without printing its value, then rerun with the unchanged complete manifest."),
+            "database_operation" => ("database_operation", "The read-only database operation could not complete.",
+                "Inspect PostgreSQL reachability, exact role grants and the session-affine package fence, then repeat the complete guarded gate."),
+            "timeout" => ("timeout", "Cancellation or the bounded session deadline interrupted preflight.",
+                "Resolve connection or lock blockers, verify resource release, then repeat the complete guarded gate."),
+            "cleanup" => ("cleanup", "The owned session fence or physical cleanup could not be verified.",
+                "Verify the owned backend and advisory lock were released, repair the session-affine endpoint, then repeat the complete guarded gate."),
+            _ => ("catalog_result", "The catalog or service returned incomplete or unexpected evidence.",
+                "Inspect schema compatibility and the reviewed catalog contract, obtain a reviewed repair, then repeat the complete guarded gate.")
+        };
+        return $"Problem: durable preflight {safeCategory} failed. Cause: {cause} Fix: keep activation closed. {fix} Docs: {PreflightDocumentationPath}";
+    }
 
     /// <summary>Builds a stable failure for schema-manager incompatibility.</summary>
     internal static string SchemaIncompatible(DurableRuntimeSchemaCompatibility compatibility) =>

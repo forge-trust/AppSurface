@@ -307,13 +307,13 @@ promise zero blocking. On any error keep Source closed and repair/roll forward w
 one-pair manifest, broad grant, or destructive schema rollback as recovery. Pair retirement and profile narrowing
 require a separately reviewed procedure.
 
-The schema-11-capable role recipe grants heartbeat pruning to every authorized runtime and no dispatcher. The current
-schema-11 CLI preflight still checks one runtime role and rejects the catalog after a second pair is enrolled. The
-[local walkthrough](../examples/durable-postgresql/README.md#version-1-role-pair-walkthrough) runs that preflight on
-the forwarding-only configuration before adding the second pair, then proves both pairs' SQL privileges and the
-forwarding workload. Keep Source activation closed until [#795](https://github.com/forge-trust/AppSurface/issues/795)
-replaces the single-runtime check with an exact restricted runtime-role set matching the manifest, policies, and
-function allowlists. Its release gate includes a real schema-10-to-11 upgrade and both-pair reproof.
+The schema-11-capable role recipe grants heartbeat pruning to every authorized runtime and no dispatcher. The CLI
+preflight requires both `--role-pairs-file` and `--migration-owner-role`, including for one pair, and checks every
+manifest runtime against exact policy, ACL, role, function, and index evidence. The [complete-manifest walkthrough](../examples/durable-postgresql/README.md#complete-manifest-preflight-walkthrough)
+shows a one-pair and full-plus-`work_only` invocation using explicit per-command environment-variable names. Keep
+activation closed until the [canonical four-stage checklist](heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist)
+has actual matching candidate and public artifacts, distinct runtime credential results, both lane proofs, the
+continuous deployment-owner guard, and matching StoreId/nonempty epoch. Local/source proof alone is insufficient.
 
 For the historical #794 rollout, run this sequence from the
 [schema-10 source snapshot](https://github.com/forge-trust/AppSurface/tree/e0618ac8), with
@@ -400,7 +400,7 @@ bash examples/durable-postgresql/run-local-proof.sh
 ```
 
 It creates a disposable loopback PostgreSQL 16.5 container, applies the current checked-in migrations through schema
-10 using the explicit CLI path, runs the canonical role recipe, initializes a development epoch, runs the real
+11 using the explicit CLI path, runs the canonical role recipe, initializes a development epoch, runs the real
 Work/Flow/Schedule example, resolves both pump interfaces to the same PostgreSQL singleton, calls authoritative
 admission directly, and checks that worker startup performs no DDL.
 

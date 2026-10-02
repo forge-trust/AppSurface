@@ -162,6 +162,41 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         }
     }
 
+    /// <summary>
+    /// Reads schema compatibility and migration checksums inside a caller-owned transaction.
+    /// </summary>
+    /// <param name="connection">The open connection that owns <paramref name="transaction"/>.</param>
+    /// <param name="transaction">The active transaction whose snapshot must include the status read.</param>
+    /// <param name="cancellationToken">Cancels status queries; cancellation is propagated to the caller.</param>
+    /// <returns>The same schema status produced by the manager's existing compatibility and checksum reader.</returns>
+    /// <remarks>
+    /// This internal reuse seam neither opens a connection nor acquires a migration fence. It does not begin,
+    /// commit, roll back, or dispose the supplied transaction or connection. The caller owns transaction boundaries,
+    /// connection lifetime, fencing and snapshot selection. A canceled read may leave the caller's transaction
+    /// needing rollback; this method deliberately does not perform that cleanup on the caller's behalf.
+    /// </remarks>
+    internal ValueTask<DurableRuntimeSchemaStatus> ReadStatusInTransactionAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(transaction);
+
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            throw new InvalidOperationException("The status-read connection must be open.");
+        }
+
+        if (!ReferenceEquals(transaction.Connection, connection))
+        {
+            throw new ArgumentException("The status-read transaction must belong to the supplied connection.", nameof(transaction));
+        }
+
+        // Npgsql validates that the transaction is still active when each command is bound and executed.
+        return ReadStatusAsync(connection, cancellationToken, transaction);
+    }
+
     /// <inheritdoc />
     /// <remarks>
     /// The generated script keeps a session-scoped lock because each migration has its own transaction. Lock
