@@ -52,7 +52,36 @@ An unavailable capability, timeout, skipped producer, incomplete test profile, o
 
 Required artifact slots are part of successful producer completion. A `Passed` result that omits a required slot makes the manifest `Invalid`. An unsuccessful producer may omit outputs it could not produce; valid absent or partial outputs leave its manifest `Incomplete`, with no closed obligation or gate eligibility. All returned metadata must still name declared slots and satisfy the byte, media type, digest and containment rules, regardless of outcome. Malformed partial outputs remain `Invalid`.
 
+An explicit producer `Invalid` outcome always makes the execution verdict `Invalid`, even if artifact finalization removes its rejected metadata. This preserves a contract violation while ordinary failed, cancelled, unavailable or timed-out work remains `Incomplete`.
+
 The public `EvidenceArtifactValidation.AreValid(producer, artifacts)` always checks every required slot, including when `artifacts` is null or empty. Use it to check complete artifact sets. The manifest builder and structural verifier share an internal overload that relaxes only required-slot presence for unsuccessful outcomes; it neither grants runtime admission nor skips metadata validation. Use the [runtime admission and gate evaluation APIs](#runtime-admission-and-gate-evaluation) to construct or consume a claim.
+
+## Artifact paths and storage layout
+
+`EvidenceArtifactSlot.RelativeRoot`, `EvidenceArtifactWriter.WriteAsync` paths, and
+`EvidenceArtifactResult.RelativePath` are relative to the producer's artifact directory.
+Protected hosts place each producer beneath its normalized producer ID in the run output directory.
+Resolve a returned artifact as `Path.Combine(outputDirectory, producerResult.ProducerId, artifact.RelativePath)`.
+Plan, manifest, and summary files remain directly beneath the run output directory.
+
+For producer ID `coverage` and report metadata path `coverage/merged/coverage.cobertura.xml`, the layout is:
+
+```text
+<run-output>/
+  evidence-plan.json
+  evidence-manifest.json
+  evidence-summary.json
+  coverage/                           # producer directory
+    coverage/merged/coverage.cobertura.xml  # metadata RelativePath
+```
+
+The repeated `coverage` component is valid: the producer ID and declared slot root are independent.
+Keep the producer ID out of paths passed to `WriteAsync`; the protected writer adds that storage prefix
+and verifies bytes at the same location. Its returned metadata preserves the path checked against the
+declared slot root. The public `EvidenceArtifactWriter(producer, rootPath)` constructor writes directly
+beneath the supplied `rootPath`; a host using that constructor supplies the producer directory itself.
+Use the [protected artifact collection channel](../../docs/evidence/evidencehost-migration.md#protected-gate-and-artifacts)
+when consuming protected output; resolving a filesystem path does not authenticate its bytes or provenance.
 
 ## Runtime admission and gate evaluation
 

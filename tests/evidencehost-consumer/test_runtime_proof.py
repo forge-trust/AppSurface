@@ -1,6 +1,7 @@
 """Regression controls for candidate proof rejection; these grant no runtime acceptance."""
 import importlib.util
 import hashlib
+import json
 import os
 import stat
 import tempfile
@@ -162,6 +163,122 @@ class BuildPublishProofTests(unittest.TestCase):
             kill.assert_called_once_with(12345, proof.signal.SIGTERM)
             self.assertEqual((public / "cli-build.stdout.log").read_bytes(), b"partial stdout")
             self.assertEqual((public / "cli-build.stderr.log").read_bytes(), b"partial stderr")
+
+
+class StructuralVerificationProofTests(unittest.TestCase):
+    @staticmethod
+    def protected_lstat(parent, *, wrong_child_owner=False):
+        original = Path.lstat
+        def inspect(path):
+            info = original(path)
+            if path == parent or (wrong_child_owner and path == parent / "structural-verification"):
+                fields = list(info)
+                fields[4] = 0 if path == parent else os.geteuid() + 1
+                return os.stat_result(fields)
+            return info
+        return inspect
+
+    def test_reserved_owned_child_is_used_without_mkdir_after_parent_protection(self):
+        with tempfile.TemporaryDirectory(prefix="appsurface-evidencehost-runtime-", dir="/tmp") as directory:
+            parent = Path(directory)
+            child = proof.reserve_structural_verification_directory(parent)
+            self.assertEqual(child, parent / "structural-verification")
+            self.assertEqual(stat.S_IMODE(child.stat().st_mode), 0o700)
+            self.assertEqual(child.stat().st_uid, os.geteuid())
+            parent.chmod(0o755)
+            stdout = b"Evidence manifest structurally verified: ObservationOnly (Informational)."
+            artifacts = {"evidence-plan.json": b"private plan", "evidence-manifest.json": b"private manifest"}
+            with patch.object(Path, "lstat", self.protected_lstat(parent)), \
+                 patch.object(Path, "mkdir", side_effect=PermissionError("root-owned parent")), \
+                 patch.object(proof, "dotnet_host", return_value=Path("/fixture/dotnet")), \
+                 patch.object(proof, "root_success", return_value=(stdout, b"")) as command:
+                self.assertEqual(proof.verify_collected_structure(Path("/fixture/cli.dll"), artifacts, parent),
+                                 hashlib.sha256(stdout).hexdigest())
+            for name, content in artifacts.items():
+                self.assertEqual((child / name).read_bytes(), content)
+                self.assertEqual(stat.S_IMODE((child / name).stat().st_mode), 0o600)
+            self.assertEqual(command.call_args.args[0][-3:],
+                             [str(child / "evidence-manifest.json"), "--plan", str(child / "evidence-plan.json")])
+
+    def test_reservation_rejects_existing_children_and_unsafe_workspace_inputs(self):
+        with tempfile.TemporaryDirectory(prefix="appsurface-evidencehost-runtime-", dir="/tmp") as directory:
+            parent = Path(directory)
+            link = parent / "linked-workspace"
+            link.symlink_to(parent, target_is_directory=True)
+            for candidate in (Path("relative"), parent / "missing", link):
+                with self.subTest(candidate=candidate), self.assertRaises(proof.ProofFailure):
+                    proof.reserve_structural_verification_directory(candidate)
+            child = proof.reserve_structural_verification_directory(parent)
+            (child / "preserved").write_bytes(b"private")
+            with self.assertRaises(proof.ProofFailure):
+                proof.reserve_structural_verification_directory(parent)
+            self.assertEqual((child / "preserved").read_bytes(), b"private")
+            parent.chmod(0o755)
+            with self.assertRaises(proof.ProofFailure):
+                proof.reserve_structural_verification_directory(parent)
+
+    def test_missing_linked_shared_or_wrong_owner_reserved_child_cannot_invoke_root(self):
+        for kind in ("missing", "symlink", "shared", "wrong-owner", "occupied-copy"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory(
+                    prefix="appsurface-evidencehost-runtime-", dir="/tmp") as directory:
+                parent = Path(directory)
+                child = parent / "structural-verification"
+                if kind == "symlink":
+                    child.symlink_to(parent, target_is_directory=True)
+                elif kind != "missing":
+                    proof.reserve_structural_verification_directory(parent)
+                    if kind == "shared": child.chmod(0o755)
+                    if kind == "occupied-copy": (child / "evidence-plan.json").symlink_to(parent / "absent")
+                parent.chmod(0o755)
+                with patch.object(Path, "lstat", self.protected_lstat(parent, wrong_child_owner=kind == "wrong-owner")), \
+                     patch.object(proof, "root_success") as command:
+                    with self.assertRaises(proof.ProofFailure):
+                        proof.verify_collected_structure(Path("/fixture/cli.dll"),
+                            {"evidence-plan.json": b"plan", "evidence-manifest.json": b"manifest"}, parent)
+                    command.assert_not_called()
+
+
+class ObservationFailureDiagnosticTests(unittest.TestCase):
+    def test_success_does_not_read_diagnostics_and_passes_option_only_to_observation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            command = ["python3", "launcher.py", "--mode", "observation"]
+            with patch.object(proof, "root_command", return_value=(0, b"completed", b"")) as root:
+                self.assertEqual(proof.run_observation_launcher(command, parent, parent), (b"completed", b""))
+            self.assertEqual(root.call_count, 1)
+            self.assertEqual(root.call_args.args[0][-2:], ["--diagnostic-directory", str(parent)])
+            self.assertNotIn("--diagnostic-directory", command)
+            self.assertFalse((parent / "launcher-failure.json").exists())
+
+    def test_failure_publishes_only_validated_categories_without_output_canaries(self):
+        record = {"schema": "evidence-launcher-failure-v1", "error_class": "LauncherError",
+                  "cause": "worker-protocol-incomplete"}
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            with patch.object(proof, "root_command", side_effect=[
+                    (1, b"secret-779 stdout", b"secret-779 stderr"),
+                    (0, json.dumps(record).encode(), b"secret-779 read stderr")]) as root:
+                with self.assertRaises(proof.ProofFailure) as failure:
+                    proof.run_observation_launcher(["launcher"], parent, parent)
+            self.assertEqual(root.call_count, 2)
+            self.assertNotIn("secret-779", str(failure.exception))
+            self.assertIn("worker-protocol-incomplete", str(failure.exception))
+            self.assertEqual(json.loads((parent / "launcher-failure.json").read_text()), record)
+
+    def test_missing_malformed_oversize_or_failed_capture_preserves_generic_failure(self):
+        good = {"schema": "evidence-launcher-failure-v1", "error_class": "LauncherError",
+                "cause": "worker-protocol-incomplete"}
+        captures = [(1, b"", b"secret-779"), (0, b"not JSON secret-779", b""),
+                    (0, json.dumps({**good, "stderr": "secret-779"}).encode(), b""),
+                    (0, b"x" * 4097, b""), proof.ProofFailure("capture timed out")]
+        for capture in captures:
+            with self.subTest(capture=type(capture).__name__), tempfile.TemporaryDirectory() as directory:
+                parent = Path(directory)
+                with patch.object(proof, "root_command", side_effect=[(1, b"secret-779", b"secret-779"), capture]):
+                    with self.assertRaisesRegex(proof.ProofFailure, "safe diagnostic unavailable") as failure:
+                        proof.run_observation_launcher(["launcher"], parent, parent)
+                self.assertNotIn("secret-779", str(failure.exception))
+                self.assertFalse((parent / "launcher-failure.json").exists())
 
 
 class LauncherWorkspaceProofTests(unittest.TestCase):

@@ -82,6 +82,21 @@ import uuid
 from pathlib import Path
 
 SCHEMA = "evidence-worker-linux-v1"
+FAILURE_DIAGNOSTIC_SCHEMA = "evidence-launcher-failure-v1"
+FAILURE_DIAGNOSTIC_FILE = "launcher-failure.json"
+FAILURE_DIAGNOSTIC_LIMIT = 4096
+FAILURE_DIAGNOSTIC_CAUSES = frozenset({
+    "unclassified-host-failure", "requires-root-systemd-linux", "requires-cgroup-v2",
+    "requires-systemd-255", "openat2-x86-64-required", "systemd-operation-failed",
+    "identity-separation-failed", "prepared-subject-overlaps-protected-root",
+    "trusted-cli-missing", "worker-start-failed", "worker-timeout",
+    "broker-handler-not-joined", "worker-protocol-incomplete", "worker-unsuccessful",
+    "worker-exit-unconfirmed", "subject-exit-unconfirmed", "output-slot-not-allocated",
+    "output-slot-invalid", "output-parent-identity-changed", "output-anchor-not-fresh",
+    "tool-root-path-not-canonical", "tool-root-symlink-component", "tool-root-path-missing",
+    "tool-root-owner-changed", "tool-root-entry-invalid", "trusted-proof-not-allowlisted",
+})
+FAILURE_DIAGNOSTIC_OPERATIONS = frozenset({"systemctl", "systemd-run", "useradd", "groupadd", "worker-exit"})
 TRUSTED_PROOF_DIGEST_ALLOWLIST: frozenset[str] = frozenset()
 MAX_REQUEST = 64 * 1024
 MAX_PREFIX = 1024 * 1024
@@ -122,6 +137,111 @@ _LIBC.syscall.restype = ctypes.c_long
 
 class LauncherError(RuntimeError):
     """Safe, non-sensitive operational failure category."""
+
+    def __init__(self, cause: str, *, operation: str | None = None, exit_code: int | None = None):
+        super().__init__(cause)
+        self.operation = operation
+        self.exit_code = exit_code
+        self.worker_main_code = None
+        self.worker_main_status = None
+
+
+def failure_diagnostic(error: Exception) -> dict:
+    """Reduce a host failure to closed literal categories, never exception text or child output."""
+    kind = ("LauncherError" if isinstance(error, LauncherError) else
+            "OSError" if isinstance(error, OSError) else
+            "SubprocessError" if isinstance(error, subprocess.SubprocessError) else "ValueError")
+    cause = str(error) if isinstance(error, LauncherError) else "unclassified-host-failure"
+    record = {"schema": FAILURE_DIAGNOSTIC_SCHEMA, "error_class": kind,
+              "cause": cause if cause in FAILURE_DIAGNOSTIC_CAUSES else "unclassified-host-failure"}
+    if (isinstance(error, LauncherError) and isinstance(error.operation, str)
+            and error.operation in FAILURE_DIAGNOSTIC_OPERATIONS):
+        record["operation"] = error.operation
+        if type(error.exit_code) is int and -128 <= error.exit_code <= 255:
+            record["exit_code"] = error.exit_code
+    if isinstance(error, OSError) and type(error.errno) is int and 0 <= error.errno <= 4095:
+        record["errno"] = error.errno
+    if isinstance(error, LauncherError) and error.operation == "worker-exit":
+        for name, maximum in (("worker_main_code", 6), ("worker_main_status", 255)):
+            value = getattr(error, name)
+            if type(value) is int and 0 <= value <= maximum:
+                record[name] = value
+    return record
+
+
+def worker_exit_failure(cause: str, properties: dict[str, str]) -> LauncherError:
+    """Attach only bounded numeric systemd main-process status to the original host cause."""
+    error = LauncherError(cause, operation="worker-exit")
+    for key, name, maximum in (("ExecMainCode", "worker_main_code", 6),
+                              ("ExecMainStatus", "worker_main_status", 255)):
+        value = properties.get(key, "")
+        if isinstance(value, str) and re.fullmatch(r"[0-9]{1,3}", value) and int(value) <= maximum:
+            setattr(error, name, int(value))
+    return error
+
+
+def validate_failure_diagnostic(record: object) -> dict:
+    """Validate the bounded private record before a driver publishes its safe categories."""
+    required = {"schema", "error_class", "cause"}
+    if (not isinstance(record, dict) or not required <= record.keys()
+            or record.keys() - required - {"operation", "exit_code", "errno", "worker_main_code", "worker_main_status"}
+            or record["schema"] != FAILURE_DIAGNOSTIC_SCHEMA
+            or record["error_class"] not in ("LauncherError", "OSError", "SubprocessError", "ValueError")
+            or not isinstance(record["cause"], str) or record["cause"] not in FAILURE_DIAGNOSTIC_CAUSES):
+        raise LauncherError("invalid-private-diagnostic")
+    if "operation" in record and (not isinstance(record["operation"], str)
+                                  or record["operation"] not in FAILURE_DIAGNOSTIC_OPERATIONS):
+        raise LauncherError("invalid-private-diagnostic")
+    if "exit_code" in record and ("operation" not in record or type(record["exit_code"]) is not int
+                                   or not -128 <= record["exit_code"] <= 255):
+        raise LauncherError("invalid-private-diagnostic")
+    if "errno" in record and (type(record["errno"]) is not int or not 0 <= record["errno"] <= 4095):
+        raise LauncherError("invalid-private-diagnostic")
+    for name, maximum in (("worker_main_code", 6), ("worker_main_status", 255)):
+        if name in record and (record.get("operation") != "worker-exit" or type(record[name]) is not int
+                               or not 0 <= record[name] <= maximum):
+            raise LauncherError("invalid-private-diagnostic")
+    return dict(record)
+
+
+def open_diagnostic_directory(directory: Path, *, expected_owner_uid: int = 0) -> int:
+    """Pin an existing protected directory; the owner override is a portable test seam only."""
+    if not directory.is_absolute():
+        raise LauncherError("diagnostic-directory-not-protected")
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    info = os.fstat(fd)
+    if info.st_uid != expected_owner_uid or info.st_mode & 0o022:
+        os.close(fd)
+        raise LauncherError("diagnostic-directory-not-protected")
+    return fd
+
+
+def write_failure_diagnostic(directory_fd: int, error: Exception) -> None:
+    """Exclusively create one 0600 no-follow record beneath the retained protected directory."""
+    data = json.dumps(failure_diagnostic(error), separators=(",", ":")).encode() + b"\n"
+    fd = os.open(FAILURE_DIAGNOSTIC_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                 0o600, dir_fd=directory_fd)
+    with os.fdopen(fd, "wb") as output:
+        output.write(data)
+
+
+def read_failure_diagnostic(directory: Path, *, expected_owner_uid: int = 0) -> dict:
+    """Read only a protected regular 0600 file within the fixed byte limit, with no links."""
+    directory_fd = open_diagnostic_directory(directory, expected_owner_uid=expected_owner_uid)
+    try:
+        fd = os.open(FAILURE_DIAGNOSTIC_FILE, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,
+                     dir_fd=directory_fd)
+        with os.fdopen(fd, "rb") as source:
+            info = os.fstat(source.fileno())
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != expected_owner_uid
+                    or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size > FAILURE_DIAGNOSTIC_LIMIT):
+                raise LauncherError("invalid-private-diagnostic")
+            data = source.read(FAILURE_DIAGNOSTIC_LIMIT + 1)
+        if len(data) > FAILURE_DIAGNOSTIC_LIMIT:
+            raise LauncherError("invalid-private-diagnostic")
+        return validate_failure_diagnostic(json.loads(data))
+    finally:
+        os.close(directory_fd)
 
 
 class OpenHow(ctypes.Structure):
@@ -817,7 +937,7 @@ class Broker:
         conn.sendall(encode_response(obj))
 
     def _unit_properties(self, unit: str, timeout: float = 5) -> dict[str, str]:
-        keys = ("ActiveState", "ControlGroup", "User", "Group", "KillMode", "Result")
+        keys = ("ActiveState", "ControlGroup", "User", "Group", "KillMode", "Result", "ExecMainCode", "ExecMainStatus")
         result = subprocess.run(["systemctl", "show", unit, "--no-pager", *[f"--property={k}" for k in keys]],
                                 capture_output=True, env=ENV, timeout=timeout, check=False)
         if result.returncode:
@@ -1283,7 +1403,7 @@ class Broker:
 def _systemd(argv: list[str], timeout: int = 8) -> subprocess.CompletedProcess:
     result = subprocess.run(argv, capture_output=True, env=ENV, timeout=timeout, check=False)
     if result.returncode:
-        raise LauncherError("systemd-operation-failed")
+        raise LauncherError("systemd-operation-failed", operation=Path(argv[0]).name, exit_code=result.returncode)
     return result
 
 
@@ -1438,11 +1558,16 @@ def launch(args: argparse.Namespace) -> Path:
         if time.monotonic() >= deadline: raise LauncherError("worker-timeout")
         for handler in handlers: handler.join(timeout=3)
         if any(handler.is_alive() for handler in handlers): raise LauncherError("broker-handler-not-joined")
-        if not broker.ready_seen or not broker.exited: raise LauncherError("worker-protocol-incomplete")
+        if not broker.ready_seen or not broker.exited:
+            try:
+                failed_properties = broker._unit_properties(worker_unit)
+            except (LauncherError, OSError, subprocess.SubprocessError, ValueError):
+                failed_properties = {}
+            raise worker_exit_failure("worker-protocol-incomplete", failed_properties)
         wprops=broker._unit_properties(worker_unit)
         if (wprops.get("Result") != "success" or wprops.get("User") != worker_name
                 or wprops.get("KillMode") != "control-group"):
-            raise LauncherError("worker-unsuccessful")
+            raise worker_exit_failure("worker-unsuccessful", wprops)
         if not broker._group_empty(wprops.get("ControlGroup", desc["cgroup"])): raise LauncherError("worker-exit-unconfirmed")
         if any(not broker._group_empty(g) for _,g in broker.units if g): raise LauncherError("subject-exit-unconfirmed")
         output = output_parent / args.output_slot
@@ -1495,6 +1620,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--workflow-identity",required=True); p.add_argument("--run-id",required=True)
     p.add_argument("--solution",required=True); p.add_argument("--path",action="append",default=[])
     p.add_argument("--diff-file")
+    p.add_argument("--diagnostic-directory", help="Internal: existing root-owned protected directory for one safe failure record.")
     p.add_argument("--observation-profile",action="append",default=[])
     p.add_argument("--observation-producer",action="append",default=[])
     for name, maximum in STAGE_LIMITS.items():
@@ -1503,19 +1629,38 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    diagnostic_fd = None
     try:
-        output=launch(parser().parse_args(argv))
+        args = parser().parse_args(argv)
+        if args.diagnostic_directory is not None:
+            diagnostic_fd = open_diagnostic_directory(Path(args.diagnostic_directory))
+            try:
+                os.stat(FAILURE_DIAGNOSTIC_FILE, dir_fd=diagnostic_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                raise LauncherError("diagnostic-slot-not-fresh")
+        output=launch(args)
         print(json.dumps({"status":"completed","output_slot":output.name},separators=(",",":")))
         return 0
     except LauncherError as error:
+        if diagnostic_fd is not None:
+            try: write_failure_diagnostic(diagnostic_fd, error)
+            except (OSError, ValueError): pass
         # Only this exact host-selected cause has a public admission diagnostic. Never echo
         # arbitrary exception text, paths, commands, or supplied descriptor values.
         diagnostic = "ASEVD407" if str(error) == "trusted-proof-not-allowlisted" else "launcher-failed"
         print(json.dumps({"status":"failed","diagnostic":diagnostic},separators=(",",":")),file=sys.stderr)
         return 1
-    except (OSError, subprocess.SubprocessError, ValueError):
+    except (OSError, subprocess.SubprocessError, ValueError) as error:
+        if diagnostic_fd is not None:
+            try: write_failure_diagnostic(diagnostic_fd, error)
+            except (OSError, ValueError): pass
         print(json.dumps({"status":"failed","diagnostic":"launcher-failed"},separators=(",",":")),file=sys.stderr)
         return 1
+    finally:
+        if diagnostic_fd is not None:
+            os.close(diagnostic_fd)
 
 
 if __name__ == "__main__":

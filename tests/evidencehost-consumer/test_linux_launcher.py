@@ -94,18 +94,137 @@ def broker_request(broker, request):
     return connection.decoded_response()
 
 
+class PrivateFailureDiagnosticTests(unittest.TestCase):
+    def test_worker_exit_reason_contains_only_bounded_numeric_systemd_fields(self):
+        for cause in ("worker-protocol-incomplete", "worker-unsuccessful"):
+            with self.subTest(cause=cause):
+                record = launcher.failure_diagnostic(launcher.worker_exit_failure(cause,
+                    {"ExecMainCode": "1", "ExecMainStatus": "203", "Result": "secret-779"}))
+                self.assertEqual(record["cause"], cause)
+                self.assertEqual(record["operation"], "worker-exit")
+                self.assertEqual((record["worker_main_code"], record["worker_main_status"]), (1, 203))
+                self.assertEqual(launcher.validate_failure_diagnostic(record), record)
+                self.assertNotIn("secret-779", json.dumps(record))
+        record = launcher.failure_diagnostic(launcher.worker_exit_failure("worker-protocol-incomplete",
+            {"ExecMainCode": "secret-779", "ExecMainStatus": "999"}))
+        self.assertNotIn("worker_main_code", record)
+        self.assertNotIn("worker_main_status", record)
+        error = launcher.worker_exit_failure("worker-protocol-incomplete", {})
+        error.worker_main_code = True
+        error.worker_main_status = 256
+        record = launcher.failure_diagnostic(error)
+        self.assertNotIn("worker_main_code", record)
+        self.assertNotIn("worker_main_status", record)
+        with self.assertRaises(launcher.LauncherError):
+            launcher.validate_failure_diagnostic({**record, "worker_main_status": True})
+
+    def test_systemd_failure_reduces_child_output_to_fixed_operation_and_numeric_exit(self):
+        result = launcher.subprocess.CompletedProcess(["systemd-run"], 3, b"secret-779", b"secret-779")
+        with patch.object(launcher.subprocess, "run", return_value=result):
+            with self.assertRaises(launcher.LauncherError) as failure:
+                launcher._systemd(["systemd-run", "secret-779"])
+        record = launcher.failure_diagnostic(failure.exception)
+        self.assertEqual((record["cause"], record["operation"], record["exit_code"]),
+                         ("systemd-operation-failed", "systemd-run", 3))
+        self.assertNotIn("secret-779", json.dumps(record))
+
+    def test_private_record_is_exclusive_0600_and_retains_only_host_categories(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            fd = launcher.open_diagnostic_directory(parent, expected_owner_uid=os.geteuid())
+            error = launcher.LauncherError("systemd-operation-failed", operation="systemd-run", exit_code=1)
+            try:
+                launcher.write_failure_diagnostic(fd, error)
+                with self.assertRaises(FileExistsError):
+                    launcher.write_failure_diagnostic(fd, launcher.LauncherError("worker-start-failed"))
+            finally:
+                os.close(fd)
+            path = parent / launcher.FAILURE_DIAGNOSTIC_FILE
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            record = launcher.read_failure_diagnostic(parent, expected_owner_uid=os.geteuid())
+            self.assertEqual(record, {"schema": launcher.FAILURE_DIAGNOSTIC_SCHEMA,
+                                     "error_class": "LauncherError", "cause": "systemd-operation-failed",
+                                     "operation": "systemd-run", "exit_code": 1})
+
+    def test_symlinks_unprotected_parents_and_unsafe_records_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            link = parent / "linked-parent"
+            link.symlink_to(parent, target_is_directory=True)
+            for candidate, owner in ((Path("relative"), os.geteuid()), (link, os.geteuid()),
+                                     (parent, os.geteuid() + 1)):
+                with self.subTest(candidate=candidate, owner=owner), self.assertRaises((launcher.LauncherError, OSError)):
+                    launcher.open_diagnostic_directory(candidate, expected_owner_uid=owner)
+            parent.chmod(0o777)
+            with self.assertRaises(launcher.LauncherError):
+                launcher.open_diagnostic_directory(parent, expected_owner_uid=os.geteuid())
+            parent.chmod(0o700)
+            destination = parent / launcher.FAILURE_DIAGNOSTIC_FILE
+            target = parent / "target"
+            target.write_text("preserved")
+            destination.symlink_to(target)
+            fd = launcher.open_diagnostic_directory(parent, expected_owner_uid=os.geteuid())
+            try:
+                with self.assertRaises(OSError):
+                    launcher.write_failure_diagnostic(fd, launcher.LauncherError("worker-start-failed"))
+            finally:
+                os.close(fd)
+            with self.assertRaises(OSError):
+                launcher.read_failure_diagnostic(parent, expected_owner_uid=os.geteuid())
+            self.assertEqual(target.read_text(), "preserved")
+            destination.unlink()
+            destination.write_text("x" * (launcher.FAILURE_DIAGNOSTIC_LIMIT + 1))
+            destination.chmod(0o600)
+            with self.assertRaises(launcher.LauncherError):
+                launcher.read_failure_diagnostic(parent, expected_owner_uid=os.geteuid())
+
+    def test_exception_canaries_and_unknown_json_fields_never_become_safe_diagnostics(self):
+        for error in (launcher.LauncherError("secret-779"),
+                      launcher.LauncherError("secret-779", operation=["secret-779"]), OSError(13, "secret-779"),
+                      launcher.subprocess.SubprocessError("secret-779"), ValueError("secret-779")):
+            with self.subTest(error=type(error).__name__):
+                record = launcher.failure_diagnostic(error)
+                self.assertNotIn("secret-779", json.dumps(record))
+                self.assertEqual(record["cause"], "unclassified-host-failure")
+        good = launcher.failure_diagnostic(launcher.LauncherError("worker-protocol-incomplete"))
+        for record in ({**good, "cause": "secret-779"}, {**good, "stderr": "secret-779"},
+                       {**good, "operation": ["secret-779"]}, {**good, "errno": True}):
+            with self.subTest(record=record), self.assertRaises(launcher.LauncherError):
+                launcher.validate_failure_diagnostic(record)
+
+    def test_main_private_capture_preserves_public_negative_and_rejects_occupied_slot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            original_open = launcher.open_diagnostic_directory
+            def portable_open(path):
+                return original_open(path, expected_owner_uid=os.geteuid())
+            with patch.object(launcher, "open_diagnostic_directory", side_effect=portable_open), \
+                 patch.object(launcher, "launch", side_effect=launcher.LauncherError("worker-protocol-incomplete")) as launch, \
+                 patch.object(launcher.sys, "stderr", io.StringIO()) as stderr:
+                with patch.object(launcher, "parser") as parser:
+                    parser.return_value.parse_args.return_value = Namespace(diagnostic_directory=str(parent))
+                    self.assertEqual(launcher.main([]), 1)
+                    self.assertEqual(json.loads(stderr.getvalue()), {"status": "failed", "diagnostic": "launcher-failed"})
+                    self.assertEqual(launcher.main([]), 1)
+                    self.assertEqual(launch.call_count, 1)
+            record = launcher.read_failure_diagnostic(parent, expected_owner_uid=os.geteuid())
+            self.assertEqual(record["cause"], "worker-protocol-incomplete")
+
+
 class LauncherValidationTests(unittest.TestCase):
     def test_trusted_allowlist_rejection_has_its_exact_safe_diagnostic(self):
         with patch.object(launcher, "parser") as parser, \
                 patch.object(launcher, "launch", side_effect=launcher.LauncherError("trusted-proof-not-allowlisted")), \
                 patch.object(launcher.sys, "stderr", io.StringIO()) as stderr:
+            parser.return_value.parse_args.return_value = Namespace(diagnostic_directory=None)
             self.assertEqual(launcher.main([]), 1)
             self.assertEqual(json.loads(stderr.getvalue()), {"status": "failed", "diagnostic": "ASEVD407"})
 
     def test_other_launcher_failures_never_echo_exception_canaries(self):
         for error in (launcher.LauncherError("secret-779"), OSError("secret-779"), ValueError("secret-779")):
-            with patch.object(launcher, "parser"), patch.object(launcher, "launch", side_effect=error), \
+            with patch.object(launcher, "parser") as parser, patch.object(launcher, "launch", side_effect=error), \
                     patch.object(launcher.sys, "stderr", io.StringIO()) as stderr:
+                parser.return_value.parse_args.return_value = Namespace(diagnostic_directory=None)
                 self.assertEqual(launcher.main([]), 1)
                 self.assertEqual(json.loads(stderr.getvalue()), {"status": "failed", "diagnostic": "launcher-failed"})
 

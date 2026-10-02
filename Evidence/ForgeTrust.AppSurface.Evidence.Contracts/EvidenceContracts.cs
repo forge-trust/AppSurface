@@ -153,9 +153,13 @@ public sealed record NormalizedDiffPath(string Path, string Kind = "modified", s
 /// Declares one artifact slot that a producer is allowed to return.
 /// </summary>
 /// <param name="LogicalName">Stable logical artifact name.</param>
-/// <param name="RelativeRoot">Normalized artifact-root-relative directory permitted for this slot.</param>
+/// <param name="RelativeRoot">Normalized directory path relative to the producer's artifact directory permitted for this slot.</param>
 /// <param name="MediaType">Expected media type.</param>
-/// <param name="Required">Whether a missing artifact invalidates the producer result.</param>
+/// <param name="Required">
+/// Whether a <c>Passed</c> producer must include this slot for complete evidence.
+/// Missing slots alone leave other unsuccessful outcomes <c>Incomplete</c>;
+/// an explicit <c>Invalid</c> outcome remains <c>Invalid</c>.
+/// </param>
 /// <param name="MaximumBytes">Maximum allowed artifact length.</param>
 public sealed record EvidenceArtifactSlot(string LogicalName, string RelativeRoot, string MediaType, bool Required, long MaximumBytes);
 
@@ -163,7 +167,10 @@ public sealed record EvidenceArtifactSlot(string LogicalName, string RelativeRoo
 /// Captures bounded metadata for one declared artifact without serializing its raw content.
 /// </summary>
 /// <param name="LogicalName">Declared artifact slot identifier.</param>
-/// <param name="RelativePath">Normalized path beneath the evidence artifact root.</param>
+/// <param name="RelativePath">
+/// Normalized path relative to the producer's artifact directory, excluding its producer ID.
+/// Protected hosts resolve the physical file beneath <c>run output / ProducerId / RelativePath</c>.
+/// </param>
 /// <param name="MediaType">Declared media type.</param>
 /// <param name="LengthBytes">Written artifact length.</param>
 /// <param name="Sha256">Lower-case SHA-256 digest of the written bytes.</param>
@@ -468,7 +475,12 @@ public sealed class EvidenceArtifactWriter
     }
 
     /// <summary>Creates an admitted writer sharing protected handles, run quota and ownership tracking.</summary>
-    /// <remarks>The host retains storage until all writer tasks stop; producer callbacks cannot replace these controls.</remarks>
+    /// <remarks>
+    /// The host retains storage until all writer tasks stop; producer callbacks cannot replace these controls.
+    /// Write paths and returned metadata are relative to the producer's artifact directory.
+    /// This constructor prepends the normalized producer ID only to physical write and verification paths
+    /// beneath the shared protected root; returned metadata excludes that prefix.
+    /// </remarks>
     internal EvidenceArtifactWriter(EvidenceProducerDeclaration producer, EvidenceLinuxArtifactRoot root,
         EvidenceRunByteQuota runQuota, EvidenceWorkerExecution execution, EvidenceAdmissionResult admission)
     {
@@ -1359,6 +1371,7 @@ public static class EvidenceManifestBuilder
             || results.Keys.Any(id => !producerDeclarations.ContainsKey(id))
             || resources.Keys.Any(id => !declaredResources.ContainsKey(id))
             || results.Any(pair => !producerDeclarations.TryGetValue(pair.Key, out var declaration)
+                || pair.Value.Outcome == EvidenceProducerOutcome.Invalid
                 || pair.Value.SatisfiedAssertionIds.Any(assertion =>
                     !declaration.AssertionIds.Contains(assertion, StringComparer.Ordinal))
                 || !EvidenceArtifactValidation.AreValid(

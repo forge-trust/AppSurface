@@ -30,3 +30,21 @@ manifest metadata, and runs the published CLI's `evidence verify` command agains
 plan and manifest. That command recomputes structural bindings and re-resolves the policy;
 it grants no provenance or gate authority. The portable rejection regression checks are
 [`test_runtime_proof.py`](../test_runtime_proof.py).
+
+## Provisional failure diagnostics
+
+The [root launcher](../../../scripts/evidencehost-linux-launcher.py) accepts the internal optional
+`--diagnostic-directory` argument. It requires an existing absolute, non-symlink, root-owned directory
+with no group or other write permission. On failure it exclusively creates `launcher-failure.json`
+with no-follow semantics and mode `0600`; an occupied filename rejects before launch. Without the
+option no diagnostic file is written, and public stderr retains its generic failure or exact
+Trusted `ASEVD407` response. The record contains only fixed host cause/error categories and optional
+allowlisted operation/numeric exit or errno fields, never exception text, subject output or descriptors.
+Worker protocol/unsuccessful-exit failures additionally retain bounded numeric `ExecMainCode` and
+`ExecMainStatus` as `worker_main_code`/`worker_main_status` under the fixed `worker-exit` operation.
+
+The [runtime driver](../runtime-proof.py) requests this record for Observation only, reads a bounded
+protected file through root after failure, validates its closed schema, and publishes only those safe
+categories. A missing or invalid diagnostic cannot satisfy the proof. It reserves its driver-owned
+`0700` structural-verification directory before protecting the parent, then uses fresh `0600` local
+plan/manifest copies after acknowledged exit. Neither diagnostics nor private copies grant authority.

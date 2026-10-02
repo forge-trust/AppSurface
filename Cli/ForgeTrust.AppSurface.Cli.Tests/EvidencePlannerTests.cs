@@ -312,6 +312,22 @@ public sealed class EvidencePlannerTests
     }
 
     [Fact]
+    public void ManifestBuilder_ShouldKeepAnInvalidProducerInvalidWhenItsArtifactMetadataIsRemoved()
+    {
+        var plan = CreateRequiredArtifactPlan();
+        var result = new EvidenceProducerResult("coverage", EvidenceProducerOutcome.Invalid, [], Artifacts: []);
+
+        var manifest = EvidenceAdmissionTestFixture.BuildTrusted(plan, [result]);
+
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, manifest.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+        Assert.Equal(EvidenceClaimEligibility.None, manifest.Eligibility);
+        Assert.Empty(manifest.ClosedObligationIds);
+        Assert.Equal(["coverage"], manifest.UnmediatedObligationIds);
+        Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
+    }
+
+    [Fact]
     public void ManifestBuilder_ShouldValidatePartialArtifactsWithoutPromotingAnUnsuccessfulProducer()
     {
         var plan = CreateRequiredArtifactPlan();
