@@ -386,7 +386,7 @@ bash examples/durable-postgresql/run-local-proof.sh
 ```
 
 It creates a disposable loopback PostgreSQL 16.5 container, applies the current checked-in migrations through schema
-10 using the explicit CLI path, runs the canonical role recipe, initializes a development epoch, runs the real
+11 using the explicit CLI path, runs the canonical role recipe, initializes a development epoch, runs the real
 Work/Flow/Schedule example, resolves both pump interfaces to the same PostgreSQL singleton, calls authoritative
 admission directly, and checks that worker startup performs no DDL.
 
