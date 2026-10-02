@@ -101,7 +101,7 @@ public sealed class ExternalActivationVerificationScriptTests
             throw Xunit.Sdk.SkipException.ForSkip("The packed consumer proof script is a Unix Bash entry point.");
         }
 
-        const string separatePassword = "another-private-marker";
+        const string separatePassword = "private-prefix private-suffix";
         var script = ReadScript();
         var environmentRunner = ExtractMarkedBlock(
             script,
@@ -127,7 +127,7 @@ public sealed class ExternalActivationVerificationScriptTests
         {
             await File.WriteAllTextAsync(
                 fakeDotnetPath,
-                "#!/usr/bin/env bash\nprintf 'configured server was %s\\nPassword=%s; retry failed\\n' \"$ACTIVATION_TEST_CONNECTION_FOR_LOG\" \"$ACTIVATION_TEST_PASSWORD_FOR_LOG\"\nexit 37\n");
+                "#!/usr/bin/env bash\nprintf 'configured server was %s\\nPassword = %s; retry failed\\n' \"$ACTIVATION_TEST_CONNECTION_FOR_LOG\" \"$ACTIVATION_TEST_PASSWORD_FOR_LOG\"\nexit 37\n");
             File.SetUnixFileMode(
                 fakeDotnetPath,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
@@ -165,10 +165,12 @@ public sealed class ExternalActivationVerificationScriptTests
             var output = result.Output + result.Error;
 
             Assert.NotEqual(0, result.ExitCode);
-            Assert.Contains("<redacted-postgres-connection>", output, StringComparison.Ordinal);
             Assert.Contains("Password=<redacted>", output, StringComparison.Ordinal);
+            Assert.Contains("diagnostic output omitted", output, StringComparison.Ordinal);
             Assert.DoesNotContain(ConnectionSecret, output, StringComparison.Ordinal);
             Assert.DoesNotContain(separatePassword, output, StringComparison.Ordinal);
+            Assert.DoesNotContain("private-prefix", output, StringComparison.Ordinal);
+            Assert.DoesNotContain("private-suffix", output, StringComparison.Ordinal);
         }
         finally
         {
@@ -269,10 +271,58 @@ public sealed class ExternalActivationVerificationScriptTests
             var result = await RunProcessAsync(startInfo);
 
             Assert.Equal(0, result.ExitCode);
-            Assert.Contains("<redacted-postgres-connection>", result.Output, StringComparison.Ordinal);
             Assert.Contains("Password=<redacted>", result.Output, StringComparison.Ordinal);
+            Assert.Contains("diagnostic output omitted", result.Output, StringComparison.Ordinal);
             Assert.False(result.Output.Contains(ConnectionSecret, StringComparison.Ordinal), "A connection string was printed.");
             Assert.False(result.Output.Contains(separatePassword, StringComparison.Ordinal), "A password was printed.");
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("Password = private-prefix private-suffix; retry failed")]
+    [InlineData("pWd = 'private-prefix ''private-suffix'; retry failed")]
+    [InlineData("PASSWORD = \"private-prefix \"\"private-suffix;still-secret\"; retry failed")]
+    [InlineData("Pwd = 'private-prefix;private-suffix; retry failed")]
+    [InlineData("Password=private-prefix; Pwd=private-suffix; retry failed")]
+    [InlineData("Password = 'private-prefix\nprivate-suffix'; retry failed")]
+    public async Task Failure_diagnostics_omit_password_output_when_field_boundaries_are_ambiguous(string diagnostic)
+    {
+        var sanitizer = ExtractMarkedBlock(
+            ReadScript(),
+            "# BEGIN activation test output sanitizer",
+            "# END activation test output sanitizer");
+        var temporaryDirectory = CreateTemporaryDirectory();
+        var logPath = Path.Combine(temporaryDirectory, "activation-test.log");
+        var harnessPath = Path.Combine(temporaryDirectory, "sanitize.sh");
+
+        try
+        {
+            await File.WriteAllTextAsync(logPath, $"{diagnostic}{Environment.NewLine}safe failure summary{Environment.NewLine}");
+            await File.WriteAllTextAsync(harnessPath, $"{sanitizer}{Environment.NewLine}print_sanitized_activation_test_log \"$1\"{Environment.NewLine}");
+            var startInfo = new ProcessStartInfo("/bin/bash")
+            {
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                WorkingDirectory = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory),
+            };
+            startInfo.ArgumentList.Add(harnessPath);
+            startInfo.ArgumentList.Add(logPath);
+
+            var result = await RunProcessAsync(startInfo);
+
+            Assert.Equal(0, result.ExitCode);
+            Assert.Contains("=<redacted>", result.Output, StringComparison.Ordinal);
+            Assert.Contains("diagnostic output omitted", result.Output, StringComparison.Ordinal);
+            Assert.DoesNotContain("private-prefix", result.Output, StringComparison.Ordinal);
+            Assert.DoesNotContain("private-suffix", result.Output, StringComparison.Ordinal);
+            Assert.DoesNotContain("still-secret", result.Output, StringComparison.Ordinal);
+            Assert.DoesNotContain("retry failed", result.Output, StringComparison.Ordinal);
+            Assert.Empty(result.Error);
         }
         finally
         {

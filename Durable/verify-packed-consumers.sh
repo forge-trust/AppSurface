@@ -169,16 +169,16 @@ connection = os.environ.get("APPSURFACE_POSTGRES_TEST_CONNECTION", "")
 if connection:
     text = text.replace(connection, "<redacted-postgres-connection>")
 text = re.sub(
-    r"(?i)(password|pwd)\s*=\s*(?:'[^']*'|\"[^\"]*\"|[^;,\s]+)",
-    r"\1=<redacted>",
-    text,
-)
-text = re.sub(
     r"(?i)(postgres(?:ql)?://)[^:/\s@]+:[^@/\s]+@",
     r"\1<redacted>@",
     text,
 )
 lines = text.splitlines()
+password_field = re.search(r"(?i)\b(password|pwd)\s*=", text)
+if password_field:
+    # Omit ambiguous diagnostics rather than guessing quoted, escaped, or
+    # multiline field boundaries and retaining a credential fragment.
+    lines = [password_field.group(1) + "=<redacted> (diagnostic output omitted)"]
 for line in lines[-120:]:
     print(line[:1200])
 PY
