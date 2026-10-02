@@ -169,6 +169,127 @@ public sealed class EvidencePolicyShadowCommandTests
             diagnostic => diagnostic.GetProperty("fixtureSource").GetString() == "Base");
     }
 
+    [Theory]
+    [InlineData(true, "Base", "--base-policy")]
+    [InlineData(false, "Candidate", "--candidate-policy")]
+    public async Task Command_Should_Reject_A_Missing_Policy_File_With_Redacted_Diagnostic(
+        bool isBasePolicy,
+        string expectedSource,
+        string optionName)
+    {
+        using var temporaryDirectory = TempDirectory.Create("appsurface-policy-shadow-missing-policy-");
+        var fixture = Fixture("docs", EvidencePolicyShadowFixtureKind.Documentation, "docs/guide.md");
+        var inputs = await WriteInputsAsync(
+            temporaryDirectory.Path,
+            Fixtures(fixture),
+            Fixtures(fixture));
+        var missingPolicyPath = TestPathUtils.PathUnder(temporaryDirectory.Path, "private-missing-policy.json");
+        inputs = isBasePolicy
+            ? inputs with { BasePolicyPath = missingPolicyPath }
+            : inputs with { CandidatePolicyPath = missingPolicyPath };
+        var outputPath = TestPathUtils.PathUnder(temporaryDirectory.Path, "missing-policy-result.json");
+
+        var run = await InvokeAsync(CreateArguments(inputs, outputPath));
+
+        Assert.NotEqual(0, run.ExitCode);
+        Assert.Contains("ASEPSCLI001", run.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain(missingPolicyPath, run.AllText, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(outputPath));
+        var diagnostic = Assert.Single(document.RootElement.GetProperty("result").GetProperty("diagnostics").EnumerateArray());
+        Assert.Equal("ASEPSCLI001", diagnostic.GetProperty("code").GetString());
+        Assert.Equal(expectedSource, diagnostic.GetProperty("fixtureSource").GetString());
+        Assert.Equal(
+            $"{optionName} could not be read; no comparison was performed.",
+            diagnostic.GetProperty("message").GetString());
+        Assert.DoesNotContain(missingPolicyPath, document.RootElement.GetRawText(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(true, "Base", "--base-policy")]
+    [InlineData(false, "Candidate", "--candidate-policy")]
+    public async Task Command_Should_Reject_Malformed_Policy_Without_Leaking_Path_Or_Raw_Text(
+        bool isBasePolicy,
+        string expectedSource,
+        string optionName)
+    {
+        using var temporaryDirectory = TempDirectory.Create("appsurface-policy-shadow-malformed-policy-");
+        const string hostileText = "policy-owned-RAW-SENTINEL-###";
+        var fixture = Fixture("docs", EvidencePolicyShadowFixtureKind.Documentation, "docs/guide.md");
+        var inputs = await WriteInputsAsync(
+            temporaryDirectory.Path,
+            Fixtures(fixture),
+            Fixtures(fixture));
+        var policyPath = isBasePolicy ? inputs.BasePolicyPath : inputs.CandidatePolicyPath;
+        await File.WriteAllTextAsync(policyPath, hostileText);
+        var outputPath = TestPathUtils.PathUnder(temporaryDirectory.Path, "malformed-policy-result.json");
+
+        var run = await InvokeAsync(CreateArguments(inputs, outputPath));
+
+        Assert.NotEqual(0, run.ExitCode);
+        Assert.Contains("ASEPSCLI002", run.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain(hostileText, run.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain(policyPath, run.AllText, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(outputPath));
+        var diagnostic = Assert.Single(document.RootElement.GetProperty("result").GetProperty("diagnostics").EnumerateArray());
+        Assert.Equal("ASEPSCLI002", diagnostic.GetProperty("code").GetString());
+        Assert.Equal(expectedSource, diagnostic.GetProperty("fixtureSource").GetString());
+        Assert.Equal(
+            $"{optionName} is malformed Evidence JSON; no comparison was performed.",
+            diagnostic.GetProperty("message").GetString());
+        var outputText = document.RootElement.GetRawText();
+        Assert.DoesNotContain(hostileText, outputText, StringComparison.Ordinal);
+        Assert.DoesNotContain(policyPath, outputText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Command_Should_Reject_A_Directory_As_A_Policy_Input_With_Redacted_Diagnostic()
+    {
+        using var temporaryDirectory = TempDirectory.Create("appsurface-policy-shadow-directory-input-");
+        var fixture = Fixture("docs", EvidencePolicyShadowFixtureKind.Documentation, "docs/guide.md");
+        var inputs = await WriteInputsAsync(
+            temporaryDirectory.Path,
+            Fixtures(fixture),
+            Fixtures(fixture));
+        var policyDirectory = Directory.CreateDirectory(
+            TestPathUtils.PathUnder(temporaryDirectory.Path, "policy-input-directory")).FullName;
+        inputs = inputs with { BasePolicyPath = policyDirectory };
+        var outputPath = TestPathUtils.PathUnder(temporaryDirectory.Path, "directory-policy-result.json");
+
+        var run = await InvokeAsync(CreateArguments(inputs, outputPath));
+
+        Assert.NotEqual(0, run.ExitCode);
+        Assert.Contains("ASEPSCLI001", run.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain(policyDirectory, run.AllText, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(outputPath));
+        var diagnostic = Assert.Single(document.RootElement.GetProperty("result").GetProperty("diagnostics").EnumerateArray());
+        Assert.Equal("ASEPSCLI001", diagnostic.GetProperty("code").GetString());
+        Assert.Equal("Base", diagnostic.GetProperty("fixtureSource").GetString());
+        Assert.Equal(
+            "--base-policy could not be read; no comparison was performed.",
+            diagnostic.GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public async Task Command_Should_Refuse_To_Overwrite_Existing_Output_And_Preserve_Contents()
+    {
+        using var temporaryDirectory = TempDirectory.Create("appsurface-policy-shadow-existing-output-");
+        const string existingContents = "output-owned-KEEP-EXISTING-CONTENTS";
+        var fixture = Fixture("docs", EvidencePolicyShadowFixtureKind.Documentation, "docs/guide.md");
+        var inputs = await WriteInputsAsync(
+            temporaryDirectory.Path,
+            Fixtures(fixture),
+            Fixtures(fixture));
+        var outputPath = TestPathUtils.PathUnder(temporaryDirectory.Path, "existing-result.json");
+        await File.WriteAllTextAsync(outputPath, existingContents);
+
+        var run = await InvokeAsync(CreateArguments(inputs, outputPath));
+
+        Assert.NotEqual(0, run.ExitCode);
+        Assert.Contains("ASEPSCLI006: The bounded shadow result could not be written to a new output target.", run.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain(outputPath, run.AllText, StringComparison.Ordinal);
+        Assert.Equal(existingContents, await File.ReadAllTextAsync(outputPath));
+    }
+
     private static string[] CreateArguments(CommandInputs inputs, string outputPath) =>
     [
         "evidence", "shadow-policy",
