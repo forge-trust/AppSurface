@@ -302,7 +302,7 @@ public sealed class ReleaseInspectMachineAuthorityTests
                      "packages/package-index.yml"
                  })
         {
-            var content = await File.ReadAllTextAsync(Path.Combine(repositoryRoot, path));
+            var content = await File.ReadAllTextAsync(TestPathUtils.PathUnder(repositoryRoot, path));
             runner.Add($"git show {PeeledCommit}:{path}", new CommandResult(0, content, ""));
         }
 
@@ -311,7 +311,7 @@ public sealed class ReleaseInspectMachineAuthorityTests
 
     private static async Task WriteFileAsync(string repositoryRoot, string relativePath, string content)
     {
-        var path = Path.Combine(repositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        var path = TestPathUtils.PathUnder(repositoryRoot, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await File.WriteAllTextAsync(path, content);
     }
