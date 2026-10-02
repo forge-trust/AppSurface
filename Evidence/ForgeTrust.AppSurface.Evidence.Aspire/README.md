@@ -24,6 +24,7 @@ is not an executable quickstart for resource-backed work.
 
 ```csharp
 using ForgeTrust.AppSurface.Evidence.Aspire;
+using ForgeTrust.AppSurface.Evidence.Contracts;
 
 await using var host = EvidenceHostBootstrap.Create(plan, registration =>
 {
@@ -42,6 +43,8 @@ The protected launcher authenticates the worker before the host invokes registra
 The old `RunAsync(bool observationOnly = false)` overload remains for source compatibility but always fails before configuration: omitted/false returns `ASEVD401`; true returns `ASEVD402` because it has no authenticated supervisor. `EvidenceAspireApplication.StartAsync(IDistributedApplicationBuilder)` returns `ASEVD400` before building a preconfigured builder. A deferred factory can be registered with the host, but the current production lane rejects its execution:
 
 ```csharp
+using Aspire.Hosting;
+
 static IDistributedApplicationBuilder CreateConsumerBuilder()
 {
     var builder = DistributedApplication.CreateBuilder(args: []);

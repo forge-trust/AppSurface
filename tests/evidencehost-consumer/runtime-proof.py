@@ -11,6 +11,7 @@ import platform
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tarfile
@@ -44,6 +45,11 @@ PRODUCER_SECONDS = 120
 LAUNCHER_TIMEOUT_SECONDS = JOB_SECONDS + 90
 WARNING_DIAGNOSTIC = re.compile(r"(?im)^.*\bwarning\s+[A-Z]{2,}[0-9]+\s*:")
 WARNING_SUMMARY = re.compile(r"(?im)^\s*([0-9]+)\s+Warning\(s\)\s*$")
+BUILD_LOG_FILES = (
+    "subject-build.stdout.log", "subject-build.stderr.log",
+    "cli-build.stdout.log", "cli-build.stderr.log",
+    "cli-publish.stdout.log", "cli-publish.stderr.log",
+)
 RUN_ID_PATTERN = re.compile(r"^([0-9]+)/([0-9]+)$")
 SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{40,64}$")
 
@@ -64,6 +70,7 @@ def bounded_run(
     timeout: int,
     label: str,
     binary_output: bool = False,
+    log_prefix: Path | None = None,
 ) -> tuple[int, bytes, bytes]:
     """Run one process tree with its own deadline and bounded diagnostic rendering."""
     try:
@@ -78,22 +85,30 @@ def bounded_run(
     except OSError as error:
         fail(f"{label} could not start ({type(error).__name__}).")
 
+    stdout, stderr = b"", b""
     try:
-        stdout, stderr = process.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
         try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            stdout, stderr = process.communicate(timeout=5)
+            stdout, stderr = process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             try:
-                os.killpg(process.pid, signal.SIGKILL)
+                os.killpg(process.pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
-            stdout, stderr = process.communicate()
-        fail(f"{label} exceeded its {timeout}-second process deadline.")
+            try:
+                stdout, stderr = process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                stdout, stderr = process.communicate()
+            fail(f"{label} exceeded its {timeout}-second process deadline.")
+    finally:
+        if log_prefix is not None:
+            for stream, content in (("stdout", stdout), ("stderr", stderr)):
+                path = log_prefix.with_name(f"{log_prefix.name}.{stream}.log")
+                path.write_bytes(content)
+                os.chmod(path, 0o644)
 
     if not binary_output:
         stdout.decode("utf-8", "replace")
@@ -107,9 +122,12 @@ def render_tail(stdout: bytes, stderr: bytes, limit: int = 6000) -> str:
 
 
 def run_success(
-    argv: list[str], *, cwd: Path, env: dict[str, str], timeout: int, label: str
+    argv: list[str], *, cwd: Path, env: dict[str, str], timeout: int, label: str,
+    log_prefix: Path | None = None,
 ) -> tuple[bytes, bytes]:
-    code, stdout, stderr = bounded_run(argv, cwd=cwd, env=env, timeout=timeout, label=label)
+    code, stdout, stderr = bounded_run(
+        argv, cwd=cwd, env=env, timeout=timeout, label=label, log_prefix=log_prefix,
+    )
     if code != 0:
         detail = render_tail(stdout, stderr)
         fail(f"{label} exited {code}." + (f"\n{detail}" if detail else ""))
@@ -164,10 +182,15 @@ def sanitized_environment(work_root: Path, executable: Path) -> dict[str, str]:
     }
 
 
-def require_zero_warning_build(output: bytes, label: str) -> None:
+def require_no_warning_diagnostics(output: bytes, label: str) -> None:
     text = output.decode("utf-8", "replace")
     if WARNING_DIAGNOSTIC.search(text):
         fail(f"{label} emitted a warning diagnostic despite warnings-as-errors.")
+
+
+def require_zero_warning_build(output: bytes, label: str) -> None:
+    require_no_warning_diagnostics(output, label)
+    text = output.decode("utf-8", "replace")
     counts = WARNING_SUMMARY.findall(text)
     if not counts or any(int(value) != 0 for value in counts):
         fail(f"{label} did not prove an exact zero-warning build summary.")
@@ -479,31 +502,51 @@ def run_mechanism_fixtures(env: dict[str, str]) -> dict[str, str]:
     }
 
 
-def build_before_root(tool_root: Path, env: dict[str, str]) -> tuple[str, str]:
+def build_before_root(tool_root: Path, env: dict[str, str], proof_directory: Path) -> tuple[str, str]:
+    """Check build summaries, then publish the same CLI configuration without rebuilding.
+
+    Raw logs survive command and validation failures in the existing public proof directory.
+    The returned build digest hashes the six raw streams in BUILD_LOG_FILES order; older
+    records without buildLogFiles hashed only the CLI publish stdout followed by stderr.
+    """
     subject_build = [
         str(dotnet_host()), "build", str(SUBJECT_PROJECT), "--configuration", "Debug",
         "--verbosity", "minimal", "--nologo", "-warnaserror", "-p:RestoreLockedMode=false",
     ]
     subject_stdout, subject_stderr = run_success(
-        subject_build, cwd=ROOT, env=env, timeout=300, label="RuntimeSubject zero-warning build"
+        subject_build, cwd=ROOT, env=env, timeout=300, label="RuntimeSubject zero-warning build",
+        log_prefix=proof_directory / "subject-build",
     )
     require_zero_warning_build(subject_stdout + subject_stderr, "RuntimeSubject build")
+
+    cli_build = [
+        str(dotnet_host()), "build", str(CLI_PROJECT), "--configuration", "Release",
+        "--runtime", "linux-x64", "--self-contained", "false",
+        "--verbosity", "minimal", "--nologo", "-warnaserror", "-p:RestoreLockedMode=false",
+    ]
+    cli_stdout, cli_stderr = run_success(
+        cli_build, cwd=ROOT, env=env, timeout=480, label="production CLI zero-warning build",
+        log_prefix=proof_directory / "cli-build",
+    )
+    require_zero_warning_build(cli_stdout + cli_stderr, "CLI build")
 
     publish = [
         str(dotnet_host()), "publish", str(CLI_PROJECT), "--configuration", "Release",
         "--runtime", "linux-x64", "--self-contained", "false",
         "--output", str(tool_root), "--verbosity", "minimal", "--nologo", "-warnaserror",
-        "-p:RestoreLockedMode=false",
+        "--no-build", "--no-restore", "-p:RestoreLockedMode=false",
     ]
     publish_stdout, publish_stderr = run_success(
-        publish, cwd=ROOT, env=env, timeout=480, label="published CLI zero-warning build"
+        publish, cwd=ROOT, env=env, timeout=480, label="production CLI publish",
+        log_prefix=proof_directory / "cli-publish",
     )
-    require_zero_warning_build(publish_stdout + publish_stderr, "CLI publish")
+    require_no_warning_diagnostics(publish_stdout + publish_stderr, "CLI publish")
     validate_publish_tree(tool_root)
     cli_dll = tool_root / CLI_DLL_NAME
     if not cli_dll.is_file():
         fail("CLI publish did not produce the production command assembly.")
-    return hashlib.sha256(cli_dll.read_bytes()).hexdigest(), hashlib.sha256((publish_stdout + publish_stderr)).hexdigest()
+    build_log = subject_stdout + subject_stderr + cli_stdout + cli_stderr + publish_stdout + publish_stderr
+    return hashlib.sha256(cli_dll.read_bytes()).hexdigest(), hashlib.sha256(build_log).hexdigest()
 
 
 def run_cli_rejection(cli_dll: Path, env: dict[str, str], args: list[str], code: str, label: str) -> None:
@@ -533,6 +576,30 @@ def root_success(argv: list[str], *, cwd: Path, timeout: int, label: str) -> tup
         detail = render_tail(stdout, stderr)
         fail(f"{label} exited {code}." + (f"\n{detail}" if detail else ""))
     return stdout, stderr
+
+
+def protect_launcher_workspace(work_root: Path) -> None:
+    """Make the fresh private parent immutable to the runner and traversable by launcher identities.
+
+    The launcher narrows tool/output child permissions to its selected worker. Cache and
+    build-home children retain their private modes. Only the generated parent is changed;
+    a root-owned parent also prevents the runner from replacing protected child names.
+    """
+    if (work_root.parent != Path("/tmp")
+            or not work_root.name.startswith("appsurface-evidencehost-runtime-")
+            or work_root.is_symlink() or not work_root.is_dir()):
+        fail("The launcher workspace must be a fresh generated temporary directory.")
+    root_success(
+        ["/usr/bin/chown", "--no-dereference", "root:root", str(work_root)],
+        cwd=ROOT, timeout=30, label="protect launcher workspace owner",
+    )
+    root_success(
+        ["/usr/bin/chmod", "0755", str(work_root)],
+        cwd=ROOT, timeout=30, label="protect launcher workspace traversal",
+    )
+    info = work_root.lstat()
+    if info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o755:
+        fail("The launcher workspace parent protection did not take effect.")
 
 
 def launcher_args(
@@ -793,6 +860,7 @@ def write_public_artifacts(
         "reportGeneratorSha256": reporter_hash,
         "reportGeneratorTarget": reporter_target,
         "buildLogSha256": build_log_hash,
+        "buildLogFiles": list(BUILD_LOG_FILES),
         "mechanismFixtures": mechanism_results,
         "launcherOutputSlot": observation_slot,
         "launcherExitedSuccessfullyBeforeArtifactRead": True,
@@ -831,7 +899,6 @@ def main() -> int:
 
     work_root = Path(tempfile.mkdtemp(prefix="appsurface-evidencehost-runtime-", dir="/tmp"))
     os.chmod(work_root, 0o700)
-    keep_work_root = True
     try:
         env = sanitized_environment(work_root, dotnet_host())
         require_linux_host(env)
@@ -846,7 +913,7 @@ def main() -> int:
         output_parent.mkdir(mode=0o755)
         trusted_parent.mkdir(mode=0o755)
 
-        cli_hash, build_log_hash = build_before_root(tool_root, env)
+        cli_hash, build_log_hash = build_before_root(tool_root, env, proof_directory)
         reporter_target, reporter_hash = prepare_report_generator(tool_root, env)
         policy = create_policy()
         policy_bytes = (json.dumps(policy, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -880,6 +947,7 @@ def main() -> int:
             if code != 0:
                 fail(f"Could not set protected permissions for {path.name}.")
 
+        protect_launcher_workspace(work_root)
         assert_trusted_denied(
             tool_root=tool_root, policy_file=policy_file, output_parent=trusted_parent,
             bindings=bindings, env=env,
@@ -920,13 +988,11 @@ def main() -> int:
             build_log_hash, verification, observation_slot, mechanism_results,
         )
         print(f"EvidenceHost Observation proof passed: {proof_directory / 'runtime-proof.json'}")
-        keep_work_root = False
         return 0
     finally:
-        if keep_work_root:
-            print(f"Preserved runtime proof workspace: {work_root}", file=sys.stderr)
-        else:
-            shutil.rmtree(work_root)
+        # Root-owned launcher files cannot be removed by this non-root driver. The disposable
+        # runner retains this fresh workspace for diagnosis; it is never reused or uploaded.
+        print(f"Preserved private runtime proof workspace on disposable runner: {work_root}", file=sys.stderr)
 
 
 if __name__ == "__main__":

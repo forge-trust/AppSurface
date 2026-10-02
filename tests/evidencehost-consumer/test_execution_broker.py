@@ -27,8 +27,12 @@ from pathlib import Path
 from typing import Any
 
 REPORT = (
-    b'<coverage lines-covered="100" lines-valid="100" branches-covered="100" '
-    b'branches-valid="100" line-rate="1" branch-rate="1"><packages /></coverage>'
+    b'<coverage lines-covered="1" lines-valid="1" branches-covered="2" branches-valid="2" '
+    b'line-rate="1" branch-rate="1"><packages><package name="fixture" line-rate="1" '
+    b'branch-rate="1"><classes><class name="Fixture" filename="fixture.cs" line-rate="1" '
+    b'branch-rate="1"><methods /><lines><line number="1" hits="1" branch="true" '
+    b'condition-coverage="100% (2/2)"><conditions><condition number="0" type="jump" '
+    b'coverage="100%" /></conditions></line></lines></class></classes></package></packages></coverage>'
 )
 MAX_LINE = 64 * 1024
 SANDBOX_MARKER_ENVIRONMENT = ("CODEX_SANDBOX", "SANDBOX_MODE", "IN_SANDBOX", "IS_SANDBOX")
@@ -94,6 +98,16 @@ def fail(message: str) -> None:
 def chown_mode(path: Path, uid: int, gid: int, mode: int) -> None:
     os.chown(path, uid, gid, follow_symlinks=False)
     os.chmod(path, mode, follow_symlinks=False)
+
+
+def configure_coverage_ancestors(base: Path, worker_root: Path, worker_gid: int) -> None:
+    """Allow retained coverage leases to read/search root-owned worker ancestors.
+
+    The worker group cannot write these directories, and other identities receive
+    no access. The fixture requires the subject UID/GID to differ from the worker.
+    """
+    for path in (base, worker_root):
+        chown_mode(path, 0, worker_gid, 0o750)
 
 
 def write_root_file(path: Path, data: bytes, gid: int, mode: int = 0o440) -> None:
@@ -378,9 +392,9 @@ def main(argv: list[str]) -> int:
     subject.mkdir(mode=0o711)
     output_root.mkdir(mode=0o711)
     worker_root.mkdir(mode=0o711)
-    for path, gid, mode in ((base, args.worker_gid, 0o710), (socket_dir, args.worker_gid, 0o710),
-                            (tool, args.worker_gid, 0o750), (output_root, args.worker_gid, 0o710),
-                            (worker_root, args.worker_gid, 0o710)):
+    configure_coverage_ancestors(base, worker_root, args.worker_gid)
+    for path, gid, mode in ((socket_dir, args.worker_gid, 0o710),
+                            (tool, args.worker_gid, 0o750), (output_root, args.worker_gid, 0o710)):
         chown_mode(path, 0, gid, mode)
     chown_mode(subject, args.subject_uid, args.subject_gid, 0o711)
     (subject / "test-output").mkdir(mode=0o700)

@@ -152,7 +152,9 @@ public sealed class EvidenceRestrictedCoverageFailureTests
             CreateWriter(directory.Path, declaration),
             CancellationToken.None);
 
-        Assert.Equal(shouldPass ? EvidenceProducerOutcome.Passed : EvidenceProducerOutcome.Failed, result.Outcome);
+        var expectedOutcome = shouldPass ? EvidenceProducerOutcome.Passed : EvidenceProducerOutcome.Failed;
+        Assert.True(result.Outcome == expectedOutcome,
+            $"Expected {expectedOutcome}, actual {result.Outcome}. Diagnostic: {result.Diagnostic}");
         if (shouldPass)
         {
             Assert.Equal(new[] { AssertionId }, result.SatisfiedAssertionIds);
@@ -162,6 +164,8 @@ public sealed class EvidenceRestrictedCoverageFailureTests
             Assert.Empty(result.SatisfiedAssertionIds);
         }
 
+        Assert.True(result.Artifacts?.Any(artifact => artifact.LogicalName == "coverage-patch-targets") == true,
+            $"Expected the declared patch targets artifact. Diagnostic: {result.Diagnostic}");
         var targets = result.Artifacts!.Single(artifact => artifact.LogicalName == "coverage-patch-targets");
         var targetsJson = await File.ReadAllTextAsync(TestPathUtils.PathUnder(
             TestPathUtils.PathUnder(directory.Path, "artifacts"), targets.RelativePath));
@@ -231,7 +235,8 @@ public sealed class EvidenceRestrictedCoverageFailureTests
             CreateWriter(directory.Path, declaration),
             CancellationToken.None);
 
-        Assert.Equal(EvidenceProducerOutcome.Invalid, result.Outcome);
+        Assert.True(result.Outcome == EvidenceProducerOutcome.Invalid,
+            $"Expected Invalid, actual {result.Outcome}. Diagnostic: {result.Diagnostic}");
         Assert.Contains("exceeds its declared byte limit", result.Diagnostic, StringComparison.Ordinal);
         Assert.Empty(result.SatisfiedAssertionIds);
         AssertNoArtifacts(result);
