@@ -867,6 +867,45 @@ public sealed class EvidencePullRequestGateVerifierTests
     }
 
     [Fact]
+    public async Task NoFollowArtifactVerifier_ShouldRecheckMetadataAfterInitialValidationOnLinux()
+    {
+        if (!SupportsNoFollowVerifier)
+        {
+            return;
+        }
+
+        await using var fixture = await GateFixture.CreateAsync();
+        var verifier = new EvidencePullRequestGateNoFollowArtifactVerifier();
+        var producerResult = fixture.Manifest.ProducerResults.Single();
+        var artifact = producerResult.Artifacts!.Single();
+        var changedArtifacts = new[]
+        {
+            artifact with { LogicalName = "undeclared" },
+            artifact with { MediaType = "application/json" },
+            artifact with { LengthBytes = -1 },
+            artifact with { RelativePath = "reports/../outside.txt" },
+        };
+
+        foreach (var changedArtifact in changedArtifacts)
+        {
+            var manifest = fixture.Manifest with
+            {
+                ProducerResults =
+                [
+                    producerResult with
+                    {
+                        Artifacts = new ChangesAfterTwoEnumerationsReadOnlyList<EvidenceArtifactResult>(
+                            [artifact],
+                            [changedArtifact]),
+                    },
+                ],
+            };
+
+            Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, fixture.Plan, manifest));
+        }
+    }
+
+    [Fact]
     public async Task NoFollowArtifactVerifier_ShouldRejectSymlinkedProducerDirectoryOnLinux()
     {
         if (!SupportsNoFollowVerifier)
@@ -1300,6 +1339,22 @@ public sealed class EvidencePullRequestGateVerifierTests
 
         public IEnumerator<T> GetEnumerator() =>
             (Interlocked.Increment(ref _enumerations) == 1 ? firstEnumeration : laterEnumerations).GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class ChangesAfterTwoEnumerationsReadOnlyList<T>(
+        IReadOnlyList<T> initialEnumerations,
+        IReadOnlyList<T> laterEnumerations) : IReadOnlyList<T>
+    {
+        private int _enumerations;
+
+        public int Count => initialEnumerations.Count;
+
+        public T this[int index] => initialEnumerations[index];
+
+        public IEnumerator<T> GetEnumerator() =>
+            (Interlocked.Increment(ref _enumerations) <= 2 ? initialEnumerations : laterEnumerations).GetEnumerator();
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }

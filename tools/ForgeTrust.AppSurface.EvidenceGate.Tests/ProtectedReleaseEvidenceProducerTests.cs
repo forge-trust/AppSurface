@@ -223,6 +223,97 @@ public sealed class ProtectedReleaseEvidenceProducerTests
     }
 
     [Fact]
+    public void RemoteTagParserRejectsMalformedAndDuplicateExactRefs()
+    {
+        var malformed = Assert.Throws<InvalidDataException>(() =>
+            GitProtectedReleaseRemoteTagAuthority.ParseRemoteTagAdvertisement("missing-tab-separator", Tag));
+        Assert.Contains("malformed tag advertisement", malformed.Message, StringComparison.Ordinal);
+
+        var duplicateTag = Assert.Throws<InvalidDataException>(() =>
+            GitProtectedReleaseRemoteTagAuthority.ParseRemoteTagAdvertisement(
+                $"{TagObjectId}\trefs/tags/{Tag}\n{new string('d', 40)}\trefs/tags/{Tag}\n",
+                Tag));
+        Assert.Contains("exact tag ref more than once", duplicateTag.Message, StringComparison.Ordinal);
+
+        var duplicatePeeledCommit = Assert.Throws<InvalidDataException>(() =>
+            GitProtectedReleaseRemoteTagAuthority.ParseRemoteTagAdvertisement(
+                $"{TagObjectId}\trefs/tags/{Tag}\n{PeeledCommit}\trefs/tags/{Tag}^{{}}\n{new string('d', 40)}\trefs/tags/{Tag}^{{}}\n",
+                Tag));
+        Assert.Contains("peeled tag ref more than once", duplicatePeeledCommit.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RemoteTagParserAcceptsCanonicalSha256ObjectIds()
+    {
+        var tagObjectId = new string('a', 64);
+        var peeledCommit = new string('b', 64);
+
+        var observation = GitProtectedReleaseRemoteTagAuthority.ParseRemoteTagAdvertisement(
+            $"{tagObjectId}\trefs/tags/{Tag}\n{peeledCommit}\trefs/tags/{Tag}^{{}}\n",
+            Tag);
+
+        Assert.Equal(new ProtectedReleaseRemoteTagObservation(tagObjectId, peeledCommit), observation);
+    }
+
+    [Theory]
+    [InlineData("file:///tmp/protected-release.git?token=ignored")]
+    [InlineData("file:///tmp/protected-release.git#fragment")]
+    public async Task LocalFixtureRejectsFileRemotesWithCredentialsOrSelectors(string remoteUrl)
+    {
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            new GitProtectedReleaseRemoteTagAuthority().ReadLocalFixtureForTestingAsync(remoteUrl, Tag, CancellationToken.None));
+
+        Assert.Contains("outside the allowed scheme", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MissingLocalRemoteIsReportedAsUnavailableRatherThanAsAnAbsentTag()
+    {
+        using var fixture = new ProducerFixture();
+        var missingRemotePath = TestPathUtils.PathUnder(fixture.Root, "missing-protected-release.git");
+
+        await Assert.ThrowsAsync<ProtectedReleaseRemoteTagUnavailableException>(() =>
+            new GitProtectedReleaseRemoteTagAuthority().ReadLocalFixtureForTestingAsync(
+                new Uri(missingRemotePath).AbsoluteUri,
+                Tag,
+                CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task OversizedRemoteAdvertisementStopsReadingAndRejectsTheResponse()
+    {
+        using var fixture = new ProducerFixture();
+        var remotePath = TestPathUtils.PathUnder(fixture.Root, "large-protected-release.git");
+        var workPath = TestPathUtils.PathUnder(fixture.Root, "large-release-work");
+        Directory.CreateDirectory(workPath);
+        _ = await RunGitAsync(fixture.Root, "init", "--bare", "--quiet", remotePath);
+        _ = await RunGitAsync(workPath, "init", "--quiet");
+        _ = await RunGitAsync(workPath, "config", "user.name", "Evidence Gate Tests");
+        _ = await RunGitAsync(workPath, "config", "user.email", "evidence-gate-tests@example.invalid");
+        await File.WriteAllTextAsync(TestPathUtils.PathUnder(workPath, "release.txt"), "large tag advertisement fixture");
+        _ = await RunGitAsync(workPath, "add", "release.txt");
+        _ = await RunGitAsync(workPath, "commit", "--quiet", "-m", "large tag advertisement fixture");
+        var commit = await RunGitAsync(workPath, "rev-parse", "HEAD");
+        _ = await RunGitAsync(workPath, "remote", "add", "origin", remotePath);
+        _ = await RunGitAsync(workPath, "push", "--quiet", "origin", "HEAD:refs/heads/main");
+
+        var tagReferences = string.Join(
+            '\n',
+            Enumerable.Range(0, 3000).Select(index => $"create refs/tags/bulk-{index:D4} {commit}")) + "\n";
+        await RunGitWithInputAsync(remotePath, tagReferences, "update-ref", "--stdin");
+
+        var authority = new GitProtectedReleaseRemoteTagAuthority();
+        var remoteUrl = new Uri(remotePath).AbsoluteUri;
+        using var cancellation = new CancellationTokenSource();
+        var canceledRead = authority.ReadLocalFixtureForTestingAsync(remoteUrl, "bulk-*", cancellation.Token);
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await canceledRead);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            authority.ReadLocalFixtureForTestingAsync(remoteUrl, "bulk-*", CancellationToken.None));
+    }
+
+    [Fact]
     public async Task ProductionRemoteAuthorityUsesOnlyTheFixedPublicRepositoryAndRejectsRemoteOverrideInputs()
     {
         Assert.Equal(
@@ -497,6 +588,33 @@ public sealed class ProtectedReleaseEvidenceProducerTests
         var error = await standardError;
         Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {error}");
         return output.Trim();
+    }
+
+    private static async Task RunGitWithInputAsync(string workingDirectory, string input, params string[] arguments)
+    {
+        var startInfo = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start git to populate the protected release test fixture.");
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        var standardError = process.StandardError.ReadToEndAsync();
+        await process.StandardInput.WriteAsync(input);
+        process.StandardInput.Close();
+        await process.WaitForExitAsync();
+        var output = await standardOutput;
+        var error = await standardError;
+        Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {error}{output}");
     }
 
     private sealed class FixedInvocationProvider(ProtectedReleaseInvocation? invocation) : IProtectedReleaseInvocationProvider
