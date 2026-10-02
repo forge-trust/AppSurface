@@ -100,6 +100,17 @@ public sealed class EvidenceGitChangeCaptureTests
     }
 
     [Fact]
+    public void ParseNameStatus_ShouldRejectInputAboveTheByteLimitBeforeParsingRecords()
+    {
+        var input = new byte[85 * 1024 * 1024 + 1];
+
+        var exception = Assert.Throws<EvidencePlanningException>(() =>
+            EvidenceGitChangeCapture.ParseNameStatus(input));
+
+        Assert.Equal("ASEVD135", exception.Code);
+    }
+
+    [Fact]
     public async Task CaptureAndVerify_ShouldBindExactCommitsAndIncludeBinaryPath()
     {
         using var repository = new GitFixture();

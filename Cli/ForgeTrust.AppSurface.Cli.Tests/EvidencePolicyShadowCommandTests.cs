@@ -237,6 +237,54 @@ public sealed class EvidencePolicyShadowCommandTests
     }
 
     [Fact]
+    public async Task Command_Should_Omit_A_Result_That_Exceeds_The_Output_Limit()
+    {
+        const int maximumPathLength = 512;
+        const int maximumKindLength = 32;
+        const int maximumIdentifierLength = 128;
+        var escapedCharacter = '\u2028';
+        var pathSegment = new string(escapedCharacter, maximumPathLength - 2);
+        var changedPath = $"x{pathSegment}x";
+        var previousPath = $"y{pathSegment}y";
+        var changeKind = $"m{new string(escapedCharacter, maximumKindLength - 2)}d";
+        var identifierSegment = new string(escapedCharacter, maximumIdentifierLength - 3);
+
+        EvidencePolicyShadowFixture[] CreateFixtures(string prefix) =>
+            Enumerable.Range(0, EvidencePolicyShadowValidator.MaximumFixtures)
+                .Select(index => new EvidencePolicyShadowFixture(
+                    $"{prefix}{identifierSegment}{index:D2}",
+                    EvidencePolicyShadowFixtureKind.Documentation,
+                    new NormalizedDiffPath(changedPath, changeKind, previousPath)))
+                .ToArray();
+
+        using var temporaryDirectory = TempDirectory.Create("appsurface-policy-shadow-oversized-result-");
+        var inputs = await WriteInputsAsync(
+            temporaryDirectory.Path,
+            Fixtures(CreateFixtures("b")),
+            Fixtures(CreateFixtures("c")));
+        Assert.InRange(new FileInfo(inputs.BaseFixturesPath).Length, 1, 1024 * 1024);
+        Assert.InRange(new FileInfo(inputs.CandidateFixturesPath).Length, 1, 1024 * 1024);
+        var outputPath = TestPathUtils.PathUnder(temporaryDirectory.Path, "bounded-result.json");
+
+        var run = await InvokeAsync(CreateArguments(inputs, outputPath));
+
+        Assert.NotEqual(0, run.ExitCode);
+        Assert.Contains("ASEPSCLI010", run.Error, StringComparison.Ordinal);
+        Assert.Contains("ASEPSCLI005", run.Error, StringComparison.Ordinal);
+        var outputText = await File.ReadAllTextAsync(outputPath);
+        Assert.True(new FileInfo(outputPath).Length < 1024 * 1024);
+        using var document = JsonDocument.Parse(outputText);
+        var root = document.RootElement;
+        Assert.False(root.GetProperty("claimEligible").GetBoolean());
+        var result = root.GetProperty("result");
+        Assert.False(result.GetProperty("isCompatible").GetBoolean());
+        Assert.Empty(result.GetProperty("selections").EnumerateArray());
+        var diagnostic = Assert.Single(result.GetProperty("diagnostics").EnumerateArray());
+        Assert.Equal("ASEPSCLI005", diagnostic.GetProperty("code").GetString());
+        Assert.Contains("1048576-byte output limit", diagnostic.GetProperty("message").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Command_Should_Reject_A_Missing_Base_Fixture_File()
     {
         using var temporaryDirectory = TempDirectory.Create("appsurface-policy-shadow-missing-base-");

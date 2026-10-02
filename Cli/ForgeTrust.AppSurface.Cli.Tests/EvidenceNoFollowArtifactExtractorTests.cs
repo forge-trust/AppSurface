@@ -207,6 +207,56 @@ public sealed class EvidenceNoFollowArtifactExtractorTests
     }
 
     [Fact]
+    public async Task ExtractAsync_ShouldAcceptTheMaximumAllowedArtifactCount()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            await AssertUnsupportedPlatformFailsClosedAsync();
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        Directory.CreateDirectory(temp.ScratchRoot);
+        Directory.CreateDirectory(Path.Join(temp.ScratchRoot, "subject"));
+        var maximumFileCount = EvidenceNoFollowArtifactExtractionLimits.MaximumAllowedFileCount;
+        var additionalSlots = Enumerable.Range(1, maximumFileCount - 1)
+            .Select(index => new EvidenceArtifactSlot(
+                $"artifact-{index}",
+                $"artifacts/{index}",
+                "application/octet-stream",
+                Required: false,
+                MaximumBytes: 1))
+            .ToArray();
+        var writer = CreateWriter(Path.Join(temp.ArtifactRoot, "maximum-count"), additionalSlots);
+        var artifacts = new List<EvidenceNoFollowArtifact>(maximumFileCount)
+        {
+            new("report", "subject/0.bin", "reports/0.bin"),
+        };
+
+        for (var index = 0; index < maximumFileCount; index++)
+        {
+            await File.WriteAllBytesAsync(
+                Path.Join(temp.ScratchRoot, "subject", $"{index}.bin"),
+                [(byte)index]);
+            if (index > 0)
+            {
+                artifacts.Add(new EvidenceNoFollowArtifact(
+                    $"artifact-{index}",
+                    $"subject/{index}.bin",
+                    $"artifacts/{index}/{index}.bin"));
+            }
+        }
+
+        using var root = OpenTrustedRoot(temp.ScratchRoot);
+
+        var results = await EvidenceNoFollowArtifactExtractor.ExtractAsync(root, writer, artifacts);
+
+        Assert.Equal(maximumFileCount, results.Count);
+        Assert.Equal(maximumFileCount, writer.WrittenArtifacts.Count);
+        Assert.True(await writer.VerifyWrittenArtifactsAsync());
+    }
+
+    [Fact]
     public async Task ExtractAsync_ShouldRejectInvalidMinimumLimitsAndCallerFileCountBeforeOpeningRoot()
     {
         using var invalidRoot = new SafeFileHandle(new IntPtr(-1), ownsHandle: false);
@@ -381,6 +431,52 @@ public sealed class EvidenceNoFollowArtifactExtractorTests
         Assert.Equal(report, await File.ReadAllBytesAsync(Path.Join(temp.ArtifactRoot, "reports", "report.bin")));
         Assert.Equal(summary, await File.ReadAllBytesAsync(Path.Join(temp.ArtifactRoot, "summaries", "summary.bin")));
         Assert.True(await writer.VerifyWrittenArtifactsAsync());
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ShouldHonorTheArtifactSlotSizeAtItsExactBoundary()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            await AssertUnsupportedPlatformFailsClosedAsync();
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        Directory.CreateDirectory(temp.ScratchRoot);
+        Directory.CreateDirectory(Path.Join(temp.ScratchRoot, "subject"));
+        var contents = new byte[] { 1, 2, 3 };
+        await File.WriteAllBytesAsync(Path.Join(temp.ScratchRoot, "subject", "report.bin"), contents);
+        using var root = OpenTrustedRoot(temp.ScratchRoot);
+        EvidenceArtifactWriter CreateSlotLimitedWriter(string artifactRoot, long maximumBytes) => CreateWriter(
+            artifactRoot,
+            new EvidenceArtifactSlot(
+                "bounded-report",
+                "bounded-reports",
+                "application/octet-stream",
+                Required: false,
+                maximumBytes));
+
+        var exactLimitRoot = Path.Join(temp.ArtifactRoot, "exact-limit");
+        var exactLimitWriter = CreateSlotLimitedWriter(exactLimitRoot, contents.Length);
+        var results = await EvidenceNoFollowArtifactExtractor.ExtractAsync(
+            root,
+            exactLimitWriter,
+            [new EvidenceNoFollowArtifact("bounded-report", "subject/report.bin", "bounded-reports/report.bin")]);
+
+        Assert.Equal(contents, await File.ReadAllBytesAsync(Path.Join(exactLimitRoot, "bounded-reports", "report.bin")));
+        Assert.Equal(contents.LongLength, Assert.Single(results).LengthBytes);
+        Assert.True(await exactLimitWriter.VerifyWrittenArtifactsAsync());
+
+        var smallerLimitRoot = Path.Join(temp.ArtifactRoot, "smaller-limit");
+        var smallerLimitWriter = CreateSlotLimitedWriter(smallerLimitRoot, contents.Length - 1);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => EvidenceNoFollowArtifactExtractor.ExtractAsync(
+            root,
+            smallerLimitWriter,
+            [new EvidenceNoFollowArtifact("bounded-report", "subject/report.bin", "bounded-reports/report.bin")]));
+
+        Assert.Empty(smallerLimitWriter.WrittenArtifacts);
+        Assert.False(File.Exists(Path.Join(smallerLimitRoot, "bounded-reports", "report.bin")));
     }
 
     [Fact]

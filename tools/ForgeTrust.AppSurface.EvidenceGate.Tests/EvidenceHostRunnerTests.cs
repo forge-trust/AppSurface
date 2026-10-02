@@ -298,6 +298,28 @@ public sealed class EvidenceHostRunnerTests
     }
 
     [Fact]
+    public async Task MissingPlanFileFailsBeforeCreatingHostOutputs()
+    {
+        using var fixture = await GateFixture.CreateAsync(docsOnly: true);
+        File.Delete(fixture.PlanPath);
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.OutputDirectory,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGH102", stderr.ToString(), StringComparison.Ordinal);
+        Assert.Empty(stdout.ToString());
+        Assert.False(Directory.Exists(fixture.OutputDirectory));
+    }
+
+    [Fact]
     public async Task PolicyDirectoryCannotBeReadAsAFileOrProduceACompleteClaim()
     {
         using var fixture = await GateFixture.CreateAsync(docsOnly: true);
@@ -557,6 +579,32 @@ public sealed class EvidenceHostRunnerTests
         Assert.Equal(2, exitCode);
         Assert.Contains("ASEGH107", stderr.ToString(), StringComparison.Ordinal);
         Assert.False(File.Exists(Path.Join(fixture.OutputDirectory, "evidence-manifest.json")));
+    }
+
+    [Fact]
+    public async Task OversizedTrustedPolicyCannotProduceAClaim()
+    {
+        using var fixture = await GateFixture.CreateAsync(docsOnly: true);
+        await File.WriteAllBytesAsync(fixture.PolicyPath, new byte[4 * 1024 * 1024 + 1]);
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.OutputDirectory,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGH107", stderr.ToString(), StringComparison.Ordinal);
+        Assert.Contains("claim=None", stdout.ToString(), StringComparison.Ordinal);
+        var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(
+            await File.ReadAllBytesAsync(Path.Join(fixture.OutputDirectory, "evidence-manifest.json")));
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, manifest.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+        Assert.Equal(EvidenceClaimEligibility.None, manifest.Eligibility);
     }
 
     [Fact]

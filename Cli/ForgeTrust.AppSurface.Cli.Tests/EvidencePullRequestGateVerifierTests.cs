@@ -938,6 +938,38 @@ public sealed class EvidencePullRequestGateVerifierTests
     }
 
     [Fact]
+    public async Task NoFollowArtifactVerifier_ShouldRejectMissingTrustedRootOnLinux()
+    {
+        if (!SupportsNoFollowVerifier)
+        {
+            return;
+        }
+
+        await using var fixture = await GateFixture.CreateAsync();
+        var verifier = new EvidencePullRequestGateNoFollowArtifactVerifier();
+        var missingRoot = Path.Join(Path.GetDirectoryName(fixture.ArtifactRoot)!, "missing-handoff");
+
+        Assert.False(Directory.Exists(missingRoot));
+        Assert.False(await verifier.VerifyArtifactsAsync(missingRoot, fixture.Plan, fixture.Manifest));
+    }
+
+    [Fact]
+    public async Task NoFollowArtifactVerifier_ShouldRejectMissingProducerDirectoryOnLinux()
+    {
+        if (!SupportsNoFollowVerifier)
+        {
+            return;
+        }
+
+        await using var fixture = await GateFixture.CreateAsync();
+        var verifier = new EvidencePullRequestGateNoFollowArtifactVerifier();
+        var producerRoot = Path.Join(fixture.ArtifactRoot, "build");
+        Directory.Delete(producerRoot, recursive: true);
+
+        Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, fixture.Plan, fixture.Manifest));
+    }
+
+    [Fact]
     public async Task NoFollowArtifactVerifier_ShouldPropagateCancellation()
     {
         await using var fixture = await GateFixture.CreateAsync();
