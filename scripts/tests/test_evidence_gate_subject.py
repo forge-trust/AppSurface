@@ -46,9 +46,7 @@ class FakeExecutor:
         self.cleanup_order: list[str] = []
         self.mount_options: str | None = None
         self.mount_target: str | None = None
-        self.result_export: bytes | None = (
-            b'{"claimEligible":false,"profileId":"code-coverage","schemaVersion":1,"status":"completed","steps":[]}\n'
-        )
+        self.result_export: bytes | None = self.successful_subject_record()
         self.config_override: dict[str, object] | None = None
         self.scratch_mount_override: dict[str, object] | None = None
 
@@ -119,6 +117,27 @@ class FakeExecutor:
     @staticmethod
     def result(value: object) -> subject.CommandResult:
         return subject.CommandResult(0, json.dumps(value, separators=(",", ":")).encode(), b"")
+
+    @staticmethod
+    def successful_subject_record() -> bytes:
+        steps = [
+            {
+                "exitCode": 0,
+                "name": name,
+                "outputBytes": 0,
+                "stderrSha256": "0" * 64,
+                "stdoutSha256": "0" * 64,
+            }
+            for name in subject.SUBJECT_RESULT_STEP_NAMES
+        ]
+        value = {
+            "claimEligible": False,
+            "profileId": "code-coverage",
+            "schemaVersion": 1,
+            "status": "completed",
+            "steps": steps,
+        }
+        return (json.dumps(value, separators=(",", ":"), sort_keys=True) + "\n").encode("ascii")
 
     def container_inspect(self) -> subject.CommandResult:
         assert self.container_name is not None
@@ -484,6 +503,32 @@ class EvidenceGateSubjectTests(unittest.TestCase):
             (self.runner_temp / "scratch-export-missing" / subject.SUBJECT_RESULT_RELATIVE_PATH).exists()
         )
         self.assertTrue(any(call[2:4] == ["rm", "--force"] for call, _ in executor.calls))
+
+    def test_successful_subject_requires_every_fixed_zero_exit_step(self) -> None:
+        valid = json.loads(FakeExecutor.successful_subject_record())
+        mutations = (
+            lambda value: value.update(steps=[]),
+            lambda value: value["steps"].pop(),
+            lambda value: value["steps"][2].update(name="unexpected-step"),
+            lambda value: value["steps"][2].update(exitCode=1),
+            lambda value: value["steps"][0].update(stdoutSha256="not-a-digest"),
+            lambda value: value["steps"][0].update(outputBytes=True),
+            lambda value: value["steps"][0].update(unexpected=True),
+        )
+        for index, mutate in enumerate(mutations):
+            with self.subTest(mutation=index):
+                value = json.loads(json.dumps(valid))
+                mutate(value)
+                executor = FakeExecutor(self.root)
+                executor.result_export = (
+                    json.dumps(value, separators=(",", ":"), sort_keys=True) + "\n"
+                ).encode("ascii")
+                with self.assertRaises(subject.SubjectLauncherError) as caught:
+                    self.launch(
+                        scratch_directory=self.runner_temp / f"scratch-step-proof-{index}",
+                        _command_executor=executor,
+                    )
+                self.assertEqual("ASEGS018", caught.exception.code)
 
     def test_failed_subject_exports_its_typed_nonclaiming_result_record(self) -> None:
         self.executor.start_exit_code = 2

@@ -48,7 +48,15 @@ MAX_RESULT_BYTES = 16 * 1024
 MAX_TOTAL_HANDOFF_BYTES = MAX_SOURCE_DIFF_BYTES + MAX_EVIDENCE_PLAN_BYTES + MAX_SNAPSHOT_ARCHIVE_BYTES + 512 * 1024
 MAX_GIT_STDERR_BYTES = 4096
 SHA_PATTERN = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
+SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 POSITIVE_DECIMAL_PATTERN = re.compile(r"[1-9][0-9]{0,18}\Z")
+SUBJECT_RESULT_STEP_NAMES = (
+    "dotnet-sdk-version",
+    "dotnet-runtime-list",
+    "offline-locked-restore",
+    "coverage-run",
+    "coverage-gate",
+)
 TRUSTED_SUBJECT_FILES = (
     "evidence-gate-handoff.py",
     "evidence-gate-subject.py",
@@ -75,6 +83,122 @@ class HandoffError(Exception):
 
 def _canonical_json(value: Mapping[str, Any]) -> bytes:
     return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
+
+
+def _validate_subject_execution_record(
+    value: Any,
+    *,
+    require_complete: bool,
+) -> Mapping[str, Any]:
+    if not isinstance(value, dict):
+        raise HandoffError("ASEHB001", "The fixed subject execution record is missing or malformed.")
+    status = value.get("status")
+    expected_keys = {"claimEligible", "profileId", "schemaVersion", "status", "steps"}
+    if status == "failed":
+        expected_keys.add("diagnostic")
+    if (
+        set(value) != expected_keys
+        or value.get("claimEligible") is not False
+        or value.get("profileId") != "code-coverage"
+        or type(value.get("schemaVersion")) is not int
+        or value["schemaVersion"] != 1
+        or not isinstance(status, str)
+        or status not in {"completed", "failed"}
+        or (require_complete and status != "completed")
+        or not isinstance(value.get("steps"), list)
+    ):
+        raise HandoffError("ASEHB001", "The fixed subject execution record has an unexpected shape.")
+
+    steps = value["steps"]
+    if len(steps) > len(SUBJECT_RESULT_STEP_NAMES):
+        raise HandoffError("ASEHB001", "The fixed subject execution record has too many steps.")
+    total_output_bytes = 0
+    for index, step in enumerate(steps):
+        if (
+            not isinstance(step, dict)
+            or set(step) != {"exitCode", "name", "outputBytes", "stderrSha256", "stdoutSha256"}
+            or index >= len(SUBJECT_RESULT_STEP_NAMES)
+            or step.get("name") != SUBJECT_RESULT_STEP_NAMES[index]
+            or type(step.get("exitCode")) is not int
+            or type(step.get("outputBytes")) is not int
+            or step["outputBytes"] < 0
+            or not isinstance(step.get("stdoutSha256"), str)
+            or SHA256_PATTERN.fullmatch(step["stdoutSha256"]) is None
+            or not isinstance(step.get("stderrSha256"), str)
+            or SHA256_PATTERN.fullmatch(step["stderrSha256"]) is None
+        ):
+            raise HandoffError("ASEHB001", "The fixed subject execution record contains malformed step proof.")
+        total_output_bytes += step["outputBytes"]
+        if total_output_bytes > SUBJECT_LIMITS["output_bytes"]:
+            raise HandoffError("ASEHB001", "The fixed subject execution record exceeds its output budget.")
+        if index + 1 < len(steps) and step["exitCode"] != 0:
+            raise HandoffError("ASEHB001", "A subject execution step failed before later steps were recorded.")
+
+    if status == "completed" and (
+        tuple(step["name"] for step in steps) != SUBJECT_RESULT_STEP_NAMES
+        or any(step["exitCode"] != 0 for step in steps)
+    ):
+        raise HandoffError("ASEHB001", "The completed subject execution omitted a required successful step.")
+    if status == "failed":
+        diagnostic = value.get("diagnostic")
+        if (
+            not isinstance(diagnostic, dict)
+            or set(diagnostic) != {"code", "message"}
+            or not isinstance(diagnostic.get("code"), str)
+            or not isinstance(diagnostic.get("message"), str)
+        ):
+            raise HandoffError("ASEHB001", "The failed subject execution omitted its typed diagnostic.")
+    return value
+
+
+def _make_execution_receipt(record: Mapping[str, Any], binding: Mapping[str, str]) -> dict[str, Any]:
+    validated_record = _validate_subject_execution_record(
+        record,
+        require_complete=record.get("status") == "completed",
+    )
+    payload = {"binding": dict(binding), "record": dict(validated_record), "schemaVersion": 1}
+    digest = hashlib.sha256(_canonical_json(payload)).hexdigest()
+    return {**payload, "sha256": digest}
+
+
+def _execution_receipt_binding(
+    identity: Mapping[str, Any],
+    manifest: Mapping[str, Any],
+    profile_id: str,
+) -> dict[str, str]:
+    return {
+        "baseRevision": str(identity["BaseRevision"]),
+        "headRevision": str(identity["HeadRevision"]),
+        "profileId": profile_id,
+        "snapshotSha256": str(manifest["SnapshotArchiveSha256"]),
+        "workflowRunAttempt": str(identity["WorkflowRunAttempt"]),
+        "workflowRunId": str(identity["WorkflowRunId"]),
+    }
+
+
+def _validate_execution_receipt(
+    value: Any,
+    *,
+    expected_binding: Mapping[str, str],
+) -> None:
+    if not isinstance(value, dict) or set(value) != {"binding", "record", "schemaVersion", "sha256"}:
+        raise HandoffError("ASEHB001", "The bounded execution receipt has an unexpected shape.")
+    if type(value.get("schemaVersion")) is not int or value["schemaVersion"] != 1:
+        raise HandoffError("ASEHB001", "The bounded execution receipt schema version is unsupported.")
+    binding = value.get("binding")
+    if not isinstance(binding, dict) or binding != dict(expected_binding):
+        raise HandoffError("ASEHB001", "The execution receipt is bound to a different run, revision, profile, or snapshot.")
+    if not isinstance(value.get("sha256"), str) or SHA256_PATTERN.fullmatch(value["sha256"]) is None:
+        raise HandoffError("ASEHB001", "The execution receipt digest is malformed.")
+    record = _validate_subject_execution_record(value.get("record"), require_complete=True)
+    try:
+        digest = hashlib.sha256(
+            _canonical_json({"binding": binding, "record": record, "schemaVersion": value["schemaVersion"]})
+        ).hexdigest()
+    except (TypeError, ValueError, RecursionError):
+        raise HandoffError("ASEHB001", "The bounded execution receipt could not be canonicalized.") from None
+    if value["sha256"] != digest:
+        raise HandoffError("ASEHB001", "The bounded execution receipt digest does not match its contents.")
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -1106,6 +1230,11 @@ def verify_handoff(
         or diagnostic.get("code") != "ASEHB010"
     ):
         raise HandoffError("ASEHB001", "The credentialless subject result does not match this successful handoff.")
+    if plan["Profile"]["Id"] == "code-coverage":
+        _validate_execution_receipt(
+            subject_result.get("executionReceipt"),
+            expected_binding=_execution_receipt_binding(identity, manifest, plan["Profile"]["Id"]),
+        )
 
     plan_bytes = _read_regular_file(entries["evidence-plan.json"], MAX_EVIDENCE_PLAN_BYTES, "The verified EvidencePlan")
     _write_regular_file(output, plan_bytes)
@@ -1186,7 +1315,12 @@ def execute_handoff(
             raise HandoffError("ASEHB008", "The trusted subject launcher could not be loaded.")
         launcher = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = launcher
-        spec.loader.exec_module(launcher)
+        previous_dont_write_bytecode = sys.dont_write_bytecode
+        sys.dont_write_bytecode = True
+        try:
+            spec.loader.exec_module(launcher)
+        finally:
+            sys.dont_write_bytecode = previous_dont_write_bytecode
         limits = launcher.SubjectLimits(**SUBJECT_LIMITS)
         subject_result = launcher.launch_subject(
             subject_checkout=checkout,
@@ -1196,6 +1330,21 @@ def execute_handoff(
             limits=limits,
             _environment=env,
         )
+        execution_record = subject_result.execution_record
+        if type(subject_result.exit_code) is not int:
+            raise HandoffError("ASEHB009", "The bounded subject launcher returned a malformed exit code.")
+        if subject_result.exit_code == 0 and not isinstance(execution_record, Mapping):
+            raise HandoffError("ASEHB009", "A successful subject run omitted its fixed execution record.")
+        if execution_record is not None:
+            if not isinstance(execution_record, Mapping):
+                raise HandoffError("ASEHB009", "The bounded subject launcher returned a malformed execution record.")
+            try:
+                result["executionReceipt"] = _make_execution_receipt(
+                    execution_record,
+                    _execution_receipt_binding(identity, manifest, profile_id),
+                )
+            except HandoffError:
+                raise HandoffError("ASEHB009", "The bounded subject launcher returned invalid step proof.") from None
         result.update(
             {
                 "execution": "completed" if subject_result.exit_code == 0 else "failed",

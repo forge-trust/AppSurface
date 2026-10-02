@@ -76,7 +76,7 @@ The gate job has a stable name, runs on PR `opened`, `synchronize`, `reopened`, 
 
 ## Open Questions
 
-- Which concrete AppSurface integration and package/release assertions can be safely executed inside the first host? The implementer must inventory the current [build](../../.github/workflows/build.yml), [package gate](../../.github/workflows/package-gate.yml), and [release contract](../../.github/workflows/release-contract.yml) workflows and name each policy obligation before wiring the host. Missing capability blocks that profile's promotion; it does not become an empty success.
+- Which concrete AppSurface integration and package/release assertions can be safely executed inside the first host? The implementer must inventory the current [build](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml), [package gate](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/package-gate.yml), and [release contract](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/release-contract.yml) workflows and name each policy obligation before wiring the host. Missing capability blocks that profile's promotion; it does not become an empty success.
 - Does the live GitHub event policy permit the selected base-owned PR trigger, and does its named check satisfy the current-head required-check rule in this repository? This is a rollout experiment, not an assumed platform guarantee.
 
 ## Success Criteria

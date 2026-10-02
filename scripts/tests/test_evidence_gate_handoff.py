@@ -210,7 +210,37 @@ class HandoffArchiveTests(unittest.TestCase):
             plan_file=plan_file,
         )
 
-    def _write_test_launcher(self, scripts: Path, *, exit_code: int = 0) -> None:
+    def _write_test_launcher(
+        self,
+        scripts: Path,
+        *,
+        exit_code: int = 0,
+        include_record: bool = True,
+        step_mutation: str | None = None,
+    ) -> None:
+        step_names = (
+            "dotnet-sdk-version",
+            "dotnet-runtime-list",
+            "offline-locked-restore",
+            "coverage-run",
+            "coverage-gate",
+        )
+        execution_record = {
+            "claimEligible": False,
+            "profileId": "code-coverage",
+            "schemaVersion": 1,
+            "status": "completed",
+            "steps": [
+                {
+                    "exitCode": 0,
+                    "name": name,
+                    "outputBytes": 0,
+                    "stderrSha256": "0" * 64,
+                    "stdoutSha256": "0" * 64,
+                }
+                for name in step_names
+            ],
+        }
         (scripts / "evidence-gate-subject.py").write_text(
             f"""from types import SimpleNamespace
 
@@ -221,10 +251,31 @@ class SubjectLimits:
 def launch_subject(*, subject_checkout, image_digest, scratch_directory, profile_id, limits, _environment):
     with open(_environment['TEST_PROFILE_LOG'], 'w', encoding='utf-8') as log:
         log.write(profile_id)
-    return SimpleNamespace(exit_code={exit_code}, stdout=b'completed', stderr=b'')
+    execution_record = {execution_record!r}
+    if {step_mutation!r} == 'omit-last':
+        execution_record['steps'].pop()
+    elif {step_mutation!r} == 'rename-first':
+        execution_record['steps'][0]['name'] = 'unexpected-step'
+    return SimpleNamespace(
+        exit_code={exit_code},
+        stdout=b'completed',
+        stderr=b'',
+        execution_record=execution_record if {exit_code} == 0 and {include_record} else None,
+    )
 """,
             encoding="utf-8",
         )
+
+    @staticmethod
+    def _resign_execution_receipt(result: dict[str, object]) -> None:
+        receipt = result["executionReceipt"]
+        assert isinstance(receipt, dict)
+        payload = {
+            "binding": receipt["binding"],
+            "record": receipt["record"],
+            "schemaVersion": receipt["schemaVersion"],
+        }
+        receipt["sha256"] = hashlib.sha256(handoff._canonical_json(payload)).hexdigest()
 
     def test_valid_handoff_round_trip_accepts_sha256_source_diff(self) -> None:
         with tempfile.TemporaryDirectory(prefix="evidence-gate-round-trip-") as temporary:
@@ -400,6 +451,121 @@ def launch_subject(*, subject_checkout, image_digest, scratch_directory, profile
             self.assertFalse(result["claimEligible"])
             self.assertEqual("completed", result["execution"])
             self.assertEqual("code-coverage", result["profileId"])
+            self.assertEqual(1, result["executionReceipt"]["schemaVersion"])
+            self.assertEqual(
+                handoff.SUBJECT_RESULT_STEP_NAMES,
+                tuple(step["name"] for step in result["executionReceipt"]["record"]["steps"]),
+            )
+            self.assertRegex(result["executionReceipt"]["sha256"], r"^[0-9a-f]{64}$")
+            verified_plan = root / "verified-plan.json"
+            handoff.verify_handoff(
+                handoff_directory=output,
+                fresh_capture_directory=capture,
+                subject_result_file=result_path,
+                output_plan=verified_plan,
+            )
+            self.assertEqual(plan_file.read_bytes(), verified_plan.read_bytes())
+
+    def test_code_coverage_verifier_rejects_missing_or_tampered_execution_receipts(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="evidence-gate-receipt-") as temporary:
+            root = Path(temporary).resolve()
+            capture, scripts, plan_file = self._capture(root)
+            self._write_test_launcher(scripts)
+            output = root / "handoff"
+            self._create(capture, scripts, plan_file, output)
+            profile_log = root / "selected-profile.txt"
+            exit_code, result_path = self._execute(
+                output,
+                root,
+                image_digest="sha256:" + "f" * 64,
+                environment={
+                    "GITHUB_RUN_ID": "456",
+                    "GITHUB_RUN_ATTEMPT": "1",
+                    "GITHUB_REPOSITORY_ID": "123",
+                    "TEST_PROFILE_LOG": str(profile_log),
+                },
+            )
+            self.assertEqual(0, exit_code)
+            valid_result = json.loads(result_path.read_bytes())
+            receipt_mutations = {
+                "omitted-receipt": lambda value: value.pop("executionReceipt"),
+                "omitted-step": lambda value: value["executionReceipt"]["record"]["steps"].pop(),
+                "duplicate-step": lambda value: value["executionReceipt"]["record"]["steps"][1].update(
+                    name=value["executionReceipt"]["record"]["steps"][0]["name"]
+                ),
+                "reordered-step": lambda value: value["executionReceipt"]["record"]["steps"].__setitem__(
+                    slice(0, 2),
+                    reversed(value["executionReceipt"]["record"]["steps"][:2]),
+                ),
+                "nonzero-step": lambda value: value["executionReceipt"]["record"]["steps"][4].update(exitCode=1),
+                "wrong-run-id": lambda value: value["executionReceipt"]["binding"].update(workflowRunId="999"),
+                "wrong-attempt": lambda value: value["executionReceipt"]["binding"].update(workflowRunAttempt="2"),
+                "wrong-base": lambda value: value["executionReceipt"]["binding"].update(baseRevision="0" * 40),
+                "wrong-head": lambda value: value["executionReceipt"]["binding"].update(headRevision="0" * 40),
+                "wrong-profile": lambda value: value["executionReceipt"]["binding"].update(profileId="documentation-only"),
+                "wrong-snapshot": lambda value: value["executionReceipt"]["binding"].update(snapshotSha256="0" * 64),
+                "wrong-receipt-schema": lambda value: value["executionReceipt"].update(schemaVersion=2),
+                "claimable-record": lambda value: value["executionReceipt"]["record"].update(claimEligible=True),
+            }
+            for name, mutate in receipt_mutations.items():
+                with self.subTest(mutation=name):
+                    result = json.loads(json.dumps(valid_result))
+                    mutate(result)
+                    if name not in {"omitted-receipt", "wrong-receipt-schema"}:
+                        self._resign_execution_receipt(result)
+                    result_path.write_bytes(handoff._canonical_json(result) + b"\n")
+                    with self.assertRaises(handoff.HandoffError):
+                        handoff.verify_handoff(
+                            handoff_directory=output,
+                            fresh_capture_directory=capture,
+                            subject_result_file=result_path,
+                            output_plan=root / f"verified-{name}.json",
+                        )
+                    self.assertFalse((root / f"verified-{name}.json").exists())
+
+            digest_tampered = json.loads(json.dumps(valid_result))
+            digest_tampered["executionReceipt"]["sha256"] = "0" * 64
+            result_path.write_bytes(handoff._canonical_json(digest_tampered) + b"\n")
+            with self.assertRaisesRegex(handoff.HandoffError, "digest does not match"):
+                handoff.verify_handoff(
+                    handoff_directory=output,
+                    fresh_capture_directory=capture,
+                    subject_result_file=result_path,
+                    output_plan=root / "verified-digest-tampered.json",
+                )
+            self.assertFalse((root / "verified-digest-tampered.json").exists())
+
+    def test_code_coverage_handoff_fails_without_or_with_invalid_step_proof(self) -> None:
+        scenarios = (
+            ("missing-record", {"include_record": False}),
+            ("missing-step", {"step_mutation": "omit-last"}),
+            ("renamed-step", {"step_mutation": "rename-first"}),
+        )
+        for name, options in scenarios:
+            with self.subTest(scenario=name), tempfile.TemporaryDirectory(prefix="evidence-gate-step-failure-") as temporary:
+                root = Path(temporary).resolve()
+                capture, scripts, plan_file = self._capture(root)
+                self._write_test_launcher(scripts, **options)
+                output = root / "handoff"
+                self._create(capture, scripts, plan_file, output)
+                profile_log = root / "selected-profile.txt"
+                exit_code, result_path = self._execute(
+                    output,
+                    root,
+                    image_digest="sha256:" + "f" * 64,
+                    environment={
+                        "GITHUB_RUN_ID": "456",
+                        "GITHUB_RUN_ATTEMPT": "1",
+                        "GITHUB_REPOSITORY_ID": "123",
+                        "TEST_PROFILE_LOG": str(profile_log),
+                    },
+                )
+                self.assertEqual(2, exit_code)
+                result = json.loads(result_path.read_bytes())
+                self.assertFalse(result["claimEligible"])
+                self.assertEqual("failed", result["execution"])
+                self.assertNotIn("executionReceipt", result)
+                self.assertEqual("ASEHB009", result["diagnostic"]["code"])
 
     def test_failed_bounded_launcher_returns_two_and_remains_non_claiming(self) -> None:
         with tempfile.TemporaryDirectory(prefix="evidence-gate-launch-failure-") as temporary:

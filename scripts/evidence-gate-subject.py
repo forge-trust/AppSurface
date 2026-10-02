@@ -76,6 +76,14 @@ IMAGE_REFERENCE_PATTERN = re.compile(r"[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64
 RUN_ID_PATTERN = re.compile(r"[1-9][0-9]{0,18}\Z")
 RUN_ATTEMPT_PATTERN = re.compile(r"[1-9][0-9]{0,8}\Z")
 SUBJECT_RESULT_RELATIVE_PATH = "evidence-subject-result.json"
+SUBJECT_RESULT_STEP_NAMES = (
+    "dotnet-sdk-version",
+    "dotnet-runtime-list",
+    "offline-locked-restore",
+    "coverage-run",
+    "coverage-gate",
+)
+SUBJECT_STEP_DIGEST_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 
 # This is a closed registry, intentionally independent of subject files and
 # policy-provided command strings. Resource-backed profiles are named here so
@@ -167,6 +175,7 @@ class SubjectRunResult:
     stdout: bytes
     stderr: bytes
     scratch_directory: Path
+    execution_record: Mapping[str, Any] | None = None
 
     @property
     def claim_eligible(self) -> bool:
@@ -780,7 +789,7 @@ def _verify_container_configuration(
         raise _fail("ASEGS012", "Subject and scratch bind mount access does not match the read-only/private contract.")
 
 
-def _validate_subject_result_content(content: bytes, *, expected_status: str) -> None:
+def _validate_subject_result_content(content: bytes, *, expected_status: str) -> Mapping[str, Any]:
     if not content or len(content) > MAX_SUBJECT_RESULT_BYTES:
         raise _fail("ASEGS018", "The exported subject result is not bounded; no claim may be issued.")
     try:
@@ -805,6 +814,35 @@ def _validate_subject_result_content(content: bytes, *, expected_status: str) ->
         or not isinstance(value.get("steps"), list)
     ):
         raise _fail("ASEGS018", "The exported subject result does not match the fixed completed non-claiming record.")
+    steps = value["steps"]
+    if len(steps) > len(SUBJECT_RESULT_STEP_NAMES):
+        raise _fail("ASEGS018", "The exported subject result contains too many fixed execution steps.")
+    total_output_bytes = 0
+    for index, step in enumerate(steps):
+        if (
+            not isinstance(step, dict)
+            or set(step) != {"exitCode", "name", "outputBytes", "stderrSha256", "stdoutSha256"}
+            or index >= len(SUBJECT_RESULT_STEP_NAMES)
+            or step.get("name") != SUBJECT_RESULT_STEP_NAMES[index]
+            or type(step.get("exitCode")) is not int
+            or type(step.get("outputBytes")) is not int
+            or step["outputBytes"] < 0
+            or not isinstance(step.get("stdoutSha256"), str)
+            or SUBJECT_STEP_DIGEST_PATTERN.fullmatch(step["stdoutSha256"]) is None
+            or not isinstance(step.get("stderrSha256"), str)
+            or SUBJECT_STEP_DIGEST_PATTERN.fullmatch(step["stderrSha256"]) is None
+        ):
+            raise _fail("ASEGS018", "The exported subject result contains malformed or unexpected step proof.")
+        total_output_bytes += step["outputBytes"]
+        if total_output_bytes > MAX_PROFILE_OUTPUT_BYTES:
+            raise _fail("ASEGS018", "The exported subject step proof exceeds its fixed output budget.")
+        if index + 1 < len(steps) and step["exitCode"] != 0:
+            raise _fail("ASEGS018", "A subject execution step failed before later steps were recorded.")
+    if status == "completed" and (
+        tuple(step["name"] for step in steps) != SUBJECT_RESULT_STEP_NAMES
+        or any(step["exitCode"] != 0 for step in steps)
+    ):
+        raise _fail("ASEGS018", "The completed subject result omitted a required successful execution step.")
     if status == "failed":
         diagnostic = value.get("diagnostic")
         if (
@@ -820,6 +858,7 @@ def _validate_subject_result_content(content: bytes, *, expected_status: str) ->
         raise _fail("ASEGS018", "The exported subject result could not be canonicalized safely.") from None
     if content != canonical:
         raise _fail("ASEGS018", "The exported subject result is not canonical; no claim may be issued.")
+    return value
 
 
 def _write_subject_result_export(scratch: Path, content: bytes) -> None:
@@ -852,9 +891,10 @@ def _write_subject_result_export(scratch: Path, content: bytes) -> None:
         raise _fail("ASEGS018", "The bounded subject result could not be saved safely; no claim may be issued.") from None
 
 
-def _export_subject_result(scratch: Path, content: bytes, *, expected_status: str) -> None:
-    _validate_subject_result_content(content, expected_status=expected_status)
+def _export_subject_result(scratch: Path, content: bytes, *, expected_status: str) -> Mapping[str, Any]:
+    value = _validate_subject_result_content(content, expected_status=expected_status)
     _write_subject_result_export(scratch, content)
+    return value
 
 
 def _check_cancel(cancel_event: threading.Event) -> None:
@@ -1045,8 +1085,9 @@ def launch_subject(
         )
         if len(started.stderr) > limits.output_bytes:
             raise _fail("ASEGS015", "The bounded subject execution output limit was exceeded.")
+        execution_record: Mapping[str, Any] | None = None
         if started.stdout:
-            _export_subject_result(
+            execution_record = _export_subject_result(
                 scratch,
                 started.stdout,
                 expected_status="completed" if started.returncode == 0 else "failed",
@@ -1058,6 +1099,7 @@ def launch_subject(
             stdout=b"",
             stderr=started.stderr,
             scratch_directory=scratch,
+            execution_record=execution_record,
         )
     except BaseException as exc:
         primary_error = exc

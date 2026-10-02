@@ -7,7 +7,7 @@
 - Status: APPROVED (office-hours, 2026-09-30)
 - Mode: Builder
 - Issue: [#777](https://github.com/forge-trust/AppSurface/issues/777)
-Builds on: [EvidenceHost contract-first design](appsurface-evidencehost-contract-first.md) and completed [#775](https://github.com/forge-trust/AppSurface/issues/775)
+Builds on: [EvidenceHost contract-first design](https://github.com/forge-trust/AppSurface/blob/main/docs/designs/appsurface-evidencehost-contract-first.md) and completed [#775](https://github.com/forge-trust/AppSurface/issues/775)
 
 ## Problem Statement
 
@@ -22,7 +22,7 @@ The workflow says *which revisions and policy were evaluated, why a profile was 
 ## Constraints
 
 - [#777](https://github.com/forge-trust/AppSurface/issues/777) is an AppSurface-owned reference path, not a new CI scheduler, deployment system, generic plugin loader, or cross-job aggregation format.
-- The [existing EvidenceHost design](appsurface-evidencehost-contract-first.md) owns the contract boundary: base-owned policy and explicit host registrations; separate trusted-tool and subject checkouts; [coverage core](evidence-coverage-core-extraction.md) reuse; typed producer/resource/obligation closure; bounded cleanup; observation-only execution for untrusted inputs.
+- The [existing EvidenceHost design](https://github.com/forge-trust/AppSurface/blob/main/docs/designs/appsurface-evidencehost-contract-first.md) owns the contract boundary: base-owned policy and explicit host registrations; separate trusted-tool and subject checkouts; [coverage core](https://github.com/forge-trust/AppSurface/blob/main/docs/designs/evidence-coverage-core-extraction.md) reuse; typed producer/resource/obligation closure; bounded cleanup; observation-only execution for untrusted inputs.
 - The current [planning CLI](../../Cli/ForgeTrust.AppSurface.Cli/EvidenceCommands.cs) accepts policy and path/diff inputs but has no authoritative base/head arguments. Its run command can execute the built-in coverage producer; it cannot yet execute every resource-backed AppSurface profile. The [plan contract](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceContracts.cs) records a normalized diff digest but not base/head or the exact source diff bytes. These are implementation gaps, not values YAML can invent.
 - Required-check behavior depends on GitHub event and ruleset semantics. The current default-branch ruleset requires reviews but no CI status. A planned gate must be proven on an actual PR before that ruleset changes.
 - No production credentials, mutable release operations, or head-controlled workflow/host/policy instructions enter the evidence run. The reference release profile remains non-mutating.
@@ -77,7 +77,7 @@ The gate job has a stable name, runs on PR `opened`, `synchronize`, `reopened`, 
 
 ## Open Questions
 
-- Which concrete AppSurface integration and package/release assertions can be safely executed inside the first host? The implementer must inventory the current [build](../../.github/workflows/build.yml), [package gate](../../.github/workflows/package-gate.yml), and [release contract](../../.github/workflows/release-contract.yml) workflows and name each policy obligation before wiring the host. Missing capability blocks that profile's promotion; it does not become an empty success.
+- Which concrete AppSurface integration and package/release assertions can be safely executed inside the first host? The implementer must inventory the current [build](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml), [package gate](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/package-gate.yml), and [release contract](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/release-contract.yml) workflows and name each policy obligation before wiring the host. Missing capability blocks that profile's promotion; it does not become an empty success.
 - Does the live GitHub event policy permit the selected base-owned PR trigger, and does its named check satisfy the current-head required-check rule in this repository? This is a rollout experiment, not an assumed platform guarantee.
 
 ## Success Criteria
@@ -94,7 +94,7 @@ Deliver the reference as a checked-in AppSurface workflow, policy, explicit host
 
 ## Dependencies
 
-[#775](https://github.com/forge-trust/AppSurface/issues/775) supplies the current contract and coverage seam. The GitHub required-check rollout depends on a live PR pilot and a repository administrator updating the active default-branch ruleset. An AppSurface resource-backed and release producer inventory is needed before those profiles can become required. The older [EvidenceHost contract-first design](appsurface-evidencehost-contract-first.md) remains the architecture source for consumer-owned hosts and trust-envelope semantics.
+[#775](https://github.com/forge-trust/AppSurface/issues/775) supplies the current contract and coverage seam. The GitHub required-check rollout depends on a live PR pilot and a repository administrator updating the active default-branch ruleset. An AppSurface resource-backed and release producer inventory is needed before those profiles can become required. The older [EvidenceHost contract-first design](https://github.com/forge-trust/AppSurface/blob/main/docs/designs/appsurface-evidencehost-contract-first.md) remains the architecture source for consumer-owned hosts and trust-envelope semantics.
 
 ## The Assignment
 

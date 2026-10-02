@@ -57,7 +57,7 @@ The [`appsurface evidence shadow-policy` command](../Cli/ForgeTrust.AppSurface.C
 
 ## `ASEHB`: private controller-to-subject handoff
 
-These codes come from the `create`, `execute`, and `verify` modes of [`evidence-gate-handoff.py`](../scripts/evidence-gate-handoff.py) or the workflow's fixed result fallback. The trusted `verify` mode also rejects a downloaded archive or plan that differs from a fresh capture of the current Git tree. A successful handoff or subject run is still non-claiming; the trusted verifier must independently authorize the final PR check.
+These codes come from the `create`, `execute`, and `verify` modes of [`evidence-gate-handoff.py`](https://github.com/forge-trust/AppSurface/blob/main/scripts/evidence-gate-handoff.py) or the workflow's fixed result fallback. The trusted `verify` mode also rejects a downloaded archive or plan that differs from a fresh capture of the current Git tree. A successful handoff or subject run is still non-claiming; the trusted verifier must independently authorize the final PR check.
 
 | Code | Cause | Safe fix |
 | --- | --- | --- |
@@ -119,7 +119,7 @@ These diagnostics come from the OCI execution primitive, which the pilot can inv
 
 ## `ASESE`: fixed offline subject entrypoint
 
-The [entrypoint](../scripts/evidence-gate-subject-entrypoint.py) is a non-claiming primitive intended for a reviewed subject image. The pilot launcher can call it when that image is supplied, but no image or locked feed has been approved for the repository. The current solution's container-dependent tests produce `ASESE010`; the script also lacks controller-diff binding and patch thresholds. A successful toy-fixture execution record still says `claimEligible: false` and is not a manifest claim.
+The [entrypoint](https://github.com/forge-trust/AppSurface/blob/main/scripts/evidence-gate-subject-entrypoint.py) is a non-claiming primitive intended for a reviewed subject image. The pilot launcher can call it when that image is supplied, but no image or locked feed has been approved for the repository. The current solution's container-dependent tests produce `ASESE010`; the script also lacks controller-diff binding and patch thresholds. A successful toy-fixture execution record still says `claimEligible: false` and is not a manifest claim.
 
 | Code | Cause | Safe fix | Start here / reference |
 | --- | --- | --- | --- |
