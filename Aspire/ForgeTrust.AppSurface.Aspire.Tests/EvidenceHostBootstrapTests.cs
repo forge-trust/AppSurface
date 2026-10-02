@@ -468,6 +468,9 @@ public sealed class EvidenceHostBootstrapTests
         var result = Assert.Single(manifest.ProducerResults);
         Assert.Equal(EvidenceProducerOutcome.Invalid, result.Outcome);
         Assert.Contains("final verification", result.Diagnostic, StringComparison.Ordinal);
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, manifest.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+        Assert.Equal(EvidenceClaimEligibility.None, manifest.Eligibility);
     }
 
     [Fact]

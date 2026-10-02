@@ -1031,3 +1031,57 @@ now ignores only complete SGR sequences, preserving raw output and error severit
 real warnings and unknown or incomplete controls. Focused process/classifier tests pass
 **40/40**, exit **0**, with no warnings or skips. No warning suppression or coverage
 policy change was used.
+
+### Native candidate results and invalid-outcome regression (2026-10-02)
+
+[Native run 37024942137](https://github.com/forge-trust/AppSurface/actions/runs/37024942137)
+used private source snapshot `43e826b11ece70845ca1eabdec79679a9865d797` and verified
+all 2707 captured source files before and after execution. The launcher controls
+passed **39/39**, runtime-driver controls **9/9**, descriptor controls **3/3**,
+POSIX lifecycle controls **5/5**, and control-protocol controls **16/16**. Its CLI
+Evidence filter reported **336 passed / 1 failed**, with no skips. The positive
+broker case produced a Passed Observation manifest, completed cleanup, closed its
+obligation, and passed the numeric coverage gate at **100% line / 100% branch**.
+Its remaining failure was the test's physical report lookup: artifact metadata is
+relative to a producer directory, so the lookup must include `ProducerId`. This
+does not change the writer layout or manifest schema. Artifact `11235321545`
+retains the actual failure and source checks. The focused Aspire selection and
+the exact `./scripts/coverage-solution.sh` gate were **not reached**.
+
+[Systemd run 37025006612](https://github.com/forge-trust/AppSurface/actions/runs/37025006612)
+used the same source snapshot. All six subject-build, CLI-build and publish
+streams contained zero warnings or errors. The production Observation launcher
+then failed with the generic `launcher-failed` diagnostic; no completed runtime
+proof was produced. Artifact `11234757444` retains those actual logs. A bounded
+private host-category diagnostic and a pre-reserved private structural-verification
+directory are being added to make the next failure actionable without publishing
+subject output or exception text. This failed run establishes no runtime acceptance.
+
+Review found a separate structural regression after allowing absent reports on
+unsuccessful producers: an explicit `Invalid` outcome could become `Incomplete`
+when finalization removed invalid artifact metadata. The structural builder now
+preserves explicit `Invalid`, and both the public builder and existing Aspire
+artifact-tampering regression assert `Invalid` with `None` claim and eligibility.
+Source-built macOS planner tests passed **47/47** and the exact Aspire tampering
+test passed **1/1**, both exit **0**, with no warnings, failures or skips. Scoped
+formatting exited **0** without changing the Aspire test bytes. The combined
+validation and formatting took **22.602 seconds**, without timeout. The local-only
+receipt is `TestResults/issue779-recovery-20261002/native-validation/invalid-outcome-validation/receipt.json`.
+
+Packed candidate `0.1.0-issue779-current.20261002.2` passed 67 modern SDK assertions,
+two legacy assertions, its expected two internal-access compiler errors, and
+seven installed CLI checks. All six packed README files matched source; SDK and
+tool Evidence assemblies matched. The legacy build produced only its expected
+unsuppressed obsolete-API warning. These checks bind their earlier captured source;
+the subsequent Contracts regression fix requires fresh packages. Current Linux
+caller execution, the unchanged solution gate, the actual systemd runtime proof,
+restricted Aspire resources and protected downstream acceptance remain required.
+
+The runtime diagnostic fix is source-clear: portable launcher controls passed
+**45/45** and runtime-driver controls **15/15**, both exit **0**. The optional
+private receipt permits only fixed host categories and bounded numeric systemd
+status. It uses exclusive no-follow creation beneath a pinned protected parent;
+the driver publishes only validated fields. Default public launcher diagnostics
+remain unchanged. The structural-verification child is created privately before
+root ownership of its parent, then checked before writing fresh collected copies.
+These portable controls do not substitute for the next actual systemd run.

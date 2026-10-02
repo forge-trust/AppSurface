@@ -92,3 +92,26 @@ The candidate [mechanism workflow run 36988778445](https://github.com/forge-trus
 The parent verified the downloaded artifact ZIP, GitHub artifact digest, internal file index and source/run/attempt bindings. Artifact `11218159613` had SHA-256 `0dabd2ffa925d4f8031264ce8d952b5592311ba5f9559ea4a35bf7bb99e4bf9f`. The reports recorded systemd `255.4-1ubuntu8.17`, kernel `6.17.0-1022-azure`, x86_64, nine worker lifecycle cases, twelve subject-boundary assertions and fourteen allocation cases. Every required case was observed and passed; the artifact still states `admission: none`.
 
 This permits implementation against the demonstrated internal Linux mechanism. It does not establish protected-base workflow execution, production CLI/Aspire integration, the downstream gate, fork Observation execution, release acceptance, or all 57 acceptance groups. Linux, Windows and macOS remain excluded from Trusted registration. The broader build for the preliminary head failed; that failure is being diagnosed independently of the successful mechanism job.
+
+## Current candidate validation observations (2026-10-02)
+
+The separate native-validation branch captures the shared implementation without
+updating the preliminary feature PR. Its source snapshot
+`43e826b11ece70845ca1eabdec79679a9865d797` is candidate code, not protected base
+tooling. [Native run 37024942137](https://github.com/forge-trust/AppSurface/actions/runs/37024942137)
+verified 2707 captured files before and after execution. The CLI Evidence filter
+passed 336 cases and failed one test lookup that omitted the producer directory.
+The broker positive case itself produced a Passed Observation manifest with
+completed cleanup and 100% numerical line and branch coverage. Artifact
+`11235321545` retains the results. The synthetic broker cgroup does not establish
+actual systemd supervision, and the Aspire selection and unchanged solution
+coverage wrapper were not reached. Later source fixes require a new snapshot.
+
+[Systemd run 37025006612](https://github.com/forge-trust/AppSurface/actions/runs/37025006612)
+built the same snapshot with zero warnings or errors, then failed at the
+production Observation launcher with a generic host failure. Artifact `11234757444`
+contains build and console logs; no completed `runtime-proof.json` exists. This
+is a failed current runtime observation. It adds no entry to the Trusted allowlist
+and does not satisfy protected workflow, fork or downstream acceptance. See the
+[execution record](../plans/issue-779-execution.md#native-candidate-results-and-invalid-outcome-regression-2026-10-02)
+for the focused fixes and remaining gates.

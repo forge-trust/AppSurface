@@ -358,8 +358,8 @@ def create_policy() -> dict:
     }
 
 
-def validate_launcher_contract() -> None:
-    """Check our CLI argument vector against the launcher's bounded public parser contract."""
+def load_launcher_contract():
+    """Load only the host-owned parser and pure diagnostic validation helpers."""
     spec = importlib.util.spec_from_file_location("evidencehost_linux_launcher", LAUNCHER)
     if spec is None or spec.loader is None:
         fail("Could not load the Linux launcher parser for the pure argument contract check.")
@@ -369,6 +369,12 @@ def validate_launcher_contract() -> None:
         spec.loader.exec_module(launcher)
     except (ImportError, OSError, ValueError):
         fail("Could not load the Linux launcher parser for the pure argument contract check.")
+    return launcher
+
+
+def validate_launcher_contract() -> None:
+    """Check our CLI argument vector against the launcher's bounded public parser contract."""
+    launcher = load_launcher_contract()
 
     minimum_reserve = ADMISSION_SECONDS + COLLECTION_SECONDS + CLEANUP_SECONDS
     admission_stages = ADMISSION_SECONDS * 2
@@ -602,6 +608,48 @@ def protect_launcher_workspace(work_root: Path) -> None:
         fail("The launcher workspace parent protection did not take effect.")
 
 
+def run_observation_launcher(command: list[str], work_root: Path, proof_directory: Path) -> tuple[bytes, bytes]:
+    """On failure publish only a validated host-category receipt, never launcher output tails.
+
+    The root launcher owns the optional private 0600 record. The driver reads it through
+    the root helper after failure; these diagnostics confer no runtime or gate authority.
+    """
+    command = [*command, "--diagnostic-directory", str(work_root)]
+    code, stdout, stderr = root_command(
+        command, cwd=ROOT, timeout=LAUNCHER_TIMEOUT_SECONDS, label="production Observation launcher")
+    if code == 0:
+        return stdout, stderr
+    safe_record = None
+    reader = (
+        "import importlib.util,json,sys; "
+        "spec=importlib.util.spec_from_file_location('diagnostic_launcher',sys.argv[1]); "
+        "module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module); "
+        "from pathlib import Path; "
+        "print(json.dumps(module.read_failure_diagnostic(Path(sys.argv[2])),separators=(',',':')))"
+    )
+    try:
+        read_code, data, _ = root_command(
+            ["/usr/bin/python3", "-c", reader, str(LAUNCHER), str(work_root)],
+            cwd=ROOT, timeout=15, label="private launcher failure categories", binary_output=True)
+        if read_code == 0 and len(data) <= 4096:
+            launcher = load_launcher_contract()
+            try:
+                safe_record = launcher.validate_failure_diagnostic(json.loads(data))
+            except (launcher.LauncherError, TypeError, ValueError, UnicodeDecodeError):
+                pass
+    except ProofFailure:
+        pass
+    if safe_record is None:
+        fail(f"Production Observation launcher exited {code}; safe diagnostic unavailable.")
+    encoded = json.dumps(safe_record, sort_keys=True, separators=(",", ":")) + "\n"
+    try:
+        with (proof_directory / "launcher-failure.json").open("x") as output:
+            output.write(encoded)
+    except OSError:
+        fail(f"Production Observation launcher exited {code}; safe diagnostic could not be retained.")
+    fail(f"Production Observation launcher exited {code}.\n{encoded.strip()}")
+
+
 def launcher_args(
     *,
     tool_root: Path,
@@ -729,17 +777,57 @@ def load_json_artifact(artifacts: dict[str, bytes], name: str) -> dict:
     return value
 
 
+def reserve_structural_verification_directory(work_root: Path) -> Path:
+    """Reserve driver-owned private copies before the launcher parent becomes root-owned.
+
+    Only a fresh generated workspace owned by this driver is accepted. An existing child
+    is never adopted, and these local copies supply no admission or protected-gate authority.
+    """
+    try:
+        info = work_root.lstat()
+    except OSError:
+        fail("Structural verification requires a fresh private workspace.")
+    if (work_root.parent != Path("/tmp")
+            or not work_root.name.startswith("appsurface-evidencehost-runtime-")
+            or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+            or stat.S_IMODE(info.st_mode) != 0o700):
+        fail("Structural verification requires a fresh private workspace.")
+    directory = work_root / "structural-verification"
+    try:
+        directory.mkdir(mode=0o700)
+    except OSError:
+        fail("The structural verification directory must be a fresh private child.")
+    return directory
+
+
 def verify_collected_structure(cli_dll: Path, artifacts: dict[str, bytes], work_root: Path) -> str:
     """Re-resolve the collected plan and recompute manifest bindings with the actual published CLI.
 
     This is structural verification only. The protected artifact channel, current-run binding,
-    and consumer/platform acceptance remain separate proof obligations.
+    and consumer/platform acceptance remain separate proof obligations. Its private directory
+    must already be reserved before the workspace parent is protected by the root launcher.
     """
     directory = work_root / "structural-verification"
-    directory.mkdir(mode=0o700)
+    try:
+        parent_info = work_root.lstat()
+        info = directory.lstat()
+    except OSError:
+        fail("The reserved structural verification directory is missing or unsafe.")
+    if (work_root.parent != Path("/tmp")
+            or not work_root.name.startswith("appsurface-evidencehost-runtime-")
+            or not stat.S_ISDIR(parent_info.st_mode) or parent_info.st_uid != 0
+            or stat.S_IMODE(parent_info.st_mode) != 0o755
+            or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+            or stat.S_IMODE(info.st_mode) != 0o700):
+        fail("The reserved structural verification directory is missing or unsafe.")
     for name in ("evidence-plan.json", "evidence-manifest.json"):
-        (directory / name).write_bytes(artifacts[name])
-        os.chmod(directory / name, 0o600)
+        path = directory / name
+        try:
+            with path.open("xb") as target:
+                target.write(artifacts[name])
+            os.chmod(path, 0o600)
+        except OSError:
+            fail("Structural verification requires fresh private plan and manifest copies.")
     stdout, stderr = root_success(
         [str(dotnet_host()), str(cli_dll), "evidence", "verify",
          str(directory / "evidence-manifest.json"), "--plan", str(directory / "evidence-plan.json")],
@@ -900,6 +988,7 @@ def main() -> int:
     work_root = Path(tempfile.mkdtemp(prefix="appsurface-evidencehost-runtime-", dir="/tmp"))
     os.chmod(work_root, 0o700)
     try:
+        reserve_structural_verification_directory(work_root)
         env = sanitized_environment(work_root, dotnet_host())
         require_linux_host(env)
         checked_out_revision = git_head(env)
@@ -964,9 +1053,7 @@ def main() -> int:
             mode="observation",
             slot=observation_slot,
         )
-        stdout, stderr = root_success(
-            observation, cwd=ROOT, timeout=LAUNCHER_TIMEOUT_SECONDS, label="production Observation launcher"
-        )
+        stdout, stderr = run_observation_launcher(observation, work_root, proof_directory)
         try:
             launcher_result = json.loads(stdout)
         except json.JSONDecodeError:

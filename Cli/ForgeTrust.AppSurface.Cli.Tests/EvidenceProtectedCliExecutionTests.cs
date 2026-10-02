@@ -54,8 +54,9 @@ public sealed class EvidenceProtectedCliExecutionTests(ITestOutputHelper output)
         var diskManifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(manifestPath));
         Assert.True(EvidenceManifestBuilder.Verify(plan, diskManifest));
         Assert.Equal(manifest.ManifestDigest, diskManifest.ManifestDigest);
-        var report = Assert.Single(manifest.ProducerResults).Artifacts!.Single(item => item.LogicalName == "coverage-report");
-        var reportPath = Path.Combine(outputDirectory, report.RelativePath);
+        var producerResult = Assert.Single(manifest.ProducerResults);
+        var report = producerResult.Artifacts!.Single(item => item.LogicalName == "coverage-report");
+        var reportPath = Path.Combine(outputDirectory, producerResult.ProducerId, report.RelativePath);
         Assert.Equal(report.LengthBytes, new FileInfo(reportPath).Length);
         await using var reportStream = File.OpenRead(reportPath);
         Assert.Equal(report.Sha256, Convert.ToHexString(await SHA256.HashDataAsync(reportStream)).ToLowerInvariant());
