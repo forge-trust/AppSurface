@@ -32,6 +32,9 @@ public sealed class EvidenceGitChangeCaptureTests
     [InlineData("R101\0src/old.cs\0src/new.cs\0")]
     [InlineData("R50\0src/old.cs\0")]
     [InlineData("A\0../outside\0")]
+    [InlineData("A\0/absolute/path\0")]
+    [InlineData("A\0src/trailing/\0")]
+    [InlineData("A\0src/./file.cs\0")]
     [InlineData("A\0src//file.cs\0")]
     [InlineData("A\0src\\file.cs\0")]
     [InlineData("A\0src/file\n.cs\0")]
@@ -49,10 +52,13 @@ public sealed class EvidenceGitChangeCaptureTests
     public void ParseNameStatus_ShouldRejectInvalidUtf8AndOversizedPath()
     {
         var invalidUtf8 = new byte[] { (byte)'A', 0, 0xff, 0 };
+        var invalidStatusUtf8 = new byte[] { 0xff, 0, (byte)'a', 0 };
         var longPath = Encoding.UTF8.GetBytes($"A\0{new string('x', EvidenceGitChangeCapture.MaximumPathBytes + 1)}\0");
 
         Assert.Equal("ASEVD135", Assert.Throws<EvidencePlanningException>(
             () => EvidenceGitChangeCapture.ParseNameStatus(invalidUtf8)).Code);
+        Assert.Equal("ASEVD135", Assert.Throws<EvidencePlanningException>(
+            () => EvidenceGitChangeCapture.ParseNameStatus(invalidStatusUtf8)).Code);
         Assert.Equal("ASEVD135", Assert.Throws<EvidencePlanningException>(
             () => EvidenceGitChangeCapture.ParseNameStatus(longPath)).Code);
     }
