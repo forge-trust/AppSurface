@@ -467,10 +467,10 @@ if ! timeout --signal=TERM --kill-after=5s 30s sudo -n mount -t tmpfs \
   fi
   podman_fail "$podman_phase" 'quota-limited-host-tmpfs-mount-failed'
 fi
+scratch_host_mounted=true
 if ! mountpoint -q "$scratch_host_mount"; then
   podman_fail "$podman_phase" 'quota-limited-host-tmpfs-not-mounted'
 fi
-scratch_host_mounted=true
 
 podman_phase='image-transfer'
 podman_archive="$work_root/candidate-image.docker.tar"
