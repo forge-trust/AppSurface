@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -9,6 +10,12 @@ using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.EvidenceGate.Tests;
 
+[CollectionDefinition("Protected release process environment", DisableParallelization = true)]
+public sealed class ProtectedReleaseProcessEnvironmentCollection
+{
+}
+
+[Collection("Protected release process environment")]
 public sealed class ProtectedReleaseEvidenceProducerTests
 {
     private const string Version = "1.2.3-preview.1";
@@ -277,6 +284,109 @@ public sealed class ProtectedReleaseEvidenceProducerTests
                 new Uri(missingRemotePath).AbsoluteUri,
                 Tag,
                 CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task MissingGitExecutableIsReportedAsUnavailableWithTheStartupFailure()
+    {
+        using var fixture = new ProducerFixture();
+        var remotePath = TestPathUtils.PathUnder(fixture.Root, "protected-release.git");
+        _ = await RunGitAsync(fixture.Root, "init", "--bare", "--quiet", remotePath);
+        var emptyPath = TestPathUtils.PathUnder(fixture.Root, "empty-path");
+        Directory.CreateDirectory(emptyPath);
+        var originalPath = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Process);
+
+        try
+        {
+            Environment.SetEnvironmentVariable("PATH", emptyPath, EnvironmentVariableTarget.Process);
+
+            var exception = await Assert.ThrowsAsync<ProtectedReleaseRemoteTagUnavailableException>(() =>
+                new GitProtectedReleaseRemoteTagAuthority().ReadLocalFixtureForTestingAsync(
+                    new Uri(remotePath).AbsoluteUri,
+                    Tag,
+                    CancellationToken.None));
+
+            Assert.IsType<Win32Exception>(exception.InnerException);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath, EnvironmentVariableTarget.Process);
+        }
+    }
+
+    [Fact]
+    public async Task RemoteReadTimeoutReportsUnavailableAndTerminatesTheGitProcess()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip("The fake git shell shim requires a Unix host.");
+        }
+
+        const string sleepPath = "/bin/sleep";
+        if (!File.Exists(sleepPath))
+        {
+            throw Xunit.Sdk.SkipException.ForSkip("The timeout fixture requires /bin/sleep.");
+        }
+
+        using var fixture = new ProducerFixture();
+        var remotePath = TestPathUtils.PathUnder(fixture.Root, "protected-release.git");
+        _ = await RunGitAsync(fixture.Root, "init", "--bare", "--quiet", remotePath);
+        var shimDirectory = TestPathUtils.PathUnder(fixture.Root, "git-shim");
+        Directory.CreateDirectory(shimDirectory);
+        var pidFile = TestPathUtils.PathUnder(fixture.Root, "git-shim.pid");
+        var shimPath = TestPathUtils.PathUnder(shimDirectory, "git");
+        await File.WriteAllTextAsync(
+            shimPath,
+            $"#!/bin/sh\nprintf '%s\\n' \"$$\" > {QuoteForShell(pidFile)}\nexec {QuoteForShell(sleepPath)} 30\n");
+        File.SetUnixFileMode(
+            shimPath,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            | UnixFileMode.GroupRead | UnixFileMode.GroupExecute
+            | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+        var originalPath = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Process);
+        int? shimProcessId = null;
+
+        try
+        {
+            Environment.SetEnvironmentVariable("PATH", shimDirectory, EnvironmentVariableTarget.Process);
+
+            var exception = await Assert.ThrowsAsync<ProtectedReleaseRemoteTagUnavailableException>(() =>
+                new GitProtectedReleaseRemoteTagAuthority().ReadLocalFixtureForTestingAsync(
+                    new Uri(remotePath).AbsoluteUri,
+                    Tag,
+                    CancellationToken.None));
+
+            Assert.IsAssignableFrom<OperationCanceledException>(exception.InnerException);
+            shimProcessId = int.Parse(await File.ReadAllTextAsync(pidFile), System.Globalization.CultureInfo.InvariantCulture);
+            Assert.True(
+                await HasExitedAsync(shimProcessId.Value, TimeSpan.FromSeconds(3)),
+                "The timed-out git process should be terminated before the remote read returns.");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath, EnvironmentVariableTarget.Process);
+            if (shimProcessId is null
+                && File.Exists(pidFile)
+                && int.TryParse(await File.ReadAllTextAsync(pidFile), System.Globalization.CultureInfo.InvariantCulture, out var startedProcessId))
+            {
+                shimProcessId = startedProcessId;
+            }
+
+            if (shimProcessId is int processId)
+            {
+                KillIfRunning(processId);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ProductionRemoteReadPropagatesPreCanceledTokenBeforeNetworkAccess()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await new GitProtectedReleaseRemoteTagAuthority().ReadAsync(Tag, cancellation.Token));
     }
 
     [Fact]
@@ -564,6 +674,57 @@ public sealed class ProtectedReleaseEvidenceProducerTests
             remoteTagAuthority ?? new FakeRemoteTagAuthority(new ProtectedReleaseRemoteTagObservation(TagObjectId, PeeledCommit)));
 
     private static string ComputeSha256(ReadOnlySpan<byte> bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+
+    private static string QuoteForShell(string value) => $"'{value.Replace("'", "'\"'\"'", StringComparison.Ordinal)}'";
+
+    private static async Task<bool> HasExitedAsync(int processId, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                using var process = Process.GetProcessById(processId);
+                if (process.HasExited)
+                {
+                    return true;
+                }
+            }
+            catch (ArgumentException)
+            {
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                return true;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+        }
+
+        return false;
+    }
+
+    private static void KillIfRunning(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (ArgumentException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        catch (Win32Exception)
+        {
+        }
+    }
 
     private static async Task<string> RunGitAsync(string workingDirectory, params string[] arguments)
     {
