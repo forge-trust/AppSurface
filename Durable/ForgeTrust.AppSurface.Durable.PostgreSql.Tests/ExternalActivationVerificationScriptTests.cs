@@ -282,6 +282,62 @@ public sealed class ExternalActivationVerificationScriptTests
         }
     }
 
+    [Fact]
+    public async Task Failure_diagnostics_redact_uri_passwords_through_the_last_authority_at_sign()
+    {
+        var sanitizer = ExtractMarkedBlock(
+            ReadScript(),
+            "# BEGIN activation test output sanitizer",
+            "# END activation test output sanitizer");
+        var temporaryDirectory = CreateTemporaryDirectory();
+        var logPath = Path.Combine(temporaryDirectory, "activation-test.log");
+        var harnessPath = Path.Combine(temporaryDirectory, "sanitize.sh");
+        var diagnostics = string.Join(
+            Environment.NewLine,
+            "ordinary failure detail before the connection strings",
+            "postgres://u:p@ss@host",
+            "postgres://user:single-secret@db.example:5432/app?mode=a@b#fragment safe note @ordinary",
+            "postgresql://user:multi@at-sign@tail@db.example:5432/app/ready@marker#frag@ment",
+            "postgres://user:encoded%40delimiter@db.example:5432/app",
+            "postgresql://user:space-secret@db.example:5432 @ordinary detail",
+            "ordinary failure detail after the connection strings");
+
+        try
+        {
+            await File.WriteAllTextAsync(logPath, diagnostics + Environment.NewLine);
+            await File.WriteAllTextAsync(harnessPath, $"{sanitizer}{Environment.NewLine}print_sanitized_activation_test_log \"$1\"{Environment.NewLine}");
+            var startInfo = new ProcessStartInfo("/bin/bash")
+            {
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                WorkingDirectory = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory),
+            };
+            startInfo.ArgumentList.Add(harnessPath);
+            startInfo.ArgumentList.Add(logPath);
+
+            var result = await RunProcessAsync(startInfo);
+
+            Assert.Equal(0, result.ExitCode);
+            Assert.Contains("postgres://<redacted>@host", result.Output, StringComparison.Ordinal);
+            Assert.Contains("postgres://<redacted>@db.example:5432/app?mode=a@b#fragment safe note @ordinary", result.Output, StringComparison.Ordinal);
+            Assert.Contains("postgresql://<redacted>@db.example:5432/app/ready@marker#frag@ment", result.Output, StringComparison.Ordinal);
+            Assert.Contains("postgres://<redacted>@db.example:5432/app", result.Output, StringComparison.Ordinal);
+            Assert.Contains("postgresql://<redacted>@db.example:5432 @ordinary detail", result.Output, StringComparison.Ordinal);
+            Assert.Contains("ordinary failure detail before the connection strings", result.Output, StringComparison.Ordinal);
+            Assert.Contains("ordinary failure detail after the connection strings", result.Output, StringComparison.Ordinal);
+            Assert.DoesNotContain("single-secret", result.Output, StringComparison.Ordinal);
+            Assert.DoesNotContain("multi@at-sign@tail", result.Output, StringComparison.Ordinal);
+            Assert.DoesNotContain("encoded%40delimiter", result.Output, StringComparison.Ordinal);
+            Assert.DoesNotContain("space-secret", result.Output, StringComparison.Ordinal);
+            Assert.Empty(result.Error);
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("Password = private-prefix private-suffix; retry failed")]
     [InlineData("pWd = 'private-prefix ''private-suffix'; retry failed")]

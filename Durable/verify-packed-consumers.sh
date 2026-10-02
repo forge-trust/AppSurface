@@ -169,7 +169,8 @@ connection = os.environ.get("APPSURFACE_POSTGRES_TEST_CONNECTION", "")
 if connection:
     text = text.replace(connection, "<redacted-postgres-connection>")
 text = re.sub(
-    r"(?i)(postgres(?:ql)?://)[^:/\s@]+:[^@/\s]+@",
+    # The greedy password span consumes embedded @ through the authority's final delimiter.
+    r"(?i)(postgres(?:ql)?://)[^:/?#\s@]+:[^/?#\s]+@",
     r"\1<redacted>@",
     text,
 )
