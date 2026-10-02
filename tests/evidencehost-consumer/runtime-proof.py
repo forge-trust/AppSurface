@@ -982,6 +982,10 @@ def run_observation_launcher(command: list[str], work_root: Path, proof_director
 
     The root launcher owns the optional private 0600 record. The driver reads it through
     the root helper after failure; these diagnostics confer no runtime or gate authority.
+    Closed-field validation delegates to the same launcher's validate_failure_diagnostic;
+    broker checkpoints and journal metadata are permitted only for worker-exit with
+    worker-protocol-incomplete or worker-unsuccessful. No second schema or raw-output
+    fallback is maintained here, and either cause still terminates this proof as failed.
     """
     command = [*command, "--diagnostic-directory", str(work_root)]
     code, stdout, stderr = root_command(

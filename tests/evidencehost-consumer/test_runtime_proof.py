@@ -445,6 +445,84 @@ class StructuralVerificationProofTests(unittest.TestCase):
                     command.assert_not_called()
 
 
+class WorkerExitDiagnosticValidationTests(unittest.TestCase):
+    """Pure controls for the actual launcher validator used by the runtime driver."""
+    @classmethod
+    def setUpClass(cls):
+        cls.launcher = proof.load_launcher_contract()
+
+    @staticmethod
+    def record(cause):
+        return {"schema": "evidence-launcher-failure-v1", "error_class": "LauncherError",
+                "cause": cause, "operation": "worker-exit", "worker_main_code": 1, "worker_main_status": 1,
+                "broker_ready_seen": True, "broker_wait_completed": False, "broker_exited": False,
+                "broker_work_closed": True, "broker_active_handlers": 0, "broker_active_runs": 0,
+                "worker_journal_state": "collected", "worker_journal_written": True,
+                "worker_journal_bytes": 4096, "worker_journal_codes": ["ASEVD402", "ASEVD410"]}
+
+    def test_both_worker_exit_causes_accept_the_same_closed_checkpoint_and_journal_fields(self):
+        for cause in ("worker-protocol-incomplete", "worker-unsuccessful"):
+            with self.subTest(cause=cause):
+                record = self.record(cause)
+                validated = self.launcher.validate_failure_diagnostic(record)
+                self.assertEqual(record, validated)
+                self.assertIsNot(record, validated)
+                self.assertEqual(cause, validated["cause"])
+                self.assertNotIn("status", validated)
+                self.assertNotIn("trusted", validated)
+
+    def test_both_causes_serialize_closed_fields_before_runtime_validation_without_canary_echo(self):
+        for cause in ("worker-protocol-incomplete", "worker-unsuccessful"):
+            with self.subTest(cause=cause):
+                expected = {**self.record(cause), "exit_code": 1}
+                error = self.launcher.LauncherError(cause, operation="worker-exit", exit_code=1)
+                error.worker_main_code = 1
+                error.worker_main_status = 1
+                error.broker_checkpoints = {name: value for name, value in expected.items() if name.startswith("broker_")}
+                error.broker_checkpoints["raw_subject_output"] = "secret-779"
+                error.worker_journal = {name: value for name, value in expected.items() if name.startswith("worker_journal_")}
+                error.worker_journal["raw_exception"] = "secret-779"
+                error.worker_result = "secret-779"
+                serialized = self.launcher.failure_diagnostic(error)
+                self.assertEqual(expected, serialized)
+                self.assertNotIn("secret-779", json.dumps(serialized))
+                self.assertEqual(expected, self.launcher.validate_failure_diagnostic(serialized))
+
+    def test_checkpoint_or_journal_metadata_requires_a_permitted_cause_and_worker_exit(self):
+        for cause, operation in (("worker-start-unit-failed", "worker-exit"),
+                                 ("unclassified-host-failure", "worker-exit"),
+                                 ("secret-779", "worker-exit"),
+                                 ("worker-unsuccessful", "worker-start"),
+                                 ("worker-protocol-incomplete", "worker-start"),
+                                 ("worker-unsuccessful", None)):
+            with self.subTest(cause=cause, operation=operation):
+                record = self.record(cause)
+                if operation is None:
+                    del record["operation"]
+                else:
+                    record["operation"] = operation
+                with self.assertRaisesRegex(self.launcher.LauncherError, "^invalid-private-diagnostic$") as failure:
+                    self.launcher.validate_failure_diagnostic(record)
+                self.assertNotIn("secret-779", str(failure.exception))
+
+    def test_both_causes_reject_wrong_types_bounds_unknown_fields_and_journal_canaries(self):
+        mutations = ({"broker_ready_seen": "secret-779"}, {"broker_active_handlers": True},
+                     {"broker_active_handlers": 4097}, {"broker_active_runs": 2},
+                     {"worker_journal_written": 1}, {"worker_journal_bytes": True},
+                     {"worker_journal_bytes": -1}, {"worker_journal_bytes": 4097},
+                     {"worker_journal_state": "secret-779"}, {"worker_journal_codes": ["ASEVD402", "secret-779"]},
+                     {"worker_journal_codes": [1]}, {"worker_journal_codes": ["ASEVD402"] * 15},
+                     {"stdout": "secret-779"}, {"exception": "secret-779"}, {"path": "secret-779"},
+                     {"status": "completed"}, {"trusted": True})
+        for cause in ("worker-protocol-incomplete", "worker-unsuccessful"):
+            for mutation in mutations:
+                with self.subTest(cause=cause, fields=list(mutation)):
+                    record = {**self.record(cause), **mutation}
+                    with self.assertRaisesRegex(self.launcher.LauncherError, "^invalid-private-diagnostic$") as failure:
+                        self.launcher.validate_failure_diagnostic(record)
+                    self.assertNotIn("secret-779", str(failure.exception))
+
+
 class ObservationFailureDiagnosticTests(unittest.TestCase):
     def test_startup_status_is_published_only_after_closed_schema_validation(self):
         safe = {"schema": "evidence-launcher-failure-v1", "error_class": "LauncherError",

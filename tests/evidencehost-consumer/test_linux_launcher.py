@@ -243,7 +243,7 @@ class PrivateFailureDiagnosticTests(unittest.TestCase):
                               {"broker_active_handlers": 4097}, {"broker_active_runs": 2},
                               {"worker_journal_bytes": 4097}, {"worker_journal_written": 1},
                               {"worker_journal_state": ["secret-779"]}, {"worker_journal_codes": ["ASEVD999"]},
-                              {"worker_journal_codes": [["secret-779"]]}, {"cause": "worker-unsuccessful"}):
+                              {"worker_journal_codes": [["secret-779"]]}, {"cause": "worker-timeout"}):
                     with self.subTest(extra=extra), self.assertRaises(launcher.LauncherError):
                         launcher.validate_failure_diagnostic({**good, **extra})
             finally:
@@ -1786,6 +1786,53 @@ class RootCompletionTests(unittest.TestCase):
                     completion.duplicate_output_parent()
             finally:
                 broker.close_artifact_handles()
+
+
+class WorkerTerminalDiagnosticControls(unittest.TestCase):
+    """Closed terminal status and bounded private capture, without native unit authority."""
+    def test_unsuccessful_worker_after_completed_protocol_retains_private_cause_and_numeric_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            broker, _, _ = artifact_broker(directory)
+            broker.unit_prefix = "evidencehost-012345abcdef"
+            broker.ready_seen = broker.wait_completed = broker.exited = broker.work_closed = True
+            parent = Path(directory)
+            fd = launcher.open_diagnostic_directory(parent, expected_owner_uid=os.geteuid())
+            raw = b"canary-terminal ASEVD409: allocation\n"
+            properties = {"Result": "exit-code", "User": "worker", "KillMode": "control-group",
+                          "ExecMainCode": "1", "ExecMainStatus": "1"}
+            try:
+                with patch.object(launcher.os, "fstat", return_value=SimpleNamespace(st_mode=stat.S_IFDIR | 0o700, st_uid=0)), \
+                     patch.object(launcher, "_read_worker_journal", return_value=("collected", raw)) as query:
+                    with self.assertRaises(launcher.LauncherError) as failed:
+                        launcher.require_successful_worker(properties, "worker", broker, fd)
+                query.assert_called_once_with("evidencehost-012345abcdef-worker.service")
+                record = launcher.failure_diagnostic(failed.exception)
+                self.assertEqual(record, launcher.validate_failure_diagnostic(record))
+                self.assertEqual((record["cause"], record["worker_main_code"], record["worker_main_status"]),
+                                 ("worker-unsuccessful", 1, 1))
+                self.assertTrue(record["broker_exited"] and record["broker_wait_completed"])
+                self.assertEqual(["ASEVD409"], record["worker_journal_codes"])
+                self.assertTrue(record["worker_journal_written"])
+                self.assertNotIn("canary-terminal", json.dumps(record))
+                self.assertEqual(raw, (parent / launcher.WORKER_JOURNAL_FILE).read_bytes())
+                self.assertEqual(0o600, stat.S_IMODE((parent / launcher.WORKER_JOURNAL_FILE).stat().st_mode))
+            finally:
+                os.close(fd); broker.close_artifact_handles()
+
+    def test_terminal_success_does_not_capture_and_each_failure_guard_stays_failed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            broker, _, _ = artifact_broker(directory)
+            properties = {"Result": "success", "User": "worker", "KillMode": "control-group"}
+            try:
+                with patch.object(launcher, "_read_worker_journal") as query:
+                    launcher.require_successful_worker(properties, "worker", broker, None)
+                query.assert_not_called()
+                for change in ({"Result": "exit-code"}, {"User": "foreign"}, {"KillMode": "process"}):
+                    with self.subTest(change=change), self.assertRaises(launcher.LauncherError) as failed:
+                        launcher.require_successful_worker({**properties, **change}, "worker", broker, None)
+                    self.assertEqual("worker-unsuccessful", str(failed.exception))
+            finally: broker.close_artifact_handles()
+
 
 
 if __name__ == "__main__": unittest.main()
