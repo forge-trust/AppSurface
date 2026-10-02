@@ -1011,6 +1011,96 @@ public sealed class ActivationHttpContractTests
         Assert.Equal(0, dependencies.Admission.CallCount);
     }
 
+    // Value: protects=fatal activation exceptions escape the handler unchanged; fails_when=the catch maps one to HostFailure; why_new=existing fatal coverage is probe-only; seam=none
+    [Theory]
+    [InlineData("out-of-memory")]
+    [InlineData("access-violation")]
+    [InlineData("stack-overflow")]
+    public async Task Fatal_service_exceptions_escape_activation_handler_unchanged(string exceptionKind)
+    {
+        Exception expected = exceptionKind switch
+        {
+            "out-of-memory" => new OutOfMemoryException("controlled fatal activation failure"),
+            "access-violation" => new AccessViolationException("controlled fatal activation failure"),
+            "stack-overflow" => new StackOverflowException("controlled fatal activation failure"),
+            _ => throw new ArgumentOutOfRangeException(nameof(exceptionKind)),
+        };
+        var dependencies = new ActivationTestDependencies();
+        dependencies.Activation.Activator = (_, _) =>
+            ValueTask.FromException<DurableExternalActivationResult>(expected);
+        await using var host = await ActivationTestHost.StartAsync(dependencies: dependencies);
+        using var requestAbort = new CancellationTokenSource();
+        var context = new DefaultHttpContext
+        {
+            RequestServices = host.App.Services,
+            RequestAborted = requestAbort.Token,
+        };
+        context.Request.ContentLength = 0;
+        context.Request.Body = new MemoryStream();
+        var settings = new ForgeTrust.AppSurface.Examples.DurableExternalActivation.ActivationHostSettings(
+            32,
+            TimeSpan.FromSeconds(2),
+            TimeSpan.FromSeconds(10));
+
+        var observed = await Assert.ThrowsAnyAsync<Exception>(async () =>
+            await ForgeTrust.AppSurface.Examples.DurableExternalActivation.ActivationHttpEndpoints.ActivateAsync(
+                context,
+                settings));
+
+        Assert.Same(expected, observed);
+        Assert.False(requestAbort.IsCancellationRequested);
+        Assert.Equal(1, dependencies.Activation.CallCount);
+        Assert.Equal(0, dependencies.Health.CallCount);
+        Assert.Equal(0, dependencies.Admission.CallCount);
+        var call = Assert.Single(dependencies.Activation.Calls);
+        Assert.Equal(requestAbort.Token, call.CancellationToken);
+        Assert.Equal(32, call.Request.PumpRequest.MaximumItems);
+        Assert.Equal(TimeSpan.FromSeconds(2), call.Request.PumpRequest.TimeBudget);
+        Assert.Equal(DurableRuntimeSurface.Work, call.Request.PumpRequest.Surfaces);
+        Assert.Equal(TimeSpan.FromSeconds(10), call.Request.RequestBudget);
+    }
+
+    // Value: protects=service-stage request abort returns the bounded HostFailure result; fails_when=activation cancellation escapes or becomes an activation outcome; why_new=HTTP tests cover body-read cancellation and ordinary service errors, not service-stage OCE; seam=none
+    [Fact]
+    public async Task Service_stage_request_abort_returns_host_failure_without_executing_a_canceled_response()
+    {
+        using var requestAbort = new CancellationTokenSource();
+        var dependencies = new ActivationTestDependencies();
+        dependencies.Activation.Activator = (_, cancellationToken) =>
+        {
+            Assert.Equal(requestAbort.Token, cancellationToken);
+            requestAbort.Cancel();
+            return ValueTask.FromException<DurableExternalActivationResult>(
+                new OperationCanceledException("private activation cancellation", cancellationToken));
+        };
+        await using var host = await ActivationTestHost.StartAsync(dependencies: dependencies);
+        var context = new DefaultHttpContext
+        {
+            RequestServices = host.App.Services,
+            RequestAborted = requestAbort.Token,
+        };
+        context.Request.ContentLength = 0;
+        context.Request.Body = new MemoryStream();
+
+        var result = await ForgeTrust.AppSurface.Examples.DurableExternalActivation.ActivationHttpEndpoints.ActivateAsync(
+            context,
+            new ForgeTrust.AppSurface.Examples.DurableExternalActivation.ActivationHostSettings(
+                32,
+                TimeSpan.FromSeconds(2),
+                TimeSpan.FromSeconds(10)));
+
+        Assert.True(requestAbort.IsCancellationRequested);
+        Assert.Equal(1, dependencies.Activation.CallCount);
+        Assert.Equal(0, dependencies.Health.CallCount);
+        Assert.Equal(0, dependencies.Admission.CallCount);
+        var statusResult = Assert.IsAssignableFrom<IStatusCodeHttpResult>(result);
+        Assert.Equal(StatusCodes.Status500InternalServerError, statusResult.StatusCode);
+        var valueResult = Assert.IsAssignableFrom<IValueHttpResult>(result);
+        var error = Assert.IsType<ForgeTrust.AppSurface.Examples.DurableExternalActivation.ErrorResponse>(valueResult.Value);
+        Assert.Equal("HostFailure", error.Error);
+        Assert.DoesNotContain("private activation cancellation", error.Error, StringComparison.Ordinal);
+    }
+
     private static async Task<ActivationTestHost> AuthorizedHostAsync() => await ActivationHostAsync(new ActivationTestDependencies());
 
     /// <summary>Verifies liveness remains the exact fixed envelope without consulting Durable dependencies.</summary>

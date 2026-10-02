@@ -245,7 +245,7 @@ separate host process, configure export in that host and inspect delivery at its
 ### Activation activity export proof
 
 The source-owned recipe in
-[ActivationDocumentationExamplesTests.cs](../examples/durable-external-activation.tests/ActivationDocumentationExamplesTests.cs)
+[InProcessActivationExportExample.cs](../examples/durable-external-activation.tests/InProcessActivationExportExample.cs)
 uses the same in-process `ActivationTestHost` fixture as the
 [exporter controls](../examples/durable-external-activation.tests/ActivationExporterTests.cs). It starts the authorized
 reference endpoint with the production activation service and controlled test health/admission dependencies. This
@@ -253,24 +253,27 @@ recipe proves SDK export, not PostgreSQL persistence. The
 [PostgreSQL lifecycle proof](../examples/durable-external-activation.tests/PostgreSqlActivationLifecycleTests.cs)
 separately checks persisted Work, readiness, and export with the real provider.
 
-These imports supplement the .NET 10 test project's implicit `System`, threading, and task imports. The fixture and its
+These explicit imports accompany the compiled .NET 10 exporter sample. The fixture and its
 local authorization token are test-owned helpers from that project, so this snippet is an executable repository-test
 recipe rather than standalone remote-client code:
 
-<!-- appsurface:snippet id="durable-external-activation-export-imports" file="examples/durable-external-activation.tests/ActivationDocumentationExamplesTests.cs" marker="durable-external-activation-export-imports" lang="csharp" -->
+<!-- appsurface:snippet id="durable-external-activation-export-imports" file="examples/durable-external-activation.tests/InProcessActivationExportExample.cs" marker="durable-external-activation-export-imports" lang="csharp" -->
 ```csharp
+using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Threading;
+using System.Threading.Tasks;
 using ForgeTrust.AppSurface.Core;
 using OpenTelemetry;
 using OpenTelemetry.Trace;
 ```
 <!-- /appsurface:snippet -->
 
-<!-- appsurface:snippet id="durable-external-activation-in-process-export" file="examples/durable-external-activation.tests/ActivationDocumentationExamplesTests.cs" marker="durable-external-activation-in-process-export" lang="csharp" -->
+<!-- appsurface:snippet id="durable-external-activation-in-process-export" file="examples/durable-external-activation.tests/InProcessActivationExportExample.cs" marker="durable-external-activation-in-process-export" lang="csharp" -->
 ```csharp
 /// <summary>Proves export from the source-owned test host running in the same process as the OpenTelemetry SDK.</summary>
 internal static class InProcessActivationExportExample
@@ -347,11 +350,11 @@ when the caller intentionally owns and tests that lower-level provider result co
 `IDurableRuntimePump.RunOnceAsync` callers remain supported and are not silently redirected.
 
 The before/after samples below are application-owned helpers in the
-[documentation-example test source](../examples/durable-external-activation.tests/ActivationDocumentationExamplesTests.cs),
+[existing-host sample source](../examples/durable-external-activation.tests/ExistingHostActivationExample.cs),
 not new package APIs. Copy the adoption imports and helper into the existing ASP.NET host. Its provider, health,
 admission, authentication, authorization, empty-body guard, and response projection remain the host's existing setup:
 
-<!-- appsurface:snippet id="durable-external-activation-adoption-imports" file="examples/durable-external-activation.tests/ActivationDocumentationExamplesTests.cs" marker="durable-external-activation-adoption-imports" lang="csharp" -->
+<!-- appsurface:snippet id="durable-external-activation-adoption-imports" file="examples/durable-external-activation.tests/ExistingHostActivationExample.cs" marker="durable-external-activation-adoption-imports" lang="csharp" -->
 ```csharp
 using System;
 using System.Threading;
@@ -369,7 +372,7 @@ Before, the existing endpoint might have obtained advisory health and invoked di
 own outcome policy. These two lower-level calls alone do not implement the service's complete phase, deadline, and
 exception rules. `provider` is the existing host's actual service provider, such as `app.Services`:
 
-<!-- appsurface:snippet id="durable-external-activation-direct-admission" file="examples/durable-external-activation.tests/ActivationDocumentationExamplesTests.cs" marker="durable-external-activation-direct-admission" lang="csharp" -->
+<!-- appsurface:snippet id="durable-external-activation-direct-admission" file="examples/durable-external-activation.tests/ExistingHostActivationExample.cs" marker="durable-external-activation-direct-admission" lang="csharp" -->
 ```csharp
 /// <summary>Shows the lower-level calls retained by hosts that intentionally own direct-admission orchestration.</summary>
 internal static class ExistingHostDirectAdmissionExample
@@ -407,7 +410,7 @@ ten outcomes with the reference host's statuses and throws for an unsupported fu
 `Result` through the host's existing activation-envelope projection; the `(StatusCode, Result)` tuple is an application
 decision, not a new wire schema:
 
-<!-- appsurface:snippet id="durable-external-activation-adoption" file="examples/durable-external-activation.tests/ActivationDocumentationExamplesTests.cs" marker="durable-external-activation-adoption" lang="csharp" -->
+<!-- appsurface:snippet id="durable-external-activation-adoption" file="examples/durable-external-activation.tests/ExistingHostActivationExample.cs" marker="durable-external-activation-adoption" lang="csharp" -->
 ```csharp
 /// <summary>Demonstrates adopting the service inside an existing host without adding a package API or route.</summary>
 internal static class ExistingHostActivationExample

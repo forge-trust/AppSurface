@@ -251,6 +251,63 @@ public sealed class ExternalActivationTimestampTests
         Assert.Equal(0, admission.CallCount);
     }
 
+    // Value: protects=timer setup failure maps safely and stops its activity; fails_when=CreateTimer throws and the service leaks the started activity or exposes the exception; why_new=timestamp tests cover capture and cleanup faults, not timer creation in Start; seam=none
+    [Fact]
+    public async Task Nonfatal_timer_creation_failure_during_setup_maps_to_safe_failure_and_stops_activity()
+    {
+        var clock = new TimerCreationFaultTimeProvider(new InvalidOperationException("private timer setup detail"));
+        var health = new ExternalActivationHealth(_ => ValueTask.FromResult(ExternalActivationTestSupport.Health()));
+        var admission = new ExternalActivationAdmission((_, _) => ValueTask.FromResult(
+            new DurableRuntimePumpAttempt(DurableRuntimePumpAttemptKind.Refused, null, null)));
+        var logger = new ExternalActivationLogger();
+        var stopped = new List<Activity>();
+        var inThisInvocation = new AsyncLocal<bool>();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == AppSurfaceActivitySources.ActivitySourceName,
+            Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            SampleUsingParentId = static (ref ActivityCreationOptions<string> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = activity =>
+            {
+                if (inThisInvocation.Value && activity.OperationName == DurableExternalActivationInvocation.OperationName)
+                {
+                    stopped.Add(activity);
+                }
+            },
+        };
+        ActivitySource.AddActivityListener(listener);
+        var service = new DurableExternalActivationService(health, admission, clock, logger);
+
+        inThisInvocation.Value = true;
+        DurableExternalActivationResult result;
+        try
+        {
+            result = await service.ActivateAsync(Request());
+        }
+        finally
+        {
+            inThisInvocation.Value = false;
+        }
+
+        Assert.Equal(DurableExternalActivationOutcomeKind.ActivationFailed, result.Kind);
+        Assert.Null(result.ObservedHealthState);
+        Assert.Equal(DurableProblemCodes.ExternalActivationFailed, result.ProblemCode);
+        Assert.Null(result.PumpResult);
+        Assert.Equal(1, clock.TimerCreationCount);
+        Assert.Equal(0, health.CallCount);
+        Assert.Equal(0, admission.CallCount);
+        Assert.DoesNotContain(logger.Entries, entry => entry.Message.Contains("private timer setup detail", StringComparison.Ordinal));
+        Assert.All(logger.Entries, entry => Assert.Null(entry.Exception));
+
+        var activity = Assert.Single(stopped);
+        Assert.Equal(ActivityKind.Internal, activity.Kind);
+        Assert.Equal(ActivityStatusCode.Error, activity.Status);
+        Assert.Equal("pre_admission", Assert.Single(activity.TagObjects, tag => tag.Key == "appsurface.durable.activation.phase").Value);
+        Assert.Equal("ActivationFailed", Assert.Single(activity.TagObjects, tag => tag.Key == "appsurface.durable.activation.outcome").Value);
+        Assert.Equal(DurableProblemCodes.ExternalActivationFailed,
+            Assert.Single(activity.TagObjects, tag => tag.Key == "appsurface.durable.activation.problem_code").Value);
+    }
+
     private static DurableExternalActivationRequest Request() => new(
         new DurableRuntimePumpRequest(5, TimeSpan.FromSeconds(2), DurableRuntimeSurface.Work),
         RequestBudget);
@@ -279,6 +336,19 @@ public sealed class ExternalActivationTimestampTests
         {
             Interlocked.Increment(ref _timestampCaptureCount);
             return base.GetTimestamp();
+        }
+    }
+
+    private sealed class TimerCreationFaultTimeProvider(Exception exception) : FakeTimeProvider
+    {
+        private int _timerCreationCount;
+
+        internal int TimerCreationCount => Volatile.Read(ref _timerCreationCount);
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            Interlocked.Increment(ref _timerCreationCount);
+            throw exception;
         }
     }
 
