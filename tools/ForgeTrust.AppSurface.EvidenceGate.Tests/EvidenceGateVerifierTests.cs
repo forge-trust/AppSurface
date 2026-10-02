@@ -154,6 +154,38 @@ public sealed class EvidenceGateVerifierTests
     }
 
     [Fact]
+    public async Task VerifyGateRejectsWellFormedButNoncanonicalPlanBytes()
+    {
+        using var fixture = await VerifyFixture.CreateAsync();
+        using var planDocument = JsonDocument.Parse(await File.ReadAllBytesAsync(fixture.PlanPath));
+        await File.WriteAllTextAsync(
+            fixture.PlanPath,
+            JsonSerializer.Serialize(planDocument.RootElement, new JsonSerializerOptions { WriteIndented = true }) + "\n");
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceGateVerifier.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.ManifestPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.IdentityPath,
+            fixture.OutputDirectory,
+            null,
+            fixture.AuthorityProvider,
+            null,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGG103", stderr.ToString(), StringComparison.Ordinal);
+        var result = EvidenceCanonicalJson.Deserialize<EvidencePullRequestGateVerificationResult>(
+            await File.ReadAllBytesAsync(Path.Join(fixture.OutputDirectory, "evidence-gate-verification.json")));
+        Assert.False(result.IsEligible);
+        Assert.Equal("ASEGG103", result.Code);
+    }
+
+    [Fact]
     public async Task VerifyGateRejectsCanonicalTamperedPlanWithNonzeroResult()
     {
         using var fixture = await VerifyFixture.CreateAsync();
