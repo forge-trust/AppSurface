@@ -86,6 +86,28 @@ jobs:
             --pr-run-identity "$identity" \
             --output "$RUNNER_TEMP/evidence-gate-plan"
 
+      - name: Compare the captured policy with protected-base policy fixtures
+        if: ${{ steps.capture.outputs.mode == 'same-repository' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          capture_directory="$RUNNER_TEMP/evidence-gate-capture"
+          protected_base="$GITHUB_WORKSPACE/trusted"
+          candidate_directory="$RUNNER_TEMP/evidence-gate-policy-shadow-inputs"
+          planner_project="$protected_base/Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"
+
+          python3 "$protected_base/scripts/evidence-gate-policy-shadow.py" \
+            --capture-directory "$capture_directory" \
+            --protected-base "$protected_base" \
+            --output-directory "$candidate_directory"
+
+          dotnet run --no-restore --project "$planner_project" -- evidence shadow-policy \
+            --base-policy "$protected_base/.appsurface/evidence/evidence.policy.json" \
+            --candidate-policy "$candidate_directory/.appsurface/evidence/evidence.policy.json" \
+            --base-fixtures "$protected_base/docs/fixtures/issue-777-policy-shadow/fixtures.json" \
+            --candidate-fixtures "$candidate_directory/docs/fixtures/issue-777-policy-shadow/fixtures.json" \
+            --output "$RUNNER_TEMP/evidence-gate-policy-shadow-result"
+
       - name: Create the bounded subject handoff
         shell: bash
         run: |
