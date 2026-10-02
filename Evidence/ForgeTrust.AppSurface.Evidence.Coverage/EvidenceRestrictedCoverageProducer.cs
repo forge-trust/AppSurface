@@ -3,9 +3,8 @@ using System.Globalization;
 using System.Xml;
 using System.Xml.Linq;
 using ForgeTrust.AppSurface.Evidence.Contracts;
-using ForgeTrust.AppSurface.Evidence.Coverage;
 
-namespace ForgeTrust.AppSurface.Evidence.Cli;
+namespace ForgeTrust.AppSurface.Evidence.Coverage;
 
 /// <summary>
 /// Runs a declared coverage command through a protected restricted-process transport and returns bounded reports
@@ -118,7 +117,7 @@ internal sealed class EvidenceRestrictedCoverageProducer
     public async Task<EvidenceProducerResult> RunAsync(
         EvidenceProducerDeclaration producer,
         string? solutionPath,
-        EvidenceDiffSnapshot? diffSnapshot,
+        EvidenceRestrictedCoverageDiffSnapshot? diffSnapshot,
         EvidenceArtifactWriter writer,
         CancellationToken cancellationToken)
     {
@@ -226,7 +225,7 @@ internal sealed class EvidenceRestrictedCoverageProducer
     private async Task<EvidenceProducerResult> MergeAndGateAsync(
         EvidenceProducerDeclaration producer,
         string solutionPath,
-        EvidenceDiffSnapshot? diffSnapshot,
+        EvidenceRestrictedCoverageDiffSnapshot? diffSnapshot,
         EvidenceCoverageGateRequirements requirements,
         EvidenceArtifactWriter writer,
         IReadOnlyList<RestrictedCoverageReport> reports,
@@ -365,7 +364,7 @@ internal sealed class EvidenceRestrictedCoverageProducer
 
     private static CoveragePatchRequest? CreatePatchRequest(
         string solutionPath,
-        EvidenceDiffSnapshot? diffSnapshot,
+        EvidenceRestrictedCoverageDiffSnapshot? diffSnapshot,
         EvidenceCoverageGateRequirements requirements)
     {
         if (diffSnapshot is null)

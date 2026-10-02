@@ -1,7 +1,6 @@
 using ForgeTrust.AppSurface.Evidence.Contracts;
-using ForgeTrust.AppSurface.Evidence.Coverage;
 
-namespace ForgeTrust.AppSurface.Evidence.Cli;
+namespace ForgeTrust.AppSurface.Evidence.Coverage;
 
 /// <summary>Runs subject coverage exclusively through the credential-checked restricted broker.</summary>
 /// <remarks>Both subject and protected reporter output charge the same host quota; the broker independently enforces its bound.</remarks>

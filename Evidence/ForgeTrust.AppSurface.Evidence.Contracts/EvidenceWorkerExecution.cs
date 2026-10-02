@@ -134,6 +134,22 @@ internal sealed class EvidenceWorkerExecution
     /// <summary>Gets whether callbacks, tracked writes/pumps, and supervisor-owned work have all acknowledged exit.</summary>
     internal bool OwnWorkStopped { get { lock (_gate) return _ownedExitEstablished && _ownedWork.All(static task => task.IsCompleted); } }
 
+    /// <summary>Requires physical owned exit and the joined pre-disposal cleanup phase.</summary>
+    /// <remarks>
+    /// Only StopAndDisposeAsync enters this phase after the supervisor exit receipt and all admitted
+    /// callbacks, writes and pumps have joined. A running registered disposer may check this guard;
+    /// OwnWorkStopped also includes that disposer and therefore cannot be used from inside it.
+    /// This guard grants no application, producer, admission or collection capability.
+    /// </remarks>
+    internal void RequireJoinedCleanupPhase()
+    {
+        lock (_gate)
+        {
+            if (!_admissionClosed || !_ownedExitEstablished || !_cleanupStarted)
+                throw new EvidenceAdmissionException("ASEVD410", "Owned work has not entered joined cleanup.");
+        }
+    }
+
     /// <summary>Gets whether the cumulative teardown phase has completed successfully.</summary>
     internal bool CleanupCompleted { get { lock (_gate) return _cleanupFinished && _cleanupSucceeded; } }
 

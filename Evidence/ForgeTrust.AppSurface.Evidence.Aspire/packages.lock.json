@@ -642,6 +642,19 @@
         "requested": "[18.0.0, )",
         "resolved": "18.0.0",
         "contentHash": "ptHVgcYmLejGuWXV7RMFoEqFKYMXnieOlWLPzEslfDtzZ9ngMhjYwykfqjBN2+fMEAEyobozkj07lKEpR4dssA=="
+      },
+      "CliWrap": {
+        "type": "CentralTransitive",
+        "requested": "[3.10.1, )",
+        "resolved": "3.10.1",
+        "contentHash": "C+WzXwzpQsJVNqvuh19ZO/bw/vR43L+DC/CmvK+PATUBkail2AWYE6an17dOGgWaVGzF9sU28YwRwfNfkPrQdg=="
+      },
+      "forgetrust.appsurface.evidence.coverage": {
+        "type": "Project",
+        "dependencies": {
+          "CliWrap": "[3.10.1, )",
+          "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )"
+        }
       }
     }
   }
