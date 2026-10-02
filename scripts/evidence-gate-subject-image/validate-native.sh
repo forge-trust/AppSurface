@@ -408,6 +408,9 @@ fi
 if ! command -v timeout >/dev/null 2>&1; then
   podman_fail 'preflight' 'timeout-command-unavailable'
 fi
+if ! command -v mountpoint >/dev/null 2>&1; then
+  podman_fail 'preflight' 'mountpoint-command-unavailable'
+fi
 podman_cli_path="$(command -v podman || true)"
 if [[ -z "$podman_cli_path" ]]; then
   podman_cli_path='unavailable'
@@ -459,7 +462,13 @@ fi
 if ! timeout --signal=TERM --kill-after=5s 30s sudo -n mount -t tmpfs \
   -o "rw,nosuid,nodev,size=$scratch_bytes,nr_inodes=$scratch_inodes,mode=0700,uid=$podman_runner_uid,gid=$podman_runner_gid" \
   tmpfs "$scratch_host_mount"; then
+  if mountpoint -q "$scratch_host_mount"; then
+    scratch_host_mounted=true
+  fi
   podman_fail "$podman_phase" 'quota-limited-host-tmpfs-mount-failed'
+fi
+if ! mountpoint -q "$scratch_host_mount"; then
+  podman_fail "$podman_phase" 'quota-limited-host-tmpfs-not-mounted'
 fi
 scratch_host_mounted=true
 
