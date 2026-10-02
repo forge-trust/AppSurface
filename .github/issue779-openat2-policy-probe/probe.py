@@ -17,7 +17,7 @@ print(json.dumps({'uid':os.getuid(),'gid':os.getgid(),'openat2_succeeded':fd>=0,
 '''
 def run(argv,**kw):return subprocess.run(argv,check=True,env=ENV,timeout=15,**kw)
 def properties(unit):
- r=run(['systemctl','show',unit,'--property=ControlGroup','--property=User','--property=Group','--property=MainPID'],stdout=subprocess.PIPE)
+ r=run(['systemctl','show',unit,'--property=ControlGroup','--property=User','--property=Group','--property=MainPID','--property=ActiveState','--property=SubState','--property=ExecMainCode','--property=ExecMainStatus'],stdout=subprocess.PIPE)
  return dict(x.split('=',1) for x in r.stdout.decode().splitlines() if '=' in x)
 def empty(group):
  if not group:return True
@@ -43,8 +43,28 @@ def main():
    props=launcher.worker_unit_properties(name,work/'tool',work/'subject',work/'test-output',writable,10)
    props['RestrictSUIDSGID']=restricted
    argv=['systemd-run','--quiet','--wait','--pipe','--expand-environment=no','--unit='+unit,*['--property='+k+'='+v for k,v in props.items()],'/usr/bin/env','-i','PATH=/usr/bin:/bin','LANG=C.UTF-8','/usr/bin/python3','-I','-c',PAYLOAD]
-   r=run(argv,stdout=subprocess.PIPE,stderr=subprocess.PIPE); assert len(r.stdout)<=4096 and len(r.stderr)<=4096
-   value=json.loads(r.stdout); assert set(value)=={'uid','gid','openat2_succeeded','errno','no_new_privileges','effective_capabilities'}
+   process=subprocess.Popen(argv,env=ENV,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+   deadline=time.monotonic()+12
+   main_finished=False
+   try:
+    while time.monotonic()<deadline:
+     try:
+      actual=properties(unit)
+     except subprocess.CalledProcessError:
+      time.sleep(.05);continue
+     if actual.get('ActiveState')=='active' and actual.get('SubState')=='exited' and actual.get('MainPID')=='0' and actual.get('ExecMainCode')=='1' and actual.get('ExecMainStatus')=='0':
+      main_finished=True;break
+     if process.poll() is not None:break
+     time.sleep(.05)
+    assert main_finished
+    run(['systemctl','stop',unit],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    stdout,stderr=process.communicate(timeout=3)
+    assert process.returncode==0 and len(stdout)<=4096 and len(stderr)<=4096
+   finally:
+    if process.poll() is None:
+     subprocess.run(['systemctl','kill','--kill-whom=all','--signal=KILL',unit],env=ENV,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=5)
+     process.kill();process.communicate(timeout=3)
+   value=json.loads(stdout); assert set(value)=={'uid','gid','openat2_succeeded','errno','no_new_privileges','effective_capabilities'}
    assert value['uid']==account.pw_uid and value['gid']==account.pw_gid and value['no_new_privileges']==1 and value['effective_capabilities']==0
    value.update(restrict_suid_sgid=restricted)
    assert (not value['openat2_succeeded'] and value['errno']==38) if restricted=='yes' else (value['openat2_succeeded'] and value['errno']==0)

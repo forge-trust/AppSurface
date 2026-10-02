@@ -17,8 +17,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          set +e
           sudo timeout --signal=TERM --kill-after=5s 60s python3 -B .github/issue779-openat2-policy-probe/probe.py "$RUNNER_TEMP/openat2-policy-root.json"
-          sudo install -o "$(id -u)" -g "$(id -g)" -m 0600 "$RUNNER_TEMP/openat2-policy-root.json" "$RUNNER_TEMP/openat2-policy.json"
+          probe_exit=$?
+          set -e
+          if sudo test -f "$RUNNER_TEMP/openat2-policy-root.json"; then
+            sudo install -o "$(id -u)" -g "$(id -g)" -m 0600 "$RUNNER_TEMP/openat2-policy-root.json" "$RUNNER_TEMP/openat2-policy.json"
+          fi
+          exit "$probe_exit"
       - name: Retain finite safe compatibility receipt
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
