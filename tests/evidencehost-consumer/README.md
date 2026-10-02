@@ -80,6 +80,53 @@ not handle external topology or confer permission to reuse failed production out
 
 ## Before public API freeze or Trusted support
 
+### Root completion channel
+
+The [internal Linux launcher](../../scripts/evidencehost-linux-launcher.py) offers
+`launch_with_completion(args)` to an importing protected root parent. It executes
+the same authentication, admission, allocation and supervised worker path as
+`launch(args)`. The existing command-line entry and Path return remain compatible;
+there is no completion or admission override in command-line or environment data.
+
+The returned context owns retained no-follow output and output-parent directory
+descriptors. `descriptor`, `output_identity` and `output_parent_identity` return
+defensive copies of root-selected facts. `subject_output_receipts` contains one
+immutable `(received_bytes, stdout_bytes, stderr_bytes)` tuple per acknowledged
+subject command. `duplicate_output_directory()` and `duplicate_output_parent()`
+return caller-owned descriptors; close each duplicate and the context explicitly.
+The context also retains this launch's worker/subject accounts and results group, so
+the worker UID cannot be reused while the parent collects from the retained handles.
+Finish collection and close all duplicate handles, then call `completion.close()`
+successfully **before invoking the gate**. Close attempts both owned descriptor
+closures and strictly checks account deletion. It is idempotent: cleanup runs once,
+and any cleanup failure is latched and raised on every subsequent close. A close
+failure forbids the gate; it cannot be made successful by calling close again.
+Duplicate handles continue to refer to the originally verified directories if a
+path is renamed. A collector must also reject a changed named binding before
+publication and read every artifact through the retained directory, with the
+existing byte, link, ownership and digest checks.
+
+Completion requires authenticated ready, protocol wait/exit, successful physical
+worker exit, empty worker and subject cgroups, no active request/artifact operation,
+and error-free joined subject pumps with exact job-wide received-byte accounting.
+Every started command must have both EOF acknowledgements and a matching byte
+receipt; overflow, missing acknowledgement or identity drift yields no completion.
+Failures retain the existing quarantine disposition. A completion candidate stays
+launcher-owned until channels/handlers and scratch cleanup succeed. Any exceptional
+exit before transfer closes both retained directory descriptors and returns no
+completion; run accounts and the output quarantine remain retained on failure.
+Successful transfer moves account cleanup into the returned context. Its copied
+descriptor records the actual selected subject root and identities after private
+scratch removal. The legacy `launch(args) -> Path` wrapper closes the context,
+including accounts, before returning and propagates cleanup failure.
+
+Use this channel to build independently selected downstream expectations after
+owned exit. It grants no Trusted admission and verifies no artifact contents by
+itself. Uploaded copies of its facts or a success exit do not authenticate a
+protected channel. The [portable retained-handle controls](test_linux_launcher.py)
+exercise physical directory descriptors and rejection paths with fixture-owned
+protocol/cgroup state; the current channel still requires native integration.
+
 ### Standalone gate and Aspire child controls
 
 The [protected gate consumer](ProtectedGateConsumer/README.md) is a separate

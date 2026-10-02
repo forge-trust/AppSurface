@@ -24,6 +24,11 @@ READINESS_SECONDS = 20
 CLEANUP_SECONDS = 10
 COOPERATIVE_SECONDS = 5
 WATCHDOG_ACK_SECONDS = 3
+IDENTITY_FAILURE = "application-identity-rejected"
+IDENTITY_STAGE = "startup-identity-validation"
+IDENTITY_DIAGNOSTIC_LIMIT = 4096
+ACTIVE_STATES = frozenset(("active", "reloading", "inactive", "failed", "activating", "deactivating",
+                           "maintenance", "refreshing", "unknown"))
 
 
 class WatchdogFailure(RuntimeError):
@@ -56,10 +61,52 @@ def belongs_to_group(pid, group):
                for line in Path(f"/proc/{pid}/cgroup").read_text().splitlines())
 
 
-def identity_matches(pid, uid, group):
+def identity_matches(pid, uid, group, facts=None):
     status = Path(f"/proc/{pid}/status").read_text().splitlines()
-    identities = next(line.split()[1:] for line in status if line.startswith("Uid:"))
-    return all(int(value) == uid for value in identities) and belongs_to_group(pid, group)
+    identities = [int(value) for value in next(line.split()[1:] for line in status if line.startswith("Uid:"))]
+    if facts is not None:
+        facts["uid"] = identities
+    if not all(value == uid for value in identities):
+        return False
+    matches = belongs_to_group(pid, group)
+    if facts is not None:
+        facts["cgroup_matches"] = matches
+    return matches
+
+
+def preserve_identity_rejection(receipt):
+    """The first identity rejection remains terminal even if later cleanup also fails."""
+    if receipt.get("failure_stage") == IDENTITY_STAGE:
+        receipt["failure"] = IDENTITY_FAILURE
+
+
+def record_identity_rejection(receipt, control, pid, target_uid, facts, group, properties, started):
+    """Latch a fixed safe category; capture bounded numeric facts without changing rejection."""
+    receipt.update(failure=IDENTITY_FAILURE, failure_stage=IDENTITY_STAGE, identity_diagnostic_written=False)
+    try:
+        identities = facts["uid"]
+        main_pid = int(properties.get("MainPID", "0"))
+        numbers = [pid, target_uid, main_pid, *identities]
+        if len(identities) != 4 or any(type(value) is not int or not 0 <= value <= 0xffffffff for value in numbers):
+            return
+        matches = facts["cgroup_matches"] if "cgroup_matches" in facts else belongs_to_group(pid, group)
+        if type(matches) is not bool:
+            return
+        active = properties.get("ActiveState", "unknown")
+        data = {"candidate_pid": pid, "target_uid": target_uid, "uid": identities,
+                "cgroup_matches": matches, "main_pid": main_pid,
+                "active_state": active if active in ACTIVE_STATES else "unknown",
+                "elapsed_seconds": round(max(0, time.monotonic() - started), 6)}
+        encoded = json.dumps(data, allow_nan=False, separators=(",", ":")).encode() + b"\n"
+        if len(encoded) > IDENTITY_DIAGNOSTIC_LIMIT:
+            return
+        with (control / "identity-rejection.json").open("xb") as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write(encoded)
+        receipt["identity_diagnostic_written"] = True
+    except Exception:
+        # The original rejection is authoritative even when its private capture fails.
+        pass
 
 
 def ready_request(path, uid, group):
@@ -395,7 +442,10 @@ def prove(args):
             if group:
                 for pid in cgroup_pids(group):
                     try:
-                        if not identity_matches(pid, args.subject_uid, group):
+                        facts = {}
+                        if not identity_matches(pid, args.subject_uid, group, facts):
+                            record_identity_rejection(receipt, control, pid, args.subject_uid, facts, group,
+                                                      properties, deadline - JOB_SECONDS)
                             raise RuntimeError("Unexpected application process identity.")
                         text = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")[:1024]
                         observed[str(pid)] = ("descendant" if "--descendant" in text else "resource" if "NativeHttpResource.dll" in text
@@ -457,6 +507,7 @@ def prove(args):
         receipt["control_result"] = "cancel-requested" if args.case == "cancel" else "bounded-control-complete"
     except Exception as error:
         receipt["failure"] = "watchdog-unavailable" if isinstance(error, WatchdogFailure) else "control-or-readiness-failure"
+        preserve_identity_rejection(receipt)
         receipt["error_class"] = type(error).__name__
     finally:
         if process is not None:
@@ -499,6 +550,7 @@ def prove(args):
             receipt["cleanup"] = True
         else:
             (control / "quarantine").write_text("unconfirmed-exit; retain all paths\n")
+        preserve_identity_rejection(receipt)
         receipt["receipt_path"] = str(control / "receipt.json")
         (control / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
     print(json.dumps(receipt))

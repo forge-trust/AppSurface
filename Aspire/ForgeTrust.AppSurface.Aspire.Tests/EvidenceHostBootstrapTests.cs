@@ -585,6 +585,413 @@ public sealed class EvidenceHostBootstrapTests
         Assert.Contains("cleanup failed", manifest.Metrics.CleanupDiagnostic, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task RunSharedCore_ShouldWriteAndVerifyArtifactAfterAtomicCompleteRegistration()
+    {
+        var plan = SealPlan(CreatePlan().Profile with
+        {
+            Producers =
+            [
+                CreatePlan().Profile.Producers.Single() with
+                {
+                    ArtifactSlots = [new EvidenceArtifactSlot("report", "coverage", "text/plain", Required: true, MaximumBytes: 16)],
+                },
+            ],
+        });
+        var resource = new DisposableReadyResource("postgres");
+        var producer = new ArtifactWritingProducer("coverage");
+        var wrongResource = new ReadyResource("wrong-resource");
+        var wrongProducer = new PassingProducer("wrong-producer", "coverage/assertion@1");
+        var configureCount = 0;
+        using var run = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Trusted, plan);
+        await using var host = EvidenceHostBootstrap.Create(plan, registration =>
+        {
+            configureCount++;
+            var resourceMismatch = Assert.Throws<ArgumentException>(() =>
+                registration.AddResource(plan.Profile.Resources.Single(), wrongResource));
+            var producerMismatch = Assert.Throws<ArgumentException>(() =>
+                registration.AddProducer(plan.Profile.Producers.Single(), wrongProducer));
+            Assert.Equal("resource", resourceMismatch.ParamName);
+            Assert.Equal("producer", producerMismatch.ParamName);
+            registration.AddResource(plan.Profile.Resources.Single(), resource);
+            registration.AddProducer(plan.Profile.Producers.Single(), producer);
+        });
+
+        var manifest = await run.RunAsync(host);
+
+        Assert.Equal(1, configureCount);
+        Assert.Equal(0, wrongResource.WaitCount);
+        Assert.Equal(0, wrongProducer.RunCount);
+        Assert.Equal(1, resource.WaitCount);
+        Assert.Equal(1, resource.DisposeCount);
+        Assert.Equal(1, producer.RunCount);
+        var result = Assert.Single(manifest.ProducerResults);
+        Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
+        var artifact = Assert.Single(result.Artifacts!);
+        var bytes = await File.ReadAllBytesAsync(Path.Join(run.ArtifactDirectory, "coverage", artifact.RelativePath));
+        Assert.Equal("written"u8.ToArray(), bytes);
+        Assert.Equal(bytes.LongLength, artifact.LengthBytes);
+        Assert.Equal(EvidenceDigest.Sha256(bytes), artifact.Sha256);
+        Assert.Equal(EvidenceClaimKind.TargetedComplete, manifest.ClaimKind);
+        Assert.True(manifest.Metrics.CleanupCompleted);
+        Assert.Equal(EvidenceDigest.CanonicalSha256(manifest with { ManifestDigest = string.Empty }), manifest.ManifestDigest);
+        Assert.Equal(1, run.Supervisor.CompletionAcknowledgements);
+    }
+
+    [Fact]
+    public async Task RunSharedCore_ShouldRejectUnrestrictedFactoryAfterHealthRegistrationWithoutInvokingEitherFactory()
+    {
+        var plan = CreatePlan();
+        var declaration = plan.Profile.Resources.Single();
+        var producer = new DisposablePassingProducer("coverage", "coverage/assertion@1");
+        var factoryCount = 0;
+        await using var host = EvidenceHostBootstrap.Create(plan, registration =>
+        {
+            Assert.Throws<ArgumentException>(() => registration.AddAspireHealthResource(
+                declaration with { Readiness = "unsupported" }, "database"));
+            registration.AddAspireHealthResource(declaration, "database");
+            Assert.Throws<InvalidOperationException>(() => registration.AddAspireHealthResource(declaration, "another-database"));
+            registration.AddProducer(plan.Profile.Producers.Single(), producer);
+            registration.SetApplicationFactory(() =>
+            {
+                factoryCount++;
+                throw new InvalidOperationException("An unrestricted application must not start.");
+            });
+            Assert.Throws<InvalidOperationException>(() => registration.SetApplicationFactory(() =>
+            {
+                factoryCount++;
+                throw new InvalidOperationException("A replacement application must not start.");
+            }));
+        });
+        using var run = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Trusted, plan);
+
+        var exception = await Assert.ThrowsAsync<EvidenceAdmissionException>(() => run.RunAsync(host));
+
+        Assert.Equal("ASEVD407", exception.Code);
+        Assert.Equal(0, factoryCount);
+        Assert.Equal(0, producer.RunCount);
+        Assert.Equal(1, producer.DisposeCount);
+        Assert.Equal(1, run.Supervisor.StopRequests);
+        Assert.Equal(1, run.Supervisor.ExitAcknowledgements);
+        Assert.Equal(0, run.Supervisor.CompletionAcknowledgements);
+    }
+
+    [Theory]
+    [InlineData("producer-declaration")]
+    [InlineData("extra-producer")]
+    [InlineData("extra-resource")]
+    public async Task RunSharedCore_ShouldRejectRegistrationDriftAndDisposeBeforeAnyStageStarts(string drift)
+    {
+        var plan = CreatePlan();
+        var resource = new DisposableReadyResource("postgres");
+        var producer = new DisposablePassingProducer("coverage", "coverage/assertion@1");
+        var extraResource = new DisposableReadyResource("extra-resource");
+        var extraProducer = new DisposablePassingProducer("extra-producer", "coverage/assertion@1");
+        var configureCount = 0;
+        await using var host = EvidenceHostBootstrap.Create(plan, registration =>
+        {
+            configureCount++;
+            registration.AddResource(plan.Profile.Resources.Single(), resource);
+            var declaration = plan.Profile.Producers.Single();
+            registration.AddProducer(drift == "producer-declaration"
+                ? declaration with { TimeoutSeconds = declaration.TimeoutSeconds + 1 }
+                : declaration, producer);
+            if (drift == "extra-producer") registration.AddProducer(extraProducer);
+            if (drift == "extra-resource") registration.AddResource(extraResource);
+        });
+        using var run = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Trusted, plan);
+
+        var exception = await Assert.ThrowsAsync<EvidenceAdmissionException>(() => run.RunAsync(host));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => run.RunAsync(host));
+
+        Assert.Equal("ASEVD404", exception.Code);
+        Assert.Equal(1, configureCount);
+        Assert.Equal(0, resource.WaitCount);
+        Assert.Equal(0, producer.RunCount);
+        Assert.Equal(0, extraResource.WaitCount);
+        Assert.Equal(0, extraProducer.RunCount);
+        Assert.Equal(1, resource.DisposeCount);
+        Assert.Equal(1, producer.DisposeCount);
+        Assert.Equal(drift == "extra-resource" ? 1 : 0, extraResource.DisposeCount);
+        Assert.Equal(drift == "extra-producer" ? 1 : 0, extraProducer.DisposeCount);
+        Assert.Equal(1, run.Supervisor.StopRequests);
+        Assert.Equal(1, run.Supervisor.ExitAcknowledgements);
+        Assert.Equal(0, run.Supervisor.CompletionAcknowledgements);
+    }
+
+    [Fact]
+    public async Task RunSharedCore_ShouldRejectInsufficientAggregateBudgetBeforeConfigurationAndConsumeAttempt()
+    {
+        var configureCount = 0;
+        await using var host = EvidenceHostBootstrap.Create(CreatePlan(), _ => configureCount++);
+        using var run = EvidenceHostAdmissionTestRun.Create(
+            EvidenceExecutionMode.Trusted, host.Plan, jobRemaining: TimeSpan.FromSeconds(1));
+
+        var exception = await Assert.ThrowsAsync<EvidenceAdmissionException>(() => run.RunAsync(host));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => run.RunAsync(host));
+
+        Assert.Equal("ASEVD410", exception.Code);
+        Assert.Equal(0, configureCount);
+        Assert.False(Directory.Exists(run.ArtifactDirectory));
+        Assert.Equal(0, run.Supervisor.StopRequests);
+        Assert.Equal(0, run.Supervisor.ExitAcknowledgements);
+        Assert.Equal(0, run.Supervisor.CompletionAcknowledgements);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(121)]
+    public async Task RunSharedCore_ShouldRejectInvalidStartAllowanceWithoutConsumingTheHost(int seconds)
+    {
+        var configureCount = 0;
+        var resource = new ReadyResource("postgres");
+        var producer = new PassingProducer("coverage", "coverage/assertion@1");
+        await using var host = EvidenceHostBootstrap.Create(CreatePlan(), registration =>
+        {
+            configureCount++;
+            registration.AddResource(resource);
+            registration.AddProducer(producer);
+        });
+        using var run = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Trusted, host.Plan);
+
+        var exception = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            run.RunAsync(host, loweredStartAllowance: TimeSpan.FromSeconds(seconds)));
+        Assert.Equal("loweredStartAllowance", exception.ParamName);
+        Assert.Equal(0, configureCount);
+        Assert.False(Directory.Exists(run.ArtifactDirectory));
+        Assert.Equal(0, run.Supervisor.StopRequests);
+
+        var manifest = await run.RunAsync(host, loweredStartAllowance: TimeSpan.FromSeconds(30));
+
+        Assert.Equal(EvidenceClaimKind.TargetedComplete, manifest.ClaimKind);
+        Assert.Equal(1, configureCount);
+        Assert.Equal(1, resource.WaitCount);
+        Assert.Equal(1, producer.RunCount);
+        Assert.Equal(1, run.Supervisor.CompletionAcknowledgements);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunSharedCore_ShouldCleanPartialConfigurationAfterFailureOrCancellation(bool cancel)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var configureCount = 0;
+        var resource = new DisposableReadyResource("postgres");
+        var producer = new DisposablePassingProducer("coverage", "coverage/assertion@1");
+        var host = EvidenceHostBootstrap.Create(CreatePlan(), registration =>
+        {
+            configureCount++;
+            registration.AddResource(resource);
+            registration.AddProducer(producer);
+            if (cancel) cancellation.Cancel();
+            else throw new InvalidOperationException("Configuration failed after taking ownership.");
+        });
+        using var run = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Trusted, host.Plan);
+        await using (host)
+        {
+            var exception = await Assert.ThrowsAsync<EvidenceAdmissionException>(() => run.RunAsync(host, cancellation.Token));
+            Assert.Equal("ASEVD410", exception.Code);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => run.RunAsync(host));
+            Assert.Equal(1, resource.DisposeCount);
+            Assert.Equal(1, producer.DisposeCount);
+        }
+
+        Assert.Equal(1, configureCount);
+        Assert.Equal(0, resource.WaitCount);
+        Assert.Equal(0, producer.RunCount);
+        Assert.Equal(1, resource.DisposeCount);
+        Assert.Equal(1, producer.DisposeCount);
+        Assert.Equal(1, run.Supervisor.StopRequests);
+        Assert.Equal(1, run.Supervisor.ExitAcknowledgements);
+        Assert.Equal(0, run.Supervisor.CompletionAcknowledgements);
+        Assert.Equal(EvidenceHostState.Disposed, host.State);
+    }
+
+    [Theory]
+    [InlineData("undefined-outcome", EvidenceProducerOutcome.Invalid)]
+    [InlineData("null-assertions", EvidenceProducerOutcome.Invalid)]
+    [InlineData("foreign-assertion", EvidenceProducerOutcome.Invalid)]
+    [InlineData("null-result", EvidenceProducerOutcome.Failed)]
+    [InlineData("failed-result", EvidenceProducerOutcome.Failed)]
+    public async Task RunSharedCore_ShouldStopAfterMalformedOrFailedResultWithoutInvokingLaterProducer(
+        string failure,
+        EvidenceProducerOutcome expectedOutcome)
+    {
+        var firstDeclaration = CreatePlan().Profile.Producers.Single();
+        var plan = SealPlan(CreatePlan().Profile with
+        {
+            Producers = [firstDeclaration, firstDeclaration with { Id = "later" }],
+        });
+        var producer = new ResultProducer("coverage", failure switch
+        {
+            "undefined-outcome" => new("coverage", (EvidenceProducerOutcome)int.MaxValue, ["coverage/assertion@1"]),
+            "null-assertions" => new("coverage", EvidenceProducerOutcome.Passed, null!),
+            "foreign-assertion" => new("coverage", EvidenceProducerOutcome.Passed, ["not-declared/assertion@1"]),
+            "null-result" => null,
+            _ => new("coverage", EvidenceProducerOutcome.Failed, []),
+        });
+        var later = new DisposablePassingProducer("later", "coverage/assertion@1");
+        var resource = new DisposableReadyResource("postgres");
+        await using var host = EvidenceHostBootstrap.Create(plan, registration =>
+        {
+            registration.AddResource(resource);
+            registration.AddProducer(producer);
+            registration.AddProducer(later);
+        });
+        using var run = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Trusted, plan);
+
+        var manifest = await run.RunAsync(host);
+
+        var result = Assert.Single(manifest.ProducerResults);
+        Assert.Equal("coverage", result.ProducerId);
+        Assert.Equal(expectedOutcome, result.Outcome);
+        Assert.Empty(result.SatisfiedAssertionIds);
+        Assert.Equal(1, producer.RunCount);
+        Assert.Equal(0, later.RunCount);
+        Assert.Equal(1, producer.DisposeCount);
+        Assert.Equal(1, later.DisposeCount);
+        Assert.Equal(1, resource.DisposeCount);
+        Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+        Assert.Equal(EvidenceClaimEligibility.None, manifest.Eligibility);
+        Assert.True(manifest.Metrics.CleanupCompleted);
+        if (failure != "null-result")
+        {
+            Assert.Equal(nameof(EvidenceWorkerTerminalCode.StageFailed), manifest.Metrics.TerminalFailureCode);
+        }
+        Assert.Equal(1, run.Supervisor.StopRequests);
+        Assert.Equal(1, run.Supervisor.ExitAcknowledgements);
+        Assert.Equal(1, run.Supervisor.CompletionAcknowledgements);
+    }
+
+    [Fact]
+    public async Task RunSharedCore_ShouldRejectCollectionWhenWorkerCompletionFailsAfterOwnedCleanup()
+    {
+        var resource = new DisposableReadyResource("postgres");
+        var producer = new DisposablePassingProducer("coverage", "coverage/assertion@1");
+        await using var host = EvidenceHostBootstrap.Create(CreatePlan(), registration =>
+        {
+            registration.AddResource(resource);
+            registration.AddProducer(producer);
+        });
+        using var run = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Trusted, host.Plan);
+        var completionCount = 0;
+
+        var exception = await Assert.ThrowsAsync<EvidenceAdmissionException>(() => run.RunAsync(host, completeWorker: token =>
+        {
+            completionCount++;
+            Assert.Equal(1, run.Supervisor.ExitAcknowledgements);
+            Assert.Equal(1, resource.DisposeCount);
+            Assert.Equal(1, producer.DisposeCount);
+            Assert.True(token.CanBeCanceled);
+            Assert.False(token.IsCancellationRequested);
+            return ValueTask.FromException(new IOException("Worker completion was not acknowledged."));
+        }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => run.RunAsync(host));
+
+        Assert.Equal("ASEVD410", exception.Code);
+        Assert.Contains("Manifest collection", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(1, completionCount);
+        Assert.Equal(1, resource.WaitCount);
+        Assert.Equal(1, producer.RunCount);
+        Assert.Equal(1, resource.DisposeCount);
+        Assert.Equal(1, producer.DisposeCount);
+        Assert.Equal(0, run.Supervisor.CompletionAcknowledgements);
+        Assert.NotEqual(EvidenceHostState.Completed, host.State);
+    }
+
+    [Fact]
+    public async Task RunSharedCore_ShouldSerializeConcurrentAttemptsWithoutReconfiguringOrRerunningProducer()
+    {
+        var configureCount = 0;
+        var producer = new BarrierProducer("coverage");
+        var resource = new DisposableReadyResource("postgres");
+        await using var host = EvidenceHostBootstrap.Create(CreatePlan(), registration =>
+        {
+            configureCount++;
+            registration.AddResource(resource);
+            registration.AddProducer(producer);
+        });
+        using var run = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Trusted, host.Plan);
+        var first = run.RunAsync(host);
+        await producer.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var second = run.RunAsync(host);
+        try
+        {
+            Assert.False(first.IsCompleted);
+            Assert.False(second.IsCompleted);
+        }
+        finally
+        {
+            producer.Release.TrySetResult();
+        }
+
+        var manifest = await first;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => second);
+
+        Assert.Equal(EvidenceClaimKind.TargetedComplete, manifest.ClaimKind);
+        Assert.Equal(1, configureCount);
+        Assert.Equal(1, resource.WaitCount);
+        Assert.Equal(1, resource.DisposeCount);
+        Assert.Equal(1, producer.RunCount);
+        Assert.Equal(1, producer.DisposeCount);
+        Assert.Equal(1, run.Supervisor.CompletionAcknowledgements);
+    }
+
+    [Fact]
+    public async Task RunSharedCore_ShouldContinueReverseCleanupAfterFailureAndDisposeSharedInstanceOnlyOnce()
+    {
+        var cleanup = new List<string>();
+        var plan = SealPlan(CreatePlan().Profile with
+        {
+            Resources =
+            [
+                new EvidenceResourceDeclaration("shared", "aspire_health", 30, []),
+                new EvidenceResourceDeclaration("database", "aspire_health", 30, ["shared"]),
+            ],
+            Producers =
+            [
+                new EvidenceProducerDeclaration("shared", "coverage", "1.0.0", ["database"], ["coverage/assertion@1"], [], 30),
+                new EvidenceProducerDeclaration("coverage", "coverage", "1.0.0", ["database"], ["coverage/assertion@1"], [], 30),
+            ],
+        });
+        var shared = new SharedDisposableCapability("shared", cleanup);
+        var resource = new RecordingSyncResource("database", cleanup);
+        var producer = new RecordingFailingDisposableProducer("coverage", cleanup);
+        var host = EvidenceHostBootstrap.Create(plan, registration =>
+        {
+            registration.AddResource(shared);
+            registration.AddResource(resource);
+            registration.AddProducer(shared);
+            registration.AddProducer(producer);
+        });
+        using var run = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Trusted, plan);
+        await using (host)
+        {
+            var manifest = await run.RunAsync(host);
+            Assert.All(manifest.ProducerResults, result => Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome));
+            Assert.Equal(EvidenceExecutionVerdict.Incomplete, manifest.ExecutionVerdict);
+            Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+            Assert.Equal(EvidenceClaimEligibility.None, manifest.Eligibility);
+            Assert.False(manifest.Metrics.CleanupCompleted);
+            Assert.Equal(nameof(EvidenceWorkerTerminalCode.CleanupFailed), manifest.Metrics.TerminalFailureCode);
+            Assert.Equal(["coverage", "shared", "database"], cleanup);
+            await host.DisposeAsync();
+        }
+
+        Assert.Equal(["coverage", "shared", "database"], cleanup);
+        Assert.Equal(1, shared.WaitCount);
+        Assert.Equal(1, shared.RunCount);
+        Assert.Equal(1, shared.DisposeCount);
+        Assert.Equal(1, resource.WaitCount);
+        Assert.Equal(1, resource.DisposeCount);
+        Assert.Equal(1, producer.RunCount);
+        Assert.Equal(1, producer.DisposeCount);
+        Assert.Equal(1, run.Supervisor.ExitAcknowledgements);
+        Assert.Equal(1, run.Supervisor.CompletionAcknowledgements);
+    }
+
     private static EvidencePlan CreatePlan(
         int resourceDeadlineSeconds = 30,
         EvidenceProfileScope scope = EvidenceProfileScope.Targeted,
@@ -614,6 +1021,121 @@ public sealed class EvidenceHostBootstrapTests
         {
             WaitCount++;
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class ArtifactWritingProducer(string id) : IEvidenceProducer
+    {
+        public string Id { get; } = id;
+
+        public int RunCount { get; private set; }
+
+        public async ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
+        {
+            RunCount++;
+            var artifact = await context.Artifacts!.WriteAsync("report", "coverage/report.txt", "written"u8.ToArray(), cancellationToken);
+            return new EvidenceProducerResult(Id, EvidenceProducerOutcome.Passed, ["coverage/assertion@1"], Artifacts: [artifact]);
+        }
+    }
+
+    private sealed class ResultProducer(string id, EvidenceProducerResult? result) : IEvidenceProducer, IAsyncDisposable
+    {
+        public string Id { get; } = id;
+
+        public int RunCount { get; private set; }
+
+        public int DisposeCount { get; private set; }
+
+        public ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
+        {
+            RunCount++;
+            return ValueTask.FromResult(result!);
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            DisposeCount++;
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class BarrierProducer(string id) : IEvidenceProducer, IAsyncDisposable
+    {
+        public string Id { get; } = id;
+
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int RunCount { get; private set; }
+
+        public int DisposeCount { get; private set; }
+
+        public async ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
+        {
+            RunCount++;
+            Started.TrySetResult();
+            await Release.Task.WaitAsync(cancellationToken);
+            return new EvidenceProducerResult(Id, EvidenceProducerOutcome.Passed, ["coverage/assertion@1"]);
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            DisposeCount++;
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class SharedDisposableCapability(string id, List<string> cleanup) : IEvidenceResourceReadiness, IEvidenceProducer, IAsyncDisposable
+    {
+        public string Id { get; } = id;
+
+        public int WaitCount { get; private set; }
+
+        public int RunCount { get; private set; }
+
+        public int DisposeCount { get; private set; }
+
+        public Task WaitUntilReadyAsync(CancellationToken cancellationToken)
+        {
+            WaitCount++;
+            return Task.CompletedTask;
+        }
+
+        public ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
+        {
+            RunCount++;
+            return ValueTask.FromResult(new EvidenceProducerResult(Id, EvidenceProducerOutcome.Passed, ["coverage/assertion@1"]));
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            DisposeCount++;
+            cleanup.Add(Id);
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingSyncResource(string id, List<string> cleanup) : ReadyResource(id), IDisposable
+    {
+        public int DisposeCount { get; private set; }
+
+        public void Dispose()
+        {
+            DisposeCount++;
+            cleanup.Add(Id);
+        }
+    }
+
+    private sealed class RecordingFailingDisposableProducer(string id, List<string> cleanup) : PassingProducer(id, "coverage/assertion@1"), IAsyncDisposable
+    {
+        public int DisposeCount { get; private set; }
+
+        public ValueTask DisposeAsync()
+        {
+            DisposeCount++;
+            cleanup.Add(Id);
+            return ValueTask.FromException(new InvalidOperationException("Producer cleanup failed."));
         }
     }
 

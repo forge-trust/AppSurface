@@ -49,9 +49,8 @@ async Task<IDistributedApplicationBuilder> CreateFactoryAsync()
         DisableDashboard = true,
         EnableResourceLogging = true,
         ProjectDirectory = scratch,
-        Args = ["--Dcp:CliPath", Path.Combine(payload, "dcp", "dcp"),
-            "--Dcp:ExtensionsPath", Path.Combine(payload, "dcp", "ext"),
-            "--Dcp:WaitForResourceCleanup", "true"]
+        Args = ["--DcpPublisher:CliPath", Path.Combine(payload, "dcp", "dcp"),
+            "--DcpPublisher:WaitForResourceCleanup", "true"]
     });
     var storeBase = Path.GetFullPath(Path.Combine(scratch, ".aspire-store"));
     if (!string.Equals(Environment.GetEnvironmentVariable("ASPIRE__STORE__PATH"), storeBase, StringComparison.Ordinal))

@@ -185,3 +185,45 @@ records the pinned SDK store configuration and the next narrow scratch-path
 correction. Neither native result proves the shared Aspire host, protected-base
 execution, Trusted admission or downstream acceptance. Every provider/platform
 entry remains excluded.
+
+### Full-source gate and next startup failures (2026-10-02)
+
+[Native gate run 37037592365](https://github.com/forge-trust/AppSurface/actions/runs/37037592365)
+used the same 2725-file candidate and reached the unchanged
+[`coverage-solution.sh` gate](../../scripts/coverage-solution.sh). All 54 test
+projects completed with 15269 passing tests, zero failures and two existing
+skips. The aggregate report measured 94.88% lines and 88.522% branches, within
+the configured gate's existing tolerance. Patch coverage measured 82.852%
+lines and 76.6374% branches; the gate exited **1** with `ASCOV020`. This is a
+failed required gate. The next work adds meaningful tests for the measured
+uncovered worker, budget, protected producer and host paths. The thresholds,
+comparison base, patch mode, selections and exclusions remain unchanged.
+
+[Systemd run 37039914626](https://github.com/forge-trust/AppSurface/actions/runs/37039914626)
+used the next complete snapshot, `2b7da72fa2eba5d15300052efc5818fb868d7f9d`.
+The namespace failure was gone, but the worker exited with `ExecMainCode=1`
+and `ExecMainStatus=1`. The closed cause was `worker-protocol-incomplete`;
+the retained receipt did not distinguish missing readiness from a missing
+terminal acknowledgement. There was no completed runtime proof or manifest.
+The next bounded root diagnostic records those lifecycle checkpoints and
+the unit's private journal without publishing raw subject output.
+
+[Aspire mechanism run 37039916803](https://github.com/forge-trust/AppSurface/actions/runs/37039916803)
+used that same frozen source. Locked native restore and build again exited
+zero with no warnings or errors. **Zero of five** controls passed. Four
+startup cases got past the store failure, then tried the embedded NuGet DCP
+path beneath protected home: the fixture supplied `Dcp:CliPath`, while
+Aspire 13.4.4 reads `DcpPublisher:CliPath`. No DCP or resource PID was observed.
+The factory-stall case failed before process observations were published;
+its exact identity rejection facts were not retained, so no specific kernel
+race is established. All five cases confirmed empty owned cgroups and
+complete error-free pump accounting before cleanup.
+
+The [child fixture](../../tests/evidencehost-consumer/AspireChild/README.md)
+now supplies the pinned SDK's correct DCP option section and records a
+bounded, root-only identity diagnostic when the unchanged UID/cgroup guard
+rejects a process. Its scoped build is warning-free and all forty portable
+controls pass. These source checks require a new exact native run; they do
+not turn either earlier failure into acceptance. Shared Aspire execution,
+protected downstream acceptance and all remaining acceptance groups are
+still required, and Trusted support remains excluded.

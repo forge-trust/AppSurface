@@ -56,6 +56,16 @@ empty child cgroups and joined output pumps. The broker PID is in the descriptor
 so the C# client can pin SO_PEERCRED across connections. No
 shell is involved. This is internal/provisional code, not a public API. Execution
 requires disposable Linux, systemd 255+, cgroup v2, and root.
+
+An importing protected root parent may use ``launch_with_completion`` instead of
+the Path-compatible ``launch``. It receives copied root-selected descriptor facts,
+acknowledged subject output counts, and retained no-follow output/parent directory
+handles only after successful worker exit, empty owned cgroups and joined handlers.
+Accounts remain reserved until the parent finishes collection, closes its duplicated
+handles and successfully closes the completion. Account cleanup must precede the gate.
+The parent must verify final artifact bytes and independently resolve the expected
+plan before invoking its gate. The completion object grants no Trusted admission,
+and serializing its facts does not authenticate an uploaded receipt.
 """
 from __future__ import annotations
 
@@ -69,6 +79,7 @@ import os
 import platform
 import pwd
 import re
+import selectors
 import stat
 import shutil
 import socket
@@ -85,6 +96,14 @@ SCHEMA = "evidence-worker-linux-v1"
 FAILURE_DIAGNOSTIC_SCHEMA = "evidence-launcher-failure-v1"
 FAILURE_DIAGNOSTIC_FILE = "launcher-failure.json"
 FAILURE_DIAGNOSTIC_LIMIT = 4096
+WORKER_JOURNAL_FILE = "launcher-worker-journal.log"
+WORKER_JOURNAL_SECONDS = 5
+WORKER_JOURNAL_CODES = frozenset({"ASEVD211", "ASEVD401", "ASEVD402", "ASEVD403", "ASEVD404",
+                                "ASEVD405", "ASEVD406", "ASEVD407", "ASEVD408", "ASEVD409",
+                                "ASEVD410", "ASEVD411", "ASEVD420", "ASEVD421"})
+WORKER_JOURNAL_STATES = frozenset({"collected", "missing", "unavailable", "truncated", "read-error"})
+BROKER_DIAGNOSTIC_BOOLEANS = ("broker_ready_seen", "broker_wait_completed", "broker_exited", "broker_work_closed")
+BROKER_DIAGNOSTIC_COUNTS = {"broker_active_handlers": 4096, "broker_active_runs": 1}
 FAILURE_DIAGNOSTIC_CAUSES = frozenset({
     "unclassified-host-failure", "requires-root-systemd-linux", "requires-cgroup-v2",
     "requires-systemd-255", "openat2-x86-64-required", "systemd-operation-failed", "host-command-start-failed",
@@ -100,6 +119,8 @@ FAILURE_DIAGNOSTIC_CAUSES = frozenset({
     "subject-copy-byte-limit", "subject-changed-during-copy",
     "worker-start-unit-absent", "worker-start-unit-rejected", "worker-start-unit-failed",
     "worker-start-command-failed", "worker-start-status-unavailable",
+    "completion-ownership-unconfirmed", "completion-output-unconfirmed",
+    "completion-output-identity-changed",
 })
 FAILURE_DIAGNOSTIC_OPERATIONS = frozenset({"systemctl", "systemd-run", "useradd", "groupadd", "userdel", "groupdel", "worker-exit", "worker-start"})
 WORKER_LOAD_STATES = frozenset({"loaded", "not-found", "error", "bad-setting", "masked"})
@@ -156,6 +177,8 @@ class LauncherError(RuntimeError):
         self.worker_main_status = None
         self.worker_load_state = None
         self.worker_result = None
+        self.broker_checkpoints = {}
+        self.worker_journal = {}
 
 
 def failure_diagnostic(error: Exception) -> dict:
@@ -183,6 +206,27 @@ def failure_diagnostic(error: Exception) -> dict:
                 value = getattr(error, name)
                 if isinstance(value, str) and value in allowed:
                     record[name] = value
+    if isinstance(error, LauncherError) and cause == "worker-protocol-incomplete" and error.operation == "worker-exit":
+        checkpoints = error.broker_checkpoints if isinstance(error.broker_checkpoints, dict) else {}
+        for name in BROKER_DIAGNOSTIC_BOOLEANS:
+            value = checkpoints.get(name)
+            if type(value) is bool:
+                record[name] = value
+        for name, maximum in BROKER_DIAGNOSTIC_COUNTS.items():
+            value = checkpoints.get(name)
+            if type(value) is int and 0 <= value <= maximum:
+                record[name] = value
+        journal = error.worker_journal if isinstance(error.worker_journal, dict) else {}
+        if isinstance(journal.get("worker_journal_state"), str) and journal["worker_journal_state"] in WORKER_JOURNAL_STATES:
+            record["worker_journal_state"] = journal["worker_journal_state"]
+        if type(journal.get("worker_journal_written")) is bool:
+            record["worker_journal_written"] = journal["worker_journal_written"]
+        if type(journal.get("worker_journal_bytes")) is int and 0 <= journal["worker_journal_bytes"] <= FAILURE_DIAGNOSTIC_LIMIT:
+            record["worker_journal_bytes"] = journal["worker_journal_bytes"]
+        codes = journal.get("worker_journal_codes")
+        if (isinstance(codes, list) and len(codes) <= len(WORKER_JOURNAL_CODES)
+                and all(isinstance(code, str) and code in WORKER_JOURNAL_CODES for code in codes)):
+            record["worker_journal_codes"] = sorted(set(codes))
     return record
 
 
@@ -197,12 +241,102 @@ def worker_exit_failure(cause: str, properties: dict[str, str]) -> LauncherError
     return error
 
 
+def _read_worker_journal(unit: str) -> tuple[str, bytes]:
+    """Read only a generated worker unit, with a combined five-second/4096-byte bound.
+
+    stderr is discarded. Reaping gets the final half-second of the same deadline;
+    a full prefix is conservatively marked truncated without reading another byte.
+    """
+    if not isinstance(unit, str) or not re.fullmatch(r"evidencehost-[0-9a-f]{12}-worker\.service", unit):
+        return "unavailable", b""
+    deadline = time.monotonic() + WORKER_JOURNAL_SECONDS
+    data = bytearray()
+    state = "unavailable"
+    process = None
+    try:
+        process = subprocess.Popen(
+            ["/usr/bin/journalctl", "--unit=" + unit, "--no-pager", "--output=cat", "--quiet", "--lines=32"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            env=ENV, cwd="/", close_fds=True)
+        os.set_blocking(process.stdout.fileno(), False)
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            while True:
+                remaining = deadline - 0.5 - time.monotonic()
+                if remaining <= 0:
+                    break
+                if not selector.select(remaining):
+                    break
+                part = os.read(process.stdout.fileno(), FAILURE_DIAGNOSTIC_LIMIT - len(data))
+                if not part:
+                    code = process.wait(timeout=max(0.001, deadline - time.monotonic()))
+                    state = ("collected" if data else "missing") if code == 0 else "unavailable"
+                    break
+                data.extend(part)
+                if len(data) == FAILURE_DIAGNOSTIC_LIMIT:
+                    state = "truncated"
+                    break
+    except (OSError, ValueError, subprocess.SubprocessError):
+        state = "read-error" if process is not None else "unavailable"
+    finally:
+        if process is not None:
+            try:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=max(0.001, deadline - time.monotonic()))
+            except (OSError, subprocess.SubprocessError):
+                pass
+            if process.stdout is not None:
+                process.stdout.close()
+    return state, bytes(data)
+
+
+def capture_worker_protocol_failure(error: LauncherError, broker: Broker, directory_fd: int | None) -> None:
+    """Attach diagnostic-only locked checkpoints; raw journal stays in one private file.
+
+    The unit is derived exclusively from this broker's root-generated prefix. Journal
+    codes are untrusted observations, never replacement host causes or gate authority.
+    All collection failures preserve the original exception and numeric exit status.
+    """
+    with broker.condition:
+        error.broker_checkpoints = {
+            "broker_ready_seen": broker.ready_seen, "broker_wait_completed": broker.wait_completed,
+            "broker_exited": broker.exited, "broker_work_closed": broker.work_closed,
+            "broker_active_handlers": broker.active_handlers, "broker_active_runs": broker.active_runs}
+    if directory_fd is None:
+        return
+    error.worker_journal = {"worker_journal_state": "unavailable", "worker_journal_written": False,
+                            "worker_journal_bytes": 0, "worker_journal_codes": []}
+    try:
+        info = os.fstat(directory_fd)
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            return
+        state, data = _read_worker_journal(broker.unit_prefix + "-worker.service")
+        if not isinstance(data, bytes) or len(data) > FAILURE_DIAGNOSTIC_LIMIT:
+            return
+        error.worker_journal.update({
+            "worker_journal_state": state if isinstance(state, str) and state in WORKER_JOURNAL_STATES else "unavailable",
+            "worker_journal_bytes": len(data),
+            "worker_journal_codes": sorted({code.decode() for code in
+                re.findall(rb"(?<![A-Za-z0-9_])ASEVD[0-9]{3}(?=:)", data)
+                if code.decode() in WORKER_JOURNAL_CODES})})
+        fd = os.open(WORKER_JOURNAL_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                     0o600, dir_fd=directory_fd)
+        with os.fdopen(fd, "wb") as output:
+            output.write(data)
+        error.worker_journal["worker_journal_written"] = True
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+        pass
+
+
 def validate_failure_diagnostic(record: object) -> dict:
     """Validate the bounded private record before a driver publishes its safe categories."""
     required = {"schema", "error_class", "cause"}
+    protocol_fields = set(BROKER_DIAGNOSTIC_BOOLEANS) | BROKER_DIAGNOSTIC_COUNTS.keys() | {
+        "worker_journal_state", "worker_journal_written", "worker_journal_bytes", "worker_journal_codes"}
     if (not isinstance(record, dict) or not required <= record.keys()
             or record.keys() - required - {"operation", "exit_code", "errno", "worker_main_code", "worker_main_status",
-                                           "worker_load_state", "worker_result"}
+                                           "worker_load_state", "worker_result"} - protocol_fields
             or record["schema"] != FAILURE_DIAGNOSTIC_SCHEMA
             or record["error_class"] not in ("LauncherError", "OSError", "SubprocessError", "ValueError")
             or not isinstance(record["cause"], str) or record["cause"] not in FAILURE_DIAGNOSTIC_CAUSES):
@@ -223,6 +357,23 @@ def validate_failure_diagnostic(record: object) -> dict:
         if name in record and (record.get("operation") != "worker-start" or not isinstance(record[name], str)
                                or record[name] not in allowed):
             raise LauncherError("invalid-private-diagnostic")
+    if protocol_fields & record.keys():
+        if record["cause"] != "worker-protocol-incomplete" or record.get("operation") != "worker-exit":
+            raise LauncherError("invalid-private-diagnostic")
+        for name in (*BROKER_DIAGNOSTIC_BOOLEANS, "worker_journal_written"):
+            if name in record and type(record[name]) is not bool:
+                raise LauncherError("invalid-private-diagnostic")
+        for name, maximum in {**BROKER_DIAGNOSTIC_COUNTS, "worker_journal_bytes": FAILURE_DIAGNOSTIC_LIMIT}.items():
+            if name in record and (type(record[name]) is not int or not 0 <= record[name] <= maximum):
+                raise LauncherError("invalid-private-diagnostic")
+        if "worker_journal_state" in record and (not isinstance(record["worker_journal_state"], str)
+                or record["worker_journal_state"] not in WORKER_JOURNAL_STATES):
+            raise LauncherError("invalid-private-diagnostic")
+        if "worker_journal_codes" in record:
+            codes = record["worker_journal_codes"]
+            if (not isinstance(codes, list) or len(codes) > len(WORKER_JOURNAL_CODES)
+                    or any(not isinstance(code, str) or code not in WORKER_JOURNAL_CODES for code in codes)):
+                raise LauncherError("invalid-private-diagnostic")
     return dict(record)
 
 
@@ -1008,6 +1159,8 @@ class Broker:
         self.artifact_bytes = 0
         self.artifact_roots: set[str] = set()
         self.allowed_results_roots: set[str] = set()
+        self.subject_commands_started = 0
+        self.command_output_receipts: list[tuple[int, int, int]] = []
 
     def _send(self, conn: socket.socket, obj: dict) -> None:
         conn.sendall(encode_response(obj))
@@ -1285,6 +1438,7 @@ class Broker:
                 raise LauncherError("job-not-active")
             proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     env=ENV, close_fds=True)
+            self.subject_commands_started += 1
         quota_before = self.output_quota.received_bytes()
         budget = OutputBudget(self.output_quota)
         owned_pumps = [OutputPump(name, stream, budget, self.stop, self._fail_subject_output)
@@ -1318,6 +1472,8 @@ class Broker:
             raise LauncherError("subject-exit-unconfirmed")
         if budget.exceeded.is_set():
             raise LauncherError("ASEVD420")
+        with self.lock:
+            self.command_output_receipts.append((received_bytes, pump_states[0][1], pump_states[1][1]))
         if result_root is not None:
             with self.lock:
                 self.allowed_results_roots.add(result_root)
@@ -1567,15 +1723,231 @@ def _start_worker_unit(argv: list[str], worker_unit: str) -> None:
         raise error from None
 
 
-def _delete_run_accounts(users: list[str], groups: list[str]) -> None:
-    """Delete only this run's tracked accounts in reverse order, preserving best-effort exit handling."""
+def _delete_run_accounts(users: list[str] | tuple[str, ...], groups: list[str] | tuple[str, ...], *, strict: bool = False) -> None:
+    """Delete tracked accounts; completion close requires every deletion to succeed."""
     for name in reversed(users):
-        _systemd(["/usr/sbin/userdel", name], timeout=5, check=False)
+        _systemd(["/usr/sbin/userdel", name], timeout=5, check=strict)
     for name in reversed(groups):
-        _systemd(["/usr/sbin/groupdel", name], timeout=5, check=False)
+        _systemd(["/usr/sbin/groupdel", name], timeout=5, check=strict)
 
 
-def launch(args: argparse.Namespace) -> Path:
+def _close_descriptors(descriptors) -> None:
+    """Attempt every owned descriptor close before propagating the first failure."""
+    failure = None
+    for fd in descriptors:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except BaseException as error:
+                if failure is None:
+                    failure = error
+    if failure is not None:
+        raise failure
+
+
+class _LaunchCompletion:
+    """In-process root completion; owns retained directories and run accounts until closed.
+
+    Descriptor and identity properties return defensive copies. Duplicated directory
+    descriptors belong to the caller. No subject content or exception text is retained.
+    This internal object is transport for a protected parent, not an admission lease.
+    """
+    def __init__(self, output: Path, descriptor: dict, output_fd: int, parent_fd: int,
+                 output_identity: dict, parent_identity: dict, receipts: tuple[tuple[int, int, int], ...]):
+        self.output = output
+        self._descriptor_bytes = json.dumps(descriptor, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+        self._output_identity = tuple(output_identity.items())
+        self._parent_identity = tuple(parent_identity.items())
+        self.subject_output_receipts = receipts
+        self._output_fd, self._parent_fd = output_fd, parent_fd
+        self._lock = threading.Lock()
+        self._run_accounts = None
+        self._closed = False
+        self._close_error = None
+
+    def _retain_run_accounts(self, users: list[str], groups: list[str]) -> None:
+        """Transfer this launch's account cleanup only after pre-transfer cleanup succeeds."""
+        with self._lock:
+            if self._closed or self._run_accounts is not None:
+                raise LauncherError("completion-ownership-unconfirmed")
+            self._run_accounts = (tuple(users), tuple(groups))
+
+    @property
+    def descriptor(self) -> dict:
+        return json.loads(self._descriptor_bytes)
+
+    @property
+    def output_identity(self) -> dict:
+        return dict(self._output_identity)
+
+    @property
+    def output_parent_identity(self) -> dict:
+        return dict(self._parent_identity)
+
+    def duplicate_output_directory(self) -> int:
+        """Return a caller-owned duplicate of the verified output directory handle."""
+        with self._lock:
+            if self._output_fd < 0:
+                raise LauncherError("completion-output-unconfirmed")
+            return os.dup(self._output_fd)
+
+    def duplicate_output_parent(self) -> int:
+        """Return a caller-owned duplicate of the independently selected output anchor."""
+        with self._lock:
+            if self._parent_fd < 0:
+                raise LauncherError("completion-output-unconfirmed")
+            return os.dup(self._parent_fd)
+
+    def close(self) -> None:
+        """Close both handles, then delete retained accounts before any gate invocation.
+
+        Cleanup is attempted once. Failure is latched and propagated on every close;
+        repeated calls cannot hide failed cleanup or repeat account deletion.
+        Caller-owned duplicates must already be closed before this method is called.
+        """
+        with self._lock:
+            if not self._closed:
+                self._closed = True
+                descriptors = (self._output_fd, self._parent_fd)
+                self._output_fd = self._parent_fd = -1
+                try:
+                    _close_descriptors(descriptors)
+                except BaseException as error:
+                    self._close_error = error
+                try:
+                    if self._run_accounts is not None:
+                        _delete_run_accounts(*self._run_accounts, strict=True)
+                except BaseException as error:
+                    if self._close_error is None:
+                        self._close_error = error
+            if self._close_error is not None:
+                raise self._close_error
+
+    def __enter__(self):
+        with self._lock:
+            if self._output_fd < 0 or self._parent_fd < 0:
+                raise LauncherError("completion-output-unconfirmed")
+        return self
+
+    def __exit__(self, *unused):
+        self.close()
+
+
+def _identity_from_stat(info) -> dict[str, int]:
+    return {"device_major": os.major(info.st_dev), "device_minor": os.minor(info.st_dev),
+            "inode": info.st_ino, "uid": info.st_uid, "gid": info.st_gid}
+
+
+def _completion_after_owned_exit(broker: Broker, output: Path, worker_name: str,
+                                 worker_properties: dict[str, str]) -> _LaunchCompletion:
+    """Pin final output only after protocol, process, handler and exact pump acknowledgements.
+
+    Called by the root launch path after every request handler has joined. Tests may
+    exercise this internal check with fixture-owned state; it cannot enable admission.
+    The parent retains responsibility for bounded no-follow artifact hashing.
+    """
+    with broker.condition:
+        if (time.monotonic() >= broker.deadline
+                or not broker.ready_seen or not broker.exited or not broker.wait_completed or not broker.work_closed
+                or broker.active_runs or broker.active_handlers or broker.active_artifact_operations
+                or broker.subject_output_failed):
+            raise LauncherError("completion-ownership-unconfirmed")
+        receipts = tuple(broker.command_output_receipts)
+        started = broker.subject_commands_started
+    total = broker.output_quota.received_bytes()
+    if (len(receipts) != started or len(receipts) > MAX_SUBJECT_UNITS
+            or broker.output_quota.exceeded.is_set() or total > MAX_JOB_OUTPUT
+            or any(type(value) is not int or value < 0 for receipt in receipts for value in receipt)
+            or any(received != stdout + stderr for received, stdout, stderr in receipts)
+            or sum(received for received, _, _ in receipts) != total):
+        raise LauncherError("completion-output-unconfirmed")
+    if (worker_properties.get("Result") != "success" or worker_properties.get("User") != worker_name
+            or worker_properties.get("KillMode") != "control-group"
+            or worker_properties.get("ExecMainCode") != "1" or worker_properties.get("ExecMainStatus") != "0"
+            or not broker._group_empty(worker_properties.get("ControlGroup", broker.descriptor["cgroup"]))
+            or not broker._all_subject_groups_empty(inspection_deadline=broker.deadline)
+            or time.monotonic() >= broker.deadline):
+        raise LauncherError("completion-ownership-unconfirmed")
+    output_fd = parent_fd = -1
+    try:
+        parent_fd = os.open(output.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        before = os.fstat(parent_fd)
+        parent_identity = _identity_from_stat(before)
+        if (parent_identity != broker.descriptor["output_parent_identity"]
+                or before.st_mode & 0o777 != 0o700
+                or parent_identity != _identity_from_stat(output.parent.lstat())):
+            raise LauncherError("completion-output-identity-changed")
+        output_fd = os.open(output.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                            dir_fd=parent_fd)
+        final = os.fstat(output_fd)
+        output_identity = _identity_from_stat(final)
+        named = os.stat(output.name, dir_fd=parent_fd, follow_symlinks=False)
+        if (not stat.S_ISDIR(final.st_mode) or final.st_mode & 0o777 != 0o700
+                or final.st_uid != broker.worker_uid or final.st_gid != broker.worker_gid
+                or output_identity != _identity_from_stat(named)
+                or parent_identity != _identity_from_stat(os.fstat(parent_fd))
+                or parent_identity != _identity_from_stat(output.parent.lstat())):
+            raise LauncherError("completion-output-identity-changed")
+        completion = _LaunchCompletion(output, broker.descriptor, output_fd, parent_fd,
+                                       output_identity, parent_identity, receipts)
+        output_fd = parent_fd = -1
+        return completion
+    finally:
+        _close_descriptors((output_fd, parent_fd))
+
+
+def _close_launch_resources(listener, handlers, broker, test_output_fd: int) -> None:
+    """Finish launcher-owned channels before retained completion ownership can transfer."""
+    if listener is not None:
+        listener.close()
+    for handler in handlers:
+        handler.join()
+    if broker is not None:
+        broker.close_artifact_handles()
+    if test_output_fd >= 0:
+        os.close(test_output_fd)
+
+
+def _finish_launch_transfer(completion: _LaunchCompletion, users: list[str], groups: list[str],
+                            listener, handlers, broker, test_output_fd: int, root: Path, scratch: Path) -> _LaunchCompletion:
+    """Transfer only after cleanup; any exception closes both retained directories.
+
+    Failed transfer retains run accounts and the output quarantine. The successful
+    completion owns account deletion, keeping the worker UID reserved during collection.
+    """
+    try:
+        _close_launch_resources(listener, handlers, broker, test_output_fd)
+        shutil.rmtree(root)
+        shutil.rmtree(scratch)
+        completion._retain_run_accounts(users, groups)
+        return completion
+    except BaseException:
+        try:
+            completion.close()
+        except BaseException:
+            pass
+        raise
+
+
+def launch(args: argparse.Namespace, *, diagnostic_directory_fd: int | None = None) -> Path:
+    """Run the existing CLI contract and release internal completion handles before returning its path."""
+    operation = (launch_with_completion(args) if diagnostic_directory_fd is None else
+                 launch_with_completion(args, diagnostic_directory_fd=diagnostic_directory_fd))
+    with operation as completion:
+        return completion.output
+
+
+def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd: int | None = None) -> _LaunchCompletion:
+    """Execute as root and return retained final ownership facts to the importing protected parent.
+
+    The caller must finish collection, close duplicates and successfully close the
+    returned context (including account cleanup) before invoking its gate.
+    The same launch, authentication,
+    admission, allocation and supervision path is used by the Path-compatible API.
+    No command-line option or caller-supplied completion facts can bypass that path.
+    The optional diagnostic directory descriptor must already be pinned and protected;
+    it permits only private failure capture and is not used by completion validation.
+    """
     if sys.platform != "linux" or os.geteuid() != 0 or Path("/proc/1/comm").read_text().strip() != "systemd":
         raise LauncherError("requires-root-systemd-linux")
     ensure_openat2_supported()
@@ -1619,11 +1991,12 @@ def launch(args: argparse.Namespace) -> Path:
     users: list[str] = []
     groups: list[str] = []
     worker_pid = 0
-    exposed = False
+    completion_ready = False
     listener: socket.socket | None = None
     broker: Broker | None = None
     test_output_fd = -1
     handlers: list[threading.Thread] = []
+    completion: _LaunchCompletion | None = None
     try:
         _create_run_accounts(worker_name, subject_name, results_group, users, groups)
         wu, su = pwd.getpwnam(worker_name), pwd.getpwnam(subject_name)
@@ -1727,7 +2100,9 @@ def launch(args: argparse.Namespace) -> Path:
                 failed_properties = broker._unit_properties(worker_unit)
             except (LauncherError, OSError, subprocess.SubprocessError, ValueError):
                 failed_properties = {}
-            raise worker_exit_failure("worker-protocol-incomplete", failed_properties)
+            failure = worker_exit_failure("worker-protocol-incomplete", failed_properties)
+            capture_worker_protocol_failure(failure, broker, diagnostic_directory_fd)
+            raise failure
         wprops=broker._unit_properties(worker_unit)
         if (wprops.get("Result") != "success" or wprops.get("User") != worker_name
                 or wprops.get("KillMode") != "control-group"):
@@ -1745,32 +2120,33 @@ def launch(args: argparse.Namespace) -> Path:
         if (not output_parent_identity(output_parent) == desc["output_parent_identity"]
                 or output_parent.stat().st_mode & 0o777 != 0o700):
             raise LauncherError("output-parent-identity-changed")
+        completion = _completion_after_owned_exit(broker, output, worker_name, wprops)
         _systemd(["systemctl", "stop", worker_unit, *[unit for unit,_ in broker.units]], timeout=5)
         _systemd(["systemctl","reset-failed",worker_unit])
         for unit,_ in broker.units: _systemd(["systemctl","reset-failed",unit])
-        exposed = True
-        return output
+        completion_ready = True
     finally:
-        if not exposed:
-            if broker is not None:
-                broker.stop()
-            if units:
-                subprocess.run(["systemctl", "stop", *reversed(units)], capture_output=True, env=ENV,
-                               timeout=5, check=False)
-        if listener is not None:
-            try: listener.close()
-            except OSError: pass
-        for handler in handlers:
-            handler.join()
-        if broker is not None:
-            broker.close_artifact_handles()
-        if test_output_fd >= 0:
-            os.close(test_output_fd)
-        # Preserve/quarantine the worker-owned output anchor whenever termination is uncertain.
-        if exposed:
-            _delete_run_accounts(users, groups)
-            shutil.rmtree(root,ignore_errors=True)
-            shutil.rmtree(scratch, ignore_errors=True)
+        if not completion_ready:
+            original_error = sys.exc_info()[1]
+            try:
+                if broker is not None:
+                    broker.stop()
+                if units:
+                    subprocess.run(["systemctl", "stop", *reversed(units)], capture_output=True, env=ENV,
+                                   timeout=5, check=False)
+                _close_launch_resources(listener, handlers, broker, test_output_fd)
+            except BaseException:
+                if original_error is None:
+                    raise
+            finally:
+                if completion is not None:
+                    try:
+                        completion.close()
+                    except BaseException:
+                        if original_error is None:
+                            raise
+    return _finish_launch_transfer(completion, users, groups, listener, handlers, broker,
+                                   test_output_fd, root, scratch)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -1803,7 +2179,7 @@ def main(argv: list[str] | None = None) -> int:
                 pass
             else:
                 raise LauncherError("diagnostic-slot-not-fresh")
-        output=launch(args)
+        output = launch(args) if diagnostic_fd is None else launch(args, diagnostic_directory_fd=diagnostic_fd)
         print(json.dumps({"status":"completed","output_slot":output.name},separators=(",",":")))
         return 0
     except LauncherError as error:

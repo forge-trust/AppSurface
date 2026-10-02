@@ -50,6 +50,46 @@ for that recorded run; it does not verify later source edits.
 
 Statuses below describe test presence and scope, not pass state. “Unit/fixture” means a local test seam or test-owned process; it does not imply a supported runner, protected credentials, or real systemd enforcement.
 
+### Measured-gap recovery and current native boundary
+
+The full 2725-file candidate reached the unchanged solution gate in
+[run 37037592365](https://github.com/forge-trust/AppSurface/actions/runs/37037592365):
+15269 tests passed, zero failed and two existing tests were skipped. The gate
+failed with `ASCOV020` because patch coverage was 82.852% lines and 76.6374%
+branches. Aggregate coverage was 94.88% lines and 88.522% branches, within the
+existing tolerance. This is failed gate evidence for that frozen candidate.
+
+The next test-only recovery batch uses public or intentionally exposed APIs and
+deterministic lifecycle controls. Scoped macOS source builds passed:
+
+- Worker execution: **73/73**, including late completion, stop/join, collector
+  failure and cleanup ownership controls.
+- Run budgets: **36/36**, with exact-fit, overflow and reserve controls. The first
+  source build stopped on a sibling producer test's decimal-threshold compile
+  error; the corrected source and successful rerun are recorded separately.
+- Restricted producer and Linux artifact root selection: **57/57**. Producer
+  declaration, report metadata and optional capacity controls executed. Linux
+  artifact syscall cases used their unsupported-platform checks on macOS; the
+  actual Linux filesystem behavior remains required.
+- Host bootstrap: **42/42**, including registration drift before callbacks,
+  partial configuration cleanup, malformed results, completion failure and
+  concurrent single-use controls.
+
+Each final command exited zero with no failures, skips, warnings or errors.
+These selections are test counts, not acceptance-group totals or a recalculated
+patch gate. Ignored source/hash receipts are under
+`TestResults/issue779-recovery-20261002/native-validation/coverage-v5b-*-fix/`.
+
+The subsequent complete snapshot failed both
+[systemd Observation](https://github.com/forge-trust/AppSurface/actions/runs/37039914626)
+and all five [Aspire mechanism controls](https://github.com/forge-trust/AppSurface/actions/runs/37039916803).
+The corrected [child fixture](../../tests/evidencehost-consumer/AspireChild/README.md)
+now builds without warnings and passes forty portable controls, including bounded
+identity diagnostics. Its DCP execution still requires a fresh native run. The
+[consumer acceptance record](issue779-consumer-acceptance.md#full-source-gate-and-next-startup-failures-2026-10-02)
+records the exact failures and limits. No new Trusted entry or acceptance group is
+closed by this recovery batch.
+
 ## Group map
 
 | Group | Current test / fixture anchors | Current verification scope | Remaining gap |
