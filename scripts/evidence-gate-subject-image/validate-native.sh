@@ -502,6 +502,12 @@ import re
 import sys
 
 expected_bytes, expected_inodes, expected_uid, expected_gid = map(int, sys.argv[1:5])
+with open("/proc/self/status", encoding="utf-8") as source:
+    status = dict(line.rstrip("\n").split(":", 1) for line in source if ":" in line)
+capabilities = {
+    name: int(status.get(name, "-1").strip(), 16)
+    for name in ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb")
+}
 mounts = {}
 lines = {}
 with open("/proc/self/mountinfo", encoding="utf-8") as source:
@@ -542,6 +548,7 @@ except ValueError:
     mode = -1
 checks = {
     "nonRootIdentity": os.getuid() == expected_uid and os.getgid() == expected_gid,
+    "allCapabilitySetsEmpty": all(value == 0 for value in capabilities.values()),
     "readOnlyRootMount": "ro" in root_mount["mountOptions"],
     "scratchIsTmpfs": scratch_mount["type"] == "tmpfs",
     "scratchReadWrite": "rw" in options,
@@ -560,6 +567,7 @@ record = {
     "schema": "appsurface-subject-podman-live-mount-v1",
     "uid": os.getuid(),
     "gid": os.getgid(),
+    "capabilities": capabilities,
     "rootMount": {**root_mount, "mountInfo": lines["/"]},
     "scratchMount": {**scratch_mount, "mountInfo": lines["/scratch"]},
     "scratchStatvfs": {
@@ -616,7 +624,12 @@ checks = {
     "networkNone": host.get("NetworkMode") == "none",
     "readOnlyRoot": host.get("ReadonlyRootfs") is True,
     "fixedNonRootUser": config.get("User") == f"{sys.argv[3]}:{sys.argv[4]}",
-    "capabilitiesDropped": host.get("CapDrop") == ["ALL"],
+    "capabilitiesDropped": (
+        isinstance(container.get("EffectiveCaps"), list)
+        and isinstance(container.get("BoundingCaps"), list)
+        and not container["EffectiveCaps"] and not container["BoundingCaps"]
+        and host.get("CapAdd") in (None, [])
+    ),
     "noNewPrivileges": isinstance(security, list) and any(
         value in ("no-new-privileges", "no-new-privileges:true") for value in security
     ),
