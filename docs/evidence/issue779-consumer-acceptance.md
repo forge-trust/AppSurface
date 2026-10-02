@@ -151,3 +151,37 @@ produced. Artifact `11237732048` has verified ZIP SHA-256
 Bounded startup status and the unit's private temporary-directory visibility are
 the next diagnosis; the exit alone establishes neither cause. Trusted remains
 excluded for every provider/platform entry above.
+
+### Full snapshot startup diagnosis (2026-10-02)
+
+The next immutable candidate, `cdadf95bb91e46c21d46dc72a8317950e9fd5da4`,
+contains 2725 source files, including the standalone gate and Aspire fixtures.
+[Systemd run 37036246639](https://github.com/forge-trust/AppSurface/actions/runs/37036246639)
+verified that binding and retained all six warning-free build/publish streams.
+The worker unit was loaded but failed with `ExecMainCode=1`,
+`ExecMainStatus=226` (`EXIT_NAMESPACE`) and `Result=exit-code`. This narrows the
+failure to namespace setup; the individual failing operation and path were not
+captured. Moving the fresh protected workspace outside private temporary mounts
+requires another native observation with the existing namespace guards retained.
+No completed Observation manifest or runtime proof was produced. Artifact
+`11240576268` has verified ZIP SHA-256
+`1ba681224d99a58b92ffd1db11fadce4ab2fab8a43188d75058084510638f11f`.
+
+[Aspire mechanism run 37036436702](https://github.com/forge-trust/AppSurface/actions/runs/37036436702)
+used the same full source binding on Ubuntu 24.04 x64, systemd 255 and .NET
+10.0.401. Locked restore and build exited zero with no warning diagnostics. The
+pinned Aspire 13.4.4 DCP payload was checked as an executable Linux x64 ELF;
+that file check does not establish DCP execution. The factory-stall control
+passed. The other four controls failed before any DCP or resource PID was
+observed: Aspire attempted to create its store beneath the embedded build
+`AspireChild/obj/.aspire` path under the protected home directory.
+
+All five controls confirmed their actual nonroot identity/cgroup, watchdog
+acknowledgement and clean watchdog exit, complete error-free pump EOF and exact
+byte accounting, and empty owned cgroups before cleanup. These successful
+teardown observations do not supply the missing resource or access-denial proof.
+The [Aspire child fixture](../../tests/evidencehost-consumer/AspireChild/README.md)
+records the pinned SDK store configuration and the next narrow scratch-path
+correction. Neither native result proves the shared Aspire host, protected-base
+execution, Trusted admission or downstream acceptance. Every provider/platform
+entry remains excluded.

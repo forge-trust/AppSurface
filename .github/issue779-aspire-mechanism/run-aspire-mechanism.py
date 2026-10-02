@@ -29,7 +29,7 @@ REQUIRED = (
     PREFIX + "NativeHttpResource/packages.lock.json", PREFIX + "NativeHttpResource/README.md",
 )
 FIXES = {"watchdog-ready-ack-and-liveness", "pump-eof-and-failure",
-         "main-only-cooperative-term-and-zero-exit"}
+         "main-only-cooperative-term-and-zero-exit", "pinned-store-path-after-builder"}
 MARKERS = ("CODEX_SANDBOX", "SANDBOX_MODE", "IN_SANDBOX", "IS_SANDBOX")
 
 

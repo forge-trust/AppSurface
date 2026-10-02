@@ -91,3 +91,7 @@ GNU timeout, standard account tools, and a disposable runner with no parallel `i
 The explicit root setup does not run against real verifier/output roots. Preparation retains private trees for
 diagnosis; the disposable runner is discarded after the job. Parent-provided source/hashes and verified fixes are
 still pending. Static syntax validation of these drafts is not native execution or build evidence.
+
+## Second native candidate
+
+This candidate adds the verified pinned 13.4.4 store-path correction: the root controller selects the base under declared writable scratch, and the child assigns public `Aspire:Store:Path` after builder construction. Its source binding includes the fourth fix label and 34 passing portable controls. The native five controls remain unverified until this run completes; shared admission and Trusted remain excluded.
