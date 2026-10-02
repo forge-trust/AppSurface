@@ -30,7 +30,8 @@ REQUIRED = (
 )
 FIXES = {"watchdog-ready-ack-and-liveness", "pump-eof-and-failure",
          "main-only-cooperative-term-and-zero-exit", "pinned-store-path-after-builder",
-         "pinned-dcp-publisher-options", "bounded-startup-identity-rejection"}
+         "pinned-dcp-publisher-options", "bounded-startup-identity-rejection",
+         "exec-startup-and-budget-diagnostics"}
 MARKERS = ("CODEX_SANDBOX", "SANDBOX_MODE", "IN_SANDBOX", "IS_SANDBOX")
 
 
@@ -257,10 +258,10 @@ def group_empty(unit):
 def control_log_allowed(name, info):
     limits = {"stdout.log": 1024 * 1024, "stderr.log": 1024 * 1024,
               "receipt.json": 1024 * 1024, "quarantine": 1024 * 1024,
-              "identity-rejection.json": 4096}
+              "identity-rejection.json": 4096, "budget-diagnostic.json": 4096}
     return (name in limits and stat.S_ISREG(info.st_mode) and info.st_uid == 0
             and info.st_nlink == 1 and 0 <= info.st_size <= limits[name]
-            and (name != "identity-rejection.json" or stat.S_IMODE(info.st_mode) == 0o600))
+            and (name not in ("identity-rejection.json", "budget-diagnostic.json") or stat.S_IMODE(info.st_mode) == 0o600))
 
 
 def control_log_identity(info):
@@ -269,9 +270,9 @@ def control_log_identity(info):
 
 
 def retain_control_logs(control, logs, case):
-    """Retain only fixed root-owned files; the identity diagnostic is private, 0600 and <=4096 bytes."""
-    valid, identity_retained = True, False
-    for name in ("stdout.log", "stderr.log", "receipt.json", "quarantine", "identity-rejection.json"):
+    """Retain only fixed root-owned files; both fixed diagnostics are private, 0600 and <=4096 bytes."""
+    valid, identity_retained, budget_retained = True, False, False
+    for name in ("stdout.log", "stderr.log", "receipt.json", "quarantine", "identity-rejection.json", "budget-diagnostic.json"):
         path = control / name
         target = logs / f"{case}.control-{name}"
         created = False
@@ -300,6 +301,7 @@ def retain_control_logs(control, logs, case):
                 os.fchmod(sink.fileno(), 0o600)
                 sink.write(data)
             identity_retained |= name == "identity-rejection.json"
+            budget_retained |= name == "budget-diagnostic.json"
         except (OSError, ValueError):
             valid = False
             if created:
@@ -307,7 +309,7 @@ def retain_control_logs(control, logs, case):
         finally:
             if fd is not None:
                 os.close(fd)
-    return valid, identity_retained
+    return valid, identity_retained, budget_retained
 
 
 def root_cases(args):
@@ -382,10 +384,12 @@ def root_cases(args):
                 case_groups_empty &= group_empty(unit)
                 valid &= case_groups_empty
                 control = base / "control"
-                retained_ok, identity_retained = retain_control_logs(control, logs, case)
+                retained_ok, identity_retained, budget_retained = retain_control_logs(control, logs, case)
                 valid &= retained_ok
                 if receipt.get("identity_diagnostic_written") is True:
                     valid &= identity_retained
+                if receipt.get("budget_diagnostic_written") is True:
+                    valid &= budget_retained
             safe_exit = case_groups_empty
             # Public summary contains fixed case names, booleans, numeric exits and hashes, never raw child errors.
             summaries.append({"case": case, "passed": bool(valid), "exit_code": result["exit_code"],

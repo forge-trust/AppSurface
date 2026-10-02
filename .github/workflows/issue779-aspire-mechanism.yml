@@ -21,7 +21,7 @@ jobs:
       - name: Checkout parent-reviewed immutable source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 8a964188e85561d57119133d26b552f9412e2445
+          ref: 98860bd540ca57ab67acafd79393ead7d1a4e34d
           persist-credentials: false
           fetch-depth: 1
           path: source
