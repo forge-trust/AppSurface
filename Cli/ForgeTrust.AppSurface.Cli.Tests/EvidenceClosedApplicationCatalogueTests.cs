@@ -379,6 +379,477 @@ public sealed class EvidenceClosedApplicationCatalogueTests
         }
     }
 
+    [Theory]
+    [InlineData("policy-null")]
+    [InlineData("policy-id-null")]
+    [InlineData("policy-id-empty")]
+    [InlineData("policy-id-long")]
+    [InlineData("policy-id-character")]
+    [InlineData("policy-version")]
+    [InlineData("conservative-id")]
+    [InlineData("profiles-null")]
+    [InlineData("profiles-over-limit")]
+    [InlineData("rules-null")]
+    [InlineData("rules-over-limit")]
+    [InlineData("rule-null")]
+    [InlineData("rule-id")]
+    [InlineData("rule-pattern-null")]
+    [InlineData("rule-pattern-long")]
+    [InlineData("rule-pattern-control")]
+    [InlineData("rule-profile-id")]
+    [InlineData("profile-null")]
+    [InlineData("profile-id")]
+    [InlineData("profile-scope")]
+    [InlineData("resources-null")]
+    [InlineData("resources-over-limit")]
+    [InlineData("producers-null")]
+    [InlineData("producers-over-limit")]
+    [InlineData("obligations-null")]
+    [InlineData("obligations-over-limit")]
+    [InlineData("resource-null")]
+    [InlineData("resource-id")]
+    [InlineData("resource-readiness-null")]
+    [InlineData("resource-readiness-long")]
+    [InlineData("resource-deadline-zero")]
+    [InlineData("resource-deadline-over-limit")]
+    [InlineData("resource-dependencies-null")]
+    [InlineData("resource-dependencies-over-limit")]
+    [InlineData("resource-dependency-id")]
+    [InlineData("resource-dependency-duplicate")]
+    [InlineData("producer-null")]
+    [InlineData("producer-id")]
+    [InlineData("producer-kind")]
+    [InlineData("producer-version")]
+    [InlineData("producer-timeout-zero")]
+    [InlineData("producer-timeout-over-limit")]
+    [InlineData("producer-resources-null")]
+    [InlineData("producer-resources-over-limit")]
+    [InlineData("producer-resource-id")]
+    [InlineData("producer-resource-duplicate")]
+    [InlineData("assertions-null")]
+    [InlineData("assertions-over-limit")]
+    [InlineData("assertion-null")]
+    [InlineData("assertion-empty")]
+    [InlineData("assertion-long")]
+    [InlineData("assertion-control")]
+    [InlineData("assertion-duplicate")]
+    [InlineData("slots-null")]
+    [InlineData("slots-over-limit")]
+    [InlineData("slot-null")]
+    [InlineData("slot-name")]
+    [InlineData("slot-root-null")]
+    [InlineData("slot-root-empty")]
+    [InlineData("slot-root-dot")]
+    [InlineData("slot-root-empty-component")]
+    [InlineData("slot-root-character")]
+    [InlineData("slot-media-null")]
+    [InlineData("slot-media-long")]
+    [InlineData("slot-bytes-negative")]
+    [InlineData("slot-bytes-over-limit")]
+    [InlineData("obligation-null")]
+    [InlineData("obligation-id")]
+    [InlineData("obligation-risk-null")]
+    [InlineData("obligation-risk-long")]
+    [InlineData("obligation-rationale-empty")]
+    [InlineData("obligation-rationale-long")]
+    [InlineData("obligation-assertion-null")]
+    [InlineData("obligation-assertion-long")]
+    [InlineData("obligation-producers-null")]
+    [InlineData("obligation-producers-over-limit")]
+    [InlineData("obligation-producer-id")]
+    public void SnapshotRejectsMalformedNestedPolicyBeforeItCanBecomeCatalogueMetadata(string change)
+    {
+        var entry = Candidate();
+        var policy = entry.Policy;
+        var profile = policy.Profiles[0];
+        var rule = policy.Rules[0];
+        var resource = profile.Resources[0];
+        var producer = profile.Producers[0];
+        var slot = producer.ArtifactSlots[0];
+        var obligation = profile.Obligations[0];
+        var invalidId = BoundaryCanary + "/invalid";
+        profile = change switch
+        {
+            "profile-id" => profile with { Id = invalidId },
+            "profile-scope" => profile with { Scope = (EvidenceProfileScope)999 },
+            "resources-null" => profile with { Resources = null! },
+            "resources-over-limit" => profile with { Resources = Enumerable.Repeat(resource, 17).ToArray() },
+            "producers-null" => profile with { Producers = null! },
+            "producers-over-limit" => profile with { Producers = Enumerable.Repeat(producer, 33).ToArray() },
+            "obligations-null" => profile with { Obligations = null! },
+            "obligations-over-limit" => profile with { Obligations = Enumerable.Repeat(obligation, 129).ToArray() },
+            _ => profile,
+        };
+        if (change.StartsWith("resource-", StringComparison.Ordinal))
+        {
+            resource = change switch
+            {
+                "resource-id" => resource with { Id = invalidId },
+                "resource-readiness-null" => resource with { Readiness = null! },
+                "resource-readiness-long" => resource with { Readiness = new string('r', 129) },
+                "resource-deadline-zero" => resource with { DeadlineSeconds = 0 },
+                "resource-deadline-over-limit" => resource with { DeadlineSeconds = 121 },
+                "resource-dependencies-null" => resource with { Requires = null! },
+                "resource-dependencies-over-limit" => resource with { Requires = Enumerable.Repeat("http", 17).ToArray() },
+                "resource-dependency-id" => resource with { Requires = [invalidId] },
+                "resource-dependency-duplicate" => resource with { Requires = ["http", "http"] },
+                _ => resource,
+            };
+            profile = profile with { Resources = [change == "resource-null" ? null! : resource] };
+        }
+        if (change.StartsWith("producer-", StringComparison.Ordinal) || change.StartsWith("assertion", StringComparison.Ordinal)
+            || change.StartsWith("slot", StringComparison.Ordinal))
+        {
+            producer = change switch
+            {
+                "producer-id" => producer with { Id = invalidId },
+                "producer-kind" => producer with { Kind = invalidId },
+                "producer-version" => producer with { Version = invalidId },
+                "producer-timeout-zero" => producer with { TimeoutSeconds = 0 },
+                "producer-timeout-over-limit" => producer with { TimeoutSeconds = 601 },
+                "producer-resources-null" => producer with { RequiredResources = null! },
+                "producer-resources-over-limit" => producer with { RequiredResources = Enumerable.Repeat("http", 17).ToArray() },
+                "producer-resource-id" => producer with { RequiredResources = [invalidId] },
+                "producer-resource-duplicate" => producer with { RequiredResources = ["http", "http"] },
+                "assertions-null" => producer with { AssertionIds = null! },
+                "assertions-over-limit" => producer with { AssertionIds = Enumerable.Repeat("assertion", 129).ToArray() },
+                "assertion-null" => producer with { AssertionIds = [null!] },
+                "assertion-empty" => producer with { AssertionIds = [string.Empty] },
+                "assertion-long" => producer with { AssertionIds = [new string('a', 129)] },
+                "assertion-control" => producer with { AssertionIds = [BoundaryCanary + "\n"] },
+                "assertion-duplicate" => producer with { AssertionIds = ["assertion", "assertion"] },
+                "slots-null" => producer with { ArtifactSlots = null! },
+                "slots-over-limit" => producer with { ArtifactSlots = Enumerable.Repeat(slot, 129).ToArray() },
+                _ => producer,
+            };
+            if (change.StartsWith("slot-", StringComparison.Ordinal))
+            {
+                slot = change switch
+                {
+                    "slot-name" => slot with { LogicalName = invalidId },
+                    "slot-root-null" => slot with { RelativeRoot = null! },
+                    "slot-root-empty" => slot with { RelativeRoot = string.Empty },
+                    "slot-root-dot" => slot with { RelativeRoot = "reports/./" + BoundaryCanary },
+                    "slot-root-empty-component" => slot with { RelativeRoot = "reports//" + BoundaryCanary },
+                    "slot-root-character" => slot with { RelativeRoot = BoundaryCanary + "?" },
+                    "slot-media-null" => slot with { MediaType = null! },
+                    "slot-media-long" => slot with { MediaType = new string('m', 129) },
+                    "slot-bytes-negative" => slot with { MaximumBytes = -1 },
+                    "slot-bytes-over-limit" => slot with { MaximumBytes = 256L * 1024 * 1024 + 1 },
+                    _ => slot,
+                };
+                producer = producer with { ArtifactSlots = [change == "slot-null" ? null! : slot] };
+            }
+            profile = profile with { Producers = [change == "producer-null" ? null! : producer, profile.Producers[1]] };
+        }
+        if (change.StartsWith("obligation-", StringComparison.Ordinal))
+        {
+            obligation = change switch
+            {
+                "obligation-id" => obligation with { Id = invalidId },
+                "obligation-risk-null" => obligation with { RiskClass = null! },
+                "obligation-risk-long" => obligation with { RiskClass = new string('r', 129) },
+                "obligation-rationale-empty" => obligation with { Rationale = string.Empty },
+                "obligation-rationale-long" => obligation with { Rationale = new string('r', 4097) },
+                "obligation-assertion-null" => obligation with { RequiredAssertionId = null! },
+                "obligation-assertion-long" => obligation with { RequiredAssertionId = new string('a', 129) },
+                "obligation-producers-null" => obligation with { RequiredProducerIds = null! },
+                "obligation-producers-over-limit" => obligation with { RequiredProducerIds = Enumerable.Repeat("coverage", 33).ToArray() },
+                "obligation-producer-id" => obligation with { RequiredProducerIds = [invalidId] },
+                _ => obligation,
+            };
+            profile = profile with { Obligations = [change == "obligation-null" ? null! : obligation] };
+        }
+        policy = policy with { Profiles = [change == "profile-null" ? null! : profile, policy.Profiles[1]] };
+        rule = change switch
+        {
+            "rule-id" => rule with { Id = invalidId },
+            "rule-pattern-null" => rule with { Pattern = null! },
+            "rule-pattern-long" => rule with { Pattern = new string('p', 257) },
+            "rule-pattern-control" => rule with { Pattern = BoundaryCanary + "\n" },
+            "rule-profile-id" => rule with { ProfileId = invalidId },
+            _ => rule,
+        };
+        policy = change switch
+        {
+            "policy-null" => null!,
+            "policy-id-null" => policy with { Id = null! },
+            "policy-id-empty" => policy with { Id = string.Empty },
+            "policy-id-long" => policy with { Id = new string('i', 129) },
+            "policy-id-character" => policy with { Id = invalidId },
+            "policy-version" => policy with { Version = invalidId },
+            "conservative-id" => policy with { ConservativeProfileId = invalidId },
+            "profiles-null" => policy with { Profiles = null! },
+            "profiles-over-limit" => policy with { Profiles = Enumerable.Repeat(profile, 33).ToArray() },
+            "rules-null" => policy with { Rules = null! },
+            "rules-over-limit" => policy with { Rules = Enumerable.Repeat(rule, 129).ToArray() },
+            _ => policy with { Rules = [change == "rule-null" ? null! : rule] },
+        };
+
+        RejectAudit(() => EvidenceClosedApplicationCatalogue.Snapshot(entry with { Policy = policy }));
+    }
+
+    [Theory]
+    [InlineData("id")]
+    [InlineData("version")]
+    [InlineData("build-id")]
+    [InlineData("profile-id")]
+    [InlineData("selected-profile-absent")]
+    [InlineData("selected-resources-empty")]
+    [InlineData("selected-resources-extra")]
+    [InlineData("selected-producers-empty")]
+    [InlineData("registrations-resources-null")]
+    [InlineData("registrations-resources-empty")]
+    [InlineData("registrations-resources-extra")]
+    [InlineData("registration-resource-null")]
+    [InlineData("registration-resource-declaration-null")]
+    [InlineData("resource-capability-version")]
+    [InlineData("resource-name")]
+    [InlineData("resource-readiness")]
+    [InlineData("resource-dependencies-null")]
+    [InlineData("resource-dependencies-present")]
+    [InlineData("registrations-producers-null")]
+    [InlineData("registrations-producers-over-limit")]
+    [InlineData("registration-producer-null")]
+    [InlineData("registration-producer-declaration-null")]
+    [InlineData("producer-implementation-version")]
+    [InlineData("producer-declaration-kind")]
+    [InlineData("producer-declaration-version")]
+    public void SnapshotRequiresTheCompleteClosedCandidateRegistrationShape(string change)
+    {
+        var entry = Candidate();
+        var resource = entry.Resources[0];
+        var producer = entry.Producers[0];
+        var profile = entry.Policy.Profiles[0];
+        var invalidId = BoundaryCanary + "/invalid";
+        if (change.StartsWith("selected-", StringComparison.Ordinal) && change != "selected-profile-absent")
+        {
+            profile = change switch
+            {
+                "selected-resources-empty" => profile with { Resources = [], Producers = profile.Producers.Select(static item => item with { RequiredResources = [] }).ToArray() },
+                "selected-resources-extra" => profile with { Resources = [profile.Resources[0], profile.Resources[0] with { Id = "extra" }] },
+                _ => profile with { Producers = [], Obligations = [] },
+            };
+            entry = entry with { Policy = entry.Policy with { Profiles = [profile, entry.Policy.Profiles[1]] } };
+        }
+        resource = change switch
+        {
+            "resource-capability-version" => resource with { CapabilityVersion = "2.0.0" },
+            "resource-name" => resource with { ResourceName = BoundaryCanary },
+            "resource-readiness" => resource with { Declaration = resource.Declaration with { Readiness = "completion" } },
+            "resource-dependencies-null" => resource with { Declaration = resource.Declaration with { Requires = null! } },
+            "resource-dependencies-present" => resource with { Declaration = resource.Declaration with { Requires = ["http"] } },
+            "registration-resource-declaration-null" => resource with { Declaration = null! },
+            _ => resource,
+        };
+        producer = change switch
+        {
+            "producer-implementation-version" => producer with { ImplementationVersion = "2.0.0" },
+            "producer-declaration-kind" => producer with { Declaration = producer.Declaration with { Kind = "other" } },
+            "producer-declaration-version" => producer with { Declaration = producer.Declaration with { Version = "2.0.0" } },
+            "registration-producer-declaration-null" => producer with { Declaration = null! },
+            _ => producer,
+        };
+        entry = entry with { Resources = [change == "registration-resource-null" ? null! : resource],
+            Producers = [change == "registration-producer-null" ? null! : producer, entry.Producers[1]] };
+        entry = change switch
+        {
+            "id" => entry with { Id = invalidId },
+            "version" => entry with { Version = invalidId },
+            "build-id" => entry with { BuildId = invalidId },
+            "profile-id" => entry with { ProfileId = invalidId },
+            "selected-profile-absent" => entry with { ProfileId = "absent-" + BoundaryCanary },
+            "registrations-resources-null" => entry with { Resources = null! },
+            "registrations-resources-empty" => entry with { Resources = [] },
+            "registrations-resources-extra" => entry with { Resources = [resource, resource] },
+            "registrations-producers-null" => entry with { Producers = null! },
+            "registrations-producers-over-limit" => entry with { Producers = Enumerable.Repeat(producer, 33).ToArray() },
+            _ => entry,
+        };
+
+        RejectAudit(() => EvidenceClosedApplicationCatalogue.Snapshot(entry));
+    }
+
+    [Theory]
+    [InlineData("null-list")]
+    [InlineData("too-few-files")]
+    [InlineData("null-file")]
+    [InlineData("empty-path")]
+    [InlineData("single-dot-path")]
+    [InlineData("empty-path-component")]
+    [InlineData("invalid-path-character")]
+    [InlineData("unknown-role")]
+    [InlineData("null-hash")]
+    [InlineData("zero-length")]
+    [InlineData("file-length-over-limit")]
+    [InlineData("total-length-over-limit")]
+    [InlineData("dcp-path")]
+    [InlineData("extension-prefix")]
+    [InlineData("extension-mode")]
+    [InlineData("apphost-suffix")]
+    [InlineData("resource-suffix")]
+    [InlineData("apphost-runtime-suffix")]
+    [InlineData("resource-runtime-suffix")]
+    [InlineData("file-directory-collision")]
+    [InlineData("duplicate-resource-role")]
+    public void SnapshotRejectsInventoriesThatCannotDescribeAClosedReadOnlyBundle(string change)
+    {
+        var entry = Candidate();
+        var file = entry.BundleFiles[0];
+        IReadOnlyList<EvidenceClosedBundleFile> files = change switch
+        {
+            "null-list" => null!,
+            "too-few-files" => entry.BundleFiles.Take(5).ToArray(),
+            "null-file" => ChangedFile(entry.BundleFiles, null!),
+            "empty-path" => ChangedFile(entry.BundleFiles, file with { RelativePath = string.Empty }),
+            "single-dot-path" => ChangedFile(entry.BundleFiles, file with { RelativePath = "." }),
+            "empty-path-component" => ChangedFile(entry.BundleFiles, file with { RelativePath = "apphost//" + BoundaryCanary }),
+            "invalid-path-character" => ChangedFile(entry.BundleFiles, file with { RelativePath = BoundaryCanary + "?.dll" }),
+            "unknown-role" => ChangedFile(entry.BundleFiles, file with { Role = (EvidenceClosedBundleRole)999 }),
+            "null-hash" => ChangedFile(entry.BundleFiles, file with { Sha256 = null! }),
+            "zero-length" => ChangedFile(entry.BundleFiles, file with { LengthBytes = 0 }),
+            "file-length-over-limit" => ChangedFile(entry.BundleFiles, file with { LengthBytes = 128L * 1024 * 1024 + 1 }),
+            "total-length-over-limit" => entry.BundleFiles.Select(static item => item with { LengthBytes = 128L * 1024 * 1024 }).ToArray(),
+            "dcp-path" => ChangedFile(entry.BundleFiles, entry.BundleFiles[4] with { RelativePath = "dcp/" + BoundaryCanary }, 4),
+            "extension-prefix" => ChangedFile(entry.BundleFiles, entry.BundleFiles[5] with { RelativePath = "dcp/extensions/" + BoundaryCanary }, 5),
+            "extension-mode" => ChangedFile(entry.BundleFiles, entry.BundleFiles[5] with { Mode = 0x124 }, 5),
+            "apphost-suffix" => ChangedFile(entry.BundleFiles, file with { RelativePath = "apphost/" + BoundaryCanary }),
+            "resource-suffix" => ChangedFile(entry.BundleFiles, entry.BundleFiles[2] with { RelativePath = "resource/" + BoundaryCanary }, 2),
+            "apphost-runtime-suffix" => ChangedFile(entry.BundleFiles, entry.BundleFiles[1] with { RelativePath = "apphost/config.json" }, 1),
+            "resource-runtime-suffix" => ChangedFile(entry.BundleFiles, entry.BundleFiles[3] with { RelativePath = "resource/config.json" }, 3),
+            "file-directory-collision" => entry.BundleFiles.Append(new("apphost", EvidenceClosedBundleRole.Dependency, 1, new string('a', 64), 0x124)).ToArray(),
+            _ => entry.BundleFiles.Append(new("resource/Second.dll", EvidenceClosedBundleRole.Resource, 1, new string('a', 64), 0x124)).ToArray(),
+        };
+
+        RejectAudit(() => EvidenceClosedApplicationCatalogue.Snapshot(entry with { BundleFiles = files }));
+    }
+
+    [Theory]
+    [InlineData("plan-null")]
+    [InlineData("paths-null")]
+    [InlineData("paths-over-limit")]
+    [InlineData("resources-null")]
+    [InlineData("resources-over-limit")]
+    [InlineData("producers-null")]
+    [InlineData("producers-over-limit")]
+    [InlineData("planner-path-rejection")]
+    public void CandidateBindingRejectsUnboundedOrUnplannableObservedInputs(string change)
+    {
+        var entry = Candidate();
+        var plan = Plan(entry.Policy);
+        var binding = Binding(entry);
+        plan = change switch
+        {
+            "plan-null" => null!,
+            "paths-null" => plan with { ChangedPaths = null! },
+            "paths-over-limit" => plan with { ChangedPaths = Enumerable.Repeat(plan.ChangedPaths[0], 4097).ToArray() },
+            "planner-path-rejection" => plan with { ChangedPaths = [new("src/../" + BoundaryCanary)] },
+            _ => plan,
+        };
+        binding = change switch
+        {
+            "resources-null" => binding with { Resources = null! },
+            "resources-over-limit" => binding with { Resources = Enumerable.Repeat(binding.Resources[0], 17).ToArray() },
+            "producers-null" => binding with { Producers = null! },
+            "producers-over-limit" => binding with { Producers = Enumerable.Repeat(binding.Producers[0], 33).ToArray() },
+            _ => binding,
+        };
+
+        RejectAudit(() => EvidenceClosedApplicationCatalogue.VerifyCandidateBinding(entry, binding.CatalogueDigest,
+            entry.Policy, plan, binding));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RealPlannerPolicyRejectionsTranslateToTheFixedCatalogueDiagnostic(bool observedPolicy)
+    {
+        var entry = Candidate();
+        var policy = entry.Policy with { Rules = [entry.Policy.Rules[0] with { ProfileId = BoundaryCanary }] };
+        var binding = Binding(entry);
+
+        if (observedPolicy)
+            RejectAudit(() => EvidenceClosedApplicationCatalogue.VerifyCandidateBinding(entry, binding.CatalogueDigest,
+                policy, Plan(entry.Policy), binding));
+        else
+            RejectAudit(() => EvidenceClosedApplicationCatalogue.Snapshot(entry with { Policy = policy }));
+    }
+
+    [Fact]
+    public void SnapshotAcceptsExactPolicyCountsAndInventoryByteCeilingAsMetadataOnly()
+    {
+        var entry = Candidate();
+        var policy = entry.Policy with
+        {
+            Id = new string('i', 128), Version = new string('v', 128),
+            Profiles = [entry.Policy.Profiles[0], .. Enumerable.Range(1, 31)
+                .Select(static index => new EvidenceProfile("unused-" + index, EvidenceProfileScope.Targeted, [], [], []))],
+            Rules = Enumerable.Range(0, 128).Select(index => new EvidencePolicyRule("rule-" + index,
+                "src/File" + index + ".cs", entry.ProfileId)).ToArray(),
+        };
+        var files = entry.BundleFiles.Select((file, index) => file with
+        {
+            LengthBytes = index < 3 ? 128L * 1024 * 1024 : index == 3 ? 128L * 1024 * 1024 - 3 : 1,
+        }).ToArray();
+
+        var snapshot = EvidenceClosedApplicationCatalogue.Snapshot(entry with { Policy = policy, BundleFiles = files });
+
+        Assert.Equal(32, snapshot.Policy.Profiles.Count);
+        Assert.Equal(128, snapshot.Policy.Rules.Count);
+        Assert.Equal(512L * 1024 * 1024, snapshot.BundleFiles.Sum(static item => item.LengthBytes));
+        Assert.Equal(128, snapshot.Policy.Id.Length);
+        Assert.Throws<NotSupportedException>(() => ((IList<EvidencePolicyRule>)snapshot.Policy.Rules).Clear());
+    }
+
+    [Fact]
+    public void SnapshotIncludesUnselectedDeclarationsAtTheirValidBoundsWithoutIssuingAdmission()
+    {
+        var entry = Candidate();
+        var resources = Enumerable.Range(0, 16).Select(static index => new EvidenceResourceDeclaration(
+            "resource-" + index, "completion", 120, [])).ToArray();
+        var assertions = Enumerable.Range(0, 128).Select(static index => index == 0 ? new string('a', 128) : "assertion-" + index).ToArray();
+        var slots = Enumerable.Range(0, 128).Select(static index => new EvidenceArtifactSlot(
+            "slot-" + index, index == 0 ? new string('r', 256) : "reports/" + index,
+            index == 0 ? new string('m', 128) : "application/xml", true, index == 0 ? 0 : 256L * 1024 * 1024)).ToArray();
+        var producers = Enumerable.Range(0, 32).Select(index => new EvidenceProducerDeclaration(
+            "producer-" + index, "coverage", "1.0.0", resources.Select(static item => item.Id).ToArray(), assertions, slots, 600)).ToArray();
+        var obligations = Enumerable.Range(0, 128).Select(index => new EvidenceObligation(
+            "obligation-" + index, index == 0 ? new string('r', 128) : "behavior",
+            index == 0 ? new string('r', 4096) : "Declared behavior requires evidence.",
+            producers.Select(static item => item.Id).ToArray(), assertions[0])).ToArray();
+        var unselected = new EvidenceProfile("bounded-unselected", EvidenceProfileScope.Targeted, resources, producers, obligations);
+
+        var snapshot = EvidenceClosedApplicationCatalogue.Snapshot(entry with
+        {
+            Policy = entry.Policy with { Profiles = [entry.Policy.Profiles[0], unselected] },
+        });
+
+        var frozen = snapshot.Policy.Profiles.Single(static item => item.Id == "bounded-unselected");
+        Assert.Equal(16, frozen.Resources.Count);
+        Assert.Equal(32, frozen.Producers.Count);
+        Assert.Equal(128, frozen.Obligations.Count);
+        Assert.Equal(16, frozen.Producers[0].RequiredResources.Count);
+        Assert.Equal(128, frozen.Producers[0].AssertionIds.Count);
+        Assert.Equal(128, frozen.Producers[0].ArtifactSlots.Count);
+        Assert.Equal(32, frozen.Obligations[0].RequiredProducerIds.Count);
+        Assert.Equal(256, frozen.Producers[0].ArtifactSlots[0].RelativeRoot.Length);
+        assertions[0] = BoundaryCanary;
+        slots[0] = slots[0] with { MaximumBytes = 1 };
+        Assert.Equal(128, frozen.Producers[0].AssertionIds[0].Length);
+        Assert.Equal(0, frozen.Producers[0].ArtifactSlots[0].MaximumBytes);
+        Assert.Throws<NotSupportedException>(() => ((IList<string>)frozen.Obligations[0].RequiredProducerIds).Clear());
+    }
+
+    private const string BoundaryCanary = "catalogue-boundary-canary-779";
+
+    private static void RejectAudit(Action audit)
+    {
+        var error = Assert.Throws<EvidenceAdmissionException>(audit);
+        Assert.Equal("ASEVD404", error.Code);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain(BoundaryCanary, error.Message, StringComparison.Ordinal);
+    }
+
     private static void Reject(EvidenceClosedApplicationDefinition entry, EvidenceClosedApplicationBinding binding)
     {
         var error = Assert.Throws<EvidenceAdmissionException>(() =>

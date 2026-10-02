@@ -614,7 +614,8 @@
         "dependencies": {
           "Aspire.Hosting": "[13.4.4, 14.0.0)",
           "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Evidence.Planner": "[0.1.0, )"
+          "ForgeTrust.AppSurface.Evidence.Planner": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Coverage": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.evidence.contracts": {
@@ -812,6 +813,13 @@
         "requested": "[18.0.0, )",
         "resolved": "18.0.0",
         "contentHash": "ptHVgcYmLejGuWXV7RMFoEqFKYMXnieOlWLPzEslfDtzZ9ngMhjYwykfqjBN2+fMEAEyobozkj07lKEpR4dssA=="
+      },
+      "forgetrust.appsurface.evidence.coverage": {
+        "type": "Project",
+        "dependencies": {
+          "CliWrap": "[3.10.1, )",
+          "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )"
+        }
       }
     }
   }

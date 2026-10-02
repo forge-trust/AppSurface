@@ -132,11 +132,6 @@ internal static class EvidenceProtectedCliExecution
                 admission.LatchFailure();
                 execution.LatchFailure();
             });
-            var coverage = new EvidenceRestrictedCoverageProducer(
-                new EvidenceRestrictedCoverageTransport(worker, processOutputQuota),
-                new CoverageMergeWorkflow(new EvidenceProtectedReportGenerator(worker, processOutputQuota), clock));
-            var diffSnapshot = inputs.DiffBytes is null ? null
-                : new EvidenceDiffSnapshot(inputs.DiffBytes, "protected-diff", EvidenceDigest.Sha256(inputs.DiffBytes));
             foreach (var producer in plan.Profile.Producers)
             {
                 if (!budget.TryBeginNextStage(callerCancellation, out stage))
@@ -148,9 +143,14 @@ internal static class EvidenceProtectedCliExecution
 
                 var writer = new EvidenceArtifactWriter(producer, root!, artifactQuota, execution, admission);
                 writers.Add(writer);
+                var coverage = EvidenceRestrictedCoverageProducerFactory.Create(producer);
                 var produced = await execution.ExecuteAsync(EvidenceRunStage.Producer, stage!.Duration,
-                    token => new ValueTask<EvidenceProducerResult>(coverage.RunAsync(producer, descriptor.Solution,
-                        diffSnapshot, writer, token)), callerCancellation).ConfigureAwait(false);
+                    async token =>
+                    {
+                        using var lease = writer.BindRestrictedProducerLease(worker, admission, plan, inputs.DiffBytes,
+                            processOutputQuota, execution, token);
+                        return await coverage.ProduceAsync(new EvidenceProducerContext(plan, producer, clock, writer), token).ConfigureAwait(false);
+                    }, callerCancellation).ConfigureAwait(false);
                 budget.CompleteCurrentStage();
                 if (produced.Outcome != EvidenceWorkerStageOutcome.Passed || produced.Value is null)
                 {

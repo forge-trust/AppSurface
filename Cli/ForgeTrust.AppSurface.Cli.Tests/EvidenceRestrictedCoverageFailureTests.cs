@@ -2,13 +2,13 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
-using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
+/// <summary>Procedure unit controls using internal fake transports; these do not establish Trusted or native acceptance.</summary>
 public sealed class EvidenceRestrictedCoverageFailureTests
 {
     private const string AssertionId = "appsurface/coverage/behavioral-patch@1";
@@ -140,7 +140,7 @@ public sealed class EvidenceRestrictedCoverageFailureTests
             @@ -0,0 +1,1 @@
             +changed
             """);
-        var snapshot = new EvidenceDiffSnapshot(
+        var snapshot = new EvidenceRestrictedCoverageDiffSnapshot(
             diffBytes,
             "protected-change.diff",
             Convert.ToHexString(SHA256.HashData(diffBytes)).ToLowerInvariant());

@@ -1170,7 +1170,8 @@ class Broker:
         conn.sendall(encode_response(obj))
 
     def _unit_properties(self, unit: str, timeout: float = 5) -> dict[str, str]:
-        keys = ("ActiveState", "ControlGroup", "User", "Group", "KillMode", "Result", "ExecMainCode", "ExecMainStatus")
+        keys = ("LoadState", "ActiveState", "SubState", "MainPID", "ControlGroup", "User", "Group", "KillMode",
+                "Result", "ExecMainCode", "ExecMainStatus")
         result = subprocess.run(["systemctl", "show", unit, "--no-pager", *[f"--property={k}" for k in keys]],
                                 capture_output=True, env=ENV, timeout=timeout, check=False)
         if result.returncode:
@@ -1419,7 +1420,8 @@ class Broker:
             if self.active_artifact_operations:
                 raise LauncherError("artifact-transfer-active")
             unit = f"{self.unit_prefix}-s-{len(self.units)}.service"
-            self.units.append((unit, ""))
+            group = f"/system.slice/{unit}"
+            self.units.append((unit, group))
         argv = ["systemd-run", "--quiet", "--wait", "--pipe", "--expand-environment=no",
                 f"--unit={unit}", *[f"--property={k}={v}" for k, v in {
                     "User": str(self.subject_uid), "Group": str(self.subject_gid),
@@ -1449,16 +1451,74 @@ class Broker:
                        for name, stream in (("stdout", proc.stdout), ("stderr", proc.stderr))]
         pumps = [threading.Thread(target=pump.run, daemon=True) for pump in owned_pumps]
         for thread in pumps: thread.start()
+        main_code = main_status = None
+        completion_failed = False
         try:
-            proc.wait(timeout=max(1, self.deadline-time.monotonic()) + 3)
-        except subprocess.TimeoutExpired:
-            self.stop()
+            # --wait waits for deactivation, while RemainAfterExit retains the unit.
+            # Capture the real terminal main-process facts before explicit stop/GC.
+            while True:
+                remaining = self.deadline - time.monotonic()
+                with self.lock:
+                    closed = self.work_closed
+                if closed or remaining <= 0:
+                    raise LauncherError("subject-exit-unconfirmed")
+                try:
+                    props = self._unit_properties(unit, timeout=min(5, remaining))
+                except (LauncherError, OSError, subprocess.SubprocessError):
+                    if proc.poll() is not None:
+                        raise LauncherError("subject-exit-unconfirmed") from None
+                    props = {}
+                if props.get("LoadState") == "loaded":
+                    if (props.get("User") != str(self.subject_uid) or props.get("Group") != str(self.subject_gid)
+                            or props.get("KillMode") != "control-group" or props.get("ControlGroup", "") not in ("", group)):
+                        raise LauncherError("subject-exit-unconfirmed")
+                    pid, code, status = (props.get(key, "") for key in ("MainPID", "ExecMainCode", "ExecMainStatus"))
+                    if (not re.fullmatch(r"[0-9]{1,10}", pid) or int(pid) > 2_147_483_647
+                            or not re.fullmatch(r"[0-9]{1,3}", status) or int(status) > 255
+                            or code not in ("0", "1", "2", "3")):
+                        raise LauncherError("subject-exit-unconfirmed")
+                    if int(pid) > 0 and props.get("ControlGroup") != group:
+                        raise LauncherError("subject-exit-unconfirmed")
+                    if (pid == "0" and code in ("1", "2", "3")
+                            and props.get("ActiveState") in ("active", "failed", "inactive")
+                            and props.get("SubState") in ("exited", "failed", "dead")):
+                        if (code == "1" and int(status) == 0 and props.get("Result") != "success"
+                                or code in ("2", "3") and not 1 <= int(status) <= 64):
+                            raise LauncherError("subject-exit-unconfirmed")
+                        main_code, main_status = int(code), int(status)
+                        break
+                elif props.get("LoadState", "") not in ("", "not-found"):
+                    raise LauncherError("subject-exit-unconfirmed")
+                if proc.poll() is not None:
+                    raise LauncherError("subject-exit-unconfirmed")
+                with self.condition:
+                    self.condition.wait(timeout=min(0.05, max(0, self.deadline - time.monotonic())))
+        except (LauncherError, OSError, subprocess.SubprocessError, ValueError):
+            completion_failed = True
+            with self.condition:
+                self.work_closed = True
+                self.condition.notify_all()
+
+        # One cumulative stop/join allowance; normal per-command stop keeps this lease open.
+        stop_deadline = time.monotonic() + min(self.stopping_seconds, self.cleanup_seconds)
+        try:
+            _systemd(["/usr/bin/systemctl", "stop", unit], timeout=max(0, stop_deadline - time.monotonic()))
+        except (LauncherError, OSError, subprocess.SubprocessError):
+            completion_failed = True
+        try:
+            proc.wait(timeout=max(0, stop_deadline - time.monotonic()))
+        except (OSError, subprocess.SubprocessError):
+            completion_failed = True
             try:
-                proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
                 proc.kill()
-                proc.wait(timeout=1)
-        for thread in pumps: thread.join(timeout=3)
+            except OSError:
+                pass
+            try:
+                proc.wait(timeout=max(0, stop_deadline - time.monotonic()))
+            except (OSError, subprocess.SubprocessError):
+                pass
+        for thread in pumps:
+            thread.join(timeout=max(0, stop_deadline - time.monotonic()))
         pump_states = [pump.snapshot() for pump in owned_pumps]
         received_bytes, stdout, stderr = budget.snapshot()
         if (any(thread.is_alive() for thread in pumps) or not all(acknowledged for acknowledged, _ in pump_states)
@@ -1466,16 +1526,26 @@ class Broker:
                 or self.output_quota.received_bytes() != quota_before + received_bytes):
             self._fail_subject_output()
             raise LauncherError("subject-output-unconfirmed")
-        props = self._unit_properties(unit)
-        group = props.get("ControlGroup", "")
-        with self.lock:
-            self.units = [(name, group if name == unit else known) for name, known in self.units]
-        if (props.get("User") != str(self.subject_uid) or props.get("KillMode") != "control-group"
-                or not self._group_empty(group)):
-            self.stop()
-            raise LauncherError("subject-exit-unconfirmed")
         if budget.exceeded.is_set():
             raise LauncherError("ASEVD420")
+        with self.lock:
+            closed = self.work_closed
+        if (completion_failed or closed or main_code is None or type(proc.returncode) is not int
+                or main_code == 1 and proc.returncode != main_status
+                or main_code in (2, 3) and proc.returncode == 0
+                or time.monotonic() >= self.deadline or time.monotonic() >= stop_deadline):
+            self._fail_subject_output()
+            raise LauncherError("subject-exit-unconfirmed")
+        try:
+            while not self._group_empty(group):
+                remaining = min(self.deadline, stop_deadline) - time.monotonic()
+                if remaining <= 0:
+                    raise LauncherError("subject-exit-unconfirmed")
+                with self.condition:
+                    self.condition.wait(timeout=min(0.05, remaining))
+        except (LauncherError, OSError, ValueError):
+            self._fail_subject_output()
+            raise LauncherError("subject-exit-unconfirmed") from None
         with self.lock:
             self.command_output_receipts.append((received_bytes, pump_states[0][1], pump_states[1][1]))
         if result_root is not None:

@@ -1021,15 +1021,23 @@ class OutputBudgetTests(unittest.TestCase):
                     self.stderr = io.BytesIO(b"err" * (launcher.MAX_PREFIX // 3 + 7))
                     self.returncode = 17
 
+                def poll(self):
+                    return None
+
                 def wait(self, timeout=None):
                     del timeout
+                    return self.returncode
 
             process = FakeProcess()
             try:
                 with patch.object(launcher, "openat2", side_effect=portable_openat2), \
                      patch.object(launcher.subprocess, "Popen", return_value=process) as spawn, \
+                     patch.object(launcher.subprocess, "run", return_value=launcher.subprocess.CompletedProcess([], 0, b"", b"")), \
                      patch.object(broker, "_unit_properties", return_value={
-                         "User": str(os.getuid()), "KillMode": "control-group", "ControlGroup": "/system.slice/test.service",
+                         "LoadState": "loaded", "ActiveState": "failed", "SubState": "failed", "MainPID": "0",
+                         "User": str(os.getuid()), "Group": str(os.getgid()), "KillMode": "control-group",
+                         "ControlGroup": "/system.slice/test-evidence-s-0.service", "Result": "exit-code",
+                         "ExecMainCode": "1", "ExecMainStatus": "17",
                      }), \
                      patch.object(broker, "_group_empty", return_value=True):
                     result = broker._run({
@@ -1078,6 +1086,7 @@ class SubjectOutputPumpTests(unittest.TestCase):
             broker, _root, _artifact = artifact_broker(temp)
             broker.subject_root = broker.scratch = Path(temp).resolve()
             process = type("Process", (), {"stdout": stdout, "stderr": stderr, "returncode": 0,
+                                           "poll": lambda self: None,
                                            "wait": lambda self, timeout=None: 0})()
             request = {"op": "run", "executable": str(broker.dotnet),
                        "arguments": ["test", "fixture.csproj", "--results-directory",
@@ -1088,7 +1097,10 @@ class SubjectOutputPumpTests(unittest.TestCase):
                      patch.object(launcher.subprocess, "Popen", return_value=process), \
                      patch.object(launcher.subprocess, "run", return_value=launcher.subprocess.CompletedProcess([], 0, b"", b"")) as stop, \
                      patch.object(broker, "_unit_properties", return_value={
-                         "User": str(os.getuid()), "KillMode": "control-group", "ControlGroup": "/system.slice/test.service"}), \
+                         "LoadState": "loaded", "ActiveState": "active", "SubState": "exited", "MainPID": "0",
+                         "User": str(os.getuid()), "Group": str(os.getgid()), "KillMode": "control-group",
+                         "ControlGroup": "/system.slice/test-evidence-s-0.service", "Result": "success",
+                         "ExecMainCode": "1", "ExecMainStatus": "0"}), \
                      patch.object(broker, "_group_empty", return_value=True):
                     response = broker_request(broker, request)
                     registered = "run-pump" in broker.allowed_results_roots
@@ -1130,7 +1142,7 @@ class SubjectOutputPumpTests(unittest.TestCase):
             self.assertEqual(response["output_truncated"], truncated)
             self.assertTrue(registered)
             self.assertFalse(closed or failed)
-            self.assertEqual(stops, 0)
+            self.assertEqual(stops, 1, "A finished retained unit must be stopped before joining systemd-run.")
 
     def test_budget_mismatch_after_clean_eof_is_terminal_and_cannot_register_results(self):
         for owner, method in ((launcher.OutputBudget, "add"), (launcher.OutputQuota, "count")):
@@ -1151,6 +1163,158 @@ class SubjectOutputPumpTests(unittest.TestCase):
         self.assertFalse(failed)
         self.assertGreater(stops, 0)
         self.assertEqual(received, 4)
+
+
+class SubjectUnitCompletionTests(unittest.TestCase):
+    """Control completion ordering with real pumps and a retained-unit process double."""
+    def exercise(self, *, status=0, change=None, launcher_status=None, wait_timeout=False, group_empty=True):
+        events = []
+        with tempfile.TemporaryDirectory() as temp:
+            broker, _root, _artifact = artifact_broker(temp)
+            broker.subject_root = broker.scratch = Path(temp).resolve()
+            group = "/system.slice/test-evidence-s-0.service"
+            stopped = False
+
+            class Process:
+                stdout = io.BytesIO(b"out")
+                stderr = io.BytesIO(b"err")
+                returncode = None
+                first_wait = True
+
+                def poll(self):
+                    return self.returncode
+
+                def wait(self, timeout=None):
+                    events.append(("wait", timeout))
+                    if not stopped or wait_timeout and self.first_wait:
+                        self.first_wait = False
+                        raise launcher.subprocess.TimeoutExpired("systemd-run", timeout)
+                    if self.returncode is None:
+                        self.returncode = status if launcher_status is None else launcher_status
+                    return self.returncode
+
+                def kill(self):
+                    events.append(("kill",))
+                    self.returncode = -9
+
+            process = Process()
+            queries = 0
+
+            def inspect(unit, timeout=5):
+                nonlocal queries
+                if stopped:
+                    raise AssertionError("Completed unit was queried after stop/GC.")
+                self.assertEqual(unit, "test-evidence-s-0.service")
+                self.assertGreater(timeout, 0)
+                queries += 1
+                events.append(("inspect", queries))
+                props = {"LoadState": "loaded", "ActiveState": "active" if status == 0 else "failed",
+                         "SubState": "exited" if status == 0 else "failed", "MainPID": "0",
+                         "User": str(broker.subject_uid), "Group": str(broker.subject_gid),
+                         "KillMode": "control-group", "ControlGroup": "", "Result": "success" if status == 0 else "exit-code",
+                         "ExecMainCode": "1", "ExecMainStatus": str(status)}
+                if change == "running-first" and queries == 1:
+                    props.update(MainPID="12345", SubState="running", ControlGroup=group, ExecMainCode="0")
+                elif change == "cancelled":
+                    broker.work_closed = True
+                elif change == "expired":
+                    broker.deadline = time.monotonic() - 1
+                elif isinstance(change, dict):
+                    props.update(change)
+                    # A launcher exiting without a valid terminal main receipt must not establish success.
+                    process.returncode = 0
+                return props
+
+            def stop(argv, **kwargs):
+                nonlocal stopped
+                self.assertIn(argv[0], ("systemctl", "/usr/bin/systemctl"))
+                self.assertEqual(argv[1], "stop")
+                self.assertEqual(argv[2:], ["test-evidence-s-0.service"])
+                self.assertGreater(kwargs["timeout"], 0)
+                events.append(("stop", kwargs["timeout"]))
+                stopped = True
+                return launcher.subprocess.CompletedProcess(argv, 0, b"", b"")
+
+            def empty(observed):
+                self.assertEqual(observed, group)
+                self.assertTrue(stopped)
+                self.assertIsNotNone(process.returncode)
+                events.append(("physical-empty",))
+                return group_empty
+
+            request = {"op": "run", "executable": str(broker.dotnet),
+                       "arguments": ["test", "fixture.csproj", "--results-directory",
+                                     str(broker.scratch / "test-output" / "run-completion")],
+                       "working_directory": str(broker.subject_root)}
+            if not group_empty:
+                broker.stopping_seconds = 0.02
+            try:
+                with patch.object(launcher, "openat2", side_effect=portable_openat2), \
+                     patch.object(launcher.subprocess, "Popen", return_value=process), \
+                     patch.object(launcher.subprocess, "run", side_effect=stop), \
+                     patch.object(broker, "_unit_properties", side_effect=inspect), \
+                     patch.object(broker, "_group_empty", side_effect=empty):
+                    response = broker_request(broker, request)
+                    if not response["ok"]:
+                        self.assertFalse(broker_request(broker, {"op": "ready"})["ok"])
+                        self.assertFalse(broker._wait_for_owned_exit())
+                return response, events, "run-completion" in broker.allowed_results_roots, broker.command_output_receipts
+            finally:
+                broker.close_artifact_handles()
+
+    def test_running_then_exited_main_is_captured_before_stop_and_launcher_wait_even_if_cgroup_pruned(self):
+        response, events, registered, receipts = self.exercise(change="running-first")
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["exit_code"], 0)
+        self.assertEqual(response["received_bytes"], 6)
+        self.assertEqual(receipts, [(6, 3, 3)])
+        self.assertTrue(registered)
+        operations = [event[0] for event in events]
+        self.assertEqual(operations, ["inspect", "inspect", "stop", "wait", "physical-empty"])
+        self.assertLessEqual(events[2][1], 2)
+        self.assertLessEqual(events[3][1], events[2][1])
+
+    def test_actual_nonzero_main_status_is_preserved_after_stop(self):
+        response, events, registered, receipts = self.exercise(status=17)
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["exit_code"], 17)
+        self.assertTrue(registered)
+        self.assertEqual(receipts, [(6, 3, 3)])
+        self.assertEqual([event[0] for event in events], ["inspect", "stop", "wait", "physical-empty"])
+
+    def test_missing_terminal_receipt_or_wrong_identity_and_group_never_registers_results(self):
+        for change in ({"User": "0"}, {"Group": "0"}, {"KillMode": "process"},
+                       {"ControlGroup": "/system.slice/foreign.service"}, {"LoadState": "not-found"},
+                       {"ExecMainCode": "0"}, {"ExecMainStatus": "256"}, {"ExecMainStatus": "secret-779"},
+                       {"MainPID": "12345", "ExecMainCode": "0"}, {"Result": "exit-code"}):
+            with self.subTest(change=change):
+                response, _events, registered, receipts = self.exercise(change=change)
+                self.assertEqual(response, {"ok": False, "error": "broker-request-failed"})
+                self.assertFalse(registered)
+                self.assertEqual(receipts, [])
+                self.assertNotIn("secret-779", json.dumps(response))
+
+    def test_cancelled_expired_or_launcher_status_mismatch_cannot_become_success(self):
+        for arguments in ({"change": "cancelled"}, {"change": "expired"}, {"launcher_status": 1}):
+            with self.subTest(arguments=arguments):
+                response, _events, registered, receipts = self.exercise(**arguments)
+                self.assertFalse(response["ok"])
+                self.assertFalse(registered)
+                self.assertEqual(receipts, [])
+
+    def test_launcher_wait_timeout_kills_and_reaps_before_rejecting_completion(self):
+        response, events, registered, receipts = self.exercise(wait_timeout=True)
+        self.assertFalse(response["ok"])
+        self.assertFalse(registered)
+        self.assertEqual(receipts, [])
+        self.assertEqual([event[0] for event in events[:5]], ["inspect", "stop", "wait", "kill", "wait"])
+
+    def test_finished_main_and_joined_pumps_do_not_substitute_for_physical_empty_group(self):
+        response, events, registered, receipts = self.exercise(group_empty=False)
+        self.assertFalse(response["ok"])
+        self.assertFalse(registered)
+        self.assertEqual(receipts, [])
+        self.assertIn("physical-empty", [event[0] for event in events])
 
 
 class ArtifactBrokerTests(unittest.TestCase):
