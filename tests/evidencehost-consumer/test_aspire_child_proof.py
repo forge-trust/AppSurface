@@ -1,5 +1,6 @@
 """Portable controls and resource HTTP probes, never native acceptance."""
 import http.client
+from contextlib import ExitStack
 import importlib.util
 import json
 import os
@@ -183,7 +184,7 @@ class StartupExecutionDiagnosticControls(unittest.TestCase):
         self.assertEqual({"result": "exit-code", "exec_main_pid": 321, "exec_main_code": 1,
                           "exec_main_status": 203, "job_id": 42}, proof.startup_execution_diagnostics(properties))
 
-    def test_queued_loaded_inactive_and_exited_process_capture_distinct_facts_but_both_reject(self):
+    def test_queued_and_exited_optional_facts_stay_distinct_without_authorizing_initial_inactive(self):
         samples = [(dict(Result="success", ExecMainPID="0", ExecMainCode="0", ExecMainStatus="0", Job="42"),
                     {"result": "success", "exec_main_pid": 0, "exec_main_code": 0, "exec_main_status": 0, "job_id": 42}),
                    (dict(Result="exit-code", ExecMainPID="321", ExecMainCode="1", ExecMainStatus="203", Job=""),
@@ -195,9 +196,14 @@ class StartupExecutionDiagnosticControls(unittest.TestCase):
                 receipt = {}
                 with mock.patch.object(proof, "command", return_value=subprocess.CompletedProcess([], 0, raw, b"private-canary")), \
                         mock.patch.object(proof, "identity_matches") as identity:
-                    with self.assertRaises(proof.StartupFailure):
-                        proof.query_exec_startup(SELECTED_UNIT, time.monotonic() + 1, False, receipt, Path(name), time.monotonic())
+                    properties, complete = proof.query_exec_startup(SELECTED_UNIT, time.monotonic() + 1,
+                                                                   False, receipt, Path(name), time.monotonic())
+                    self.assertFalse(complete)
+                    self.assertEqual({}, receipt)
                     identity.assert_not_called()
+                # Optional diagnostics cannot distinguish authority. A launcher exit
+                # or deadline still rejects both samples and retains their actual facts.
+                proof.record_startup_failure(receipt, Path(name), properties, time.monotonic())
                 path = Path(name) / "startup-diagnostic.json"
                 data = json.loads(path.read_bytes())
                 self.assertEqual(expected, {key: data[key] for key in expected})
@@ -515,7 +521,7 @@ class StartupQueryAndStopDiscoveryControls(unittest.TestCase):
 class ExitedLauncherOrchestrationControls(unittest.TestCase):
     """Execute controller orchestration with fake launcher/query outcomes, no native service."""
 
-    def _run_exited_launcher(self, *, activating_first=False, read_failure=None):
+    def _run_exited_launcher(self, *, activating_first=False, read_failure=None, queued_first=False, final_queued=False):
         import io
         from types import SimpleNamespace
         original_path = Path
@@ -548,6 +554,13 @@ class ExitedLauncherOrchestrationControls(unittest.TestCase):
             events, query_timeouts = [], []
             pending = StartupQueryAndStopDiscoveryControls.properties(ActiveState="activating", SubState="start", MainPID="0")
             terminal = StartupQueryAndStopDiscoveryControls.properties(ActiveState="failed", SubState="failed", MainPID="0")
+            queued = StartupQueryAndStopDiscoveryControls.properties(ActiveState="inactive", SubState="dead", MainPID="0",
+                                                                    ControlGroup="", Result="success", ExecMainPID="0",
+                                                                    ExecMainCode="0", ExecMainStatus="0", Job="42")
+            if queued_first:
+                pending = queued
+            if final_queued:
+                terminal = queued
             samples = iter(([pending] if activating_first else []) + [read_failure if read_failure is not None else terminal])
             def query(unit, timeout=5):
                 self.assertEqual(SELECTED_UNIT, unit)
@@ -594,27 +607,34 @@ class ExitedLauncherOrchestrationControls(unittest.TestCase):
                 if candidate == control.parent / "payload/proof-input":
                     mode |= 0o200
                 return original_chmod(candidate, mode, *args, **kwargs)
-            with mock.patch.object(proof.sys, "platform", "linux"), \
-                    mock.patch.multiple(proof.os, geteuid=mock.Mock(return_value=0), chown=mock.Mock()), \
-                    mock.patch.object(proof.pwd, "getpwuid"), \
-                    mock.patch.object(proof, "Path", side_effect=selected_path), \
-                    mock.patch.object(original_path, "chmod", root_fixture_chmod), \
-                    mock.patch.object(proof.uuid, "uuid4", return_value=SimpleNamespace(hex="a" * 32)), \
-                    mock.patch.object(proof, "prepare_payload", side_effect=stage), \
-                    mock.patch.object(proof.multiprocessing, "Event"), mock.patch.object(proof.multiprocessing, "Pipe", return_value=(mock.Mock(), mock.Mock())), \
-                    mock.patch.object(proof.multiprocessing, "Process", return_value=monitor), \
-                    mock.patch.object(proof, "await_watchdog_ack"), mock.patch.object(proof, "disarm_watchdog", side_effect=disarm), \
-                    mock.patch.object(proof.subprocess, "Popen", return_value=process), \
-                    mock.patch.object(proof, "unit_properties", side_effect=query), \
-                    mock.patch.object(proof, "record_startup_failure", side_effect=capture), \
-                    mock.patch.object(proof, "record_budget_diagnostic"), mock.patch.object(proof, "stop_and_join", side_effect=stop), \
-                    mock.patch.object(proof, "command") as command, mock.patch.object(proof, "identity_matches") as identity, \
-                    mock.patch("builtins.print") as printed:
+            with ExitStack() as stack:
+                stack.enter_context(mock.patch.object(proof.sys, 'platform', 'linux'))
+                stack.enter_context(mock.patch.multiple(proof.os, geteuid=mock.Mock(return_value=0), chown=mock.Mock()))
+                stack.enter_context(mock.patch.object(proof.pwd, 'getpwuid'))
+                stack.enter_context(mock.patch.object(proof, 'Path', side_effect=selected_path))
+                stack.enter_context(mock.patch.object(original_path, 'chmod', root_fixture_chmod))
+                stack.enter_context(mock.patch.object(proof.uuid, 'uuid4', return_value=SimpleNamespace(hex='a' * 32)))
+                stack.enter_context(mock.patch.object(proof, 'prepare_payload', side_effect=stage))
+                stack.enter_context(mock.patch.object(proof.multiprocessing, 'Event'))
+                stack.enter_context(mock.patch.object(proof.multiprocessing, 'Pipe', return_value=(mock.Mock(), mock.Mock())))
+                stack.enter_context(mock.patch.object(proof.multiprocessing, 'Process', return_value=monitor))
+                stack.enter_context(mock.patch.object(proof, 'await_watchdog_ack'))
+                stack.enter_context(mock.patch.object(proof, 'disarm_watchdog', side_effect=disarm))
+                stack.enter_context(mock.patch.object(proof.subprocess, 'Popen', return_value=process))
+                stack.enter_context(mock.patch.object(proof, 'unit_properties', side_effect=query))
+                stack.enter_context(mock.patch.object(proof, 'record_startup_failure', side_effect=capture))
+                stack.enter_context(mock.patch.object(proof, 'record_budget_diagnostic'))
+                stack.enter_context(mock.patch.object(proof, 'stop_and_join', side_effect=stop))
+                command = stack.enter_context(mock.patch.object(proof, 'command'))
+                identity = stack.enter_context(mock.patch.object(proof, 'identity_matches'))
+                http = stack.enter_context(mock.patch.object(proof, 'ready_request'))
+                printed = stack.enter_context(mock.patch('builtins.print'))
                 code = proof.prove(args)
             self.assertEqual(1, code)
             self.assertEqual(["query", "query", "capture", "TERM"] if activating_first else ["query", "capture", "TERM"], events)
             command.assert_called_once_with(["systemctl", "kill", "--kill-whom=main", "--signal=TERM", SELECTED_UNIT], check=False)
             identity.assert_not_called()
+            http.assert_not_called()
             receipt = json.loads(printed.call_args.args[0])
             self.assertEqual(proof.STARTUP_FAILURE, receipt["failure"])
             self.assertEqual("StartupFailure", receipt["error_class"])
@@ -639,6 +659,12 @@ class ExitedLauncherOrchestrationControls(unittest.TestCase):
     def test_activating_launcher_exits_between_queries_refreshes_terminal_facts_before_term_and_fails(self):
         self._run_exited_launcher(activating_first=True)
 
+    def test_queued_launcher_exits_between_queries_still_captures_before_term_and_fails(self):
+        self._run_exited_launcher(activating_first=True, queued_first=True)
+
+    def test_already_exited_launcher_with_queued_facts_cannot_turn_diagnostic_refresh_into_startup(self):
+        self._run_exited_launcher(final_queued=True)
+
     def test_final_read_failure_keeps_old_activating_facts_and_original_startup_failure(self):
         for error in (OSError("private-query-canary"), subprocess.TimeoutExpired("private-query-canary", 1)):
             with self.subTest(error_class=type(error).__name__):
@@ -649,6 +675,160 @@ class ExitedLauncherOrchestrationControls(unittest.TestCase):
         with mock.patch.object(proof.time, "monotonic", return_value=12), mock.patch.object(proof, "unit_properties") as query:
             self.assertIs(previous, proof.refresh_unconfirmed_startup(SELECTED_UNIT, 12, previous))
         query.assert_not_called()
+
+
+class QueuedStartupOrchestrationControls(unittest.TestCase):
+    """Fake launcher/query orchestration only; no native service or admission."""
+
+    def _run_sequence(self, *, outcome="ready", optional=None):
+        import io
+        from types import SimpleNamespace
+        original_path, original_read = Path, Path.read_bytes
+        with tempfile.TemporaryDirectory(prefix="queued-startup-") as name:
+            root = original_path(name)
+            run_root, bundle, tools, output = (root / part for part in ("run", "bundle", "tools", "output"))
+            for directory in (run_root, bundle, tools, output):
+                directory.mkdir()
+            controllers, dotnet = root / "cgroup.controllers", root / "dotnet"
+            controllers.touch()
+            dotnet.touch()
+            resource = original_path(__file__).parent / "NativeHttpResource/bin/Debug/net10.0/NativeHttpResource.dll"
+            shutil.copyfile(resource, tools / "protected-tool.dll")
+            args = SimpleNamespace(bundle=bundle, dotnet=dotnet, protected_tools=tools,
+                                   protected_output=output, subject_uid=999, subject_gid=999, case="normal")
+            process = SimpleNamespace(stdout=io.BytesIO(), stderr=io.BytesIO(), returncode=None,
+                                      poll=lambda: None)
+            monitor = WatchdogAndPumpControls._monitor()
+            clock, events = [100.0], []
+            queued = StartupQueryAndStopDiscoveryControls.properties(ActiveState="inactive", SubState="dead",
+                                                                    MainPID="0", ControlGroup="", **(optional or {}))
+            activating = StartupQueryAndStopDiscoveryControls.properties(ActiveState="activating", SubState="start", MainPID="0")
+            active = StartupQueryAndStopDiscoveryControls.properties()
+            samples = [queued, activating, active]
+            if outcome == "always-inactive":
+                samples = [queued]
+            elif outcome == "regressed-inactive":
+                samples = [queued, activating, queued]
+            elif outcome == "foreign":
+                samples = [queued | {"ControlGroup": "/system.slice/foreign.service"}]
+            elif outcome == "malformed":
+                samples = [queued | {"MainPID": "private-query-canary"}]
+            control = run_root / SELECTED_UNIT.removesuffix(".service") / "control"
+            index = [0]
+            def query(unit, timeout=5):
+                self.assertEqual(SELECTED_UNIT, unit)
+                self.assertGreater(timeout, 0)
+                self.assertLessEqual(timeout, 0.200001)
+                sample = samples[min(index[0], len(samples) - 1)]
+                index[0] += 1
+                events.append("query:" + sample["ActiveState"])
+                return sample
+            def identity(pid, uid, group, facts=None):
+                self.assertEqual("query:active", next(event for event in reversed(events) if event.startswith("query:")))
+                self.assertEqual(999, uid)
+                self.assertEqual(SELECTED_GROUP, group)
+                events.append("UID")
+                return True
+            def http(*args):
+                self.assertIn("UID", events)
+                self.assertIn("query:active", events)
+                events.append("HTTP")
+                return True, 125, False
+            def read(candidate):
+                roles = {"/proc/123/cmdline": b"dotnet\0AspireChild.dll\0", "/proc/124/cmdline": b"dcp\0",
+                         "/proc/125/cmdline": b"dotnet\0NativeHttpResource.dll\0"}
+                return roles[str(candidate)] if str(candidate) in roles else original_read(candidate)
+            def stop(unit, launcher, group, pumps, guard):
+                if outcome != "ready":
+                    self.assertTrue((control / "startup-diagnostic.json").is_file())
+                events.append("TERM")
+                launcher.returncode = 0
+                for thread in pumps:
+                    thread.join(timeout=1)
+                    self.assertFalse(thread.is_alive())
+                guard()
+                return True, False
+            def selected_path(value, *parts):
+                if str(value) == "/run":
+                    return run_root
+                if str(value) == "/sys/fs/cgroup/cgroup.controllers":
+                    return controllers
+                return original_path(value, *parts)
+            def stage(source, destination):
+                destination.mkdir()
+                return {}
+            def disarm(*args, **kwargs):
+                monitor.exitcode = 0
+            original_chmod = original_path.chmod
+            def fixture_chmod(candidate, mode, *args, **kwargs):
+                if candidate == control.parent / "payload/proof-input":
+                    mode |= 0o200
+                return original_chmod(candidate, mode, *args, **kwargs)
+            with ExitStack() as stack:
+                stack.enter_context(mock.patch.object(proof.sys, 'platform', 'linux'))
+                stack.enter_context(mock.patch.multiple(proof.os, geteuid=mock.Mock(return_value=0), chown=mock.Mock()))
+                stack.enter_context(mock.patch.object(proof.pwd, 'getpwuid'))
+                stack.enter_context(mock.patch.object(proof, 'Path', side_effect=selected_path))
+                stack.enter_context(mock.patch.object(original_path, 'chmod', fixture_chmod))
+                stack.enter_context(mock.patch.object(original_path, 'read_bytes', read))
+                stack.enter_context(mock.patch.object(proof.uuid, 'uuid4', return_value=SimpleNamespace(hex='a' * 32)))
+                stack.enter_context(mock.patch.object(proof, 'prepare_payload', side_effect=stage))
+                stack.enter_context(mock.patch.object(proof.multiprocessing, 'Event'))
+                stack.enter_context(mock.patch.object(proof.multiprocessing, 'Pipe', return_value=(mock.Mock(), mock.Mock())))
+                stack.enter_context(mock.patch.object(proof.multiprocessing, 'Process', return_value=monitor))
+                stack.enter_context(mock.patch.object(proof, 'await_watchdog_ack'))
+                stack.enter_context(mock.patch.object(proof, 'disarm_watchdog', side_effect=disarm))
+                stack.enter_context(mock.patch.object(proof.subprocess, 'Popen', return_value=process))
+                stack.enter_context(mock.patch.object(proof, 'unit_properties', side_effect=query))
+                stack.enter_context(mock.patch.object(proof, 'cgroup_pids', return_value={123, 124, 125}))
+                uid_guard = stack.enter_context(mock.patch.object(proof, 'identity_matches', side_effect=identity))
+                http_guard = stack.enter_context(mock.patch.object(proof, 'ready_request', side_effect=http))
+                stack.enter_context(mock.patch.object(proof, 'record_budget_diagnostic'))
+                stack.enter_context(mock.patch.object(proof, 'stop_and_join', side_effect=stop))
+                stack.enter_context(mock.patch.object(proof.time, 'monotonic', side_effect=lambda: clock[0]))
+                stack.enter_context(mock.patch.object(proof.time, 'sleep', side_effect=lambda duration: clock.__setitem__(0, clock[0] + duration)))
+                stack.enter_context(mock.patch.object(proof, 'READINESS_SECONDS', 0.2))
+                printed = stack.enter_context(mock.patch('builtins.print'))
+                code = proof.prove(args)
+            receipt = json.loads(printed.call_args.args[0])
+            self.assertFalse(receipt["trust_claim"])
+            self.assertTrue(receipt["provisional"])
+            self.assertEqual("TERM", events[-1])
+            if outcome == "ready":
+                self.assertEqual(0, code)
+                self.assertEqual(["query:inactive", "query:activating", "query:active", "UID", "UID", "UID", "HTTP", "TERM"], events)
+                self.assertTrue(receipt["ready"])
+                self.assertNotIn("startup_diagnostic_written", receipt)
+            else:
+                self.assertEqual(1, code)
+                uid_guard.assert_not_called()
+                http_guard.assert_not_called()
+                self.assertFalse(receipt["ready"])
+                self.assertEqual(proof.STARTUP_FAILURE, receipt["failure"])
+                self.assertEqual(proof.STARTUP_STAGE, receipt["failure_stage"])
+                self.assertTrue(receipt["startup_diagnostic_written"])
+                self.assertNotIn("private-query-canary", json.dumps(receipt))
+                if outcome == "always-inactive":
+                    self.assertGreaterEqual(clock[0], 100.2)
+                    self.assertGreaterEqual(index[0], 2)
+            return receipt
+
+    def test_queued_inactive_then_activating_then_active_observes_uid_and_http_only_after_exec(self):
+        for optional in ({}, {"Result": "success", "ExecMainPID": "0", "ExecMainCode": "0", "ExecMainStatus": "0", "Job": "42"},
+                         {"Result": "unknown", "ExecMainPID": None, "Job": "private-query-canary"}):
+            with self.subTest(optional=optional):
+                self._run_sequence(optional=optional)
+
+    def test_always_initial_inactive_expires_without_uid_or_http_and_fails(self):
+        self._run_sequence(outcome="always-inactive")
+
+    def test_initial_pending_foreign_group_or_malformed_pid_fails_before_uid_or_http(self):
+        for outcome in ("foreign", "malformed"):
+            with self.subTest(outcome=outcome):
+                self._run_sequence(outcome=outcome)
+
+    def test_inactive_after_activation_cannot_restart_initial_pending_grace(self):
+        self._run_sequence(outcome="regressed-inactive")
 
 
 class IdentityRejectionDiagnostics(unittest.TestCase):
