@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
@@ -209,6 +210,27 @@ public sealed class EvidenceGitChangeCaptureTests
         var noChange = await Assert.ThrowsAsync<EvidencePlanningException>(() =>
             EvidenceGitChangeCapture.CaptureAsync(repository.Path, commitRevision, commitRevision));
         Assert.Equal("ASEVD132", noChange.Code);
+    }
+
+    [Fact]
+    public async Task Capture_ShouldRejectARealBinaryDiffAboveTheReviewedByteLimit()
+    {
+        using var repository = new GitFixture();
+        File.WriteAllText(Path.Join(repository.Path, "readme.md"), "base\n");
+        repository.Run("add", "readme.md");
+        repository.Commit("base");
+        var baseRevision = repository.Run("rev-parse", "HEAD").Trim();
+
+        var binary = RandomNumberGenerator.GetBytes(EvidenceGitChangeCapture.MaximumSourceDiffBytes + 4 * 1024 * 1024);
+        File.WriteAllBytes(Path.Join(repository.Path, "large.bin"), binary);
+        repository.Run("add", "large.bin");
+        repository.Commit("large-binary");
+        var headRevision = repository.Run("rev-parse", "HEAD").Trim();
+
+        var exception = await Assert.ThrowsAsync<EvidencePlanningException>(() =>
+            EvidenceGitChangeCapture.CaptureAsync(repository.Path, baseRevision, headRevision));
+
+        Assert.Equal("ASEVD134", exception.Code);
     }
 
     [Fact]
