@@ -1,0 +1,63 @@
+name: Issue 779 private Aspire mechanism candidate (no Trust acceptance)
+
+on:
+  push:
+    branches: [codex/issue779-aspire-mechanism-validation-20261002]
+
+permissions:
+  contents: read
+
+jobs:
+  native-aspire-mechanism:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout private validation harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          path: harness
+      - name: Checkout parent-reviewed immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: cdadf95bb91e46c21d46dc72a8317950e9fd5da4
+          persist-credentials: false
+          fetch-depth: 1
+          path: source
+      - name: Setup native .NET 10 SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.x
+      - name: Build locked native payload and run five mechanism controls
+        shell: bash
+        env:
+          MECHANISM_RUN_ID: ${{ github.run_id }}/${{ github.run_attempt }}
+          MECHANISM_WORKFLOW_REF: ${{ github.workflow_ref }}
+          MECHANISM_WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          preparation="$GITHUB_WORKSPACE/harness/.github/issue779-aspire-mechanism"
+          python3 -B "$preparation/run-aspire-mechanism.py" run \
+            --source "$GITHUB_WORKSPACE/source" \
+            --binding "$preparation/source-binding.json" \
+            --output "$RUNNER_TEMP/issue779-aspire-mechanism-receipts"
+      - name: Retain safe candidate metadata and case receipts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: issue779-aspire-mechanism-safe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/issue779-aspire-mechanism-receipts/*.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Retain bounded private diagnostic logs separately
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: issue779-aspire-mechanism-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/issue779-aspire-mechanism-receipts/*.log
+            ${{ runner.temp }}/issue779-aspire-mechanism-receipts/*.tar.gz
+          if-no-files-found: warn
+          retention-days: 7
