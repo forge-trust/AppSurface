@@ -145,15 +145,12 @@ internal static class DurableSchemaPreflightVerifier
                 : TimeSpan.FromMilliseconds(1));
             try
             {
-                if (transaction is not null)
+                if (transaction is not null && !transactionCompleted && transaction.Connection is not null)
                 {
-                    if (!transactionCompleted && transaction.Connection is not null)
-                    {
-                        // A command timeout also constrains the physical connector's final Terminate flush.
-                        // Avoid transaction disposal while pending: it retries rollback without cancellation.
-                        await using var rollback = new NpgsqlCommand("ROLLBACK", connection, transaction) { CommandTimeout = 1 };
-                        await rollback.ExecuteNonQueryAsync(cleanup.Token).ConfigureAwait(false);
-                    }
+                    // A command timeout also constrains the physical connector's final Terminate flush.
+                    // Avoid transaction disposal while pending: it retries rollback without cancellation.
+                    await using var rollback = new NpgsqlCommand("ROLLBACK", connection, transaction) { CommandTimeout = 1 };
+                    await rollback.ExecuteNonQueryAsync(cleanup.Token).ConfigureAwait(false);
                 }
                 if (ownsFence)
                 {

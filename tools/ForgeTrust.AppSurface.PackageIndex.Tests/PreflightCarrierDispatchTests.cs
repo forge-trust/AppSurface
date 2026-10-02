@@ -713,6 +713,7 @@ public sealed class PreflightCarrierDispatchTests : IDisposable
             var smokeRoot = TestPathUtils.PathUnder(root, "smoke-repository");
             var projectMetadata = new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase);
             var packageRows = new List<string> { "packages:" };
+            var row = new StringBuilder();
             foreach (var entry in carrier.Entries)
             {
                 var projectPath = entry.ProjectPath;
@@ -720,7 +721,7 @@ public sealed class PreflightCarrierDispatchTests : IDisposable
                 var isWeb = packageId == "ForgeTrust.AppSurface.Web";
                 var isCli = packageId == "ForgeTrust.AppSurface.Cli";
                 await WriteFileAsync(smokeRoot, projectPath, "<Project />");
-                var row = new StringBuilder()
+                row.Clear()
                     .AppendLine($"  - project: {projectPath}")
                     .AppendLine("    product_family: appsurface")
                     .AppendLine($"    classification: {(isWeb || isCli ? "public" : "support")}")

@@ -142,7 +142,7 @@ Work-only dispatcher. See the provider's [host and direct-pass example](../../Du
 
 ## Complete-manifest preflight walkthrough
 
-The [one-pair full manifest](role-pairs-full.example.json) and [full plus `work_only` manifest](role-pairs-full-and-work-only.example.json)
+The [one-pair full manifest](https://github.com/forge-trust/AppSurface/blob/main/examples/durable-postgresql/role-pairs-full.example.json) and [full plus `work_only` manifest](https://github.com/forge-trust/AppSurface/blob/main/examples/durable-postgresql/role-pairs-full-and-work-only.example.json)
 are fictional disposable examples using the role names created by the local transcript below. They are not reviewed
 deployment inputs. The same exact file bytes must be used for the matching recipe run and every preflight command;
 changing whitespace or order changes SHA-256 and requires a new review. For actual deployment, substitute the reviewed

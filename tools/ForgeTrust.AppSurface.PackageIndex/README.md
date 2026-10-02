@@ -88,7 +88,7 @@ The required hosts are exactly `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64
 
 The [schema-11 operations guide](../../Durable/heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist)
 defines the candidate, published and deployment gates for complete runtime-set preflight. The release carriers use
-[`verify-preflight-artifacts.sh`](../../Durable/verify-preflight-artifacts.sh) and its
+[`verify-preflight-artifacts.sh`](https://github.com/forge-trust/AppSurface/blob/main/Durable/verify-preflight-artifacts.sh) and its
 [disposable package consumer](../../Durable/consumers/PostgreSqlPreflightConsumer/Program.cs) for one pair, enrollment
 of a second pair, identical reconciliation and a modeled two-pair schema-10 upgrade. The consumer installs the exact
 packed CLI and restores the matching PostgreSQL provider into isolated roots; it does not repack the product.
