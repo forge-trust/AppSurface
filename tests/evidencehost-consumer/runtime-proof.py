@@ -31,6 +31,12 @@ STAGED_SUBJECT_FILES = (
     SUBJECT_PROJECT_RELATIVE, "tests/evidencehost-consumer/RuntimeSubject/Program.cs",
     "tests/evidencehost-consumer/RuntimeSubject/packages.lock.json",
 )
+RELOCATED_PROOF_SOURCES = (
+    ("Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceRestrictedCoverageProducer.cs",
+     "Evidence/ForgeTrust.AppSurface.Evidence.Coverage/EvidenceRestrictedCoverageProducer.cs"),
+    ("Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceRestrictedCoverageTransport.cs",
+     "Evidence/ForgeTrust.AppSurface.Evidence.Coverage/EvidenceRestrictedCoverageTransport.cs"),
+)
 MAX_STAGED_SUBJECT_BYTES = 20 * 1024 * 1024
 LAUNCHER = ROOT / "scripts" / "evidencehost-linux-launcher.py"
 DRIVER = Path(__file__).resolve()
@@ -311,24 +317,41 @@ def require_zero_warning_build(output: bytes, label: str) -> None:
 
 
 def source_paths() -> list[Path]:
+    """Require the shared execution sources and their pinned project dependency inputs."""
     relative_paths = [
         "scripts/verify-evidencehost-linux-runtime.sh",
         "scripts/evidencehost-linux-launcher.py",
         "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+        "Cli/ForgeTrust.AppSurface.Cli/packages.lock.json",
         "Cli/ForgeTrust.AppSurface.Cli/EvidenceWorkerCommand.cs",
         "Cli/ForgeTrust.AppSurface.Cli/CoverageRun.cs",
         "Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceProtectedCliExecution.cs",
-        "Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceRestrictedCoverageProducer.cs",
-        "Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceRestrictedCoverageTransport.cs",
         "Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceCliWorkflow.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Cli/ForgeTrust.AppSurface.Evidence.Cli.csproj",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Cli/packages.lock.json",
         "Evidence/ForgeTrust.AppSurface.Evidence.Coverage/CoverageExecutionBoundary.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Coverage/EvidenceRestrictedCoverageProducerFactory.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Coverage/ForgeTrust.AppSurface.Evidence.Coverage.csproj",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Coverage/packages.lock.json",
         "Evidence/ForgeTrust.AppSurface.Evidence.Planner/EvidenceProtectedWorkerInputs.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Planner/EvidenceClosedApplicationCatalogue.cs",
         "Evidence/ForgeTrust.AppSurface.Evidence.Planner/EvidencePlanner.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Planner/ForgeTrust.AppSurface.Evidence.Planner.csproj",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Planner/packages.lock.json",
         "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceAdmission.cs",
         "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceLinuxWorkerSupervisor.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceLinuxApplicationProtocol.cs",
         "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceLinuxArtifactRoot.cs",
         "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceContracts.cs",
         "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceModeSelection.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceRestrictedProducerLease.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceWorkerExecution.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/ForgeTrust.AppSurface.Evidence.Contracts.csproj",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/packages.lock.json",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceHostBootstrap.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceRestrictedAspireApplication.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Aspire/ForgeTrust.AppSurface.Evidence.Aspire.csproj",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Aspire/packages.lock.json",
         ".github/workflows/evidencehost-runtime-proof.yml",
         "tests/evidencehost-consumer/ControlProtocolWorker/ControlProtocolWorker.csproj",
         "tests/evidencehost-consumer/ControlProtocolWorker/Program.cs",
@@ -342,10 +365,20 @@ def source_paths() -> list[Path]:
         "tests/evidencehost-consumer/runtime-proof.py",
         "tests/evidencehost-consumer/test_runtime_proof.py",
     ]
-    return [ROOT / item for item in dict.fromkeys([*relative_paths, *STAGED_SUBJECT_FILES])]
+    relocated = [current for _, current in RELOCATED_PROOF_SOURCES]
+    return [ROOT / item for item in dict.fromkeys([*relative_paths, *relocated, *STAGED_SUBJECT_FILES])]
 
 
 def hash_sources() -> tuple[dict[str, str], str]:
+    """Bind every required file's exact bytes, rejecting stale copies at both old locations.
+
+    The caller repeats this inventory after execution and requires an identical map and
+    canonical JSON digest. These source bindings alone grant no execution authority.
+    """
+    for previous, _ in RELOCATED_PROOF_SOURCES:
+        path = ROOT / previous
+        if path.exists() or path.is_symlink():
+            fail(f"Relocated proof source still exists at its previous location: {previous}")
     hashes: dict[str, str] = {}
     for path in source_paths():
         if not path.is_file() or path.is_symlink():
