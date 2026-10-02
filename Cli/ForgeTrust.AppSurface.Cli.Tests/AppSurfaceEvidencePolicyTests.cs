@@ -7,6 +7,7 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class AppSurfaceEvidencePolicyTests
 {
     private const string PolicyRelativePath = ".appsurface/evidence/evidence.policy.json";
+    private const string ShadowFixturesRelativePath = "docs/fixtures/issue-777-policy-shadow/fixtures.json";
     private static readonly EvidencePolicy Policy = LoadPolicy();
     private static readonly EvidencePlanner Planner = new();
 
@@ -192,6 +193,9 @@ public sealed class AppSurfaceEvidencePolicyTests
     [InlineData("scripts/coverage-solution.sh")]
     [InlineData("Evidence/ForgeTrust.AppSurface.Evidence.Planner/EvidencePlanner.cs")]
     [InlineData("Cli/ForgeTrust.AppSurface.Cli.Tests/AppSurfaceEvidencePolicyTests.cs")]
+    [InlineData("tools/ForgeTrust.AppSurface.EvidenceGate/Program.cs")]
+    [InlineData("tools/ForgeTrust.AppSurface.EvidenceGate.Tests/EvidenceGateVerifierTests.cs")]
+    [InlineData("docs/fixtures/issue-777-policy-shadow/fixtures.json")]
     public void ControlPlanePaths_ShouldNeverUseNoEvidenceProfile(string path)
     {
         var plan = Planner.ResolveForGate(Policy, [new NormalizedDiffPath(path)]);
@@ -208,6 +212,24 @@ public sealed class AppSurfaceEvidencePolicyTests
 
         AssertConservativeUnion(plan);
         Assert.Contains("conservative:pr-conservative", plan.MatchedRuleIds, StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public void CheckedInShadowFixtures_ShouldRemainCompatibleWithReviewedPolicy()
+    {
+        var fixtures = EvidenceCanonicalJson.Deserialize<EvidencePolicyShadowFixture[]>(
+            File.ReadAllBytes(FindRepositoryFile(ShadowFixturesRelativePath)));
+
+        var result = EvidencePolicyShadowValidator.Validate(Policy, Policy, fixtures, fixtures);
+
+        Assert.True(result.IsCompatible);
+        Assert.Equal(10, result.Selections.Count);
+        Assert.Empty(result.Diagnostics);
+        Assert.False(result.DiagnosticsTruncated);
+        Assert.Contains(result.Selections, selection =>
+            selection.Kind == EvidencePolicyShadowFixtureKind.ControlPlane
+            && selection.FixtureId == "fixture-control-plane"
+            && selection.BaseProfileId == "pr-conservative");
     }
 
     [Fact]
@@ -366,18 +388,24 @@ public sealed class AppSurfaceEvidencePolicyTests
 
     private static EvidencePolicy LoadPolicy()
     {
+        return EvidenceCanonicalJson.Deserialize<EvidencePolicy>(
+            File.ReadAllBytes(FindRepositoryFile(PolicyRelativePath)));
+    }
+
+    private static string FindRepositoryFile(string relativePath)
+    {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
         while (current is not null)
         {
-            var candidate = TestPathUtils.PathUnder(current.FullName, PolicyRelativePath);
+            var candidate = TestPathUtils.PathUnder(current.FullName, relativePath);
             if (File.Exists(candidate))
             {
-                return EvidenceCanonicalJson.Deserialize<EvidencePolicy>(File.ReadAllBytes(candidate));
+                return candidate;
             }
 
             current = current.Parent;
         }
 
-        throw new DirectoryNotFoundException($"Could not find the checked-in {PolicyRelativePath} file from the test assembly directory.");
+        throw new DirectoryNotFoundException($"Could not find the checked-in {relativePath} file from the test assembly directory.");
     }
 }
