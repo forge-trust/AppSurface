@@ -653,7 +653,7 @@ def service_command(unit, payload, scratch, dotnet, uid, gid, tools, output, con
                   f"RuntimeMaxSec={JOB_SECONDS}s", "SendSIGKILL=yes", "NoNewPrivileges=yes",
                   "CapabilityBoundingSet=", "AmbientCapabilities=", "ProtectControlGroups=yes",
                   "ProtectSystem=strict", "ProtectHome=yes", "PrivateNetwork=yes", "RestrictSUIDSGID=yes",
-                  "TasksMax=64", "MemoryMax=1G", "UMask=0077", f"WorkingDirectory={scratch}",
+                  "TasksMax=128", "MemoryMax=1G", "UMask=0077", f"WorkingDirectory={scratch}",
                   f"ReadWritePaths={scratch}", f"ReadOnlyPaths={payload} {dotnet.parent} {allowed_input}",
                   f"InaccessiblePaths={tools} {output} {control}"]
     argv = ["systemd-run", "--quiet", "--wait", "--pipe", f"--unit={unit}"]
