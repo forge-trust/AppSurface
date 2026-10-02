@@ -186,7 +186,6 @@ podman_status='pending'
 podman_phase='preflight'
 podman_diagnostic=''
 podman_container_created=false
-podman_create_attempted=false
 podman_container_started=false
 podman_zero_exit=false
 podman_configuration_verified=false
@@ -341,15 +340,11 @@ podman_smoke_cleanup() {
   if [[ "$podman_evidence_written" == true ]]; then
     exit "$exit_code"
   fi
-  if [[ "$podman_create_attempted" == true && "$podman_cleanup_succeeded" != true ]]; then
+  if [[ "$podman_container_created" == true && "$podman_cleanup_succeeded" != true ]]; then
     podman_cleanup_attempted=true
-    cleanup_container="$podman_container_name"
-    if [[ "$podman_container_created" == true ]]; then
-      cleanup_container="$podman_container_id"
-    fi
     if timeout --signal=TERM --kill-after=5s 30s \
       "$podman_cli_path" --remote=false rm --force --ignore \
-        "$cleanup_container" >/dev/null 2>&1; then
+        "$podman_container_id" >/dev/null 2>&1; then
       podman_cleanup_succeeded=true
       if [[ "$podman_container_created" == true ]]; then
         podman_container_removed=true
@@ -591,7 +586,6 @@ print(json.dumps(record, sort_keys=True))
 if not all(checks.values()):
     sys.exit(1)
 '
-podman_create_attempted=true
 if ! podman_container_id="$(timeout --signal=TERM --kill-after=5s 30s \
   "$podman_cli_path" --remote=false create \
   --pull=never --name "$podman_container_name" --network=none \
@@ -654,6 +648,17 @@ checks = {
     "capabilityDropRequest": reported_capability_sets_empty or (
         effective_caps is None and bounding_caps is None and reported_drop_request
     ),
+    "privateNamespaceRequests": all(
+        host.get(key) == "private" for key in ("PidMode", "IpcMode", "UTSMode", "UsernsMode")
+    ),
+    "boundedResourceRequests": (
+        host.get("PidsLimit") == 64
+        and host.get("Memory") == 256 * 1024 * 1024
+        and host.get("NanoCpus") == 500_000_000
+        and host.get("CpuQuota") == 50_000
+        and host.get("CpuPeriod") == 100_000
+    ),
+    "notPrivileged": host.get("Privileged") is False,
     "noNewPrivileges": isinstance(security, list) and any(
         value in ("no-new-privileges", "no-new-privileges:true") for value in security
     ),
@@ -779,6 +784,11 @@ cat > "$cold_root/offline-nuget.config" <<'CONFIG'
   </packageSources>
 </configuration>
 CONFIG
+# Project SDK resolution runs while MSBuild evaluates the project, before the
+# restore command's --configfile is applied. Give that resolver the same closed
+# feed through the private subject user's NuGet configuration.
+mkdir -m 0700 "$cold_root/home/.nuget" "$cold_root/home/.nuget/NuGet"
+cp "$cold_root/offline-nuget.config" "$cold_root/home/.nuget/NuGet/NuGet.Config"
 timeout --signal=TERM --kill-after=5s 120s sudo -n chown -R 65532:65532 "$cold_root"
 
 if timeout --signal=TERM --kill-after=10s 16m \
