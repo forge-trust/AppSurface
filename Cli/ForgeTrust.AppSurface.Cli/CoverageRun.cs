@@ -17,6 +17,7 @@ using CliFx.Infrastructure;
 using CliWrap;
 using CliWrap.Exceptions;
 using CliCommand = CliWrap.Cli;
+using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 
 #if EVIDENCE_COVERAGE_CORE
@@ -502,6 +503,7 @@ internal sealed partial class CoverageRunCommand : ICommand
 /// <param name="CoverageDriver">VSTest coverage integration selected once for the complete run.</param>
 /// <param name="RequireNonSandbox">Whether an enabled known sandbox environment marker fails the run before side effects.</param>
 /// <param name="ProducerDeadline">Optional monotonic first-party Evidence deadline; the caller's linked cancellation remains authoritative.</param>
+/// <param name="ProcessOutputQuota">Optional Evidence run-wide aggregate quota shared by all child processes, including discovery and merge.</param>
 internal sealed record CoverageRunRequest(
     string? SolutionPath,
     IReadOnlyList<string> TestProjects,
@@ -531,7 +533,8 @@ internal sealed record CoverageRunRequest(
     CoverageRunWatchdogMode WatchdogMode,
     CoverageRunDriver CoverageDriver,
     bool RequireNonSandbox,
-    CoverageProducerDeadline? ProducerDeadline = null);
+    CoverageProducerDeadline? ProducerDeadline = null,
+    EvidenceRunByteQuota? ProcessOutputQuota = null);
 
 /// <summary>
 /// Monotonic Evidence producer budget shared with the private coverage workflow. The deadline does
@@ -853,7 +856,14 @@ internal sealed class CoverageRunWorkflow
                 .Select(entry => new CoverageRunProjectExecutionState(entry))
                 .ToArray();
             CoverageRunOutputGuard.Validate(outputDirectory, resolution.SolutionDirectory, resolution.Projects);
-            await CoverageRunDriverPreflight.ValidateAsync(request.CoverageDriver, request.Configuration, resolution, _processRunner, supervisor, supervisedCancellationToken);
+            await CoverageRunDriverPreflight.ValidateAsync(
+                request.CoverageDriver,
+                request.Configuration,
+                resolution,
+                _processRunner,
+                supervisor,
+                supervisedCancellationToken,
+                request.ProcessOutputQuota);
 
             await PrintDiscoveryAsync(runConsole, request, resolution, outputDirectory, schedulePlan);
             if (request.DryRun)
@@ -982,7 +992,8 @@ internal sealed class CoverageRunWorkflow
                             mergeDirectory,
                             operation.ReserveProcess(),
                             operation.ObserveBytes,
-                            supervisedCancellationToken);
+                            supervisedCancellationToken,
+                            request.ProcessOutputQuota);
                     }
                     catch (OperationCanceledException)
                     {
@@ -1189,7 +1200,7 @@ internal sealed class CoverageRunWorkflow
             try
             {
                 list = await _processRunner.RunAsync(
-                    new CoverageRunProcessRequest("dotnet", ["sln", solutionPath, "list"], solutionDirectory, null, operation.ObserveBytes, operation.ReserveProcess()),
+                    new CoverageRunProcessRequest("dotnet", ["sln", solutionPath, "list"], solutionDirectory, null, operation.ObserveBytes, operation.ReserveProcess(), request.ProcessOutputQuota),
                     cancellationToken);
             }
             catch (OperationCanceledException)
@@ -1769,7 +1780,7 @@ internal sealed class CoverageRunWorkflow
             try
             {
                 result = await _processRunner.RunAsync(
-                    new CoverageRunProcessRequest("dotnet", args, resolution.SolutionDirectory, null, operation.ObserveBytes, operation.ReserveProcess()),
+                    new CoverageRunProcessRequest("dotnet", args, resolution.SolutionDirectory, null, operation.ObserveBytes, operation.ReserveProcess(), request.ProcessOutputQuota),
                     cancellationToken);
             }
             catch (OperationCanceledException)
@@ -1815,7 +1826,7 @@ internal sealed class CoverageRunWorkflow
                 try
                 {
                     result = await _processRunner.RunAsync(
-                        new CoverageRunProcessRequest("dotnet", args, resolution.SolutionDirectory, null, operation.ObserveBytes, operation.ReserveProcess()),
+                        new CoverageRunProcessRequest("dotnet", args, resolution.SolutionDirectory, null, operation.ObserveBytes, operation.ReserveProcess(), request.ProcessOutputQuota),
                         cancellationToken);
                 }
                 catch (OperationCanceledException)
@@ -2012,7 +2023,7 @@ internal sealed class CoverageRunWorkflow
                 state.OwnedResultsDirectory = driverInvocation.RawResultsDirectory;
                 state.HangPlan = hangPlan;
                 processResult = await _processRunner.RunAsync(
-                    new CoverageRunProcessRequest("dotnet", args, resolution.SolutionDirectory, logFile, operation.ObserveBytes, operation.ReserveProcess()),
+                    new CoverageRunProcessRequest("dotnet", args, resolution.SolutionDirectory, logFile, operation.ObserveBytes, operation.ReserveProcess(), request.ProcessOutputQuota),
                     cancellationToken);
                 InspectHangDiagnostics(state, outputDirectory);
                 operation.Transition("finalizing");
@@ -3425,13 +3436,15 @@ internal interface ICoverageRunProcessRunner
 /// <param name="OutputFile">Optional streamed log destination.</param>
 /// <param name="OutputObserver">Non-blocking positive-byte progress observer.</param>
 /// <param name="Lease">Supervisor-owned root-process lease.</param>
+/// <param name="ProcessOutputQuota">Optional Evidence run-wide quota shared by every child command in that invocation.</param>
 internal sealed record CoverageRunProcessRequest(
     string FileName,
     IReadOnlyList<string> Arguments,
     string WorkingDirectory,
     string? OutputFile,
     Action<int>? OutputObserver,
-    CoverageRunProcessLease Lease);
+    CoverageRunProcessLease Lease,
+    EvidenceRunByteQuota? ProcessOutputQuota = null);
 
 /// <summary>
 /// Result of running a coverage workflow process.
@@ -3465,17 +3478,38 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         CancellationToken cancellationToken)
     {
         var processExited = false;
+        var quota = request.ProcessOutputQuota;
+        using var processCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         try
         {
+            if (quota?.IsFailed == true)
+            {
+                throw CreateOutputQuotaException();
+            }
+
             var result = request.OutputFile is null
-                ? await RunBufferedAsync(request, cancellationToken)
-                : await RunStreamingAsync(request, cancellationToken);
+                ? await RunBufferedAsync(request, quota, processCancellation, processCancellation.Token)
+                : await RunStreamingAsync(request, quota, processCancellation, processCancellation.Token);
+            if (quota?.IsFailed == true)
+            {
+                throw CreateOutputQuotaException();
+            }
+
             processExited = true;
             return result;
         }
         catch (OperationCanceledException)
         {
+            if (quota?.IsFailed == true)
+            {
+                throw CreateOutputQuotaException();
+            }
+
             throw;
+        }
+        catch (Exception) when (quota?.IsFailed == true)
+        {
+            throw CreateOutputQuotaException();
         }
         catch (Exception ex) when (IsCommandLaunchFailure(ex))
         {
@@ -3502,6 +3536,8 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
 
     private static async Task<CoverageRunProcessResult> RunBufferedAsync(
         CoverageRunProcessRequest request,
+        EvidenceRunByteQuota? quota,
+        CancellationTokenSource processCancellation,
         CancellationToken cancellationToken)
     {
         using var standardOutput = new MemoryStream();
@@ -3510,8 +3546,8 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
             .WithArguments(request.Arguments)
             .WithWorkingDirectory(request.WorkingDirectory)
             .WithValidation(CommandResultValidation.None)
-            .WithStandardOutputPipe(PipeTarget.Create((source, token) => CopyPipeToBufferAsync(source, standardOutput, token, request.OutputObserver)))
-            .WithStandardErrorPipe(PipeTarget.Create((source, token) => CopyPipeToBufferAsync(source, standardError, token, request.OutputObserver)))
+            .WithStandardOutputPipe(PipeTarget.Create((source, token) => CopyPipeToBufferAsync(source, standardOutput, token, request.OutputObserver, quota, processCancellation)))
+            .WithStandardErrorPipe(PipeTarget.Create((source, token) => CopyPipeToBufferAsync(source, standardError, token, request.OutputObserver, quota, processCancellation)))
             .ExecuteAsync(_ => { }, request.Lease.Attach, cancellationToken);
         var outputTruncated = standardOutput.Length > MaximumBufferedBytesPerStream
             || standardError.Length > MaximumBufferedBytesPerStream;
@@ -3523,6 +3559,8 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
 
     private static async Task<CoverageRunProcessResult> RunStreamingAsync(
         CoverageRunProcessRequest request,
+        EvidenceRunByteQuota? quota,
+        CancellationTokenSource processCancellation,
         CancellationToken cancellationToken)
     {
         var directory = Path.GetDirectoryName(request.OutputFile!);
@@ -3544,8 +3582,8 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
             .WithArguments(request.Arguments)
             .WithWorkingDirectory(request.WorkingDirectory)
             .WithValidation(CommandResultValidation.None)
-            .WithStandardOutputPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(source, stream, writeGate, token, request.OutputObserver)))
-            .WithStandardErrorPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(source, stream, writeGate, token, request.OutputObserver)))
+            .WithStandardOutputPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(source, stream, writeGate, token, request.OutputObserver, quota, processCancellation)))
+            .WithStandardErrorPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(source, stream, writeGate, token, request.OutputObserver, quota, processCancellation)))
             .ExecuteAsync(_ => { }, request.Lease.Attach, cancellationToken);
 
         return new CoverageRunProcessResult(result.ExitCode, string.Empty);
@@ -3555,7 +3593,9 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         Stream source,
         MemoryStream target,
         CancellationToken cancellationToken,
-        Action<int>? outputObserver)
+        Action<int>? outputObserver,
+        EvidenceRunByteQuota? quota,
+        CancellationTokenSource processCancellation)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(81920);
         try
@@ -3568,6 +3608,7 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
                     return;
                 }
 
+                ChargeOutput(quota, read, processCancellation);
                 ObserveOutput(outputObserver, read);
                 var remaining = MaximumBufferedBytesPerStream + 1 - target.Length;
                 if (remaining > 0)
@@ -3597,7 +3638,9 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         Stream target,
         SemaphoreSlim writeGate,
         CancellationToken cancellationToken,
-        Action<int>? outputObserver)
+        Action<int>? outputObserver,
+        EvidenceRunByteQuota? quota,
+        CancellationTokenSource processCancellation)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(81920);
         try
@@ -3610,6 +3653,7 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
                     return;
                 }
 
+                ChargeOutput(quota, read, processCancellation);
                 ObserveOutput(outputObserver, read);
 
                 await writeGate.WaitAsync(cancellationToken);
@@ -3627,6 +3671,32 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         {
             ArrayPool<byte>.Shared.Return(buffer);
         }
+    }
+
+    private static void ChargeOutput(
+        EvidenceRunByteQuota? quota,
+        int receivedBytes,
+        CancellationTokenSource processCancellation)
+    {
+        if (quota is not null && !quota.TryChargeReceived(receivedBytes))
+        {
+            processCancellation.Cancel();
+            throw CreateOutputQuotaException();
+        }
+    }
+
+    private static Exception CreateOutputQuotaException()
+    {
+#if EVIDENCE_COVERAGE_CORE
+        return new CoverageExecutionException("ASCOV420 Evidence process output exceeded its aggregate received-byte quota.");
+#else
+        return CoverageRunDiagnostics.Create(
+            "ASCOV420",
+            "Evidence process output exceeded its aggregate received-byte quota.",
+            "The Evidence run received more child-process output than its registered limit.",
+            "Reduce process output or lower the selected test scope.",
+            "Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-diagnostics");
+#endif
     }
 
     private static void ObserveOutput(Action<int>? observer, int count)
@@ -3711,7 +3781,8 @@ internal interface ICoverageRunReportGenerator
         string outputDirectory,
         CoverageRunProcessLease lease,
         Action<int> outputObserver,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        EvidenceRunByteQuota? processOutputQuota = null)
         => MergeAsync(coverageFiles, outputDirectory, cancellationToken);
 }
 
@@ -3752,7 +3823,8 @@ internal sealed class CoverageRunReportGenerator : ICoverageRunReportGenerator
             outputDirectory,
             CoverageRunProcessLease.Detached(),
             _ => { },
-            cancellationToken);
+            cancellationToken,
+            processOutputQuota: null);
 
     /// <inheritdoc />
     public async Task<CoverageRunMergeResult> MergeSupervisedAsync(
@@ -3760,7 +3832,8 @@ internal sealed class CoverageRunReportGenerator : ICoverageRunReportGenerator
         string outputDirectory,
         CoverageRunProcessLease lease,
         Action<int> outputObserver,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        EvidenceRunByteQuota? processOutputQuota = null)
     {
         var reportGeneratorDll = _locator.ResolveReportGeneratorDll();
         var reports = string.Join(';', coverageFiles);
@@ -3771,7 +3844,8 @@ internal sealed class CoverageRunReportGenerator : ICoverageRunReportGenerator
                 Directory.GetCurrentDirectory(),
                 null,
                 outputObserver,
-                lease),
+                lease,
+                processOutputQuota),
             cancellationToken);
 
         return new CoverageRunMergeResult(

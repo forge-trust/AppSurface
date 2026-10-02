@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using Aspire.Hosting;
 using ForgeTrust.AppSurface.Evidence.Contracts;
+using ForgeTrust.AppSurface.Evidence.Planner;
 
 namespace ForgeTrust.AppSurface.Evidence.Aspire;
 
@@ -36,8 +38,8 @@ public enum EvidenceHostState
 /// <summary>
 /// Configures an explicit EvidenceHost lifecycle.
 /// </summary>
-/// <param name="RequireTrustedEnvelope">Whether every run requires an accepted envelope verifier result.</param>
-/// <param name="ArtifactDirectory">Controlled root for producer artifacts. Defaults to <c>TestResults/evidence/artifacts</c>.</param>
+/// <param name="RequireTrustedEnvelope">Legacy setting retained for source compatibility; it cannot grant runtime admission.</param>
+/// <param name="ArtifactDirectory">Legacy local path retained for source compatibility; admitted runs use the protected output root.</param>
 public sealed record EvidenceHostOptions(
     bool RequireTrustedEnvelope = false,
     string? ArtifactDirectory = null);
@@ -87,6 +89,12 @@ public sealed class EvidenceHostRegistration
 {
     private readonly Dictionary<string, IEvidenceResourceReadiness> _resources = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IEvidenceProducer> _producers = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, EvidenceResourceDeclaration> _resourceDeclarations = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, EvidenceProducerDeclaration> _producerDeclarations = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _aspireHealthResources = new(StringComparer.Ordinal);
+    private readonly List<object> _additionalOwned = [];
+    internal Func<IDistributedApplicationBuilder>? ApplicationFactory { get; private set; }
+    internal IReadOnlyList<object> AdditionalOwned => _additionalOwned;
 
     /// <summary>Gets explicitly registered resource readiness probes.</summary>
     public IReadOnlyDictionary<string, IEvidenceResourceReadiness> Resources => _resources;
@@ -110,6 +118,53 @@ public sealed class EvidenceHostRegistration
         }
     }
 
+    /// <summary>Registers a readiness probe against its complete protected declaration.</summary>
+    /// <param name="declaration">The resource declaration selected by the admitted plan.</param>
+    /// <param name="resource">Consumer-owned readiness probe.</param>
+    public void AddResource(EvidenceResourceDeclaration declaration, IEvidenceResourceReadiness resource)
+    {
+        ArgumentNullException.ThrowIfNull(declaration);
+        ArgumentNullException.ThrowIfNull(resource);
+        if (!string.Equals(declaration.Id, resource.Id, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("The readiness probe id must match its declared resource id.", nameof(resource));
+        }
+
+        AddResource(resource);
+        _resourceDeclarations.Add(declaration.Id, declaration);
+    }
+
+    /// <summary>Declares a resource whose Aspire health adapter will be bound after the admitted app starts.</summary>
+    /// <param name="declaration">The complete protected resource declaration.</param>
+    /// <param name="aspireResourceName">Consumer-owned Aspire resource name.</param>
+    public void AddAspireHealthResource(EvidenceResourceDeclaration declaration, string aspireResourceName)
+    {
+        ArgumentNullException.ThrowIfNull(declaration);
+        ArgumentException.ThrowIfNullOrWhiteSpace(aspireResourceName);
+        if (!string.Equals(declaration.Readiness, "aspire_health", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("The declaration must use aspire_health readiness.", nameof(declaration));
+        }
+
+        if (_resourceDeclarations.ContainsKey(declaration.Id) || _aspireHealthResources.ContainsKey(declaration.Id))
+        {
+            throw new InvalidOperationException($"Evidence resource '{declaration.Id}' is already registered.");
+        }
+
+        _resourceDeclarations.Add(declaration.Id, declaration);
+        _aspireHealthResources.Add(declaration.Id, aspireResourceName);
+    }
+
+    internal void AddOwnedApplication(EvidenceAspireApplication application)
+    {
+        ArgumentNullException.ThrowIfNull(application);
+        _additionalOwned.Add(application);
+        foreach (var (id, resourceName) in _aspireHealthResources)
+        {
+            _resources.Add(id, application.CreateHealthReadiness(id, resourceName));
+        }
+    }
+
     /// <summary>
     /// Adds one explicitly named typed producer.
     /// </summary>
@@ -122,6 +177,62 @@ public sealed class EvidenceHostRegistration
             throw new InvalidOperationException($"Evidence producer '{producer.Id}' is already registered.");
         }
     }
+
+    /// <summary>Registers a producer against its complete protected declaration.</summary>
+    /// <param name="declaration">The producer declaration selected by the admitted plan.</param>
+    /// <param name="producer">Consumer-owned producer.</param>
+    public void AddProducer(EvidenceProducerDeclaration declaration, IEvidenceProducer producer)
+    {
+        ArgumentNullException.ThrowIfNull(declaration);
+        ArgumentNullException.ThrowIfNull(producer);
+        if (!string.Equals(declaration.Id, producer.Id, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("The producer id must match its declared producer id.", nameof(producer));
+        }
+
+        AddProducer(producer);
+        _producerDeclarations.Add(declaration.Id, declaration);
+    }
+
+    internal bool Matches(EvidencePlan plan)
+    {
+        if (_resourceDeclarations.Count != plan.Profile.Resources.Count || _resources.Count != plan.Profile.Resources.Count
+            || _producerDeclarations.Count != plan.Profile.Producers.Count || _producers.Count != plan.Profile.Producers.Count)
+        {
+            return false;
+        }
+
+        return plan.Profile.Resources.All(declaration =>
+                _resourceDeclarations.TryGetValue(declaration.Id, out var registered)
+                && CanonicallyEqual(registered, declaration))
+            && plan.Profile.Producers.All(declaration =>
+                _producerDeclarations.TryGetValue(declaration.Id, out var registered)
+                && CanonicallyEqual(registered, declaration));
+    }
+
+    internal void BindIdOnlyRegistrationsForTests(EvidencePlan plan)
+    {
+        foreach (var (id, _) in _resources)
+        {
+            if (!_resourceDeclarations.ContainsKey(id)
+                && plan.Profile.Resources.FirstOrDefault(declaration => declaration.Id == id) is { } declaration)
+            {
+                _resourceDeclarations.Add(id, declaration);
+            }
+        }
+
+        foreach (var (id, _) in _producers)
+        {
+            if (!_producerDeclarations.ContainsKey(id)
+                && plan.Profile.Producers.FirstOrDefault(declaration => declaration.Id == id) is { } declaration)
+            {
+                _producerDeclarations.Add(id, declaration);
+            }
+        }
+    }
+
+    private static bool CanonicallyEqual<T>(T left, T right) =>
+        EvidenceCanonicalJson.Serialize(left).AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(right));
 
     /// <summary>
     /// Sets the single trusted execution-envelope verifier used by this host.
@@ -137,6 +248,24 @@ public sealed class EvidenceHostRegistration
 
         EnvelopeVerifier = verifier;
     }
+
+    /// <summary>Sets the deferred Aspire builder factory for a separately restricted supervisor child.</summary>
+    /// <param name="factory">Consumer-owned builder factory.</param>
+    /// <remarks>
+    /// The current protected worker has no Aspire resource capability map or restricted child. The production path
+    /// rejects a configured factory with <c>ASEVD407</c> before invoking it; direct head-application startup is not
+    /// supported.
+    /// </remarks>
+    public void SetApplicationFactory(Func<IDistributedApplicationBuilder> factory)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+        if (ApplicationFactory is not null)
+        {
+            throw new InvalidOperationException("EvidenceHost accepts exactly one Aspire application factory.");
+        }
+
+        ApplicationFactory = factory;
+    }
 }
 
 /// <summary>
@@ -145,24 +274,24 @@ public sealed class EvidenceHostRegistration
 public sealed class EvidenceHostBootstrap : IAsyncDisposable
 {
     private readonly EvidencePlan _plan;
-    private readonly EvidenceHostRegistration _registration;
-    private readonly EvidenceHostOptions _options;
-    private readonly TimeProvider _timeProvider;
-    private readonly string _artifactDirectory;
+    private readonly Action<EvidenceHostRegistration> _configure;
+    private EvidenceHostRegistration _registration = new();
     private readonly SemaphoreSlim _execution = new(1, 1);
+    private EvidenceLinuxArtifactRoot? _artifactRoot;
+    private EvidenceRunByteQuota? _artifactQuota;
+    private EvidenceAdmissionResult? _admission;
+    private EvidenceWorkerExecution? _lifecycle;
+    private readonly List<EvidenceArtifactWriter> _artifactWriters = [];
+    private string? _testArtifactDirectory;
     private bool _cleaned;
+    private bool _runClaimed;
 
     private EvidenceHostBootstrap(
         EvidencePlan plan,
-        EvidenceHostRegistration registration,
-        EvidenceHostOptions options,
-        TimeProvider timeProvider)
+        Action<EvidenceHostRegistration> configure)
     {
         _plan = plan;
-        _registration = registration;
-        _options = options;
-        _timeProvider = timeProvider;
-        _artifactDirectory = Path.GetFullPath(options.ArtifactDirectory ?? Path.Join("TestResults", "evidence", "artifacts"));
+        _configure = configure;
     }
 
     /// <summary>Gets the immutable plan owned by this host instance.</summary>
@@ -177,20 +306,18 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
     /// <param name="plan">Resolved immutable plan.</param>
     /// <param name="configure">Consumer-owned registration callback.</param>
     /// <param name="options">Optional lifecycle constraints.</param>
-    /// <param name="timeProvider">Clock seam for deterministic tests and deadline handling.</param>
     /// <returns>A single-use EvidenceHost instance.</returns>
     public static EvidenceHostBootstrap Create(
         EvidencePlan plan,
         Action<EvidenceHostRegistration> configure,
-        EvidenceHostOptions? options = null,
-        TimeProvider? timeProvider = null)
+        EvidenceHostOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(configure);
 
-        var registration = new EvidenceHostRegistration();
-        configure(registration);
-        return new EvidenceHostBootstrap(plan, registration, options ?? new EvidenceHostOptions(), timeProvider ?? TimeProvider.System);
+        var snapshot = EvidenceCanonicalJson.Deserialize<EvidencePlan>(EvidenceCanonicalJson.Serialize(plan));
+        _ = options;
+        return new EvidenceHostBootstrap(snapshot, configure);
     }
 
     /// <summary>
@@ -199,59 +326,396 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
     /// <param name="observationOnly">Whether the caller intentionally requests a non-gate observation.</param>
     /// <param name="cancellationToken">Caller cancellation for the complete bounded lifecycle.</param>
     /// <returns>A terminal immutable manifest.</returns>
-    public async Task<EvidenceManifest> RunAsync(bool observationOnly = false, CancellationToken cancellationToken = default)
+    [Obsolete("Use RunAsync(EvidenceExecutionRequest) with a supported protected worker. The legacy Boolean cannot select admission.")]
+    public Task<EvidenceManifest> RunAsync(bool observationOnly = false, CancellationToken cancellationToken = default)
     {
+        _ = cancellationToken;
+        // Preserve the legacy signature only to give every caller the same migration diagnostic. In
+        // particular, do not configure registrations, allocate output, or invoke an Aspire factory.
+        return Task.FromException<EvidenceManifest>(observationOnly
+            ? new EvidenceAdmissionException("ASEVD402", "Legacy Observation selection requires an independently armed protected worker.")
+            : new EvidenceAdmissionException("ASEVD401", "Select Trusted or Observation explicitly."));
+    }
+
+    /// <summary>Runs through the protected Linux worker and shared admission lifecycle.</summary>
+    /// <param name="request">Explicit mode and protected launcher's control channel.</param>
+    /// <param name="cancellationToken">Caller cancellation for admission and execution.</param>
+    /// <returns>A terminal immutable manifest.</returns>
+    /// <remarks>
+    /// No production Aspire consumer proof or registered resource capability map is currently available. Production
+    /// admission remains fail-closed until a supported Linux setup supplies that proof and any Aspire application runs
+    /// in a separately restricted supervisor child. The internal test seam exercises library behavior only.
+    /// A run claims this instance before authentication. Authentication, admission, or execution failure consumes
+    /// that single attempt; create another host for another run. A null request or cancellation before acquiring
+    /// execution ownership does not consume the attempt.
+    /// </remarks>
+    public Task<EvidenceManifest> RunAsync(EvidenceExecutionRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return RunSupervisedAsync(request, cancellationToken);
+    }
+
+    /// <summary>
+    /// Exercises the same shared admission and admitted lifecycle core with test-owned acceptance and supervision.
+    /// </summary>
+    /// <param name="mode">Requested execution mode.</param>
+    /// <param name="context">Test-owned admission context for the resolved plan.</param>
+    /// <param name="supervisor">Test-owned execution supervisor.</param>
+    /// <param name="verifier">Optional test-owned admission verifier.</param>
+    /// <param name="artifactDirectory">Temporary output directory used by this test run.</param>
+    /// <param name="jobRemaining">Frozen monotonic allowance supplied by the test supervisor.</param>
+    /// <param name="completeWorker">Optional test-owned worker completion callback.</param>
+    /// <param name="cancellationToken">Cancellation for admission and execution.</param>
+    /// <param name="loweredStartAllowance">Optional stricter per-stage allowance. It must be positive and no greater than the protected 120-second maximum.</param>
+    /// <returns>The terminal manifest produced by the shared lifecycle.</returns>
+    /// <remarks>
+    /// This internal seam is available only to the Aspire test assembly. Its synthetic output binding and in-process
+    /// supervisor do not establish protected consumer, process-isolation, or platform acceptance.
+    /// The same start limit must reach registration and application startup. If one execution keeps the default cap,
+    /// its exact-stage check can reject a run that was admitted with a stricter protected allowance.
+    /// </remarks>
+    internal async Task<EvidenceManifest> RunSharedCoreForTestsAsync(
+        EvidenceExecutionMode mode,
+        EvidenceAdmissionContext context,
+        IEvidenceExecutionSupervisor supervisor,
+        IEvidenceAdmissionVerifier? verifier,
+        string artifactDirectory,
+        TimeSpan jobRemaining,
+        Func<CancellationToken, ValueTask>? completeWorker = null,
+        CancellationToken cancellationToken = default,
+        TimeSpan? loweredStartAllowance = null)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(supervisor);
+        ArgumentException.ThrowIfNullOrWhiteSpace(artifactDirectory);
+        if (loweredStartAllowance is { } requestedStartAllowance
+            && (requestedStartAllowance <= TimeSpan.Zero || requestedStartAllowance > EvidenceRunBudgetLimits.Start))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(loweredStartAllowance),
+                "The lowered start allowance must be positive and no greater than 120 seconds.");
+        }
+
         await _execution.WaitAsync(cancellationToken).ConfigureAwait(false);
+        EvidenceWorkerExecution? lifecycle = null;
+        EvidenceAdmissionResult? admission = null;
         try
         {
-            if (State != EvidenceHostState.Created)
+            if (_runClaimed || State != EvidenceHostState.Created)
             {
                 throw new InvalidOperationException("EvidenceHost instances execute exactly once.");
             }
 
-            var execution = Stopwatch.StartNew();
-            var envelopeStatus = EvidenceEnvelopeStatus.NotRequired;
-            var resourceResults = (IReadOnlyList<EvidenceResourceResult>)[];
-            try
+            _runClaimed = true;
+            var clock = TimeProvider.System;
+            var admissionLimit = EvidenceRunBudgetLimits.Admission;
+            var startLimit = loweredStartAllowance ?? EvidenceRunBudgetLimits.Start;
+            var collectionLimit = EvidenceRunBudgetLimits.Collection;
+            var cleanupLimit = EvidenceRunBudgetLimits.Cleanup;
+            var stoppingLimit = EvidenceRunBudgetLimits.Stopping;
+            var budgetStages = new List<EvidenceRunStageDeadline>
             {
-                State = EvidenceHostState.Validating;
-                var envelope = await ValidateEnvelopeAsync(cancellationToken).ConfigureAwait(false);
-                envelopeStatus = envelope.Status;
-                if (envelope.Results is not null)
+                new(EvidenceRunStage.Admission, admissionLimit),
+                new(EvidenceRunStage.Start, startLimit),
+                new(EvidenceRunStage.Start, startLimit),
+                new(EvidenceRunStage.Start, startLimit),
+            };
+            budgetStages.AddRange(OrderResources(_plan.Profile.Resources.ToDictionary(static item => item.Id, StringComparer.Ordinal))
+                .Select(static item => new EvidenceRunStageDeadline(EvidenceRunStage.Resource, TimeSpan.FromSeconds(item.DeadlineSeconds))));
+            budgetStages.AddRange(_plan.Profile.Producers
+                .Select(static item => new EvidenceRunStageDeadline(EvidenceRunStage.Producer, TimeSpan.FromSeconds(item.TimeoutSeconds))));
+
+            if (!EvidenceRunTimeBudget.TryCreateFromAllowance(
+                clock,
+                jobRemaining,
+                budgetStages,
+                collectionLimit,
+                cleanupLimit,
+                stoppingLimit,
+                out var timeBudget)
+                || timeBudget is null)
+            {
+                throw new EvidenceAdmissionException("ASEVD410", "Test job time cannot cover admitted work and cleanup reserves.");
+            }
+
+            lifecycle = new EvidenceWorkerExecution(
+                supervisor,
+                clock,
+                jobRemaining,
+                cleanupLimit,
+                stoppingLimit,
+                fatalTermination: static message => new EvidenceWorkerTestInterruptionException(message),
+                collectionReserve: collectionLimit);
+            _lifecycle = lifecycle;
+
+            var admitted = await ExecuteBudgetedAsync(
+                timeBudget,
+                lifecycle,
+                EvidenceRunStage.Admission,
+                admissionLimit,
+                token => EvidenceAdmission.AdmitAsync(mode, _plan, context, supervisor, verifier, token),
+                cancellationToken).ConfigureAwait(false);
+            if (admitted.Outcome != EvidenceWorkerStageOutcome.Passed || admitted.Value is null)
+            {
+                await lifecycle.StopAndDisposeAsync().ConfigureAwait(false);
+                if (lifecycle.TerminalException is EvidenceAdmissionException admissionFailure)
                 {
-                    return await CollectAndCleanAsync(envelope.Results, resourceResults, observationOnly, envelopeStatus, execution).ConfigureAwait(false);
+                    throw admissionFailure;
                 }
 
-                ValidateRegistrations();
-                State = EvidenceHostState.WaitingForResources;
-                var readiness = await WaitForResourcesAsync(cancellationToken).ConfigureAwait(false);
-                resourceResults = readiness.ResourceResults;
-                if (readiness.FailureResults is not null)
-                {
-                    return await CollectAndCleanAsync(readiness.FailureResults, resourceResults, observationOnly, envelopeStatus, execution).ConfigureAwait(false);
-                }
+                throw new EvidenceAdmissionException("ASEVD410", "Test admission did not complete.");
+            }
 
-                State = EvidenceHostState.Producing;
-                var results = await ProduceAsync(cancellationToken).ConfigureAwait(false);
-                return await CollectAndCleanAsync(results, resourceResults, observationOnly, envelopeStatus, execution).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            admission = admitted.Value;
+            var outputReady = await ExecuteBudgetedAsync(
+                timeBudget,
+                lifecycle,
+                EvidenceRunStage.Start,
+                startLimit,
+                token =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    Directory.CreateDirectory(Path.GetFullPath(artifactDirectory));
+                    return ValueTask.FromResult(true);
+                },
+                cancellationToken,
+                admission).ConfigureAwait(false);
+            if (outputReady.Outcome != EvidenceWorkerStageOutcome.Passed)
             {
-                return await CollectAndCleanAsync(
-                    FailureForEveryProducer(EvidenceProducerOutcome.Cancelled, "EvidenceHost execution was cancelled by the caller."),
-                    resourceResults,
-                    observationOnly,
-                    envelopeStatus,
-                    execution).ConfigureAwait(false);
+                throw new EvidenceAdmissionException("ASEVD410", "Test output binding did not complete.");
             }
-            catch
+
+            admission.Activate("internal-test-output-binding");
+            return await RunAdmittedStagesAsync(
+                timeBudget,
+                lifecycle,
+                admission,
+                root: null,
+                artifactDirectory,
+                completeWorker,
+                bindIdOnlyRegistrationsForTests: true,
+                startLimit: startLimit,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            if (lifecycle is not null)
             {
-                await CleanAsync().ConfigureAwait(false);
-                throw;
+                try { await lifecycle.StopAndDisposeAsync().ConfigureAwait(false); }
+                catch { /* Preserve the host-selected primary diagnostic. */ }
             }
+
+            if (admission is not null && State != EvidenceHostState.Completed)
+            {
+                admission.LatchFailure();
+            }
+
+            throw;
         }
         finally
         {
+            _artifactRoot = null;
+            _artifactQuota = null;
+            _admission = null;
+            _lifecycle = null;
+            _testArtifactDirectory = null;
+            _artifactWriters.Clear();
+            _execution.Release();
+        }
+    }
+
+    private async Task<EvidenceManifest> RunSupervisedAsync(EvidenceExecutionRequest request, CancellationToken cancellationToken)
+    {
+        await _execution.WaitAsync(cancellationToken).ConfigureAwait(false);
+        EvidenceLinuxWorkerSupervisor? supervisor = null;
+        EvidenceAdmissionResult? admission = null;
+        EvidenceLinuxArtifactRoot? root = null;
+        EvidenceWorkerExecution? lifecycle = null;
+        try
+        {
+            if (_runClaimed || State != EvidenceHostState.Created)
+            {
+                throw new InvalidOperationException("EvidenceHost instances execute exactly once.");
+            }
+
+            _runClaimed = true;
+            try
+            {
+                supervisor = await EvidenceLinuxWorkerSupervisor.ConnectAsync(request.ControlChannel, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception) when (IsNonFatalException(exception))
+            {
+                throw new EvidenceAdmissionException("ASEVD402", "Protected worker authentication failed.");
+            }
+            if (supervisor.Descriptor.Mode != request.Mode.ToString().ToLowerInvariant())
+            {
+                throw new EvidenceAdmissionException("ASEVD401", "Requested mode does not match the protected worker mode.");
+            }
+
+            var descriptor = supervisor.Descriptor;
+            var systemClock = TimeProvider.System;
+            // JobDeadlineUtc remains audit metadata. Control time comes only from the
+            // launcher's frozen monotonic allowance, including its socket handshake.
+            var remaining = supervisor.JobRemaining;
+            var admissionLimit = TimeSpan.FromSeconds(descriptor.AdmissionSeconds);
+            var startLimit = TimeSpan.FromSeconds(descriptor.StartSeconds);
+            var collectionLimit = TimeSpan.FromSeconds(descriptor.CollectionSeconds);
+            var cleanupLimit = TimeSpan.FromSeconds(descriptor.CleanupSeconds);
+            var stoppingLimit = TimeSpan.FromSeconds(descriptor.StoppingSeconds);
+            var budgetStages = new List<EvidenceRunStageDeadline>
+            {
+                new(EvidenceRunStage.Admission, admissionLimit),
+                new(EvidenceRunStage.Start, startLimit), // secure output allocation
+                new(EvidenceRunStage.Start, startLimit), // consumer registration callback
+                new(EvidenceRunStage.Start, startLimit), // optional Aspire application factory
+            };
+
+            budgetStages.AddRange(OrderResources(_plan.Profile.Resources.ToDictionary(static item => item.Id, StringComparer.Ordinal))
+                .Select(static item => new EvidenceRunStageDeadline(EvidenceRunStage.Resource, TimeSpan.FromSeconds(item.DeadlineSeconds))));
+            budgetStages.AddRange(_plan.Profile.Producers
+                .Select(static item => new EvidenceRunStageDeadline(EvidenceRunStage.Producer, TimeSpan.FromSeconds(item.TimeoutSeconds))));
+            if (!EvidenceRunTimeBudget.TryCreateFromAllowance(
+                systemClock,
+                remaining,
+                budgetStages,
+                collectionLimit,
+                cleanupLimit,
+                stoppingLimit,
+                out var timeBudget)
+                || timeBudget is null)
+            {
+                throw new EvidenceAdmissionException("ASEVD410", "Protected job time cannot cover admitted work and cleanup reserves.");
+            }
+
+            lifecycle = new EvidenceWorkerExecution(
+                supervisor,
+                systemClock,
+                remaining,
+                cleanupLimit,
+                stoppingLimit,
+                collectionReserve: collectionLimit);
+
+            var admitted = await ExecuteBudgetedAsync(
+                timeBudget,
+                lifecycle,
+                EvidenceRunStage.Admission,
+                admissionLimit,
+                async token =>
+                {
+                    var protectedInputs = await EvidenceProtectedWorkerInputs.ResolveAsync(descriptor, token).ConfigureAwait(false);
+                    if (!SamePlan(_plan, protectedInputs.Plan))
+                    {
+                        throw new EvidenceAdmissionException("ASEVD403", "Caller plan does not match the protected resolved plan.");
+                    }
+
+                    var context = EvidenceProtectedWorkerInputs.CreateContext(descriptor, protectedInputs.Policy, protectedInputs.Plan);
+                    IEvidenceAdmissionVerifier? verifier = context.ExpectedAssertion is null
+                        ? null
+                        : new EvidenceProtectedWorkerInputs.RegisteredVerifier(supervisor, context.ExpectedAssertion);
+                    return await EvidenceAdmission.AdmitAsync(
+                        request.Mode, protectedInputs.Plan, context, supervisor, verifier, token).ConfigureAwait(false);
+                },
+                cancellationToken).ConfigureAwait(false);
+            if (admitted.Outcome != EvidenceWorkerStageOutcome.Passed || admitted.Value is null)
+            {
+                await lifecycle.StopAndDisposeAsync().ConfigureAwait(false);
+                if (lifecycle.TerminalException is EvidenceAdmissionException admissionFailure)
+                {
+                    throw admissionFailure;
+                }
+
+                throw new EvidenceAdmissionException("ASEVD410", "Protected admission did not complete.");
+            }
+
+            admission = admitted.Value;
+            _lifecycle = lifecycle;
+
+            var allocation = await ExecuteBudgetedAsync(
+                timeBudget,
+                lifecycle,
+                EvidenceRunStage.Start,
+                startLimit,
+                token =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    var allocated = EvidenceLinuxArtifactRoot.Allocate(
+                        descriptor.OutputParent,
+                        descriptor.OutputParentIdentity,
+                        descriptor.OutputSlot,
+                        descriptor.WorkerUid,
+                        descriptor.WorkerGid);
+                    // Keep the retained handles owned even if cancellation wins before this stage returns.
+                    root = allocated;
+                    token.ThrowIfCancellationRequested();
+                    admission.Activate(allocated.Identity.ToString());
+                    return ValueTask.FromResult(allocated);
+                },
+                cancellationToken,
+                admission).ConfigureAwait(false);
+            if (allocation.Outcome != EvidenceWorkerStageOutcome.Passed || allocation.Value is null)
+            {
+                await lifecycle.StopAndDisposeAsync().ConfigureAwait(false);
+                throw new EvidenceAdmissionException("ASEVD410", "Protected artifact root activation did not complete.");
+            }
+
+            root = allocation.Value;
+            _artifactRoot = root;
+            _admission = admission;
+            var manifest = await RunAdmittedStagesAsync(
+                timeBudget,
+                lifecycle,
+                admission,
+                root,
+                testArtifactDirectory: null,
+                completeWorker: supervisor.CompleteWorkerAsync,
+                bindIdOnlyRegistrationsForTests: false,
+                startLimit: startLimit,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+            root = null;
+            return manifest;
+        }
+        catch
+        {
+            if (lifecycle is not null)
+            {
+                try { await lifecycle.StopAndDisposeAsync().ConfigureAwait(false); }
+                catch { /* Preserve the host-selected primary diagnostic. */ }
+            }
+            else if (supervisor is not null)
+            {
+                try
+                {
+                    supervisor.CloseAdmission();
+                    using var stopping = new CancellationTokenSource(EvidenceRunBudgetLimits.Stopping);
+                    await supervisor.RequestStopAsync(stopping.Token).ConfigureAwait(false);
+                    await supervisor.WaitForOwnedExitAsync(stopping.Token).ConfigureAwait(false);
+                }
+                catch { /* No callback was admitted; best-effort bounded handshake cleanup. */ }
+            }
+
+            if (admission is not null && State != EvidenceHostState.Completed)
+            {
+                admission.LatchFailure();
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (root is not null)
+            {
+                try { await root.DisposeAsync().ConfigureAwait(false); }
+                catch { /* The manifest already records terminal cleanup failure. */ }
+            }
+
+            _artifactRoot = null;
+            _admission = null;
+            _artifactQuota = null;
+            _lifecycle = null;
             _execution.Release();
         }
     }
@@ -279,27 +743,171 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         }
     }
 
-    private async Task<EnvelopeValidation> ValidateEnvelopeAsync(CancellationToken cancellationToken)
+    private async Task<EvidenceManifest> RunAdmittedStagesAsync(
+        EvidenceRunTimeBudget timeBudget,
+        EvidenceWorkerExecution lifecycle,
+        EvidenceAdmissionResult admission,
+        EvidenceLinuxArtifactRoot? root,
+        string? testArtifactDirectory,
+        Func<CancellationToken, ValueTask>? completeWorker,
+        bool bindIdOnlyRegistrationsForTests,
+        TimeSpan startLimit,
+        CancellationToken cancellationToken)
     {
-        var needsEnvelope = _options.RequireTrustedEnvelope || _plan.Profile.Scope == EvidenceProfileScope.Release;
-        if (!needsEnvelope)
+        _artifactRoot = root;
+        _testArtifactDirectory = testArtifactDirectory is null ? null : Path.GetFullPath(testArtifactDirectory);
+        _admission = admission;
+        if (root is not null)
         {
-            return new EnvelopeValidation(EvidenceEnvelopeStatus.NotRequired, null);
+            _artifactQuota = EvidenceRunByteQuota.CreateArtifact(onExceeded: () =>
+            {
+                lifecycle.LatchFailure();
+                admission.LatchFailure();
+            });
         }
 
-        if (_registration.EnvelopeVerifier is null)
+        if (!lifecycle.RegisterDisposer(_ => CleanRegistrationsAsync()))
         {
-            return new EnvelopeValidation(
-                EvidenceEnvelopeStatus.Unavailable,
-                FailureForEveryProducer(EvidenceProducerOutcome.Invalid, "Trusted evidence requires an explicitly registered CI envelope verifier."));
+            throw new EvidenceAdmissionException("ASEVD410", "Registration cleanup could not be admitted.");
         }
 
-        var result = await _registration.EnvelopeVerifier.VerifyAsync(_plan, cancellationToken).ConfigureAwait(false);
-        return result.Accepted
-            ? new EnvelopeValidation(EvidenceEnvelopeStatus.ValidatedNotAttested, null)
-            : new EnvelopeValidation(
-                EvidenceEnvelopeStatus.Invalid,
-                FailureForEveryProducer(EvidenceProducerOutcome.Invalid, result.Diagnostic ?? "The CI execution envelope was not accepted."));
+        State = EvidenceHostState.Validating;
+        // Pitfall: this value must match the scheduled Start stages and both exact-stage checks below.
+        var configured = await ExecuteBudgetedAsync(
+            timeBudget,
+            lifecycle,
+            EvidenceRunStage.Start,
+            startLimit,
+            token =>
+            {
+                token.ThrowIfCancellationRequested();
+                admission.ValidateActive(_plan);
+                _configure(_registration);
+                return ValueTask.FromResult(true);
+            },
+            cancellationToken,
+            admission).ConfigureAwait(false);
+        if (configured.Outcome != EvidenceWorkerStageOutcome.Passed)
+        {
+            throw new EvidenceAdmissionException("ASEVD410", "Registration configuration did not complete.");
+        }
+
+        if (bindIdOnlyRegistrationsForTests)
+        {
+            _registration.BindIdOnlyRegistrationsForTests(_plan);
+        }
+
+        if (_registration.ApplicationFactory is not null)
+        {
+            throw new EvidenceAdmissionException(
+                "ASEVD407",
+                "Aspire application startup requires a separately restricted supervisor child.");
+        }
+
+        // Keep the declared start stage in the shared budget. The protected worker currently
+        // has no child capability for AddProject, so an application factory is rejected above.
+        var appStart = await ExecuteBudgetedAsync(
+            timeBudget,
+            lifecycle,
+            EvidenceRunStage.Start,
+            startLimit,
+            _ => ValueTask.FromResult<EvidenceAspireApplication?>(null),
+            cancellationToken,
+            admission).ConfigureAwait(false);
+        if (appStart.Outcome != EvidenceWorkerStageOutcome.Passed)
+        {
+            throw new EvidenceAdmissionException("ASEVD410", "Aspire application startup did not complete.");
+        }
+
+        ValidateRegistrations();
+
+        var execution = Stopwatch.StartNew();
+        State = EvidenceHostState.WaitingForResources;
+        var readiness = await WaitForResourcesAsync(cancellationToken, lifecycle, timeBudget, admission).ConfigureAwait(false);
+        State = EvidenceHostState.Producing;
+        var producerResults = readiness.FailureResults
+            ?? await ProduceAsync(cancellationToken, lifecycle, timeBudget, admission).ConfigureAwait(false);
+
+        State = EvidenceHostState.Cleaning;
+        _ = timeBudget.TryAbandonStagesAndBeginCleanup(stageClosed: true);
+        var cleanupTimer = Stopwatch.StartNew();
+        var stopAndDisposeSucceeded = await lifecycle.StopAndDisposeAsync().ConfigureAwait(false);
+        cleanupTimer.Stop();
+        var cleanupCompleted = lifecycle.CleanupCompleted;
+        _ = timeBudget.CompleteCleanup();
+        if (!stopAndDisposeSucceeded || lifecycle.TerminalCode != EvidenceWorkerTerminalCode.None || !cleanupCompleted)
+        {
+            admission.LatchFailure();
+        }
+
+        execution.Stop();
+        var ownedWorkStopped = lifecycle.OwnWorkStopped;
+        if (!ownedWorkStopped)
+        {
+            throw new EvidenceAdmissionException("ASEVD410", "Owned work has not stopped; finalization is forbidden.");
+        }
+
+        var terminalFailureCode = TerminalFailureCode(lifecycle.TerminalCode);
+        var metrics = new EvidenceExecutionMetrics(
+            ResourceReadinessMilliseconds: readiness.ResourceResults.Sum(static result => result.ElapsedMilliseconds),
+            ProducerMilliseconds: producerResults.Sum(static result => result.ElapsedMilliseconds),
+            CleanupMilliseconds: cleanupTimer.ElapsedMilliseconds,
+            TotalMilliseconds: execution.ElapsedMilliseconds,
+            CleanupCompleted: cleanupCompleted,
+            CleanupDiagnostic: cleanupCompleted ? null : "Evidence cleanup failed.",
+            TerminalFailureCode: terminalFailureCode);
+
+        if (!timeBudget.TryBeginCollection())
+        {
+            admission.LatchFailure();
+            throw new EvidenceAdmissionException("ASEVD410", "Manifest collection reserve is unavailable.");
+        }
+
+        var collected = await lifecycle.CollectAsync(
+            timeBudget.CollectionRemaining,
+            async token =>
+            {
+                var verification = await VerifyAndAttachArtifactsAsync(producerResults, token).ConfigureAwait(false);
+                producerResults = verification.Results;
+                if (!verification.Verified)
+                {
+                    admission.LatchFailure();
+                    metrics = metrics with { TerminalFailureCode = metrics.TerminalFailureCode ?? nameof(EvidenceWorkerTerminalCode.StageFailed) };
+                }
+                admission.Complete(ownedWorkStopped, verification.Verified, cleanupCompleted);
+                var manifest = EvidenceManifestBuilder.Build(_plan, producerResults, admission, readiness.ResourceResults, metrics);
+
+                if (root is not null)
+                {
+                    var manifestBytes = EvidenceCanonicalJson.Serialize(manifest);
+                    await root.WriteAsync("manifest.json", manifestBytes, token).ConfigureAwait(false);
+                    await root.VerifyAsync("manifest.json", manifestBytes.Length, EvidenceDigest.Sha256(manifestBytes), token)
+                        .ConfigureAwait(false);
+
+                    // This host-owned disposal remains inside the bounded collection callback.
+                    // The broker exit acknowledgement follows only after retained handles close.
+                    await root.DisposeAsync().ConfigureAwait(false);
+                }
+
+                if (completeWorker is not null)
+                {
+                    await completeWorker(token).ConfigureAwait(false);
+                }
+
+                return manifest;
+            },
+            CancellationToken.None).ConfigureAwait(false);
+        _ = timeBudget.CompleteCollection();
+        if (collected.Outcome != EvidenceWorkerStageOutcome.Passed || collected.Value is null)
+        {
+            throw new EvidenceAdmissionException("ASEVD410", "Manifest collection did not complete.");
+        }
+
+        // A pre-existing timeout/cancellation makes StopAndDisposeAsync return false even when
+        // cleanup itself completed. Eligibility follows the latched cause; cleanup metrics use
+        // CleanupCompleted independently.
+        State = EvidenceHostState.Completed;
+        return collected.Value;
     }
 
     private void ValidateRegistrations()
@@ -326,138 +934,249 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
                 throw new EvidenceHostException("ASEVD303", $"Required producer '{producer.Id}' is not explicitly registered.", "Register the selected producer in the EvidenceHost bootstrap callback.");
             }
         }
+
+        if (!_registration.Matches(_plan))
+        {
+            throw new EvidenceAdmissionException("ASEVD404", "Registered declarations do not exactly match the admitted plan.");
+        }
     }
 
-    private async Task<ResourceReadiness> WaitForResourcesAsync(CancellationToken cancellationToken)
+    private async Task<ResourceReadiness> WaitForResourcesAsync(
+        CancellationToken cancellationToken,
+        EvidenceWorkerExecution lifecycle,
+        EvidenceRunTimeBudget timeBudget,
+        EvidenceAdmissionResult admission)
     {
         var declarations = _plan.Profile.Resources.ToDictionary(static resource => resource.Id, StringComparer.Ordinal);
         var results = new List<EvidenceResourceResult>();
         foreach (var resource in OrderResources(declarations))
         {
             var timer = Stopwatch.StartNew();
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            deadline.CancelAfter(TimeSpan.FromSeconds(resource.DeadlineSeconds));
-            try
+            var readiness = await ExecuteBudgetedAsync(
+                timeBudget,
+                lifecycle,
+                EvidenceRunStage.Resource,
+                TimeSpan.FromSeconds(resource.DeadlineSeconds),
+                async token =>
+                {
+                    await _registration.Resources[resource.Id].WaitUntilReadyAsync(token).ConfigureAwait(false);
+                    return true;
+                },
+                cancellationToken,
+                admission).ConfigureAwait(false);
+            if (readiness.Outcome == EvidenceWorkerStageOutcome.Passed)
             {
-                // A registration should observe cancellation, but the host must also enforce its
-                // declared deadline when a third-party probe fails to do so.
-                var readinessTask = _registration.Resources[resource.Id].WaitUntilReadyAsync(deadline.Token);
-                await readinessTask.WaitAsync(deadline.Token).ConfigureAwait(false);
                 results.Add(new EvidenceResourceResult(resource.Id, EvidenceResourceOutcome.Ready, timer.ElapsedMilliseconds));
+                continue;
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                results.Add(new EvidenceResourceResult(resource.Id, EvidenceResourceOutcome.TimedOut, timer.ElapsedMilliseconds, $"Resource '{resource.Id}' did not become ready before its {resource.DeadlineSeconds}-second deadline."));
-                return new ResourceReadiness(
-                    results,
-                    FailureForEveryProducer(EvidenceProducerOutcome.Unavailable, $"Resource '{resource.Id}' did not become ready before its {resource.DeadlineSeconds}-second deadline."));
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception exception) when (IsNonFatalException(exception))
-            {
-                results.Add(new EvidenceResourceResult(resource.Id, EvidenceResourceOutcome.Unavailable, timer.ElapsedMilliseconds, $"Resource '{resource.Id}' readiness failed with {exception.GetType().Name}."));
-                return new ResourceReadiness(
-                    results,
-                    FailureForEveryProducer(EvidenceProducerOutcome.Unavailable, $"Resource '{resource.Id}' readiness failed with {exception.GetType().Name}."));
-            }
+
+            var timeout = readiness.Outcome == EvidenceWorkerStageOutcome.TimedOut;
+            var cancelled = readiness.Outcome == EvidenceWorkerStageOutcome.Cancelled || cancellationToken.IsCancellationRequested;
+            var outcome = timeout
+                ? EvidenceResourceOutcome.TimedOut
+                : cancelled ? EvidenceResourceOutcome.Cancelled : EvidenceResourceOutcome.Unavailable;
+            var diagnostic = timeout
+                ? $"Resource '{resource.Id}' did not become ready before its {resource.DeadlineSeconds}-second deadline."
+                : cancelled
+                    ? $"Resource '{resource.Id}' readiness was cancelled by the caller."
+                    : $"Resource '{resource.Id}' readiness did not complete successfully.";
+            results.Add(new EvidenceResourceResult(resource.Id, outcome, timer.ElapsedMilliseconds, diagnostic));
+            return new ResourceReadiness(
+                results,
+                FailureForEveryProducer(cancelled ? EvidenceProducerOutcome.Cancelled : EvidenceProducerOutcome.Unavailable, diagnostic));
         }
 
         return new ResourceReadiness(results, null);
     }
 
-    private async Task<IReadOnlyList<EvidenceProducerResult>> ProduceAsync(CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<EvidenceProducerResult>> ProduceAsync(
+        CancellationToken cancellationToken,
+        EvidenceWorkerExecution lifecycle,
+        EvidenceRunTimeBudget timeBudget,
+        EvidenceAdmissionResult admission)
     {
         var results = new List<EvidenceProducerResult>();
         foreach (var declaration in _plan.Profile.Producers)
         {
             var timer = Stopwatch.StartNew();
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            deadline.CancelAfter(TimeSpan.FromSeconds(declaration.TimeoutSeconds));
-            try
+            var artifacts = _artifactRoot is { } protectedRoot
+                ? new EvidenceArtifactWriter(declaration, protectedRoot, _artifactQuota!, lifecycle, _admission!)
+                : new EvidenceArtifactWriter(declaration, Path.Join(_testArtifactDirectory!, declaration.Id));
+            _artifactWriters.Add(artifacts);
+            var execution = await ExecuteBudgetedAsync(
+                timeBudget,
+                lifecycle,
+                EvidenceRunStage.Producer,
+                TimeSpan.FromSeconds(declaration.TimeoutSeconds),
+                token => _registration.Producers[declaration.Id].ProduceAsync(
+                    new EvidenceProducerContext(_plan, declaration, TimeProvider.System, artifacts), token),
+                cancellationToken,
+                admission).ConfigureAwait(false);
+            var elapsed = timer.ElapsedMilliseconds;
+            if (execution.Outcome == EvidenceWorkerStageOutcome.Passed && execution.Value is { } result)
             {
-                var artifacts = new EvidenceArtifactWriter(declaration, Path.Join(_artifactDirectory, declaration.Id));
-                // A registration should observe cancellation, but the host must also enforce its
-                // declared deadline when a third-party producer fails to do so.
-                var producerTask = _registration.Producers[declaration.Id]
-                    .ProduceAsync(new EvidenceProducerContext(_plan, declaration, _timeProvider, artifacts), deadline.Token)
-                    .AsTask();
-                var result = await producerTask.WaitAsync(deadline.Token).ConfigureAwait(false);
-                results.Add(await ValidateProducerResultAsync(
-                    declaration,
-                    result,
-                    artifacts,
-                    timer.ElapsedMilliseconds,
-                    deadline.Token).ConfigureAwait(false));
+                if (result.ProducerId != declaration.Id || !Enum.IsDefined(result.Outcome)
+                    || result.SatisfiedAssertionIds is null
+                    || result.SatisfiedAssertionIds.Any(assertion => !declaration.AssertionIds.Contains(assertion, StringComparer.Ordinal)))
+                {
+                    result = new EvidenceProducerResult(declaration.Id, EvidenceProducerOutcome.Invalid, [],
+                        "Producer output does not match its protected declaration.");
+                }
+                results.Add(result with { ElapsedMilliseconds = elapsed });
+                if (result.Outcome != EvidenceProducerOutcome.Passed)
+                {
+                    admission.LatchFailure();
+                    await lifecycle.RequestTerminalStopAsync(EvidenceWorkerTerminalCode.StageFailed).ConfigureAwait(false);
+                    break;
+                }
+                continue;
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+
+            var outcome = cancellationToken.IsCancellationRequested
+                ? EvidenceProducerOutcome.Cancelled
+                : execution.Outcome switch
             {
-                results.Add(new EvidenceProducerResult(declaration.Id, EvidenceProducerOutcome.TimedOut, [], $"Producer '{declaration.Id}' exceeded its {declaration.TimeoutSeconds}-second deadline.", ElapsedMilliseconds: timer.ElapsedMilliseconds));
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception exception) when (IsNonFatalException(exception))
-            {
-                results.Add(new EvidenceProducerResult(declaration.Id, EvidenceProducerOutcome.Failed, [], $"Producer '{declaration.Id}' failed with {exception.GetType().Name}.", ElapsedMilliseconds: timer.ElapsedMilliseconds));
-            }
+                EvidenceWorkerStageOutcome.TimedOut => EvidenceProducerOutcome.TimedOut,
+                EvidenceWorkerStageOutcome.Cancelled => EvidenceProducerOutcome.Cancelled,
+                _ => EvidenceProducerOutcome.Failed,
+            };
+            var timedOut = outcome == EvidenceProducerOutcome.TimedOut;
+            results.Add(new EvidenceProducerResult(
+                declaration.Id,
+                outcome,
+                [],
+                timedOut
+                    ? $"Producer '{declaration.Id}' exceeded its {declaration.TimeoutSeconds}-second deadline."
+                    : outcome == EvidenceProducerOutcome.Cancelled
+                        ? $"Producer '{declaration.Id}' was cancelled by the caller."
+                        : $"Producer '{declaration.Id}' did not complete successfully.",
+                ElapsedMilliseconds: elapsed));
+            break;
         }
 
         return results;
     }
 
-    private static async Task<EvidenceProducerResult> ValidateProducerResultAsync(
-        EvidenceProducerDeclaration declaration,
-        EvidenceProducerResult result,
-        EvidenceArtifactWriter artifacts,
-        long elapsedMilliseconds,
+    private static async Task<(EvidenceWorkerStageOutcome Outcome, T? Value)> ExecuteBudgetedAsync<T>(
+        EvidenceRunTimeBudget timeBudget,
+        EvidenceWorkerExecution lifecycle,
+        EvidenceRunStage expectedStage,
+        TimeSpan deadline,
+        Func<CancellationToken, ValueTask<T>> callback,
+        CancellationToken cancellationToken,
+        EvidenceAdmissionResult? admission = null)
+    {
+        if (!timeBudget.TryBeginNextStage(cancellationToken, out var admittedStage)
+            || admittedStage is null
+            || admittedStage.Stage != expectedStage
+            || admittedStage.Duration != deadline)
+        {
+            admission?.LatchFailure();
+            _ = timeBudget.TryAbandonStagesAndBeginCleanup(stageClosed: true);
+            await lifecycle.RequestTerminalStopAsync(EvidenceWorkerTerminalCode.AdmissionClosed, cancellationToken).ConfigureAwait(false);
+            return (EvidenceWorkerStageOutcome.Rejected, default);
+        }
+
+        var result = await lifecycle.ExecuteAsync(expectedStage, deadline, callback, cancellationToken).ConfigureAwait(false);
+        if (result.Outcome == EvidenceWorkerStageOutcome.Passed)
+        {
+            _ = timeBudget.CompleteCurrentStage();
+        }
+        else
+        {
+            admission?.LatchFailure();
+            _ = timeBudget.TryAbandonStagesAndBeginCleanup(stageClosed: true);
+        }
+
+        return result;
+    }
+
+    private async Task<(bool Verified, IReadOnlyList<EvidenceProducerResult> Results)> VerifyAndAttachArtifactsAsync(
+        IReadOnlyList<EvidenceProducerResult> results,
         CancellationToken cancellationToken)
     {
-        if (!string.Equals(result.ProducerId, declaration.Id, StringComparison.Ordinal))
-        {
-            return new EvidenceProducerResult(declaration.Id, EvidenceProducerOutcome.Invalid, [], "Producer returned a result for a different declaration id.", ElapsedMilliseconds: elapsedMilliseconds);
-        }
-
-        var writtenArtifacts = artifacts.WrittenArtifacts;
-        if (result.Artifacts is not null && !result.Artifacts.SequenceEqual(writtenArtifacts))
-        {
-            return new EvidenceProducerResult(declaration.Id, EvidenceProducerOutcome.Invalid, [], "Producer returned artifact metadata that was not written through the declared evidence writer.", ElapsedMilliseconds: elapsedMilliseconds);
-        }
-
-        if (!await artifacts.VerifyWrittenArtifactsAsync(cancellationToken).ConfigureAwait(false))
-        {
-            return new EvidenceProducerResult(declaration.Id, EvidenceProducerOutcome.Invalid, [], "A declared evidence artifact was missing or changed before manifest collection.", ElapsedMilliseconds: elapsedMilliseconds);
-        }
-
-        return result with { Artifacts = writtenArtifacts, ElapsedMilliseconds = elapsedMilliseconds };
-    }
-
-    private async Task<EvidenceManifest> CollectAndCleanAsync(
-        IReadOnlyList<EvidenceProducerResult> results,
-        IReadOnlyList<EvidenceResourceResult> resourceResults,
-        bool observationOnly,
-        EvidenceEnvelopeStatus envelopeStatus,
-        Stopwatch execution)
-    {
         State = EvidenceHostState.Collecting;
-        var cleanupTimer = Stopwatch.StartNew();
-        var cleanupFailure = await CleanAsync().ConfigureAwait(false);
-        cleanupTimer.Stop();
-        execution.Stop();
-        var metrics = new EvidenceExecutionMetrics(
-            ResourceReadinessMilliseconds: resourceResults.Sum(static result => result.ElapsedMilliseconds),
-            ProducerMilliseconds: results.Sum(static result => result.ElapsedMilliseconds),
-            CleanupMilliseconds: cleanupTimer.ElapsedMilliseconds,
-            TotalMilliseconds: execution.ElapsedMilliseconds,
-            CleanupCompleted: cleanupFailure is null,
-            CleanupDiagnostic: cleanupFailure);
-        var manifest = EvidenceManifestBuilder.Build(_plan, results, observationOnly, envelopeStatus, resourceResults, metrics);
-        State = EvidenceHostState.Completed;
-        return manifest;
+        var valid = true;
+        var finalized = results.ToArray();
+        for (var index = 0; index < _artifactWriters.Count; index++)
+        {
+            var writer = _artifactWriters[index];
+            if (index >= _plan.Profile.Producers.Count) break;
+            var declaration = _plan.Profile.Producers[index];
+            var resultIndex = -1;
+            for (var i = 0; i < results.Count; i++)
+            {
+                if (string.Equals(results[i].ProducerId, declaration.Id, StringComparison.Ordinal))
+                {
+                    resultIndex = i;
+                    break;
+                }
+            }
+
+            if (resultIndex < 0) continue;
+            var result = results[resultIndex];
+            var artifacts = writer.WrittenArtifacts;
+            if (result.ProducerId != declaration.Id
+                || (result.Artifacts is not null && !result.Artifacts.SequenceEqual(artifacts))
+                || !await writer.VerifyWrittenArtifactsAsync(cancellationToken).ConfigureAwait(false))
+            {
+                valid = false;
+                _admission!.LatchFailure();
+                finalized[resultIndex] = result with
+                {
+                    Outcome = EvidenceProducerOutcome.Invalid,
+                    Artifacts = [],
+                    Diagnostic = "A declared artifact failed final verification.",
+                };
+                continue;
+            }
+
+            finalized[resultIndex] = result with { Artifacts = artifacts };
+        }
+
+        return (valid, finalized);
     }
+
+    private async ValueTask CleanRegistrationsAsync()
+    {
+        var failure = await CleanAsync().ConfigureAwait(false);
+        if (failure is not null)
+        {
+            throw new InvalidOperationException("Evidence registration cleanup failed.");
+        }
+    }
+
+    private static bool SamePlan(EvidencePlan left, EvidencePlan right) =>
+        EvidenceCanonicalJson.Serialize(left).AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(right));
+
+    private static EvidenceManifest DowngradeManifest(EvidenceManifest manifest, string terminalFailureCode)
+    {
+        var downgraded = manifest with
+        {
+            ExecutionVerdict = EvidenceExecutionVerdict.Incomplete,
+            ClaimKind = EvidenceClaimKind.None,
+            Eligibility = EvidenceClaimEligibility.None,
+            Metrics = manifest.Metrics with
+            {
+                CleanupCompleted = false,
+                CleanupDiagnostic = "Final manifest output could not be verified.",
+                TerminalFailureCode = terminalFailureCode,
+            },
+            ManifestDigest = string.Empty,
+        };
+        return downgraded with { ManifestDigest = EvidenceDigest.CanonicalSha256(downgraded) };
+    }
+
+    private static string? TerminalFailureCode(EvidenceWorkerTerminalCode terminalCode) => terminalCode switch
+    {
+        EvidenceWorkerTerminalCode.None => null,
+        EvidenceWorkerTerminalCode.StageFailed => nameof(EvidenceWorkerTerminalCode.StageFailed),
+        EvidenceWorkerTerminalCode.DeadlineExceeded => nameof(EvidenceWorkerTerminalCode.DeadlineExceeded),
+        EvidenceWorkerTerminalCode.CallerCancelled => nameof(EvidenceWorkerTerminalCode.CallerCancelled),
+        EvidenceWorkerTerminalCode.CleanupFailed => nameof(EvidenceWorkerTerminalCode.CleanupFailed),
+        EvidenceWorkerTerminalCode.AdmissionClosed => nameof(EvidenceWorkerTerminalCode.AdmissionClosed),
+        _ => "ASEVD410",
+    };
 
     private async Task<string?> CleanAsync()
     {
@@ -471,6 +1190,7 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         Exception? failure = null;
         var owned = _registration.Producers.Values.Reverse().Cast<object>()
             .Concat(_registration.Resources.Values.Reverse().Cast<object>())
+            .Concat(_registration.AdditionalOwned.Reverse())
             .Distinct(ReferenceEqualityComparer.Instance);
         foreach (var disposable in owned)
         {
@@ -543,8 +1263,6 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
             ordered.Add(resource);
         }
     }
-
-    private sealed record EnvelopeValidation(EvidenceEnvelopeStatus Status, IReadOnlyList<EvidenceProducerResult>? Results);
 
     private sealed record ResourceReadiness(
         IReadOnlyList<EvidenceResourceResult> ResourceResults,

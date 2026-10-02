@@ -1,0 +1,59 @@
+name: EvidenceHost Linux runtime proof (candidate; no Trust acceptance)
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'Evidence/**'
+      - 'Cli/**/Evidence*'
+      - 'Cli/**/Coverage*'
+      - 'Cli/**/ForgeTrust.AppSurface.Cli*.csproj'
+      - 'Cli/**/packages.lock.json'
+      - 'tests/evidencehost-consumer/**'
+      - 'scripts/evidencehost-linux-launcher.py'
+      - 'scripts/verify-evidencehost-linux-runtime.sh'
+      - '.github/workflows/evidencehost-runtime-proof.yml'
+
+jobs:
+  linux-runtime-candidate:
+    name: Candidate proof — Observation only; no Trust acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout candidate PR head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Run candidate Linux runtime proof (Observation only)
+        env:
+          EVIDENCEHOST_PROOF_LABEL: candidate-no-trust-acceptance
+          EVIDENCEHOST_WORKFLOW_IDENTITY: ${{ github.workflow_ref }}
+          EVIDENCEHOST_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVIDENCEHOST_BASE_REVISION: ${{ github.event.pull_request.base.sha }}
+          EVIDENCEHOST_RUN_ID: ${{ github.run_id }}
+          EVIDENCEHOST_RUN_ATTEMPT: ${{ github.run_attempt }}
+          EVIDENCEHOST_OUTPUT_PARENT: ${{ runner.temp }}/evidencehost-runtime-proof
+        run: bash scripts/verify-evidencehost-linux-runtime.sh "$EVIDENCEHOST_OUTPUT_PARENT"
+
+      - name: Retain candidate JSON receipts and logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: evidencehost-runtime-candidate-no-trust-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/evidencehost-runtime-proof/*.json
+            ${{ runner.temp }}/evidencehost-runtime-proof/*.log
+            ${{ runner.temp }}/evidencehost-runtime-proof/**/*.json
+            ${{ runner.temp }}/evidencehost-runtime-proof/**/*.log
+          if-no-files-found: warn
+          retention-days: 7

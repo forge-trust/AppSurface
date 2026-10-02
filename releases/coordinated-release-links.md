@@ -37,6 +37,14 @@ Preparation discovers annotated `v*` tags whose peeled commits are ancestors of 
 
 Legacy rows that have only `release_notes_path` keep their explicit-path meaning so historical package-index snapshots stay readable. New coordinated rows must not set `release_notes_path`; combining a mutable path with the pointer makes the reader-facing target ambiguous.
 
+## EvidenceHost migration
+
+The canonical migration and current support boundary for the #779 EvidenceHost admission change is the
+[EvidenceHost migration and support reference](../docs/evidence/evidencehost-migration.md). Package READMEs and
+adoption guides should link there rather than copying a second migration narrative. Trusted admission remains
+closed until the full consumer, production-broker, and CI proof set is accepted; the migration page records the
+current proof status and compatibility diagnostics.
+
 Compatibility rule: a reader that understands only `release_notes_path` must continue to resolve legacy rows, while a coordinated reader resolves `release_track: coordinated` through `releases/current.md`. Do not retrofit historical rows just to make the current tree uniform. Migrate only when the package is intentionally joining the coordinated release family, and validate the old and new row shapes from a checked-out historical tree plus the current tree.
 
 ## Migrate a public coordinated package

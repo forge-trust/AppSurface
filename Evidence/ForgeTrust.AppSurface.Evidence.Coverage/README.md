@@ -5,3 +5,10 @@
 The assembly owns one in-process implementation of coverage discovery, execution, watchdog supervision, merge, gate evaluation, patch analysis, and controlled artifact writing. The CLI owns command parsing and presentation; Evidence owns policy and claim translation. This direction ensures Evidence produces coverage claims from the same execution engine as `appsurface coverage run` and `appsurface coverage gate`, without invoking a second process. Both surfaces use the fail-mode default. For VSTest test phases with at least 90 seconds remaining, the engine requests no-dump hang blame and reserves part of the current budget for sequence output and summary. Evidence's producer deadline remains authoritative and includes discovery/build time. The [CLI hang-diagnostics reference](../../Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-hang-diagnostics) documents the timeout arithmetic, opt-outs, artifact statuses, and migration for healthy long-running tests. Evidence results never include test names or Sequence.xml contents.
 
 All coverage orchestration types are internal and visible only to first-party assemblies. Consumers should use the documented public [coverage commands](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run) and [EvidenceHost workflow](../../start-here/evidencehost.md).
+
+The package depends on [Evidence.Contracts](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#shared-lifecycle-and-output-limits)
+for the run-wide received-byte quota shared by subject and reporter output. Every received byte is charged even
+when only a bounded prefix is retained. Crossing the limit closes admission and cancels and drains the owned
+process before returning a failed result. Callers must use one quota for the full Evidence run; creating a new
+quota for each command would incorrectly reset its cumulative limit. This internal dependency supplies output
+accounting; it does not grant runtime admission or enable a supported provider.

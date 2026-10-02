@@ -41,7 +41,7 @@ Allowlist revision: `issue779-v1-draft`.
 
 | Provider / platform | CI owner | Supervision / allocation mechanism | Immutable proof runs and artifacts | State |
 | --- | --- | --- | --- | --- |
-| GitHub Actions / Linux | Andrew | provisional systemd transient services + separate worker/subject Unix identities + retained-descriptor `openat2` allocation; actual runner proof pending | none | excluded |
+| GitHub Actions / Linux | Andrew | provisional systemd transient services + separate worker/subject Unix identities + retained-descriptor `openat2` allocation | [mechanism run 36988778445](https://github.com/forge-trust/AppSurface/actions/runs/36988778445), artifact `11218159613`; mechanism only | excluded |
 | GitHub Actions / Windows | Andrew | not proved | none | excluded |
 | GitHub Actions / macOS | Andrew | not proved | none | excluded |
 
@@ -75,12 +75,20 @@ Local evidence on 2026-09-30:
   content equality; it does not implement cryptographic writer/manifest hashing or real CI acceptance.
 - Python syntax, shell syntax, C# formatting and `git diff --check` passed for the prepared fixture.
 
-A real systemd/cgroup-v2 run remains mandatory before public provider API freeze. The new workflow cannot be
+The preliminary workflow produced a real systemd/cgroup-v2 mechanism observation described below. Full consumer and downstream acceptance remain required before public provider API freeze. The new workflow cannot be
 manually dispatched until it exists on the default branch under
 [GitHub's dispatch rules](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
 The user selected the staged proof route on 2026-10-01: create a preliminary draft mechanism-proof PR after
 the unchanged coverage gate passes, obtain its real runner observations, then continue the full #779
-implementation. The branch is not yet published and no PR exists. Trusted remains excluded until the actual
+implementation. The branch is published as [draft PR #850](https://github.com/forge-trust/AppSurface/pull/850). Trusted remains excluded until the actual
 protected integration and immutable acceptance evidence are complete. The preliminary PR references #779
 without closing it; final implementation and acceptance own closure. No coverage or release exception has
 been inferred.
+
+## Actual Ubuntu mechanism observation (2026-10-02)
+
+The candidate [mechanism workflow run 36988778445](https://github.com/forge-trust/AppSurface/actions/runs/36988778445) succeeded on attempt 1 at source revision `4dd992ec1bc2df8220c73149115c5b478edb0085`. Its merge checkout was `d0f6acd18c90d4c7950e00f428bf9de8f2b88522`. GitHub API job metadata identified `ubuntu-24.04`, runner ID `1000061870` and the GitHub Actions runner group; repository runner inventory contained zero entries. These metadata are observations, not runtime authentication.
+
+The parent verified the downloaded artifact ZIP, GitHub artifact digest, internal file index and source/run/attempt bindings. Artifact `11218159613` had SHA-256 `0dabd2ffa925d4f8031264ce8d952b5592311ba5f9559ea4a35bf7bb99e4bf9f`. The reports recorded systemd `255.4-1ubuntu8.17`, kernel `6.17.0-1022-azure`, x86_64, nine worker lifecycle cases, twelve subject-boundary assertions and fourteen allocation cases. Every required case was observed and passed; the artifact still states `admission: none`.
+
+This permits implementation against the demonstrated internal Linux mechanism. It does not establish protected-base workflow execution, production CLI/Aspire integration, the downstream gate, fork Observation execution, release acceptance, or all 57 acceptance groups. Linux, Windows and macOS remain excluded from Trusted registration. The broader build for the preliminary head failed; that failure is being diagnosed independently of the successful mechanism job.

@@ -539,6 +539,8 @@ packages:
     release_notes_path: releases/unreleased.md
     order: 57
     note: Private coverage execution implementation restored only through first-party AppSurface CLI and Evidence workflow packages; it is not a direct-install integration surface.
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Evidence.Contracts
   - project: Evidence/ForgeTrust.AppSurface.Evidence.Cli/ForgeTrust.AppSurface.Evidence.Cli.csproj
     release_guidance_variant: default
     classification: public
@@ -578,6 +580,7 @@ packages:
       - ForgeTrust.AppSurface.Evidence.Contracts
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Evidence.Contracts
+      - ForgeTrust.AppSurface.Evidence.Planner
   - project: Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj
     release_guidance_variant: apphost
     classification: public

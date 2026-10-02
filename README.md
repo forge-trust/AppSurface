@@ -123,6 +123,36 @@ The Durable packages are coordinated public previews. The [Durable operational-a
 - [**ForgeTrust.AppSurface.Evidence.Planner**](./Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md) – Deterministic explicit-diff policy resolution with conservative fallback and ambiguity rejection.
 - [**ForgeTrust.AppSurface.Evidence.Aspire**](./Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) – Separate, explicit consumer-owned lifecycle for Aspire readiness and browser/E2E producers; it is never mixed into normal application startup.
 
+#### Aspire caller migration
+
+Aspire callers must select an explicit mode and run inside the separately supervised Linux worker. The old
+`RunAsync(bool observationOnly)` overload remains only as a source-compatibility failure: its default/`false`
+form returns `ASEVD400`, and `true` returns `ASEVD402`, both before the registration callback runs. The old
+`EvidenceAspireApplication.StartAsync(builder)` entry likewise returns `ASEVD400` before building the supplied
+builder. Use the host-owned deferred application factory so builder creation, configuration, build, and start
+all occur after protected admission:
+
+```csharp
+var host = EvidenceHostBootstrap.Create(plan, registration =>
+{
+    registration.AddResource(resourceDeclaration, readinessProbe);
+    registration.AddProducer(producerDeclaration, producer);
+    registration.SetApplicationFactory(() => CreateDistributedApplicationBuilder());
+});
+
+var manifest = await host.RunAsync(
+    new EvidenceExecutionRequest(EvidenceExecutionMode.Observation, protectedControlSocket),
+    cancellationToken);
+```
+
+Each resource and producer registration must match the complete selected declaration. Observation is restricted
+to a protected, dependency-free targeted profile with no resource declarations or protected secrets. Trusted
+execution requires protected consumer acceptance and a registered verifier; until that proof is available,
+shared admission rejects Trusted runs with `ASEVD407`. The request does not itself provide supervision or
+acceptance. The current implementation supports the protected Linux launcher and its authenticated control
+channel; Windows, macOS, and unrelated long-lived host processes are unsupported. See the
+[EvidenceHost guide](./start-here/evidencehost.md) for the trust boundary, diagnostics, and migration constraints.
+
 ### [Dependency](./Dependency/README.md)
 
 - [**ForgeTrust.AppSurface.Dependency.Autofac**](./Dependency/ForgeTrust.AppSurface.Dependency.Autofac/README.md) – Optional integration with the Autofac IoC container so modules can participate in Autofac service registration.

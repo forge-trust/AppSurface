@@ -613,11 +613,18 @@
         "type": "Project",
         "dependencies": {
           "Aspire.Hosting": "[13.4.4, 14.0.0)",
-          "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )"
+          "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Planner": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.evidence.contracts": {
         "type": "Project"
+      },
+      "forgetrust.appsurface.evidence.planner": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )"
+        }
       },
       "forgetrust.appsurface.testing": {
         "type": "Project"

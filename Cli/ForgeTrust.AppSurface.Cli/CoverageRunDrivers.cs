@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Xml;
 using System.Xml.Linq;
+using ForgeTrust.AppSurface.Evidence.Contracts;
 #if !EVIDENCE_COVERAGE_CORE
 using ForgeTrust.AppSurface.CoverageArtifacts;
 #endif
@@ -76,6 +77,7 @@ internal static class CoverageRunDriverPreflight
     /// <param name="processRunner">Runner used for supervised MSBuild capability queries.</param>
     /// <param name="supervisor">Run-scoped supervisor for discovery operations and cancellation.</param>
     /// <param name="cancellationToken">Cancellation token for capability evaluation.</param>
+    /// <param name="processOutputQuota">Optional Evidence invocation-wide quota shared with capability-evaluation child processes.</param>
     /// <returns>A task that completes when every project is compatible.</returns>
     /// <remarks>Throws a stable coverage execution diagnostic for an engine incompatibility or aggregated project package and capability failures in stable project order.</remarks>
     public static async Task ValidateAsync(
@@ -84,7 +86,8 @@ internal static class CoverageRunDriverPreflight
         CoverageProjectResolution resolution,
         ICoverageRunProcessRunner processRunner,
         CoverageRunWatchdogSupervisor supervisor,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        EvidenceRunByteQuota? processOutputQuota = null)
     {
         ValidateEngine(resolution.SolutionDirectory);
         var requiredPackage = driver == CoverageRunDriver.Collector ? "coverlet.collector" : "coverlet.msbuild";
@@ -99,7 +102,8 @@ internal static class CoverageRunDriverPreflight
                 resolution.SolutionDirectory,
                 processRunner,
                 supervisor,
-                cancellationToken);
+                cancellationToken,
+                processOutputQuota);
 
             if (result.ExitCode != 0
                 || result.StandardOutput is null
@@ -149,7 +153,8 @@ internal static class CoverageRunDriverPreflight
                     resolution.SolutionDirectory,
                     processRunner,
                     supervisor,
-                    cancellationToken);
+                    cancellationToken,
+                    processOutputQuota);
                 if (innerResult.ExitCode != 0
                     || innerResult.StandardOutput is null
                     || !TryReadCapabilities(innerResult.StandardOutput, requiredPackage, out var innerHasPackage, out var innerHasDuplicatePackage, out var innerUsesMtp, out _, out _))
@@ -186,7 +191,8 @@ internal static class CoverageRunDriverPreflight
         string solutionDirectory,
         ICoverageRunProcessRunner processRunner,
         CoverageRunWatchdogSupervisor supervisor,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        EvidenceRunByteQuota? processOutputQuota)
     {
         var args = new List<string>
         {
@@ -206,7 +212,7 @@ internal static class CoverageRunDriverPreflight
         try
         {
             return await processRunner.RunAsync(
-                new CoverageRunProcessRequest("dotnet", args, solutionDirectory, null, operation.ObserveBytes, operation.ReserveProcess()),
+                new CoverageRunProcessRequest("dotnet", args, solutionDirectory, null, operation.ObserveBytes, operation.ReserveProcess(), processOutputQuota),
                 cancellationToken);
         }
         catch (OperationCanceledException)

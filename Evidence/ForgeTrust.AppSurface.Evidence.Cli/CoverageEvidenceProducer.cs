@@ -53,6 +53,10 @@ internal sealed class CoverageEvidenceProducer
     /// The caller cancellation token. Caller cancellation is propagated; only expiration of the producer's linked
     /// deadline yields <see cref="EvidenceProducerOutcome.TimedOut"/>.
     /// </param>
+    /// <param name="processOutputQuota">
+    /// Optional Evidence invocation-wide child-process output quota. The parent should pass the same instance to every
+    /// producer in one invocation; when omitted, this producer creates a quota for its single coverage run.
+    /// </param>
     /// <returns>
     /// A passed result only when collection and the declared gate both pass; a failed result for collection, gate, or
     /// nonfatal core failures (including independently thrown cancellation exceptions); or an unavailable or invalid
@@ -71,7 +75,8 @@ internal sealed class CoverageEvidenceProducer
         string outputDirectory,
         EvidenceDiffSnapshot? diffSnapshot,
         CoverageTextWriters writers,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        EvidenceRunByteQuota? processOutputQuota = null)
     {
         ArgumentNullException.ThrowIfNull(producer);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputDirectory);
@@ -99,6 +104,8 @@ internal sealed class CoverageEvidenceProducer
         }
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var effectiveProcessOutputQuota = processOutputQuota
+            ?? EvidenceRunByteQuota.CreateProcessOutput(onExceeded: deadline.Cancel);
         try
         {
             var producerDeadline = new CoverageProducerDeadline(
@@ -107,7 +114,11 @@ internal sealed class CoverageEvidenceProducer
                 TimeSpan.FromSeconds(producer.TimeoutSeconds));
             deadline.CancelAfter(TimeSpan.FromSeconds(producer.TimeoutSeconds));
             var result = await _executionWorkflow.RunAndGateAsync(
-                CreateRunRequest(solutionPath, outputDirectory) with { ProducerDeadline = producerDeadline },
+                CreateRunRequest(solutionPath, outputDirectory) with
+                {
+                    ProducerDeadline = producerDeadline,
+                    ProcessOutputQuota = effectiveProcessOutputQuota,
+                },
                 CreateGateRequest(outputDirectory, diffSnapshot, producer.CoverageGate),
                 writers,
                 deadline.Token).ConfigureAwait(false);

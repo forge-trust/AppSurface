@@ -2,9 +2,15 @@
 
 This fixture tests the Linux mechanism proposed for [issue #779](https://github.com/forge-trust/AppSurface/issues/779).
 The [consumer acceptance record](../../docs/evidence/issue779-consumer-acceptance.md) remains the release prerequisite.
-Neither a passed fixture nor its uploaded JSON grants runtime admission. The fixture has no EvidenceHost lease API,
+Neither a passed fixture nor its uploaded JSON grants Trusted admission. The preliminary mechanism fixture has no EvidenceHost lease API,
 protected verifier, producer catalogue, or downstream gate. Public provider APIs remain provisional until a real
 consumer demonstrates the [approved boundaries](../../docs/designs/issue-779-evidencehost-trust-boundary.md).
+
+The separate [runtime candidate](RuntimeSubject/README.md) exercises production CLI Observation orchestration,
+including authenticated broker communication and retained-handle output. Its [workflow](../../.github/workflows/evidencehost-runtime-proof.yml)
+is candidate-controlled and supplies no protected-base or Trusted acceptance. The [runtime proof driver](runtime-proof.py)
+requires exact missing-proof rejection and structural verification of the collected plan/manifest. These tests and
+the preliminary mechanism observations have different source and execution bindings; one cannot substitute for the other.
 
 ## Run
 
@@ -65,6 +71,10 @@ be established, the probe fails; a real integration must quarantine output and c
 not handle external topology or confer permission to reuse failed production output.
 
 ## Before public API freeze or Trusted support
+
+For direct CLI/Aspire consumer-path regression tests, use the separate
+[root-owned protocol fixture](ExecutionBroker-README.md). Its subject results and cgroup
+metadata are synthetic; it does not replace the actual systemd or consumer CI proof.
 
 Record immutable real CI run/revision/artifact identifiers, rerun from a reviewed protected workflow/base,
 then integrate the actual protected worker and restricted subject. Prove exact catalogue/context binding,
