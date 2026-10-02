@@ -11,6 +11,35 @@ public sealed class EvidenceLinuxApplicationProtocolTests
     private const string Lease = "0123456789abcdef0123456789abcdef";
     private const long GiB = 1024L * 1024 * 1024;
 
+    [Theory]
+    [InlineData("ASEVD402")]
+    [InlineData("ASEVD410")]
+    public void ApplicationRequestPreservesAdmissionFailuresDespiteInvalidOperationInheritance(string code)
+    {
+        var failure = new EvidenceAdmissionException(code, "Protected channel failure.");
+        Assert.IsAssignableFrom<InvalidOperationException>(failure);
+        Assert.Same(failure, EvidenceLinuxWorkerSupervisor.NormalizeApplicationRequestFailure(failure));
+    }
+
+    [Fact]
+    public void ApplicationRequestNormalizesBrokerOutputRejectionWithoutRetainingSuppliedValues()
+    {
+        var failure = EvidenceLinuxWorkerSupervisor.NormalizeApplicationRequestFailure(
+            new EvidenceAdmissionException("ASEVD420", Canary));
+        Assert.Equal("ASEVD410", failure.Code);
+        Assert.DoesNotContain(Canary, failure.Message);
+        Assert.Null(failure.InnerException);
+    }
+
+    [Fact]
+    public void ApplicationRequestNormalizesUnclassifiedInvalidOperationWithoutAnAdmissionCode()
+    {
+        var failure = EvidenceLinuxWorkerSupervisor.NormalizeApplicationRequestFailure(new InvalidOperationException(Canary));
+        Assert.Equal("ASEVD410", failure.Code);
+        Assert.DoesNotContain(Canary, failure.Message);
+        Assert.Null(failure.InnerException);
+    }
+
     [Fact]
     public void CompleteDescriptorPreservesAllDeclarationsAndNineClosedBundleRolesAfterJsonDisposal()
     {

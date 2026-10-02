@@ -234,10 +234,20 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor
     private async Task<JsonElement> RequestApplicationAsync<T>(T request, CancellationToken cancellationToken)
     {
         try { return await RequestAsync(request, cancellationToken).ConfigureAwait(false); }
-        catch (EvidenceAdmissionException error) when (error.Code == "ASEVD420") { throw ApplicationFailure("ASEVD410"); }
+        catch (EvidenceAdmissionException error) { throw NormalizeApplicationRequestFailure(error); }
         catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException
-            or FormatException or OverflowException or SocketException or IOException) { throw ApplicationFailure("ASEVD410"); }
+            or FormatException or OverflowException or SocketException or IOException) { throw NormalizeApplicationRequestFailure(error); }
     }
+
+    /// <summary>Preserves authenticated-channel diagnostics before normalizing application wire failures.</summary>
+    /// <param name="error">A failure already caught by the private application request path.</param>
+    /// <returns>The original admission exception, except for broker output rejection, or fixed ASEVD410.</returns>
+    /// <remarks>This data-only helper grants no channel, supervisor or execution authority. Admission exceptions
+    /// derive from InvalidOperationException and must be classified before that broader wire-error family.</remarks>
+    internal static EvidenceAdmissionException NormalizeApplicationRequestFailure(Exception error) =>
+        error is EvidenceAdmissionException admission && admission.Code != "ASEVD420"
+            ? admission
+            : ApplicationFailure("ASEVD410");
 
     private static EvidenceResourceDeclaration ParseApplicationResource(JsonElement value)
     {
