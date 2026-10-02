@@ -55,18 +55,99 @@ public sealed class ReleaseTaggedProjectionResolverTests
         Assert.DoesNotContain($"git merge-base --is-ancestor {TagCommit} origin/main", fixture.Runner.Calls);
     }
 
-    [Fact]
-    public async Task ResolveMachineInspectRejectsInvalidCapturedTagObjectId()
+    [Theory]
+    [InlineData("type")]
+    [InlineData("short-header")]
+    public async Task ResolveMachineInspectRejectsMalformedCapturedTagObjectHeaders(string malformedHeader)
+    {
+        var fixture = CreateFixture();
+        var invalidTagObject = malformedHeader switch
+        {
+            "type" => fixture.TagObject.Replace("type commit", "type blob", StringComparison.Ordinal),
+            "short-header" => $"object {TagCommit}\ntype commit",
+            _ => throw new ArgumentOutOfRangeException(nameof(malformedHeader))
+        };
+        fixture.Runner.Add(
+            $"git cat-file -p {TagObjectId}",
+            new CommandResult(0, invalidTagObject, string.Empty));
+
+        var failure = await Assert.ThrowsAsync<ReleaseToolException>(() => ResolveMachineInspectAsync(fixture));
+
+        Assert.Equal("release-tag-object-binding-invalid", failure.Diagnostic.Code);
+        Assert.DoesNotContain($"git merge-base --is-ancestor {TagCommit} origin/main", fixture.Runner.Calls);
+    }
+
+    [Theory]
+    [InlineData("short-object-id")]
+    [InlineData("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB")]
+    [InlineData("gggggggggggggggggggggggggggggggggggggggg")]
+    public async Task ResolveMachineInspectRejectsInvalidCapturedTagObjectId(string objectId)
     {
         var runner = new FakeCommandRunner();
         runner.Add(
             $"git rev-parse --verify refs/tags/{Tag}",
-            new CommandResult(0, "short-object-id\n", string.Empty));
+            new CommandResult(0, $"{objectId}\n", string.Empty));
 
         var failure = await Assert.ThrowsAsync<ReleaseToolException>(() => ResolveMachineInspectAsync(runner));
 
         Assert.Equal("release-tag-object-id-invalid", failure.Diagnostic.Code);
         Assert.Single(runner.Calls);
+    }
+
+    [Fact]
+    public async Task ResolveMachineInspectAcceptsFullSha256TagAndCommitIds()
+    {
+        var tagObjectId = new string('1', 64);
+        var tagCommit = new string('2', 64);
+        var fixture = CreateFixture(tagObjectId, tagCommit);
+
+        var projection = await ResolveMachineInspectAsync(fixture);
+
+        Assert.Equal(tagObjectId, projection.TagObjectId);
+        Assert.Equal(tagCommit, projection.TagCommit);
+    }
+
+    [Theory]
+    [InlineData("", "", "Git did not resolve the requested tag.")]
+    [InlineData("", "missing ref", "missing ref")]
+    [InlineData("tag lookup failed", "", "tag lookup failed")]
+    public async Task ResolveMachineInspectUsesAvailableGitDiagnosticWhenTagRefIsMissing(
+        string standardError,
+        string standardOutput,
+        string expectedCause)
+    {
+        var runner = new FakeCommandRunner();
+        runner.Add(
+            $"git rev-parse --verify refs/tags/{Tag}",
+            new CommandResult(1, standardOutput, standardError));
+
+        var failure = await Assert.ThrowsAsync<ReleaseToolException>(() => ResolveMachineInspectAsync(runner));
+
+        Assert.Equal("release-tag-missing", failure.Diagnostic.Code);
+        Assert.Equal(expectedCause, failure.Diagnostic.Cause);
+        Assert.Single(runner.Calls);
+    }
+
+    [Theory]
+    [InlineData("", "Git could not inspect the captured tag object.")]
+    [InlineData("object storage unavailable", "object storage unavailable")]
+    public async Task ResolveMachineInspectReportsFailureToReadCapturedTagObject(
+        string standardError,
+        string expectedCause)
+    {
+        var runner = new FakeCommandRunner();
+        runner.Add(
+            $"git rev-parse --verify refs/tags/{Tag}",
+            new CommandResult(0, $"{TagObjectId}\n", string.Empty));
+        runner.Add(
+            $"git cat-file -t {TagObjectId}",
+            new CommandResult(1, string.Empty, standardError));
+
+        var failure = await Assert.ThrowsAsync<ReleaseToolException>(() => ResolveMachineInspectAsync(runner));
+
+        Assert.Equal("release-tag-object-missing", failure.Diagnostic.Code);
+        Assert.Equal(expectedCause, failure.Diagnostic.Cause);
+        Assert.Equal(2, runner.Calls.Count);
     }
 
     [Fact]
@@ -103,6 +184,26 @@ public sealed class ReleaseTaggedProjectionResolverTests
 
         Assert.Equal("release-tag-moved-during-inspect", failure.Diagnostic.Code);
         Assert.Contains(DifferentTagObjectId, failure.Diagnostic.Cause, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("", "", "The tag ref could not be re-read after artifact validation.")]
+    [InlineData("unexpected ref output", "tag lookup failed", "unexpected ref output")]
+    public async Task ResolveMachineInspectReportsWhyCapturedTagRefCouldNotBeRevalidated(
+        string standardError,
+        string standardOutput,
+        string expectedCause)
+    {
+        var fixture = CreateFixture();
+        fixture.Runner.AddSequence(
+            $"git rev-parse --verify refs/tags/{Tag}",
+            new CommandResult(0, $"{TagObjectId}\n", string.Empty),
+            new CommandResult(1, standardOutput, standardError));
+
+        var failure = await Assert.ThrowsAsync<ReleaseToolException>(() => ResolveMachineInspectAsync(fixture));
+
+        Assert.Equal("release-tag-moved-during-inspect", failure.Diagnostic.Code);
+        Assert.Equal(expectedCause, failure.Diagnostic.Cause);
     }
 
     [Theory]
@@ -198,7 +299,7 @@ public sealed class ReleaseTaggedProjectionResolverTests
         FailOnWarnings: false,
         AllowExistingTargets: false);
 
-    private static ResolverFixture CreateFixture()
+    private static ResolverFixture CreateFixture(string tagObjectId = TagObjectId, string tagCommit = TagCommit)
     {
         var version = SemVer.Parse(VersionText);
         var workspace = new ReleaseWorkspace(RepositoryRoot);
@@ -249,7 +350,7 @@ public sealed class ReleaseTaggedProjectionResolverTests
             ["releases/current.md.yml"] = currentReleaseSidecar,
             [PackageIndexPath] = packageIndex
         };
-        var tagObject = CreateTagObject(TagCommit, new ReleaseTagBinding(
+        var tagObject = CreateTagObject(tagCommit, new ReleaseTagBinding(
             Tag,
             ReleaseEvidence.ComputeSha256Hex(releaseSidecar),
             ReleaseEvidence.ComputeSha256Hex(manifest),
@@ -257,22 +358,22 @@ public sealed class ReleaseTaggedProjectionResolverTests
         var runner = new FakeCommandRunner();
         runner.Add(
             $"git rev-parse --verify refs/tags/{Tag}",
-            new CommandResult(0, $"{TagObjectId}\n", string.Empty));
-        runner.Add($"git cat-file -t {TagObjectId}", new CommandResult(0, "tag\n", string.Empty));
-        runner.Add($"git cat-file -p {TagObjectId}", new CommandResult(0, tagObject, string.Empty));
+            new CommandResult(0, $"{tagObjectId}\n", string.Empty));
+        runner.Add($"git cat-file -t {tagObjectId}", new CommandResult(0, "tag\n", string.Empty));
+        runner.Add($"git cat-file -p {tagObjectId}", new CommandResult(0, tagObject, string.Empty));
         runner.Add(
-            $"git rev-parse {TagObjectId}^{{commit}}",
-            new CommandResult(0, $"{TagCommit}\n", string.Empty));
+            $"git rev-parse {tagObjectId}^{{commit}}",
+            new CommandResult(0, $"{tagCommit}\n", string.Empty));
         runner.Add(
-            $"git merge-base --is-ancestor {TagCommit} origin/main",
+            $"git merge-base --is-ancestor {tagCommit} origin/main",
             new CommandResult(0, string.Empty, string.Empty));
         runner.Add(
-            $"git merge-base --is-ancestor {PreparationBaseCommit} {TagCommit}",
+            $"git merge-base --is-ancestor {PreparationBaseCommit} {tagCommit}",
             new CommandResult(0, string.Empty, string.Empty));
         foreach (var (path, content) in artifacts)
         {
             runner.Add(
-                $"git show {TagCommit}:{path}",
+                $"git show {tagCommit}:{path}",
                 new CommandResult(0, content, string.Empty));
         }
 

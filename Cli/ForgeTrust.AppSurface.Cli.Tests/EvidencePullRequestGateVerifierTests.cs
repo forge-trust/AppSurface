@@ -190,6 +190,7 @@ public sealed class EvidencePullRequestGateVerifierTests
             fixture.ExpectedIdentity with { EventName = "workflow_dispatch" },
             fixture.ExpectedIdentity with { WorkflowId = string.Empty },
             fixture.ExpectedIdentity with { SubjectJobId = "evidence\nsubject" },
+            fixture.ExpectedIdentity with { RunIdentity = null! },
             fixture.ExpectedIdentity with
             {
                 RunIdentity = fixture.RunIdentity with { WorkflowRunAttempt = 0 },
@@ -274,6 +275,7 @@ public sealed class EvidencePullRequestGateVerifierTests
             fixture.Authority with { EventName = "pull_request" },
             fixture.Authority with { WorkflowId = "other-workflow.yml" },
             fixture.Authority with { RunIdentity = fixture.RunIdentity with { HeadRepositoryId = 999 } },
+            fixture.Authority with { RunIdentity = null! },
             fixture.Authority with { RunIdentity = fixture.RunIdentity with { WorkflowRunAttempt = 2 } },
             fixture.Authority with { SubjectJobConclusion = "cancelled" },
         };
@@ -348,14 +350,35 @@ public sealed class EvidencePullRequestGateVerifierTests
     {
         await using var fixture = await GateFixture.CreateAsync();
         var producer = fixture.Plan.Profile.Producers.Single();
+        var obligation = fixture.Plan.Profile.Obligations.Single();
         var invalidPlans = new EvidencePlan[]
         {
             fixture.Plan with { PullRequestRunIdentity = fixture.RunIdentity with { TargetBranch = new string('m', 129) } },
             fixture.Plan with { PolicyDigest = new string('d', EvidenceGitChangeCapture.MaximumPathBytes + 1) },
             fixture.Plan with { MatchedRuleIds = ["source", new string('r', 129)] },
             fixture.Plan with { ChangedPaths = [null!] },
+            fixture.Plan with { ChangedPaths = null! },
+            fixture.Plan with { MatchedRuleIds = null! },
+            fixture.Plan with { ChangedPaths = [new NormalizedDiffPath("src/Feature.cs", PreviousPath: new string('p', EvidenceGitChangeCapture.MaximumPathBytes + 1))] },
+            fixture.Plan with { Profile = fixture.Plan.Profile with { Resources = null! } },
+            fixture.Plan with { Profile = fixture.Plan.Profile with { Producers = null! } },
+            fixture.Plan with { Profile = fixture.Plan.Profile with { Obligations = null! } },
+            fixture.Plan with { Profile = fixture.Plan.Profile with { Resources = [null!] } },
+            fixture.Plan with { Profile = fixture.Plan.Profile with { Producers = [null!] } },
+            fixture.Plan with { Profile = fixture.Plan.Profile with { Obligations = [null!] } },
             fixture.Plan with { Profile = fixture.Plan.Profile with { Producers = [producer with { AssertionIds = null! }] } },
+            fixture.Plan with { Profile = fixture.Plan.Profile with { Producers = [producer with { RequiredResources = null! }] } },
+            fixture.Plan with { Profile = fixture.Plan.Profile with { Producers = [producer with { RequiredResources = Enumerable.Repeat("database", EvidenceProfileLimits.MaximumResources + 1).ToArray() }] } },
+            fixture.Plan with { Profile = fixture.Plan.Profile with { Producers = [producer with { AssertionIds = Enumerable.Repeat("build/passed", 257).ToArray() }] } },
+            fixture.Plan with { Profile = fixture.Plan.Profile with { Producers = [producer with { ArtifactSlots = null! }] } },
+            fixture.Plan with { Profile = fixture.Plan.Profile with { Producers = [producer with { ArtifactSlots = Enumerable.Repeat(producer.ArtifactSlots.Single(), 129).ToArray() }] } },
+            fixture.Plan with { Profile = fixture.Plan.Profile with { Producers = [producer with { ArtifactSlots = [null!] }] } },
+            fixture.Plan with { Profile = fixture.Plan.Profile with { Obligations = [obligation with { RequiredProducerIds = null! }] } },
             fixture.Plan with { PolicySnapshot = fixture.Policy with { Profiles = [] } },
+            fixture.Plan with { PolicySnapshot = fixture.Policy with { Profiles = [null!] } },
+            fixture.Plan with { PolicySnapshot = fixture.Policy with { Rules = null! } },
+            fixture.Plan with { PolicySnapshot = fixture.Policy with { Rules = [null!] } },
+            fixture.Plan with { PolicySnapshot = fixture.Policy with { Rules = new EvidencePolicyRule[10_001] } },
             fixture.Plan with
             {
                 PolicySnapshot = fixture.Policy with
@@ -380,16 +403,48 @@ public sealed class EvidencePullRequestGateVerifierTests
         var artifact = producerResult.Artifacts!.Single();
         var invalidManifests = new EvidenceManifest[]
         {
+            fixture.Manifest with { PullRequestRunIdentity = null! },
             fixture.Manifest with { Metrics = null! },
+            fixture.Manifest with { ResourceResults = null! },
             fixture.Manifest with { ResourceResults = new EvidenceResourceResult[EvidenceProfileLimits.MaximumResources + 1] },
+            fixture.Manifest with { ResourceResults = [null!] },
+            fixture.Manifest with { ResourceResults = [new EvidenceResourceResult("database", EvidenceResourceOutcome.Ready, 0, new string('d', 513))] },
+            fixture.Manifest with { SelectedObligationIds = null! },
             fixture.Manifest with { SelectedObligationIds = Enumerable.Repeat("compile", EvidenceProfileLimits.MaximumObligations + 1).ToArray() },
+            fixture.Manifest with { ClosedObligationIds = null! },
+            fixture.Manifest with { ClosedObligationIds = Enumerable.Repeat("compile", EvidenceProfileLimits.MaximumObligations + 1).ToArray() },
+            fixture.Manifest with { UnmediatedObligationIds = null! },
+            fixture.Manifest with { UnmediatedObligationIds = Enumerable.Repeat("compile", EvidenceProfileLimits.MaximumObligations + 1).ToArray() },
+            fixture.Manifest with { ProducerResults = null! },
+            fixture.Manifest with { ProducerResults = [null!] },
+            fixture.Manifest with { ProducerResults = new EvidenceProducerResult[EvidenceProfileLimits.MaximumProducers + 1] },
             fixture.Manifest with
             {
                 ProducerResults = [producerResult with { Diagnostic = new string('d', 513) }],
             },
             fixture.Manifest with
             {
+                ProducerResults = [producerResult with { SatisfiedAssertionIds = null! }],
+            },
+            fixture.Manifest with
+            {
+                ProducerResults = [producerResult with { SatisfiedAssertionIds = Enumerable.Repeat("build/passed", 257).ToArray() }],
+            },
+            fixture.Manifest with
+            {
                 ProducerResults = [producerResult with { SatisfiedAssertionIds = [new string('a', 129)] }],
+            },
+            fixture.Manifest with
+            {
+                ProducerResults = [producerResult with { Artifacts = null! }],
+            },
+            fixture.Manifest with
+            {
+                ProducerResults = [producerResult with { Artifacts = Enumerable.Repeat(artifact, 129).ToArray() }],
+            },
+            fixture.Manifest with
+            {
+                ProducerResults = [producerResult with { Artifacts = [null!] }],
             },
             fixture.Manifest with
             {

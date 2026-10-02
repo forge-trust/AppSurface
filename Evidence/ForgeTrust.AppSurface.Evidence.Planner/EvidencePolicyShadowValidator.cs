@@ -264,6 +264,7 @@ public static class EvidencePolicyShadowValidator
 
             if (fixture.Kind == EvidencePolicyShadowFixtureKind.ControlPlane)
             {
+                AddUnrecognizedControlPlanePaths(trustedBasePolicy, fixture, EvidencePolicyShadowFixtureSource.Base, diagnostics);
                 AddUnrecognizedControlPlanePaths(candidatePolicy, fixture, EvidencePolicyShadowFixtureSource.Candidate, diagnostics);
             }
         }

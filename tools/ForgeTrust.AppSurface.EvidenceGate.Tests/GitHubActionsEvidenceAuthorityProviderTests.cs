@@ -37,6 +37,38 @@ public sealed class GitHubActionsEvidenceAuthorityProviderTests
         Assert.Null(provider);
     }
 
+    [Theory]
+    [InlineData("https://api.example.test?tenant=trusted")]
+    [InlineData("https://api.example.test/#fragment")]
+    public void EnvironmentFactoryRejectsApiEndpointsWithQueryOrFragment(string apiAddress)
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["GITHUB_TOKEN"] = "valid-token",
+            ["GITHUB_API_URL"] = apiAddress,
+        };
+
+        using var provider = GitHubActionsEvidenceAuthorityProvider.TryCreateFromEnvironment(
+            name => values.GetValueOrDefault(name));
+
+        Assert.Null(provider);
+    }
+
+    [Fact]
+    public void EnvironmentFactoryRejectsBearerCredentialLongerThanBound()
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["GITHUB_TOKEN"] = new string('a', 4097),
+            ["GITHUB_API_URL"] = "https://api.example.test",
+        };
+
+        using var provider = GitHubActionsEvidenceAuthorityProvider.TryCreateFromEnvironment(
+            name => values.GetValueOrDefault(name));
+
+        Assert.Null(provider);
+    }
+
     [Fact]
     public void EnvironmentFactoryAcceptsBearerCredentialCharactersAndTrailingPadding()
     {
@@ -70,6 +102,20 @@ public sealed class GitHubActionsEvidenceAuthorityProviderTests
 
             Assert.Equal("apiBaseAddress", exception.ParamName);
         }
+    }
+
+    [Fact]
+    public void ProviderRequiresHttpClientAndApiBaseAddress()
+    {
+        using var httpClient = new HttpClient();
+
+        var missingClient = Assert.Throws<ArgumentNullException>(() =>
+            new GitHubActionsEvidenceAuthorityProvider(null!, new Uri("https://api.example.test")));
+        var missingAddress = Assert.Throws<ArgumentNullException>(() =>
+            new GitHubActionsEvidenceAuthorityProvider(httpClient, null!));
+
+        Assert.Equal("httpClient", missingClient.ParamName);
+        Assert.Equal("apiBaseAddress", missingAddress.ParamName);
     }
 
     [Fact]
@@ -190,6 +236,8 @@ public sealed class GitHubActionsEvidenceAuthorityProviderTests
         { JobsPath, "jobs.0.id", "999" },
         { JobsPath, "jobs.0.run_id", "654322" },
         { JobsPath, "jobs.0.run_attempt", "2" },
+        { JobsPath, "jobs.0.run_attempt", "null" },
+        { JobsPath, "jobs.0.run_attempt", "\"1\"" },
     };
 
     [Theory]
@@ -204,6 +252,32 @@ public sealed class GitHubActionsEvidenceAuthorityProviderTests
             PullRequestHeadRevision,
             (path, body) => path == responsePath
                 ? new ApiResponse(HttpStatusCode.OK, SetJsonValue(body, jsonPath, replacementJsonValue))
+                : null);
+        using var httpClient = new HttpClient(handler);
+        var attestationProvider = new FixedCheckoutAttestationProvider(PullRequestHeadRevision);
+        using var authorityProvider = new GitHubActionsEvidenceAuthorityProvider(
+            httpClient,
+            new Uri("https://api.example.test/"),
+            attestationProvider);
+
+        var snapshot = await authorityProvider.ReadFreshAsync(CreateExpectedIdentity());
+
+        Assert.Null(snapshot);
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.Equal(0, attestationProvider.CallCount);
+    }
+
+    [Fact]
+    public async Task ProviderRejectsApiStringFieldsLongerThanTheBound()
+    {
+        var handler = new GitHubApiFixtureHandler(
+            BaseRevision,
+            PullRequestHeadRevision,
+            (path, body) => path == PullRequestPath
+                ? new ApiResponse(HttpStatusCode.OK, SetJsonValue(
+                    body,
+                    "base.ref",
+                    JsonSerializer.Serialize(new string('m', 4097))))
                 : null);
         using var httpClient = new HttpClient(handler);
         var attestationProvider = new FixedCheckoutAttestationProvider(PullRequestHeadRevision);

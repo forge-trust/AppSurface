@@ -107,6 +107,35 @@ public sealed class EvidencePolicyShadowValidatorTests
     }
 
     [Fact]
+    public void Validate_ShouldRequireExplicitControlPlaneMappingInTrustedBasePolicy()
+    {
+        var policy = CreatePolicy();
+        var basePolicy = policy with
+        {
+            Rules = policy.Rules.Where(static rule => rule.Id != "control").ToArray(),
+        };
+        var candidatePolicy = basePolicy with
+        {
+            Rules =
+            [
+                .. basePolicy.Rules,
+                new EvidencePolicyRule("control", ".github/**", policy.ConservativeProfileId),
+            ],
+        };
+        var fixture = Fixture("new-workflow", EvidencePolicyShadowFixtureKind.ControlPlane, ".github/workflows/new-gate.yml");
+
+        var result = EvidencePolicyShadowValidator.Validate(basePolicy, candidatePolicy, [fixture], [fixture]);
+
+        Assert.False(result.IsCompatible);
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("ASEPS008", diagnostic.Code);
+        Assert.Equal(EvidencePolicyShadowFixtureSource.Base, diagnostic.FixtureSource);
+        Assert.Equal(fixture.Id, diagnostic.FixtureId);
+        Assert.Equal(fixture.ChangedPath.Path, diagnostic.Path);
+        Assert.Contains("base policy does not explicitly recognize", diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Validate_ShouldResolveDocumentationCodeResourceControlPlaneAndUnknownCasesUnderBothPolicies()
     {
         var policy = CreatePolicy();
@@ -194,6 +223,51 @@ public sealed class EvidencePolicyShadowValidatorTests
     }
 
     [Fact]
+    public void Validate_ShouldReportIncompletePolicyCollectionsForEitherPolicySide()
+    {
+        var policy = CreatePolicy();
+        var fixture = Fixture("code", EvidencePolicyShadowFixtureKind.Code, "src/Feature.cs");
+        var invalidPolicies = new[]
+        {
+            (EvidencePolicyShadowFixtureSource.Base, policy with { Profiles = null! }),
+            (EvidencePolicyShadowFixtureSource.Base, policy with { Rules = null! }),
+            (EvidencePolicyShadowFixtureSource.Candidate, policy with { Profiles = null! }),
+            (EvidencePolicyShadowFixtureSource.Candidate, policy with { Rules = null! }),
+        };
+
+        foreach (var (source, invalidPolicy) in invalidPolicies)
+        {
+            var result = source == EvidencePolicyShadowFixtureSource.Base
+                ? EvidencePolicyShadowValidator.Validate(invalidPolicy, policy, [fixture], [fixture])
+                : EvidencePolicyShadowValidator.Validate(policy, invalidPolicy, [fixture], [fixture]);
+
+            Assert.False(result.IsCompatible);
+            Assert.Empty(result.Selections);
+            var diagnostic = Assert.Single(result.Diagnostics);
+            Assert.Equal(source == EvidencePolicyShadowFixtureSource.Base ? "ASEPS001" : "ASEPS002", diagnostic.Code);
+            Assert.Equal(source, diagnostic.FixtureSource);
+            Assert.Contains("incomplete", diagnostic.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void Validate_ShouldReportInvalidTrustedBaseGatePolicyWithoutClaimingCompatibility()
+    {
+        var policy = CreatePolicy();
+        var invalidBasePolicy = policy with { ConservativeProfileId = "missing-profile" };
+        var fixture = Fixture("code", EvidencePolicyShadowFixtureKind.Code, "src/Feature.cs");
+
+        var result = EvidencePolicyShadowValidator.Validate(invalidBasePolicy, policy, [fixture], [fixture]);
+
+        Assert.False(result.IsCompatible);
+        Assert.Empty(result.Selections);
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("ASEPS001", diagnostic.Code);
+        Assert.Equal(EvidencePolicyShadowFixtureSource.Base, diagnostic.FixtureSource);
+        Assert.Contains("base gate policy is invalid", diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Validate_ShouldPreserveBaseCasesWhenCandidateFixturesExceedTheLimit()
     {
         var policy = CreatePolicy();
@@ -273,6 +347,65 @@ public sealed class EvidencePolicyShadowValidatorTests
             diagnostic.Code == "ASEPS003"
             && diagnostic.FixtureSource == EvidencePolicyShadowFixtureSource.Candidate
             && diagnostic.Message.Contains("incomplete", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_ShouldBoundDiagnosticsForMalformedCandidateFixtureFields()
+    {
+        var policy = CreatePolicy();
+        var baseFixture = Fixture("base-code", EvidencePolicyShadowFixtureKind.Code, "src/Base.cs");
+        var longIdentifier = new string('i', 129);
+        var longPath = new string('p', 513);
+        EvidencePolicyShadowFixture[] candidateFixtures =
+        [
+            null!,
+            new("invalid-kind", (EvidencePolicyShadowFixtureKind)99, new NormalizedDiffPath("src/InvalidKind.cs")),
+            new("null-path", EvidencePolicyShadowFixtureKind.Code, null!),
+            Fixture("empty-path", EvidencePolicyShadowFixtureKind.Code, string.Empty),
+            Fixture(longIdentifier, EvidencePolicyShadowFixtureKind.Code, "src/LongId.cs"),
+            Fixture("long-path", EvidencePolicyShadowFixtureKind.Code, longPath),
+            new("long-kind", EvidencePolicyShadowFixtureKind.Code, new NormalizedDiffPath("src/LongKind.cs", new string('k', 33))),
+            new("long-previous", EvidencePolicyShadowFixtureKind.Code, new NormalizedDiffPath("src/New.cs", "renamed", longPath)),
+        ];
+
+        var result = EvidencePolicyShadowValidator.Validate(policy, policy, [baseFixture], candidateFixtures);
+
+        Assert.False(result.IsCompatible);
+        Assert.Collection(
+            result.Selections,
+            selection =>
+            {
+                Assert.Equal(EvidencePolicyShadowFixtureSource.Base, selection.FixtureSource);
+                Assert.Equal(baseFixture.Id, selection.FixtureId);
+            });
+        Assert.Equal(candidateFixtures.Length, result.Diagnostics.Count);
+        Assert.All(result.Diagnostics, diagnostic =>
+        {
+            Assert.Equal("ASEPS003", diagnostic.Code);
+            Assert.Equal(EvidencePolicyShadowFixtureSource.Candidate, diagnostic.FixtureSource);
+        });
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.FixtureId is null
+            && diagnostic.Kind is null
+            && diagnostic.Path is null);
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.FixtureId == "invalid-kind"
+            && diagnostic.Kind is null);
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.FixtureId == "null-path"
+            && diagnostic.Kind == EvidencePolicyShadowFixtureKind.Code
+            && diagnostic.Path is null);
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.FixtureId == "empty-path"
+            && diagnostic.Path == string.Empty);
+        var boundedIdentifierDiagnostic = Assert.Single(result.Diagnostics, diagnostic => diagnostic.FixtureId?.Length == 128);
+        Assert.Equal(128, boundedIdentifierDiagnostic.FixtureId!.Length);
+        Assert.EndsWith("…", boundedIdentifierDiagnostic.FixtureId, StringComparison.Ordinal);
+        var boundedPathDiagnostic = Assert.Single(result.Diagnostics, diagnostic => diagnostic.FixtureId == "long-path");
+        Assert.Equal(512, boundedPathDiagnostic.Path!.Length);
+        Assert.EndsWith("…", boundedPathDiagnostic.Path, StringComparison.Ordinal);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.FixtureId == "long-kind");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.FixtureId == "long-previous");
     }
 
     [Fact]

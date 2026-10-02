@@ -48,6 +48,41 @@ public sealed class EvidenceGateVerifierTests
     }
 
     [Fact]
+    public async Task VerifyGateRejectsOversizedVerifiedSummaryAndWritesOnlyFixedFailureResult()
+    {
+        using var fixture = await VerifyFixture.CreateAsync(
+            includeArtifactEvidence: true,
+            largeSummaryRiskClasses: true);
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceGateVerifier.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.ManifestPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.IdentityPath,
+            fixture.OutputDirectory,
+            fixture.ArtifactHandoffRootPath,
+            fixture.AuthorityProvider,
+            new EvidencePullRequestGateNoFollowArtifactVerifier(),
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGG106", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Contains("ASEGG106", stderr.ToString(), StringComparison.Ordinal);
+        var result = EvidenceCanonicalJson.Deserialize<EvidencePullRequestGateVerificationResult>(
+            await File.ReadAllBytesAsync(Path.Join(fixture.OutputDirectory, "evidence-gate-verification.json")));
+        Assert.False(result.IsEligible);
+        Assert.Equal("ASEGG106", result.Code);
+        Assert.Null(result.Summary);
+        var markdownPath = Path.Join(fixture.OutputDirectory, "evidence-gate-summary.md");
+        Assert.True(new FileInfo(markdownPath).Length < 128 * 1024);
+        Assert.DoesNotContain(new string('r', 128), await File.ReadAllTextAsync(markdownPath), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task VerifyGateRejectsArtifactBytesChangedAfterTheirManifestDigestWasCaptured()
     {
         using var fixture = await VerifyFixture.CreateAsync(includeArtifactEvidence: true);
@@ -176,6 +211,64 @@ public sealed class EvidenceGateVerifierTests
             await File.ReadAllBytesAsync(Path.Join(fixture.OutputDirectory, "evidence-gate-verification.json")));
         Assert.False(result.IsEligible);
         Assert.Equal("ASEVG006", result.Code);
+    }
+
+    [Fact]
+    public async Task VerifyGateMapsUnexpectedAuthorityProviderFailureToFixedUnavailableResult()
+    {
+        using var fixture = await VerifyFixture.CreateAsync();
+        var authorityProvider = new ThrowingAuthorityProvider();
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceGateVerifier.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.ManifestPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.IdentityPath,
+            fixture.OutputDirectory,
+            null,
+            authorityProvider,
+            null,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Equal(1, authorityProvider.CallCount);
+        Assert.Contains("ASEVG006", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Contains("ASEVG006", stderr.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("synthetic authority failure", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Equal("ASEVG006", EvidenceCanonicalJson.Deserialize<EvidencePullRequestGateVerificationResult>(
+            await File.ReadAllBytesAsync(Path.Join(fixture.OutputDirectory, "evidence-gate-verification.json"))).Code);
+    }
+
+    [Fact]
+    public async Task VerifyGatePersistsFixedInputFailureWhenOutputDirectoryCannotBeCreated()
+    {
+        using var fixture = await VerifyFixture.CreateAsync();
+        var blockingFilePath = Path.Join(fixture.RootPath, "output-is-a-file");
+        await File.WriteAllTextAsync(blockingFilePath, "preserve this file");
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceGateVerifier.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.ManifestPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.IdentityPath,
+            blockingFilePath,
+            null,
+            fixture.AuthorityProvider,
+            null,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGG102", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Contains("ASEGG102", stderr.ToString(), StringComparison.Ordinal);
+        Assert.Equal("preserve this file", await File.ReadAllTextAsync(blockingFilePath));
     }
 
     [Fact]
@@ -469,7 +562,8 @@ public sealed class EvidenceGateVerifierTests
         public static async Task<VerifyFixture> CreateAsync(
             EvidencePullRequestGateAuthoritySnapshot? authority = null,
             bool authorityUnavailable = false,
-            bool includeArtifactEvidence = false)
+            bool includeArtifactEvidence = false,
+            bool largeSummaryRiskClasses = false)
         {
             var root = Path.Join(Path.GetTempPath(), "appsurface-verifygate-" + Guid.NewGuid().ToString("N"));
             var repository = Path.Join(root, "repository");
@@ -495,14 +589,26 @@ public sealed class EvidenceGateVerifierTests
                 ["review-complete"],
                 [artifactSlot],
                 60);
-            var artifactObligation = new EvidenceObligation(
-                "review-obligation",
-                "review",
-                "Review the changed documentation.",
-                [artifactProducer.Id],
-                "review-complete");
+            var artifactObligations = largeSummaryRiskClasses
+                ? Enumerable.Range(0, EvidencePullRequestGateVerifier.MaximumSummaryItems)
+                    .Select(index => new EvidenceObligation(
+                        $"review-obligation-{index:D2}",
+                        new string('r', 4096),
+                        "Review the changed documentation.",
+                        [artifactProducer.Id],
+                        "review-complete"))
+                    .ToArray()
+                :
+                [
+                    new EvidenceObligation(
+                        "review-obligation",
+                        "review",
+                        "Review the changed documentation.",
+                        [artifactProducer.Id],
+                        "review-complete"),
+                ];
             var profile = includeArtifactEvidence
-                ? new EvidenceProfile("documentation-only", EvidenceProfileScope.Targeted, [], [artifactProducer], [artifactObligation])
+                ? new EvidenceProfile("documentation-only", EvidenceProfileScope.Targeted, [], [artifactProducer], artifactObligations)
                 : new EvidenceProfile("documentation-only", EvidenceProfileScope.Targeted, [], [], []);
             var conservativeProducer = includeArtifactEvidence
                 ? artifactProducer
@@ -510,17 +616,17 @@ public sealed class EvidenceGateVerifierTests
                     "conservative-review",
                     "manual_review",
                     "1",
-                    [],
-                    ["review-complete"],
-                    [],
-                    60);
+                [],
+                ["review-complete"],
+                [],
+                60);
             var conservativeProfile = new EvidenceProfile(
                 "conservative",
                 EvidenceProfileScope.Targeted,
                 [],
                 [conservativeProducer],
                 includeArtifactEvidence
-                    ? [artifactObligation]
+                    ? artifactObligations
                     : [new EvidenceObligation(
                         "conservative-obligation",
                         "conservative",
@@ -658,6 +764,19 @@ public sealed class EvidenceGateVerifierTests
         public Task<EvidencePullRequestGateAuthoritySnapshot?> ReadFreshAsync(
             EvidencePullRequestGateExpectedIdentity expectedIdentity,
             CancellationToken cancellationToken = default) => Task.FromResult(snapshot);
+    }
+
+    private sealed class ThrowingAuthorityProvider : IEvidencePullRequestGateAuthorityProvider
+    {
+        public int CallCount { get; private set; }
+
+        public Task<EvidencePullRequestGateAuthoritySnapshot?> ReadFreshAsync(
+            EvidencePullRequestGateExpectedIdentity expectedIdentity,
+            CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            throw new NotSupportedException("synthetic authority failure");
+        }
     }
 
     private sealed class ThrowOnceTextWriter : StringWriter

@@ -17,6 +17,17 @@ public sealed class ProtectedReleaseEvidenceProducerTests
     private const string ComparisonBaseCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     [Fact]
+    public void ProducerRequiresTrustedInvocationProvider()
+    {
+        using var fixture = new ProducerFixture();
+
+        var exception = Assert.Throws<ArgumentNullException>(() =>
+            new ProtectedReleaseEvidenceProducer(fixture.Root, null!));
+
+        Assert.Equal("invocationProvider", exception.ParamName);
+    }
+
+    [Fact]
     public async Task RegisteredReleaseProducerFailsClosedWhenTrustedInvocationIsUnavailable()
     {
         using var fixture = new ProducerFixture();
@@ -98,6 +109,23 @@ public sealed class ProtectedReleaseEvidenceProducerTests
             releaseDigests.Select(static artifact => artifact.GetProperty("path").GetString()).OrderBy(static path => path, StringComparer.Ordinal));
         Assert.Equal(ComputeSha256(digestIndexBytes), digestIndex.Sha256);
         Assert.Contains("package/archive", result.Diagnostic, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProducerRejectsMissingArtifactWriterAfterInspectionInsteadOfReturningUnwrittenEvidence()
+    {
+        using var fixture = new ProducerFixture();
+        var declaration = CreateDeclaration();
+        var inspectAuthority = new FakeInspectAuthority(CreateInspection());
+        var producer = new ProtectedReleaseEvidenceProducer(
+            fixture.Root,
+            new FixedInvocationProvider(CreateInvocation()),
+            inspectAuthority);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await producer.ProduceAsync(CreateContext(declaration, writer: null), CancellationToken.None));
+
+        Assert.Equal(1, inspectAuthority.Calls);
     }
 
     [Fact]
@@ -282,7 +310,7 @@ public sealed class ProtectedReleaseEvidenceProducerTests
             new ReleaseInspectArtifactDigest("releases/current.md.yml", new string('6', 64)),
         ]);
 
-    private static EvidenceProducerContext CreateContext(EvidenceProducerDeclaration declaration, EvidenceArtifactWriter writer)
+    private static EvidenceProducerContext CreateContext(EvidenceProducerDeclaration declaration, EvidenceArtifactWriter? writer)
     {
         var obligation = new EvidenceObligation(
             "protected-release-subject",
