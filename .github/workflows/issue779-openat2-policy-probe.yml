@@ -1,0 +1,29 @@
+name: Issue 779 bounded openat2 policy compatibility probe
+on:
+  push:
+    branches: [codex/issue779-openat2-policy-probe-20261002]
+permissions:
+  contents: read
+jobs:
+  kernel-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout immutable diagnostic harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Two bounded native syscall controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo timeout --signal=TERM --kill-after=5s 60s python3 -B .github/issue779-openat2-policy-probe/probe.py "$RUNNER_TEMP/openat2-policy-root.json"
+          sudo install -o "$(id -u)" -g "$(id -g)" -m 0600 "$RUNNER_TEMP/openat2-policy-root.json" "$RUNNER_TEMP/openat2-policy.json"
+      - name: Retain finite safe compatibility receipt
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: issue779-openat2-policy-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/openat2-policy.json
+          if-no-files-found: warn
+          retention-days: 7
