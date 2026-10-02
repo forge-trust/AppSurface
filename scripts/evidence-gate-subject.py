@@ -60,8 +60,10 @@ IMAGE_REFERENCE_PATTERN = re.compile(r"[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64
 RUN_ID_PATTERN = re.compile(r"[1-9][0-9]{0,18}\Z")
 RUN_ATTEMPT_PATTERN = re.compile(r"[1-9][0-9]{0,8}\Z")
 SUBJECT_RESULT_RELATIVE_PATH = "evidence-subject-result.json"
+# Rootless Podman 4.9 rejects noswap on tmpfs. The fixed byte/inode quotas and
+# container memory limit remain enforceable; this contract makes no no-swap claim.
 SCRATCH_TMPFS_OPTIONS = (
-    "rw,nosuid,nodev,noswap,"
+    "rw,nosuid,nodev,"
     f"size={MAX_PROFILE_SCRATCH_BYTES},"
     f"nr_inodes={MAX_PROFILE_SCRATCH_INODES},"
     f"mode=0700,uid={CONTAINER_UID},gid={CONTAINER_GID}"
@@ -604,7 +606,7 @@ def _scratch_tmpfs_options_are_bounded(value: Any) -> bool:
             if key in flags:
                 return False
             flags.add(key)
-    if flags != {"rw", "nosuid", "nodev", "noswap"}:
+    if flags != {"rw", "nosuid", "nodev"}:
         return False
     if set(options) != {"size", "nr_inodes", "mode", "uid", "gid"}:
         return False

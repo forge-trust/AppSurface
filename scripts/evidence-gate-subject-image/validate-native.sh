@@ -502,7 +502,7 @@ checks = {
     "scratchReadWrite": "rw" in options,
     "scratchNoSuid": "nosuid" in options,
     "scratchNoDeviceNodes": "nodev" in options,
-    "scratchNoSwap": "noswap" in options,
+    "scratchNoUnsupportedNoSwap": "noswap" not in options,
     "scratchByteOption": option_bytes == expected_bytes,
     "scratchInodeOption": values.get("nr_inodes") == str(expected_inodes),
     "scratchByteStatvfs": actual_bytes == expected_bytes,

@@ -248,7 +248,7 @@ class EvidenceGateSubjectTests(unittest.TestCase):
         tmpfs_mount = create[create.index("--tmpfs") + 1]
         self.assertIn(f"size={subject.MAX_PROFILE_SCRATCH_BYTES}", tmpfs_mount)
         self.assertIn(f"nr_inodes={subject.MAX_PROFILE_SCRATCH_INODES}", tmpfs_mount)
-        self.assertIn("noswap", tmpfs_mount)
+        self.assertNotIn("noswap", tmpfs_mount)
         self.assertIn(f"uid={subject.CONTAINER_UID}", tmpfs_mount)
         self.assertIn(f"gid={subject.CONTAINER_GID}", tmpfs_mount)
         self.assertFalse(any(call[2] == "cp" for call, _ in self.executor.calls))
@@ -349,7 +349,7 @@ class EvidenceGateSubjectTests(unittest.TestCase):
             ),
             expected + ",rw",
             expected.replace("mode=0700", "mode=0777"),
-            expected.replace(",noswap", ""),
+            expected.replace("nosuid", "nosuid,noswap"),
             expected.replace(f"uid={subject.CONTAINER_UID}", f"uid={subject.CONTAINER_UID + 1}"),
             expected.replace(f"gid={subject.CONTAINER_GID}", f"gid={subject.CONTAINER_GID + 1}"),
         )
