@@ -383,6 +383,8 @@ dotnet run --project examples/razorwire-mvc/RazorWireWebExample.csproj
 
 For the intentional validation-failure shape, run `dotnet run --project examples/config-validation`.
 
+The [RazorWire MVC example](./examples/razorwire-mvc/README.md#server-selected-dialogs) includes explicit [server-selected dialog responses](./Web/ForgeTrust.RazorWire/Docs/dialog-responses.md) at `/Reactivity/DialogResponses`, with status responses, follow-up forms, validation, and full HTML fallbacks.
+
 The RazorWire MVC example includes a failed-form UX page at `/Reactivity/FormFailures` that shows server-handled validation, development anti-forgery diagnostics, default fallback rendering, and consumer styling hooks. It also includes `/Reactivity/FormLoading` for local and shared status indicators, the package fallback, and Turbo Frame loading; see the [Form Loading Feedback guide](./Web/ForgeTrust.RazorWire/Docs/form-loading.md) for the public contract.
 
 ## Release notes and upgrade policy
