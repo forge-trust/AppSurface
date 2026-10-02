@@ -1,4 +1,3 @@
-<!-- /autoplan restore point: "/Users/andrew/.gstack/projects/forge-trust-AppSurface/main-autoplan-restore-20260930-225359.md" -->
 ## Implementation plan
 # Design: AppSurface policy-driven CI evidence gate
 
@@ -618,7 +617,7 @@ Verification / output
   [GAP] one verdict across terminal/summary/JSON
 ```
 
-Each `[GAP]` is a proposed codepath or flow, not an assertion about a shipped feature. The [test plan artifact](/Users/andrew/.gstack/projects/forge-trust-AppSurface/andrew-main-eng-review-test-plan-20260930-234800.md) gives each critical path and edge case an observable invariant, credible regression, reason existing coverage misses it, and the required test boundary. Add rows to current table-driven planner/host/release tests where they fit; create new runner/extractor/verifier tests at their actual boundaries, without reflection or test-only production hooks. No test is retired. Run focused xUnit suites for changed packages, hostile OCI integration on supported Linux, a live PR pilot for GitHub semantics, formatting and `./scripts/coverage-solution.sh` when practical. Live remote behavior remains a rollout dependency, not a simulated unit-test pass.
+Each `[GAP]` is a proposed codepath or flow, not an assertion about a shipped feature. For each critical path and edge case, verify an observable invariant, a credible regression, why existing coverage misses it, and the required test boundary. Add rows to current table-driven planner/host/release tests where they fit; create new runner/extractor/verifier tests at their actual boundaries, without reflection or test-only production hooks. No test is retired. Run focused xUnit suites for changed packages, hostile OCI integration on supported Linux, a live PR pilot for GitHub semantics, formatting and `./scripts/coverage-solution.sh` when practical. Live remote behavior remains a rollout dependency, not a simulated unit-test pass.
 
 ### Eng Section 4: performance and operations
 

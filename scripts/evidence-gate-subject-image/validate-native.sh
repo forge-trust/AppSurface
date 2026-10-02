@@ -185,6 +185,7 @@ podman_image_id='unavailable'
 podman_status='pending'
 podman_phase='preflight'
 podman_diagnostic=''
+podman_container_create_attempted=false
 podman_container_created=false
 podman_container_started=false
 podman_zero_exit=false
@@ -219,6 +220,7 @@ write_podman_evidence() {
   DOCKER_IMAGE_ID="$docker_image_id" PODMAN_IMAGE_ID="$podman_image_id" \
   IMAGE_TAG="$image_tag" PODMAN_CONTAINER_NAME="$podman_container_name" \
   PODMAN_CONTAINER_ID="$podman_container_id" \
+  PODMAN_CONTAINER_CREATE_ATTEMPTED="$podman_container_create_attempted" \
   PODMAN_CONTAINER_CREATED="$podman_container_created" \
   PODMAN_CONTAINER_STARTED="$podman_container_started" \
   PODMAN_ZERO_EXIT="$podman_zero_exit" \
@@ -295,6 +297,7 @@ record = {
     "container": {
         "name": os.environ["PODMAN_CONTAINER_NAME"],
         "id": os.environ["PODMAN_CONTAINER_ID"],
+        "createAttempted": flag("PODMAN_CONTAINER_CREATE_ATTEMPTED"),
         "created": flag("PODMAN_CONTAINER_CREATED"),
         "started": flag("PODMAN_CONTAINER_STARTED"),
         "zeroExit": flag("PODMAN_ZERO_EXIT"),
@@ -341,15 +344,13 @@ podman_smoke_cleanup() {
   if [[ "$podman_evidence_written" == true ]]; then
     exit "$exit_code"
   fi
-  if [[ "$podman_container_created" == true && "$podman_cleanup_succeeded" != true ]]; then
+  if [[ "$podman_container_create_attempted" == true && "$podman_cleanup_succeeded" != true ]]; then
     podman_cleanup_attempted=true
     if timeout --signal=TERM --kill-after=5s 30s \
       "$podman_cli_path" --remote=false rm --force --ignore \
-        "$podman_container_id" >/dev/null 2>&1; then
+        "$podman_container_name" >/dev/null 2>&1; then
       podman_cleanup_succeeded=true
-      if [[ "$podman_container_created" == true ]]; then
-        podman_container_removed=true
-      fi
+      podman_container_removed=true
     else
       podman_status='failed'
       podman_phase='cleanup'
@@ -365,7 +366,7 @@ podman_smoke_cleanup() {
   # mount attached for runner retirement instead of detaching it underneath a
   # container that may still be running.
   if [[ "$scratch_host_mounted" == true \
-    && ( "$podman_container_created" != true || "$podman_container_removed" == true ) ]]; then
+    && ( "$podman_container_create_attempted" != true || "$podman_container_removed" == true ) ]]; then
     if timeout --signal=TERM --kill-after=5s 30s sudo -n umount "$scratch_host_mount"; then
       scratch_host_mounted=false
       scratch_host_unmount_succeeded=true
@@ -587,6 +588,7 @@ print(json.dumps(record, sort_keys=True))
 if not all(checks.values()):
     sys.exit(1)
 '
+podman_container_create_attempted=true
 if ! podman_container_id="$(timeout --signal=TERM --kill-after=5s 30s \
   "$podman_cli_path" --remote=false create \
   --pull=never --name "$podman_container_name" --network=none \
