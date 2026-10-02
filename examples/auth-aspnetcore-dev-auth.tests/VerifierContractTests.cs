@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 
@@ -623,14 +624,91 @@ public sealed class VerifierContractTests
                     await standardOutput,
                     await standardError);
             }
-            catch
+            catch (Exception exception)
             {
+                var timeoutException = exception as TimeoutException;
+                var timeoutSnapshot = timeoutException is null
+                    ? null
+                    : $"events=[{DescribeRecentEvents()}]; owned-processes=[{DescribeOwnedProcessStates(process)}]";
                 var cleanupDeadline = DateTime.UtcNow + processTimeout;
                 await TerminateProcessTreeAsync(process, cleanupDeadline);
                 await DrainOutputAsync(standardOutput, standardError, cleanupDeadline);
+                if (timeoutException is not null)
+                {
+                    var stageMarkers = DescribeStageMarkers(GetCompletedOutput(standardOutput), GetCompletedOutput(standardError));
+                    throw new TimeoutException(
+                        $"{timeoutException.Message}{Environment.NewLine}Timeout diagnostics: stages=[{stageMarkers}]; {timeoutSnapshot}; " +
+                        $"verifier-after-cleanup={TryGetProcessState(process.Id)}.",
+                        timeoutException);
+                }
+
                 throw;
             }
         }
+
+        private string DescribeOwnedProcessStates(Process verifier)
+        {
+            return string.Join(',', new[] { verifier.Id }.Concat(ChildProcessIds)
+                .Select(processId => $"{processId}:{TryGetProcessState(processId)}"));
+        }
+
+        private static string TryGetProcessState(int processId)
+        {
+            try
+            {
+                using var process = Process.GetProcessById(processId);
+                return process.HasExited ? "exited" : "running";
+            }
+            catch (ArgumentException)
+            {
+                return "exited";
+            }
+            catch (InvalidOperationException)
+            {
+                return "unknown";
+            }
+            catch (Win32Exception)
+            {
+                return "unknown";
+            }
+        }
+
+        private string DescribeRecentEvents()
+        {
+            var events = ReadEventLines().TakeLast(12).Select(line => line switch
+            {
+                "build" => "build",
+                _ when line.StartsWith("launch environment=", StringComparison.Ordinal) => "launch",
+                _ when line.StartsWith("child-pid ", StringComparison.Ordinal) => "child",
+                _ when line.StartsWith("listen http://127.0.0.1:", StringComparison.Ordinal) => "listen",
+                _ when line.StartsWith("curl ", StringComparison.Ordinal) => "curl",
+                _ => null,
+            }).Where(static category => category is not null);
+            return string.Join(',', events);
+        }
+
+        private static string DescribeStageMarkers(string standardOutput, string standardError)
+        {
+            var output = string.Concat(standardOutput, standardError);
+            var tail = output.Length > 4096 ? output[^4096..] : output;
+            var stages = tail.Split('\n').Select(line =>
+            {
+                if (!line.StartsWith("[stage=", StringComparison.Ordinal))
+                {
+                    return null;
+                }
+
+                var end = line.IndexOfAny([' ', ']'], "[stage=".Length);
+                var stage = end < 0 ? null : line["[stage=".Length..end];
+                return stage is "PREFLIGHT" or "BUILD" or "LAUNCH" or "READINESS" or "HTTP_PROOF" or "CLEANUP" or "COMPLETE"
+                    ? stage
+                    : null;
+            }).Where(static stage => stage is not null).TakeLast(12);
+            return string.Join(',', stages);
+        }
+
+        private static string GetCompletedOutput(Task<string> output) =>
+            output.Status == TaskStatus.RanToCompletion ? output.Result : string.Empty;
 
         private static async Task<string> ReadStandardErrorAsync(
             StreamReader standardError,

@@ -1,5 +1,23 @@
 # Deferred work
 
+## EvidenceHost follow-ups after #779
+
+### Portable origin receipts
+
+**What:** Evaluate signed portable EvidenceHost receipts when a consumer needs verification outside the protected CI output channel.
+
+**Why:** The [#779 shared admission design](docs/designs/issue-779-evidencehost-trust-boundary.md) deliberately records `ValidatedNotAttested`; a structurally valid manifest cannot authenticate its own source.
+
+**Pros:** Gives external gate consumers a verifiable origin and explicit retention policy.
+
+**Cons:** Adds signing identity, authorization, key/identity lifecycle and retained evidence costs; it cannot prove correctness of subject-owned test logic.
+
+**Context:** Reuse the [release provenance follow-up](#release-provenance-follow-up-798) where its origin/retention requirements coincide. Preserve admission, registered assertion semantics and the separate CI containment boundary; do not simply rename a limited assertion to `Attested`.
+
+**Effort:** Human L / agent M, subject to consumer research.
+**Priority:** P3
+**Depends on:** #779 hostile proof, a real external consumer and a separate signing/retention design.
+
 ## Server-pushed RazorWire dialogs (#828 follow-up)
 
 - **What:** Design explicit server-pushed dialog commands after request-scoped #828 dialogs are adopted. **Why:** A live stream has no initiating request or current form owner, so the request/flow token contract from [#828](docs/designs/issue-828-server-selected-dialogs.md) cannot be reused unchanged. **Pros:** Supports genuinely asynchronous attention when an application has a user need. **Cons:** Adds replay, authorization, interruption, and multi-tab lifecycle decisions. **Context:** #828 intentionally supports only response-owned dialogs; keep hub replay and automatic presentation outside its first release. **Effort:** L human team / M CC + gstack. **Priority:** P3. **Depends on / blocked by:** #828 adoption evidence and a concrete server-initiated use case.

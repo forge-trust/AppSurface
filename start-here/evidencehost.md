@@ -4,6 +4,16 @@ EvidenceHost is AppSurface's contract-first approach to CI evidence. Its purpose
 
 It is not a replacement for a test framework, coverage collector, GitHub Actions, Aspire AppHost, Docker, or a hosted coverage dashboard. It starts no infrastructure by default and has no outbound telemetry.
 
+## Current support status
+
+This preliminary #779 stage supports planning and structural diagnostics. Protected
+PR and release gating remains **unadmitted**: the shared admission contract and actual
+consumer/platform proof are still required. Existing `run` output and `verify` results
+do not establish runtime authority. Use the existing [private coverage gate](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate)
+for numeric coverage enforcement. The [consumer acceptance record](../docs/evidence/issue779-consumer-acceptance.md)
+tracks the required proofs and excluded providers; the [preliminary plan](../docs/plans/issue-779-preliminary-proof.md)
+tracks the staged delivery.
+
 ## The first five minutes
 
 Install the [AppSurface CLI](../Cli/ForgeTrust.AppSurface.Cli/README.md), then create the deliberately small policy starter:
@@ -15,6 +25,8 @@ appsurface evidence explain --path src/Orders/SubmitOrder.cs
 ```
 
 The generated policy maps `docs/**` to an explicit `no-evidence` profile and sends every unmatched path to a non-empty conservative coverage profile. `explain` tells a developer, before tests start, which profile won, which rule selected it, which producers must run, and which obligations they must close.
+
+`doctor` reports `ready_with_external_prerequisites` when structural planning succeeds but protected execution facts remain `unverified`. It grants no runtime admission, including when a CI environment flag is present. Consult the [consumer acceptance record](../docs/evidence/issue779-consumer-acceptance.md) for the required consumer, supervision and platform proof. Policy and generated JSON are read under the shared [20 MiB counted input limit](../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md#bounded-json-input); invalid or oversized inputs fail before planning or verification.
 
 ```text
 Evidence plan: targeted-coverage (targeted)
@@ -29,13 +41,13 @@ That is the desired “quiet when right, obvious when wrong” interaction: a do
 
 ## What a claim means
 
-EvidenceHost has four honest outcomes:
+The current APIs can emit four structural outcomes. Their names do not supply protected admission:
 
-| Claim | May gate? | Meaning |
+| Claim | Current protected gate use | Meaning |
 | --- | --- | --- |
-| `TargetedComplete` | Pull request | Every selected producer passed and closed every selected obligation. |
-| `ReleaseComplete` | Release only | The release profile completed and an explicit CI envelope verifier accepted the run. v1 is still not independently attested. |
-| `NoEvidenceRequired` | Pull request | A checked-in, explicit empty profile matched the changed paths. It never means “tests were skipped.” |
+| `TargetedComplete` | No | Every selected producer passed and closed every selected obligation. |
+| `ReleaseComplete` | No | The release profile completed and an explicit CI envelope verifier accepted the run. v1 is still not independently attested. |
+| `NoEvidenceRequired` | No | A checked-in, explicit empty profile matched the changed paths. It never means “tests were skipped.” |
 | `ObservationOnly` | No | A useful diagnostic run that cannot satisfy a gate. |
 
 Anything else has `ClaimKind.None`: a filtered test suite, missing browser runtime, unavailable Docker dependency, timed-out producer, or unsatisfied assertion is incomplete evidence—not a partial pass. This is intentional. A repository-wide gate on an incomplete test profile is a configuration error, and EvidenceHost makes that condition visible instead of encouraging a misleading green badge.

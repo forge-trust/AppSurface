@@ -101,6 +101,8 @@ The focused host regression uses [`WebApplicationFactory<TEntryPoint>`](https://
 
 On failure, the verifier prints the stage, elapsed time, child PID, URL, classification, and available child exit status. It also prints a bounded application-log tail. The evidence is intentionally narrow: before preserving a failure directory, the verifier removes cookie jars, response headers, response bodies, and every non-allowlisted artifact. Only a text stage summary and an allowlisted application-log tail may remain; known hosting categories, exception-shaped lines in redacted canonical form, bind failure, and the configured listening record are retained while every other line becomes `[REDACTED]`. The tail is capped at 80 lines and 32 KiB. The verifier never prints an environment dump, cookies, Data Protection keys, seeded claims, or complete status payloads.
 
+Verifier-contract test timeouts also retain bounded stage categories, fixture event categories and owned process states before cleanup removes the temporary fixture. These test diagnostics omit raw responses and environment values. A fixture deadline alone does not establish a DevAuth defect.
+
 Use the stage to choose the next check:
 
 - **Preflight:** inspect the named missing-command or invalid-configuration diagnostic before trying to launch the host.

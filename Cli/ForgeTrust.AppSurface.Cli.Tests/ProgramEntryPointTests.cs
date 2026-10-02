@@ -3600,7 +3600,7 @@ public sealed class ProgramEntryPointTests
             PolicyPath = policyPath,
             Paths = ["src/Feature.cs"],
         };
-        var doctorException = await Assert.ThrowsAsync<CommandException>(() => doctor.ExecuteAsync(console).AsTask());
+        await doctor.ExecuteAsync(console);
 
         var missingDoctor = new EvidenceDoctorCommand(workflow)
         {
@@ -3657,9 +3657,10 @@ public sealed class ProgramEntryPointTests
 
         var output = console.ReadOutputString();
         Assert.Contains("Use 'appsurface evidence init", output, StringComparison.Ordinal);
-        Assert.Contains("Evidence doctor: blocked", output, StringComparison.Ordinal);
+        Assert.Contains("Evidence doctor: ready_with_external_prerequisites", output, StringComparison.Ordinal);
         Assert.Contains("Next:", output, StringComparison.Ordinal);
-        Assert.Contains("ASEVD210", doctorException.Message, StringComparison.Ordinal);
+        Assert.Contains("unverified trusted-envelope", output, StringComparison.Ordinal);
+        Assert.Contains("do not grant admission", output, StringComparison.Ordinal);
         Assert.Contains("ASEVD204", missingDoctorException.Message, StringComparison.Ordinal);
         Assert.Contains("ASEVD117", ambiguousDoctorException.Message, StringComparison.Ordinal);
         Assert.Contains("ASEVD117", ambiguousRunException.Message, StringComparison.Ordinal);
