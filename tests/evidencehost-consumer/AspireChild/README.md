@@ -1,0 +1,62 @@
+# Provisional restricted Aspire child mechanism
+
+This fixture prepares the next application-child facet of [issue #779's approved boundary](../../../docs/designs/issue-779-evidencehost-trust-boundary.md). It returns no Evidence admission, Trusted result, or supported-platform claim. Integration into the shared host, broker, producer leases, and final collection remains separate work.
+
+## Closed application boundary
+
+`Program.cs` owns the deferred factory, `Build`, `StartAsync`, bounded `StopAsync`, and disposal. Before writing the armed marker or launching the child, the controller requires a watchdog ACK over a private inherited pipe within three seconds, matching the selected watchdog PID and confirming that process is live. The application child receives no ACK pipe descriptors and additionally waits for the controller marker before invoking its factory. There is exactly one Aspire `ExecutableResource`, named `native-http`. It runs the bundled [native HTTP fixture](../NativeHttpResource/README.md) with literal arguments and an HTTP health check over `scratch/http.sock`. Dashboard and container resources are disabled/absent. The child references Aspire 13.4.4 and platform libraries; no Evidence/ForgeTrust runtime assembly is allowed in its bundle.
+
+The [root controller](../aspire-child-proof.py) selects a fresh systemd unit, distinct non-root application UID/GID, immutable root-owned bundle, writable scratch, protected tools/output denial, private network, finite tasks/memory/output, and 45-second runtime. AppHost, DCP and the executable inherit one restricted unit/cgroup; the stuck-descendant control stays in that same group. This mechanism does not yet establish different AppHost/resource identities or independent resource capability grants. It has no authority to read verifier, registration or output roots. The platform `dotnet` runtime must live outside denied protected-tool roots.
+
+Root readiness uses its own bounded HTTP request, `SO_PEERCRED`, and `/proc/PID/cgroup`; it ignores any child readiness text. The fixture serves successful health only after `File.OpenRead` and `Assembly.LoadFile` of the real `protected-tool.dll` are denied, creation of `native-resource-output-probe` in the fresh protected output root is denied, **and** reading the immutable bundled `proof-input/declared.txt` returns `declared-native-input` plus newline. Both tool operations are attempted independently. The root controller verifies a managed PE tool exists beforehand, and verifies the output probe remains absent after joined teardown. Namespace settings alone are not denial proof. Root records actual AppHost/DCP/resource process roles and PIDs, without publishing raw command lines.
+
+Cooperative stop sends `systemctl kill --kill-whom=main --signal=TERM` to the AppHost only. This lets AppHost own DCP/resource shutdown and does not start PID 1's service-stop timeout. After a fresh five-second grace, unconfirmed process/cgroup exit triggers `systemctl stop --no-block` followed by KILL of the entire cgroup. `KillMode=control-group`, the independent runtime bound and `TimeoutStopSec=10s` remain enforced. Normal/cancel controls additionally require the joined systemd-run process to exit 0; an empty cgroup with a killed, timed-out or unsuccessful process cannot pass as cooperative. The controller then joins output pumps and confirms the cgroup is empty before deleting scratch/payload. Final output accounting occurs after pump joins, including teardown bursts. If exit confirmation fails, paths stay quarantined. The separate watchdog survives controller process-group cancellation.
+
+Watchdog liveness is checked during readiness and teardown. After confirmed physical exit the root must still find the watchdog live, disarm it explicitly, receive its private disarm ACK and join it with exit 0. Missing/wrong startup ACK, premature exit (including exit 0), missing disarm ACK or nonzero final exit fails closed and retains quarantine. A deadline-expired watchdog cannot acknowledge a successful disarm. The separate watchdog remains armed when physical child/pump exit is unconfirmed.
+
+Each stdout/stderr pump records observed bytes, actual EOF, failure and finished state under a lock. Read, write, flush or close failure cannot count as complete output even if the thread joined. Success requires both pumps to finish with EOF and no failure, and their byte totals must equal the shared budget count. Final JSON includes fixed pump states and error class names, never exception text. Incomplete capture retains quarantine; final quota accounting includes all successfully observed teardown bytes.
+
+## Pinned SDK payload and portable build
+
+The SDK is pinned in the project to `Aspire.AppHost.Sdk/13.4.4`; central package management pins `Aspire.Hosting.AppHost/13.4.4`. SDK selection uses **the build host's `NETCoreSdkRuntimeIdentifier`**, so locks are named `packages.osx-arm64.lock.json` and `packages.linux-x64.lock.json`. The Linux lock was generated by cross-restore metadata only, not native execution. Each native build must use its matching lock.
+
+Aspire 13.4.4 marks AppHost projects non-publishable. `CopyProofPayload` therefore copies the SDK's real platform DCP tree and the resource's build output into the AppHost output. It fails if DCP is absent. There is no direct-process or fake readiness fallback. Building on macOS prepares a macOS DCP bundle; **do not run that bundle on Linux**. Linux CI must build its own bundle:
+
+```sh
+dotnet restore tests/evidencehost-consumer/AspireChild/AspireChild.csproj --locked-mode
+dotnet build tests/evidencehost-consumer/AspireChild/AspireChild.csproj --no-restore -p:UseSharedCompilation=false
+python3 -m unittest discover -s tests/evidencehost-consumer -p test_aspire_child_proof.py -v
+```
+
+Cross-platform metadata preparation only (does not build or prove Linux):
+
+```sh
+dotnet restore tests/evidencehost-consumer/AspireChild/AspireChild.csproj -p:NETCoreSdkRuntimeIdentifier=linux-x64
+```
+
+NuGet audit stays enabled. A sandbox may need a writable `NUGET_HTTP_CACHE_PATH`; this changes cache location only. Portable builds prove compilation and payload construction. Portable Python controls prove command construction, byte limits, rejection of missing DCP, selected cgroup validation, watchdog quarantine ordering, main-only cooperative TERM, stop/KILL-all ordering after grace, unsuccessful cooperative exit rejection, unjoined-pump rejection and final quota latching after teardown output.
+
+Four additional portable controls execute the existing resource DLL with ordinary fixture file permissions: denied tool/output with exact input returns 200; accessible tool, accessible output and mismatched input each return 503. The output case verifies that a real creation attempt occurred. These are ordinary POSIX fixture checks; they run no Aspire, DCP, systemd unit or protected worker and establish no native boundary acceptance. HTTP responses and private probe logs are bounded to 8 KiB. They require local Unix-socket binding permission; the macOS validation ran outside the agent filesystem sandbox, whose restricted repeat could not reach the fixture socket.
+
+## Native proof controls (parent CI only)
+
+Prerequisites: root Linux/systemd, unified cgroup v2, .NET 10 platform runtime, an existing dedicated non-root application user/group, and two existing protected directories. The tools directory must contain a real managed binary named exactly `protected-tool.dll`; the fresh output directory must have no `native-resource-output-probe`. A safe synthetic tool is the built resource DLL itself. Root creates the declared input inside the staged read-only payload. Native execution has not been performed during fixture preparation. The controller refuses unsupported hosts rather than substituting a simulated run.
+
+Prepare **new fixture directories** in native CI, outside the real verifier/output roots:
+
+```sh
+sudo install -d -m 0755 /opt/issue779-child-tools /var/lib/issue779-child-output
+sudo install -m 0444 tests/evidencehost-consumer/NativeHttpResource/bin/Debug/net10.0/NativeHttpResource.dll /opt/issue779-child-tools/protected-tool.dll
+```
+
+```sh
+sudo timeout 75s python3 tests/evidencehost-consumer/aspire-child-proof.py \
+  --bundle "$PWD/tests/evidencehost-consumer/AspireChild/bin/Debug/net10.0" \
+  --dotnet /opt/dotnet/dotnet --subject-uid 2401 --subject-gid 2401 \
+  --protected-tools /opt/issue779-child-tools \
+  --protected-output /var/lib/issue779-child-output --case normal
+```
+
+Run the same command separately for `readiness-failure`, `factory-stall`, `cancel`, and `stuck-descendant`. Normal/cancel/stuck require an actual healthy socket plus AppHost and DCP process observations. Normal/cancel must stop cooperatively without controller escalation. Readiness failure must retain live AppHost, DCP and resource processes with the selected UID/cgroup and obtain HTTP 503 from a separately authenticated UDS peer; a startup crash cannot satisfy this control. Factory stall must retain a live AppHost with an owner-checked marker written inside the factory after controller arming, have no observed DCP/resource, and require escalation. Stuck descendant must show the actual descendant PID/UID/cgroup plus its marker written after installing the signal-resistant handler; readiness waits for that evidence before stop. DCP may dispose it itself, otherwise the controller escalates after grace. Receipts record controller escalation explicitly. These controls check finite teardown; `cancel` currently represents a root cancellation request after verified readiness, not the future shared worker cancellation protocol.
+
+Each invocation prints a bounded JSON receipt and retains root-only logs/receipt under `/run/issue779-child-*/control`. Public JSON contains fixed failure categories and error class names; raw child diagnostics stay in byte-bounded private logs. Exit 0 means this provisional control completed with confirmed cgroup/pump exit and cleanup. Unconfirmed exit or unexpected readiness/process evidence returns failure and retains quarantine. Receipts explicitly set `trust_claim: false`. The full approved resource map, capability validation, producer/application lease separation and shared admission/supervision integration still need implementation and native acceptance.

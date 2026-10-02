@@ -26,6 +26,12 @@ CLI_PROJECT = ROOT / "Cli" / "ForgeTrust.AppSurface.Cli" / "ForgeTrust.AppSurfac
 CLI_DLL_NAME = "ForgeTrust.AppSurface.Cli.dll"
 SUBJECT_PROJECT_RELATIVE = "tests/evidencehost-consumer/RuntimeSubject/RuntimeSubject.csproj"
 SUBJECT_PROJECT = ROOT / SUBJECT_PROJECT_RELATIVE
+STAGED_SUBJECT_FILES = (
+    "Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props",
+    SUBJECT_PROJECT_RELATIVE, "tests/evidencehost-consumer/RuntimeSubject/Program.cs",
+    "tests/evidencehost-consumer/RuntimeSubject/packages.lock.json",
+)
+MAX_STAGED_SUBJECT_BYTES = 20 * 1024 * 1024
 LAUNCHER = ROOT / "scripts" / "evidencehost-linux-launcher.py"
 DRIVER = Path(__file__).resolve()
 REPORT_GENERATOR_SOURCE = ROOT / "Cli" / "ForgeTrust.AppSurface.Cli" / "CoverageRun.cs"
@@ -228,7 +234,7 @@ def source_paths() -> list[Path]:
         "tests/evidencehost-consumer/runtime-proof.py",
         "tests/evidencehost-consumer/test_runtime_proof.py",
     ]
-    return [ROOT / item for item in relative_paths]
+    return [ROOT / item for item in dict.fromkeys([*relative_paths, *STAGED_SUBJECT_FILES])]
 
 
 def hash_sources() -> tuple[dict[str, str], str]:
@@ -240,6 +246,96 @@ def hash_sources() -> tuple[dict[str, str], str]:
         hashes[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
     encoded = json.dumps(hashes, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashes, hashlib.sha256(encoded).hexdigest()
+
+
+def stage_runtime_subject(work_root: Path, source_hashes: dict[str, str], *, source_root: Path = ROOT) -> tuple[Path, dict[str, str]]:
+    """Stage exactly the dependency-free fixture and its pinned regular build inputs.
+
+    This is an explicit input projection, not an exclusion filter over a checkout. New ancestor
+    build inputs or explicit imports require a reviewed update to the six-file declaration.
+    Candidate Git/source provenance remains bound to the original checkout.
+    """
+    if not source_root.is_absolute() or source_root.is_symlink() or not source_root.is_dir():
+        fail("RuntimeSubject staging requires a regular candidate source root.")
+    build_names = ("Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props",
+                   "global.json", "NuGet.Config", "nuget.config")
+    for relative_parent in ("", "tests", "tests/evidencehost-consumer", "tests/evidencehost-consumer/RuntimeSubject"):
+        for name in build_names:
+            relative = str(PurePosixPath(relative_parent) / name)
+            path = source_root / relative
+            if relative not in STAGED_SUBJECT_FILES and (path.exists() or path.is_symlink()):
+                fail("RuntimeSubject has an undeclared ancestor build input.")
+    contents = {}
+    total = 0
+    for relative in STAGED_SUBJECT_FILES:
+        path = source_root / relative
+        if any((source_root / Path(*Path(relative).parts[:index])).is_symlink()
+               for index in range(1, len(Path(relative).parts))):
+            fail("RuntimeSubject source inputs cannot traverse links.")
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(fd, "rb") as source:
+                before = os.fstat(source.fileno())
+                if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_STAGED_SUBJECT_BYTES - total:
+                    fail("RuntimeSubject source input shape or byte bound is invalid.")
+                data = source.read(MAX_STAGED_SUBJECT_BYTES - total + 1)
+                after = os.fstat(source.fileno())
+        except OSError:
+            fail("A required RuntimeSubject source input is missing or unsafe.")
+        if (len(data) != before.st_size or len(data) > MAX_STAGED_SUBJECT_BYTES - total
+                or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+                != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+                or hashlib.sha256(data).hexdigest() != source_hashes.get(relative)):
+            fail("RuntimeSubject source bytes differ from the pinned candidate inputs.")
+        if relative.endswith((".props", ".targets", ".csproj")):
+            try:
+                document = ET.fromstring(data)
+            except ET.ParseError:
+                fail("RuntimeSubject build input is not valid XML.")
+            if any(element.tag.rsplit("}", 1)[-1] in ("Import", "ProjectReference") for element in document.iter()):
+                fail("RuntimeSubject has an undeclared build import or project reference.")
+        contents[relative] = data
+        total += len(data)
+    directory = work_root / "subject-source"
+    try:
+        directory.mkdir(mode=0o755)
+        for relative, data in contents.items():
+            path = directory / relative
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+            with path.open("xb") as target:
+                target.write(data)
+            path.chmod(0o644)
+    except OSError:
+        fail("RuntimeSubject staging requires a fresh private destination.")
+    hashes = {relative: hashlib.sha256(data).hexdigest() for relative, data in contents.items()}
+    return directory, hashes
+
+
+def verify_staged_subject(directory: Path, expected: dict[str, str]) -> None:
+    """Require the prepared six-file input tree to remain unchanged through execution."""
+    if directory.is_symlink() or not directory.is_dir():
+        fail("The staged RuntimeSubject root changed.")
+    paths = list(directory.rglob("*"))
+    if any(path.is_symlink() for path in paths):
+        fail("The staged RuntimeSubject input set contains a link.")
+    files = {path.relative_to(directory).as_posix() for path in paths if not path.is_dir()}
+    if files != set(STAGED_SUBJECT_FILES) or set(expected) != set(STAGED_SUBJECT_FILES):
+        fail("The staged RuntimeSubject input set changed.")
+    total = 0
+    for relative, digest in expected.items():
+        path = directory / relative
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(fd, "rb") as source:
+                info = os.fstat(source.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_STAGED_SUBJECT_BYTES - total:
+                    fail("The staged RuntimeSubject shape or byte bound changed.")
+                data = source.read(MAX_STAGED_SUBJECT_BYTES - total + 1)
+        except OSError:
+            fail("The staged RuntimeSubject input is missing or unsafe.")
+        if len(data) != info.st_size or len(data) > MAX_STAGED_SUBJECT_BYTES - total or hashlib.sha256(data).hexdigest() != digest:
+            fail("The staged RuntimeSubject bytes changed.")
+        total += len(data)
 
 
 def read_bindings() -> dict[str, str]:
@@ -658,11 +754,12 @@ def launcher_args(
     bindings: dict[str, str],
     mode: str,
     slot: str,
+    subject_root: Path = ROOT,
 ) -> list[str]:
     return [
         "/usr/bin/python3", str(LAUNCHER),
         "--tool-root", str(tool_root),
-        "--subject-root", str(ROOT),
+        "--subject-root", str(subject_root),
         "--policy-file", str(policy_file),
         "--job-seconds", str(JOB_SECONDS),
         "--admission-seconds", str(ADMISSION_SECONDS),
@@ -686,7 +783,8 @@ def launcher_args(
 
 
 def assert_trusted_denied(
-    *, tool_root: Path, policy_file: Path, output_parent: Path, bindings: dict[str, str], env: dict[str, str]
+    *, tool_root: Path, policy_file: Path, output_parent: Path, bindings: dict[str, str], env: dict[str, str],
+    subject_root: Path = ROOT,
 ) -> None:
     slot = "trusted-proof-denied"
     command = launcher_args(
@@ -696,6 +794,7 @@ def assert_trusted_denied(
         bindings=bindings,
         mode="trusted",
         slot=slot,
+        subject_root=subject_root,
     )
     code, stdout, stderr = root_command(
         command, cwd=ROOT, timeout=90, label="Trusted missing-proof rejection"
@@ -903,6 +1002,7 @@ def write_public_artifacts(
     checked_out_revision: str, source_hashes: dict[str, str], source_digest: str,
     policy_bytes: bytes, cli_hash: str, reporter_hash: str, reporter_target: str,
     build_log_hash: str, verification: dict, observation_slot: str, mechanism_results: dict[str, str],
+    staged_subject_hashes: dict[str, str],
 ) -> None:
     file_map = {
         "evidence-plan.json": "evidence-plan.json",
@@ -934,6 +1034,10 @@ def write_public_artifacts(
         "workflowIdentity": bindings["EVIDENCE_WORKFLOW_IDENTITY"],
         "sourceFilesSha256": source_hashes,
         "sourceManifestSha256": source_digest,
+        "subjectInputScope": "declared-runtime-fixture",
+        "stagedSubjectFilesSha256": staged_subject_hashes,
+        "stagedSubjectManifestSha256": hashlib.sha256(
+            json.dumps(staged_subject_hashes, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
         "policySha256": hashlib.sha256(policy_bytes).hexdigest(),
         "planDigest": verification["plan"].get("planDigest"),
         "manifestDigest": verification["manifest"].get("manifestDigest"),
@@ -1003,6 +1107,7 @@ def main() -> int:
         trusted_parent.mkdir(mode=0o755)
 
         cli_hash, build_log_hash = build_before_root(tool_root, env, proof_directory)
+        subject_source, staged_subject_hashes = stage_runtime_subject(work_root, source_hashes)
         reporter_target, reporter_hash = prepare_report_generator(tool_root, env)
         policy = create_policy()
         policy_bytes = (json.dumps(policy, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -1040,6 +1145,7 @@ def main() -> int:
         assert_trusted_denied(
             tool_root=tool_root, policy_file=policy_file, output_parent=trusted_parent,
             bindings=bindings, env=env,
+            subject_root=subject_source,
         )
         if list(trusted_parent.iterdir()):
             fail("Trusted missing-proof rejection left an output entry behind.")
@@ -1052,6 +1158,7 @@ def main() -> int:
             bindings=bindings,
             mode="observation",
             slot=observation_slot,
+            subject_root=subject_source,
         )
         stdout, stderr = run_observation_launcher(observation, work_root, proof_directory)
         try:
@@ -1068,11 +1175,12 @@ def main() -> int:
         after_hashes, after_digest = hash_sources()
         if after_hashes != source_hashes or after_digest != source_digest:
             fail("Proof source files changed during the runtime observation.")
+        verify_staged_subject(subject_source, staged_subject_hashes)
 
         write_public_artifacts(
             proof_directory, artifacts, bindings, checked_out_revision, source_hashes,
             source_digest, policy_bytes, cli_hash, reporter_hash, reporter_target,
-            build_log_hash, verification, observation_slot, mechanism_results,
+            build_log_hash, verification, observation_slot, mechanism_results, staged_subject_hashes,
         )
         print(f"EvidenceHost Observation proof passed: {proof_directory / 'runtime-proof.json'}")
         return 0

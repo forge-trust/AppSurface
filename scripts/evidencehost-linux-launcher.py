@@ -87,7 +87,7 @@ FAILURE_DIAGNOSTIC_FILE = "launcher-failure.json"
 FAILURE_DIAGNOSTIC_LIMIT = 4096
 FAILURE_DIAGNOSTIC_CAUSES = frozenset({
     "unclassified-host-failure", "requires-root-systemd-linux", "requires-cgroup-v2",
-    "requires-systemd-255", "openat2-x86-64-required", "systemd-operation-failed",
+    "requires-systemd-255", "openat2-x86-64-required", "systemd-operation-failed", "host-command-start-failed",
     "identity-separation-failed", "prepared-subject-overlaps-protected-root",
     "trusted-cli-missing", "worker-start-failed", "worker-timeout",
     "broker-handler-not-joined", "worker-protocol-incomplete", "worker-unsuccessful",
@@ -95,8 +95,16 @@ FAILURE_DIAGNOSTIC_CAUSES = frozenset({
     "output-slot-invalid", "output-parent-identity-changed", "output-anchor-not-fresh",
     "tool-root-path-not-canonical", "tool-root-symlink-component", "tool-root-path-missing",
     "tool-root-owner-changed", "tool-root-entry-invalid", "trusted-proof-not-allowlisted",
+    "subject-entry-invalid", "subject-root-symlink", "subject-copy-path-invalid",
+    "subject-copy-path-overlap", "subject-copy-depth-limit", "subject-copy-entry-limit",
+    "subject-copy-byte-limit", "subject-changed-during-copy",
+    "worker-start-unit-absent", "worker-start-unit-rejected", "worker-start-unit-failed",
+    "worker-start-command-failed", "worker-start-status-unavailable",
 })
-FAILURE_DIAGNOSTIC_OPERATIONS = frozenset({"systemctl", "systemd-run", "useradd", "groupadd", "worker-exit"})
+FAILURE_DIAGNOSTIC_OPERATIONS = frozenset({"systemctl", "systemd-run", "useradd", "groupadd", "userdel", "groupdel", "worker-exit", "worker-start"})
+WORKER_LOAD_STATES = frozenset({"loaded", "not-found", "error", "bad-setting", "masked"})
+WORKER_RESULTS = frozenset({"success", "resources", "protocol", "timeout", "exit-code", "signal",
+                            "core-dump", "watchdog", "start-limit-hit", "oom-kill", "exec-condition"})
 TRUSTED_PROOF_DIGEST_ALLOWLIST: frozenset[str] = frozenset()
 MAX_REQUEST = 64 * 1024
 MAX_PREFIX = 1024 * 1024
@@ -138,12 +146,16 @@ _LIBC.syscall.restype = ctypes.c_long
 class LauncherError(RuntimeError):
     """Safe, non-sensitive operational failure category."""
 
-    def __init__(self, cause: str, *, operation: str | None = None, exit_code: int | None = None):
+    def __init__(self, cause: str, *, operation: str | None = None, exit_code: int | None = None,
+                 errno: int | None = None):
         super().__init__(cause)
         self.operation = operation
         self.exit_code = exit_code
+        self.errno = errno
         self.worker_main_code = None
         self.worker_main_status = None
+        self.worker_load_state = None
+        self.worker_result = None
 
 
 def failure_diagnostic(error: Exception) -> dict:
@@ -159,13 +171,18 @@ def failure_diagnostic(error: Exception) -> dict:
         record["operation"] = error.operation
         if type(error.exit_code) is int and -128 <= error.exit_code <= 255:
             record["exit_code"] = error.exit_code
-    if isinstance(error, OSError) and type(error.errno) is int and 0 <= error.errno <= 4095:
+    if isinstance(error, (LauncherError, OSError)) and type(error.errno) is int and 0 <= error.errno <= 4095:
         record["errno"] = error.errno
-    if isinstance(error, LauncherError) and error.operation == "worker-exit":
+    if isinstance(error, LauncherError) and error.operation in ("worker-exit", "worker-start"):
         for name, maximum in (("worker_main_code", 6), ("worker_main_status", 255)):
             value = getattr(error, name)
             if type(value) is int and 0 <= value <= maximum:
                 record[name] = value
+        if error.operation == "worker-start":
+            for name, allowed in (("worker_load_state", WORKER_LOAD_STATES), ("worker_result", WORKER_RESULTS)):
+                value = getattr(error, name)
+                if isinstance(value, str) and value in allowed:
+                    record[name] = value
     return record
 
 
@@ -184,7 +201,8 @@ def validate_failure_diagnostic(record: object) -> dict:
     """Validate the bounded private record before a driver publishes its safe categories."""
     required = {"schema", "error_class", "cause"}
     if (not isinstance(record, dict) or not required <= record.keys()
-            or record.keys() - required - {"operation", "exit_code", "errno", "worker_main_code", "worker_main_status"}
+            or record.keys() - required - {"operation", "exit_code", "errno", "worker_main_code", "worker_main_status",
+                                           "worker_load_state", "worker_result"}
             or record["schema"] != FAILURE_DIAGNOSTIC_SCHEMA
             or record["error_class"] not in ("LauncherError", "OSError", "SubprocessError", "ValueError")
             or not isinstance(record["cause"], str) or record["cause"] not in FAILURE_DIAGNOSTIC_CAUSES):
@@ -198,8 +216,12 @@ def validate_failure_diagnostic(record: object) -> dict:
     if "errno" in record and (type(record["errno"]) is not int or not 0 <= record["errno"] <= 4095):
         raise LauncherError("invalid-private-diagnostic")
     for name, maximum in (("worker_main_code", 6), ("worker_main_status", 255)):
-        if name in record and (record.get("operation") != "worker-exit" or type(record[name]) is not int
+        if name in record and (record.get("operation") not in ("worker-exit", "worker-start") or type(record[name]) is not int
                                or not 0 <= record[name] <= maximum):
+            raise LauncherError("invalid-private-diagnostic")
+    for name, allowed in (("worker_load_state", WORKER_LOAD_STATES), ("worker_result", WORKER_RESULTS)):
+        if name in record and (record.get("operation") != "worker-start" or not isinstance(record[name], str)
+                               or record[name] not in allowed):
             raise LauncherError("invalid-private-diagnostic")
     return dict(record)
 
@@ -864,6 +886,10 @@ class OutputQuota:
             if self.total > MAX_JOB_OUTPUT:
                 self.exceeded.set()
 
+    def received_bytes(self) -> int:
+        with self._lock:
+            return self.total
+
 
 class OutputBudget:
     """Per-command prefixes backed by the broker's job-wide received-byte quota."""
@@ -881,6 +907,11 @@ class OutputBudget:
             target = self.stdout if stream == "stdout" else self.stderr
             target.extend(chunk[:max(0, MAX_PREFIX - len(target))])
 
+    def snapshot(self) -> tuple[int, bytes, bytes]:
+        """Freeze the counted bytes and retained prefixes under their shared lock."""
+        with self._lock:
+            return self.total, bytes(self.stdout), bytes(self.stderr)
+
     @property
     def truncated(self) -> bool:
         return self.total > len(self.stdout) + len(self.stderr)
@@ -888,6 +919,50 @@ class OutputBudget:
     @property
     def exceeded(self):
         return self.quota.exceeded
+
+
+class OutputPump:
+    """Acknowledge a binary pipe only after actual EOF, with exact received-byte accounting.
+
+    A short nonempty read is data, not EOF. Read/count/stop exceptions latch failure without
+    retaining exception text. Thread termination alone cannot acknowledge this pipe.
+    """
+    def __init__(self, name: str, stream, budget: OutputBudget, stop, failed):
+        self.name, self.stream, self.budget = name, stream, budget
+        self.stop, self.on_failure = stop, failed
+        self._lock = threading.Lock()
+        self._received_bytes = 0
+        self._eof = False
+        self._failed = False
+        self._finished = False
+
+    def run(self) -> None:
+        try:
+            while True:
+                block = self.stream.read(65536)
+                if not isinstance(block, bytes):
+                    raise ValueError("invalid-output-read")
+                if not block:
+                    with self._lock:
+                        self._eof = True
+                    break
+                with self._lock:
+                    self._received_bytes += len(block)
+                self.budget.add(self.name, block)
+                if self.budget.exceeded.is_set():
+                    self.stop()
+        except Exception:
+            with self._lock:
+                self._failed = True
+            self.on_failure()
+        finally:
+            with self._lock:
+                self._finished = True
+
+    def snapshot(self) -> tuple[bool, int]:
+        """Return error-free EOF acknowledgement and actual bytes read, under one lock."""
+        with self._lock:
+            return self._finished and self._eof and not self._failed, self._received_bytes
 
 
 class Broker:
@@ -924,6 +999,7 @@ class Broker:
         self.active_artifact_operations = 0
         self.active_handlers = 0
         self.work_closed = False
+        self.subject_output_failed = False
         self.wait_completed = False
         self.artifact_handles: dict[tuple[str, str], ArtifactHandle] = {}
         self.artifact_handles_closing = False
@@ -1209,17 +1285,11 @@ class Broker:
                 raise LauncherError("job-not-active")
             proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     env=ENV, close_fds=True)
+        quota_before = self.output_quota.received_bytes()
         budget = OutputBudget(self.output_quota)
-        def pump(name: str, stream):
-            while True:
-                block = stream.read(65536)
-                if not block:
-                    break
-                budget.add(name, block)
-                if budget.exceeded.is_set():
-                    self.stop()
-        pumps = [threading.Thread(target=pump, args=("stdout", proc.stdout), daemon=True),
-                 threading.Thread(target=pump, args=("stderr", proc.stderr), daemon=True)]
+        owned_pumps = [OutputPump(name, stream, budget, self.stop, self._fail_subject_output)
+                       for name, stream in (("stdout", proc.stdout), ("stderr", proc.stderr))]
+        pumps = [threading.Thread(target=pump.run, daemon=True) for pump in owned_pumps]
         for thread in pumps: thread.start()
         try:
             proc.wait(timeout=max(1, self.deadline-time.monotonic()) + 3)
@@ -1231,12 +1301,19 @@ class Broker:
                 proc.kill()
                 proc.wait(timeout=1)
         for thread in pumps: thread.join(timeout=3)
+        pump_states = [pump.snapshot() for pump in owned_pumps]
+        received_bytes, stdout, stderr = budget.snapshot()
+        if (any(thread.is_alive() for thread in pumps) or not all(acknowledged for acknowledged, _ in pump_states)
+                or received_bytes != sum(count for _, count in pump_states)
+                or self.output_quota.received_bytes() != quota_before + received_bytes):
+            self._fail_subject_output()
+            raise LauncherError("subject-output-unconfirmed")
         props = self._unit_properties(unit)
         group = props.get("ControlGroup", "")
         with self.lock:
             self.units = [(name, group if name == unit else known) for name, known in self.units]
         if (props.get("User") != str(self.subject_uid) or props.get("KillMode") != "control-group"
-                or any(thread.is_alive() for thread in pumps) or not self._group_empty(group)):
+                or not self._group_empty(group)):
             self.stop()
             raise LauncherError("subject-exit-unconfirmed")
         if budget.exceeded.is_set():
@@ -1244,9 +1321,21 @@ class Broker:
         if result_root is not None:
             with self.lock:
                 self.allowed_results_roots.add(result_root)
-        return {"exit_code": proc.returncode, "stdout": bytes(budget.stdout).decode("utf-8", "replace"),
-                "stderr": bytes(budget.stderr).decode("utf-8", "replace"),
-                "output_truncated": budget.truncated, "received_bytes": budget.total}
+        return {"exit_code": proc.returncode, "stdout": stdout.decode("utf-8", "replace"),
+                "stderr": stderr.decode("utf-8", "replace"),
+                "output_truncated": received_bytes > len(stdout) + len(stderr), "received_bytes": received_bytes}
+
+    def _fail_subject_output(self) -> None:
+        """Permanently close this lease before best-effort stop of every owned subject unit."""
+        with self.condition:
+            self.subject_output_failed = True
+            self.work_closed = True
+            self.condition.notify_all()
+        try:
+            self.stop()
+        except Exception:
+            # A failed stop cannot restore EOF acknowledgement or make the failed lease reusable.
+            pass
 
     def stop(self) -> None:
         with self.lock:
@@ -1258,7 +1347,7 @@ class Broker:
     def _all_subject_groups_empty(self, inspection_deadline: float | None = None) -> bool:
         with self.lock:
             units = list(self.units)
-            if self.active_runs:
+            if self.active_runs or self.subject_output_failed:
                 return False
         for unit, group in units:
             if not group:
@@ -1286,6 +1375,8 @@ class Broker:
         wait_deadline = min(self.deadline, started + grace)
         while True:
             with self.condition:
+                if self.subject_output_failed:
+                    return False
                 generation = self.run_change_generation
                 active = self.active_runs
             if not active:
@@ -1400,11 +1491,88 @@ class Broker:
                     self.condition.notify_all()
 
 
-def _systemd(argv: list[str], timeout: int = 8) -> subprocess.CompletedProcess:
-    result = subprocess.run(argv, capture_output=True, env=ENV, timeout=timeout, check=False)
-    if result.returncode:
+def _systemd(argv: list[str], timeout: int = 8, *, check: bool = True) -> subprocess.CompletedProcess:
+    """Run a fixed host command; spawning failures expose only a known operation and bounded errno."""
+    operation = Path(argv[0]).name
+    if operation not in FAILURE_DIAGNOSTIC_OPERATIONS:
+        operation = None
+    try:
+        result = subprocess.run(argv, capture_output=True, env=ENV, timeout=timeout, check=False)
+    except OSError as error:
+        raise LauncherError("host-command-start-failed", operation=operation, errno=error.errno) from None
+    if check and result.returncode:
         raise LauncherError("systemd-operation-failed", operation=Path(argv[0]).name, exit_code=result.returncode)
     return result
+
+
+def _create_run_accounts(worker_name: str, subject_name: str, results_group: str,
+                         users: list[str], groups: list[str]) -> None:
+    """Use trusted absolute utilities and track each account only after successful creation."""
+    for name in (worker_name, subject_name):
+        _systemd(["/usr/sbin/useradd", "--system", "--user-group", "--no-create-home",
+                  "--shell", "/usr/sbin/nologin", name])
+        users.append(name)
+    _systemd(["/usr/sbin/groupadd", "--system", results_group])
+    groups.append(results_group)
+
+
+def _start_worker_unit(argv: list[str], worker_unit: str) -> None:
+    """Start one generated unit; retain only closed status categories after a nonzero start.
+
+    A missing unit is an observation, not proof that no process was ever started. Status queries
+    cannot replace launch/exit acknowledgement, and failures retain the original command exit.
+    No stderr, arbitrary property value, unit name, or command argument reaches the diagnostic.
+    """
+    if not re.fullmatch(r"evidencehost-[0-9a-f]{12}-worker\.service", worker_unit):
+        raise LauncherError("invalid-worker-unit")
+    try:
+        _systemd(argv)
+        return
+    except LauncherError as start_error:
+        if str(start_error) != "systemd-operation-failed" or start_error.operation != "systemd-run":
+            raise
+        properties = {}
+        try:
+            result = _systemd(["/usr/bin/systemctl", "show", worker_unit, "--no-pager",
+                               "--property=LoadState", "--property=Result",
+                               "--property=ExecMainCode", "--property=ExecMainStatus"], timeout=5, check=False)
+            if (result.returncode in (0, 1) and isinstance(result.stdout, bytes)
+                    and len(result.stdout) <= FAILURE_DIAGNOSTIC_LIMIT):
+                for line in result.stdout.decode("ascii").splitlines():
+                    key, separator, value = line.partition("=")
+                    if separator and key in ("LoadState", "Result", "ExecMainCode", "ExecMainStatus"):
+                        if key in properties:
+                            properties = {}
+                            break
+                        properties[key] = value
+        except (LauncherError, OSError, subprocess.SubprocessError, ValueError):
+            properties = {}
+        load_state = properties.get("LoadState")
+        result_state = properties.get("Result")
+        if load_state == "not-found":
+            cause = "worker-start-unit-absent"
+        elif load_state in ("error", "bad-setting", "masked"):
+            cause = "worker-start-unit-rejected"
+        elif load_state == "loaded" and result_state in WORKER_RESULTS:
+            cause = "worker-start-unit-failed" if result_state != "success" else "worker-start-command-failed"
+        else:
+            cause = "worker-start-status-unavailable"
+        error = worker_exit_failure(cause, properties)
+        error.operation = "worker-start"
+        error.exit_code = start_error.exit_code
+        if load_state in WORKER_LOAD_STATES:
+            error.worker_load_state = load_state
+        if result_state in WORKER_RESULTS:
+            error.worker_result = result_state
+        raise error from None
+
+
+def _delete_run_accounts(users: list[str], groups: list[str]) -> None:
+    """Delete only this run's tracked accounts in reverse order, preserving best-effort exit handling."""
+    for name in reversed(users):
+        _systemd(["/usr/sbin/userdel", name], timeout=5, check=False)
+    for name in reversed(groups):
+        _systemd(["/usr/sbin/groupdel", name], timeout=5, check=False)
 
 
 def launch(args: argparse.Namespace) -> Path:
@@ -1457,11 +1625,7 @@ def launch(args: argparse.Namespace) -> Path:
     test_output_fd = -1
     handlers: list[threading.Thread] = []
     try:
-        for name in (worker_name, subject_name):
-            _systemd(["useradd", "--system", "--user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", name])
-            users.append(name)
-        _systemd(["groupadd", "--system", results_group])
-        groups.append(results_group)
+        _create_run_accounts(worker_name, subject_name, results_group, users, groups)
         wu, su = pwd.getpwnam(worker_name), pwd.getpwnam(subject_name)
         rgid = grp.getgrnam(results_group).gr_gid
         if wu.pw_uid == su.pw_uid or not wu.pw_uid or not su.pw_uid: raise LauncherError("identity-separation-failed")
@@ -1493,7 +1657,7 @@ def launch(args: argparse.Namespace) -> Path:
                        *[f"--property={k}={v}" for k,v in worker_unit_properties(
                            worker_name, tool, subject, scratch / "test-output", output_parent,
                            args.job_seconds).items()], *worker_command]
-        _systemd(worker_argv)
+        _start_worker_unit(worker_argv, worker_unit)
         props = {}
         deadline = job_deadline_monotonic
         while time.monotonic() < deadline:
@@ -1604,8 +1768,7 @@ def launch(args: argparse.Namespace) -> Path:
             os.close(test_output_fd)
         # Preserve/quarantine the worker-owned output anchor whenever termination is uncertain.
         if exposed:
-            for name in reversed(users): subprocess.run(["userdel",name],capture_output=True,env=ENV,timeout=5,check=False)
-            for name in reversed(groups): subprocess.run(["groupdel",name],capture_output=True,env=ENV,timeout=5,check=False)
+            _delete_run_accounts(users, groups)
             shutil.rmtree(root,ignore_errors=True)
             shutil.rmtree(scratch, ignore_errors=True)
 

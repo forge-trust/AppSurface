@@ -22,6 +22,26 @@ The resulting manifest is `ObservationOnly` and informational. Neither this subj
 runtime receipt represents protected workflow acceptance or authorizes `Trusted` mode. Trusted
 acceptance requires a separately reviewed protected workflow and an accepted consumer proof.
 
+## Exact subject input staging
+
+The [runtime driver](../runtime-proof.py) projects an explicit six-file input set into its fresh
+`subject-source` directory: this fixture's `RuntimeSubject.csproj`, `Program.cs` and `packages.lock.json`,
+plus the repository-root `Directory.Build.props`, `Directory.Build.targets` and `Directory.Packages.props`.
+Every copied regular-file byte must match the original candidate source hash, within the aggregate
+20 MiB staging bound. Required-file/ancestor links, missing or special files, undeclared ancestor
+build inputs and explicit imports/project references reject staging. This candidate has no `global.json`
+or NuGet config; introducing one requires an explicit staging-contract update.
+
+The original Git revision and candidate source bindings remain unchanged. The launcher receives the
+staged subject root with the original project/path layout. Its existing link, depth, count and byte
+copy guards remain active. No `bin`, `obj`, `node_modules`, Git metadata or unrelated projects are staged.
+This is the small dependency-free runtime fixture scope; pinned candidate tooling and its web-asset
+preparation still execute through the existing workflow prerequisites. It is not whole-consumer execution.
+
+The final runtime record adds `subjectInputScope: declared-runtime-fixture`, `stagedSubjectFilesSha256`
+and its canonical `stagedSubjectManifestSha256`. The prepared input tree and original candidate source
+hashes are rechecked after execution; these records grant no provenance or gate authority.
+
 The candidate driver requires the Trusted missing-proof control to exit 1 with the exact safe
 `ASEVD407` diagnostic, no stdout, and no allocated output anchor. An unrelated launcher failure
 does not satisfy that control. After successful Observation and acknowledged exit, the driver
@@ -30,6 +50,17 @@ manifest metadata, and runs the published CLI's `evidence verify` command agains
 plan and manifest. That command recomputes structural bindings and re-resolves the policy;
 it grants no provenance or gate authority. The portable rejection regression checks are
 [`test_runtime_proof.py`](../test_runtime_proof.py).
+
+The [launcher's subject-command pumps](../../../scripts/evidencehost-linux-launcher.py) separately
+acknowledge stdout and stderr only after actual binary EOF without a read/count/stop error. Each
+pump locks its EOF, failure and received-byte state; joining a terminated thread is insufficient.
+Before returning a command response or registering its results root, the broker requires both
+pump acknowledgements and matches their received-byte sum to the command budget and job quota
+increase. Retained prefixes may be truncated, but discarded bytes remain counted. A failed or
+unacknowledged pump permanently closes the lease, stops its owned units and denies owned-exit
+acknowledgement and artifact access; it cannot produce final successful output. Normal EOF after
+a quota stop retains the `ASEVD420` response. The [portable launcher controls](../test_linux_launcher.py)
+exercise read exceptions in either pipe, short reads, prefix truncation and accounting mismatch.
 
 ## Provisional failure diagnostics
 
@@ -42,6 +73,27 @@ Trusted `ASEVD407` response. The record contains only fixed host cause/error cat
 allowlisted operation/numeric exit or errno fields, never exception text, subject output or descriptors.
 Worker protocol/unsuccessful-exit failures additionally retain bounded numeric `ExecMainCode` and
 `ExecMainStatus` as `worker_main_code`/`worker_main_status` under the fixed `worker-exit` operation.
+If the initial worker `systemd-run` command exits nonzero, the launcher queries only that generated
+worker unit, with a five-second deadline and a 4 KiB response limit. Under `worker-start`, it retains
+the original command exit code, bounded numeric main-process codes and closed `worker_load_state` /
+`worker_result` categories. Fixed causes distinguish an absent unit, rejected unit configuration,
+unit failure, command failure with a successful unit result, and unavailable status. An absent unit
+does not prove that no process ever started. Status-query failure retains a safe failure, and no raw
+command stderr or arbitrary property text is published. These categories never replace owned exit
+acknowledgement or qualify a failed run as a successful proof.
+
+The v5 artifact retained only the initial command exit 1, without unit status. Its `/tmp` tool/output
+paths and `PrivateTmp=yes` are a potential namespace conflict: systemd mounts private `/tmp` before
+applying restrictions to nested paths, as defined by the [systemd 255 documentation](https://github.com/systemd/systemd/blob/v255/man/systemd.exec.xml)
+and [namespace implementation](https://github.com/systemd/systemd/blob/v255/src/core/namespace.c).
+The exact v5 startup cause is unconfirmed; the next actual run must supply numeric startup evidence
+before selecting a workspace relocation or explicit bind-mount repair. Portable controls do not
+prove the live namespace behavior. Existing isolation, mount and permission requirements remain in force.
+
+Root account creation and cleanup use the fixed `/usr/sbin/useradd`, `/usr/sbin/groupadd`,
+`/usr/sbin/userdel` and `/usr/sbin/groupdel` executables, independently of the sanitized worker PATH.
+A host command that cannot spawn records `host-command-start-failed`, its allowlisted operation
+and bounded numeric errno; no attempted argv, paths or operating-system exception text is published.
 
 The [runtime driver](../runtime-proof.py) requests this record for Observation only, reads a bounded
 protected file through root after failure, validates its closed schema, and publishes only those safe

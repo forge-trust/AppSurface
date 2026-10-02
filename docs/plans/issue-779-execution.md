@@ -2,6 +2,50 @@
 
 Goal: implement the [approved EvidenceHost plan](../designs/issue-779-evidencehost-trust-boundary.md) through a validated **draft** PR. Preserve the shared admission contract, zero protected secrets, mandatory stop/join-or-fatal ordering, and all [57 acceptance groups](issue-779-evidencehost-test-plan.md).
 
+## Current recovery checkpoint — native gate reached (2026-10-02)
+
+The [native solution and systemd startup records](../evidence/issue779-consumer-acceptance.md#native-solution-gate-and-systemd-startup-result-2026-10-02)
+bind each observation to its private source snapshot. Native v4 passed CLI
+**338/338** and Aspire **81/81**, then the unchanged exact coverage wrapper
+failed `ASCOV120` on one test path-policy assertion. Its merged measurement was
+**94.88% line / 88.52% branch**; numerical and patch gates were not reached.
+Focused Enhance cycle 1 remains in Verify with this concrete failure. The next
+correction uses the repository's shared path helper and meaningful behavior
+tests for changed uncovered execution paths; no threshold, selection or base
+change is authorized or needed.
+
+Runtime v5 reached worker submission but `systemd-run` returned **1**, without a
+completed runtime proof. Source-build and publish logs are warning-free. Closed
+startup diagnostics and actual mount visibility must distinguish rejection from
+service-start failure before selecting a runtime fix.
+
+The standalone protected gate consumer has a warning-free locked restore/build
+and **11/11** external-process portable controls. Its coherent synthetic JSON
+positive verifies public gate behavior and supplies no authenticated channel or
+Trusted authority. The provisional Aspire child fixture builds a real pinned
+Aspire/DCP payload and exercises a real native HTTP resource in portable controls.
+Native Aspire/DCP/systemd execution, shared-host integration, protected-base/fork workflows and downstream acceptance
+remain required. The preliminary draft PR has not been updated from these
+candidate observations.
+
+The subsequent fixture correction closes the scoped watchdog/pump source findings:
+private PID acknowledgement precedes launch; watchdog liveness remains required
+through clean disarm; both joined pumps must acknowledge error-free EOF and exact
+final byte totals. Main-only TERM gives a fresh five-second grace before whole-unit
+force, and normal/cancel require exit zero. **33/33** portable controls passed,
+including real fork/Pipe and four ordinary resource-DLL HTTP controls. A separate
+read-only review found no remaining P1/P2 issue in those three fixes or their
+private native wrapper. Native execution remains pending.
+
+The production broker had the same joined-thread gap. It now rejects failed or
+missing pump EOF, latches the lease closed, and checks command/job received-byte
+accounting before registering artifact results. Portable launcher controls passed
+**56/56** and driver controls **20/20**, exit zero. Bounded worker startup status
+diagnostics were added; namespace guards remain unchanged pending actual failure
+evidence. The path-helper and legacy-option migration corrections passed **26/26**
+focused tests, with warning-free source builds and unchanged bytes after both
+scoped formatters. These observations require a new immutable native snapshot.
+
 ## Current state
 
 - Dedicated branch: `codex/make-it-so-evidencehost-779`, initially from `5dc141db81009348538d3f6b7634a99ccb34cd99`, fast-forwarded to `origin/main` at `fd0b124e16a35b85ee16acde799834af407e18de`. Existing approved plan, test-plan and `TODOS.md` changes belong to #779 and are preserved.

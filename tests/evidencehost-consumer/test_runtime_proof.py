@@ -165,6 +165,100 @@ class BuildPublishProofTests(unittest.TestCase):
             self.assertEqual((public / "cli-build.stderr.log").read_bytes(), b"partial stderr")
 
 
+class RuntimeSubjectStagingTests(unittest.TestCase):
+    @staticmethod
+    def candidate(parent):
+        source = parent / "candidate"
+        source.mkdir()
+        hashes = {}
+        for relative in proof.STAGED_SUBJECT_FILES:
+            path = source / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            data = (proof.ROOT / relative).read_bytes()
+            path.write_bytes(data)
+            hashes[relative] = hashlib.sha256(data).hexdigest()
+        return source, hashes
+
+    def test_exact_fixture_bytes_and_build_inputs_are_staged_with_original_launcher_bindings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            source, hashes = self.candidate(parent)
+            generated = source / "Web/node_modules"
+            generated.mkdir(parents=True)
+            (generated / "unrelated-link").symlink_to(source)
+            stage, staged_hashes = proof.stage_runtime_subject(parent, hashes, source_root=source)
+            self.assertEqual(staged_hashes, hashes)
+            self.assertEqual({path.relative_to(stage).as_posix() for path in stage.rglob("*") if path.is_file()},
+                             set(proof.STAGED_SUBJECT_FILES))
+            self.assertFalse((stage / "Web").exists())
+            for relative in proof.STAGED_SUBJECT_FILES:
+                self.assertEqual((stage / relative).read_bytes(), (source / relative).read_bytes())
+            proof.verify_staged_subject(stage, hashes)
+            bindings = {"EVIDENCE_BASE_REVISION": "base", "EVIDENCE_SUBJECT_REVISION": "candidate",
+                        "EVIDENCE_WORKFLOW_IDENTITY": "workflow", "EVIDENCE_RUN_ID": "12/1"}
+            arguments = proof.launcher_args(tool_root=parent / "tool", policy_file=parent / "policy",
+                output_parent=parent / "output", bindings=bindings, mode="observation", slot="slot", subject_root=stage)
+            self.assertEqual(arguments[arguments.index("--subject-root") + 1], str(stage))
+            self.assertEqual(arguments[arguments.index("--solution") + 1], proof.SUBJECT_PROJECT_RELATIVE)
+            self.assertEqual(arguments[arguments.index("--subject-revision") + 1], "candidate")
+            (stage / "extra").write_bytes(b"unexpected")
+            with self.assertRaises(proof.ProofFailure): proof.verify_staged_subject(stage, hashes)
+
+    def test_required_file_or_ancestor_links_missing_and_nonregular_inputs_are_rejected(self):
+        for kind in ("file-link", "ancestor-link", "missing", "directory", "source-link"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                parent = Path(directory)
+                source, hashes = self.candidate(parent)
+                path = source / "Directory.Build.props"
+                if kind == "ancestor-link":
+                    ancestor = source / "tests"
+                    ancestor.rename(source / "real-tests")
+                    ancestor.symlink_to(source / "real-tests", target_is_directory=True)
+                elif kind == "source-link":
+                    link = parent / "linked-source"
+                    link.symlink_to(source, target_is_directory=True)
+                    source = link
+                else:
+                    data = path.read_bytes()
+                    path.unlink()
+                    if kind == "file-link":
+                        target = source / "other.props"
+                        target.write_bytes(data)
+                        path.symlink_to(target)
+                    if kind == "directory": path.mkdir()
+                with self.assertRaises(proof.ProofFailure):
+                    proof.stage_runtime_subject(parent, hashes, source_root=source)
+                self.assertFalse((parent / "subject-source").exists())
+
+    def test_undeclared_build_inputs_and_imports_require_explicit_scope_update(self):
+        for kind in ("global", "ancestor-props", "import", "project-reference"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                parent = Path(directory)
+                source, hashes = self.candidate(parent)
+                if kind == "global": (source / "global.json").write_text("{}")
+                elif kind == "ancestor-props": (source / "tests/Directory.Build.props").write_text("<Project />")
+                else:
+                    tag = 'Import Project="other.props"' if kind == "import" else 'ProjectReference Include="other.csproj"'
+                    data = f"<Project><{tag} /></Project>".encode()
+                    (source / "Directory.Build.props").write_bytes(data)
+                    hashes["Directory.Build.props"] = hashlib.sha256(data).hexdigest()
+                with self.assertRaises(proof.ProofFailure):
+                    proof.stage_runtime_subject(parent, hashes, source_root=source)
+
+    def test_pinned_hash_byte_limit_and_fresh_destination_are_enforced(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            source, hashes = self.candidate(parent)
+            with self.assertRaises(proof.ProofFailure):
+                proof.stage_runtime_subject(parent, {**hashes, "Directory.Build.props": "0" * 64}, source_root=source)
+            with patch.object(proof, "MAX_STAGED_SUBJECT_BYTES", 1), self.assertRaises(proof.ProofFailure):
+                proof.stage_runtime_subject(parent, hashes, source_root=source)
+            stage, _ = proof.stage_runtime_subject(parent, hashes, source_root=source)
+            with self.assertRaises(proof.ProofFailure): proof.stage_runtime_subject(parent, hashes, source_root=source)
+            (stage / "Directory.Build.props").write_bytes(b"changed")
+            with self.assertRaises(proof.ProofFailure): proof.verify_staged_subject(stage, hashes)
+
+
 class StructuralVerificationProofTests(unittest.TestCase):
     @staticmethod
     def protected_lstat(parent, *, wrong_child_owner=False):
@@ -239,6 +333,26 @@ class StructuralVerificationProofTests(unittest.TestCase):
 
 
 class ObservationFailureDiagnosticTests(unittest.TestCase):
+    def test_startup_status_is_published_only_after_closed_schema_validation(self):
+        safe = {"schema": "evidence-launcher-failure-v1", "error_class": "LauncherError",
+                "cause": "worker-start-unit-failed", "operation": "worker-start", "exit_code": 1,
+                "worker_load_state": "loaded", "worker_result": "exit-code",
+                "worker_main_code": 1, "worker_main_status": 226}
+        for record, accepted in ((safe, True), ({**safe, "worker_result": ["secret-779"]}, False),
+                                 ({**safe, "worker_main_status": True}, False)):
+            with self.subTest(accepted=accepted, record=record), tempfile.TemporaryDirectory() as directory:
+                parent = Path(directory)
+                with patch.object(proof, "root_command", side_effect=[
+                        (1, b"secret-779 stdout", b"secret-779 stderr"),
+                        (0, json.dumps(record).encode(), b"secret-779 query stderr")]):
+                    with self.assertRaises(proof.ProofFailure) as failure:
+                        proof.run_observation_launcher(["launcher"], parent, parent)
+                self.assertNotIn("secret-779", str(failure.exception))
+                receipt = parent / "launcher-failure.json"
+                self.assertEqual(receipt.exists(), accepted)
+                if accepted:
+                    self.assertEqual(json.loads(receipt.read_text()), safe)
+
     def test_success_does_not_read_diagnostics_and_passes_option_only_to_observation(self):
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)
