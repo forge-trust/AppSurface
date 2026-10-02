@@ -27,10 +27,17 @@ public sealed class EvidenceGitChangeCaptureTests
 
     [Theory]
     [InlineData("A\0src/file.cs")]
+    [InlineData("\0src/file.cs\0")]
+    [InlineData("A\0\0")]
     [InlineData("U\0src/file.cs\0")]
+    [InlineData("R\0src/old.cs\0src/new.cs\0")]
+    [InlineData("Rxyz\0src/old.cs\0src/new.cs\0")]
+    [InlineData("R-1\0src/old.cs\0src/new.cs\0")]
     [InlineData("R1000\0src/old.cs\0src/new.cs\0")]
     [InlineData("R101\0src/old.cs\0src/new.cs\0")]
     [InlineData("R50\0src/old.cs\0")]
+    [InlineData("R100\0src/old.cs\0\0")]
+    [InlineData("C100\0\0src/copied.cs\0")]
     [InlineData("A\0../outside\0")]
     [InlineData("A\0/absolute/path\0")]
     [InlineData("A\0src/trailing/\0")]
@@ -46,6 +53,20 @@ public sealed class EvidenceGitChangeCaptureTests
             () => EvidenceGitChangeCapture.ParseNameStatus(Encoding.UTF8.GetBytes(output)));
 
         Assert.Equal("ASEVD135", exception.Code);
+    }
+
+    [Fact]
+    public void ParseNameStatus_ShouldAcceptZeroSimilarityRenameAndCopyRecords()
+    {
+        var bytes = Encoding.UTF8.GetBytes(
+            "R0\0src/old.cs\0src/renamed.cs\0C0\0src/original.cs\0src/copied.cs\0");
+
+        var paths = EvidenceGitChangeCapture.ParseNameStatus(bytes);
+
+        Assert.Collection(
+            paths,
+            path => Assert.Equal(("src/renamed.cs", "renamed", "src/old.cs"), (path.Path, path.Kind, path.PreviousPath)),
+            path => Assert.Equal(("src/copied.cs", "copied", "src/original.cs"), (path.Path, path.Kind, path.PreviousPath)));
     }
 
     [Fact]
