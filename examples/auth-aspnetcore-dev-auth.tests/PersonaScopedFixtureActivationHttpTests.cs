@@ -638,6 +638,30 @@ public sealed class PersonaScopedFixtureActivationHttpTests
         }, ConfigureActivationHarness());
     }
 
+    [Theory]
+    [InlineData("labeler", "labeler")]
+    [InlineData("reviewer", "reviewer")]
+    [InlineData("admin", "admin")]
+    [InlineData("viewer", "viewer")]
+    [InlineData("custom-operator", "other")]
+    public async Task ActivationLogs_UseOnlyRecognizedPersonaIds(string personaId, string expectedLogId)
+    {
+        using var logProvider = new RecordingLoggerProvider();
+        var options = new AppSurfaceDevAuthOptions();
+        options.Users.Add(personaId, user => user.DisplayName("Local operator").Subject("operator-1"));
+        var context = new DefaultHttpContext { TraceIdentifier = "trace-persona-allowlist" };
+        using var loggerFactory = LoggerFactory.Create(logging => logging.AddProvider(logProvider));
+        var activation = new LocalFixtureActivation(new LocalCandidateFixtureStore(),
+            loggerFactory.CreateLogger<LocalFixtureActivation>());
+
+        await activation.ActivateAsync(options.Users.Personas[personaId], context, CancellationToken.None);
+
+        Assert.Equal([
+            $"Local fixture activation TraceId=trace-persona-allowlist PersonaId={expectedLogId} Outcome=start",
+            $"Local fixture activation TraceId=trace-persona-allowlist PersonaId={expectedLogId} Outcome=success",
+        ], logProvider.Entries);
+    }
+
     [Fact]
     public async Task ActivationLogs_CorrelateSafeFieldsAndExcludeCookiesClaimsAndExceptionData()
     {
@@ -828,8 +852,8 @@ public sealed class PersonaScopedFixtureActivationHttpTests
         Environment.SetEnvironmentVariable(ReloadConfigEnvironmentVariable, "false");
         try
         {
-            await using var factory = new WebApplicationFactory<Program>()
-                .WithWebHostBuilder(builder =>
+            await using var rootFactory = new WebApplicationFactory<Program>();
+            await using var factory = rootFactory.WithWebHostBuilder(builder =>
                 {
                     builder.UseEnvironment(Environments.Development);
                     builder.ConfigureLogging(logging => configureLogging?.Invoke(logging));
