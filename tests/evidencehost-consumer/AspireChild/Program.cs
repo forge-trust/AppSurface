@@ -53,6 +53,14 @@ async Task<IDistributedApplicationBuilder> CreateFactoryAsync()
             "--Dcp:ExtensionsPath", Path.Combine(payload, "dcp", "ext"),
             "--Dcp:WaitForResourceCleanup", "true"]
     });
+    var storeBase = Path.GetFullPath(Path.Combine(scratch, ".aspire-store"));
+    if (!string.Equals(Environment.GetEnvironmentVariable("ASPIRE__STORE__PATH"), storeBase, StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException("The Aspire store must use the root-selected scratch base.");
+    }
+
+    // Aspire 13.4.4's constructor replaces the environment setting with build metadata.
+    appBuilder.Configuration["Aspire:Store:Path"] = storeBase;
     appBuilder.Services.AddHealthChecks().AddCheck("native-http-uds", new SocketHealth(socket));
     appBuilder.AddExecutable("native-http", Environment.ProcessPath!, scratch,
         [Path.Combine(payload, "resource", "NativeHttpResource.dll"), "--socket", socket, "--case", control])

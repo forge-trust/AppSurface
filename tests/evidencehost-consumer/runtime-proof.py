@@ -15,8 +15,8 @@ import stat
 import subprocess
 import sys
 import tarfile
-import tempfile
 import time
+import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path, PurePosixPath
 
@@ -58,6 +58,41 @@ BUILD_LOG_FILES = (
 )
 RUN_ID_PATTERN = re.compile(r"^([0-9]+)/([0-9]+)$")
 SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{40,64}$")
+RUNTIME_WORKSPACE_PARENT = Path("/run")
+RUNTIME_WORKSPACE_PREFIX = "appsurface-evidencehost-runtime-"
+RUNTIME_WORKSPACE_ROOT_SCRIPT = '''import os,re,stat,sys
+mode,token,uid,gid=sys.argv[1:5]
+uid,gid=int(uid),int(gid)
+if os.geteuid()!=0 or mode not in ("create","freeze") or not re.fullmatch(r"[0-9a-f]{32}",token) or not 0<uid<4294967295 or not 0<gid<4294967295:
+    sys.exit(1)
+parent=os.open("/run",os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
+child=-1
+try:
+    info=os.fstat(parent)
+    if info.st_uid!=0 or info.st_mode&0o022:
+        sys.exit(1)
+    name="appsurface-evidencehost-runtime-"+token
+    if mode=="create":
+        os.mkdir(name,0o700,dir_fd=parent)
+    child=os.open(name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=parent)
+    info=os.fstat(child)
+    if stat.S_IMODE(info.st_mode)!=0o700:
+        sys.exit(1)
+    if mode=="create":
+        if info.st_uid!=0 or len(sys.argv)!=5:
+            sys.exit(1)
+        os.fchown(child,uid,gid)
+        os.fchmod(child,0o700)
+    else:
+        if len(sys.argv)!=7 or info.st_uid!=uid or info.st_gid!=gid or (info.st_dev,info.st_ino)!=(int(sys.argv[5]),int(sys.argv[6])):
+            sys.exit(1)
+        os.fchown(child,0,0)
+        os.fchmod(child,0o755)
+finally:
+    if child>=0:
+        os.close(child)
+    os.close(parent)
+'''
 
 
 class ProofFailure(RuntimeError):
@@ -680,6 +715,42 @@ def root_success(argv: list[str], *, cwd: Path, timeout: int, label: str) -> tup
     return stdout, stderr
 
 
+def runtime_workspace_path(work_root: Path) -> bool:
+    """Accept only a closed UUID child of the fixed runtime workspace parent."""
+    return (work_root.parent == RUNTIME_WORKSPACE_PARENT
+            and re.fullmatch(re.escape(RUNTIME_WORKSPACE_PREFIX) + r"[0-9a-f]{32}", work_root.name) is not None)
+
+
+def create_launcher_workspace() -> Path:
+    """Root-create one exclusive /run UUID child and hand its private preparation to this driver.
+
+    No caller-selected path is accepted. The fixed root helper pins /run without following a
+    link, rejects an existing child, and changes only its new directory to the nonroot driver.
+    A failed/partial preparation is retained on the disposable runner, never adopted or deleted.
+    """
+    uid, gid = os.geteuid(), os.getegid()
+    if type(uid) is not int or type(gid) is not int or not 0 < uid < 4294967295 or not 0 < gid < 4294967295:
+        fail("Runtime workspace preparation requires a nonroot driver identity.")
+    token = uuid.uuid4().hex
+    work_root = RUNTIME_WORKSPACE_PARENT / (RUNTIME_WORKSPACE_PREFIX + token)
+    if not runtime_workspace_path(work_root):
+        fail("Runtime workspace UUID is invalid.")
+    code, stdout, _stderr = root_command(
+        ["/usr/bin/python3", "-I", "-c", RUNTIME_WORKSPACE_ROOT_SCRIPT, "create", token, str(uid), str(gid)],
+        cwd=ROOT, timeout=15, label="create private runtime workspace",
+    )
+    if code != 0 or stdout:
+        fail("Root runtime workspace creation failed.")
+    try:
+        info = work_root.lstat()
+    except OSError:
+        fail("Root runtime workspace creation did not take effect.")
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != uid or info.st_gid != gid
+            or stat.S_IMODE(info.st_mode) != 0o700):
+        fail("Root runtime workspace creation did not take effect.")
+    return work_root
+
+
 def protect_launcher_workspace(work_root: Path) -> None:
     """Make the fresh private parent immutable to the runner and traversable by launcher identities.
 
@@ -687,20 +758,25 @@ def protect_launcher_workspace(work_root: Path) -> None:
     build-home children retain their private modes. Only the generated parent is changed;
     a root-owned parent also prevents the runner from replacing protected child names.
     """
-    if (work_root.parent != Path("/tmp")
-            or not work_root.name.startswith("appsurface-evidencehost-runtime-")
-            or work_root.is_symlink() or not work_root.is_dir()):
+    try:
+        before = work_root.lstat()
+    except OSError:
         fail("The launcher workspace must be a fresh generated temporary directory.")
-    root_success(
-        ["/usr/bin/chown", "--no-dereference", "root:root", str(work_root)],
-        cwd=ROOT, timeout=30, label="protect launcher workspace owner",
+    if (not runtime_workspace_path(work_root) or not stat.S_ISDIR(before.st_mode)
+            or before.st_uid != os.geteuid() or before.st_gid != os.getegid()
+            or stat.S_IMODE(before.st_mode) != 0o700):
+        fail("The launcher workspace must be a fresh generated temporary directory.")
+    code, stdout, _stderr = root_command(
+        ["/usr/bin/python3", "-I", "-c", RUNTIME_WORKSPACE_ROOT_SCRIPT, "freeze",
+         work_root.name[len(RUNTIME_WORKSPACE_PREFIX):], str(os.geteuid()), str(os.getegid()),
+         str(before.st_dev), str(before.st_ino)],
+        cwd=ROOT, timeout=15, label="freeze runtime workspace parent",
     )
-    root_success(
-        ["/usr/bin/chmod", "0755", str(work_root)],
-        cwd=ROOT, timeout=30, label="protect launcher workspace traversal",
-    )
+    if code != 0 or stdout:
+        fail("The launcher workspace parent protection failed.")
     info = work_root.lstat()
-    if info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o755:
+    if (not stat.S_ISDIR(info.st_mode) or (info.st_dev, info.st_ino) != (before.st_dev, before.st_ino)
+            or info.st_uid != 0 or info.st_gid != 0 or stat.S_IMODE(info.st_mode) != 0o755):
         fail("The launcher workspace parent protection did not take effect.")
 
 
@@ -886,8 +962,7 @@ def reserve_structural_verification_directory(work_root: Path) -> Path:
         info = work_root.lstat()
     except OSError:
         fail("Structural verification requires a fresh private workspace.")
-    if (work_root.parent != Path("/tmp")
-            or not work_root.name.startswith("appsurface-evidencehost-runtime-")
+    if (not runtime_workspace_path(work_root)
             or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
             or stat.S_IMODE(info.st_mode) != 0o700):
         fail("Structural verification requires a fresh private workspace.")
@@ -912,8 +987,7 @@ def verify_collected_structure(cli_dll: Path, artifacts: dict[str, bytes], work_
         info = directory.lstat()
     except OSError:
         fail("The reserved structural verification directory is missing or unsafe.")
-    if (work_root.parent != Path("/tmp")
-            or not work_root.name.startswith("appsurface-evidencehost-runtime-")
+    if (not runtime_workspace_path(work_root)
             or not stat.S_ISDIR(parent_info.st_mode) or parent_info.st_uid != 0
             or stat.S_IMODE(parent_info.st_mode) != 0o755
             or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
@@ -1089,8 +1163,7 @@ def main() -> int:
     proof_directory.mkdir(parents=True, mode=0o700)
     os.chmod(proof_directory, 0o755)
 
-    work_root = Path(tempfile.mkdtemp(prefix="appsurface-evidencehost-runtime-", dir="/tmp"))
-    os.chmod(work_root, 0o700)
+    work_root = create_launcher_workspace()
     try:
         reserve_structural_verification_directory(work_root)
         env = sanitized_environment(work_root, dotnet_host())
@@ -1125,6 +1198,7 @@ def main() -> int:
             ["--mode", "observation"], "ASEVD402", "missing-supervisor rejection",
         )
 
+        protect_launcher_workspace(work_root)
         for path in (tool_root, output_parent, trusted_parent):
             code, stdout, stderr = root_command(
                 ["/usr/bin/chown", "-R", "--no-dereference", "root:root", str(path)],
@@ -1141,7 +1215,6 @@ def main() -> int:
             if code != 0:
                 fail(f"Could not set protected permissions for {path.name}.")
 
-        protect_launcher_workspace(work_root)
         assert_trusted_denied(
             tool_root=tool_root, policy_file=policy_file, output_parent=trusted_parent,
             bindings=bindings, env=env,

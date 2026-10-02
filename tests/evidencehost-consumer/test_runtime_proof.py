@@ -5,6 +5,9 @@ import json
 import os
 import stat
 import tempfile
+import uuid
+from contextlib import contextmanager
+from types import SimpleNamespace
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -12,6 +15,17 @@ from unittest.mock import Mock, patch
 spec = importlib.util.spec_from_file_location("runtime_proof", Path(__file__).with_name("runtime-proof.py"))
 proof = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(proof)
+
+
+@contextmanager
+def portable_runtime_workspace():
+    """Use real private files with a test-only parent override; never operate on host /run."""
+    with tempfile.TemporaryDirectory() as directory:
+        parent = Path(directory)
+        child = parent / (proof.RUNTIME_WORKSPACE_PREFIX + uuid.uuid4().hex)
+        child.mkdir(mode=0o700)
+        with patch.object(proof, "RUNTIME_WORKSPACE_PARENT", parent):
+            yield str(child)
 
 
 class TrustedRejectionProofTests(unittest.TestCase):
@@ -268,12 +282,13 @@ class StructuralVerificationProofTests(unittest.TestCase):
             if path == parent or (wrong_child_owner and path == parent / "structural-verification"):
                 fields = list(info)
                 fields[4] = 0 if path == parent else os.geteuid() + 1
+                if path == parent: fields[5] = 0
                 return os.stat_result(fields)
             return info
         return inspect
 
     def test_reserved_owned_child_is_used_without_mkdir_after_parent_protection(self):
-        with tempfile.TemporaryDirectory(prefix="appsurface-evidencehost-runtime-", dir="/tmp") as directory:
+        with portable_runtime_workspace() as directory:
             parent = Path(directory)
             child = proof.reserve_structural_verification_directory(parent)
             self.assertEqual(child, parent / "structural-verification")
@@ -295,7 +310,7 @@ class StructuralVerificationProofTests(unittest.TestCase):
                              [str(child / "evidence-manifest.json"), "--plan", str(child / "evidence-plan.json")])
 
     def test_reservation_rejects_existing_children_and_unsafe_workspace_inputs(self):
-        with tempfile.TemporaryDirectory(prefix="appsurface-evidencehost-runtime-", dir="/tmp") as directory:
+        with portable_runtime_workspace() as directory:
             parent = Path(directory)
             link = parent / "linked-workspace"
             link.symlink_to(parent, target_is_directory=True)
@@ -313,8 +328,7 @@ class StructuralVerificationProofTests(unittest.TestCase):
 
     def test_missing_linked_shared_or_wrong_owner_reserved_child_cannot_invoke_root(self):
         for kind in ("missing", "symlink", "shared", "wrong-owner", "occupied-copy"):
-            with self.subTest(kind=kind), tempfile.TemporaryDirectory(
-                    prefix="appsurface-evidencehost-runtime-", dir="/tmp") as directory:
+            with self.subTest(kind=kind), portable_runtime_workspace() as directory:
                 parent = Path(directory)
                 child = parent / "structural-verification"
                 if kind == "symlink":
@@ -397,43 +411,146 @@ class ObservationFailureDiagnosticTests(unittest.TestCase):
 
 class LauncherWorkspaceProofTests(unittest.TestCase):
     def test_protected_parent_is_traversable_without_changing_private_children(self):
-        with tempfile.TemporaryDirectory(prefix="appsurface-evidencehost-runtime-", dir="/tmp") as directory:
+        with portable_runtime_workspace() as directory:
             parent = Path(directory)
             private = parent / "private-cache"
             private.mkdir(mode=0o700)
             original_lstat = Path.lstat
+            frozen = False
+            before = parent.lstat()
 
             def protected_stat(path):
                 info = original_lstat(path)
-                if path == parent:
+                if path == parent and frozen:
                     fields = list(info)
-                    fields[0] = stat.S_IFDIR | 0o755
-                    fields[4] = 0
+                    fields[0], fields[4], fields[5] = stat.S_IFDIR | 0o755, 0, 0
                     return os.stat_result(fields)
                 return info
 
-            with patch.object(proof, "root_success", return_value=(b"", b"")) as command, \
+            def freeze(*args, **kwargs):
+                nonlocal frozen
+                frozen = True
+                return 0, b"", b""
+
+            with patch.object(proof, "root_command", side_effect=freeze) as command, \
                  patch.object(Path, "lstat", protected_stat):
                 proof.protect_launcher_workspace(parent)
-            self.assertEqual([call.args[0] for call in command.call_args_list], [
-                ["/usr/bin/chown", "--no-dereference", "root:root", str(parent)],
-                ["/usr/bin/chmod", "0755", str(parent)],
+            self.assertEqual(command.call_args.args[0], [
+                "/usr/bin/python3", "-I", "-c", proof.RUNTIME_WORKSPACE_ROOT_SCRIPT, "freeze",
+                parent.name[len(proof.RUNTIME_WORKSPACE_PREFIX):], str(os.geteuid()), str(os.getegid()),
+                str(before.st_dev), str(before.st_ino),
             ])
             self.assertEqual(stat.S_IMODE(private.stat().st_mode), 0o700)
 
     def test_unsafe_or_unprotected_parent_cannot_reach_the_launcher(self):
-        with tempfile.TemporaryDirectory(prefix="appsurface-evidencehost-runtime-", dir="/tmp") as directory:
+        with portable_runtime_workspace() as directory:
             parent = Path(directory)
             link = parent / "appsurface-evidencehost-runtime-link"
             link.symlink_to(parent, target_is_directory=True)
-            for candidate in (parent / "missing", link, Path("relative")):
-                with self.subTest(candidate=candidate), patch.object(proof, "root_success") as command:
+            for candidate in (parent / "missing", link, Path("relative"), parent / "arbitrary"):
+                with self.subTest(candidate=candidate), patch.object(proof, "root_command") as command:
                     with self.assertRaises(proof.ProofFailure):
                         proof.protect_launcher_workspace(candidate)
                     command.assert_not_called()
-            with patch.object(proof, "root_success", return_value=(b"", b"")):
+            with patch.object(proof, "root_command", return_value=(0, b"", b"")):
                 with self.assertRaisesRegex(proof.ProofFailure, "protection did not take effect"):
                     proof.protect_launcher_workspace(parent)
+
+    def test_root_creation_is_one_fixed_uuid_child_with_private_driver_owner(self):
+        token = "a" * 32
+        info = os.stat_result((stat.S_IFDIR | 0o700, 42, 1, 2, os.geteuid(), os.getegid(), 0, 0, 0, 0))
+        with patch.object(proof.uuid, "uuid4", return_value=SimpleNamespace(hex=token)), \
+             patch.object(proof, "root_command", return_value=(0, b"", b"")) as command, \
+             patch.object(Path, "lstat", return_value=info):
+            parent = proof.create_launcher_workspace()
+        self.assertEqual(parent, Path("/run") / (proof.RUNTIME_WORKSPACE_PREFIX + token))
+        self.assertEqual(command.call_args.args[0], ["/usr/bin/python3", "-I", "-c", proof.RUNTIME_WORKSPACE_ROOT_SCRIPT,
+            "create", token, str(os.geteuid()), str(os.getegid())])
+        self.assertEqual(command.call_args.kwargs["timeout"], 15)
+        bindings = {"EVIDENCE_BASE_REVISION": "b" * 40, "EVIDENCE_SUBJECT_REVISION": "c" * 40,
+                    "EVIDENCE_WORKFLOW_IDENTITY": "workflow", "EVIDENCE_RUN_ID": "12/1"}
+        args = proof.launcher_args(tool_root=parent / "tool-root", policy_file=parent / "tool-root/policy",
+            output_parent=parent / "output-parent", bindings=bindings, mode="observation", slot="slot",
+            subject_root=parent / "subject-source")
+        self.assertEqual(args[args.index("--subject-root") + 1], str(parent / "subject-source"))
+        self.assertEqual(args[args.index("--solution") + 1], proof.SUBJECT_PROJECT_RELATIVE)
+        self.assertEqual(args[args.index("--subject-revision") + 1], "c" * 40)
+        launcher = proof.load_launcher_contract()
+        properties = launcher.worker_unit_properties("worker", parent / "tool-root", Path("/run/subject"),
+            Path("/run/test-output"), parent / "output-parent", 90)
+        self.assertEqual(properties["PrivateTmp"], "yes")
+        self.assertEqual(properties["ProtectSystem"], "strict")
+        self.assertEqual(properties["ReadOnlyPaths"], str(parent / "tool-root") + " /run/subject")
+        self.assertEqual(properties["ReadWritePaths"], str(parent / "output-parent"))
+        self.assertEqual(properties["InaccessiblePaths"], "/run/test-output")
+
+    def test_creation_rejects_failures_shared_linked_wrong_owner_or_root_identity_without_echo(self):
+        good = (stat.S_IFDIR | 0o700, 42, 1, 2, os.geteuid(), os.getegid(), 0, 0, 0, 0)
+        for kind in ("command", "stdout", "missing", "symlink", "mode", "owner", "group"):
+            fields = list(good)
+            if kind == "symlink": fields[0] = stat.S_IFLNK | 0o700
+            if kind == "mode": fields[0] = stat.S_IFDIR | 0o755
+            if kind == "owner": fields[4] += 1
+            if kind == "group": fields[5] += 1
+            result = (1 if kind == "command" else 0, b"secret-779" if kind == "stdout" else b"", b"secret-779")
+            with self.subTest(kind=kind), patch.object(proof, "root_command", return_value=result), \
+                 patch.object(Path, "lstat", side_effect=OSError("secret-779") if kind == "missing" else None,
+                              return_value=os.stat_result(fields)):
+                with self.assertRaises(proof.ProofFailure) as failure:
+                    proof.create_launcher_workspace()
+                self.assertNotIn("secret-779", str(failure.exception))
+        for uid, gid in ((0, 1001), (1001, 0), (True, 1001), (4294967295, 1001)):
+            with self.subTest(uid=uid, gid=gid), patch.object(proof.os, "geteuid", return_value=uid), \
+                 patch.object(proof.os, "getegid", return_value=gid), patch.object(proof, "root_command") as command:
+                with self.assertRaises(proof.ProofFailure): proof.create_launcher_workspace()
+                command.assert_not_called()
+
+
+class RootWorkspaceOperationTests(unittest.TestCase):
+    def execute(self, mode, *, child_owner=0, child_mode=0o700, inode=42, token="a" * 32,
+                parent_mode=0o755, mkdir_error=None):
+        parent = SimpleNamespace(st_uid=0, st_mode=stat.S_IFDIR | parent_mode)
+        child = SimpleNamespace(st_uid=child_owner, st_gid=0 if child_owner==0 else 1001,
+                                st_mode=stat.S_IFDIR | child_mode, st_dev=1, st_ino=inode)
+        args = ["-c", mode, token, "1001", "1001"] + (["1", "42"] if mode == "freeze" else [])
+        with patch.object(proof.sys, "argv", args), patch.object(proof.os, "geteuid", return_value=0), \
+             patch.object(proof.os, "open", side_effect=[10, 11]) as opened, \
+             patch.object(proof.os, "fstat", side_effect=[parent, child]), \
+             patch.object(proof.os, "mkdir", side_effect=mkdir_error) as mkdir, \
+             patch.object(proof.os, "fchown") as chown, patch.object(proof.os, "fchmod") as chmod, \
+             patch.object(proof.os, "close"):
+            error = None
+            try:
+                exec(proof.RUNTIME_WORKSPACE_ROOT_SCRIPT, {})
+            except (SystemExit, OSError) as caught:
+                error = caught
+        return error, opened, mkdir, chown, chmod
+
+    def test_root_script_creates_exclusively_and_freezes_pinned_inode_without_recursive_changes(self):
+        error, opened, mkdir, chown, chmod = self.execute("create")
+        self.assertIsNone(error)
+        self.assertEqual(opened.call_args_list[0].args[0], "/run")
+        self.assertTrue(opened.call_args_list[0].args[1] & os.O_NOFOLLOW)
+        mkdir.assert_called_once_with(proof.RUNTIME_WORKSPACE_PREFIX + "a" * 32, 0o700, dir_fd=10)
+        chown.assert_called_once_with(11, 1001, 1001)
+        chmod.assert_called_once_with(11, 0o700)
+        error, opened, mkdir, chown, chmod = self.execute("freeze", child_owner=1001)
+        self.assertIsNone(error)
+        mkdir.assert_not_called()
+        self.assertTrue(opened.call_args.args[1] & os.O_NOFOLLOW)
+        chown.assert_called_once_with(11, 0, 0)
+        chmod.assert_called_once_with(11, 0o755)
+
+    def test_root_script_rejects_reuse_arbitrary_name_shared_parent_owner_and_inode_changes(self):
+        for mode, values in (("create", {"mkdir_error": FileExistsError()}),
+                             ("create", {"token": "../arbitrary"}), ("create", {"parent_mode": 0o775}),
+                             ("freeze", {"child_owner": 1002}), ("freeze", {"child_owner": 1001, "inode": 43}),
+                             ("freeze", {"child_owner": 1001, "child_mode": 0o755})):
+            with self.subTest(mode=mode, values=values):
+                error, _open, _mkdir, chown, chmod = self.execute(mode, **values)
+                self.assertIsNotNone(error)
+                chown.assert_not_called()
+                chmod.assert_not_called()
 
 
 if __name__ == "__main__":

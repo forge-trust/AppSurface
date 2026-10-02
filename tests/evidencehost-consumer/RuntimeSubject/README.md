@@ -24,6 +24,31 @@ acceptance requires a separately reviewed protected workflow and an accepted con
 
 ## Exact subject input staging
 
+### Protected runtime workspace
+
+The [runtime driver's workspace helpers](../runtime-proof.py) create a fresh
+`/run/appsurface-evidencehost-runtime-<32 lowercase hexadecimal UUID>` through a fixed root command.
+There is no caller-selected root path. The helper opens `/run` without following a link, requires
+its root ownership and absence of group/other write permissions, and exclusively creates the child;
+an existing name fails instead of being reused. It hands only that new `0700` directory to the
+nonroot driver's exact UID/GID for build, publish, six-file projection and private cache preparation.
+
+Before arming the launcher, the driver freezes the same directory by device/inode through a
+no-follow directory descriptor, changes its owner/group to root and its mode to `0755`, and verifies
+the result. This happens before protecting the tool/output children, preventing replacement of
+their names after the freeze. Tool-tree worker read permissions and worker-owned `0700` output
+anchors remain enforced by the launcher. Cache/home and reserved structural-copy directories keep
+their private modes. The prepared workspace is retained on both outcomes on the disposable runner;
+the driver performs no privileged recursive cleanup and never adopts an earlier workspace.
+
+This places control-visible tool/output paths outside the private `/tmp` and `/var/tmp` namespaces.
+`PrivateTmp=yes`, strict filesystem protection, mount/link guards and all supervisor markers remain
+unchanged. The source revision, six input hashes and all six zero-warning build/publish logs retain
+their existing bindings. Portable workspace controls verify the fixed root operation and caller
+sequence with mocked root ownership; a subsequent native run must establish actual Observation.
+
+### Declared fixture projection
+
 The [runtime driver](../runtime-proof.py) projects an explicit six-file input set into its fresh
 `subject-source` directory: this fixture's `RuntimeSubject.csproj`, `Program.cs` and `packages.lock.json`,
 plus the repository-root `Directory.Build.props`, `Directory.Build.targets` and `Directory.Packages.props`.
@@ -82,13 +107,14 @@ does not prove that no process ever started. Status-query failure retains a safe
 command stderr or arbitrary property text is published. These categories never replace owned exit
 acknowledgement or qualify a failed run as a successful proof.
 
-The v5 artifact retained only the initial command exit 1, without unit status. Its `/tmp` tool/output
-paths and `PrivateTmp=yes` are a potential namespace conflict: systemd mounts private `/tmp` before
+The v6 artifact confirms a loaded worker unit exiting with numeric status `226` (`EXIT_NAMESPACE`),
+which systemd defines as mount/UTS/IPC namespace setup failure. It does not identify the exact path.
+The former `/tmp` tool/output paths conflict with private temporary visibility: systemd mounts private `/tmp` before
 applying restrictions to nested paths, as defined by the [systemd 255 documentation](https://github.com/systemd/systemd/blob/v255/man/systemd.exec.xml)
 and [namespace implementation](https://github.com/systemd/systemd/blob/v255/src/core/namespace.c).
-The exact v5 startup cause is unconfirmed; the next actual run must supply numeric startup evidence
-before selecting a workspace relocation or explicit bind-mount repair. Portable controls do not
-prove the live namespace behavior. Existing isolation, mount and permission requirements remain in force.
+The `/run` workspace addresses that documented visibility conflict while preserving isolation.
+The next actual run must confirm startup and Observation; portable controls do not prove the live
+namespace behavior or that relocation resolves every possible namespace setup failure.
 
 Root account creation and cleanup use the fixed `/usr/sbin/useradd`, `/usr/sbin/groupadd`,
 `/usr/sbin/userdel` and `/usr/sbin/groupdel` executables, independently of the sanitized worker PATH.

@@ -46,6 +46,17 @@ evidence. The path-helper and legacy-option migration corrections passed **26/26
 focused tests, with warning-free source builds and unchanged bytes after both
 scoped formatters. These observations require a new immutable native snapshot.
 
+The [full-snapshot startup diagnosis](../evidence/issue779-consumer-acceptance.md#full-snapshot-startup-diagnosis-2026-10-02)
+now records 2725 source files at `cdadf95bb91e46c21d46dc72a8317950e9fd5da4`.
+Runtime v6 failed namespace setup with systemd status **226**, without a terminal
+manifest. Aspire v1 passed the factory-stall control and failed the other four
+before DCP/resource execution because its embedded SDK store path was not
+writable. All five Aspire controls confirmed owned exit, empty cgroups and exact
+error-free pump accounting. The narrow workspace and store-path corrections
+retain the existing guards and require new native runs. Native v5b is rerunning
+the same full snapshot after correcting the harness's required `--consumer`
+argument; its current-source coverage acceptance remains pending.
+
 ## Current state
 
 - Dedicated branch: `codex/make-it-so-evidencehost-779`, initially from `5dc141db81009348538d3f6b7634a99ccb34cd99`, fast-forwarded to `origin/main` at `fd0b124e16a35b85ee16acde799834af407e18de`. Existing approved plan, test-plan and `TODOS.md` changes belong to #779 and are preserved.
