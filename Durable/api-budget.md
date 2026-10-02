@@ -68,7 +68,7 @@ helper remain internal. Existing direct `IDurableRuntimePumpAdmission` and legac
 their contracts and are not redirected. The
 [versioned activation reference](external-activation-v1.md) documents the decision to add this orchestration surface,
 its constraints, host ownership, failure mapping, and telemetry. The Provider
-[`PublicAPI.Shipped.txt`](ForgeTrust.AppSurface.Durable.Provider/PublicAPI.Shipped.txt) snapshot remains the exhaustive
+[`PublicAPI.Shipped.txt`](https://github.com/forge-trust/AppSurface/blob/ecd81417065982d1803d26000fc7618a7c06108e/Durable/ForgeTrust.AppSurface.Durable.Provider/PublicAPI.Shipped.txt) snapshot remains the exhaustive
 member inventory.
 
 ## Slice 3 PostgreSQL API

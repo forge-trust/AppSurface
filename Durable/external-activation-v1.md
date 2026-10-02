@@ -515,7 +515,7 @@ The documentation-example tests exercise constructor-validated examples of all t
 `PumpFailed` diagnostic. They retain the exact result and `Completed` aggregate, including a positive failed-item count
 and `HasMore`, when the caller cancels just before the service returns. They also check the distinct budgets and caller
 token, passive registration, and eager factory validation. The
-[packed-consumer verifier](verify-packed-consumers.sh) copies these same sources into its package-reference test
+[packed-consumer verifier](https://github.com/forge-trust/AppSurface/blob/ecd81417065982d1803d26000fc7618a7c06108e/Durable/verify-packed-consumers.sh) copies these same sources into its package-reference test
 project, so the recipes participate in compilation and execution against the exact restored package APIs. Managed
 fences are tied to these source markers by the
 [Markdown snippet verifier](../tools/ForgeTrust.AppSurface.MarkdownSnippets/README.md).

@@ -197,7 +197,7 @@ export ASPNETCORE_URLS="$BASE_URL"
 The application does not apply DDL or grants at startup. Run the Development-only migration CLI first, then pass the
 canonical role recipe the single dispatcher/runtime pair and explicit `work_only` profile. The recipe is invoked as
 the disposable container administrator; its input is the checked-in source at
-[`Durable/configure-postgresql-roles.sql`](../../Durable/configure-postgresql-roles.sql), not an ad-hoc grant script.
+[`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/ecd81417065982d1803d26000fc7618a7c06108e/Durable/configure-postgresql-roles.sql), not an ad-hoc grant script.
 
 ```bash
 dotnet "$HOST_DLL" schema-apply-dev
