@@ -210,6 +210,91 @@ public sealed class EvidenceGateVerifierTests
         Assert.False(File.Exists(Path.Join(fixture.OutputDirectory, "evidence-gate-verification.json")));
     }
 
+    [Fact]
+    public async Task VerifyGateCancellationBeforeReadingInputsEmitsAnIneligibleMachineResult()
+    {
+        using var fixture = await VerifyFixture.CreateAsync();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceGateVerifier.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.ManifestPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.IdentityPath,
+            fixture.OutputDirectory,
+            null,
+            fixture.AuthorityProvider,
+            null,
+            stdout,
+            stderr,
+            cancellation.Token);
+
+        Assert.Equal(130, exitCode);
+        Assert.Contains("ASEVG008", stderr.ToString(), StringComparison.Ordinal);
+        var result = EvidenceCanonicalJson.Deserialize<EvidencePullRequestGateVerificationResult>(
+            await File.ReadAllBytesAsync(Path.Join(fixture.OutputDirectory, "evidence-gate-verification.json")));
+        Assert.False(result.IsEligible);
+        Assert.Equal("ASEVG008", result.Code);
+    }
+
+    [Fact]
+    public async Task VerifyGateMissingIdentityParentFailsClosedWithFixedInputDiagnostic()
+    {
+        using var fixture = await VerifyFixture.CreateAsync();
+        var missingIdentityPath = Path.Join(Path.GetDirectoryName(fixture.IdentityPath)!, "absent", "identity.json");
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceGateVerifier.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.ManifestPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            missingIdentityPath,
+            fixture.OutputDirectory,
+            null,
+            fixture.AuthorityProvider,
+            null,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGG102", stderr.ToString(), StringComparison.Ordinal);
+        var result = EvidenceCanonicalJson.Deserialize<EvidencePullRequestGateVerificationResult>(
+            await File.ReadAllBytesAsync(Path.Join(fixture.OutputDirectory, "evidence-gate-verification.json")));
+        Assert.False(result.IsEligible);
+        Assert.Equal("ASEGG102", result.Code);
+    }
+
+    [Fact]
+    public async Task VerifyGateRejectsAnInvalidOutputPathWithoutWritingAResult()
+    {
+        using var fixture = await VerifyFixture.CreateAsync();
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceGateVerifier.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.ManifestPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.IdentityPath,
+            "\0invalid-output",
+            null,
+            fixture.AuthorityProvider,
+            null,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGG102", stderr.ToString(), StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Join(fixture.OutputDirectory, "evidence-gate-verification.json")));
+    }
+
     private sealed class VerifyFixture(string root, string repositoryPath, string planPath, string manifestPath, string policyPath, string identityPath, string outputDirectory, IEvidencePullRequestGateAuthorityProvider authorityProvider) : IDisposable
     {
         public string RepositoryPath { get; } = repositoryPath;
