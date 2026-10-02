@@ -380,7 +380,23 @@ public sealed class EvidenceNoFollowArtifactExtractorTests
     }
 
     [Fact]
-    public async Task ExtractAsync_ShouldRejectContentChangedDuringStreamingBeforePromotion()
+    public async Task ExtractAsync_ShouldRejectInvalidRootDescriptorBeforeOpeningSources()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            await AssertUnsupportedPlatformFailsClosedAsync();
+            return;
+        }
+
+        using var invalidRoot = new SafeFileHandle(new IntPtr(-1), ownsHandle: false);
+        await Assert.ThrowsAsync<ArgumentException>(() => EvidenceNoFollowArtifactExtractor.ExtractAsync(
+            invalidRoot,
+            CreateWriter(Path.GetTempPath()),
+            [new EvidenceNoFollowArtifact("report", "subject/report.bin", "reports/report.bin")]));
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ShouldResolveSourcesBeneathTheAlreadyOpenedRootDescriptor()
     {
         if (!OperatingSystem.IsLinux())
         {
@@ -392,40 +408,73 @@ public sealed class EvidenceNoFollowArtifactExtractorTests
         Directory.CreateDirectory(temp.ScratchRoot);
         Directory.CreateDirectory(temp.ArtifactRoot);
         Directory.CreateDirectory(Path.Join(temp.ScratchRoot, "subject"));
-        var sourcePath = Path.Join(temp.ScratchRoot, "subject", "large.bin");
-        await using (var created = new FileStream(sourcePath, FileMode.CreateNew, FileAccess.Write, FileShare.ReadWrite))
+        var expected = new byte[] { 1, 2, 3 };
+        await File.WriteAllBytesAsync(Path.Join(temp.ScratchRoot, "subject", "report.bin"), expected);
+        using var root = OpenTrustedRoot(temp.ScratchRoot);
+
+        Directory.Move(temp.ScratchRoot, temp.OutsideRoot);
+        Directory.CreateDirectory(Path.Join(temp.ScratchRoot, "subject"));
+        await File.WriteAllBytesAsync(Path.Join(temp.ScratchRoot, "subject", "report.bin"), [9, 8, 7]);
+
+        var results = await EvidenceNoFollowArtifactExtractor.ExtractAsync(
+            root,
+            CreateWriter(temp.ArtifactRoot),
+            [new EvidenceNoFollowArtifact("report", "subject/report.bin", "reports/report.bin")]);
+
+        Assert.Equal(expected, await File.ReadAllBytesAsync(Path.Join(temp.ArtifactRoot, "reports", "report.bin")));
+        Assert.Equal(expected.LongLength, Assert.Single(results).LengthBytes);
+        Assert.Equal(new byte[] { 9, 8, 7 }, await File.ReadAllBytesAsync(Path.Join(temp.ScratchRoot, "subject", "report.bin")));
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ShouldRejectFifoWithoutBlockingOrWriting()
+    {
+        if (!OperatingSystem.IsLinux())
         {
-            created.SetLength(64L * 1024 * 1024);
+            await AssertUnsupportedPlatformFailsClosedAsync();
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        Directory.CreateDirectory(temp.ScratchRoot);
+        Directory.CreateDirectory(temp.ArtifactRoot);
+        Directory.CreateDirectory(Path.Join(temp.ScratchRoot, "subject"));
+        var fifoPath = Path.Join(temp.ScratchRoot, "subject", "pipe");
+        if (MakeFifo(fifoPath, 0x180) != 0)
+        {
+            throw new IOException($"Could not create the Linux FIFO fixture (errno {Marshal.GetLastPInvokeError()}).");
         }
 
         using var root = OpenTrustedRoot(temp.ScratchRoot);
         var writer = CreateWriter(temp.ArtifactRoot);
-        var extraction = EvidenceNoFollowArtifactExtractor.ExtractAsync(
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => EvidenceNoFollowArtifactExtractor.ExtractAsync(
             root,
             writer,
-            [new EvidenceNoFollowArtifact("report", "subject/large.bin", "reports/report.bin")]);
+            [new EvidenceNoFollowArtifact("report", "subject/pipe", "reports/report.bin")]));
 
-        var changed = false;
-        await using (var mutator = new FileStream(sourcePath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite))
-        {
-            while (!extraction.IsCompleted && !changed)
-            {
-                mutator.Position = 0;
-                await mutator.WriteAsync(new byte[] { 0xff });
-                await mutator.FlushAsync();
-                changed = true;
-            }
-        }
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.False(File.Exists(Path.Join(temp.ArtifactRoot, "reports", "report.bin")));
+    }
 
-        if (!changed)
+    [Fact]
+    public async Task ExtractAsync_ShouldRejectPreCanceledRequestsBeforeOpeningRoot()
+    {
+        if (!OperatingSystem.IsLinux())
         {
-            await extraction;
+            await AssertUnsupportedPlatformFailsClosedAsync();
             return;
         }
 
-        await Assert.ThrowsAsync<InvalidDataException>(() => extraction);
-        Assert.Empty(writer.WrittenArtifacts);
-        Assert.False(File.Exists(Path.Join(temp.ArtifactRoot, "reports", "report.bin")));
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        using var invalidRoot = new SafeFileHandle(new IntPtr(-1), ownsHandle: false);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => EvidenceNoFollowArtifactExtractor.ExtractAsync(
+            invalidRoot,
+            CreateWriter(Path.GetTempPath()),
+            [],
+            cancellationToken: cancellation.Token));
     }
 
     [Fact]
@@ -479,6 +528,9 @@ public sealed class EvidenceNoFollowArtifactExtractorTests
 
     [DllImport("libc", EntryPoint = "open", SetLastError = true)]
     private static extern int Open([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
+
+    [DllImport("libc", EntryPoint = "mkfifo", SetLastError = true)]
+    private static extern int MakeFifo([MarshalAs(UnmanagedType.LPUTF8Str)] string path, uint mode);
 
     [DllImport("libc", EntryPoint = "link", SetLastError = true)]
     private static extern int Link(
