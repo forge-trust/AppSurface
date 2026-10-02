@@ -640,7 +640,16 @@ if sys.argv[2] == "true":
         and scratch[0].get("Source") == sys.argv[5] and scratch[0].get("RW") is True
     )
     checks["containerExitedZero"] = state.get("Status") == "exited" and state.get("ExitCode") == 0
-print(json.dumps({"checks": checks, "state": state}, sort_keys=True))
+print(json.dumps({
+    "checks": checks,
+    "capabilitySets": {
+        "effective": container.get("EffectiveCaps"),
+        "bounding": container.get("BoundingCaps"),
+        "added": host.get("CapAdd"),
+        "dropPresentation": host.get("CapDrop"),
+    },
+    "state": state,
+}, sort_keys=True))
 if not all(checks.values()):
     raise SystemExit("Podman inspect did not match the smoke envelope.")
 PY
