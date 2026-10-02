@@ -2,6 +2,25 @@
 
 Goal: implement the [approved EvidenceHost plan](../designs/issue-779-evidencehost-trust-boundary.md) through a validated **draft** PR. Preserve the shared admission contract, zero protected secrets, mandatory stop/join-or-fatal ordering, and all [57 acceptance groups](issue-779-evidencehost-test-plan.md).
 
+## Shared integration checkpoint (2026-10-02)
+
+The [shared producer and host checkpoint](../evidence/issue779-consumer-acceptance.md#shared-producer-and-host-integration-checkpoint-2026-10-02)
+records the completed physical coverage extraction, internal callback lease,
+captured concrete host registrations, tracked readiness and joined cleanup guard.
+The focused validation covers 457 distinct cases across successful scoped runs;
+it is macOS metadata/procedure/lifecycle evidence and supplies no native or
+coverage improvement claim. Historical failed assertion and fixture runs are
+preserved. The production catalogue and consumer-proof resolver remain closed.
+
+The [frozen v11 native outcomes](../evidence/issue779-consumer-acceptance.md#frozen-v11-native-outcomes-and-next-corrections-2026-10-02)
+retain the failed production handshake and Aspire 0/5 result, their immutable
+source/run/artifact bindings and the narrow next corrections. The corrected
+control fixture, subject completion flow and additional startup diagnostics
+require a fresh snapshot and native execution. The root v2 application handler,
+actual shared application/producer execution, protected downstream proof, all 57
+acceptance groups, current-main integration and fresh unchanged coverage gate
+remain required before updating the draft feature PR.
+
 ## Current recovery checkpoint — native gate reached (2026-10-02)
 
 The [native solution and systemd startup records](../evidence/issue779-consumer-acceptance.md#native-solution-gate-and-systemd-startup-result-2026-10-02)

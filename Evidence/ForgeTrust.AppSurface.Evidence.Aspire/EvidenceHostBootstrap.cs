@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Aspire.Hosting;
 using ForgeTrust.AppSurface.Evidence.Contracts;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Evidence.Planner;
 
 namespace ForgeTrust.AppSurface.Evidence.Aspire;
@@ -93,14 +94,23 @@ public sealed class EvidenceHostRegistration
     private readonly Dictionary<string, EvidenceProducerDeclaration> _producerDeclarations = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _aspireHealthResources = new(StringComparer.Ordinal);
     private readonly List<object> _additionalOwned = [];
+    private readonly IReadOnlyDictionary<string, IEvidenceResourceReadiness> _resourceView;
+    private readonly IReadOnlyDictionary<string, IEvidenceProducer> _producerView;
     internal Func<IDistributedApplicationBuilder>? ApplicationFactory { get; private set; }
     internal IReadOnlyList<object> AdditionalOwned => _additionalOwned;
 
+    /// <summary>Creates empty explicit registration maps with read-only public views.</summary>
+    public EvidenceHostRegistration()
+    {
+        _resourceView = new System.Collections.ObjectModel.ReadOnlyDictionary<string, IEvidenceResourceReadiness>(_resources);
+        _producerView = new System.Collections.ObjectModel.ReadOnlyDictionary<string, IEvidenceProducer>(_producers);
+    }
+
     /// <summary>Gets explicitly registered resource readiness probes.</summary>
-    public IReadOnlyDictionary<string, IEvidenceResourceReadiness> Resources => _resources;
+    public IReadOnlyDictionary<string, IEvidenceResourceReadiness> Resources => _resourceView;
 
     /// <summary>Gets explicitly registered typed producers.</summary>
-    public IReadOnlyDictionary<string, IEvidenceProducer> Producers => _producers;
+    public IReadOnlyDictionary<string, IEvidenceProducer> Producers => _producerView;
 
     /// <summary>Gets the optional trusted execution-envelope verifier.</summary>
     public IEvidenceExecutionEnvelopeVerifier? EnvelopeVerifier { get; private set; }
@@ -163,6 +173,62 @@ public sealed class EvidenceHostRegistration
         {
             _resources.Add(id, application.CreateHealthReadiness(id, resourceName));
         }
+    }
+
+    /// <summary>Retains pending restricted ownership before any application-start I/O.</summary>
+    internal void RetainRestrictedApplication(EvidenceRestrictedAspireApplication application) => _additionalOwned.Add(application);
+
+    /// <summary>Checks complete declarations and concrete compiled adapters before restricted startup.</summary>
+    /// <remarks>Returned dictionaries are private snapshots; later changes to caller-visible registration maps cannot replace adapters.</remarks>
+    internal (IReadOnlyDictionary<string, IEvidenceResourceReadiness> Resources, IReadOnlyDictionary<string, IEvidenceProducer> Producers)
+        BindRestrictedApplication(EvidenceClosedApplicationDefinition definition, EvidenceRestrictedAspireApplication application)
+    {
+        var producers = CaptureRestrictedDeclarations(definition);
+        var resources = definition.Resources.ToDictionary(static item => item.Declaration.Id,
+            item => application.CreateReadiness(item.Declaration.Id), StringComparer.Ordinal);
+        foreach (var (id, readiness) in resources) _resources.Add(id, readiness);
+        return (new System.Collections.ObjectModel.ReadOnlyDictionary<string, IEvidenceResourceReadiness>(resources),
+            producers);
+    }
+
+    /// <summary>Audits complete registered metadata and sealed producer types; does not enroll an application or start work.</summary>
+    internal void ValidateRestrictedDeclarations(EvidenceClosedApplicationDefinition definition)
+        => _ = CaptureRestrictedDeclarations(definition);
+
+    private IReadOnlyDictionary<string, IEvidenceProducer> CaptureRestrictedDeclarations(EvidenceClosedApplicationDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        var resources = new Dictionary<string, IEvidenceResourceReadiness>(_resources, StringComparer.Ordinal);
+        var declarations = new Dictionary<string, EvidenceResourceDeclaration>(_resourceDeclarations, StringComparer.Ordinal);
+        var names = new Dictionary<string, string>(_aspireHealthResources, StringComparer.Ordinal);
+        var producers = CaptureRestrictedProducers(definition.Producers.Select(static item => item.Declaration).ToArray());
+        if (resources.Count != 0 || declarations.Count != definition.Resources.Count
+            || names.Count != definition.Resources.Count
+            || definition.Resources.Any(item => !declarations.TryGetValue(item.Declaration.Id, out var declared)
+                || !CanonicallyEqual(declared, item.Declaration)
+                || !names.TryGetValue(item.Declaration.Id, out var name) || name != item.ResourceName))
+        {
+            throw new EvidenceAdmissionException("ASEVD404", "Restricted registrations do not match the complete compiled application.");
+        }
+        return producers;
+    }
+
+    /// <summary>Snapshots only sealed coverage registrations matching every protected producer declaration.</summary>
+    internal IReadOnlyDictionary<string, IEvidenceProducer> CaptureRestrictedProducers(IReadOnlyList<EvidenceProducerDeclaration> declarations)
+    {
+        var producers = new Dictionary<string, IEvidenceProducer>(_producers, StringComparer.Ordinal);
+        var registeredDeclarations = new Dictionary<string, EvidenceProducerDeclaration>(_producerDeclarations, StringComparer.Ordinal);
+        if (producers.Count != declarations.Count || registeredDeclarations.Count != declarations.Count
+            || declarations.Any(item => !registeredDeclarations.TryGetValue(item.Id, out var declared)
+                || !CanonicallyEqual(declared, item)
+                || !producers.TryGetValue(item.Id, out var producer)
+                || producer is not EvidenceRestrictedCoverageRegistration registered
+                || !CanonicallyEqual(registered.Declaration, item)))
+        {
+            throw new EvidenceAdmissionException("ASEVD404", "Protected producer registration is unavailable.");
+        }
+        return new System.Collections.ObjectModel.ReadOnlyDictionary<string, IEvidenceProducer>(
+            producers);
     }
 
     /// <summary>
@@ -285,6 +351,12 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
     private string? _testArtifactDirectory;
     private bool _cleaned;
     private bool _runClaimed;
+    private EvidenceLinuxWorkerSupervisor? _restrictedWorker;
+    private byte[]? _protectedDiffBytes;
+    private EvidenceRunByteQuota? _processOutputQuota;
+    private IReadOnlyDictionary<string, IEvidenceResourceReadiness>? _restrictedResources;
+    private IReadOnlyDictionary<string, IEvidenceProducer>? _restrictedProducers;
+    private EvidenceRestrictedAspireApplication? _restrictedApplication;
 
     private EvidenceHostBootstrap(
         EvidencePlan plan,
@@ -531,6 +603,8 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         EvidenceAdmissionResult? admission = null;
         EvidenceLinuxArtifactRoot? root = null;
         EvidenceWorkerExecution? lifecycle = null;
+        EvidenceClosedApplicationDefinition? compiledApplication = null;
+        byte[]? protectedDiffBytes = null;
         try
         {
             if (_runClaimed || State != EvidenceHostState.Created)
@@ -613,6 +687,11 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
                     }
 
                     var context = EvidenceProtectedWorkerInputs.CreateContext(descriptor, protectedInputs.Policy, protectedInputs.Plan);
+                    protectedDiffBytes = protectedInputs.DiffBytes;
+                    if (descriptor.Application is not null)
+                    {
+                        compiledApplication = EvidenceClosedApplicationCatalogue.Resolve(protectedInputs.Policy, protectedInputs.Plan, descriptor);
+                    }
                     IEvidenceAdmissionVerifier? verifier = context.ExpectedAssertion is null
                         ? null
                         : new EvidenceProtectedWorkerInputs.RegisteredVerifier(supervisor, context.ExpectedAssertion);
@@ -674,7 +753,10 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
                 completeWorker: supervisor.CompleteWorkerAsync,
                 bindIdOnlyRegistrationsForTests: false,
                 startLimit: startLimit,
-                cancellationToken: cancellationToken).ConfigureAwait(false);
+                cancellationToken: cancellationToken,
+                worker: supervisor,
+                compiledApplication: compiledApplication,
+                protectedDiffBytes: protectedDiffBytes).ConfigureAwait(false);
             root = null;
             return manifest;
         }
@@ -709,13 +791,19 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
             if (root is not null)
             {
                 try { await root.DisposeAsync().ConfigureAwait(false); }
-                catch { /* The manifest already records terminal cleanup failure. */ }
+                catch { /* Preserve the primary failure; unsuccessful collection publishes no returned manifest. */ }
             }
 
             _artifactRoot = null;
             _admission = null;
             _artifactQuota = null;
             _lifecycle = null;
+            _restrictedWorker = null;
+            _protectedDiffBytes = null;
+            _processOutputQuota = null;
+            _restrictedResources = null;
+            _restrictedProducers = null;
+            _restrictedApplication = null;
             _execution.Release();
         }
     }
@@ -752,11 +840,21 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         Func<CancellationToken, ValueTask>? completeWorker,
         bool bindIdOnlyRegistrationsForTests,
         TimeSpan startLimit,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        EvidenceLinuxWorkerSupervisor? worker = null,
+        EvidenceClosedApplicationDefinition? compiledApplication = null,
+        byte[]? protectedDiffBytes = null)
     {
         _artifactRoot = root;
         _testArtifactDirectory = testArtifactDirectory is null ? null : Path.GetFullPath(testArtifactDirectory);
         _admission = admission;
+        _restrictedWorker = worker;
+        _protectedDiffBytes = protectedDiffBytes;
+        _processOutputQuota = worker is null ? null : EvidenceRunByteQuota.CreateProcessOutput(onExceeded: () =>
+        {
+            lifecycle.LatchFailure();
+            admission.LatchFailure();
+        });
         if (root is not null)
         {
             _artifactQuota = EvidenceRunByteQuota.CreateArtifact(onExceeded: () =>
@@ -769,6 +867,15 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         if (!lifecycle.RegisterDisposer(_ => CleanRegistrationsAsync()))
         {
             throw new EvidenceAdmissionException("ASEVD410", "Registration cleanup could not be admitted.");
+        }
+
+        EvidenceRestrictedAspireApplication? restrictedApplication = null;
+        if (compiledApplication is not null)
+        {
+            if (worker is null) throw new EvidenceAdmissionException("ASEVD407", "Restricted application supervision is unavailable.");
+            restrictedApplication = new(worker, admission, _plan, compiledApplication, lifecycle);
+            _registration.RetainRestrictedApplication(restrictedApplication);
+            _restrictedApplication = restrictedApplication;
         }
 
         State = EvidenceHostState.Validating;
@@ -804,22 +911,40 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
                 "Aspire application startup requires a separately restricted supervisor child.");
         }
 
-        // Keep the declared start stage in the shared budget. The protected worker currently
-        // has no child capability for AddProject, so an application factory is rejected above.
+        if (restrictedApplication is not null)
+        {
+            (_restrictedResources, _restrictedProducers) = _registration.BindRestrictedApplication(compiledApplication!, restrictedApplication);
+        }
+        else if (worker is not null && _plan.Profile.Resources.Count != 0)
+        {
+            throw new EvidenceAdmissionException("ASEVD407", "Resource-backed execution requires a compiled restricted application.");
+        }
+
+        if (worker is not null)
+        {
+            _restrictedProducers = _registration.CaptureRestrictedProducers(_plan.Profile.Producers);
+        }
+
+        ValidateRegistrations();
+
+        // Only a resolved compile-owned registration can reach root-mediated start.
+        // Public factories remain rejected, and v1 keeps its scheduled no-op start stage.
         var appStart = await ExecuteBudgetedAsync(
             timeBudget,
             lifecycle,
             EvidenceRunStage.Start,
             startLimit,
-            _ => ValueTask.FromResult<EvidenceAspireApplication?>(null),
+            async token =>
+            {
+                if (restrictedApplication is not null) await restrictedApplication.StartAsync(token).ConfigureAwait(false);
+                return true;
+            },
             cancellationToken,
             admission).ConfigureAwait(false);
         if (appStart.Outcome != EvidenceWorkerStageOutcome.Passed)
         {
             throw new EvidenceAdmissionException("ASEVD410", "Aspire application startup did not complete.");
         }
-
-        ValidateRegistrations();
 
         var execution = Stopwatch.StartNew();
         State = EvidenceHostState.WaitingForResources;
@@ -959,7 +1084,15 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
                 TimeSpan.FromSeconds(resource.DeadlineSeconds),
                 async token =>
                 {
-                    await _registration.Resources[resource.Id].WaitUntilReadyAsync(token).ConfigureAwait(false);
+                    var probe = (_restrictedResources ?? _registration.Resources)[resource.Id];
+                    if (_restrictedApplication is { } application)
+                    {
+                        await application.RunReadinessAsync(resource.Id, probe, token).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await probe.WaitUntilReadyAsync(token).ConfigureAwait(false);
+                    }
                     return true;
                 },
                 cancellationToken,
@@ -1008,8 +1141,19 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
                 lifecycle,
                 EvidenceRunStage.Producer,
                 TimeSpan.FromSeconds(declaration.TimeoutSeconds),
-                token => _registration.Producers[declaration.Id].ProduceAsync(
-                    new EvidenceProducerContext(_plan, declaration, TimeProvider.System, artifacts), token),
+                async token =>
+                {
+                    var producer = (_restrictedProducers ?? _registration.Producers)[declaration.Id];
+                    var context = new EvidenceProducerContext(_plan, declaration, TimeProvider.System, artifacts);
+                    if (_restrictedWorker is null)
+                    {
+                        return await producer.ProduceAsync(context, token).ConfigureAwait(false);
+                    }
+
+                    using var lease = artifacts.BindRestrictedProducerLease(_restrictedWorker, admission, _plan,
+                        _protectedDiffBytes, _processOutputQuota!, lifecycle, token);
+                    return await producer.ProduceAsync(context, token).ConfigureAwait(false);
+                },
                 cancellationToken,
                 admission).ConfigureAwait(false);
             var elapsed = timer.ElapsedMilliseconds;
@@ -1148,24 +1292,6 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
 
     private static bool SamePlan(EvidencePlan left, EvidencePlan right) =>
         EvidenceCanonicalJson.Serialize(left).AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(right));
-
-    private static EvidenceManifest DowngradeManifest(EvidenceManifest manifest, string terminalFailureCode)
-    {
-        var downgraded = manifest with
-        {
-            ExecutionVerdict = EvidenceExecutionVerdict.Incomplete,
-            ClaimKind = EvidenceClaimKind.None,
-            Eligibility = EvidenceClaimEligibility.None,
-            Metrics = manifest.Metrics with
-            {
-                CleanupCompleted = false,
-                CleanupDiagnostic = "Final manifest output could not be verified.",
-                TerminalFailureCode = terminalFailureCode,
-            },
-            ManifestDigest = string.Empty,
-        };
-        return downgraded with { ManifestDigest = EvidenceDigest.CanonicalSha256(downgraded) };
-    }
 
     private static string? TerminalFailureCode(EvidenceWorkerTerminalCode terminalCode) => terminalCode switch
     {

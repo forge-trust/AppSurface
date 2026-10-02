@@ -1,12 +1,12 @@
 using System.Security.Cryptography;
 using System.Text;
-using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
+/// <summary>Procedure unit controls using internal fake transports; these do not establish Trusted or native acceptance.</summary>
 public sealed class EvidenceRestrictedCoverageProducerTests
 {
     private const string AssertionId = "appsurface/coverage/behavioral-patch@1";
@@ -273,7 +273,7 @@ public sealed class EvidenceRestrictedCoverageProducerTests
         var transport = new FakeRestrictedRun([Report(PassingCobertura)]);
         var reporter = new CopyingReportGenerator();
         var writer = new EvidenceArtifactWriter(valid, TestPathUtils.PathUnder(directory.Path, "artifacts"));
-        var diff = new EvidenceDiffSnapshot([], "protected-empty.diff", Convert.ToHexString(SHA256.HashData(Array.Empty<byte>())).ToLowerInvariant());
+        var diff = new EvidenceRestrictedCoverageDiffSnapshot([], "protected-empty.diff", Convert.ToHexString(SHA256.HashData(Array.Empty<byte>())).ToLowerInvariant());
 
         var result = await CreateProducer(transport, reporter).RunAsync(
             declaration, TestPathUtils.PathUnder(directory.Path, "subject.slnx"), diff, writer, CancellationToken.None);

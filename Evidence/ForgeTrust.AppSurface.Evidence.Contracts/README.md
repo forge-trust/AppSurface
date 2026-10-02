@@ -189,6 +189,31 @@ same 256 MiB aggregate bounds apply. See the [restricted coverage implementation
 
 [`EvidenceLinuxApplicationProtocol`](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceLinuxApplicationProtocol.cs) adds a closed application descriptor and typed startup/readiness acknowledgements to the existing root-authenticated Linux supervisor. It is internal protocol preparation. The production Trusted proof resolver remains false, the production application catalogue remains empty, and public application factories remain rejected with `ASEVD407`. See the [closed catalogue prerequisite](../ForgeTrust.AppSurface.Evidence.Planner/README.md#internal-closed-application-catalogue-prerequisite) and [Aspire support status](../../docs/evidence/evidencehost-migration.md#support-status). A parsed descriptor or receipt supplies no proof or runtime admission by itself.
 
+### Restricted producer callback binding
+
+The shared lifecycle's internal `RequireJoinedCleanupPhase()` is a void guard for closing local application state from a registered disposer. It succeeds only after the supervisor has acknowledged physical owned exit, admitted callbacks/writes/pumps have joined, and `StopAndDisposeAsync` has entered disposal. It issues no admission or execution capability. A registered disposer cannot use `OwnWorkStopped` for this check because that final predicate also includes the disposer task itself. The [restricted Aspire host](../ForgeTrust.AppSurface.Evidence.Aspire/README.md#explicit-supervised-bootstrap) uses this phase guard without adding a stop timer; a premature local close remains failed on retry. Final collection continues to require completion of all disposer tasks and successful cleanup.
+
+The [fixed coverage registration](../ForgeTrust.AppSurface.Evidence.Coverage/README.md#fixed-restricted-coverage-registration) receives runtime access only from a callback-scoped internal `EvidenceRestrictedProducerLease` attached to the existing `EvidenceArtifactWriter`. This is an implementation binding for the first-party CLI/Aspire hosts, not a new public admission context or consumer transport API.
+
+The internal binder has this exact shape:
+
+```csharp
+EvidenceRestrictedProducerLease BindRestrictedProducerLease(
+    EvidenceLinuxWorkerSupervisor worker,
+    EvidenceAdmissionResult admission,
+    EvidencePlan plan,
+    byte[]? diffBytes,
+    EvidenceRunByteQuota processOutputQuota,
+    EvidenceWorkerExecution execution,
+    CancellationToken stageToken);
+```
+
+Call it only inside the current tracked producer callback, using the actual connected worker, the same activated admission and lifecycle used to create that protected writer, the complete protected plan, counted diff bytes and the one run-wide received-output quota. The root's UID/GID must match the authenticated worker. A public/local writer cannot bind. `CancellationToken.None` cannot stand in for the real stage token. Dispose the returned lease in the callback's finally block; a writer cannot be rebound after closure.
+
+The lease verifies the complete admitted plan, exactly one matching full producer declaration and the supervisor's run identity. It copies the plan/declaration/diff and checks copied diff bytes against the descriptor digest. It permits one attempt, including a failed metadata/execution attempt; callback closure and stale/latched admission reject permanently. `GetRestrictedProducerLease()` is an internal accessor used only by the shared adapter and returns fixed `ASEVD410` when no binding exists. Pure internal metadata and atomic-attempt helpers used by unit tests issue no lease, supervisor or admission.
+
+`RunAsync` registers the entire fixed procedure through `EvidenceWorkerExecution.TrackOwnedWork` before returning its task. Its cancellation links the actual stage token with additional caller cancellation and adds no independent timer. Owned work stays registered until actual completion even when the caller ignores its task. Admission/arming/closure/quota checks are repeated around the procedure, so a late successful result cannot reopen eligibility. Artifact verification, cleanup and manifest completion retain their existing separate requirements. This binding does not enroll a consumer proof or enable Trusted execution.
+
 ### Authenticated outer worker descriptor
 
 `EvidenceLinuxWorkerSupervisor.ConnectAsync` keeps actual Linux root `SO_PEERCRED` authentication and the current nonroot worker PID/UID/GID comparison. Its pure internal `ParseWorkerDescriptor(JsonElement)` parser accepts exactly `evidence-worker-linux-v1` or `evidence-worker-linux-v2` as metadata. V1 rejects any `application` field, including explicit JSON null. V2 requires the non-null application object described below. Parsing alone does not construct a supervisor, create admission or accept consumer proof.

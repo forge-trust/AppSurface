@@ -459,6 +459,7 @@ public sealed class EvidenceArtifactWriter
     private readonly EvidenceRunByteQuota? _runQuota;
     private readonly EvidenceWorkerExecution? _execution;
     private readonly EvidenceAdmissionResult? _admission;
+    private EvidenceRestrictedProducerLease? _restrictedProducerLease;
     private readonly string _producerPrefix = string.Empty;
     private long _totalBytes;
 
@@ -491,6 +492,45 @@ public sealed class EvidenceArtifactWriter
         _execution = execution;
         _admission = admission;
         _producerPrefix = EvidenceArtifactValidation.NormalizeRelativePath(producer.Id) + "/";
+    }
+
+    /// <summary>Binds one actual protected producer callback to its existing writer and owning lifecycle.</summary>
+    /// <param name="worker">Supervisor returned by the real credential-checked ConnectAsync path.</param>
+    /// <param name="admission">The same active admission used to construct this protected writer.</param>
+    /// <param name="plan">The complete protected resolved plan.</param>
+    /// <param name="diffBytes">Counted protected planning diff bytes, copied before callbacks can mutate them.</param>
+    /// <param name="processOutputQuota">The one run-wide received-output quota shared with every reporter.</param>
+    /// <param name="execution">The same lifecycle used to construct this writer.</param>
+    /// <param name="stageToken">The actual current producer-stage token; CancellationToken.None is rejected.</param>
+    /// <returns>A callback-scoped binding to dispose in the producer callback's finally block.</returns>
+    /// <remarks>Local/public writers cannot bind. A writer cannot be rebound after success, failure or disposal.</remarks>
+    internal EvidenceRestrictedProducerLease BindRestrictedProducerLease(EvidenceLinuxWorkerSupervisor worker,
+        EvidenceAdmissionResult admission, EvidencePlan plan, byte[]? diffBytes, EvidenceRunByteQuota processOutputQuota,
+        EvidenceWorkerExecution execution, CancellationToken stageToken)
+    {
+        lock (_sync)
+        {
+            if (_restrictedProducerLease is not null) throw EvidenceRestrictedProducerLease.Failure();
+            return _restrictedProducerLease = EvidenceRestrictedProducerLease.Create(this, worker, admission, plan, _producer,
+                diffBytes, processOutputQuota, execution, stageToken);
+        }
+    }
+
+    /// <summary>Checks actual protected storage and identical admission/lifecycle ownership before lease issuance.</summary>
+    /// <remarks>Called by the lease issuer as well as its binder, so internal creation cannot use a public/local writer.</remarks>
+    internal void RequireRestrictedProducerOwnership(EvidenceLinuxWorkerSupervisor worker, EvidenceAdmissionResult admission,
+        EvidenceWorkerExecution execution)
+    {
+        if (_protectedRoot is null || !ReferenceEquals(_admission, admission) || !ReferenceEquals(_execution, execution)
+            || worker is null || _protectedRoot.Identity.Uid != worker.Descriptor.WorkerUid
+            || _protectedRoot.Identity.Gid != worker.Descriptor.WorkerGid)
+            throw EvidenceRestrictedProducerLease.Failure();
+    }
+
+    /// <summary>Gets only this writer's internally issued callback binding; grants no public transport authority.</summary>
+    internal EvidenceRestrictedProducerLease GetRestrictedProducerLease()
+    {
+        lock (_sync) return _restrictedProducerLease ?? throw EvidenceRestrictedProducerLease.Failure();
     }
 
     /// <summary>Gets completed artifact metadata emitted through this writer in ordinal logical-name order.</summary>
