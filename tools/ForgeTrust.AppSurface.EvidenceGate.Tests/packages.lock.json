@@ -622,6 +622,9 @@
           "Markdig": "[1.2.0, )"
         }
       },
+      "forgetrust.appsurface.testing": {
+        "type": "Project"
+      },
       "Aspire.Hosting": {
         "type": "CentralTransitive",
         "requested": "[13.4.4, )",

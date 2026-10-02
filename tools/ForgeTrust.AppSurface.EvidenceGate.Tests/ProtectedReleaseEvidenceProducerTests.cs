@@ -4,6 +4,7 @@ using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.EvidenceGate;
 using ForgeTrust.AppSurface.Release;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.EvidenceGate.Tests;
 
@@ -59,7 +60,7 @@ public sealed class ProtectedReleaseEvidenceProducerTests
         Assert.Equal(2, result.Artifacts!.Count);
 
         var projection = result.Artifacts.Single(artifact => artifact.LogicalName == ProtectedReleaseEvidenceProducer.ReleaseProjectionArtifactName);
-        var projectionBytes = await File.ReadAllBytesAsync(Path.Join(GetWriterRoot(fixture.Root), projection.RelativePath));
+        var projectionBytes = await File.ReadAllBytesAsync(TestPathUtils.PathUnder(GetWriterRoot(fixture.Root), projection.RelativePath));
         using var projectionDocument = JsonDocument.Parse(projectionBytes);
         Assert.Equal("appsurface-release-inspect-v1", projectionDocument.RootElement.GetProperty("schema").GetString());
         Assert.Equal(TagObjectId, projectionDocument.RootElement.GetProperty("tagObjectId").GetString());
@@ -68,7 +69,7 @@ public sealed class ProtectedReleaseEvidenceProducerTests
         Assert.Equal(ComputeSha256(projectionBytes), projection.Sha256);
 
         var digestIndex = result.Artifacts.Single(artifact => artifact.LogicalName == ProtectedReleaseEvidenceProducer.ReleaseDigestIndexArtifactName);
-        var digestIndexBytes = await File.ReadAllBytesAsync(Path.Join(GetWriterRoot(fixture.Root), digestIndex.RelativePath));
+        var digestIndexBytes = await File.ReadAllBytesAsync(TestPathUtils.PathUnder(GetWriterRoot(fixture.Root), digestIndex.RelativePath));
         using var digestDocument = JsonDocument.Parse(digestIndexBytes);
         Assert.Equal("appsurface-protected-release-digest-index-v1", digestDocument.RootElement.GetProperty("schema").GetString());
         var releaseDigests = digestDocument.RootElement.GetProperty("releaseArtifactDigests").EnumerateArray().ToArray();
@@ -97,7 +98,7 @@ public sealed class ProtectedReleaseEvidenceProducerTests
                 registration.AddProducer(producer);
                 registration.SetEnvelopeVerifier(new AcceptedEnvelopeVerifier());
             },
-            new EvidenceHostOptions(ArtifactDirectory: Path.Join(fixture.Root, "host-artifacts")));
+            new EvidenceHostOptions(ArtifactDirectory: TestPathUtils.PathUnder(fixture.Root, "host-artifacts")));
 
         var manifest = await host.RunAsync();
 
@@ -219,7 +220,8 @@ public sealed class ProtectedReleaseEvidenceProducerTests
         return new EvidenceProducerContext(plan, declaration, TimeProvider.System, writer);
     }
 
-    private static string GetWriterRoot(string root) => Path.Join(root, "artifacts", ProtectedReleaseEvidenceProducer.ProducerId);
+    private static string GetWriterRoot(string root) =>
+        TestPathUtils.PathUnder(root, "artifacts", ProtectedReleaseEvidenceProducer.ProducerId);
 
     private static string ComputeSha256(ReadOnlySpan<byte> bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 
@@ -272,7 +274,7 @@ public sealed class ProtectedReleaseEvidenceProducerTests
     {
         public ProducerFixture()
         {
-            Root = Path.Join(Path.GetTempPath(), "appsurface-protected-release-" + Guid.NewGuid().ToString("N"));
+            Root = TestPathUtils.PathUnder(Path.GetTempPath(), "appsurface-protected-release-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(Root);
         }
 
