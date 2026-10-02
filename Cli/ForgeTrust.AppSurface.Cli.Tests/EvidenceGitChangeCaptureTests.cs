@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Security.Cryptography;
 using System.Text;
 using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
@@ -221,7 +220,8 @@ public sealed class EvidenceGitChangeCaptureTests
         repository.Commit("base");
         var baseRevision = repository.Run("rev-parse", "HEAD").Trim();
 
-        var binary = RandomNumberGenerator.GetBytes(EvidenceGitChangeCapture.MaximumSourceDiffBytes + 4 * 1024 * 1024);
+        var binary = new byte[EvidenceGitChangeCapture.MaximumSourceDiffBytes + 4 * 1024 * 1024];
+        new Random(777).NextBytes(binary);
         File.WriteAllBytes(Path.Join(repository.Path, "large.bin"), binary);
         repository.Run("add", "large.bin");
         repository.Commit("large-binary");
