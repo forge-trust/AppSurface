@@ -669,6 +669,31 @@ def launch_subject(*, subject_checkout, image_digest, scratch_directory, profile
             self.assertEqual("failed", result["execution"])
             self.assertEqual("ASEHB001", result["diagnostic"]["code"])
 
+    def test_missing_or_changed_trusted_supervisor_fails_before_subject_execution(self) -> None:
+        for mutation in ("missing", "changed"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory(
+                prefix="evidence-gate-supervisor-handoff-"
+            ) as temporary:
+                root = Path(temporary).resolve()
+                capture, scripts, plan_file = self._capture(root)
+                output_parent = root / "outputs"
+                output_parent.mkdir()
+                output = output_parent / "handoff"
+                self._create(capture, scripts, plan_file, output)
+                supervisor = output / "evidence-gate-subject-supervisor.py"
+                if mutation == "missing":
+                    supervisor.unlink()
+                else:
+                    supervisor.write_bytes(supervisor.read_bytes() + b"\n# changed\n")
+
+                exit_code, result_path = self._execute(output, root)
+
+                self.assertEqual(2, exit_code)
+                result = json.loads(result_path.read_text(encoding="utf-8"))
+                self.assertFalse(result["claimEligible"])
+                self.assertEqual("failed", result["execution"])
+                self.assertEqual("ASEHB001", result["diagnostic"]["code"])
+
     def test_revision_mismatch_in_plan_is_rejected_during_capture(self) -> None:
         with tempfile.TemporaryDirectory(prefix="evidence-gate-plan-revision-") as temporary:
             root = Path(temporary).resolve()

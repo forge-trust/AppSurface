@@ -1,4 +1,7 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Release;
@@ -9,9 +12,11 @@ namespace ForgeTrust.AppSurface.EvidenceGate;
 /// Runs the existing read-only Release inspect authority and records its exact machine result as typed evidence.
 /// </summary>
 /// <remarks>
-/// This producer proves only local V2 tag-bound release inspection. It does not authenticate a protected workflow
-/// event, reread the remote protected tag, validate publication eligibility, or build NuGet/docs archive outputs.
-/// It therefore returns no satisfied assertion and cannot close the protected release obligation on its own.
+/// This producer proves local V2 tag-bound release inspection and matches its annotated-tag object and peeled commit
+/// against a fresh read of the trusted remote tag ref. It does not authenticate the protected workflow event, repeat
+/// the remote read at final verdict or publication use, validate publication eligibility, or build and hash the exact
+/// NuGet/docs archive outputs. It therefore returns no satisfied assertion and cannot close the protected release
+/// obligation on its own.
 /// </remarks>
 internal sealed class ProtectedReleaseEvidenceProducer : IEvidenceProducer
 {
@@ -25,16 +30,19 @@ internal sealed class ProtectedReleaseEvidenceProducer : IEvidenceProducer
     private readonly string _repositoryRoot;
     private readonly IProtectedReleaseInvocationProvider _invocationProvider;
     private readonly IReleaseInspectMachineAuthority _inspectAuthority;
+    private readonly IProtectedReleaseRemoteTagAuthority _remoteTagAuthority;
 
     internal ProtectedReleaseEvidenceProducer(
         string repositoryRoot,
         IProtectedReleaseInvocationProvider invocationProvider,
-        IReleaseInspectMachineAuthority? inspectAuthority = null)
+        IReleaseInspectMachineAuthority? inspectAuthority = null,
+        IProtectedReleaseRemoteTagAuthority? remoteTagAuthority = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
         _repositoryRoot = Path.GetFullPath(repositoryRoot);
         _invocationProvider = invocationProvider ?? throw new ArgumentNullException(nameof(invocationProvider));
         _inspectAuthority = inspectAuthority ?? new ReleaseInspectMachineAuthorityAdapter();
+        _remoteTagAuthority = remoteTagAuthority ?? new GitProtectedReleaseRemoteTagAuthority();
     }
 
     /// <inheritdoc />
@@ -75,6 +83,15 @@ internal sealed class ProtectedReleaseEvidenceProducer : IEvidenceProducer
                 return Invalid("Read-only release inspection did not match the trusted invocation identity.");
             }
 
+            var remoteTag = await _remoteTagAuthority.ReadAsync(invocation.Tag, cancellationToken).ConfigureAwait(false);
+            if (remoteTag is null
+                || remoteTag.PeeledCommit is null
+                || !string.Equals(remoteTag.TagObjectId, inspection.TagObjectId, StringComparison.Ordinal)
+                || !string.Equals(remoteTag.PeeledCommit, inspection.PeeledCommit, StringComparison.Ordinal))
+            {
+                return Invalid("The fresh remote protected tag was missing, lightweight, or no longer matched the inspected tag object and peeled commit.");
+            }
+
             var projectionBytes = JsonSerializer.SerializeToUtf8Bytes(inspection, ReleaseJson.Options);
             if (projectionBytes.Length > MaximumProjectionBytes)
             {
@@ -108,12 +125,16 @@ internal sealed class ProtectedReleaseEvidenceProducer : IEvidenceProducer
                 Id,
                 EvidenceProducerOutcome.Unavailable,
                 [],
-                "Local V2 release inspection was captured; protected remote-ref, release-event, and produced package/archive verification remain unavailable.",
+                "Local V2 release inspection and a matching fresh remote annotated-tag identity were captured; protected release-event validation and exact produced package/archive verification remain unavailable.",
                 artifacts.WrittenArtifacts);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
+        }
+        catch (ProtectedReleaseRemoteTagUnavailableException)
+        {
+            return Unavailable("The protected release tag could not be reread from its trusted remote.");
         }
         catch (ReleaseToolException)
         {
@@ -188,3 +209,303 @@ internal sealed record ProtectedReleaseDigestIndex(
 
 /// <summary>Digest for one release artifact validated at the captured peeled commit.</summary>
 internal sealed record ProtectedReleaseDigestEntry(string Path, string Sha256);
+
+/// <summary>Reads one exact protected tag ref directly from its trusted remote without updating local refs.</summary>
+internal interface IProtectedReleaseRemoteTagAuthority
+{
+    Task<ProtectedReleaseRemoteTagObservation?> ReadAsync(
+        string tag,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>Object identities returned by a fresh remote tag advertisement.</summary>
+internal sealed record ProtectedReleaseRemoteTagObservation(string TagObjectId, string? PeeledCommit);
+
+/// <summary>Indicates that a remote tag read could not be completed, rather than that its identity mismatched.</summary>
+internal sealed class ProtectedReleaseRemoteTagUnavailableException : Exception
+{
+    internal ProtectedReleaseRemoteTagUnavailableException(Exception? innerException = null)
+        : base("The protected release tag remote could not be read.", innerException)
+    {
+    }
+}
+
+/// <summary>Uses read-only <c>git ls-remote</c> to capture the current annotated-tag and peeled-commit identities.</summary>
+/// <remarks>
+/// Production reads are pinned to <see cref="ProtectedRepositoryRemoteUrl"/>. The child process inherits only PATH;
+/// Git prompts, credential helpers, system/global configuration, extra headers, and proxies are disabled. Standard
+/// output and error are drained concurrently with an 8 KiB bound and a 15-second timeout. Local file remotes are
+/// available only through the explicitly test-only fixture method.
+/// </remarks>
+internal sealed class GitProtectedReleaseRemoteTagAuthority : IProtectedReleaseRemoteTagAuthority
+{
+    internal const string ProtectedRepositoryRemoteUrl = "https://github.com/forge-trust/AppSurface.git";
+    private const int MaximumOutputCharacters = 8192;
+    private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(15);
+
+    public async Task<ProtectedReleaseRemoteTagObservation?> ReadAsync(
+        string tag,
+        CancellationToken cancellationToken)
+    {
+        return await ReadCoreAsync(ProtectedRepositoryRemoteUrl, tag, allowLocalFileUrl: false, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Reads a local bare-repository fixture. This is a test-only seam and must never be used by the production producer.
+    /// </summary>
+    internal Task<ProtectedReleaseRemoteTagObservation?> ReadLocalFixtureForTestingAsync(
+        string remoteUrl,
+        string tag,
+        CancellationToken cancellationToken)
+    {
+        if (!Uri.TryCreate(remoteUrl, UriKind.Absolute, out var uri)
+            || !string.Equals(uri.Scheme, Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("The test-only remote must be a file URL.", nameof(remoteUrl));
+        }
+
+        return ReadCoreAsync(remoteUrl, tag, allowLocalFileUrl: true, cancellationToken);
+    }
+
+    private static async Task<ProtectedReleaseRemoteTagObservation?> ReadCoreAsync(
+        string remoteUrl,
+        string tag,
+        bool allowLocalFileUrl,
+        CancellationToken cancellationToken)
+    {
+        if (!IsSupportedRemoteUrl(remoteUrl, allowLocalFileUrl))
+        {
+            throw new InvalidDataException("The protected release remote URL is outside the allowed scheme or contains unsupported URL components.");
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(tag);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var startInfo = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = Path.GetTempPath(),
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        startInfo.Environment.Clear();
+        var path = Environment.GetEnvironmentVariable("PATH");
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            startInfo.Environment["PATH"] = path;
+        }
+
+        startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
+        startInfo.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
+        startInfo.Environment["GIT_CONFIG_GLOBAL"] = OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
+        startInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("credential.helper=");
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("credential.interactive=false");
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("core.askPass=");
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("http.extraHeader=");
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("http.proxy=");
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("protocol.allow=never");
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("protocol.https.allow=always");
+        if (allowLocalFileUrl)
+        {
+            startInfo.ArgumentList.Add("-c");
+            startInfo.ArgumentList.Add("protocol.file.allow=always");
+        }
+
+        startInfo.ArgumentList.Add("ls-remote");
+        startInfo.ArgumentList.Add("--tags");
+        startInfo.ArgumentList.Add("--");
+        startInfo.ArgumentList.Add(remoteUrl);
+        startInfo.ArgumentList.Add($"refs/tags/{tag}");
+        startInfo.ArgumentList.Add($"refs/tags/{tag}^{{}}");
+
+        using var process = new Process { StartInfo = startInfo };
+        try
+        {
+            if (!process.Start())
+            {
+                throw new ProtectedReleaseRemoteTagUnavailableException();
+            }
+        }
+        catch (ProtectedReleaseRemoteTagUnavailableException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
+        {
+            throw new ProtectedReleaseRemoteTagUnavailableException(exception);
+        }
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(ReadTimeout);
+        var standardOutput = ReadBoundedAndTerminateOnFailureAsync(process.StandardOutput, process, timeout);
+        var standardError = ReadBoundedAndTerminateOnFailureAsync(process.StandardError, process, timeout);
+        try
+        {
+            var exitTask = process.WaitForExitAsync(timeout.Token);
+            await Task.WhenAll(exitTask, standardOutput, standardError).ConfigureAwait(false);
+            var output = await standardOutput.ConfigureAwait(false);
+            if (process.ExitCode != 0)
+            {
+                throw new ProtectedReleaseRemoteTagUnavailableException();
+            }
+
+            return ParseRemoteTagAdvertisement(output, tag);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            TryKill(process);
+            throw;
+        }
+        catch (OperationCanceledException exception)
+        {
+            TryKill(process);
+            throw new ProtectedReleaseRemoteTagUnavailableException(exception);
+        }
+        catch (ProtectedReleaseRemoteTagUnavailableException)
+        {
+            TryKill(process);
+            throw;
+        }
+        catch (IOException exception)
+        {
+            TryKill(process);
+            throw new ProtectedReleaseRemoteTagUnavailableException(exception);
+        }
+    }
+
+    private static bool IsSupportedRemoteUrl(string? remoteUrl, bool allowLocalFileUrl)
+    {
+        if (string.IsNullOrWhiteSpace(remoteUrl)
+            || !Uri.TryCreate(remoteUrl, UriKind.Absolute, out var uri)
+            || uri.UserInfo.Length != 0
+            || uri.Query.Length != 0
+            || uri.Fragment.Length != 0)
+        {
+            return false;
+        }
+
+        return (string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(uri.Host))
+            || (allowLocalFileUrl
+                && string.Equals(uri.Scheme, Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase));
+    }
+
+    internal static ProtectedReleaseRemoteTagObservation? ParseRemoteTagAdvertisement(string output, string tag)
+    {
+        var expectedRef = $"refs/tags/{tag}";
+        string? tagObjectId = null;
+        string? peeledCommit = null;
+        foreach (var rawLine in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var line = rawLine.EndsWith('\r') ? rawLine[..^1] : rawLine;
+            var separator = line.IndexOf('\t');
+            if (separator <= 0)
+            {
+                throw new InvalidDataException("The protected release remote returned a malformed tag advertisement.");
+            }
+
+            var objectId = line[..separator];
+            var reference = line[(separator + 1)..];
+            var isTagObject = string.Equals(reference, expectedRef, StringComparison.Ordinal);
+            var isPeeledCommit = string.Equals(reference, expectedRef + "^{}", StringComparison.Ordinal);
+            if (!isTagObject && !isPeeledCommit)
+            {
+                continue;
+            }
+
+            if (!IsCanonicalGitObjectId(objectId))
+            {
+                throw new InvalidDataException("The protected release remote returned a noncanonical Git object ID.");
+            }
+
+            if (isTagObject)
+            {
+                if (tagObjectId is not null)
+                {
+                    throw new InvalidDataException("The protected release remote returned the exact tag ref more than once.");
+                }
+
+                tagObjectId = objectId;
+            }
+            else
+            {
+                if (peeledCommit is not null)
+                {
+                    throw new InvalidDataException("The protected release remote returned the peeled tag ref more than once.");
+                }
+
+                peeledCommit = objectId;
+            }
+        }
+
+        return tagObjectId is null ? null : new ProtectedReleaseRemoteTagObservation(tagObjectId, peeledCommit);
+    }
+
+    private static async Task<string> ReadBoundedAsync(StreamReader reader, CancellationToken cancellationToken)
+    {
+        var builder = new StringBuilder();
+        var buffer = new char[1024];
+        while (true)
+        {
+            var count = await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
+            if (count == 0)
+            {
+                return builder.ToString();
+            }
+
+            if (builder.Length + count > MaximumOutputCharacters)
+            {
+                throw new InvalidDataException("The protected release remote response exceeded its output bound.");
+            }
+
+            builder.Append(buffer, 0, count);
+        }
+    }
+
+    private static async Task<string> ReadBoundedAndTerminateOnFailureAsync(
+        StreamReader reader,
+        Process process,
+        CancellationTokenSource timeout)
+    {
+        try
+        {
+            return await ReadBoundedAsync(reader, timeout.Token).ConfigureAwait(false);
+        }
+        catch
+        {
+            TryKill(process);
+            timeout.Cancel();
+            throw;
+        }
+    }
+
+    private static bool IsCanonicalGitObjectId(string value) =>
+        value.Length is 40 or 64
+        && value.All(static character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        catch (Win32Exception)
+        {
+        }
+    }
+}

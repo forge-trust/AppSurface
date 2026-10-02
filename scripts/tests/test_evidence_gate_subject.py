@@ -49,6 +49,8 @@ class FakeExecutor:
         self.result_export: bytes | None = self.successful_subject_record()
         self.config_override: dict[str, object] | None = None
         self.scratch_mount_override: dict[str, object] | None = None
+        self.labels_override: dict[str, str] | None = None
+        self.partial_mount_present = False
 
     def __call__(self, arguments: list[str], **options: object) -> subject.CommandResult:
         self.calls.append((list(arguments), dict(options)))
@@ -152,6 +154,15 @@ class FakeExecutor:
             value.partition("=")[2] for value in scratch_mount.split(",") if value.startswith("src=")
         )
         create_arguments = create_call
+        labels = {
+            key: value
+            for argument in create_arguments
+            if argument.startswith("--label=")
+            for key, separator, value in [argument[len("--label="):].partition("=")]
+            if separator
+        }
+        if self.labels_override is not None:
+            labels = dict(self.labels_override)
         pids = int(next(value.partition("=")[2] for value in create_arguments if value.startswith("--pids-limit=")))
         memory_mib = int(next(value.partition("=")[2][:-1] for value in create_arguments if value.startswith("--memory=")))
         cpu_millis = round(
@@ -166,6 +177,7 @@ class FakeExecutor:
                     "User": "65532:65532",
                     "WorkingDir": "/subject",
                     "Env": environment,
+                    "Labels": labels,
                 },
                 "HostConfig": {
                     "ReadonlyRootfs": True,
@@ -213,6 +225,147 @@ class FakeExecutor:
         return self.result(document)
 
 
+class FakeCleanupSupervisor:
+    """Public launcher seam fake; cleanup actions remain owned by this fake supervisor."""
+
+    def __init__(
+        self,
+        executor: FakeExecutor,
+        environment: dict[str, str],
+        *,
+        ready: bool = True,
+        fail_alive: bool = False,
+        attestation: dict[str, object] | None = None,
+    ) -> None:
+        self.executor = executor
+        self.environment = environment
+        self.ready = ready
+        self.fail_alive = fail_alive
+        self.attestation = attestation
+        self.owner_token = "b" * 32
+        self.session: subject.SupervisorSession | None = None
+        self.scratch_directory: Path | None = None
+        self.started = False
+        self.requested = False
+        self.request_observed_export = False
+        self.lifecycle: list[str] = []
+
+    def start(self, **arguments: object) -> subject.SupervisorSession:
+        self.started = True
+        self.lifecycle.append("start")
+        self.scratch_directory = Path(str(arguments["scratch_directory"]))
+        if self.ready:
+            state = Path(str(arguments["runner_temp"])) / f"appsurface-subject-supervisor-{self.owner_token}"
+            self.session = subject.SupervisorSession(
+                owner_token=self.owner_token,
+                owner_label=subject.SUPERVISOR_OWNER_LABEL,
+                manifest_path=state / "supervisor.json",
+                state_directory=state,
+                supervisor_pid=12345,
+                supervisor_start_time=67890,
+                ready=True,
+                state_directory_device=-1,
+                state_directory_inode=-1,
+            )
+            return self.session
+        return subject.SupervisorSession(
+            owner_token=self.owner_token,
+            owner_label=subject.SUPERVISOR_OWNER_LABEL,
+            manifest_path=Path("/unavailable/supervisor.json"),
+            state_directory=Path("/unavailable"),
+            supervisor_pid=12345,
+            supervisor_start_time=67890,
+            ready=False,
+            state_directory_device=-1,
+            state_directory_inode=-1,
+        )
+
+    def assert_alive(self, session: subject.SupervisorSession) -> None:
+        if not self.ready or self.fail_alive or session is not self.session:
+            raise subject.SubjectLauncherError("ASEGS017", "fake supervisor is not ready")
+        self.lifecycle.append("assert-alive")
+
+    def request_and_wait(self, session: subject.SupervisorSession) -> dict[str, object]:
+        self.requested = True
+        self.lifecycle.append("request")
+        if session is not self.session:
+            raise subject.SubjectLauncherError("ASEGS017", "fake supervisor session mismatch")
+        mount_call = next(
+            (call for call, _ in self.executor.calls if call[0] == subject.SUDO_PATH and call[2] == "mount"),
+            None,
+        )
+        create_attempted = any(call[2] == "create" for call, _ in self.executor.calls)
+        container_status = "absent"
+        if create_attempted:
+            result = self.executor(
+                ["/usr/bin/podman", "--remote=false", "rm", "--force", "--ignore", self.executor.container_name or ""],
+                **self._command_options(),
+            )
+            container_status = "removed" if result.returncode == 0 else "failed"
+
+        mount_status = "absent"
+        mount_present = False
+        if mount_call is not None:
+            mount_present = (
+                not self.executor.fail_mount
+                or subject._host_scratch_mount_is_present(Path(str(self.executor.mount_target)))
+            )
+        if mount_call is not None and mount_present:
+            if container_status in {"removed", "absent"}:
+                result = self.executor(
+                    [subject.SUDO_PATH, "-n", "umount", "--", str(self.executor.mount_target)],
+                    **self._command_options(),
+                )
+                mount_status = "unmounted" if result.returncode == 0 else "failed"
+                if result.returncode == 0:
+                    Path(str(self.executor.mount_target)).rmdir()
+            else:
+                mount_status = "unverified"
+        elif mount_call is not None:
+            Path(str(self.executor.mount_target)).rmdir()
+        scratch_status = (
+            "removed"
+            if container_status in {"removed", "absent"} and mount_status in {"unmounted", "absent"}
+            else "preserved"
+        )
+        self.request_observed_export = (
+            self.scratch_directory is not None
+            and (self.scratch_directory / subject.SUBJECT_RESULT_RELATIVE_PATH).is_file()
+        )
+        complete = (
+            container_status in {"removed", "absent"}
+            and mount_status in {"unmounted", "absent"}
+            and scratch_status == "removed"
+        )
+        record: dict[str, object] = {
+            "schemaVersion": 1,
+            "claimEligible": False,
+            "published": False,
+            "status": "complete" if complete else "incomplete",
+            "trigger": "request",
+            "containerStatus": container_status,
+            "mountStatus": mount_status,
+            "scratchStatus": scratch_status,
+            "failureCode": "none" if complete else "resource-cleanup-incomplete",
+            "cleanupDeadlineSeconds": subject.SUPERVISOR_CLEANUP_DEADLINE_SECONDS,
+        }
+        return self.attestation or record
+
+    def _command_options(self) -> dict[str, object]:
+        return {
+            "timeout_seconds": subject.CLEANUP_TIMEOUT_SECONDS,
+            "maximum_output_bytes": 4096,
+            "environment": {
+                "PATH": subject.ENGINE_PATH,
+                "HOME": self.environment["HOME"],
+                "XDG_RUNTIME_DIR": self.environment["XDG_RUNTIME_DIR"],
+                "TMPDIR": self.environment["RUNNER_TEMP"],
+                "REGISTRY_AUTH_FILE": "/dev/null",
+            },
+            "cancel_event": threading.Event(),
+        }
+
+
 class EvidenceGateSubjectTests(unittest.TestCase):
     def setUp(self) -> None:
         if os.geteuid() == 0:
@@ -244,6 +397,7 @@ class EvidenceGateSubjectTests(unittest.TestCase):
             output_bytes=16 * 1024,
         )
         self.executor = FakeExecutor(self.root)
+        self.supervisor = FakeCleanupSupervisor(self.executor, self.environment)
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
@@ -261,8 +415,15 @@ class EvidenceGateSubjectTests(unittest.TestCase):
             "_engine_path": "/usr/bin/podman",
             "_host_mount_verifier": self.verify_fake_host_mount,
             "_command_executor": self.executor,
+            "supervisor_client": self.supervisor,
         }
         arguments.update(overrides)
+        if "supervisor_client" not in overrides:
+            self.supervisor = FakeCleanupSupervisor(
+                arguments["_command_executor"],  # type: ignore[arg-type]
+                arguments["_environment"],  # type: ignore[arg-type]
+            )
+            arguments["supervisor_client"] = self.supervisor
         return subject.launch_subject(**arguments)
 
     def verify_fake_host_mount(self, mountpoint: Path, *, host_uid: int, host_gid: int) -> None:
@@ -284,6 +445,10 @@ class EvidenceGateSubjectTests(unittest.TestCase):
         self.assertTrue(exported_result.is_file())
         self.assertFalse(json.loads(exported_result.read_bytes())["claimEligible"])
         self.assertEqual("completed", json.loads(exported_result.read_bytes())["status"])
+        self.assertTrue(self.supervisor.requested)
+        self.assertTrue(self.supervisor.request_observed_export)
+        self.assertEqual("start", self.supervisor.lifecycle[0])
+        self.assertEqual("request", self.supervisor.lifecycle[-1])
 
         podman_calls = [call for call, _ in self.executor.calls if call[0] != subject.SUDO_PATH]
         self.assertTrue(all(call[1] == "--remote=false" for call in podman_calls))
@@ -306,7 +471,14 @@ class EvidenceGateSubjectTests(unittest.TestCase):
         self.assertNotIn("--entrypoint=/bin/sh", create)
         self.assertNotIn("GITHUB_TOKEN", " ".join(create))
         self.assertNotIn("subject-owned-command.txt", " ".join(create))
-        self.assertFalse(any("token" in value.casefold() or "socket" in value.casefold() for value in create))
+        owner_label_argument = (
+            f"--label={subject.SUPERVISOR_OWNER_LABEL}={self.supervisor.owner_token}"
+        )
+        self.assertIn(owner_label_argument, create)
+        self.assertFalse(
+            any("token" in value.casefold() for value in create if value != owner_label_argument)
+        )
+        self.assertFalse(any("socket" in value.casefold() for value in create))
         self.assertEqual(2, len([value for value in create if value == "--mount"]))
         self.assertNotIn("--tmpfs", create)
         mount_arguments = [create[index + 1] for index, value in enumerate(create[:-1]) if value == "--mount"]
@@ -567,6 +739,53 @@ class EvidenceGateSubjectTests(unittest.TestCase):
         self.assertEqual("ASEGS017", caught.exception.code)
         self.assertEqual(["mount", "container-remove"], self.executor.cleanup_order)
         self.assertTrue(Path(self.executor.mount_target or "").is_dir())
+
+    def test_unready_supervisor_stops_before_mount_or_container_creation(self) -> None:
+        self.supervisor = FakeCleanupSupervisor(self.executor, self.environment, ready=False)
+
+        with self.assertRaises(subject.SubjectLauncherError) as caught:
+            self.launch(supervisor_client=self.supervisor)
+
+        self.assertEqual("ASEGS017", caught.exception.code)
+        self.assertTrue(self.supervisor.started)
+        self.assertFalse(self.supervisor.requested)
+        self.assertFalse(any(call[0] == subject.SUDO_PATH for call, _ in self.executor.calls))
+        self.assertFalse(any(len(call) > 2 and call[2] == "create" for call, _ in self.executor.calls))
+
+    def test_missing_container_owner_label_fails_before_start_and_still_requests_cleanup(self) -> None:
+        self.executor.labels_override = {}
+
+        with self.assertRaises(subject.SubjectLauncherError) as caught:
+            self.launch()
+
+        self.assertEqual("ASEGS012", caught.exception.code)
+        self.assertTrue(self.supervisor.requested)
+        self.assertFalse(any(len(call) > 2 and call[2] == "start" for call, _ in self.executor.calls))
+
+    def test_incomplete_supervisor_attestation_invalidates_zero_exit_execution(self) -> None:
+        self.supervisor = FakeCleanupSupervisor(
+            self.executor,
+            self.environment,
+            attestation={
+                "schemaVersion": 1,
+                "claimEligible": False,
+                "published": False,
+                "status": "incomplete",
+                "trigger": "request",
+                "containerStatus": "removed",
+                "mountStatus": "unmounted",
+                "scratchStatus": "preserved",
+                "failureCode": "resource-cleanup-incomplete",
+                "cleanupDeadlineSeconds": subject.SUPERVISOR_CLEANUP_DEADLINE_SECONDS,
+            },
+        )
+
+        with self.assertRaises(subject.SubjectLauncherError) as caught:
+            self.launch(supervisor_client=self.supervisor)
+
+        self.assertEqual("ASEGS017", caught.exception.code)
+        self.assertTrue(self.supervisor.requested)
+        self.assertTrue(self.supervisor.request_observed_export)
 
     def test_host_tmpfs_mount_failure_stops_before_container_creation(self) -> None:
         self.executor.fail_mount = True

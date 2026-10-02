@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Aspire;
@@ -53,7 +54,7 @@ public sealed class ProtectedReleaseEvidenceProducerTests
         var declaration = CreateDeclaration();
         var invocationProvider = new FixedInvocationProvider(CreateInvocation());
         var writer = new EvidenceArtifactWriter(declaration, GetWriterRoot(fixture.Root));
-        var producer = new ProtectedReleaseEvidenceProducer(fixture.Root, invocationProvider);
+        var producer = CreateProducer(fixture.Root, invocationProvider);
 
         var result = await producer.ProduceAsync(CreateContext(declaration, writer), CancellationToken.None);
 
@@ -73,10 +74,7 @@ public sealed class ProtectedReleaseEvidenceProducerTests
         var invocation = CreateInvocation();
         var inspection = CreateInspection();
         var inspectAuthority = new FakeInspectAuthority(inspection);
-        var producer = new ProtectedReleaseEvidenceProducer(
-            fixture.Root,
-            new FixedInvocationProvider(invocation),
-            inspectAuthority);
+        var producer = CreateProducer(fixture.Root, new FixedInvocationProvider(invocation), inspectAuthority);
         var writer = new EvidenceArtifactWriter(declaration, GetWriterRoot(fixture.Root));
 
         var result = await producer.ProduceAsync(CreateContext(declaration, writer), CancellationToken.None);
@@ -111,16 +109,156 @@ public sealed class ProtectedReleaseEvidenceProducerTests
         Assert.Contains("package/archive", result.Diagnostic, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("tag-object")]
+    [InlineData("peeled-commit")]
+    [InlineData("lightweight")]
+    public async Task FreshRemoteTagMismatchIsInvalidAndWritesNoEvidence(string mismatch)
+    {
+        using var fixture = new ProducerFixture();
+        var declaration = CreateDeclaration();
+        var writer = new EvidenceArtifactWriter(declaration, GetWriterRoot(fixture.Root));
+        var remoteTag = mismatch switch
+        {
+            "tag-object" => new ProtectedReleaseRemoteTagObservation(new string('d', 40), PeeledCommit),
+            "peeled-commit" => new ProtectedReleaseRemoteTagObservation(TagObjectId, new string('e', 40)),
+            _ => new ProtectedReleaseRemoteTagObservation(TagObjectId, null),
+        };
+        var remoteAuthority = new FakeRemoteTagAuthority(remoteTag);
+        var inspectAuthority = new FakeInspectAuthority(CreateInspection());
+        var producer = CreateProducer(
+            fixture.Root,
+            new FixedInvocationProvider(CreateInvocation()),
+            inspectAuthority,
+            remoteAuthority);
+
+        var result = await producer.ProduceAsync(CreateContext(declaration, writer), CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Invalid, result.Outcome);
+        Assert.Empty(result.SatisfiedAssertionIds);
+        Assert.Null(result.Artifacts);
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.Equal(1, inspectAuthority.Calls);
+        Assert.Equal(1, remoteAuthority.Calls);
+        Assert.Equal(Tag, remoteAuthority.Tag);
+    }
+
+    [Fact]
+    public async Task UnavailableRemoteTagReadCannotWriteEvidenceOrCloseTheReleaseObligation()
+    {
+        using var fixture = new ProducerFixture();
+        var declaration = CreateDeclaration();
+        var writer = new EvidenceArtifactWriter(declaration, GetWriterRoot(fixture.Root));
+        var remoteAuthority = new FakeRemoteTagAuthority(null)
+        {
+            Failure = new ProtectedReleaseRemoteTagUnavailableException(),
+        };
+        var producer = CreateProducer(
+            fixture.Root,
+            new FixedInvocationProvider(CreateInvocation()),
+            new FakeInspectAuthority(CreateInspection()),
+            remoteAuthority);
+
+        var result = await producer.ProduceAsync(CreateContext(declaration, writer), CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Unavailable, result.Outcome);
+        Assert.Empty(result.SatisfiedAssertionIds);
+        Assert.Null(result.Artifacts);
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.Contains("could not be reread", result.Diagnostic, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GitRemoteAuthorityObservesAnAnnotatedTagMoveOnAReadOnlyFreshLookup()
+    {
+        using var fixture = new ProducerFixture();
+        var remotePath = TestPathUtils.PathUnder(fixture.Root, "protected-release.git");
+        var workPath = TestPathUtils.PathUnder(fixture.Root, "release-work");
+        Directory.CreateDirectory(workPath);
+        _ = await RunGitAsync(fixture.Root, "init", "--bare", "--quiet", remotePath);
+        _ = await RunGitAsync(workPath, "init", "--quiet");
+        _ = await RunGitAsync(workPath, "config", "user.name", "Evidence Gate Tests");
+        _ = await RunGitAsync(workPath, "config", "user.email", "evidence-gate-tests@example.invalid");
+        await File.WriteAllTextAsync(TestPathUtils.PathUnder(workPath, "release.txt"), "first release commit");
+        _ = await RunGitAsync(workPath, "add", "release.txt");
+        _ = await RunGitAsync(workPath, "commit", "--quiet", "-m", "first release commit");
+        _ = await RunGitAsync(workPath, "tag", "-a", Tag, "-m", "first annotated tag");
+        _ = await RunGitAsync(workPath, "tag", "-a", $"{Tag}-extra", "-m", "same-prefix sibling tag");
+        _ = await RunGitAsync(workPath, "remote", "add", "origin", remotePath);
+        _ = await RunGitAsync(workPath, "push", "--quiet", "origin", $"refs/tags/{Tag}", $"refs/tags/{Tag}-extra");
+        var firstTagObjectId = await RunGitAsync(workPath, "rev-parse", $"refs/tags/{Tag}");
+        var firstPeeledCommit = await RunGitAsync(workPath, "rev-parse", $"refs/tags/{Tag}^{{}}");
+        var remoteUrl = new Uri(remotePath).AbsoluteUri;
+        var authority = new GitProtectedReleaseRemoteTagAuthority();
+
+        var firstRead = await authority.ReadLocalFixtureForTestingAsync(remoteUrl, Tag, CancellationToken.None);
+
+        Assert.Equal(new ProtectedReleaseRemoteTagObservation(firstTagObjectId, firstPeeledCommit), firstRead);
+
+        await File.WriteAllTextAsync(TestPathUtils.PathUnder(workPath, "release.txt"), "second release commit");
+        _ = await RunGitAsync(workPath, "add", "release.txt");
+        _ = await RunGitAsync(workPath, "commit", "--quiet", "-m", "second release commit");
+        _ = await RunGitAsync(workPath, "tag", "--force", "-a", Tag, "-m", "moved annotated tag");
+        _ = await RunGitAsync(workPath, "push", "--quiet", "--force", "origin", $"refs/tags/{Tag}");
+        var movedTagObjectId = await RunGitAsync(workPath, "rev-parse", $"refs/tags/{Tag}");
+        var movedPeeledCommit = await RunGitAsync(workPath, "rev-parse", $"refs/tags/{Tag}^{{}}");
+
+        var secondRead = await authority.ReadLocalFixtureForTestingAsync(remoteUrl, Tag, CancellationToken.None);
+
+        Assert.Equal(new ProtectedReleaseRemoteTagObservation(movedTagObjectId, movedPeeledCommit), secondRead);
+        Assert.NotEqual(firstRead, secondRead);
+    }
+
+    [Fact]
+    public void RemoteTagParserRequiresTheExactAnnotatedRefAndCanonicalObjectIds()
+    {
+        var output = $"{TagObjectId}\trefs/tags/{Tag}\n{PeeledCommit}\trefs/tags/{Tag}^{{}}\n{new string('d', 40)}\trefs/tags/{Tag}-extra\n";
+
+        var observation = GitProtectedReleaseRemoteTagAuthority.ParseRemoteTagAdvertisement(output, Tag);
+
+        Assert.Equal(new ProtectedReleaseRemoteTagObservation(TagObjectId, PeeledCommit), observation);
+        Assert.Null(GitProtectedReleaseRemoteTagAuthority.ParseRemoteTagAdvertisement($"{TagObjectId}\trefs/tags/{Tag}-extra\n", Tag));
+        Assert.Throws<InvalidDataException>(() =>
+            GitProtectedReleaseRemoteTagAuthority.ParseRemoteTagAdvertisement($"not-an-object-id\trefs/tags/{Tag}\n", Tag));
+    }
+
+    [Fact]
+    public async Task ProductionRemoteAuthorityUsesOnlyTheFixedPublicRepositoryAndRejectsRemoteOverrideInputs()
+    {
+        Assert.Equal(
+            "https://github.com/forge-trust/AppSurface.git",
+            GitProtectedReleaseRemoteTagAuthority.ProtectedRepositoryRemoteUrl);
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            new GitProtectedReleaseRemoteTagAuthority().ReadLocalFixtureForTestingAsync("https://example.invalid/repo.git", Tag, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task FreshRemoteSuccessDiagnosticNamesVerifiedTagAndRemainingEvidenceGaps()
+    {
+        using var fixture = new ProducerFixture();
+        var declaration = CreateDeclaration();
+        var producer = CreateProducer(
+            fixture.Root,
+            new FixedInvocationProvider(CreateInvocation()),
+            new FakeInspectAuthority(CreateInspection()));
+
+        var result = await producer.ProduceAsync(
+            CreateContext(declaration, new EvidenceArtifactWriter(declaration, GetWriterRoot(fixture.Root))),
+            CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Unavailable, result.Outcome);
+        Assert.Contains("matching fresh remote annotated-tag identity", result.Diagnostic, StringComparison.Ordinal);
+        Assert.Contains("release-event validation", result.Diagnostic, StringComparison.Ordinal);
+        Assert.Contains("produced package/archive verification", result.Diagnostic, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ProducerRejectsMissingArtifactWriterAfterInspectionInsteadOfReturningUnwrittenEvidence()
     {
         using var fixture = new ProducerFixture();
         var declaration = CreateDeclaration();
         var inspectAuthority = new FakeInspectAuthority(CreateInspection());
-        var producer = new ProtectedReleaseEvidenceProducer(
-            fixture.Root,
-            new FixedInvocationProvider(CreateInvocation()),
-            inspectAuthority);
+        var producer = CreateProducer(fixture.Root, new FixedInvocationProvider(CreateInvocation()), inspectAuthority);
 
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await producer.ProduceAsync(CreateContext(declaration, writer: null), CancellationToken.None));
@@ -134,10 +272,7 @@ public sealed class ProtectedReleaseEvidenceProducerTests
         using var fixture = new ProducerFixture();
         var declaration = CreateDeclaration();
         var context = CreateContext(declaration, new EvidenceArtifactWriter(declaration, GetWriterRoot(fixture.Root)));
-        var producer = new ProtectedReleaseEvidenceProducer(
-            fixture.Root,
-            new FixedInvocationProvider(CreateInvocation()),
-            new FakeInspectAuthority(CreateInspection()));
+        var producer = CreateProducer(fixture.Root, new FixedInvocationProvider(CreateInvocation()), new FakeInspectAuthority(CreateInspection()));
         await using var host = EvidenceHostBootstrap.Create(
             context.Plan,
             registration =>
@@ -174,10 +309,7 @@ public sealed class ProtectedReleaseEvidenceProducerTests
             PeeledCommit = mismatch == "peeled-commit" ? new string('e', 40) : PeeledCommit,
         };
         var writer = new EvidenceArtifactWriter(declaration, GetWriterRoot(fixture.Root));
-        var producer = new ProtectedReleaseEvidenceProducer(
-            fixture.Root,
-            new FixedInvocationProvider(CreateInvocation()),
-            new FakeInspectAuthority(inspection));
+        var producer = CreateProducer(fixture.Root, new FixedInvocationProvider(CreateInvocation()), new FakeInspectAuthority(inspection));
 
         var result = await producer.ProduceAsync(CreateContext(declaration, writer), CancellationToken.None);
 
@@ -195,7 +327,7 @@ public sealed class ProtectedReleaseEvidenceProducerTests
         var invocationProvider = new FixedInvocationProvider(CreateInvocation());
         var inspectAuthority = new FakeInspectAuthority(CreateInspection());
         var writer = new EvidenceArtifactWriter(declaration, GetWriterRoot(fixture.Root));
-        var producer = new ProtectedReleaseEvidenceProducer(fixture.Root, invocationProvider, inspectAuthority);
+        var producer = CreateProducer(fixture.Root, invocationProvider, inspectAuthority);
 
         var result = await producer.ProduceAsync(CreateContext(declaration, writer), CancellationToken.None);
 
@@ -215,10 +347,7 @@ public sealed class ProtectedReleaseEvidenceProducerTests
             ReleaseArtifactDigests = [new ReleaseInspectArtifactDigest(new string('p', 20 * 1024), new string('a', 64))],
         };
         var writer = new EvidenceArtifactWriter(declaration, GetWriterRoot(fixture.Root));
-        var producer = new ProtectedReleaseEvidenceProducer(
-            fixture.Root,
-            new FixedInvocationProvider(CreateInvocation()),
-            new FakeInspectAuthority(inspection));
+        var producer = CreateProducer(fixture.Root, new FixedInvocationProvider(CreateInvocation()), new FakeInspectAuthority(inspection));
 
         var result = await producer.ProduceAsync(CreateContext(declaration, writer), CancellationToken.None);
 
@@ -238,10 +367,7 @@ public sealed class ProtectedReleaseEvidenceProducerTests
         Exception failureException = failure == "release-rejected"
             ? new ReleaseToolException(ReleaseDiagnostic.Error("release-invalid", "Tag inspection failed.", "Invalid tag.", "Correct the tag.", "releases/README.md"))
             : new IOException("The inspection stream is unavailable.");
-        var producer = new ProtectedReleaseEvidenceProducer(
-            fixture.Root,
-            new FixedInvocationProvider(CreateInvocation()),
-            new ThrowingInspectAuthority(failureException));
+        var producer = CreateProducer(fixture.Root, new FixedInvocationProvider(CreateInvocation()), new ThrowingInspectAuthority(failureException));
 
         var result = await producer.ProduceAsync(CreateContext(declaration, writer), CancellationToken.None);
 
@@ -262,10 +388,7 @@ public sealed class ProtectedReleaseEvidenceProducerTests
         var writer = new EvidenceArtifactWriter(declaration, GetWriterRoot(fixture.Root));
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
-        var producer = new ProtectedReleaseEvidenceProducer(
-            fixture.Root,
-            new FixedInvocationProvider(CreateInvocation()),
-            new FakeInspectAuthority(CreateInspection()));
+        var producer = CreateProducer(fixture.Root, new FixedInvocationProvider(CreateInvocation()), new FakeInspectAuthority(CreateInspection()));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
             await producer.ProduceAsync(CreateContext(declaration, writer), cancellation.Token));
@@ -338,7 +461,43 @@ public sealed class ProtectedReleaseEvidenceProducerTests
     private static string GetWriterRoot(string root) =>
         TestPathUtils.PathUnder(root, "artifacts", ProtectedReleaseEvidenceProducer.ProducerId);
 
+    private static ProtectedReleaseEvidenceProducer CreateProducer(
+        string root,
+        IProtectedReleaseInvocationProvider invocationProvider,
+        IReleaseInspectMachineAuthority? inspectAuthority = null,
+        FakeRemoteTagAuthority? remoteTagAuthority = null) =>
+        new(
+            root,
+            invocationProvider,
+            inspectAuthority,
+            remoteTagAuthority ?? new FakeRemoteTagAuthority(new ProtectedReleaseRemoteTagObservation(TagObjectId, PeeledCommit)));
+
     private static string ComputeSha256(ReadOnlySpan<byte> bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+
+    private static async Task<string> RunGitAsync(string workingDirectory, params string[] arguments)
+    {
+        var startInfo = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start git for the protected release test fixture.");
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        var standardError = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        var output = await standardOutput;
+        var error = await standardError;
+        Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {error}");
+        return output.Trim();
+    }
 
     private sealed class FixedInvocationProvider(ProtectedReleaseInvocation? invocation) : IProtectedReleaseInvocationProvider
     {
@@ -387,6 +546,26 @@ public sealed class ProtectedReleaseEvidenceProducerTests
             string tag,
             string baseRef,
             CancellationToken cancellationToken) => Task.FromException<ReleaseInspectMachineResult>(exception);
+    }
+
+    private sealed class FakeRemoteTagAuthority(ProtectedReleaseRemoteTagObservation? observation) : IProtectedReleaseRemoteTagAuthority
+    {
+        public int Calls { get; private set; }
+
+        public string? Tag { get; private set; }
+
+        public Exception? Failure { get; init; }
+
+        public Task<ProtectedReleaseRemoteTagObservation?> ReadAsync(
+            string tag,
+            CancellationToken cancellationToken)
+        {
+            Calls++;
+            Tag = tag;
+            return Failure is null
+                ? Task.FromResult(observation)
+                : Task.FromException<ProtectedReleaseRemoteTagObservation?>(Failure);
+        }
     }
 
     private sealed class AcceptedEnvelopeVerifier : IEvidenceExecutionEnvelopeVerifier

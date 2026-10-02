@@ -60,6 +60,8 @@ SUBJECT_RESULT_STEP_NAMES = (
 TRUSTED_SUBJECT_FILES = (
     "evidence-gate-handoff.py",
     "evidence-gate-subject.py",
+    "evidence-gate-subject-supervisor.py",
+    "evidence-gate-cleanup-attestation-check.py",
     "evidence-gate-subject-entrypoint.py",
 )
 SUBJECT_IMAGE_ENVIRONMENT_VARIABLE = "EVIDENCE_GATE_SUBJECT_IMAGE"

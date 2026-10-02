@@ -55,6 +55,8 @@ jobs:
           --filter "FullyQualifiedName~Release"
       - name: Validate controller capture and credentialless subject isolation
         run: python3 -m unittest discover -s scripts/tests -p 'test_evidence_gate_*.py'
+      - name: Validate protected-main image publisher guards
+        run: python3 -m unittest discover -s scripts/evidence-gate-subject-image -p 'test_publish_guard.py'
       - name: Rehearse exact docs-only plan, host, and local verification
         shell: bash
         run: |

@@ -1,0 +1,266 @@
+name: Evidence gate subject image publish (non-claiming)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/evidence-gate-subject-image-publish.yml
+      - scripts/evidence-gate-subject-image/**
+      - scripts/evidence-gate-build-offline-feed.py
+      - scripts/evidence-gate-subject-entrypoint.py
+      - ForgeTrust.AppSurface.slnx
+      - global.json
+      - Directory.*.props
+      - Directory.*.targets
+      - '**/Directory.*.props'
+      - '**/Directory.*.targets'
+      - '**/*.csproj'
+      - '**/packages*.lock.json'
+      - NuGet.*.config
+      - '**/NuGet.Config'
+      - '**/nuget.config'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evidence-gate-subject-image-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate exact local subject image
+    if: ${{ github.repository == 'forge-trust/AppSurface' && github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      image-id: ${{ steps.image.outputs.image-id }}
+      archive-sha256: ${{ steps.image.outputs.archive-sha256 }}
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the protected-main push without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.401
+
+      - name: Validate publisher context and configured image name
+        id: context
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          REF: ${{ github.ref }}
+          IMAGE: ${{ vars.EVIDENCE_GATE_SUBJECT_IMAGE }}
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          python3 scripts/evidence-gate-subject-image/publish_guard.py context \
+            --event-name "$EVENT_NAME" \
+            --repository "$REPOSITORY" \
+            --ref "$REF" \
+            --image "$IMAGE" \
+            --sha "$SHA" \
+            --run-id "$RUN_ID" \
+            --run-attempt "$RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+
+      - name: Build and validate the exact local image
+        shell: bash
+        run: bash ./scripts/evidence-gate-subject-image/validate-native.sh
+
+      - name: Save and identify the validated local image
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_tag='appsurface-subject-native-validation:local'
+          identity="$(docker image inspect --format '{{.Id}}|{{.Os}}|{{.Architecture}}' "$image_tag")"
+          IFS='|' read -r image_id image_os image_arch <<< "$identity"
+          python3 scripts/evidence-gate-subject-image/publish_guard.py image-identity \
+            --image-id "$image_id" --os "$image_os" --architecture "$image_arch"
+          archive="$RUNNER_TEMP/appsurface-subject-image.tar"
+          docker save --output "$archive" "$image_tag"
+          archive_sha256="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+          {
+            echo "image-id=$image_id"
+            echo "archive-sha256=$archive_sha256"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload exact image for the credentialed publisher job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: evidence-gate-subject-image-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/appsurface-subject-image.tar
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  publish:
+    name: Publish validated image and attest registry digest
+    needs: validate
+    if: ${{ needs.validate.result == 'success' && github.repository == 'forge-trust/AppSurface' && github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: evidence-gate-subject-image-publish
+      url: https://github.com/${{ github.repository }}/pkgs/container/appsurface-subject-native-validation
+    permissions:
+      actions: read
+      contents: read
+      packages: write
+      attestations: write
+      artifact-metadata: write
+      id-token: write
+    outputs:
+      image-reference: ${{ steps.registry.outputs.image-reference }}
+      image-digest: ${{ steps.registry.outputs.digest }}
+    steps:
+      - name: Check out the attested protected-main revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate protected publisher context
+        id: context
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          REF: ${{ github.ref }}
+          IMAGE: ${{ vars.EVIDENCE_GATE_SUBJECT_IMAGE }}
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          python3 scripts/evidence-gate-subject-image/publish_guard.py context \
+            --event-name "$EVENT_NAME" \
+            --repository "$REPOSITORY" \
+            --ref "$REF" \
+            --image "$IMAGE" \
+            --sha "$SHA" \
+            --run-id "$RUN_ID" \
+            --run-attempt "$RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+
+      - name: Require the publisher environment to be main-only and reviewed
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH_ENVIRONMENT: evidence-gate-subject-image-publish
+        run: |
+          set -euo pipefail
+          environment_json="$RUNNER_TEMP/publisher-environment.json"
+          branch_policies_json="$RUNNER_TEMP/publisher-branch-policies.json"
+          gh api "repos/$GITHUB_REPOSITORY/environments/$PUBLISH_ENVIRONMENT" > "$environment_json"
+          gh api "repos/$GITHUB_REPOSITORY/environments/$PUBLISH_ENVIRONMENT/deployment-branch-policies" \
+            > "$branch_policies_json"
+          python3 scripts/evidence-gate-subject-image/publish_guard.py environment \
+            --environment-json "$environment_json" \
+            --branch-policies-json "$branch_policies_json"
+
+      - name: Download the exact validated image archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: evidence-gate-subject-image-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/validated-subject-image
+
+      - name: Verify and load the unchanged image
+        shell: bash
+        env:
+          EXPECTED_ARCHIVE_SHA256: ${{ needs.validate.outputs.archive-sha256 }}
+          EXPECTED_IMAGE_ID: ${{ needs.validate.outputs.image-id }}
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/validated-subject-image/appsurface-subject-image.tar"
+          python3 scripts/evidence-gate-subject-image/publish_guard.py verify-archive \
+            --archive "$archive" --expected-sha256 "$EXPECTED_ARCHIVE_SHA256"
+          docker load --input "$archive"
+          identity="$(docker image inspect --format '{{.Id}}|{{.Os}}|{{.Architecture}}' \
+            appsurface-subject-native-validation:local)"
+          IFS='|' read -r image_id image_os image_arch <<< "$identity"
+          python3 scripts/evidence-gate-subject-image/publish_guard.py image-identity \
+            --image-id "$image_id" --os "$image_os" --architecture "$image_arch" \
+            --expected-image-id "$EXPECTED_IMAGE_ID"
+
+      - name: Log in to GHCR for this publish step only
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io \
+            --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Push validated image and capture registry manifest digest
+        id: registry
+        shell: bash
+        env:
+          IMAGE_NAME: ${{ steps.context.outputs.image_name }}
+          IMAGE_TAG: ${{ steps.context.outputs.image_tag }}
+          EXPECTED_IMAGE_ID: ${{ needs.validate.outputs.image-id }}
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker tag appsurface-subject-native-validation:local "$IMAGE_TAG"
+          current_main_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          python3 scripts/evidence-gate-subject-image/publish_guard.py main-head \
+            --source-sha "$SOURCE_SHA" --current-main-sha "$current_main_sha"
+          docker push "$IMAGE_TAG"
+
+          descriptor="$RUNNER_TEMP/subject-image-registry-descriptor.json"
+          raw_manifest="$RUNNER_TEMP/subject-image-registry-manifest.json"
+          docker buildx imagetools inspect "$IMAGE_TAG" --format '{{json .Manifest}}' > "$descriptor"
+          docker buildx imagetools inspect --raw "$IMAGE_TAG" > "$raw_manifest"
+          digest="$(python3 scripts/evidence-gate-subject-image/publish_guard.py manifest-digest \
+            --descriptor "$descriptor" --raw-manifest "$raw_manifest" \
+            --expected-image-id "$EXPECTED_IMAGE_ID")"
+          image_reference="${IMAGE_NAME}@${digest}"
+          docker pull "$image_reference"
+          published_identity="$(docker image inspect --format '{{.Id}}|{{.Os}}|{{.Architecture}}' \
+            "$image_reference")"
+          IFS='|' read -r published_image_id published_image_os published_image_arch \
+            <<< "$published_identity"
+          python3 scripts/evidence-gate-subject-image/publish_guard.py image-identity \
+            --image-id "$published_image_id" --os "$published_image_os" \
+            --architecture "$published_image_arch" --expected-image-id "$EXPECTED_IMAGE_ID"
+          {
+            echo "digest=$digest"
+            echo "image-reference=$image_reference"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Attest the immutable GHCR image digest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.context.outputs.image_name }}
+          subject-digest: ${{ steps.registry.outputs.digest }}
+          push-to-registry: true
+
+      - name: Publish reviewer-friendly digest summary
+        shell: bash
+        env:
+          IMAGE_REFERENCE: ${{ steps.registry.outputs.image-reference }}
+          IMAGE_ID: ${{ needs.validate.outputs.image-id }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          {
+            echo '## Evidence gate subject image (non-claiming)'
+            echo
+            echo "- Immutable GHCR reference: `$IMAGE_REFERENCE`"
+            echo "- Validated local image ID: `$IMAGE_ID`"
+            echo "- Protected-main source commit: `$SOURCE_SHA`"
+            echo '- GitHub artifact attestation: published for this immutable image digest.'
+            echo '- This publication does not establish evidence-gate eligibility or a coverage claim.'
+            echo
+            printf '%s\n' "- Verify: \`gh attestation verify \"oci://$IMAGE_REFERENCE\" --repo forge-trust/AppSurface --signer-workflow forge-trust/AppSurface/.github/workflows/evidence-gate-subject-image-publish.yml --source-ref refs/heads/main --source-digest $SOURCE_SHA\`"
+          } >> "$GITHUB_STEP_SUMMARY"

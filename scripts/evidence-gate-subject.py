@@ -15,14 +15,11 @@ command from the subject checkout.  Only ``code-coverage`` is enabled, with
 network disabled.  Resource-backed profiles remain rejected until their
 network/resource envelope has a separately reviewed implementation.
 
-The caller owns the new scratch directory after return and must treat every
-byte written there and all process output as untrusted.  Even exit code zero
-does not create complete Evidence or authorize a CI verdict.
-
-Normal completion and handled failures remove the container before unmounting
-the private host tmpfs. This process-local cleanup cannot run after SIGKILL or
-VM loss; an independent supervisor is still required before this primitive can
-support an eligible claim.
+The launcher consumes the bounded result record in memory, then requires an
+independent supervisor's completed cleanup attestation before returning. The
+supervisor removes the container, private host tmpfs, and per-run scratch. All
+output remains untrusted; even exit code zero does not create complete Evidence
+or authorize a CI verdict.
 """
 
 from __future__ import annotations
@@ -43,13 +40,20 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
 
 ENGINE_PATH = "/usr/bin:/usr/local/bin:/bin"
 SUDO_PATH = "/usr/bin/sudo"
 MOUNTINFO_PATH = Path("/proc/self/mountinfo")
+PROC_ROOT = Path("/proc")
 CONTAINER_ENTRYPOINT = "/usr/local/libexec/appsurface-subject-runner"
+SUPERVISOR_SCRIPT_NAME = "evidence-gate-subject-supervisor.py"
+SUPERVISOR_OWNER_LABEL = "io.forge-trust.appsurface.cleanup-token"
+SUPERVISOR_CLEANUP_DEADLINE_SECONDS = 10 * 60
+SUPERVISOR_STARTUP_TIMEOUT_SECONDS = 30
+MAX_SUPERVISOR_RECORD_BYTES = 4096
+SUPERVISOR_TOKEN_PATTERN = re.compile(r"[0-9a-f]{32}\Z")
 CONTAINER_UID = 65532
 CONTAINER_GID = 65532
 PODMAN_DEFAULT_CAPABILITIES = frozenset(
@@ -182,7 +186,433 @@ class SubjectRunResult:
         return False
 
 
+@dataclass(frozen=True)
+class SupervisorSession:
+    """Validated identity and private paths for one detached cleanup supervisor."""
+
+    owner_token: str
+    owner_label: str
+    manifest_path: Path
+    state_directory: Path
+    supervisor_pid: int
+    supervisor_start_time: int
+    ready: bool
+    state_directory_device: int
+    state_directory_inode: int
+
+    @property
+    def attestation_path(self) -> Path:
+        return self.state_directory / "cleanup-attestation.json"
+
+
+class CleanupSupervisorClient(Protocol):
+    """Public lifecycle seam used by ``run_profile`` and its integration tests."""
+
+    def start(
+        self,
+        *,
+        container_name: str,
+        scratch_directory: Path,
+        mountpoint: Path,
+        runner_temp: Path,
+        home: Path,
+        runtime: Path,
+        parent_pid: int,
+    ) -> SupervisorSession: ...
+
+    def assert_alive(self, session: SupervisorSession) -> None: ...
+
+    def request_and_wait(self, session: SupervisorSession) -> Mapping[str, Any]: ...
+
+
 CommandExecutor = Callable[..., CommandResult]
+
+
+def _linux_process_identity(pid: int, *, proc_root: Path = PROC_ROOT) -> tuple[int, str] | None:
+    """Read the Linux process start time and state used to reject PID reuse."""
+    try:
+        raw = (proc_root / str(pid) / "stat").read_text(encoding="ascii")
+        closing_paren = raw.rfind(")")
+        if closing_paren < 0:
+            return None
+        fields = raw[closing_paren + 1 :].split()
+        if len(fields) <= 19 or len(fields[0]) != 1:
+            return None
+        return int(fields[19]), fields[0]
+    except (OSError, UnicodeError, ValueError):
+        return None
+
+
+def _read_private_json_record(path: Path, *, directory: Path, uid: int, maximum_bytes: int) -> Mapping[str, Any]:
+    """Read a bounded regular file without following a replaced path or symlink."""
+    try:
+        directory_info = directory.lstat()
+        if (
+            not stat.S_ISDIR(directory_info.st_mode)
+            or directory_info.st_uid != uid
+            or stat.S_IMODE(directory_info.st_mode) != 0o700
+        ):
+            raise ValueError("unsafe record directory")
+        directory_fd = os.open(
+            directory,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        try:
+            opened_directory_info = os.fstat(directory_fd)
+            if (
+                opened_directory_info.st_dev != directory_info.st_dev
+                or opened_directory_info.st_ino != directory_info.st_ino
+                or opened_directory_info.st_uid != uid
+                or stat.S_IMODE(opened_directory_info.st_mode) != 0o700
+            ):
+                raise ValueError("record directory changed")
+            fd = os.open(
+                path.name,
+                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=directory_fd,
+            )
+            try:
+                info = os.fstat(fd)
+                if (
+                    not stat.S_ISREG(info.st_mode)
+                    or info.st_uid != uid
+                    or stat.S_IMODE(info.st_mode) != 0o600
+                    or info.st_nlink != 1
+                    or info.st_size <= 0
+                    or info.st_size > maximum_bytes
+                ):
+                    raise ValueError("unsafe record")
+                chunks: list[bytes] = []
+                remaining = maximum_bytes + 1
+                while remaining:
+                    chunk = os.read(fd, min(4096, remaining))
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    remaining -= len(chunk)
+                content = b"".join(chunks)
+                if len(content) > maximum_bytes:
+                    raise ValueError("oversized record")
+            finally:
+                os.close(fd)
+        finally:
+            os.close(directory_fd)
+    except FileNotFoundError:
+        raise
+    except (OSError, ValueError):
+        raise _fail("ASEGS017", "The cleanup supervisor record is unavailable or unsafe.") from None
+    try:
+        value = _parse_json(content, "cleanup supervisor record")
+    except SubjectLauncherError:
+        raise _fail("ASEGS017", "The cleanup supervisor record is malformed.") from None
+    if not isinstance(value, dict):
+        raise _fail("ASEGS017", "The cleanup supervisor record is malformed.")
+    return value
+
+
+class SubjectCleanupSupervisorClient:
+    """Start and communicate with the fixed detached cleanup supervisor."""
+
+    def __init__(
+        self,
+        *,
+        runner_temp: Path,
+        home: Path,
+        runtime: Path,
+        executor: CommandExecutor | None = None,
+        process_identity_reader: Callable[[int], tuple[int, str] | None] = _linux_process_identity,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        self.runner_temp = runner_temp
+        self.home = home
+        self.runtime = runtime
+        self.executor = executor or _run_command
+        self.process_identity_reader = process_identity_reader
+        self.monotonic = monotonic
+        self.sleep = sleep
+        self.uid = os.geteuid()
+        self.environment = {
+            "PATH": ENGINE_PATH,
+            "HOME": str(home),
+            "XDG_RUNTIME_DIR": str(runtime),
+            "RUNNER_TEMP": str(runner_temp),
+        }
+        self.script_path = Path(__file__).resolve().with_name(SUPERVISOR_SCRIPT_NAME)
+
+    def _run(self, arguments: Sequence[str], *, timeout_seconds: float) -> CommandResult:
+        return self.executor(
+            arguments,
+            timeout_seconds=timeout_seconds,
+            maximum_output_bytes=MAX_SUPERVISOR_RECORD_BYTES,
+            environment=self.environment,
+            cancel_event=threading.Event(),
+        )
+
+    def _validate_session_paths(self, session: SupervisorSession) -> Path:
+        if (
+            not isinstance(session, SupervisorSession)
+            or session.ready is not True
+            or not isinstance(session.owner_token, str)
+            or SUPERVISOR_TOKEN_PATTERN.fullmatch(session.owner_token) is None
+            or session.owner_label != SUPERVISOR_OWNER_LABEL
+            or type(session.supervisor_pid) is not int
+            or session.supervisor_pid <= 1
+            or type(session.supervisor_start_time) is not int
+            or session.supervisor_start_time <= 0
+        ):
+            raise _fail("ASEGS017", "The cleanup supervisor did not provide a ready owned session.")
+        expected_state = self.runner_temp / f"appsurface-subject-supervisor-{session.owner_token}"
+        expected_manifest = expected_state / "supervisor.json"
+        try:
+            state = _path_without_symlink_components(session.state_directory, "The cleanup supervisor state")
+            manifest = _path_without_symlink_components(session.manifest_path, "The cleanup supervisor manifest")
+            info = state.lstat()
+            if (
+                state != expected_state
+                or manifest != expected_manifest
+                or state.parent != self.runner_temp
+                or info.st_uid != self.uid
+                or not stat.S_ISDIR(info.st_mode)
+                or stat.S_IMODE(info.st_mode) != 0o700
+                or (info.st_dev, info.st_ino)
+                != (session.state_directory_device, session.state_directory_inode)
+            ):
+                raise ValueError("state identity mismatch")
+        except (SubjectLauncherError, OSError, ValueError):
+            raise _fail("ASEGS017", "The cleanup supervisor state path is unsafe.") from None
+        return state
+
+    def start(
+        self,
+        *,
+        container_name: str,
+        scratch_directory: Path,
+        mountpoint: Path,
+        runner_temp: Path,
+        home: Path,
+        runtime: Path,
+        parent_pid: int,
+    ) -> SupervisorSession:
+        if runner_temp != self.runner_temp or home != self.home or runtime != self.runtime:
+            raise _fail("ASEGS017", "The cleanup supervisor context differs from the validated runner paths.")
+        try:
+            resolved_script = _path_without_symlink_components(
+                self.script_path, "The trusted cleanup supervisor"
+            )
+            if not stat.S_ISREG(resolved_script.stat().st_mode):
+                raise _fail("ASEGS017", "The trusted cleanup supervisor is unavailable.")
+        except (SubjectLauncherError, OSError):
+            raise _fail("ASEGS017", "The trusted cleanup supervisor is unavailable.") from None
+        parent_identity = self.process_identity_reader(parent_pid)
+        if (
+            parent_identity is None
+            or not isinstance(parent_identity, tuple)
+            or len(parent_identity) != 2
+            or parent_identity[1] in {"Z", "X"}
+        ):
+            raise _fail("ASEGS017", "The launcher process identity could not be verified for cleanup.")
+        parent_start_time = parent_identity[0]
+        result = self._run(
+            [
+                sys.executable,
+                str(resolved_script),
+                "start",
+                "--container-name",
+                container_name,
+                "--scratch-directory",
+                str(scratch_directory),
+                "--mountpoint",
+                str(mountpoint),
+                "--parent-pid",
+                str(parent_pid),
+                "--parent-start-time",
+                str(parent_start_time),
+            ],
+            timeout_seconds=SUPERVISOR_STARTUP_TIMEOUT_SECONDS,
+        )
+        if (
+            result.returncode != 0
+            or result.stderr
+            or len(result.stdout) > MAX_SUPERVISOR_RECORD_BYTES
+        ):
+            raise _fail("ASEGS017", "The cleanup supervisor failed its bounded startup handshake.")
+        document = _parse_json(result.stdout, "cleanup supervisor readiness record")
+        expected_keys = {
+            "schemaVersion", "claimEligible", "ownerToken", "stateDirectory", "manifestPath",
+            "supervisorPid", "supervisorStartTime", "supervisorReady", "ownerLabel",
+        }
+        if (
+            not isinstance(document, dict)
+            or set(document) != expected_keys
+            or type(document.get("schemaVersion")) is not int
+            or document.get("schemaVersion") != 1
+            or document.get("claimEligible") is not False
+            or document.get("supervisorReady") is not True
+            or document.get("ownerLabel") != SUPERVISOR_OWNER_LABEL
+            or not isinstance(document.get("ownerToken"), str)
+            or SUPERVISOR_TOKEN_PATTERN.fullmatch(document["ownerToken"]) is None
+            or type(document.get("supervisorPid")) is not int
+            or document["supervisorPid"] <= 1
+            or type(document.get("supervisorStartTime")) is not int
+            or document["supervisorStartTime"] <= 0
+            or not isinstance(document.get("stateDirectory"), str)
+            or not isinstance(document.get("manifestPath"), str)
+        ):
+            raise _fail("ASEGS017", "The cleanup supervisor readiness record is incomplete.")
+        token = document["ownerToken"]
+        session = SupervisorSession(
+            owner_token=token,
+            owner_label=SUPERVISOR_OWNER_LABEL,
+            manifest_path=Path(document["manifestPath"]),
+            state_directory=Path(document["stateDirectory"]),
+            supervisor_pid=document["supervisorPid"],
+            supervisor_start_time=document["supervisorStartTime"],
+            ready=True,
+            state_directory_device=-1,
+            state_directory_inode=-1,
+        )
+        state = self._validate_session_start_paths(session)
+        manifest = _read_private_json_record(
+            session.manifest_path,
+            directory=state,
+            uid=self.uid,
+            maximum_bytes=MAX_SUPERVISOR_RECORD_BYTES,
+        )
+        if (
+            manifest.get("schemaVersion") != 1
+            or manifest.get("ownerToken") != token
+            or manifest.get("containerName") != container_name
+            or manifest.get("scratchDirectory") != str(scratch_directory)
+            or manifest.get("mountpoint") != str(mountpoint)
+            or manifest.get("parentPid") != parent_pid
+            or manifest.get("parentStartTime") != parent_start_time
+        ):
+            raise _fail("ASEGS017", "The cleanup supervisor manifest does not match this subject run.")
+        state_info = state.lstat()
+        session = SupervisorSession(
+            **{**session.__dict__, "state_directory_device": state_info.st_dev, "state_directory_inode": state_info.st_ino}
+        )
+        self._validate_session_paths(session)
+        try:
+            session.attestation_path.lstat()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            raise _fail("ASEGS017", "The cleanup supervisor attestation path is unsafe.") from None
+        else:
+            raise _fail("ASEGS017", "The cleanup supervisor returned a stale attestation.")
+        self.assert_alive(session)
+        return session
+
+    def _validate_session_start_paths(self, session: SupervisorSession) -> Path:
+        expected_state = self.runner_temp / f"appsurface-subject-supervisor-{session.owner_token}"
+        expected_manifest = expected_state / "supervisor.json"
+        try:
+            state = _path_without_symlink_components(session.state_directory, "The cleanup supervisor state")
+            manifest = _path_without_symlink_components(session.manifest_path, "The cleanup supervisor manifest")
+            state_info = state.lstat()
+            if (
+                state != expected_state
+                or manifest != expected_manifest
+                or state.parent != self.runner_temp
+                or state_info.st_uid != self.uid
+                or not stat.S_ISDIR(state_info.st_mode)
+                or stat.S_IMODE(state_info.st_mode) != 0o700
+            ):
+                raise ValueError("unsafe state path")
+            return state
+        except (SubjectLauncherError, OSError, ValueError):
+            raise _fail("ASEGS017", "The cleanup supervisor state path is unsafe.") from None
+
+    def assert_alive(self, session: SupervisorSession) -> None:
+        self._validate_session_paths(session)
+        identity = self.process_identity_reader(session.supervisor_pid)
+        if (
+            identity is None
+            or not isinstance(identity, tuple)
+            or len(identity) != 2
+            or identity[0] != session.supervisor_start_time
+            or identity[1] in {"Z", "X"}
+        ):
+            raise _fail("ASEGS017", "The cleanup supervisor stopped before subject setup completed.")
+
+    def request_and_wait(self, session: SupervisorSession) -> Mapping[str, Any]:
+        state = self._validate_session_paths(session)
+        try:
+            session.attestation_path.lstat()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            raise _fail("ASEGS017", "The cleanup supervisor attestation path is unsafe.") from None
+        else:
+            record = _read_private_json_record(
+                session.attestation_path,
+                directory=state,
+                uid=self.uid,
+                maximum_bytes=MAX_SUPERVISOR_RECORD_BYTES,
+            )
+            self._validate_attestation(record)
+            return record
+        self.assert_alive(session)
+        deadline = self.monotonic() + SUPERVISOR_CLEANUP_DEADLINE_SECONDS
+        request = self._run(
+            [
+                sys.executable,
+                str(self.script_path),
+                "request",
+                "--manifest",
+                str(session.manifest_path),
+                "--owner-token",
+                session.owner_token,
+            ],
+            timeout_seconds=min(
+                SUPERVISOR_STARTUP_TIMEOUT_SECONDS,
+                max(0.001, deadline - self.monotonic()),
+            ),
+        )
+        if request.returncode != 0 or request.stdout or request.stderr:
+            raise _fail("ASEGS017", "The cleanup supervisor rejected the bounded cleanup request.")
+        attestation_path = session.attestation_path
+        while True:
+            try:
+                _path_without_symlink_components(state, "The cleanup supervisor state")
+                record = _read_private_json_record(
+                    attestation_path,
+                    directory=state,
+                    uid=self.uid,
+                    maximum_bytes=MAX_SUPERVISOR_RECORD_BYTES,
+                )
+            except FileNotFoundError:
+                if self.monotonic() >= deadline:
+                    raise _fail("ASEGS017", "The cleanup supervisor did not produce a completed attestation.") from None
+                self.sleep(min(0.2, max(0.0, deadline - self.monotonic())))
+                continue
+            self._validate_attestation(record)
+            return record
+
+    @staticmethod
+    def _validate_attestation(record: Mapping[str, Any]) -> None:
+        expected_keys = {
+            "schemaVersion", "claimEligible", "published", "status", "trigger", "containerStatus",
+            "mountStatus", "scratchStatus", "failureCode", "cleanupDeadlineSeconds",
+        }
+        if (
+            not isinstance(record, Mapping)
+            or set(record) != expected_keys
+            or type(record.get("schemaVersion")) is not int
+            or record.get("schemaVersion") != 1
+            or record.get("claimEligible") is not False
+            or record.get("published") is not False
+            or record.get("status") != "complete"
+            or record.get("trigger") not in {"request", "parent-exit"}
+            or record.get("containerStatus") not in {"removed", "absent"}
+            or record.get("mountStatus") not in {"unmounted", "absent"}
+            or record.get("scratchStatus") not in {"removed", "absent"}
+            or record.get("failureCode") != "none"
+            or record.get("cleanupDeadlineSeconds") != SUPERVISOR_CLEANUP_DEADLINE_SECONDS
+        ):
+            raise _fail("ASEGS017", "The cleanup supervisor attestation is incomplete; no claim may be issued.")
 
 
 def _fail(code: str, message: str) -> SubjectLauncherError:
@@ -553,6 +983,7 @@ def _container_create_arguments(
     *,
     name: str,
     image: str,
+    owner_token: str,
     subject_root: Path,
     scratch_mountpoint: Path,
     profile_arguments: Sequence[str],
@@ -569,6 +1000,7 @@ def _container_create_arguments(
         "--pull=never",
         "--http-proxy=false",
         f"--name={name}",
+        f"--label={SUPERVISOR_OWNER_LABEL}={owner_token}",
         "--network=none",
         "--pid=private",
         "--ipc=private",
@@ -706,6 +1138,7 @@ def _verify_container_configuration(
     scratch_mountpoint: Path,
     limits: SubjectLimits,
     profile_arguments: Sequence[str],
+    owner_token: str,
 ) -> None:
     container = _one_inspect_object(data)
     config = container.get("Config")
@@ -722,6 +1155,9 @@ def _verify_container_configuration(
         raise _fail("ASEGS012", "The created container is not using its fixed non-root identity and work directory.")
     if config.get("Env") != list(CONTAINER_ENVIRONMENT):
         raise _fail("ASEGS012", "The created container environment differs from the fixed credentialless allowlist.")
+    labels = config.get("Labels")
+    if not isinstance(labels, dict) or labels.get(SUPERVISOR_OWNER_LABEL) != owner_token:
+        raise _fail("ASEGS012", "The created container does not carry this run's cleanup ownership label.")
     if host.get("ReadonlyRootfs") is not True:
         raise _fail("ASEGS012", "The created container root filesystem is not read-only.")
     cap_drop = host.get("CapDrop")
@@ -930,6 +1366,7 @@ def launch_subject(
     _engine_path: str | None = None,
     _host_mount_verifier: Callable[..., None] | None = None,
     _command_executor: CommandExecutor = _run_command,
+    supervisor_client: CleanupSupervisorClient | None = None,
 ) -> SubjectRunResult:
     """Run a fixed profile with host-mounted quota-limited scratch and export its result record."""
     _validate_limits(limits)
@@ -1001,14 +1438,50 @@ def launch_subject(
     run_id = env["GITHUB_RUN_ID"]
     attempt = env["GITHUB_RUN_ATTEMPT"]
     container_name = f"ase-subject-{run_id}-{attempt}-{secrets.token_hex(6)}"
-    create_attempted = False
-    mount_attempted = False
-    mount_cleanup_required = False
+    supervisor = supervisor_client or SubjectCleanupSupervisorClient(
+        runner_temp=runner_temp,
+        home=home,
+        runtime=runtime,
+        executor=_command_executor,
+    )
+    try:
+        supervisor_session = supervisor.start(
+            container_name=container_name,
+            scratch_directory=scratch,
+            mountpoint=scratch_mountpoint,
+            runner_temp=runner_temp,
+            home=home,
+            runtime=runtime,
+            parent_pid=os.getpid(),
+        )
+        if not isinstance(supervisor_session, SupervisorSession) or supervisor_session.ready is not True:
+            raise _fail("ASEGS017", "The cleanup supervisor did not complete its readiness handshake.")
+        owner_token = supervisor_session.owner_token
+        if (
+            not isinstance(owner_token, str)
+            or SUPERVISOR_TOKEN_PATTERN.fullmatch(owner_token) is None
+            or supervisor_session.owner_label != SUPERVISOR_OWNER_LABEL
+        ):
+            raise _fail("ASEGS017", "The cleanup supervisor returned an invalid ownership token.")
+    except SubjectLauncherError:
+        for directory in (scratch_mountpoint, scratch):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
+        raise
+    except Exception:
+        for directory in (scratch_mountpoint, scratch):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
+        raise _fail("ASEGS017", "The cleanup supervisor failed before subject setup.") from None
     primary_error: BaseException | None = None
     result: SubjectRunResult | None = None
     try:
         _check_cancel(event)
-        mount_attempted = True
+        supervisor.assert_alive(supervisor_session)
         mount_options = (
             "rw,nosuid,nodev,"
             f"size={MAX_PROFILE_SCRATCH_BYTES},"
@@ -1034,17 +1507,17 @@ def launch_subject(
         )
         if mount_result.returncode != 0:
             raise _fail("ASEGS019", "The quota-limited host scratch mount failed.")
-        mount_cleanup_required = True
         mount_verifier = _verify_host_scratch_mount if _host_mount_verifier is None else _host_mount_verifier
         mount_verifier(scratch_mountpoint, host_uid=effective_uid, host_gid=host_gid)
         _check_cancel(event)
-        create_attempted = True
+        supervisor.assert_alive(supervisor_session)
         _expect_success(
             _command_executor(
                 _container_create_arguments(
                     engine,
                     name=container_name,
                     image=image_digest,
+                    owner_token=owner_token,
                     subject_root=subject_root,
                     scratch_mountpoint=scratch_mountpoint,
                     profile_arguments=profile_arguments,
@@ -1074,6 +1547,7 @@ def launch_subject(
             scratch_mountpoint=scratch_mountpoint,
             limits=limits,
             profile_arguments=profile_arguments,
+            owner_token=owner_token,
         )
         _check_cancel(event)
         started = _command_executor(
@@ -1103,59 +1577,13 @@ def launch_subject(
         )
     except BaseException as exc:
         primary_error = exc
-        if mount_attempted and not mount_cleanup_required:
-            try:
-                mount_cleanup_required = _host_scratch_mount_is_present(scratch_mountpoint)
-            except BaseException:
-                # An unreadable mount table cannot prove that the failed mount
-                # left no mount behind, so make a best-effort unmount attempt.
-                mount_cleanup_required = True
-
-    cleanup_error: BaseException | None = None
-    if create_attempted:
-        try:
-            cleanup_result = _command_executor(
-                [engine, "--remote=false", "rm", "--force", "--ignore", container_name],
-                timeout_seconds=CLEANUP_TIMEOUT_SECONDS,
-                maximum_output_bytes=4096,
-                environment=engine_environment,
-                cancel_event=threading.Event(),
-            )
-            if cleanup_result.returncode != 0:
-                cleanup_error = _fail("ASEGS017", "The subject container cleanup failed; no claim may be issued.")
-        except BaseException as exc:
-            cleanup_error = exc
-
-    mount_unmounted = not mount_cleanup_required
-    # A failed container removal may leave a running bind-mount user. Preserve
-    # its host mount for external cleanup rather than detaching it underneath
-    # that process.
-    if mount_cleanup_required and (not create_attempted or cleanup_error is None):
-        try:
-            unmount_result = _command_executor(
-                [SUDO_PATH, "-n", "umount", "--", str(scratch_mountpoint)],
-                timeout_seconds=CLEANUP_TIMEOUT_SECONDS,
-                maximum_output_bytes=4096,
-                environment=engine_environment,
-                cancel_event=threading.Event(),
-            )
-            if unmount_result.returncode == 0:
-                mount_unmounted = True
-            elif cleanup_error is None:
-                cleanup_error = _fail("ASEGS017", "The host scratch tmpfs cleanup failed; no claim may be issued.")
-        except BaseException as exc:
-            if cleanup_error is None:
-                cleanup_error = exc
-
-    if mount_unmounted and cleanup_error is None:
-        try:
-            scratch_mountpoint.rmdir()
-        except OSError as exc:
-            if cleanup_error is None:
-                cleanup_error = exc
-
-    if cleanup_error is not None:
-        raise _fail("ASEGS017", "The subject container or host scratch cleanup failed; no claim may be issued.") from None
+    try:
+        supervisor_record = supervisor.request_and_wait(supervisor_session)
+        SubjectCleanupSupervisorClient._validate_attestation(supervisor_record)
+    except SubjectLauncherError:
+        raise
+    except Exception:
+        raise _fail("ASEGS017", "The cleanup supervisor did not attest complete cleanup.") from None
     if primary_error is not None:
         if isinstance(primary_error, SubjectLauncherError):
             raise primary_error

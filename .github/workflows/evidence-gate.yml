@@ -22,6 +22,8 @@ jobs:
     name: Evidence gate controller capture (non-claiming)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    outputs:
+      profile_id: ${{ steps.profile.outputs.profile_id }}
     permissions:
       contents: read
       pull-requests: read
@@ -86,6 +88,25 @@ jobs:
             --pr-run-identity "$identity" \
             --output "$RUNNER_TEMP/evidence-gate-plan"
 
+      - name: Export the bounded policy-selected profile
+        id: profile
+        if: ${{ steps.capture.outputs.mode == 'same-repository' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/evidence-gate-plan/evidence-plan.json" "$GITHUB_OUTPUT" <<'PY'
+          import json
+          import re
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as plan_file:
+              profile_id = json.load(plan_file)["Profile"]["Id"]
+          if not isinstance(profile_id, str) or re.fullmatch(r"[a-z0-9-]{1,64}", profile_id) is None:
+              raise SystemExit("The policy-selected profile cannot be exported safely.")
+          with open(sys.argv[2], "a", encoding="utf-8") as output_file:
+              output_file.write(f"profile_id={profile_id}\n")
+          PY
+
       - name: Compare the captured policy with protected-base policy fixtures
         if: ${{ steps.capture.outputs.mode == 'same-repository' }}
         shell: bash
@@ -135,12 +156,64 @@ jobs:
           compression-level: 0
           include-hidden-files: false
 
+  subject-image-preflight:
+    name: Evidence gate subject image provenance (non-claiming)
+    needs: controller-capture
+    if: ${{ needs.controller-capture.result == 'success' && needs.controller-capture.outputs.profile_id == 'code-coverage' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: read
+      attestations: read
+    outputs:
+      image: ${{ steps.verify.outputs.image }}
+    steps:
+      - name: Verify the protected-main publisher and registry digest
+        id: verify
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUBJECT_IMAGE: ${{ vars.EVIDENCE_GATE_SUBJECT_IMAGE_DIGEST }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$SUBJECT_IMAGE" =~ ^ghcr\.io/forge-trust/appsurface-subject-native-validation@sha256:[0-9a-f]{64}$ ]]; then
+            echo 'The configured subject image must be the reviewed GHCR package at its registry digest.' >&2
+            exit 1
+          fi
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin >/dev/null
+          gh attestation verify "oci://$SUBJECT_IMAGE" \
+            --repo forge-trust/AppSurface \
+            --signer-workflow forge-trust/AppSurface/.github/workflows/evidence-gate-subject-image-publish.yml \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/evidence-gate-image-attestation.json"
+          python3 - "$RUNNER_TEMP/evidence-gate-image-attestation.json" "${SUBJECT_IMAGE##*@sha256:}" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as verified_file:
+              results = json.load(verified_file)
+          expected_digest = sys.argv[2]
+          if not isinstance(results, list) or not any(
+              isinstance(subject.get("digest"), dict)
+              and subject["digest"].get("sha256") == expected_digest
+              for result in results
+              for subject in result.get("verificationResult", {}).get("statement", {}).get("subject", [])
+              if isinstance(subject, dict)
+          ):
+              raise SystemExit("The verified provenance does not name the configured registry digest.")
+          PY
+          printf 'image=%s\n' "$SUBJECT_IMAGE" >> "$GITHUB_OUTPUT"
+
   credentialless-subject:
     name: Evidence gate subject (credentialless, non-claiming)
-    needs: controller-capture
-    if: ${{ needs.controller-capture.result == 'success' }}
+    needs:
+      - controller-capture
+      - subject-image-preflight
+    if: ${{ always() && needs.controller-capture.result == 'success' && (needs.controller-capture.outputs.profile_id != 'code-coverage' || needs.subject-image-preflight.result == 'success') }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     permissions: {}
     steps:
       - name: Download this run's controller handoff
@@ -149,10 +222,27 @@ jobs:
           name: evidence-gate-controller-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/evidence-gate-controller-handoff
 
+      - name: Pull only the attested image digest without credentials
+        if: ${{ needs.controller-capture.outputs.profile_id == 'code-coverage' }}
+        shell: bash
+        env:
+          SUBJECT_IMAGE: ${{ needs.subject-image-preflight.outputs.image }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$SUBJECT_IMAGE" =~ ^ghcr\.io/forge-trust/appsurface-subject-native-validation@sha256:[0-9a-f]{64}$ ]]; then
+            echo 'The subject image digest is missing or malformed.' >&2
+            exit 1
+          fi
+          auth_file="$RUNNER_TEMP/evidence-gate-empty-registry-auth.json"
+          ( umask 077; printf '{}\n' > "$auth_file" )
+          env REGISTRY_AUTH_FILE="$auth_file" podman pull --authfile "$auth_file" --tls-verify=true "$SUBJECT_IMAGE"
+          env REGISTRY_AUTH_FILE="$auth_file" podman image inspect "$SUBJECT_IMAGE" --format '{{json .RepoDigests}}' |
+            python3 -c 'import json,sys; ref=sys.argv[1]; refs=json.load(sys.stdin); sys.exit(0 if isinstance(refs,list) and ref in refs else 1)' "$SUBJECT_IMAGE"
+
       - name: Execute the bounded non-claiming subject profile
         shell: bash
         env:
-          EVIDENCE_GATE_SUBJECT_IMAGE: ${{ vars.EVIDENCE_GATE_SUBJECT_IMAGE }}
+          EVIDENCE_GATE_SUBJECT_IMAGE: ${{ needs.subject-image-preflight.outputs.image }}
         run: |
           set -euo pipefail
           python3 "$RUNNER_TEMP/evidence-gate-controller-handoff/evidence-gate-handoff.py" execute \
@@ -161,6 +251,27 @@ jobs:
             --scratch-directory "$RUNNER_TEMP/evidence-gate-subject-scratch" \
             --result "$RUNNER_TEMP/evidence-gate-subject-result.json" \
             --image-digest "$EVIDENCE_GATE_SUBJECT_IMAGE"
+
+      - name: Require independent subject cleanup to attest completion
+        if: ${{ always() && needs.controller-capture.outputs.profile_id == 'code-coverage' }}
+        shell: bash
+        timeout-minutes: 11
+        run: |
+          set -euo pipefail
+          python3 "$RUNNER_TEMP/evidence-gate-controller-handoff/evidence-gate-cleanup-attestation-check.py" \
+            --runner-temp "$RUNNER_TEMP" \
+            --output "$RUNNER_TEMP/evidence-gate-cleanup-attestation.json"
+
+      - name: Upload the bounded non-claiming cleanup attestation
+        if: ${{ always() && needs.controller-capture.outputs.profile_id == 'code-coverage' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: evidence-gate-cleanup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence-gate-cleanup-attestation.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          include-hidden-files: false
 
       - name: Ensure a fixed non-claiming result exists
         if: ${{ always() }}
@@ -312,7 +423,7 @@ jobs:
             printf '%s\n' "- Credentialless subject job: $SUBJECT_RESULT"
             echo '- Subject handoff: controller snapshot execution is wired; the fixed result is always non-claiming.'
             echo '- Trusted verifier: the handoff and subject result are rebound to a fresh Git capture, then the current PR and subject job are reread for a non-claiming rehearsal.'
-            echo '- OCI prerequisite: a digest-pinned image must already exist in the rootless local image store and contain the locked offline feed.'
+            echo '- OCI prerequisite: trusted preflight verifies a protected-main image attestation; the credentialless subject job anonymously pulls that exact digest into its rootless local store.'
             echo '- Checkout/isolation attestation: unavailable to the verdict; no trusted verifier consumes an attestation.'
             echo '- Required gate verdict: unavailable; host registrations and complete producer verification are not established.'
           } >> "$GITHUB_STEP_SUMMARY"
