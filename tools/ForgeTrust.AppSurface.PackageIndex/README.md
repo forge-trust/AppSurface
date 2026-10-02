@@ -89,6 +89,92 @@ The native consumer starts with the [committed consumer lock](https://github.com
 
 The required hosts are exactly `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`, and `win-x64`. Native v2 receipts (`appsurface-tailwind-native-host-proof-v2`) are eligible; v1 is historical diagnostic data only. Each success binds producer ID/run/attempt, subject and manifest digests, source/version, current native invocation, expected and observed host RID/OS/process architecture, and per-first-party producer/restored raw SHA-512 and protected payload evidence. The closure includes Core and Tailwind and comes from the producer's successful `net10.0` consumer graph plus validated package inventory. It also records Tailwind release-manifest and selected host CLI digests, generated CSS, absence of companion dependency, and absence of native consumer output. Full modes, flags, report shapes, limits, recipes and recovery are in the [reference](../../docs/tailwind-artifact-provenance.md).
 
+## Durable preflight artifact proof (#845)
+
+The [schema-11 operations guide](../../Durable/heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist)
+defines the candidate, published and deployment gates for complete runtime-set preflight. The release carriers use
+[`verify-preflight-artifacts.sh`](https://github.com/forge-trust/AppSurface/blob/main/Durable/verify-preflight-artifacts.sh) and its
+[disposable package consumer](../../Durable/consumers/PostgreSqlPreflightConsumer/Program.cs) for one pair, enrollment
+of a second pair, identical reconciliation and a modeled two-pair schema-10 upgrade. The consumer installs the exact
+packed CLI and restores the matching PostgreSQL provider into isolated roots; it does not repack the product.
+The pre-upgrade schema-10 fixture proves SQL role capabilities: durable Work completion, Flow dispatch discovery,
+and a Schedule dispatch claim, plus Source dispatcher denials. It retires its unique probes through the restricted
+runtime and verifies their persisted state before upgrading. Actual registered provider Work, Flow and Schedule
+execution runs after migration and reconciliation. This modeled baseline does not claim historical binary
+compatibility. Guard-loss negatives use a separate disposable database with the same package bytes, roles and store
+identity, retaining canceled lane facts until the fixture container is disposed.
+The consumer also tests an observer failure while a real provider Work operation waits on a table lock in another
+disposable database. The controller must cancel and await its lane child and guard monitor before releasing that
+lock, verify the owned sessions and fence are gone, and withhold the receipt. Failure or timeout during this cleanup
+blocks the candidate proof. The same checked cleanup covers observation and backend-termination errors in the
+guard-loss probes; an elapsed wait alone never counts as a drained child.
+An independent fixture repeats the observer-failure check with a throwing cancellation callback. Nested cleanup
+must still drain both owned tasks and release their sessions before propagating that callback failure.
+An actual verified activation-drain failure follows the same cleanup path: it drains the guard monitor, releases the
+guard, and finishes and disposes the queued writer, while withholding the receipt.
+
+Candidate proof runs for each bundle in both release channels before the artifact manifest can authorize publication.
+A failed command or missing, incomplete, mismatched or stale receipt leaves that gate closed. The published smoke
+carrier then compares restored package contents and extracted role-recipe bytes with the candidate and runs the same proof.
+An earlier candidate result cannot stand in for the published proof. Source tests and tool help remain separate checks.
+
+The carrier binds `sourceCommit`, `runId`, and the immutable producer `artifactId` to the receipt and checks every
+first-party archive's nuspec package id, package version, canonical repository URL, and repository commit before the
+consumer runs. It rechecks the candidate bundle after the run. The public smoke restore explicitly requests every
+`publish` and `support_publish` manifest entry, including support packages unreachable from public dependency roots.
+Each restored archive must have the same ZIP entry names and uncompressed contents as its candidate, except the
+optional root `.signature.p7s` envelope added or updated by [NuGet repository signing](https://learn.microsoft.com/en-us/nuget/reference/signed-packages-reference).
+Duplicate entry names, changed package metadata, added/missing payloads, or a changed extracted PostgreSQL role recipe
+close the gate. ZIP compression, entry order and timestamps are not payload identity.
+
+The shared consumer runs from copies of the approved candidate archives, whose original manifest SHA-512 values are
+checked before and after execution. Passing signed public archives to that candidate manifest would invalidate its
+hash binding. The version-2 `.carrier.json` uses `ProofKind: issue845-public-feed-package-content-identity` and records
+`CandidatePackageSha256` and `PublicPackageSha256` maps for every manifest package, plus the candidate receipt and
+shared proof receipt hashes. These raw archive hashes may differ after signing. The carrier proves payload identity;
+NuGet restore owns signature validation, and the carrier receipt makes no independent signature-authenticity claim.
+Retain both receipts and the original manifest; a whole-archive public hash must never replace a candidate manifest hash.
+
+Each canonical CLI result row carries a `Scenario` identity. The one-pair scenario proves forwarder Work, Flow, and
+Schedule before and after; the installed `work_only` pair scenarios also prove Work succeeds while Flow, Schedule,
+and All are denied. Each before/after lane record binds its scenario, store, epoch, guard backend, and runtime-role
+results. The queued-writer receipt uses the additive `outcome` values `completed-before-writer` or
+`bounded-failure-then-rerun`, with `authoritativeScenario` bound to the fourth complete CLI evidence set
+(`queued-writer-prewriter-complete` or `queued-writer-postwriter-rerun`). The first branch records that the complete
+window finished before the writer acquired its lock; the recovery branch records a bounded failure, writer release
+and completion, then the complete post-writer window. This discriminator is an additive receipt-contract correction
+for the writer outcome union; the producer and shared contract must emit the same fields before release receipts can
+pass.
+
+The internal artifact-proof request supplies the repository root, frozen artifact directory, caller-owned manifest
+path, exact source commit, carrier run identifier and artifact identifier. A successful candidate proof moves the
+manifest to the approved path; on failure, the carrier preserves it at the caller-supplied path, rolling back a
+partial promotion when that path remains available. Candidate and published operations propagate cancellation to
+bounded child commands, validate complete proof receipts and retain package SHA-256 values alongside the artifact
+manifest's SHA-512 binding. Proof receipts contain synthetic role/store/epoch identity and stage timings; connection
+credentials stay in child-process environment variables. Consult the generated `--help` for the explicit carrier
+arguments, and retain the candidate receipt with the original bundle for the public smoke invocation.
+
+The internal `Program.RunAsync` command boundary accepts an optional `preflightCommandRunner` for verification of
+candidate and published command dispatch. Omitting it uses `CliWrapCommandRunner` to launch the real
+bounded consumer process. The override changes only that external-command boundary: argument parsing, archive and
+receipt validation, checked scratch cleanup, and manifest promotion still run through the production carrier.
+Promotion validates retained evidence without launching a consumer. This is an internal test seam, not a CLI option;
+injected fixture results do not replace the [exact-package proof](../../Durable/heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist).
+
+The fixture owner guard spans distinct runtime invocations, lane checks and a cancellable fixture activation callback.
+A released receipt records a completed disposable proof window; it cannot authorize a later deployment. An actual
+application activation requires independently reviewed inputs, named owners and its own continuous session-affine
+coordinator, as described in the canonical operations guide. Keep the existing release job deadlines: this proof does
+not authorize increasing them or skipping a scenario after a timeout.
+
+For production `smoke-install`, pass `--artifacts-input` for the downloaded frozen bundle, `--artifact-manifest`
+for its promoted manifest, `--preflight-source-commit`, `--preflight-run-id`, `--preflight-artifact-id`, and
+`--preflight-candidate-receipt`. The bundle directory must contain the receipt-bound candidate archives; the
+manifest path alone does not select that directory. The command validates the retained candidate receipt before public-feed restore
+evidence can authorize the shared proof. Its published receipt and `.carrier.json` record are written under the smoke
+work directory and should be retained with the smoke report.
+
 ## Python parser candidate gate
 
 The `inspect-python-parser-candidate` command is a bounded, static dependency-selection proof. It accepts one local
