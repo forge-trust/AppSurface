@@ -158,6 +158,74 @@ public sealed class ProtectedReleaseEvidenceProducerTests
         Assert.Empty(writer.WrittenArtifacts);
     }
 
+    [Fact]
+    public async Task OversizedInspectionProjectionIsRejectedBeforeAnyArtifactIsWritten()
+    {
+        using var fixture = new ProducerFixture();
+        var declaration = CreateDeclaration();
+        var inspection = CreateInspection() with
+        {
+            ReleaseArtifactDigests = [new ReleaseInspectArtifactDigest(new string('p', 20 * 1024), new string('a', 64))],
+        };
+        var writer = new EvidenceArtifactWriter(declaration, GetWriterRoot(fixture.Root));
+        var producer = new ProtectedReleaseEvidenceProducer(
+            fixture.Root,
+            new FixedInvocationProvider(CreateInvocation()),
+            new FakeInspectAuthority(inspection));
+
+        var result = await producer.ProduceAsync(CreateContext(declaration, writer), CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Invalid, result.Outcome);
+        Assert.Contains("artifact bound", result.Diagnostic, StringComparison.Ordinal);
+        Assert.Empty(writer.WrittenArtifacts);
+    }
+
+    [Theory]
+    [InlineData("release-rejected")]
+    [InlineData("unreadable-inspection")]
+    public async Task InspectFailureIsInvalidAndCannotWriteReleaseArtifacts(string failure)
+    {
+        using var fixture = new ProducerFixture();
+        var declaration = CreateDeclaration();
+        var writer = new EvidenceArtifactWriter(declaration, GetWriterRoot(fixture.Root));
+        Exception failureException = failure == "release-rejected"
+            ? new ReleaseToolException(ReleaseDiagnostic.Error("release-invalid", "Tag inspection failed.", "Invalid tag.", "Correct the tag.", "releases/README.md"))
+            : new IOException("The inspection stream is unavailable.");
+        var producer = new ProtectedReleaseEvidenceProducer(
+            fixture.Root,
+            new FixedInvocationProvider(CreateInvocation()),
+            new ThrowingInspectAuthority(failureException));
+
+        var result = await producer.ProduceAsync(CreateContext(declaration, writer), CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Invalid, result.Outcome);
+        Assert.Empty(result.SatisfiedAssertionIds);
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.Contains(
+            failure == "release-rejected" ? "Release inspect authority rejected" : "could not be captured",
+            result.Diagnostic,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CallerCancellationPropagatesWithoutAReleaseClaim()
+    {
+        using var fixture = new ProducerFixture();
+        var declaration = CreateDeclaration();
+        var writer = new EvidenceArtifactWriter(declaration, GetWriterRoot(fixture.Root));
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var producer = new ProtectedReleaseEvidenceProducer(
+            fixture.Root,
+            new FixedInvocationProvider(CreateInvocation()),
+            new FakeInspectAuthority(CreateInspection()));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await producer.ProduceAsync(CreateContext(declaration, writer), cancellation.Token));
+
+        Assert.Empty(writer.WrittenArtifacts);
+    }
+
     private static EvidenceProducerDeclaration CreateDeclaration() => new(
         ProtectedReleaseEvidenceProducer.ProducerId,
         "release-inspection",
@@ -262,6 +330,16 @@ public sealed class ProtectedReleaseEvidenceProducerTests
             BaseRef = baseRef;
             return Task.FromResult(result);
         }
+    }
+
+    private sealed class ThrowingInspectAuthority(Exception exception) : IReleaseInspectMachineAuthority
+    {
+        public Task<ReleaseInspectMachineResult> InspectAsync(
+            string repositoryRoot,
+            string version,
+            string tag,
+            string baseRef,
+            CancellationToken cancellationToken) => Task.FromException<ReleaseInspectMachineResult>(exception);
     }
 
     private sealed class AcceptedEnvelopeVerifier : IEvidenceExecutionEnvelopeVerifier
