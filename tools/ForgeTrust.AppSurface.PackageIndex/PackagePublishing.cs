@@ -776,7 +776,8 @@ internal sealed class PackagePublishWorkflow
 }
 
 /// <summary>
-/// Restores published public packages and verifies published .NET tools from a clean NuGet configuration after publish completes.
+/// Restores every publish and support_publish package and verifies published .NET tools from a clean NuGet
+/// configuration after publish completes. Explicit support references cover packages unreachable from public roots.
 /// </summary>
 internal sealed class PackageSmokeInstallWorkflow
 {
@@ -796,19 +797,22 @@ internal sealed class PackageSmokeInstallWorkflow
     private readonly IExternalCommandRunner _commandRunner;
     private readonly PackageSmokeInstallReportRenderer _reportRenderer;
     private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
+    private readonly DurablePreflightArtifactProof _preflightArtifactProof;
 
     internal PackageSmokeInstallWorkflow(
         PackageArtifactManifestReader manifestReader,
         PackagePublishPlanResolver planResolver,
         IExternalCommandRunner commandRunner,
         PackageSmokeInstallReportRenderer reportRenderer,
-        Func<TimeSpan, CancellationToken, Task> delayAsync)
+        Func<TimeSpan, CancellationToken, Task> delayAsync,
+        DurablePreflightArtifactProof? preflightArtifactProof = null)
     {
         _manifestReader = manifestReader;
         _planResolver = planResolver;
         _commandRunner = commandRunner;
         _reportRenderer = reportRenderer;
         _delayAsync = delayAsync;
+        _preflightArtifactProof = preflightArtifactProof ?? new DurablePreflightArtifactProof(commandRunner);
     }
 
     /// <summary>
@@ -856,7 +860,8 @@ internal sealed class PackageSmokeInstallWorkflow
             ?? throw new PackageIndexException("Package artifact manifest path must include a directory.");
         var entries = PackageArtifactManifestPlanValidator
             .Validate(plan, manifest, artifactDirectory)
-            .Where(entry => string.Equals(entry.ManifestEntry.Decision, "publish", StringComparison.OrdinalIgnoreCase))
+            .Where(entry => string.Equals(entry.ManifestEntry.Decision, "publish", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(entry.ManifestEntry.Decision, "support_publish", StringComparison.OrdinalIgnoreCase))
             .ToArray();
         Directory.CreateDirectory(request.WorkDirectory);
         var nugetConfigPath = Path.Combine(request.WorkDirectory, "NuGet.config");
@@ -934,6 +939,28 @@ internal sealed class PackageSmokeInstallWorkflow
         var report = new PackageSmokeInstallReport(manifest.PackageVersion, request.Source, reportEntries);
         Directory.CreateDirectory(Path.GetDirectoryName(request.ReportPath)!);
         await File.WriteAllTextAsync(request.ReportPath, _reportRenderer.RenderMarkdown(report), cancellationToken);
+
+        if (request.PreflightProof is not null)
+        {
+            if (reportEntries.Any(entry => entry.Status != PackageSmokeInstallStatus.Restored))
+            {
+                throw new PackageIndexException("Public-feed smoke failed; the published runtime-preflight proof cannot run.");
+            }
+
+            if (string.IsNullOrWhiteSpace(request.CandidatePreflightReceiptPath)
+                || string.IsNullOrWhiteSpace(request.PublishedPreflightReceiptPath))
+            {
+                throw new PackageIndexException("Public-feed runtime-preflight proof requires candidate and published receipt paths.");
+            }
+
+            await _preflightArtifactProof.RunPublishedAsync(
+                request.PreflightProof,
+                request.CandidatePreflightReceiptPath,
+                sharedPackagesPath,
+                request.PublishedPreflightReceiptPath,
+                cancellationToken);
+        }
+
         return report;
     }
 
@@ -1475,13 +1502,19 @@ internal sealed class TailwindPublicationEvidenceValidator : ITailwindPublicatio
 /// <param name="WorkDirectory">Isolated smoke install work directory.</param>
 /// <param name="ReportPath">Markdown smoke install report path.</param>
 /// <param name="Source">NuGet source URL.</param>
+/// <param name="PreflightProof">Exact-bundle proof request required for the production public-feed carrier.</param>
+/// <param name="CandidatePreflightReceiptPath">Validated candidate receipt retained with the producer artifact.</param>
+/// <param name="PublishedPreflightReceiptPath">Destination for the public-feed shared proof and transport receipt.</param>
 internal sealed record PackageSmokeInstallRequest(
     string RepositoryRoot,
     string ManifestPath,
     string ArtifactManifestPath,
     string WorkDirectory,
     string ReportPath,
-    string Source);
+    string Source,
+    DurablePreflightArtifactProofRequest? PreflightProof = null,
+    string? CandidatePreflightReceiptPath = null,
+    string? PublishedPreflightReceiptPath = null);
 
 /// <summary>
 /// Machine-readable artifact manifest that binds validated package artifacts to immutable hashes.
