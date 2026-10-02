@@ -206,7 +206,9 @@ def failure_diagnostic(error: Exception) -> dict:
                 value = getattr(error, name)
                 if isinstance(value, str) and value in allowed:
                     record[name] = value
-    if isinstance(error, LauncherError) and cause == "worker-protocol-incomplete" and error.operation == "worker-exit":
+    if (isinstance(error, LauncherError)
+            and cause in ("worker-protocol-incomplete", "worker-unsuccessful")
+            and error.operation == "worker-exit"):
         checkpoints = error.broker_checkpoints if isinstance(error.broker_checkpoints, dict) else {}
         for name in BROKER_DIAGNOSTIC_BOOLEANS:
             value = checkpoints.get(name)
@@ -329,6 +331,21 @@ def capture_worker_protocol_failure(error: LauncherError, broker: Broker, direct
         pass
 
 
+def require_successful_worker(properties: dict[str, str], worker_name: str,
+                              broker: Broker, directory_fd: int | None) -> None:
+    """Preserve a failed terminal worker status and attach the same bounded private capture.
+
+    Successful protocol exit does not make an unsuccessful process authoritative.
+    Journal text and codes stay diagnostic; capture cannot replace this failure.
+    """
+    if (properties.get("Result") != "success" or properties.get("User") != worker_name
+            or properties.get("KillMode") != "control-group"):
+        failure = worker_exit_failure("worker-unsuccessful", properties)
+        capture_worker_protocol_failure(failure, broker, directory_fd)
+        raise failure
+
+
+
 def validate_failure_diagnostic(record: object) -> dict:
     """Validate the bounded private record before a driver publishes its safe categories."""
     required = {"schema", "error_class", "cause"}
@@ -358,7 +375,8 @@ def validate_failure_diagnostic(record: object) -> dict:
                                or record[name] not in allowed):
             raise LauncherError("invalid-private-diagnostic")
     if protocol_fields & record.keys():
-        if record["cause"] != "worker-protocol-incomplete" or record.get("operation") != "worker-exit":
+        if (record["cause"] not in ("worker-protocol-incomplete", "worker-unsuccessful")
+                or record.get("operation") != "worker-exit"):
             raise LauncherError("invalid-private-diagnostic")
         for name in (*BROKER_DIAGNOSTIC_BOOLEANS, "worker_journal_written"):
             if name in record and type(record[name]) is not bool:
@@ -2178,9 +2196,7 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
             capture_worker_protocol_failure(failure, broker, diagnostic_directory_fd)
             raise failure
         wprops=broker._unit_properties(worker_unit)
-        if (wprops.get("Result") != "success" or wprops.get("User") != worker_name
-                or wprops.get("KillMode") != "control-group"):
-            raise worker_exit_failure("worker-unsuccessful", wprops)
+        require_successful_worker(wprops, worker_name, broker, diagnostic_directory_fd)
         if not broker._group_empty(wprops.get("ControlGroup", desc["cgroup"])): raise LauncherError("worker-exit-unconfirmed")
         if any(not broker._group_empty(g) for _,g in broker.units if g): raise LauncherError("subject-exit-unconfirmed")
         output = output_parent / args.output_slot
