@@ -692,6 +692,8 @@ public sealed class EvidencePullRequestGateVerifierTests
             artifact with { RelativePath = "other/build.txt" },
             artifact with { RelativePath = "reports\\build.txt" },
             artifact with { RelativePath = "reports/bad\nname.txt" },
+            artifact with { RelativePath = "reports/build.txt " },
+            artifact with { RelativePath = $"reports/{new string('x', EvidenceGitChangeCapture.MaximumPathBytes)}" },
             artifact with { Sha256 = "not-a-sha256" },
         };
 
@@ -713,6 +715,56 @@ public sealed class EvidencePullRequestGateVerifierTests
         var traversalManifest = ReplaceProducerResults(fixture.Manifest, [traversalResult]);
 
         Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, traversalPlan, traversalManifest));
+
+        foreach (var invalidProducerId in new[] { string.Empty, "build\n" })
+        {
+            var invalidProducer = producer with { Id = invalidProducerId };
+            var invalidPlan = fixture.Plan with
+            {
+                Profile = fixture.Plan.Profile with { Producers = [invalidProducer] },
+            };
+            var invalidResult = fixture.Manifest.ProducerResults.Single() with { ProducerId = invalidProducerId };
+            var invalidManifest = ReplaceProducerResults(fixture.Manifest, [invalidResult]);
+
+            Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, invalidPlan, invalidManifest));
+        }
+    }
+
+    [Fact]
+    public async Task NoFollowArtifactVerifier_ShouldRejectSymlinkedProducerDirectoryOnLinux()
+    {
+        if (!SupportsNoFollowVerifier)
+        {
+            return;
+        }
+
+        await using var fixture = await GateFixture.CreateAsync();
+        var verifier = new EvidencePullRequestGateNoFollowArtifactVerifier();
+        var producerRoot = Path.Join(fixture.ArtifactRoot, "build");
+        Directory.Delete(producerRoot, recursive: true);
+
+        var alternateProducerRoot = Path.Join(Path.GetDirectoryName(fixture.ArtifactRoot)!, "alternate-build");
+        var alternateArtifactPath = Path.Join(alternateProducerRoot, "reports", "build.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(alternateArtifactPath)!);
+        await File.WriteAllTextAsync(alternateArtifactPath, "trusted artifact bytes");
+        Directory.CreateSymbolicLink(producerRoot, alternateProducerRoot);
+
+        Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, fixture.Plan, fixture.Manifest));
+    }
+
+    [Fact]
+    public async Task NoFollowArtifactVerifier_ShouldAcceptProducerWithoutOptionalArtifactsOnLinux()
+    {
+        if (!SupportsNoFollowVerifier)
+        {
+            return;
+        }
+
+        await using var fixture = await GateFixture.CreateAsync(includeArtifact: false);
+        var verifier = new EvidencePullRequestGateNoFollowArtifactVerifier();
+
+        Assert.Empty(fixture.Manifest.ProducerResults.Single().Artifacts!);
+        Assert.True(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, fixture.Plan, fixture.Manifest));
     }
 
     [Fact]
@@ -862,6 +914,31 @@ public sealed class EvidencePullRequestGateVerifierTests
     }
 
     [Fact]
+    public async Task NoFollowArtifactVerifier_ShouldPropagateCancellationRaisedDuringVerificationOnLinux()
+    {
+        if (!SupportsNoFollowVerifier)
+        {
+            return;
+        }
+
+        await using var fixture = await GateFixture.CreateAsync();
+        var verifier = new EvidencePullRequestGateNoFollowArtifactVerifier();
+        using var cancellation = new CancellationTokenSource();
+        var manifest = fixture.Manifest with
+        {
+            ProducerResults = new CancellingReadOnlyList<EvidenceProducerResult>(
+                fixture.Manifest.ProducerResults,
+                cancellation),
+        };
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => verifier.VerifyArtifactsAsync(
+            fixture.ArtifactRoot,
+            fixture.Plan,
+            manifest,
+            cancellation.Token));
+    }
+
+    [Fact]
     public async Task VerifyAsync_ShouldRejectRecomputedManifestWithForgedArtifactHash()
     {
         if (!SupportsNoFollowVerifier)
@@ -978,6 +1055,22 @@ public sealed class EvidencePullRequestGateVerifierTests
         public T this[int index] => throw new InvalidOperationException("The untrusted collection cannot be indexed.");
 
         public IEnumerator<T> GetEnumerator() => throw new InvalidOperationException("The untrusted collection cannot be enumerated.");
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class CancellingReadOnlyList<T>(IReadOnlyList<T> items, CancellationTokenSource cancellation)
+        : IReadOnlyList<T>
+    {
+        public int Count => items.Count;
+
+        public T this[int index] => items[index];
+
+        public IEnumerator<T> GetEnumerator()
+        {
+            cancellation.Cancel();
+            return items.GetEnumerator();
+        }
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
