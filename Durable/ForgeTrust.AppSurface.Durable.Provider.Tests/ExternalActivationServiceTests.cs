@@ -361,7 +361,7 @@ public sealed class ExternalActivationServiceTests
     {
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
         var health = FixedHealth(ExternalActivationTestSupport.Health());
-        var caller = new CancellationTokenSource();
+        using var caller = new CancellationTokenSource();
         var aggregate = ExternalActivationTestSupport.PumpResult(failed: 2);
         var admission = new ExternalActivationAdmission((_, _) =>
         {
@@ -401,7 +401,7 @@ public sealed class ExternalActivationServiceTests
                          new DurableRuntimePumpAttempt(DurableRuntimePumpAttemptKind.Completed, aggregate, null),
                      })
             {
-                var lateCaller = new CancellationTokenSource();
+                using var lateCaller = new CancellationTokenSource();
                 var lateClock = new ExternalActivationClock();
                 var lateAdmission = new ExternalActivationAdmission((_, _) =>
                 {
@@ -467,7 +467,7 @@ public sealed class ExternalActivationServiceTests
     [InlineData("budget")]
     public async Task Pre_admission_cancellation_during_ignored_health_is_rechecked_after_the_read(string source)
     {
-        var caller = new CancellationTokenSource();
+        using var caller = new CancellationTokenSource();
         var clock = new ExternalActivationClock();
         var health = new ExternalActivationHealth(_ =>
         {
@@ -499,7 +499,7 @@ public sealed class ExternalActivationServiceTests
     [Fact]
     public async Task Caller_cancellation_wins_when_caller_and_budget_are_both_signaled_at_health_return()
     {
-        var caller = new CancellationTokenSource();
+        using var caller = new CancellationTokenSource();
         var clock = new ExternalActivationClock();
         var health = new ExternalActivationHealth(_ =>
         {
@@ -519,14 +519,15 @@ public sealed class ExternalActivationServiceTests
     [Fact]
     public async Task Pre_entry_caller_cancellation_and_null_health_are_classified_without_admission()
     {
-        var caller = new CancellationTokenSource();
+        using var caller = new CancellationTokenSource();
         caller.Cancel();
         var health = new ExternalActivationHealth(_ => ValueTask.FromResult(ExternalActivationTestSupport.Health()));
         var admission = RefusingAdmission();
 
         var canceled = await CreateService(health, admission).ActivateAsync(Request(), caller.Token);
         var nullHealth = new ExternalActivationHealth(_ => ValueTask.FromResult<DurableRuntimeHealthSnapshot>(null!));
-        var nullSnapshot = await CreateService(nullHealth, RefusingAdmission()).ActivateAsync(Request());
+        var nullAdmission = RefusingAdmission();
+        var nullSnapshot = await CreateService(nullHealth, nullAdmission).ActivateAsync(Request());
 
         Assert.Equal(DurableExternalActivationOutcomeKind.CanceledBeforeAdmission, canceled.Kind);
         Assert.Null(canceled.ObservedHealthState);
@@ -535,6 +536,7 @@ public sealed class ExternalActivationServiceTests
         Assert.Equal(DurableExternalActivationOutcomeKind.ActivationFailed, nullSnapshot.Kind);
         Assert.Null(nullSnapshot.ObservedHealthState);
         Assert.Equal(DurableProblemCodes.ExternalActivationFailed, nullSnapshot.ProblemCode);
+        Assert.Equal(0, nullAdmission.CallCount);
     }
 
     [Fact]
@@ -603,7 +605,8 @@ public sealed class ExternalActivationServiceTests
     {
         foreach (var source in new[] { "caller", "budget" })
         {
-            var caller = new CancellationTokenSource();
+            using var caller = new CancellationTokenSource();
+            using var exceptionTokenSource = new CancellationTokenSource();
             var clock = new ExternalActivationClock();
             var health = FixedHealth(ExternalActivationTestSupport.Health(
                 DurableRuntimeHealthState.Stale,
@@ -620,7 +623,7 @@ public sealed class ExternalActivationServiceTests
                 }
 
                 return ValueTask.FromException<DurableRuntimePumpAttempt>(
-                    new OperationCanceledException("unrelated exception token", new CancellationTokenSource().Token));
+                    new OperationCanceledException("unrelated exception token", exceptionTokenSource.Token));
             });
 
             var result = await CreateService(health, admission, clock).ActivateAsync(Request(RequestBudget), caller.Token);
@@ -635,11 +638,13 @@ public sealed class ExternalActivationServiceTests
     [Fact]
     public async Task Unrelated_operation_cancellation_maps_to_407_by_invocation_phase()
     {
+        using var preInvocationExceptionTokenSource = new CancellationTokenSource();
+        using var postInvocationExceptionTokenSource = new CancellationTokenSource();
         var preInvocation = new ExternalActivationHealth(_ => ValueTask.FromException<DurableRuntimeHealthSnapshot>(
-            new OperationCanceledException("not the caller token", new CancellationTokenSource().Token)));
+            new OperationCanceledException("not the caller token", preInvocationExceptionTokenSource.Token)));
         var before = await CreateService(preInvocation, RefusingAdmission()).ActivateAsync(Request());
         var afterInvocation = new ExternalActivationAdmission((_, _) => ValueTask.FromException<DurableRuntimePumpAttempt>(
-            new OperationCanceledException("not the caller token", new CancellationTokenSource().Token)));
+            new OperationCanceledException("not the caller token", postInvocationExceptionTokenSource.Token)));
         var after = await CreateService(FixedHealth(ExternalActivationTestSupport.Health()), afterInvocation)
             .ActivateAsync(Request());
 
@@ -654,7 +659,7 @@ public sealed class ExternalActivationServiceTests
     [Fact]
     public async Task A_non_cancellation_failure_remains_a_failure_even_after_a_cancellation_signal()
     {
-        var caller = new CancellationTokenSource();
+        using var caller = new CancellationTokenSource();
         var providerFailure = new InvalidOperationException("private provider detail");
         var admission = new ExternalActivationAdmission((_, _) =>
         {

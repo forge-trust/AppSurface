@@ -62,8 +62,9 @@ internal sealed class DurableExternalActivationService(
                 return result;
             }
 
-            ExternalActivationValidation.ValidateHealth(snapshot!);
-            if (snapshot!.State == DurableRuntimeHealthState.Unavailable)
+            ArgumentNullException.ThrowIfNull(snapshot);
+            ExternalActivationValidation.ValidateHealth(snapshot);
+            if (snapshot.State == DurableRuntimeHealthState.Unavailable)
             {
                 result = invocation.Result(DurableExternalActivationOutcomeKind.Unavailable, snapshot.ProblemCode);
             }

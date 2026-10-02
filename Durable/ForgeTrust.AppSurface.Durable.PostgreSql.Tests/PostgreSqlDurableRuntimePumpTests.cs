@@ -1722,14 +1722,37 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             maximumItems: 1,
             surfaces: DurableRuntimeSurface.Work)).AsTask();
 
-        await registration.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await delayedStore.FirstRenewalCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await Task.Delay(TimeSpan.FromMilliseconds(50));
-        Assert.Equal(1, delayedStore.RenewalCount);
-        registration.Complete.TrySetResult(registration.CompletionResult);
+        try
+        {
+            await registration.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var first = await delayedStore.FirstRenewalCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.NotNull(first.Renewed);
+            Assert.True(first.Renewed.LeaseExpiresAtUtc > first.Original.LeaseExpiresAtUtc);
+            Assert.True(first.Renewed.Revision > first.Original.Revision);
+            Assert.True(System.Diagnostics.Stopwatch.GetElapsedTime(first.StartedAt, first.CompletedAt)
+                > first.Original.LeaseRenewalCadence);
 
-        var result = await running.WaitAsync(TimeSpan.FromSeconds(5));
+            var second = await delayedStore.SecondRenewalCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.NotNull(second.Renewed);
+            Assert.Same(first.Renewed, second.Original);
+            Assert.True(second.Renewed.LeaseExpiresAtUtc > second.Original.LeaseExpiresAtUtc);
+            Assert.True(second.Renewed.Revision > second.Original.Revision);
+            // Measure entry after the first committed renewal, rather than relying on a short sleep that can overshoot.
+            Assert.True(System.Diagnostics.Stopwatch.GetElapsedTime(first.CompletedAt, second.StartedAt)
+                >= first.Renewed.LeaseRenewalCadence);
+        }
+        finally
+        {
+            registration.Complete.TrySetResult(registration.CompletionResult);
+            await running.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        var result = await running;
         Assert.Equal(1, result.Processed);
+        var snapshot = await provider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
+            new DurableWorkGetRequest(scope, accepted.Value!.WorkId));
+        Assert.True(snapshot.IsSuccess);
+        Assert.Equal(DurableWorkState.Succeeded, snapshot.Value!.State);
     }
 
     [Fact]
@@ -3630,6 +3653,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         }
     }
 
+    /// <summary>Delays the first renewal while retaining PostgreSQL lease fencing and committed renewal observations.</summary>
     private sealed class DelayedLeaseRenewalWorkStore : PostgreSqlDurableWorkStore
     {
         private int _renewalCount;
@@ -3639,18 +3663,41 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         {
         }
 
-        internal TaskCompletionSource FirstRenewalCompleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        /// <summary>Records the first real renewal, with monotonic timestamps surrounding its delay and database call.</summary>
+        internal TaskCompletionSource<(PostgreSqlDurableWorkClaim Original, PostgreSqlDurableWorkClaim? Renewed,
+            long StartedAt, long CompletedAt)> FirstRenewalCompleted
+        { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        internal int RenewalCount => Volatile.Read(ref _renewalCount);
+        /// <summary>Records the second real renewal so its entry can be compared with the first renewal's completion.</summary>
+        internal TaskCompletionSource<(PostgreSqlDurableWorkClaim Original, PostgreSqlDurableWorkClaim? Renewed,
+            long StartedAt, long CompletedAt)> SecondRenewalCompleted
+        { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        /// <inheritdoc />
         internal override async ValueTask<PostgreSqlDurableWorkClaim?> RenewLeaseAsync(
             PostgreSqlDurableWorkClaim claim,
             CancellationToken cancellationToken = default)
         {
-            _ = Interlocked.Increment(ref _renewalCount);
-            await Task.Delay(TimeSpan.FromMilliseconds(300), cancellationToken);
-            FirstRenewalCompleted.TrySetResult();
-            return claim with { LeaseExpiresAtUtc = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(1) };
+            var startedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+            var renewalNumber = Interlocked.Increment(ref _renewalCount);
+            if (renewalNumber == 1)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(300), cancellationToken);
+            }
+
+            // A fabricated expiry leaves the persisted lease unchanged and can make successful completion stale.
+            var renewed = await base.RenewLeaseAsync(claim, cancellationToken);
+            var completedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+            if (renewalNumber == 1)
+            {
+                FirstRenewalCompleted.TrySetResult((claim, renewed, startedAt, completedAt));
+            }
+            else if (renewalNumber == 2)
+            {
+                SecondRenewalCompleted.TrySetResult((claim, renewed, startedAt, completedAt));
+            }
+
+            return renewed;
         }
     }
 
