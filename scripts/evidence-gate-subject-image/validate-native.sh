@@ -198,6 +198,10 @@ scratch_inodes='unavailable'
 scratch_uid='unavailable'
 scratch_gid='unavailable'
 podman_runner_uid="$(id -u)"
+podman_runner_gid="$(id -g)"
+scratch_host_mount="$work_root/quota-limited-scratch"
+scratch_host_mounted=false
+scratch_host_unmount_succeeded=false
 
 write_podman_evidence() {
   PODMAN_EVIDENCE_PATH="$podman_evidence_path" \
@@ -224,6 +228,7 @@ write_podman_evidence() {
   SCRATCH_TMPFS_OPTIONS="$scratch_tmpfs_options" \
   SCRATCH_BYTES="$scratch_bytes" SCRATCH_INODES="$scratch_inodes" \
   SCRATCH_UID="$scratch_uid" SCRATCH_GID="$scratch_gid" \
+  SCRATCH_HOST_UNMOUNT_SUCCEEDED="$scratch_host_unmount_succeeded" \
   IMAGE_OS="$docker_image_os" IMAGE_ARCH="$docker_image_arch" \
   python3 -c '
 import json
@@ -312,6 +317,8 @@ record = {
         "liveObservation": observation,
     },
     "scratchContract": {
+        "mountApproach": "trusted-host-tmpfs-rootless-bind",
+        "hostUnmountSucceeded": flag("SCRATCH_HOST_UNMOUNT_SUCCEEDED"),
         "options": os.environ["SCRATCH_TMPFS_OPTIONS"],
         "bytes": integer("SCRATCH_BYTES"),
         "inodes": integer("SCRATCH_INODES"),
@@ -347,6 +354,21 @@ podman_smoke_cleanup() {
         podman_diagnostic="$podman_diagnostic;container-cleanup-failed"
       else
         podman_diagnostic='container-cleanup-failed'
+      fi
+      [[ "$exit_code" -ne 0 ]] || exit_code=1
+    fi
+  fi
+  if [[ "$scratch_host_mounted" == true ]]; then
+    if timeout --signal=TERM --kill-after=5s 30s sudo -n umount "$scratch_host_mount"; then
+      scratch_host_mounted=false
+      scratch_host_unmount_succeeded=true
+    else
+      podman_status='failed'
+      podman_phase='cleanup'
+      if [[ -n "$podman_diagnostic" ]]; then
+        podman_diagnostic="$podman_diagnostic;scratch-host-unmount-failed"
+      else
+        podman_diagnostic='scratch-host-unmount-failed'
       fi
       [[ "$exit_code" -ne 0 ]] || exit_code=1
     fi
@@ -426,6 +448,20 @@ if [[ "$scratch_bytes" != '4294967296' || "$scratch_inodes" != '262144' \
   || "$scratch_uid" != '65532' || "$scratch_gid" != '65532' ]]; then
   podman_fail "$podman_phase" 'launcher-scratch-contract-changed'
 fi
+if [[ "$scratch_tmpfs_options" != "rw,nosuid,nodev,size=$scratch_bytes,nr_inodes=$scratch_inodes,mode=0700,uid=$scratch_uid,gid=$scratch_gid" ]]; then
+  podman_fail "$podman_phase" 'launcher-scratch-options-changed'
+fi
+
+podman_phase='mount-host-scratch'
+if ! mkdir -m 0700 "$scratch_host_mount"; then
+  podman_fail "$podman_phase" 'scratch-mountpoint-create-failed'
+fi
+if ! timeout --signal=TERM --kill-after=5s 30s sudo -n mount -t tmpfs \
+  -o "rw,nosuid,nodev,size=$scratch_bytes,nr_inodes=$scratch_inodes,mode=0700,uid=$podman_runner_uid,gid=$podman_runner_gid" \
+  tmpfs "$scratch_host_mount"; then
+  podman_fail "$podman_phase" 'quota-limited-host-tmpfs-mount-failed'
+fi
+scratch_host_mounted=true
 
 podman_phase='image-transfer'
 podman_archive="$work_root/candidate-image.docker.tar"
@@ -508,8 +544,8 @@ checks = {
     "scratchByteStatvfs": actual_bytes == expected_bytes,
     "scratchInodeStatvfs": stat.f_files == expected_inodes,
     "scratchMode": mode == 0o700,
-    "scratchUid": values.get("uid") == str(expected_uid),
-    "scratchGid": values.get("gid") == str(expected_gid),
+    "scratchUid": os.stat("/scratch").st_uid == expected_uid,
+    "scratchGid": os.stat("/scratch").st_gid == expected_gid,
 }
 record = {
     "schema": "appsurface-subject-podman-live-mount-v1",
@@ -541,7 +577,7 @@ if ! podman_container_id="$(timeout --signal=TERM --kill-after=5s 30s \
   --user="$scratch_uid:$scratch_gid" \
   --cap-drop=ALL --security-opt=no-new-privileges \
   --pids-limit=64 --memory=256m --cpus=0.500 \
-  --tmpfs "/scratch:$scratch_tmpfs_options" \
+  --mount "type=bind,src=$scratch_host_mount,dst=/scratch,rw=true,bind-propagation=rprivate" \
   --entrypoint=/usr/bin/python3 "$image_tag" -c "$podman_probe" \
   "$scratch_bytes" "$scratch_inodes" "$scratch_uid" "$scratch_gid")"; then
   podman_fail "$podman_phase" 'podman-container-create-failed'
@@ -552,7 +588,7 @@ verify_podman_inspect() {
   local inspect_path="$1"
   local checks_path="$2"
   local require_scratch="$3"
-  python3 - "$inspect_path" "$require_scratch" "$scratch_uid" "$scratch_gid" \
+  python3 - "$inspect_path" "$require_scratch" "$scratch_uid" "$scratch_gid" "$scratch_host_mount" \
     > "$checks_path" <<'PY'
 import json
 import sys
@@ -577,8 +613,9 @@ checks = {
     ),
 }
 if sys.argv[2] == "true":
-    checks["scratchMountedReadWriteTmpfs"] = (
-        len(scratch) == 1 and scratch[0].get("Type") == "tmpfs" and scratch[0].get("RW") is True
+    checks["scratchMountedReadWriteHostTmpfs"] = (
+        len(scratch) == 1 and scratch[0].get("Type") == "bind"
+        and scratch[0].get("Source") == sys.argv[5] and scratch[0].get("RW") is True
     )
     checks["containerExitedZero"] = state.get("Status") == "exited" and state.get("ExitCode") == 0
 print(json.dumps({"checks": checks, "state": state}, sort_keys=True))
@@ -646,6 +683,13 @@ if ! timeout --signal=TERM --kill-after=5s 30s \
 fi
 podman_cleanup_succeeded=true
 podman_container_removed=true
+if ! timeout --signal=TERM --kill-after=5s 30s sudo -n umount "$scratch_host_mount"; then
+  podman_status='failed'
+  podman_diagnostic='scratch-host-unmount-failed'
+  podman_fail 'cleanup' "$podman_diagnostic"
+fi
+scratch_host_mounted=false
+scratch_host_unmount_succeeded=true
 podman_phase='complete'
 if ! write_podman_evidence; then
   podman_status='failed'
