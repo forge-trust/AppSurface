@@ -29,7 +29,8 @@ REQUIRED = (
     PREFIX + "NativeHttpResource/packages.lock.json", PREFIX + "NativeHttpResource/README.md",
 )
 FIXES = {"watchdog-ready-ack-and-liveness", "pump-eof-and-failure",
-         "main-only-cooperative-term-and-zero-exit", "pinned-store-path-after-builder"}
+         "main-only-cooperative-term-and-zero-exit", "pinned-store-path-after-builder",
+         "pinned-dcp-publisher-options", "bounded-startup-identity-rejection"}
 MARKERS = ("CODEX_SANDBOX", "SANDBOX_MODE", "IN_SANDBOX", "IS_SANDBOX")
 
 
@@ -252,6 +253,63 @@ def group_empty(unit):
     return not path.exists() or all(not entry.read_text().strip() for entry in path.rglob("cgroup.procs"))
 
 
+
+def control_log_allowed(name, info):
+    limits = {"stdout.log": 1024 * 1024, "stderr.log": 1024 * 1024,
+              "receipt.json": 1024 * 1024, "quarantine": 1024 * 1024,
+              "identity-rejection.json": 4096}
+    return (name in limits and stat.S_ISREG(info.st_mode) and info.st_uid == 0
+            and info.st_nlink == 1 and 0 <= info.st_size <= limits[name]
+            and (name != "identity-rejection.json" or stat.S_IMODE(info.st_mode) == 0o600))
+
+
+def control_log_identity(info):
+    return (info.st_dev, info.st_ino, info.st_uid, info.st_mode, info.st_nlink,
+            info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def retain_control_logs(control, logs, case):
+    """Retain only fixed root-owned files; the identity diagnostic is private, 0600 and <=4096 bytes."""
+    valid, identity_retained = True, False
+    for name in ("stdout.log", "stderr.log", "receipt.json", "quarantine", "identity-rejection.json"):
+        path = control / name
+        target = logs / f"{case}.control-{name}"
+        created = False
+        fd = None
+        try:
+            try:
+                before = path.lstat()
+            except FileNotFoundError:
+                continue
+            if not control_log_allowed(name, before):
+                valid = False
+                continue
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            if control_log_identity(os.fstat(fd)) != control_log_identity(before):
+                valid = False
+                continue
+            with os.fdopen(fd, "rb", closefd=False) as stream:
+                data = stream.read(before.st_size + 1)
+            if (len(data) != before.st_size
+                    or control_log_identity(os.fstat(fd)) != control_log_identity(before)
+                    or control_log_identity(path.lstat()) != control_log_identity(before)):
+                valid = False
+                continue
+            with target.open("xb") as sink:
+                created = True
+                os.fchmod(sink.fileno(), 0o600)
+                sink.write(data)
+            identity_retained |= name == "identity-rejection.json"
+        except (OSError, ValueError):
+            valid = False
+            if created:
+                target.unlink(missing_ok=True)
+        finally:
+            if fd is not None:
+                os.close(fd)
+    return valid, identity_retained
+
+
 def root_cases(args):
     if os.geteuid() != 0:
         raise ValueError("root-controller-required")
@@ -324,14 +382,10 @@ def root_cases(args):
                 case_groups_empty &= group_empty(unit)
                 valid &= case_groups_empty
                 control = base / "control"
-                for name in ("stdout.log", "stderr.log", "receipt.json", "quarantine"):
-                    path = control / name
-                    if path.exists():
-                        info = path.lstat()
-                        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_size > 1024 * 1024:
-                            valid = False
-                            continue
-                        shutil.copyfile(path, logs / f"{case}.control-{name}")
+                retained_ok, identity_retained = retain_control_logs(control, logs, case)
+                valid &= retained_ok
+                if receipt.get("identity_diagnostic_written") is True:
+                    valid &= identity_retained
             safe_exit = case_groups_empty
             # Public summary contains fixed case names, booleans, numeric exits and hashes, never raw child errors.
             summaries.append({"case": case, "passed": bool(valid), "exit_code": result["exit_code"],
