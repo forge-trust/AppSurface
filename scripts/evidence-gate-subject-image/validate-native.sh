@@ -822,7 +822,12 @@ else
   exit "$cold_restore_exit_code"
 fi
 
-if [[ -z "$(find "$cold_root/cache" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+if ! cache_entry="$(timeout --signal=TERM --kill-after=5s 30s \
+  sudo -n find "$cold_root/cache" -mindepth 1 -maxdepth 1 -print -quit)"; then
+  echo 'The offline package cache could not be inspected after restore.' >&2
+  exit 2
+fi
+if [[ -z "$cache_entry" ]]; then
   echo 'The offline restore produced no packages in its empty cache.' >&2
   exit 2
 fi
