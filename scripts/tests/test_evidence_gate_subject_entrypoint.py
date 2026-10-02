@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -439,6 +440,57 @@ class FixedOfflineSubjectEntrypointTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertTrue(first.endswith(b"\n"))
         self.assertEqual(first, (json.dumps(json.loads(first), ensure_ascii=True, separators=(",", ":"), sort_keys=True) + "\n").encode("ascii"))
+
+    def test_main_streams_the_bounded_result_record_for_attached_launcher_capture(self) -> None:
+        class CapturedStdout:
+            def __init__(self) -> None:
+                self.buffer = io.BytesIO()
+
+        for status, exit_code, diagnostic in (
+            ("completed", 0, None),
+            ("failed", 2, ("ASESE010", "coverage unavailable")),
+        ):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as temporary:
+                scratch = Path(temporary).resolve()
+                invocation = entrypoint.Invocation(
+                    entrypoint.FIXED_PROFILE_ID,
+                    entrypoint.SUBJECT_ROOT,
+                    scratch,
+                    entrypoint.DEPENDENCY_SOURCE,
+                    True,
+                )
+                expected = entrypoint._make_result(status, [], diagnostic=diagnostic)
+                captured = CapturedStdout()
+
+                def write_record(_invocation: entrypoint.Invocation) -> int:
+                    entrypoint._write_result(scratch, expected)
+                    return exit_code
+
+                with (
+                    mock.patch.object(entrypoint, "parse_invocation", return_value=invocation),
+                    mock.patch.object(entrypoint, "execute", side_effect=write_record),
+                    mock.patch("sys.stdout", captured),
+                ):
+                    self.assertEqual(exit_code, entrypoint.main([]))
+
+                self.assertEqual(expected, captured.buffer.getvalue())
+
+    def test_result_transport_rejects_oversized_or_symlinked_record(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            scratch = Path(temporary).resolve()
+            oversized = scratch / entrypoint.RESULT_RELATIVE_PATH
+            oversized.write_bytes(b"x" * (entrypoint.MAX_RESULT_BYTES + 1))
+            with self.assertRaisesRegex(entrypoint.EntrypointError, "bounded") as oversized_failure:
+                entrypoint._result_for_transport(scratch)
+            self.assertEqual("ASESE009", oversized_failure.exception.code)
+
+            oversized.unlink()
+            target = scratch / "target"
+            target.write_bytes(b"{}")
+            (scratch / entrypoint.RESULT_RELATIVE_PATH).symlink_to(target)
+            with self.assertRaises(entrypoint.EntrypointError) as symlink_failure:
+                entrypoint._result_for_transport(scratch)
+            self.assertEqual("ASESE009", symlink_failure.exception.code)
 
     def test_process_cleanup_fails_closed_when_group_cannot_be_reaped(self) -> None:
         process = mock.Mock(pid=12345)

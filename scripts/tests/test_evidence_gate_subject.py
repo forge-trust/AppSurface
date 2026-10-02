@@ -37,8 +37,14 @@ class FakeExecutor:
         self.calls: list[tuple[list[str], dict[str, object]]] = []
         self.container_name: str | None = None
         self.fail_start: BaseException | None = None
+        self.start_exit_code = 0
+        self.start_stderr = b""
         self.fail_cleanup = False
+        self.result_export: bytes | None = (
+            b'{"claimEligible":false,"profileId":"code-coverage","schemaVersion":1,"status":"completed","steps":[]}\n'
+        )
         self.config_override: dict[str, object] | None = None
+        self.mounts_override: list[dict[str, object]] | None = None
 
     def __call__(self, arguments: list[str], **options: object) -> subject.CommandResult:
         self.calls.append((list(arguments), dict(options)))
@@ -74,7 +80,7 @@ class FakeExecutor:
         if command[1] == "start":
             if self.fail_start is not None:
                 raise self.fail_start
-            return subject.CommandResult(0, b"subject output", b"")
+            return subject.CommandResult(self.start_exit_code, self.result_export or b"", self.start_stderr)
         if command[1:3] == ["rm", "--force"]:
             return subject.CommandResult(1 if self.fail_cleanup else 0, b"", b"")
         raise AssertionError(f"unexpected fixed engine argv: {arguments!r}")
@@ -101,9 +107,10 @@ class FakeExecutor:
         create_call = next(call for call, _ in self.calls if len(call) > 2 and call[2] == "create")
         mounts = [create_call[index + 1] for index, value in enumerate(create_call[:-1]) if value == "--mount"]
         subject_mount = next(value for value in mounts if "dst=/subject," in value)
-        scratch_mount = next(value for value in mounts if "dst=/scratch," in value)
         subject_source = next(value.split("=", 1)[1] for value in subject_mount.split(",") if value.startswith("src="))
-        scratch_source = next(value.split("=", 1)[1] for value in scratch_mount.split(",") if value.startswith("src="))
+        tmpfs_mount = create_call[create_call.index("--tmpfs") + 1]
+        tmpfs_destination, separator, tmpfs_options = tmpfs_mount.partition(":")
+        assert separator and tmpfs_destination == "/scratch"
         create_arguments = create_call
         pids = int(next(value.partition("=")[2] for value in create_arguments if value.startswith("--pids-limit=")))
         memory_mib = int(next(value.partition("=")[2][:-1] for value in create_arguments if value.startswith("--memory=")))
@@ -131,6 +138,7 @@ class FakeExecutor:
                     "Privileged": False,
                     "Devices": [],
                     "PortBindings": {},
+                    "Tmpfs": {"/scratch": tmpfs_options},
                     "PidMode": "private",
                     "IpcMode": "private",
                     "CgroupnsMode": "private",
@@ -138,12 +146,14 @@ class FakeExecutor:
                 },
                 "Mounts": [
                     {"Type": "bind", "Source": subject_source, "Destination": "/subject", "RW": False},
-                    {"Type": "bind", "Source": scratch_source, "Destination": "/scratch", "RW": True},
+                    {"Type": "tmpfs", "Source": "tmpfs", "Destination": "/scratch", "RW": True},
                 ],
             }
         ]
         if self.config_override:
             document[0]["HostConfig"].update(self.config_override)
+        if self.mounts_override is not None:
+            document[0]["Mounts"] = self.mounts_override
         return self.result(document)
 
 
@@ -204,9 +214,13 @@ class EvidenceGateSubjectTests(unittest.TestCase):
         result = self.launch()
 
         self.assertEqual(0, result.exit_code)
-        self.assertEqual(b"subject output", result.stdout)
+        self.assertEqual(b"", result.stdout)
         self.assertFalse(result.claim_eligible)
         self.assertEqual(0o700, stat.S_IMODE(result.scratch_directory.stat().st_mode))
+        exported_result = result.scratch_directory / subject.SUBJECT_RESULT_RELATIVE_PATH
+        self.assertTrue(exported_result.is_file())
+        self.assertFalse(json.loads(exported_result.read_bytes())["claimEligible"])
+        self.assertEqual("completed", json.loads(exported_result.read_bytes())["status"])
 
         self.assertTrue(all(call[1] == "--remote=false" for call, _ in self.executor.calls))
         create = next(call for call, _ in self.executor.calls if call[2] == "create")
@@ -229,7 +243,20 @@ class EvidenceGateSubjectTests(unittest.TestCase):
         self.assertNotIn("GITHUB_TOKEN", " ".join(create))
         self.assertNotIn("subject-owned-command.txt", " ".join(create))
         self.assertFalse(any("token" in value.casefold() or "socket" in value.casefold() for value in create))
-        self.assertEqual(2, len([value for value in create if value == "--mount"]))
+        self.assertEqual(1, len([value for value in create if value == "--mount"]))
+        self.assertNotIn(str(self.runner_temp / "subject-scratch"), " ".join(create))
+        tmpfs_mount = create[create.index("--tmpfs") + 1]
+        self.assertIn(f"size={subject.MAX_PROFILE_SCRATCH_BYTES}", tmpfs_mount)
+        self.assertIn(f"nr_inodes={subject.MAX_PROFILE_SCRATCH_INODES}", tmpfs_mount)
+        self.assertIn("noswap", tmpfs_mount)
+        self.assertIn(f"uid={subject.CONTAINER_UID}", tmpfs_mount)
+        self.assertIn(f"gid={subject.CONTAINER_GID}", tmpfs_mount)
+        self.assertFalse(any(call[2] == "cp" for call, _ in self.executor.calls))
+        start_options = next(options for call, options in self.executor.calls if call[2] == "start")
+        self.assertEqual(
+            self.limits.output_bytes + subject.MAX_SUBJECT_RESULT_BYTES,
+            start_options["maximum_output_bytes"],
+        )
         self.assertTrue(any(call[2:4] == ["rm", "--force"] for call, _ in self.executor.calls))
         self.assertTrue(all(options["maximum_output_bytes"] <= subject.MAX_ENGINE_OUTPUT_BYTES for _, options in self.executor.calls))
 
@@ -308,6 +335,95 @@ class EvidenceGateSubjectTests(unittest.TestCase):
         self.assertTrue(any(call[2:4] == ["rm", "--force"] for call, _ in self.executor.calls))
         self.assertFalse(any(call[2] == "start" for call, _ in self.executor.calls))
 
+    def test_scratch_inspection_rejects_missing_or_expanded_tmpfs_caps_and_wrong_mount_type(self) -> None:
+        expected = subject.SCRATCH_TMPFS_OPTIONS
+        hostile_options = (
+            expected.replace(f"size={subject.MAX_PROFILE_SCRATCH_BYTES}", f"size={subject.MAX_PROFILE_SCRATCH_BYTES + 1}"),
+            expected.replace(
+                f"nr_inodes={subject.MAX_PROFILE_SCRATCH_INODES},",
+                "",
+            ),
+            expected.replace(
+                f"nr_inodes={subject.MAX_PROFILE_SCRATCH_INODES}",
+                f"nr_inodes={subject.MAX_PROFILE_SCRATCH_INODES + 1}",
+            ),
+            expected + ",rw",
+            expected.replace("mode=0700", "mode=0777"),
+            expected.replace(",noswap", ""),
+            expected.replace(f"uid={subject.CONTAINER_UID}", f"uid={subject.CONTAINER_UID + 1}"),
+            expected.replace(f"gid={subject.CONTAINER_GID}", f"gid={subject.CONTAINER_GID + 1}"),
+        )
+        for index, options in enumerate(hostile_options):
+            with self.subTest(options=options):
+                executor = FakeExecutor(self.root)
+                executor.config_override = {"Tmpfs": {"/scratch": options}}
+                with self.assertRaises(subject.SubjectLauncherError) as caught:
+                    self.launch(
+                        scratch_directory=self.runner_temp / f"scratch-invalid-{index}",
+                        _command_executor=executor,
+                    )
+                self.assertEqual("ASEGS012", caught.exception.code)
+                self.assertFalse(any(call[2] == "start" for call, _ in executor.calls))
+                self.assertTrue(any(call[2:4] == ["rm", "--force"] for call, _ in executor.calls))
+
+        executor = FakeExecutor(self.root)
+        executor.config_override = {"Tmpfs": {}}
+        with self.assertRaises(subject.SubjectLauncherError) as missing_tmpfs_error:
+            self.launch(scratch_directory=self.runner_temp / "scratch-missing-tmpfs", _command_executor=executor)
+        self.assertEqual("ASEGS012", missing_tmpfs_error.exception.code)
+        self.assertFalse(any(call[2] == "start" for call, _ in executor.calls))
+
+        executor = FakeExecutor(self.root)
+        executor.mounts_override = [
+            {"Type": "bind", "Source": str(self.subject_root), "Destination": "/subject", "RW": False},
+            {"Type": "bind", "Source": str(self.runner_temp), "Destination": "/scratch", "RW": True},
+        ]
+        with self.assertRaises(subject.SubjectLauncherError) as caught:
+            self.launch(scratch_directory=self.runner_temp / "scratch-wrong-mount", _command_executor=executor)
+        self.assertEqual("ASEGS012", caught.exception.code)
+        self.assertFalse(any(call[2] == "start" for call, _ in executor.calls))
+
+    def test_successful_subject_requires_a_bounded_nonclaiming_result_export(self) -> None:
+        self.executor.result_export = b'{"claimEligible":true,"profileId":"code-coverage","schemaVersion":1,"status":"completed","steps":[]}\n'
+        with self.assertRaises(subject.SubjectLauncherError) as caught:
+            self.launch()
+        self.assertEqual("ASEGS018", caught.exception.code)
+        self.assertTrue(any(call[2:4] == ["rm", "--force"] for call, _ in self.executor.calls))
+
+        executor = FakeExecutor(self.root)
+        executor.result_export = b"x" * (subject.MAX_SUBJECT_RESULT_BYTES + 1)
+        with self.assertRaises(subject.SubjectLauncherError) as oversized_error:
+            self.launch(scratch_directory=self.runner_temp / "scratch-export-oversized", _command_executor=executor)
+        self.assertEqual("ASEGS018", oversized_error.exception.code)
+        self.assertFalse(
+            (self.runner_temp / "scratch-export-oversized" / subject.SUBJECT_RESULT_RELATIVE_PATH).exists()
+        )
+        self.assertTrue(any(call[2:4] == ["rm", "--force"] for call, _ in executor.calls))
+
+        executor = FakeExecutor(self.root)
+        executor.result_export = None
+        with self.assertRaises(subject.SubjectLauncherError) as missing_error:
+            self.launch(scratch_directory=self.runner_temp / "scratch-export-missing", _command_executor=executor)
+        self.assertEqual("ASEGS018", missing_error.exception.code)
+        self.assertFalse(
+            (self.runner_temp / "scratch-export-missing" / subject.SUBJECT_RESULT_RELATIVE_PATH).exists()
+        )
+        self.assertTrue(any(call[2:4] == ["rm", "--force"] for call, _ in executor.calls))
+
+    def test_failed_subject_exports_its_typed_nonclaiming_result_record(self) -> None:
+        self.executor.start_exit_code = 2
+        self.executor.result_export = (
+            b'{"claimEligible":false,"diagnostic":{"code":"ASESE010","message":"coverage unavailable"},'
+            b'"profileId":"code-coverage","schemaVersion":1,"status":"failed","steps":[]}\n'
+        )
+        result = self.launch()
+
+        self.assertEqual(2, result.exit_code)
+        self.assertFalse(result.claim_eligible)
+        record = json.loads((result.scratch_directory / subject.SUBJECT_RESULT_RELATIVE_PATH).read_bytes())
+        self.assertEqual("failed", record["status"])
+        self.assertEqual("ASESE010", record["diagnostic"]["code"])
+
     def test_cancellation_during_subject_process_still_cleans_container(self) -> None:
         self.executor.fail_start = subject._ProcessCancelled()
         with self.assertRaises(subject.SubjectLauncherError) as caught:
@@ -336,6 +452,13 @@ class EvidenceGateSubjectTests(unittest.TestCase):
             self.launch()
         self.assertEqual("ASEGS015", caught.exception.code)
         self.assertTrue(any(call[2] == "rm" for call, _ in self.executor.calls))
+
+        executor = FakeExecutor(self.root)
+        executor.start_stderr = b"x" * (self.limits.output_bytes + 1)
+        with self.assertRaises(subject.SubjectLauncherError) as stderr_error:
+            self.launch(scratch_directory=self.runner_temp / "scratch-stderr-overflow", _command_executor=executor)
+        self.assertEqual("ASEGS015", stderr_error.exception.code)
+        self.assertTrue(any(call[2:4] == ["rm", "--force"] for call, _ in executor.calls))
 
     def test_process_executor_uses_argv_and_kills_process_group_on_cancellation(self) -> None:
         class FakeProcess:

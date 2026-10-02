@@ -3,7 +3,11 @@
 
 This is an execution primitive, not an evidence verifier or a gate.  It accepts
 only controller-owned paths, a digest-pinned image, a policy profile ID, and
-validated resource limits.  The image must contain the trusted fixed entrypoint
+validated resource limits. The writable container scratch is a fixed-size,
+fixed-inode tmpfs; the trusted entrypoint streams its small fixed result record
+over the attached process output, where this launcher validates it and writes it
+to private host scratch. Other container scratch artifacts are discarded. The
+image must contain the trusted fixed entrypoint
 ``/usr/local/libexec/appsurface-subject-runner`` and its locked offline inputs.
 The entrypoint receives a fixed profile contract; this program never reads a
 command from the subject checkout.  Only ``code-coverage`` is enabled, with
@@ -48,10 +52,20 @@ MAX_PROFILE_MEMORY_MIB = 4096
 MAX_PROFILE_CPU_MILLIS = 2000
 MAX_PROFILE_PIDS = 256
 MAX_PROFILE_OUTPUT_BYTES = 1024 * 1024
+MAX_PROFILE_SCRATCH_BYTES = 4 * 1024 * 1024 * 1024
+MAX_PROFILE_SCRATCH_INODES = 262_144
+MAX_SUBJECT_RESULT_BYTES = 16 * 1024
 MIN_OUTPUT_BYTES = 4096
 IMAGE_REFERENCE_PATTERN = re.compile(r"[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}\Z")
 RUN_ID_PATTERN = re.compile(r"[1-9][0-9]{0,18}\Z")
 RUN_ATTEMPT_PATTERN = re.compile(r"[1-9][0-9]{0,8}\Z")
+SUBJECT_RESULT_RELATIVE_PATH = "evidence-subject-result.json"
+SCRATCH_TMPFS_OPTIONS = (
+    "rw,nosuid,nodev,noswap,"
+    f"size={MAX_PROFILE_SCRATCH_BYTES},"
+    f"nr_inodes={MAX_PROFILE_SCRATCH_INODES},"
+    f"mode=0700,uid={CONTAINER_UID},gid={CONTAINER_GID}"
+)
 
 # This is a closed registry, intentionally independent of subject files and
 # policy-provided command strings. Resource-backed profiles are named here so
@@ -137,7 +151,7 @@ class CommandResult:
 
 @dataclass(frozen=True)
 class SubjectRunResult:
-    """Untrusted process output and status; this result can never be gate-eligible."""
+    """Untrusted output and one bounded result record; profile artifacts are not exported and this is never gate-eligible."""
 
     exit_code: int
     stdout: bytes
@@ -521,12 +535,10 @@ def _container_create_arguments(
     name: str,
     image: str,
     subject_root: Path,
-    scratch: Path,
     profile_arguments: Sequence[str],
     limits: SubjectLimits,
 ) -> list[str]:
     subject_mount = f"type=bind,src={subject_root},dst=/subject,ro=true,bind-propagation=rprivate"
-    scratch_mount = f"type=bind,src={scratch},dst=/scratch,rw=true,bind-propagation=rprivate"
     arguments = [
         engine,
         "--remote=false",
@@ -552,8 +564,8 @@ def _container_create_arguments(
         f"--cpus={_cpu_argument(limits.cpu_millis)}",
         "--mount",
         subject_mount,
-        "--mount",
-        scratch_mount,
+        "--tmpfs",
+        f"/scratch:{SCRATCH_TMPFS_OPTIONS}",
         "--unsetenv-all",
     ]
     arguments.extend(f"--env={value}" for value in CONTAINER_ENVIRONMENT)
@@ -575,11 +587,44 @@ def _one_inspect_object(data: bytes) -> Mapping[str, Any]:
     return inspected[0]
 
 
+def _scratch_tmpfs_options_are_bounded(value: Any) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    flags: set[str] = set()
+    options: dict[str, str] = {}
+    for item in value.split(","):
+        if not item:
+            return False
+        key, separator, option_value = item.partition("=")
+        if separator:
+            if not key or not option_value or key in options:
+                return False
+            options[key] = option_value
+        else:
+            if key in flags:
+                return False
+            flags.add(key)
+    if flags != {"rw", "nosuid", "nodev", "noswap"}:
+        return False
+    if set(options) != {"size", "nr_inodes", "mode", "uid", "gid"}:
+        return False
+    if (
+        options["size"] != str(MAX_PROFILE_SCRATCH_BYTES)
+        or options["nr_inodes"] != str(MAX_PROFILE_SCRATCH_INODES)
+        or options["uid"] != str(CONTAINER_UID)
+        or options["gid"] != str(CONTAINER_GID)
+    ):
+        return False
+    try:
+        return int(options["mode"], 8) == 0o700
+    except ValueError:
+        return False
+
+
 def _verify_container_configuration(
     data: bytes,
     *,
     subject_root: Path,
-    scratch: Path,
     limits: SubjectLimits,
     profile_arguments: Sequence[str],
 ) -> None:
@@ -626,9 +671,13 @@ def _verify_container_configuration(
         raise _fail("ASEGS012", "The created container omitted device access verification.")
     if host.get("Privileged") is not False or devices:
         raise _fail("ASEGS012", "The created container has a privileged or device capability.")
+    tmpfs = host.get("Tmpfs")
+    if not isinstance(tmpfs, dict) or set(tmpfs) != {"/scratch"}:
+        raise _fail("ASEGS012", "The created container scratch is not the single approved quota-limited tmpfs.")
+    if not _scratch_tmpfs_options_are_bounded(tmpfs["/scratch"]):
+        raise _fail("ASEGS012", "The created container scratch byte, inode, or access limits do not match the fixed profile.")
     if (
         host.get("PortBindings") not in (None, {})
-        or host.get("Tmpfs") not in (None, {})
         or host.get("PidMode") == "host"
         or host.get("IpcMode") == "host"
         or host.get("CgroupnsMode") != "private"
@@ -647,11 +696,87 @@ def _verify_container_configuration(
         subject_mount.get("Type") != "bind"
         or Path(str(subject_mount.get("Source"))).resolve() != subject_root
         or subject_mount.get("RW") is not False
-        or scratch_mount.get("Type") != "bind"
-        or Path(str(scratch_mount.get("Source"))).resolve() != scratch
+        or scratch_mount.get("Type") != "tmpfs"
         or scratch_mount.get("RW") is not True
     ):
-        raise _fail("ASEGS012", "Subject and scratch mount access does not match the read-only/writable contract.")
+        raise _fail("ASEGS012", "Subject and scratch mount access does not match the read-only/quota-limited contract.")
+
+
+def _validate_subject_result_content(content: bytes, *, expected_status: str) -> None:
+    if not content or len(content) > MAX_SUBJECT_RESULT_BYTES:
+        raise _fail("ASEGS018", "The exported subject result is not bounded; no claim may be issued.")
+    try:
+        value = _parse_json(content, "bounded subject result")
+    except SubjectLauncherError:
+        raise _fail("ASEGS018", "The exported subject result is malformed; no claim may be issued.") from None
+    if not isinstance(value, dict):
+        raise _fail("ASEGS018", "The exported subject result does not match the fixed non-claiming record.")
+    status = value.get("status")
+    expected_keys = {"claimEligible", "profileId", "schemaVersion", "status", "steps"}
+    if status == "failed":
+        expected_keys.add("diagnostic")
+    if (
+        set(value) != expected_keys
+        or value.get("claimEligible") is not False
+        or value.get("profileId") != "code-coverage"
+        or type(value.get("schemaVersion")) is not int
+        or value.get("schemaVersion") != 1
+        or not isinstance(status, str)
+        or status != expected_status
+        or status not in {"completed", "failed"}
+        or not isinstance(value.get("steps"), list)
+    ):
+        raise _fail("ASEGS018", "The exported subject result does not match the fixed completed non-claiming record.")
+    if status == "failed":
+        diagnostic = value.get("diagnostic")
+        if (
+            not isinstance(diagnostic, dict)
+            or set(diagnostic) != {"code", "message"}
+            or not isinstance(diagnostic.get("code"), str)
+            or not isinstance(diagnostic.get("message"), str)
+        ):
+            raise _fail("ASEGS018", "The failed subject result omitted its typed diagnostic.")
+    try:
+        canonical = (json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True) + "\n").encode("ascii")
+    except (TypeError, ValueError, RecursionError):
+        raise _fail("ASEGS018", "The exported subject result could not be canonicalized safely.") from None
+    if content != canonical:
+        raise _fail("ASEGS018", "The exported subject result is not canonical; no claim may be issued.")
+
+
+def _write_subject_result_export(scratch: Path, content: bytes) -> None:
+    result_path = scratch / SUBJECT_RESULT_RELATIVE_PATH
+    descriptor = -1
+    created = False
+    try:
+        descriptor = os.open(
+            result_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        created = True
+        with os.fdopen(descriptor, "wb") as output:
+            descriptor = -1
+            output.write(content)
+            output.flush()
+            os.fsync(output.fileno())
+    except OSError:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        if created:
+            try:
+                result_path.unlink()
+            except OSError:
+                pass
+        raise _fail("ASEGS018", "The bounded subject result could not be saved safely; no claim may be issued.") from None
+
+
+def _export_subject_result(scratch: Path, content: bytes, *, expected_status: str) -> None:
+    _validate_subject_result_content(content, expected_status=expected_status)
+    _write_subject_result_export(scratch, content)
 
 
 def _check_cancel(cancel_event: threading.Event) -> None:
@@ -687,7 +812,7 @@ def launch_subject(
     _engine_path: str | None = None,
     _command_executor: CommandExecutor = _run_command,
 ) -> SubjectRunResult:
-    """Run only a registered profile and return bounded, explicitly non-claiming output."""
+    """Run a fixed profile with quota-limited scratch and export only its small result record."""
     _validate_limits(limits)
     profile_arguments = _validate_profile(profile_id)
     _validate_image_reference(image_digest)
@@ -762,7 +887,6 @@ def launch_subject(
                     name=container_name,
                     image=image_digest,
                     subject_root=subject_root,
-                    scratch=scratch,
                     profile_arguments=profile_arguments,
                     limits=limits,
                 ),
@@ -787,7 +911,6 @@ def launch_subject(
         _verify_container_configuration(
             inspect_result.stdout,
             subject_root=subject_root,
-            scratch=scratch,
             limits=limits,
             profile_arguments=profile_arguments,
         )
@@ -795,13 +918,23 @@ def launch_subject(
         started = _command_executor(
             [engine, "--remote=false", "start", "--attach", container_name],
             timeout_seconds=limits.timeout_seconds,
-            maximum_output_bytes=limits.output_bytes,
+            maximum_output_bytes=limits.output_bytes + MAX_SUBJECT_RESULT_BYTES,
             environment=engine_environment,
             cancel_event=event,
         )
+        if len(started.stderr) > limits.output_bytes:
+            raise _fail("ASEGS015", "The bounded subject execution output limit was exceeded.")
+        if started.stdout:
+            _export_subject_result(
+                scratch,
+                started.stdout,
+                expected_status="completed" if started.returncode == 0 else "failed",
+            )
+        elif started.returncode == 0:
+            raise _fail("ASEGS018", "The completed subject omitted its bounded non-claiming result record.")
         result = SubjectRunResult(
             exit_code=started.returncode,
-            stdout=started.stdout,
+            stdout=b"",
             stderr=started.stderr,
             scratch_directory=scratch,
         )

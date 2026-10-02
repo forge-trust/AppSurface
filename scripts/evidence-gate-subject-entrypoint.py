@@ -688,6 +688,32 @@ def _write_result(scratch_root: Path, content: bytes) -> None:
         raise EntrypointError("ASESE009", "The canonical subject result could not be written safely.") from None
 
 
+def _result_for_transport(scratch_root: Path) -> bytes:
+    result_path = scratch_root / RESULT_RELATIVE_PATH
+    descriptor = -1
+    try:
+        descriptor = os.open(result_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1 or metadata.st_size > MAX_RESULT_BYTES:
+            raise EntrypointError("ASESE009", "The canonical subject result is not a bounded regular file.")
+        with os.fdopen(descriptor, "rb") as result_file:
+            descriptor = -1
+            content = result_file.read(MAX_RESULT_BYTES + 1)
+        if len(content) != metadata.st_size or not content or len(content) > MAX_RESULT_BYTES:
+            raise EntrypointError("ASESE009", "The canonical subject result is not bounded.")
+        return content
+    except EntrypointError:
+        raise
+    except OSError:
+        raise EntrypointError("ASESE009", "The canonical subject result could not be read safely.") from None
+    finally:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                raise EntrypointError("ASESE009", "The canonical subject result could not be closed safely.") from None
+
+
 def execute(
     invocation: Invocation,
     *,
@@ -798,7 +824,14 @@ def execute(
 def main(argv: Sequence[str] | None = None) -> int:
     try:
         invocation = parse_invocation(argv)
-        return execute(invocation)
+        exit_code = execute(invocation)
+        content = _result_for_transport(invocation.scratch_root)
+        try:
+            sys.stdout.buffer.write(content)
+            sys.stdout.buffer.flush()
+        except OSError:
+            raise EntrypointError("ASESE009", "The canonical subject result could not be streamed safely.") from None
+        return exit_code
     except EntrypointError as exc:
         print(f"{exc.code}: {exc.message}", file=sys.stderr)
         return 2
