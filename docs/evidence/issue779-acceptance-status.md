@@ -13,7 +13,11 @@ recorded run through the consumer acceptance record.
 - A separate actual GitHub Ubuntu 24.04 mechanism run used systemd 255/cgroup v2 and recorded nine lifecycle, twelve subject-boundary, and fourteen allocation cases. Its artifact says `admission: none`; it is mechanism evidence on its recorded older source/checkout, not proof of the current dirty implementation, CLI/Aspire admission, or protected downstream acceptance. See [the observed run record](issue779-consumer-acceptance.md#actual-ubuntu-mechanism-observation-2026-10-02). Local-only captured metadata: `TestResults/issue779-recovery-20261002/actual-ubuntu-850/mechanism-verification.json`.
 - Production Trusted provider/platform allowlists remain intentionally empty pending the required acceptance proofs.
 
-### Latest focused verification
+### Earlier focused verification
+
+The results in this subsection bind earlier captured revisions. The measured-gap
+recovery below records the newer focused checks; neither set is an acceptance
+group total or verification of subsequent source changes.
 
 The [execution record](../plans/issue-779-execution.md#single-use-admission-recovery-and-linux-sdk-diagnosis-2026-10-02)
 records **81/81** current native macOS Aspire Evidence tests, exit **0**, with no
@@ -151,6 +155,31 @@ closed by this recovery batch.
 | P03 | [Output quota](../../Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProcessOutputQuotaTests.cs): `ProcessRunner_OverflowCancelsAndDrainsChildBeforeReturning`; [worker](../../Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidenceWorkerExecutionTests.cs): quota failure closes registration | Partial: overflow and stop/join are tested separately. | End-to-end overflow must latch failure, join, dispose, and prevent an eligible truncated result. |
 | P04 | [Budgets](../../Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceRunBudgetTests.cs): exact-fit, one-tick-short, invalid settings, and cleanup reserve | Present: deterministic budget unit cases exist. | Current caller must reject the summed job budget before invoking any callback. |
 | P05 | [Budgets](../../Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceRunBudgetTests.cs): monotonic elapsed time, later-stage recheck, concurrent start, cancellation | Present: wall-clock shift and reservation unit cases exist. | Re-run latest lifecycle integration and prove no concurrent reservation extends the job. |
+
+## Latest exact-source mechanism failures
+
+Frozen snapshot `8a964188e85561d57119133d26b552f9412e2445` failed both
+[systemd Observation](https://github.com/forge-trust/AppSurface/actions/runs/37047555055)
+and [Aspire mechanism execution](https://github.com/forge-trust/AppSurface/actions/runs/37047560583).
+All 2725 source hashes, dispatched workflow bindings and downloaded artifact
+digests matched. Runtime readiness and wait completed, but output allocation or
+activation reported `ASEVD409` without its underlying exception; no final
+manifest or runtime proof was produced. Aspire passed native restore/build,
+then failed all five controls: four resource startups failed during thread
+creation, and the factory-stall identity guard rejected an observed root UID.
+No healthy resource or valid readiness-failure control was established.
+
+These results leave the native groups incomplete. The next diagnostics preserve
+closed allocation facts, completed executable startup and bounded cgroup task
+and memory counters. See the [exact observation and its limits](issue779-consumer-acceptance.md#frozen-source-allocation-and-resource-startup-failures-2026-10-02).
+The [unchanged solution coverage run](https://github.com/forge-trust/AppSurface/actions/runs/37047553718)
+also exited **1**, with `ASCOV120`: its fixture-path policy rejected dynamic
+`Path.Join` in the Bootstrap artifact test. The solution recorded 15,393 passes,
+one failure and two existing skips; 53 of 54 projects exited zero, with no
+compiler warnings or errors. Measured aggregate coverage was 94.98% line and
+88.79% branch, but the patch gate was not reached. The local correction uses
+`TestPathUtils.PathUnder`; a fresh unchanged native gate remains required.
+All 57 groups and the protected CLI/Aspire positive remain required.
 
 ## Five highest-value remaining gaps
 

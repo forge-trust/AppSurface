@@ -628,7 +628,7 @@ public sealed class EvidenceHostBootstrapTests
         var result = Assert.Single(manifest.ProducerResults);
         Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
         var artifact = Assert.Single(result.Artifacts!);
-        var bytes = await File.ReadAllBytesAsync(Path.Join(run.ArtifactDirectory, "coverage", artifact.RelativePath));
+        var bytes = await File.ReadAllBytesAsync(TestPathUtils.PathUnder(run.ArtifactDirectory, "coverage", artifact.RelativePath));
         Assert.Equal("written"u8.ToArray(), bytes);
         Assert.Equal(bytes.LongLength, artifact.LengthBytes);
         Assert.Equal(EvidenceDigest.Sha256(bytes), artifact.Sha256);

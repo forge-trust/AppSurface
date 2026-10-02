@@ -35,6 +35,51 @@ Keep the policy small and explicit:
 
 The planner does not classify C# semantics or infer that a getter, constructor, or generated line is low value. That belongs in a future, separately versioned behavior classifier; v1 refuses to pretend an unimplemented heuristic is trustworthy.
 
+## Internal closed application catalogue prerequisite
+
+[`EvidenceClosedApplicationCatalogue`](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Planner/EvidenceClosedApplicationCatalogue.cs) defines immutable metadata for a future restricted Aspire application adapter. The production table is empty. `Resolve(policy, plan, binding)` therefore rejects with `ASEVD407`; it does not start an application or change consumer-proof acceptance. The public application factory remains rejected as described in the [Aspire integration reference](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md). This prerequisite supplies neither a supported Trusted-positive path nor native/systemd acceptance; all required acceptance groups remain required.
+
+The first definition shape is a native HTTP resource with `native-http-uds` capability version `1.0.0`, `aspire_health` readiness, coverage producers version `1.0.0`, and Aspire SDK **13.4.4**. It permits a private network, declared immutable input and bounded scratch, memory, tasks, output, startup and stop time. Secrets, privileged groups and protected/result-root projections have no grant in this shape. Later adapters must preserve real authenticated Connect, admission, allocation and supervision.
+
+### Metadata API and exact matching
+
+| Internal model/API | Contract |
+| --- | --- |
+| `EvidenceClosedApplicationDefinition` | Application ID/version/build ID, entire protected policy, selected profile, complete resource/producer registrations, bundle inventory and capability grants. No delegate, absolute host path or argument vector. |
+| `EvidenceClosedResourceRegistration`, `EvidenceClosedProducerRegistration` | Complete policy declarations plus closed capability/implementation identity. Readiness, dependencies, timeouts, assertions, artifacts and coverage gates all participate in matching. |
+| `EvidenceClosedBundleFile` | Normalized ASCII relative name, closed role, positive exact length, lower-case SHA-256 and Unix permission bits. DLLs, runtime configurations, DCP, extensions, dependencies and declared input are explicit inventory. |
+| `EvidenceClosedApplicationCapabilities` | Exactly one declared input; scratch/memory each at most 1 GiB, tasks at most 64, output at most 1 MiB, startup at most 120 seconds and fresh stop at most 30 seconds. Every allowance is positive. |
+| `EvidenceClosedApplicationBinding`, `EvidenceClosedApplicationIdentities` | Observed provider `github-actions`, platform `linux-x64`, proposed protocol `evidence-worker-linux-v2`, digests, complete registrations/inventory/grants and three positive distinct UIDs plus five positive distinct GIDs. These values cannot populate the compiled table. |
+| `Snapshot`, `ComputeEntryDigest`, `ComputeCatalogueDigest`, `VerifyCandidateBinding` | Pure bounded metadata audit. A matching candidate cannot enroll itself or create admission, context, proof or a runtime capability. |
+| `Resolve` | Selects only a compile-owned entry and verifies complete correspondence. Its result is read-only definition metadata, not an execution lease. |
+
+Snapshots copy and wrap every policy/declaration list, registration list, bundle inventory and input list. Entry digests cover the complete snapshot, including unselected profiles and rules. Catalogue digests cover the fixed `evidence-closed-application-catalogue-v1` schema and entries ordered by ordinal application ID. Bundle files, registrations and inputs are ordered for matching; nested policy list order is retained and exact. The supplied plan must equal a fresh planner resolution of its changed paths against the complete protected policy.
+
+Bounds are eight catalogue entries, 256 bundle files, 128 MiB per file, 512 MiB total file bytes and 1 MiB canonical entry metadata. Policies are bounded to 32 profiles and 128 rules with the existing [profile declaration limits](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceContracts.cs). Duplicate application IDs or policy/profile bindings, duplicate declarations, case-aliasing/path-prefix bundle collisions, traversal, writable files and any declaration drift reject. Inventory permissions are `0444`, or `0555` for DCP/native extensions; DCP and its extensions require executable `0555`. Invalid or mismatched metadata produces a fixed `ASEVD404` diagnostic without echoing supplied values.
+
+### Compile-owned fixture registration and pending integration
+
+A separately compiled controlled-release fixture may include the production catalogue source and one same-assembly partial source containing reviewed literal definitions:
+
+```csharp
+using System.Collections.Generic;
+
+namespace ForgeTrust.AppSurface.Evidence.Planner;
+
+internal static partial class EvidenceClosedApplicationCatalogue
+{
+    static partial void RegisterCompiledEntries(
+        List<EvidenceClosedApplicationDefinition> entries)
+    {
+        entries.Add(FixtureDefinitions.NativeHttp); // Immutable compile-owned data.
+    }
+}
+```
+
+`FixtureDefinitions.NativeHttp` is a prerequisite fixture definition, not a shipped registration. The fixture must be a distinct build artifact with its finished binaries and source binding pinned by the protected root parent. A partial class in a separate referencing assembly cannot modify the production table. No runtime file loader, environment switch, public Boolean, supplied factory, reflection or additional friend access may register entries. Metadata audit methods are never a substitute for `Resolve` in the future adapter.
+
+The root parent still must independently inspect retained bundle bytes, ownership, modes and hashes; authenticate the worker channel; verify actual UID/GID and supplementary-group membership; and enforce capabilities. Descriptor v2 and the separately restricted Aspire child/resource adapter are pending integration. This slice does not alter the production Trusted allowlist or proof resolver. A separately compiled immutable proof registry and real shared-path positive execution remain prerequisites for controlled-release acceptance; matching structural metadata alone is insufficient.
+
 ## Failure and recovery
 
 | Diagnostic | Meaning | Recovery |

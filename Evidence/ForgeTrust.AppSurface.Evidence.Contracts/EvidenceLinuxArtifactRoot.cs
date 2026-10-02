@@ -7,6 +7,14 @@ using Microsoft.Win32.SafeHandles;
 
 namespace ForgeTrust.AppSurface.Evidence.Contracts;
 
+/// <summary>Closed host operations retained when exclusive artifact allocation fails.</summary>
+internal enum EvidenceLinuxArtifactAllocationOperation
+{
+    None, ValidateArguments, CheckPlatform, OpenFilesystemRoot, OpenParent, CheckParentIdentity,
+    CheckParentName, CreateSlot, OpenSlot, InspectSlotIdentity, CheckSlotPolicy, CheckSlotName,
+    RecheckParentName, RetainDescriptors, Completed,
+}
+
 /// <summary>Identifies a Linux filesystem object by device, inode, owner and group.</summary>
 /// <param name="DeviceMajor">Linux device major number.</param>
 /// <param name="DeviceMinor">Linux device minor number.</param>
@@ -95,11 +103,25 @@ internal sealed class EvidenceLinuxArtifactRoot : IAsyncDisposable
     /// <exception cref="IOException">The parent identity/policy is wrong, the slot collides, or safe allocation fails.</exception>
     /// <remarks>The parent and allocated root must have exact mode <c>0700</c>. The parent is re-resolved before and after creation.</remarks>
     internal static EvidenceLinuxArtifactRoot Allocate(string parentPath, EvidenceLinuxArtifactIdentity expectedParentIdentity, string slotName, uint expectedUid, uint expectedGid)
+        => Allocate(parentPath, expectedParentIdentity, slotName, expectedUid, expectedGid, out _);
+
+    /// <summary>Allocates with the same guards and exceptions, retaining the last attempted closed operation.</summary>
+    /// <param name="parentPath">Absolute protected parent path.</param>
+    /// <param name="expectedParentIdentity">Protected parent identity.</param>
+    /// <param name="slotName">Fresh single-component slot.</param>
+    /// <param name="expectedUid">Exact required owner.</param>
+    /// <param name="expectedGid">Exact required group.</param>
+    /// <param name="operation">Last attempted operation on failure; Completed on success. Diagnostic only, never authority.</param>
+    /// <returns>The same retained root as the overload without diagnostics.</returns>
+    internal static EvidenceLinuxArtifactRoot Allocate(string parentPath, EvidenceLinuxArtifactIdentity expectedParentIdentity,
+        string slotName, uint expectedUid, uint expectedGid, out EvidenceLinuxArtifactAllocationOperation operation)
     {
+        operation = EvidenceLinuxArtifactAllocationOperation.ValidateArguments;
         ArgumentException.ThrowIfNullOrWhiteSpace(parentPath);
         ValidateComponent(slotName, nameof(slotName));
         if (!Path.IsPathFullyQualified(parentPath) || Encoding.UTF8.GetByteCount(parentPath) > MaximumPathBytes)
             throw new ArgumentException("An absolute bounded parent path is required.", nameof(parentPath));
+        operation = EvidenceLinuxArtifactAllocationOperation.CheckPlatform;
         if (!OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
             throw new PlatformNotSupportedException("Linux openat2 artifact storage is unavailable on this platform.");
 
@@ -108,21 +130,33 @@ internal sealed class EvidenceLinuxArtifactRoot : IAsyncDisposable
         SafeFileHandle? root = null;
         try
         {
+            operation = EvidenceLinuxArtifactAllocationOperation.OpenFilesystemRoot;
             slash = OpenAt2(AtFdcwd, "/", O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0, 0);
+            operation = EvidenceLinuxArtifactAllocationOperation.OpenParent;
             parent = OpenAt2(Fd(slash), ToRootRelative(parentPath), O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0, ParentResolveFlags);
+            operation = EvidenceLinuxArtifactAllocationOperation.CheckParentIdentity;
             RequireIdentity(parent, expectedParentIdentity, expectedUid, expectedGid, DirectoryMode, "Protected parent identity or policy changed.");
+            operation = EvidenceLinuxArtifactAllocationOperation.CheckParentName;
             RequireNamedIdentity(slash, ToRootRelative(parentPath), parent, DirectoryMode, ParentResolveFlags, "Protected parent path no longer names its retained directory.");
+            operation = EvidenceLinuxArtifactAllocationOperation.CreateSlot;
             if (MkdirAt(Fd(parent), slotName, DirectoryMode) != 0)
                 throw IoError("Could not exclusively create the artifact root.");
 
+            operation = EvidenceLinuxArtifactAllocationOperation.OpenSlot;
             root = OpenAt2(Fd(parent), slotName, O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0, DescendantResolveFlags);
+            operation = EvidenceLinuxArtifactAllocationOperation.InspectSlotIdentity;
             var identity = IdentityOf(root);
+            operation = EvidenceLinuxArtifactAllocationOperation.CheckSlotPolicy;
             if (identity.Uid != expectedUid || identity.Gid != expectedGid || ModeOf(root) != DirectoryMode)
                 throw new IOException("Allocated artifact root does not match the required owner and mode.");
+            operation = EvidenceLinuxArtifactAllocationOperation.CheckSlotName;
             RequireNamedIdentity(parent, slotName, root, DirectoryMode, DescendantResolveFlags, "Artifact root name changed during allocation.");
+            operation = EvidenceLinuxArtifactAllocationOperation.RecheckParentName;
             RequireNamedIdentity(slash, ToRootRelative(parentPath), parent, DirectoryMode, ParentResolveFlags, "Protected parent changed during allocation.");
+            operation = EvidenceLinuxArtifactAllocationOperation.RetainDescriptors;
             var result = new EvidenceLinuxArtifactRoot(parentPath, slotName, expectedUid, expectedGid, slash, parent, root, identity);
             slash = parent = root = null;
+            operation = EvidenceLinuxArtifactAllocationOperation.Completed;
             return result;
         }
         catch

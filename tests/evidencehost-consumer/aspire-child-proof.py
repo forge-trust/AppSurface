@@ -7,8 +7,10 @@ import multiprocessing
 import os
 from pathlib import Path
 import pwd
+import re
 import shutil
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -27,6 +29,8 @@ WATCHDOG_ACK_SECONDS = 3
 IDENTITY_FAILURE = "application-identity-rejected"
 IDENTITY_STAGE = "startup-identity-validation"
 IDENTITY_DIAGNOSTIC_LIMIT = 4096
+BUDGET_DIAGNOSTIC_LIMIT = 4096
+BUDGET_DIAGNOSTIC_CATEGORY = "cgroup-task-memory-counters"
 ACTIVE_STATES = frozenset(("active", "reloading", "inactive", "failed", "activating", "deactivating",
                            "maintenance", "refreshing", "unknown"))
 
@@ -35,13 +39,120 @@ class WatchdogFailure(RuntimeError):
     """Fixed-category failure of the independent root owner."""
 
 
+class StartupFailure(RuntimeError):
+    """The selected exec unit did not establish completed process setup."""
+
+
 def command(argv, timeout=5, check=True):
     return subprocess.run(argv, capture_output=True, timeout=timeout, check=check)
 
 
 def unit_properties(unit):
-    raw = command(["systemctl", "show", unit, "--property=ControlGroup,MainPID,ActiveState"]).stdout.decode()
+    raw = command(["systemctl", "show", unit, "--property=ControlGroup,MainPID,Type,ActiveState,SubState"]).stdout.decode()
     return dict(line.split("=", 1) for line in raw.splitlines() if "=" in line)
+
+
+def exec_startup_complete(properties, deadline):
+    """Only Type=exec active/running permits subsequent exact identity checks."""
+    if time.monotonic() >= deadline or properties.get("Type") != "exec":
+        raise StartupFailure("application-exec-startup-failed")
+    state = properties.get("ActiveState"), properties.get("SubState")
+    if state == ("active", "running"):
+        pid = properties.get("MainPID", "")
+        if not re.fullmatch(r"[0-9]{1,10}", pid) or not 0 < int(pid) <= 0xffffffff or not properties.get("ControlGroup"):
+            raise StartupFailure("application-exec-startup-failed")
+        return True
+    if state[0] == "activating" and state[1] in ("condition", "start-pre", "start", "start-post"):
+        return False
+    raise StartupFailure("application-exec-startup-failed")
+
+
+def observe_unit_processes(properties, uid, group, receipt, control, started, deadline):
+    """Exec completion precedes the unchanged UID/cgroup guard for every PID."""
+    if not exec_startup_complete(properties, deadline):
+        return None
+    observed = {}
+    for pid in cgroup_pids(group):
+        try:
+            facts = {}
+            if not identity_matches(pid, uid, group, facts):
+                record_identity_rejection(receipt, control, pid, uid, facts, group, properties, started)
+                raise RuntimeError("Unexpected application process identity.")
+            text = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")[:1024]
+            observed[str(pid)] = ("descendant" if "--descendant" in text else "resource" if "NativeHttpResource.dll" in text
+                                  else "apphost" if "AspireChild.dll" in text else "dcp" if "dcp" in text else "other")
+        except FileNotFoundError:
+            pass
+    return observed
+
+
+def read_cgroup_counter(directory_fd, name):
+    """Read one fixed cgroup file without following links, within the byte bound."""
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory_fd)
+    with os.fdopen(fd, "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError("invalid-cgroup-counter")
+        raw = stream.read(BUDGET_DIAGNOSTIC_LIMIT + 1)
+    if len(raw) > BUDGET_DIAGNOSTIC_LIMIT:
+        raise ValueError("invalid-cgroup-counter")
+    return raw.decode("ascii").strip()
+
+
+def counter_number(value, unlimited=False):
+    """Kernel unsigned counters are numeric; an unlimited maximum becomes null."""
+    if unlimited and value == "max":
+        return None
+    if not re.fullmatch(r"[0-9]{1,20}", value) or int(value) > 0xffffffffffffffff:
+        raise ValueError("invalid-cgroup-counter")
+    return int(value)
+
+
+def counter_events(raw, required, optional=()):
+    values = {}
+    for line in raw.splitlines():
+        key, value = line.split()
+        if key not in (*required, *optional) or key in values:
+            raise ValueError("invalid-cgroup-counter")
+        values[key] = counter_number(value)
+    if not set(required).issubset(values):
+        raise ValueError("invalid-cgroup-counter")
+    return {key: values.get(key) for key in (*required, *optional)}
+
+
+def record_budget_diagnostic(receipt, control, group, started):
+    """Best-effort private counters before stop; never reclassify the run failure."""
+    receipt.update(budget_diagnostic_category=BUDGET_DIAGNOSTIC_CATEGORY, budget_diagnostic_written=False)
+    directory_fd = None
+    try:
+        if not re.fullmatch(r"/system.slice/issue779-child-[0-9a-f]{32}\.service", group):
+            return
+        directory_fd = os.open(Path("/sys/fs/cgroup") / group.lstrip("/"),
+                               os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        read = lambda name: read_cgroup_counter(directory_fd, name)
+        data = {"pids_current": counter_number(read("pids.current")),
+                "pids_max": counter_number(read("pids.max"), unlimited=True),
+                "pids_events_max": counter_events(read("pids.events"), ("max",))["max"],
+                "memory_current": counter_number(read("memory.current")),
+                "memory_max": counter_number(read("memory.max"), unlimited=True),
+                "memory_events": counter_events(read("memory.events"), ("low", "high", "max", "oom", "oom_kill"),
+                                                ("oom_group_kill", "sock_throttled")),
+                "elapsed_seconds": round(max(0, time.monotonic() - started), 6)}
+        encoded = json.dumps(data, allow_nan=False, separators=(",", ":")).encode() + b"\n"
+        if len(encoded) > BUDGET_DIAGNOSTIC_LIMIT:
+            return
+        with (control / "budget-diagnostic.json").open("xb") as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write(encoded)
+        receipt["budget_diagnostic_written"] = True
+    except Exception:
+        # Diagnostics cannot erase the first cause or change physical cleanup.
+        pass
+    finally:
+        if directory_fd is not None:
+            try:
+                os.close(directory_fd)
+            except OSError:
+                pass
 
 
 def cgroup_pids(group):
@@ -109,17 +220,25 @@ def record_identity_rejection(receipt, control, pid, target_uid, facts, group, p
         pass
 
 
-def ready_request(path, uid, group):
+def ready_request(path, uid, group, deadline):
     """Independent root request: kernel peer identity plus bounded HTTP response."""
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stream:
-        stream.settimeout(1)
+        def bound_operation():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("readiness-deadline-expired")
+            stream.settimeout(min(1, remaining))
+
+        bound_operation()
         stream.connect(str(path))
         pid, peer_uid, _ = struct.unpack("3i", stream.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
         if peer_uid != uid or not belongs_to_group(pid, group):
             raise RuntimeError("Readiness socket peer escaped the selected UID/cgroup.")
+        bound_operation()
         stream.sendall(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
         data = bytearray()
         while True:
+            bound_operation()
             part = stream.recv(1024)
             if not part:
                 break
@@ -128,6 +247,7 @@ def ready_request(path, uid, group):
                 raise RuntimeError("Readiness response exceeded its independent byte bound.")
         header, body = bytes(data).split(b"\r\n\r\n", 1)
         status = header.split(b"\r\n", 1)[0]
+        bound_operation()
         return status == b"HTTP/1.1 200 OK" and body == b"native-http-ready", pid, status == b"HTTP/1.1 503 Service Unavailable"
 
 
@@ -331,7 +451,7 @@ def prepare_payload(source, destination):
 
 def service_command(unit, payload, scratch, dotnet, uid, gid, tools, output, control, case):
     allowed_input = payload / "proof-input" / "declared.txt"
-    properties = [f"User={uid}", f"Group={gid}", "KillMode=control-group", "TimeoutStopSec=10s",
+    properties = ["Type=exec", f"User={uid}", f"Group={gid}", "KillMode=control-group", "TimeoutStopSec=10s",
                   f"RuntimeMaxSec={JOB_SECONDS}s", "SendSIGKILL=yes", "NoNewPrivileges=yes",
                   "CapabilityBoundingSet=", "AmbientCapabilities=", "ProtectControlGroups=yes",
                   "ProtectSystem=strict", "ProtectHome=yes", "PrivateNetwork=yes", "RestrictSUIDSGID=yes",
@@ -435,25 +555,28 @@ def prove(args):
             pumps.append(thread)
         ready_deadline = min(deadline, time.monotonic() + READINESS_SECONDS)
         observed = {}
+        startup_confirmed = False
         while time.monotonic() < ready_deadline and process.poll() is None and not budget.exceeded.is_set():
             require_watchdog_alive(monitor)
-            properties = unit_properties(unit)
+            try:
+                properties = unit_properties(unit)
+            except (OSError, subprocess.SubprocessError, ValueError) as error:
+                if not startup_confirmed:
+                    raise StartupFailure("application-exec-startup-failed") from error
+                raise
             group = properties.get("ControlGroup", "") or group
+            current = observe_unit_processes(properties, args.subject_uid, group, receipt, control,
+                                             deadline - JOB_SECONDS, ready_deadline)
+            if current is None:
+                time.sleep(0.05)
+                continue
+            startup_confirmed = True
+            observed.update(current)
             if group:
-                for pid in cgroup_pids(group):
-                    try:
-                        facts = {}
-                        if not identity_matches(pid, args.subject_uid, group, facts):
-                            record_identity_rejection(receipt, control, pid, args.subject_uid, facts, group,
-                                                      properties, deadline - JOB_SECONDS)
-                            raise RuntimeError("Unexpected application process identity.")
-                        text = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")[:1024]
-                        observed[str(pid)] = ("descendant" if "--descendant" in text else "resource" if "NativeHttpResource.dll" in text
-                                              else "apphost" if "AspireChild.dll" in text else "dcp" if "dcp" in text else "other")
-                    except FileNotFoundError:
-                        pass
                 try:
-                    ready, pid, unhealthy = ready_request(scratch / "http.sock", args.subject_uid, group)
+                    ready, pid, unhealthy = ready_request(scratch / "http.sock", args.subject_uid, group, ready_deadline)
+                    if time.monotonic() >= ready_deadline:
+                        raise TimeoutError("readiness-deadline-expired")
                     if unhealthy:
                         receipt["unhealthy_peer_pid"] = pid
                     if ready:
@@ -473,6 +596,8 @@ def prove(args):
                     pass
             time.sleep(0.1)
         require_watchdog_alive(monitor)
+        if not startup_confirmed:
+            raise StartupFailure("application-exec-startup-failed")
         receipt["observed_processes"] = observed
         receipt["output_bytes"] = budget.count
         receipt["output_quota_exceeded"] = budget.exceeded.is_set()
@@ -506,11 +631,14 @@ def prove(args):
             raise RuntimeError("Combined child output quota exceeded.")
         receipt["control_result"] = "cancel-requested" if args.case == "cancel" else "bounded-control-complete"
     except Exception as error:
-        receipt["failure"] = "watchdog-unavailable" if isinstance(error, WatchdogFailure) else "control-or-readiness-failure"
+        receipt["failure"] = ("watchdog-unavailable" if isinstance(error, WatchdogFailure) else
+                              "application-exec-startup-failed" if isinstance(error, StartupFailure) else
+                              "control-or-readiness-failure")
         preserve_identity_rejection(receipt)
         receipt["error_class"] = type(error).__name__
     finally:
         if process is not None:
+            record_budget_diagnostic(receipt, control, group, deadline - JOB_SECONDS)
             try:
                 physical_exit, receipt["stop_escalated"] = stop_and_join(unit, process, group, pumps, guard=observe_watchdog)
                 receipt["owned_exit"] = physical_exit
