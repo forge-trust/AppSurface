@@ -35,6 +35,11 @@
     "changedPath": { "path": "tools/ForgeTrust.AppSurface.EvidenceGate/Program.cs" }
   },
   {
+    "id": "release-tool-control-plane",
+    "kind": "ControlPlane",
+    "changedPath": { "path": "tools/ForgeTrust.AppSurface.Release/ReleaseCommands.cs" }
+  },
+  {
     "id": "fixture-control-plane",
     "kind": "ControlPlane",
     "changedPath": { "path": "docs/fixtures/issue-777-policy-shadow/fixtures.json" }

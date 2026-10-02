@@ -72,7 +72,6 @@ public sealed class AppSurfaceEvidencePolicyTests
     [InlineData("examples/auth-aspire-keycloak-apphost/Program.cs", "keycloak-theme-integration", "keycloak-theme-contract")]
     [InlineData("packages/package-index.yml", "package-release-preparation", "package-contract")]
     [InlineData("src/Example/Example.csproj", "package-release-preparation", "package-contract")]
-    [InlineData("tools/ForgeTrust.AppSurface.Release/ReleaseCommands.cs", "package-release-preparation", "release-preparation-contract")]
     public void ResourceAndPackagePaths_ShouldKeepTheirRequiredProducers(string path, string profileId, string producerId)
     {
         var plan = Planner.ResolveForGate(Policy, [new NormalizedDiffPath(path)]);
@@ -190,11 +189,17 @@ public sealed class AppSurfaceEvidencePolicyTests
     [InlineData("docs/evidence-gate-policy-matrix.md")]
     [InlineData("docs/evidence-gate-rollout.md")]
     [InlineData("docs/evidence-gate-diagnostics.md")]
+    [InlineData("docs/evidence-gate-migration.md")]
+    [InlineData("docs/fixtures/issue-777-docs-only/fixture.json")]
     [InlineData("scripts/coverage-solution.sh")]
     [InlineData("Evidence/ForgeTrust.AppSurface.Evidence.Planner/EvidencePlanner.cs")]
     [InlineData("Cli/ForgeTrust.AppSurface.Cli.Tests/AppSurfaceEvidencePolicyTests.cs")]
     [InlineData("tools/ForgeTrust.AppSurface.EvidenceGate/Program.cs")]
     [InlineData("tools/ForgeTrust.AppSurface.EvidenceGate.Tests/EvidenceGateVerifierTests.cs")]
+    [InlineData("tools/ForgeTrust.AppSurface.Release/ReleaseCommands.cs")]
+    [InlineData("tools/ForgeTrust.AppSurface.Release.Tests/ReleaseToolTests.cs")]
+    [InlineData("tools/ForgeTrust.AppSurface.PackageIndex/Program.cs")]
+    [InlineData("tools/ForgeTrust.AppSurface.PackageIndex.Tests/PackageIndexTests.cs")]
     [InlineData("docs/fixtures/issue-777-policy-shadow/fixtures.json")]
     public void ControlPlanePaths_ShouldNeverUseNoEvidenceProfile(string path)
     {
@@ -223,7 +228,7 @@ public sealed class AppSurfaceEvidencePolicyTests
         var result = EvidencePolicyShadowValidator.Validate(Policy, Policy, fixtures, fixtures);
 
         Assert.True(result.IsCompatible);
-        Assert.Equal(10, result.Selections.Count);
+        Assert.Equal(11, result.Selections.Count);
         Assert.Empty(result.Diagnostics);
         Assert.False(result.DiagnosticsTruncated);
         Assert.Contains(result.Selections, selection =>

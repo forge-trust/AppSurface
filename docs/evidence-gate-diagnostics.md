@@ -1,6 +1,6 @@
 # AppSurface evidence-gate diagnostics
 
-This guide maps the stable `ASEGG`, `ASEHB`, `ASEGH`, `ASEGS`, `ASESE`, `ASEPS`, and `ASEVC` diagnostics emitted by the verifier I/O layer, private handoff, host, subject launcher, fixed offline entrypoint, policy-shadow validator, trusted verifier context resolver, and checked-in pilot workflow. `ASEGG` identifies `verify-gate` command processing, `ASEHB` identifies the controller-to-subject handoff, `ASEGH` identifies host execution and the non-claiming workflow verdict, `ASEGS` identifies the subject launcher, `ASESE` identifies the fixed offline entrypoint, `ASEPS` identifies non-claiming policy-shadow comparison, and `ASEVC` identifies attempt-specific verifier identity resolution. The controller capture script reports bounded plain-language errors; it does not currently emit these code families.
+This guide maps the stable `ASEGG`, `ASEHB`, `ASEGH`, `ASEGS`, `ASESE`, `ASEPS`, `ASEPSCLI`, and `ASEVC` diagnostics emitted by the verifier I/O layer, private handoff, host, subject launcher, fixed offline entrypoint, policy-shadow validator and CLI, trusted verifier context resolver, and checked-in pilot workflow. `ASEGG` identifies `verify-gate` command processing, `ASEHB` identifies the controller-to-subject handoff, `ASEGH` identifies host execution and the non-claiming workflow verdict, `ASEGS` identifies the subject launcher, `ASESE` identifies the fixed offline entrypoint, `ASEPS` and `ASEPSCLI` identify non-claiming policy-shadow comparison and its CLI input/output layer, and `ASEVC` identifies attempt-specific verifier identity resolution. The controller capture script reports bounded plain-language errors; it does not currently emit these code families.
 
 These codes report a failed or incomplete operation, except `ASEHB010`, which reports completed subject execution without a gate claim. None turns an observation into a gate pass. The separate `ASEVG` codes are final library-verdict results, documented in the planner's [trusted PR verdict reference](../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md#trusted-pr-verdict-boundary).
 
@@ -24,6 +24,18 @@ These findings come from the [policy-shadow validator](../Evidence/ForgeTrust.Ap
 | `ASEPS006` | The candidate policy could not resolve a fixture. | Fix the candidate rule/profile mapping without dropping the fixture. |
 | `ASEPS007` | A candidate selection omits or weakens a base-selected requirement. | Preserve the resource, producer, assertion, artifact, and obligation requirements selected by the base policy. |
 | `ASEPS008` | A control-plane fixture path has no explicit matching rule; conservative fallback alone selected it. | Add an explicit reviewed control-plane mapping while retaining at least the base-selected obligations. |
+
+The [`appsurface evidence shadow-policy` command](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-evidence-shadow-policy) wraps those findings without issuing a claim. Its I/O failures use these codes:
+
+| Code | Cause | Safe fix |
+| --- | --- | --- |
+| `ASEPSCLI001` | A required input path is missing or unreadable. | Supply the protected base policy and fixture files plus the candidate policy; a missing candidate fixture file alone is treated as an empty candidate set. |
+| `ASEPSCLI002` | An input is malformed Evidence JSON. | Repair the source file rather than editing the emitted result. |
+| `ASEPSCLI003` | An input exceeds its 1 MiB bound. | Keep the complete case set under the reviewed limit or make a reviewed limit change; do not truncate inputs. |
+| `ASEPSCLI004` | Input validation could not complete safely. | Keep the result incompatible and inspect the protected input sources. |
+| `ASEPSCLI005` | The serialized comparison exceeds its 1 MiB output bound. | Preserve failure and reduce unexpectedly large policy/fixture text through a reviewed change. |
+| `ASEPSCLI006` | A new bounded result file cannot be created. | Use a new writable output path; existing files are not replaced. |
+| `ASEPSCLI010` | The comparison has one or more incompatibility findings. | Read the bounded JSON result and repair the named `ASEPS` or input finding; do not treat this shadow result as a gate claim. |
 
 ## `ASEVC`: trusted verifier context resolution
 

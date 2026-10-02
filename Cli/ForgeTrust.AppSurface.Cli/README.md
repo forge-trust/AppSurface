@@ -567,6 +567,23 @@ The built-in producer reuses the private [`ForgeTrust.AppSurface.Evidence.Covera
 
 The v1 workflow has no outbound telemetry, no automatic assembly/test discovery, no Docker sandbox, no independent artifact attestation, and no semantic classifier that silently labels arbitrary getters or constructors low value. Keep generated-code exclusions and the coverage thresholds in the reviewed Evidence policy explicit. See the [EvidenceHost cookbook](../../guides/evidencehost-cookbook.md) for policy, E2E, release-envelope, and incomplete-profile patterns.
 
+#### `appsurface evidence shadow-policy`
+
+Use `shadow-policy` to compare a proposed policy with the protected base policy and its base-owned fixture set before proposing a policy change. The [planner policy-shadow documentation](../../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md) describes the comparison and its bounded diagnostics.
+
+```bash
+appsurface evidence shadow-policy \
+  --base-policy ../protected-base/.appsurface/evidence/evidence.policy.json \
+  --candidate-policy .appsurface/evidence/evidence.policy.json \
+  --base-fixtures ../protected-base/docs/fixtures/issue-777-policy-shadow/fixtures.json \
+  --candidate-fixtures ./docs/fixtures/issue-777-policy-shadow/fixtures.json \
+  --output ./TestResults/evidence-policy-shadow
+```
+
+All four input flags and the output flag are explicit. Each input and the serialized result are limited to 1 MiB; inputs are parsed with the Evidence contract serializer. Fixture inputs are JSON arrays of `EvidencePolicyShadowFixture` records; the camelCase form is `[{"id":"ordinary-code","kind":"Code","changedPath":{"path":"src/Feature.cs","kind":"modified","previousPath":null}}]`. A specified but missing candidate fixture file means an empty candidate set, so base-owned deletions are reported. A missing base fixture file, malformed input, or oversized input fails closed. The output directory receives a new `evidence-policy-shadow.json`; a `--output` path ending in `.json` selects a new file directly. Existing result files are never overwritten.
+
+The JSON result always sets `claimEligible` to `false` and contains no Evidence manifest claim. A compatible comparison exits zero; any validator finding or input failure exits nonzero. Human diagnostics report stable codes and do not echo candidate-controlled IDs, paths, policy text, or exception details. The caller must source both base inputs from the protected base checkout. This CLI cannot authenticate input provenance, select a trusted revision, authorize a gate, or establish Evidence claim authority; a protected workflow must independently enforce any result it chooses to use.
+
 ### `appsurface coverage run`
 
 Run instrumented .NET test projects and merge private Cobertura artifacts.
