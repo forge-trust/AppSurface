@@ -175,6 +175,7 @@ jobs:
     outputs:
       producer_artifact_id: ${{ steps.binding.outputs.producer_artifact_id }}
       expected_subject_sha256: ${{ steps.binding.outputs.expected_subject_sha256 }}
+      preflight_artifact_id: ${{ steps.upload-preflight-proof.outputs.artifact-id }}
 
     steps:
       - name: Checkout tag commit
@@ -246,7 +247,7 @@ jobs:
             verify-packages \
             --package-version "${PACKAGE_VERSION}" \
             --artifacts-output "${PACKAGE_ARTIFACTS}" \
-            --artifact-manifest "${PACKAGE_ARTIFACTS}/package-artifact-manifest.json" \
+            --artifact-manifest "${PACKAGE_ARTIFACTS}/package-artifact-manifest.unapproved.json" \
             --report "${PACKAGE_ARTIFACTS}/package-validation-report.md" \
             --repository-id "$REPOSITORY_ID" --producer-run-id "$PRODUCER_RUN_ID" \
             --producer-attempt "$PRODUCER_ATTEMPT" --source-commit "$SOURCE_COMMIT"
@@ -284,7 +285,7 @@ jobs:
           dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" verify-tailwind-evidence \
             --repo-root "$GITHUB_WORKSPACE" --mode producer-binding \
             --artifacts-input "$PACKAGE_ARTIFACTS" \
-            --artifact-manifest "$PACKAGE_ARTIFACTS/package-artifact-manifest.json" \
+            --artifact-manifest "$PACKAGE_ARTIFACTS/package-artifact-manifest.unapproved.json" \
             --producer-subject "$subject" --producer-artifact-id "$producer_id" \
             --expected-subject-sha256 "$subject_sha256" --repository-id "$REPOSITORY_ID" \
             --producer-run-id "$PRODUCER_RUN_ID" --source-commit "$SOURCE_COMMIT" \
@@ -298,6 +299,40 @@ jobs:
              (.producerAttempt | type == "string" and test("^[1-9][0-9]*$"))' "$RESOLVED_BINDING" >/dev/null
           echo "producer_artifact_id=$(jq -er '.producerArtifactId' "$RESOLVED_BINDING")" >> "$GITHUB_OUTPUT"
           echo "expected_subject_sha256=$(jq -er '.subjectSha256' "$RESOLVED_BINDING")" >> "$GITHUB_OUTPUT"
+
+      - name: Download exact producer bundle for issue 845 proof
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.binding.outputs.producer_artifact_id }}
+          path: ${{ runner.temp }}/preflight-candidate
+
+      - name: Consume exact candidate bundle with PostgreSQL preflight
+        env:
+          PACKAGE_ARTIFACTS: ${{ runner.temp }}/preflight-candidate
+          PREFLIGHT_PROOF_OUTPUT: ${{ runner.temp }}/preflight-proof
+          SOURCE_COMMIT: ${{ needs.validate-tag.outputs.tag-commit }}
+          PRODUCER_ARTIFACT_ID: ${{ steps.binding.outputs.producer_artifact_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$PREFLIGHT_PROOF_OUTPUT"
+          dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" \
+            verify-preflight-artifact --mode candidate --repo-root "$GITHUB_WORKSPACE" \
+            --artifact-dir "$PACKAGE_ARTIFACTS" \
+            --artifact-manifest "$PACKAGE_ARTIFACTS/package-artifact-manifest.unapproved.json" \
+            --approved-manifest "$PREFLIGHT_PROOF_OUTPUT/package-artifact-manifest.json" \
+            --receipt "$PREFLIGHT_PROOF_OUTPUT/durable-preflight-candidate.receipt.json" \
+            --source-commit "$SOURCE_COMMIT" --run-id "$GITHUB_RUN_ID" --artifact-id "$PRODUCER_ARTIFACT_ID"
+
+      - name: Retain candidate preflight receipt and approved manifest
+        id: upload-preflight-proof
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: appsurface-prerelease-preflight-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/preflight-proof/package-artifact-manifest.json
+            ${{ runner.temp }}/preflight-proof/durable-preflight-candidate.receipt.json
+          if-no-files-found: error
+          retention-days: ${{ github.retention_days }}
 
       - name: Upload package validation diagnostics
         if: ${{ always() }}
@@ -435,6 +470,12 @@ jobs:
           artifact-ids: ${{ env.PRODUCER_ARTIFACT_ID }}
           path: ${{ runner.temp }}/package-artifacts
 
+      - name: Download retained candidate preflight evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.pack-and-verify.outputs.preflight_artifact_id }}
+          path: ${{ runner.temp }}/preflight-proof
+
       - name: Download original aggregate by immutable ID
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -453,6 +494,19 @@ jobs:
         env:
           SOURCE_REVISION_ID: ${{ env.SOURCE_COMMIT }}
         run: dotnet build tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -c Release --no-restore --output "$RUNNER_TEMP/package-index" /p:SourceRevisionId="$SOURCE_REVISION_ID"
+
+      - name: Validate candidate receipt and promote exact approved manifest
+        env:
+          PACKAGE_ARTIFACTS: ${{ runner.temp }}/package-artifacts
+          PREFLIGHT_PROOF: ${{ runner.temp }}/preflight-proof
+        run: |
+          dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" \
+            verify-preflight-artifact --mode promote --repo-root "$GITHUB_WORKSPACE" \
+            --artifact-dir "$PACKAGE_ARTIFACTS" \
+            --artifact-manifest "$PACKAGE_ARTIFACTS/package-artifact-manifest.unapproved.json" \
+            --approved-manifest "$PREFLIGHT_PROOF/package-artifact-manifest.json" \
+            --receipt "$PREFLIGHT_PROOF/durable-preflight-candidate.receipt.json" \
+            --source-commit "$SOURCE_COMMIT" --run-id "$PRODUCER_RUN_ID" --artifact-id "$PRODUCER_ARTIFACT_ID"
 
       - name: Validate evidence and prepare publication inputs
         shell: bash
@@ -606,6 +660,26 @@ jobs:
           artifact-ids: ${{ needs.pack-and-verify.outputs.producer_artifact_id }}
           path: ${{ runner.temp }}/package-artifacts
 
+      - name: Download retained candidate preflight evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.pack-and-verify.outputs.preflight_artifact_id }}
+          path: ${{ runner.temp }}/preflight-proof
+
+      - name: Validate candidate receipt and promote exact approved manifest
+        env:
+          PACKAGE_ARTIFACTS: ${{ runner.temp }}/package-artifacts
+          PREFLIGHT_PROOF: ${{ runner.temp }}/preflight-proof
+        run: |
+          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
+            verify-preflight-artifact --mode promote --repo-root "$GITHUB_WORKSPACE" \
+            --artifact-dir "$PACKAGE_ARTIFACTS" \
+            --artifact-manifest "$PACKAGE_ARTIFACTS/package-artifact-manifest.unapproved.json" \
+            --approved-manifest "$PREFLIGHT_PROOF/package-artifact-manifest.json" \
+            --receipt "$PREFLIGHT_PROOF/durable-preflight-candidate.receipt.json" \
+            --source-commit "${{ needs.validate-tag.outputs.tag-commit }}" \
+            --run-id "$GITHUB_RUN_ID" --artifact-id "${{ needs.pack-and-verify.outputs.producer_artifact_id }}"
+
       - name: Smoke install published packages
         env:
           PACKAGE_ARTIFACTS: ${{ runner.temp }}/package-artifacts
@@ -613,14 +687,23 @@ jobs:
         run: |
           dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
             smoke-install \
+            --artifacts-input "${PACKAGE_ARTIFACTS}" \
             --artifact-manifest "${PACKAGE_ARTIFACTS}/package-artifact-manifest.json" \
             --smoke-work-dir "${SMOKE_WORK_DIR}" \
-            --smoke-report "${SMOKE_WORK_DIR}/package-smoke-report.md"
+            --smoke-report "${SMOKE_WORK_DIR}/package-smoke-report.md" \
+            --preflight-source-commit "${{ needs.validate-tag.outputs.tag-commit }}" \
+            --preflight-run-id "$GITHUB_RUN_ID" \
+            --preflight-artifact-id "${{ needs.pack-and-verify.outputs.producer_artifact_id }}" \
+            --preflight-candidate-receipt "${{ runner.temp }}/preflight-proof/durable-preflight-candidate.receipt.json"
 
       - name: Upload smoke install report
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: appsurface-prerelease-smoke-${{ needs.validate-tag.outputs.package-version }}
-          path: ${{ runner.temp }}/package-smoke/package-smoke-report.md
+          path: |
+            ${{ runner.temp }}/package-smoke/package-smoke-report.md
+            ${{ runner.temp }}/package-smoke/preflight-published.receipt.json
+            ${{ runner.temp }}/package-smoke/preflight-published.receipt.json.carrier.json
           if-no-files-found: warn
+          retention-days: ${{ github.retention_days }}
