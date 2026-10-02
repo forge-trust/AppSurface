@@ -95,6 +95,9 @@ FAILURE_DIAGNOSTIC_CAUSES = frozenset({
     "output-slot-invalid", "output-parent-identity-changed", "output-anchor-not-fresh",
     "tool-root-path-not-canonical", "tool-root-symlink-component", "tool-root-path-missing",
     "tool-root-owner-changed", "tool-root-entry-invalid", "trusted-proof-not-allowlisted",
+    "subject-entry-invalid", "subject-root-symlink", "subject-copy-path-invalid",
+    "subject-copy-path-overlap", "subject-copy-depth-limit", "subject-copy-entry-limit",
+    "subject-copy-byte-limit", "subject-changed-during-copy",
 })
 FAILURE_DIAGNOSTIC_OPERATIONS = frozenset({"systemctl", "systemd-run", "useradd", "groupadd", "userdel", "groupdel", "worker-exit"})
 TRUSTED_PROOF_DIGEST_ALLOWLIST: frozenset[str] = frozenset()

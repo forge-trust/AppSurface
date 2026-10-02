@@ -22,6 +22,26 @@ The resulting manifest is `ObservationOnly` and informational. Neither this subj
 runtime receipt represents protected workflow acceptance or authorizes `Trusted` mode. Trusted
 acceptance requires a separately reviewed protected workflow and an accepted consumer proof.
 
+## Exact subject input staging
+
+The [runtime driver](../runtime-proof.py) projects an explicit six-file input set into its fresh
+`subject-source` directory: this fixture's `RuntimeSubject.csproj`, `Program.cs` and `packages.lock.json`,
+plus the repository-root `Directory.Build.props`, `Directory.Build.targets` and `Directory.Packages.props`.
+Every copied regular-file byte must match the original candidate source hash, within the aggregate
+20 MiB staging bound. Required-file/ancestor links, missing or special files, undeclared ancestor
+build inputs and explicit imports/project references reject staging. This candidate has no `global.json`
+or NuGet config; introducing one requires an explicit staging-contract update.
+
+The original Git revision and candidate source bindings remain unchanged. The launcher receives the
+staged subject root with the original project/path layout. Its existing link, depth, count and byte
+copy guards remain active. No `bin`, `obj`, `node_modules`, Git metadata or unrelated projects are staged.
+This is the small dependency-free runtime fixture scope; pinned candidate tooling and its web-asset
+preparation still execute through the existing workflow prerequisites. It is not whole-consumer execution.
+
+The final runtime record adds `subjectInputScope: declared-runtime-fixture`, `stagedSubjectFilesSha256`
+and its canonical `stagedSubjectManifestSha256`. The prepared input tree and original candidate source
+hashes are rechecked after execution; these records grant no provenance or gate authority.
+
 The candidate driver requires the Trusted missing-proof control to exit 1 with the exact safe
 `ASEVD407` diagnostic, no stdout, and no allocated output anchor. An unrelated launcher failure
 does not satisfy that control. After successful Observation and acknowledged exit, the driver

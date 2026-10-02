@@ -95,6 +95,15 @@ def broker_request(broker, request):
 
 
 class PrivateFailureDiagnosticTests(unittest.TestCase):
+    def test_existing_copy_guard_literals_are_exact_safe_diagnostic_causes(self):
+        for cause in ("subject-entry-invalid", "subject-root-symlink", "subject-copy-path-invalid",
+                      "subject-copy-path-overlap", "subject-copy-depth-limit", "subject-copy-entry-limit",
+                      "subject-copy-byte-limit", "subject-changed-during-copy"):
+            with self.subTest(cause=cause):
+                record = launcher.failure_diagnostic(launcher.LauncherError(cause))
+                self.assertEqual(record["cause"], cause)
+                self.assertEqual(launcher.validate_failure_diagnostic(record), record)
+
     def test_account_creation_and_cleanup_use_absolute_host_utilities_and_track_ownership(self):
         users, groups = [], []
         result = launcher.subprocess.CompletedProcess([], 0, b"", b"")
