@@ -90,6 +90,47 @@ public sealed class EvidenceHostRunnerTests
     }
 
     [Fact]
+    public async Task RegisteredProducerNameAloneCannotBypassUnsupportedProfileBoundary()
+    {
+        using var fixture = await GateFixture.CreateAsync(docsOnly: false, registeredProducerOnly: true);
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath, fixture.PolicyPath, fixture.RepositoryPath, fixture.OutputDirectory, stdout, stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGH202", stderr.ToString(), StringComparison.Ordinal);
+        var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(
+            await File.ReadAllBytesAsync(Path.Join(fixture.OutputDirectory, "evidence-manifest.json")));
+        Assert.Equal(EvidenceExecutionVerdict.Incomplete, manifest.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+        Assert.Equal(EvidenceProducerOutcome.Unavailable, Assert.Single(manifest.ProducerResults).Outcome);
+    }
+
+    [Fact]
+    public async Task InvalidEvidenceBearingPlanMarksEverySelectedResultInvalid()
+    {
+        using var fixture = await GateFixture.CreateAsync(docsOnly: false);
+        var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(fixture.PlanPath));
+        await File.WriteAllBytesAsync(fixture.PlanPath, EvidenceCanonicalJson.Serialize(plan with { PlanDigest = new string('0', 64) }));
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath, fixture.PolicyPath, fixture.RepositoryPath, fixture.OutputDirectory, stdout, stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGH104", stderr.ToString(), StringComparison.Ordinal);
+        var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(
+            await File.ReadAllBytesAsync(Path.Join(fixture.OutputDirectory, "evidence-manifest.json")));
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, manifest.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+        Assert.Equal(EvidenceProducerOutcome.Invalid, Assert.Single(manifest.ProducerResults).Outcome);
+        Assert.Equal(EvidenceResourceOutcome.Invalid, Assert.Single(manifest.ResourceResults).Outcome);
+    }
+
+    [Fact]
     public async Task MalformedPlanWithoutBoundedIdentityDoesNotEmitManifest()
     {
         using var fixture = await GateFixture.CreateAsync(docsOnly: true);
@@ -120,7 +161,9 @@ public sealed class EvidenceHostRunnerTests
     [InlineData("blank-resource")]
     [InlineData("too-many-resources")]
     [InlineData("blank-producer")]
+    [InlineData("too-many-producers")]
     [InlineData("blank-obligation")]
+    [InlineData("too-many-obligations")]
     public async Task PlanWithoutBoundedManifestIdentityCannotEmitAClaim(string defect)
     {
         using var fixture = await GateFixture.CreateAsync(docsOnly: true);
@@ -151,9 +194,27 @@ public sealed class EvidenceHostRunnerTests
             {
                 Profile = profile with { Producers = [new EvidenceProducerDeclaration("", "test", "1", [], [], [], 1)] },
             },
+            "too-many-producers" => plan with
+            {
+                Profile = profile with
+                {
+                    Producers = Enumerable.Range(0, EvidenceProfileLimits.MaximumProducers + 1)
+                        .Select(index => new EvidenceProducerDeclaration($"producer-{index}", "test", "1", [], [], [], 1))
+                        .ToArray(),
+                },
+            },
             "blank-obligation" => plan with
             {
                 Profile = profile with { Obligations = [new EvidenceObligation("", "test", "reason", [], "assertion")] },
+            },
+            "too-many-obligations" => plan with
+            {
+                Profile = profile with
+                {
+                    Obligations = Enumerable.Range(0, EvidenceProfileLimits.MaximumObligations + 1)
+                        .Select(index => new EvidenceObligation($"obligation-{index}", "test", "reason", [], "assertion"))
+                        .ToArray(),
+                },
             },
             _ => throw new ArgumentOutOfRangeException(nameof(defect)),
         };
@@ -381,6 +442,28 @@ public sealed class EvidenceHostRunnerTests
     }
 
     [Fact]
+    public async Task InvalidPlanIdentifiersAreRedactedInHostTerminalStatus()
+    {
+        using var fixture = await GateFixture.CreateAsync(docsOnly: true);
+        var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(fixture.PlanPath));
+        await File.WriteAllBytesAsync(fixture.PlanPath, EvidenceCanonicalJson.Serialize(plan with
+        {
+            Profile = plan.Profile with { Id = "unsafe\nprofile" },
+            PlanDigest = new string('g', 64),
+        }));
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath, fixture.PolicyPath, fixture.RepositoryPath, fixture.OutputDirectory, stdout, stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("profile=[invalid-token]", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Contains("plan=[invalid-digest]", stdout.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("unsafe\nprofile", stdout.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task UnselectedEmptyPolicyProfileCannotBeUsedAsAPlanBypass()
     {
         using var fixture = await GateFixture.CreateAsync(docsOnly: true);
@@ -436,7 +519,10 @@ public sealed class EvidenceHostRunnerTests
         public string PlanPath { get; } = planPath;
         public string OutputDirectory { get; } = outputDirectory;
 
-        public static async Task<GateFixture> CreateAsync(bool docsOnly, string emptyProfileId = "documentation-only")
+        public static async Task<GateFixture> CreateAsync(
+            bool docsOnly,
+            string emptyProfileId = "documentation-only",
+            bool registeredProducerOnly = false)
         {
             var root = Path.Join(Path.GetTempPath(), "appsurface-evidencegate-" + Guid.NewGuid().ToString("N"));
             var repository = Path.Join(root, "repository");
@@ -472,10 +558,10 @@ public sealed class EvidenceHostRunnerTests
             var emptyProfile = new EvidenceProfile(emptyProfileId, EvidenceProfileScope.Targeted, [], [], []);
             var unselectedEmptyProfile = new EvidenceProfile("unselected-empty", EvidenceProfileScope.Targeted, [], [], []);
             var producer = new EvidenceProducerDeclaration(
-                "source-check",
+                registeredProducerOnly ? "release-inspection" : "source-check",
                 "source-check",
                 "1.0",
-                ["database"],
+                registeredProducerOnly ? [] : ["database"],
                 ["source-assertion"],
                 [],
                 60);
@@ -483,7 +569,7 @@ public sealed class EvidenceHostRunnerTests
             var sourceProfile = new EvidenceProfile(
                 "source",
                 EvidenceProfileScope.Targeted,
-                [resource],
+                registeredProducerOnly ? [] : [resource],
                 [producer],
                 [new EvidenceObligation("source-obligation", "source", "Run source checks", [producer.Id], "source-assertion")]);
             var policy = new EvidencePolicy(
