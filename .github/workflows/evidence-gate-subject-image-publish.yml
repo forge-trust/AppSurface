@@ -170,9 +170,10 @@ jobs:
       - name: Require reviewed main with no ruleset bypass
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.EVIDENCE_GATE_RULESET_INSPECTION_TOKEN }}
         run: |
           set -euo pipefail
+          : "${GH_TOKEN:?Configure the protected publisher environment's EVIDENCE_GATE_RULESET_INSPECTION_TOKEN}"
           default_branch="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.default_branch')"
           ruleset_json="$RUNNER_TEMP/publisher-main-ruleset.json"
           gh api "repos/$GITHUB_REPOSITORY/rulesets/7295365" > "$ruleset_json"
@@ -221,6 +222,7 @@ jobs:
           IMAGE_TAG: ${{ steps.context.outputs.image_tag }}
           EXPECTED_IMAGE_ID: ${{ needs.validate.outputs.image-id }}
           GH_TOKEN: ${{ github.token }}
+          RULESET_INSPECTION_TOKEN: ${{ secrets.EVIDENCE_GATE_RULESET_INSPECTION_TOKEN }}
           SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
@@ -230,10 +232,12 @@ jobs:
             --source-sha "$SOURCE_SHA" --current-main-sha "$current_main_sha"
           current_default_branch="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.default_branch')"
           current_ruleset_json="$RUNNER_TEMP/publisher-main-ruleset-current.json"
-          gh api "repos/$GITHUB_REPOSITORY/rulesets/7295365" > "$current_ruleset_json"
+          : "${RULESET_INSPECTION_TOKEN:?Configure the protected publisher environment's EVIDENCE_GATE_RULESET_INSPECTION_TOKEN}"
+          GH_TOKEN="$RULESET_INSPECTION_TOKEN" gh api "repos/$GITHUB_REPOSITORY/rulesets/7295365" > "$current_ruleset_json"
           python3 scripts/evidence-gate-subject-image/publish_guard.py main-ruleset \
             --ruleset-json "$current_ruleset_json" \
             --default-branch "$current_default_branch"
+          unset RULESET_INSPECTION_TOKEN
           docker push "$IMAGE_TAG"
 
           descriptor="$RUNNER_TEMP/subject-image-registry-descriptor.json"

@@ -144,7 +144,9 @@ def validate_main_ruleset(ruleset: dict, default_branch: str) -> None:
         or ref_name.get("exclude") != []
     ):
         raise ValueError("publisher main ruleset must include main without exclusions")
-    if ruleset.get("bypass_actors") != []:
+    if "bypass_actors" not in ruleset:
+        raise ValueError("publisher ruleset inspection credential must expose bypass_actors")
+    if ruleset["bypass_actors"] != []:
         raise ValueError("publisher main ruleset must not allow review bypass actors")
 
     rules = ruleset.get("rules")

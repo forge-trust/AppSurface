@@ -195,6 +195,10 @@ class PublishGuardTests(unittest.TestCase):
             dismiss_stale_reviews_on_push=False, require_last_push_approval=True
         )
         validate_main_ruleset(latest_push_ruleset, "main")
+        hidden_bypass_ruleset = deepcopy(ruleset)
+        del hidden_bypass_ruleset["bypass_actors"]
+        with self.assertRaisesRegex(ValueError, "must expose bypass_actors"):
+            validate_main_ruleset(hidden_bypass_ruleset, "main")
 
         invalid = []
         for field, value in (
