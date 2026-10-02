@@ -100,10 +100,9 @@ The planner does not classify C# semantics or infer that a getter, constructor, 
 | `ASEVD121` | An identifier is empty or exceeds 128 characters. | Use a stable identifier up to 128 characters. |
 | `ASEVD111`, `ASEVD124` | A producer or resource requires an undeclared resource. | Declare every required resource in the same profile. |
 | `ASEVD128` | A hunked unified diff does not include Git file headers. | Supply a Git-formatted diff or explicit changed paths. |
-| `ASEVD129` | A PR gate's conservative profile does not preserve a targeted profile requirement. | Add the required declaration to the conservative profile or use an explicit combined profile. |
+| `ASEVD129` | A PR gate selects a release-only profile or its conservative profile does not preserve a targeted profile requirement. | Map PR paths to targeted profiles and add any missing conservative requirements, or use an explicit combined profile. |
 | `ASEVD130`–`ASEVD136` | Exact Git revisions, object-store reads, bounded status parsing, or capture verification failed. | Fetch full commit objects into the trusted object store and recapture with the pinned Git runner; do not downgrade to path-only selection. |
 | `ASEVD137` | Exact Git change capture exceeded its 120-second deadline. | Retry in the pinned runner or reduce the change before a reviewed deadline increase. |
-| `ASEVD138` | A pull-request plan selected a release-only profile. | Map PR paths to a targeted profile and reserve release selection for the protected release event. |
 | `ASEVD139` | A v2 plan did not match the trusted policy and exact Git commit pair. | Discard it and replan from the trusted base-owned policy and fetched objects. |
 
 Read next: [contracts](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md), [CLI workflow](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md), and the [policy cookbook](https://github.com/forge-trust/AppSurface/blob/main/guides/evidencehost-cookbook.md).

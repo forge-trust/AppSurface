@@ -21,11 +21,6 @@ public sealed class ReleaseInspectMachineResultTests
             ["noncanonical peeled commit"] = valid with { TagCommit = new string('C', 40) },
             ["missing peeled commit"] = valid with { TagCommit = string.Empty },
             ["mismatched Git formats"] = valid with { TagCommit = new string('c', 64) },
-            ["comparison base format differs from Git object format"] = valid with
-            {
-                TagObjectId = new string('b', 64),
-                TagCommit = new string('c', 64),
-            },
             ["noncanonical preparation base"] = valid with { PreparationBaseCommit = new string('G', 40) },
             ["uppercase preparation base"] = valid with { PreparationBaseCommit = new string('A', 40) },
             ["mismatched preparation base format"] = valid with { PreparationBaseCommit = new string('a', 64) },
@@ -70,6 +65,23 @@ public sealed class ReleaseInspectMachineResultTests
             Assert.Equal("release-inspect-machine-json-v2-required", failure.Diagnostic.Code);
             Assert.NotEmpty(reason);
         }
+    }
+
+    [Fact]
+    public void FromProjectionAcceptsSha256TagObjectsWithTheV2Sha1PreparationBase()
+    {
+        var (options, valid) = CreateValidProjection();
+        var sha256Projection = valid with
+        {
+            TagObjectId = new string('b', 64),
+            TagCommit = new string('c', 64),
+        };
+
+        var result = ReleaseInspectMachineResult.FromProjection(options, sha256Projection);
+
+        Assert.Equal(sha256Projection.TagObjectId, result.TagObjectId);
+        Assert.Equal(sha256Projection.TagCommit, result.PeeledCommit);
+        Assert.Equal(valid.PreparationBaseCommit, result.ComparisonBaseCommit);
     }
 
     [Fact]

@@ -31,7 +31,8 @@ internal sealed record ReleaseInspectMachineResult(
     private const int ExpectedReleaseArtifactCount = 5;
 
     /// <summary>
-    /// Creates a result only from a fully validated V2 tagged projection.
+    /// Creates a result only from a fully validated V2 tagged projection. Tag and peeled commit IDs use the
+    /// repository's matching Git object format; the V2 preparation base remains a 40-character SHA-1 ID.
     /// </summary>
     /// <param name="options">Validated inspect options.</param>
     /// <param name="projection">Projection returned by the tagged resolver.</param>
@@ -44,7 +45,6 @@ internal sealed record ReleaseInspectMachineResult(
             || !IsCanonicalGitObjectId(projection.TagCommit)
             || projection.TagObjectId!.Length != projection.TagCommit.Length
             || !IsCanonicalPreparationBaseCommit(projection.PreparationBaseCommit)
-            || projection.PreparationBaseCommit!.Length != projection.TagCommit.Length
             || !IsCanonicalSha256(projection.EvidenceBundleSha256)
             || !IsCanonicalSha256(projection.EvidenceSubjectSha256)
             || !AreValidReleaseArtifactDigests(options.Version, projection.ReleaseArtifactDigests))

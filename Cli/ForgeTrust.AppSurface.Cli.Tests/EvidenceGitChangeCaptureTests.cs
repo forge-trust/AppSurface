@@ -329,15 +329,17 @@ public sealed class EvidenceGitChangeCaptureTests
     }
 
     [Theory]
+    [InlineData(null)]
+    [InlineData(" ")]
     [InlineData("main")]
     [InlineData("abc123")]
     [InlineData("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
-    public async Task Capture_ShouldRejectRefsAndNonCanonicalObjectIds(string revision)
+    public async Task Capture_ShouldRejectRefsAndNonCanonicalObjectIds(string? revision)
     {
         using var repository = new GitFixture();
 
         var exception = await Assert.ThrowsAsync<EvidencePlanningException>(
-            () => EvidenceGitChangeCapture.CaptureAsync(repository.Path, revision, revision));
+            () => EvidenceGitChangeCapture.CaptureAsync(repository.Path, revision!, revision!));
 
         Assert.Equal("ASEVD130", exception.Code);
     }

@@ -44,14 +44,6 @@ public static class EvidenceRevisionPlanBuilder
         }
 
         var local = planner.ResolveForGate(policy, snapshot.ChangedPaths);
-        if (local.Profile.Scope == EvidenceProfileScope.Release)
-        {
-            throw new EvidencePlanningException(
-                "ASEVD138",
-                "A pull-request event selected a release-only evidence profile.",
-                "Use a targeted profile for PR changes; run release evidence only from a protected release event.");
-        }
-
         var draft = local with
         {
             ContractVersion = "2.0",

@@ -119,6 +119,17 @@ public sealed class GitHubActionsEvidenceAuthorityProviderTests
     }
 
     [Fact]
+    public void ProviderRejectsRelativeApiBaseAddressWithArgumentDiagnostic()
+    {
+        using var httpClient = new HttpClient();
+
+        var exception = Assert.Throws<ArgumentException>(() =>
+            new GitHubActionsEvidenceAuthorityProvider(httpClient, new Uri("relative/path", UriKind.Relative)));
+
+        Assert.Equal("apiBaseAddress", exception.ParamName);
+    }
+
+    [Fact]
     public async Task UnavailableProviderReturnsNoAuthoritySnapshot()
     {
         var provider = new UnavailableEvidenceAuthorityProvider();

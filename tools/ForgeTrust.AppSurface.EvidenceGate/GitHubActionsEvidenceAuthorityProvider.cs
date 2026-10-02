@@ -22,7 +22,7 @@ internal sealed class GitHubActionsEvidenceAuthorityProvider : IEvidencePullRequ
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         ArgumentNullException.ThrowIfNull(apiBaseAddress);
-        if (apiBaseAddress.Scheme != Uri.UriSchemeHttps || !apiBaseAddress.IsAbsoluteUri || apiBaseAddress.UserInfo.Length != 0)
+        if (!apiBaseAddress.IsAbsoluteUri || apiBaseAddress.Scheme != Uri.UriSchemeHttps || apiBaseAddress.UserInfo.Length != 0)
         {
             throw new ArgumentException("The GitHub API base address must be an absolute HTTPS URI without user information.", nameof(apiBaseAddress));
         }
