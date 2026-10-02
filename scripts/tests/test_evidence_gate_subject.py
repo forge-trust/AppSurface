@@ -12,6 +12,7 @@ import stat
 import sys
 import tempfile
 import threading
+from types import SimpleNamespace
 import unittest
 from contextlib import redirect_stdout
 from unittest import mock
@@ -40,11 +41,16 @@ class FakeExecutor:
         self.start_exit_code = 0
         self.start_stderr = b""
         self.fail_cleanup = False
+        self.fail_mount = False
+        self.fail_unmount = False
+        self.cleanup_order: list[str] = []
+        self.mount_options: str | None = None
+        self.mount_target: str | None = None
         self.result_export: bytes | None = (
             b'{"claimEligible":false,"profileId":"code-coverage","schemaVersion":1,"status":"completed","steps":[]}\n'
         )
         self.config_override: dict[str, object] | None = None
-        self.mounts_override: list[dict[str, object]] | None = None
+        self.scratch_mount_override: dict[str, object] | None = None
 
     def __call__(self, arguments: list[str], **options: object) -> subject.CommandResult:
         self.calls.append((list(arguments), dict(options)))
@@ -77,11 +83,23 @@ class FakeExecutor:
             return subject.CommandResult(0, b"", b"")
         if command[1:3] == ["inspect", "--format=json"]:
             return self.container_inspect()
+        if arguments[0] == subject.SUDO_PATH:
+            privileged_command = arguments[1:]
+            if privileged_command[:4] == ["-n", "mount", "-t", "tmpfs"]:
+                self.cleanup_order.append("mount")
+                self.mount_options = privileged_command[5]
+                self.mount_target = privileged_command[-1]
+                return subject.CommandResult(1 if self.fail_mount else 0, b"", b"")
+            if privileged_command[:3] == ["-n", "umount", "--"]:
+                self.cleanup_order.append("umount")
+                assert self.mount_target == privileged_command[-1]
+                return subject.CommandResult(1 if self.fail_unmount else 0, b"", b"")
         if command[1] == "start":
             if self.fail_start is not None:
                 raise self.fail_start
             return subject.CommandResult(self.start_exit_code, self.result_export or b"", self.start_stderr)
         if command[1:3] == ["rm", "--force"]:
+            self.cleanup_order.append("container-remove")
             return subject.CommandResult(1 if self.fail_cleanup else 0, b"", b"")
         raise AssertionError(f"unexpected fixed engine argv: {arguments!r}")
 
@@ -108,9 +126,12 @@ class FakeExecutor:
         mounts = [create_call[index + 1] for index, value in enumerate(create_call[:-1]) if value == "--mount"]
         subject_mount = next(value for value in mounts if "dst=/subject," in value)
         subject_source = next(value.split("=", 1)[1] for value in subject_mount.split(",") if value.startswith("src="))
-        tmpfs_mount = create_call[create_call.index("--tmpfs") + 1]
-        tmpfs_destination, separator, tmpfs_options = tmpfs_mount.partition(":")
-        assert separator and tmpfs_destination == "/scratch"
+        scratch_mount = next(
+            value for value in mounts if "dst=/scratch," in value
+        )
+        scratch_source = next(
+            value.partition("=")[2] for value in scratch_mount.split(",") if value.startswith("src=")
+        )
         create_arguments = create_call
         pids = int(next(value.partition("=")[2] for value in create_arguments if value.startswith("--pids-limit=")))
         memory_mib = int(next(value.partition("=")[2][:-1] for value in create_arguments if value.startswith("--memory=")))
@@ -129,7 +150,7 @@ class FakeExecutor:
                 },
                 "HostConfig": {
                     "ReadonlyRootfs": True,
-                    "CapDrop": ["ALL"],
+                    "CapDrop": sorted(subject.PODMAN_DEFAULT_CAPABILITIES),
                     "SecurityOpt": ["no-new-privileges"],
                     "NetworkMode": "none",
                     "PidsLimit": pids,
@@ -138,22 +159,38 @@ class FakeExecutor:
                     "Privileged": False,
                     "Devices": [],
                     "PortBindings": {},
-                    "Tmpfs": {"/scratch": tmpfs_options},
+                    "Tmpfs": {},
                     "PidMode": "private",
                     "IpcMode": "private",
-                    "CgroupnsMode": "private",
-                    "UsernsMode": "keep-id:uid=65532,gid=65532",
+                    "UTSMode": "private",
+                    "CgroupnsMode": None,
+                    "UsernsMode": "private",
                 },
                 "Mounts": [
-                    {"Type": "bind", "Source": subject_source, "Destination": "/subject", "RW": False},
-                    {"Type": "tmpfs", "Source": "tmpfs", "Destination": "/scratch", "RW": True},
+                    {
+                        "Type": "bind",
+                        "Source": subject_source,
+                        "Destination": "/subject",
+                        "RW": False,
+                        "Propagation": "rprivate",
+                    },
+                    {
+                        "Type": "bind",
+                        "Source": scratch_source,
+                        "Destination": "/scratch",
+                        "RW": True,
+                        "Propagation": "rprivate",
+                    },
                 ],
             }
         ]
         if self.config_override:
             document[0]["HostConfig"].update(self.config_override)
-        if self.mounts_override is not None:
-            document[0]["Mounts"] = self.mounts_override
+        if self.scratch_mount_override is not None:
+            scratch_mount_document = next(
+                mount for mount in document[0]["Mounts"] if mount["Destination"] == "/scratch"
+            )
+            scratch_mount_document.update(self.scratch_mount_override)
         return self.result(document)
 
 
@@ -203,10 +240,17 @@ class EvidenceGateSubjectTests(unittest.TestCase):
             "_system_name": "Linux",
             "_effective_uid": os.geteuid(),
             "_engine_path": "/usr/bin/podman",
+            "_host_mount_verifier": self.verify_fake_host_mount,
             "_command_executor": self.executor,
         }
         arguments.update(overrides)
         return subject.launch_subject(**arguments)
+
+    def verify_fake_host_mount(self, mountpoint: Path, *, host_uid: int, host_gid: int) -> None:
+        self.assertTrue(mountpoint.is_dir())
+        self.assertEqual("quota-limited-scratch-" + mountpoint.name.rsplit("-", 1)[-1], mountpoint.name)
+        self.assertEqual(os.geteuid(), host_uid)
+        self.assertEqual(os.getegid(), host_gid)
 
     def test_success_uses_fixed_offline_argv_and_exact_container_envelope(self) -> None:
         hostile_command = "--entrypoint=/bin/sh -c 'cat /runner/token'"
@@ -222,7 +266,8 @@ class EvidenceGateSubjectTests(unittest.TestCase):
         self.assertFalse(json.loads(exported_result.read_bytes())["claimEligible"])
         self.assertEqual("completed", json.loads(exported_result.read_bytes())["status"])
 
-        self.assertTrue(all(call[1] == "--remote=false" for call, _ in self.executor.calls))
+        podman_calls = [call for call, _ in self.executor.calls if call[0] != subject.SUDO_PATH]
+        self.assertTrue(all(call[1] == "--remote=false" for call in podman_calls))
         create = next(call for call, _ in self.executor.calls if call[2] == "create")
         self.assertEqual("none", next(value.partition("=")[2] for value in create if value.startswith("--network=")))
         self.assertIn("--http-proxy=false", create)
@@ -243,14 +288,33 @@ class EvidenceGateSubjectTests(unittest.TestCase):
         self.assertNotIn("GITHUB_TOKEN", " ".join(create))
         self.assertNotIn("subject-owned-command.txt", " ".join(create))
         self.assertFalse(any("token" in value.casefold() or "socket" in value.casefold() for value in create))
-        self.assertEqual(1, len([value for value in create if value == "--mount"]))
-        self.assertNotIn(str(self.runner_temp / "subject-scratch"), " ".join(create))
-        tmpfs_mount = create[create.index("--tmpfs") + 1]
-        self.assertIn(f"size={subject.MAX_PROFILE_SCRATCH_BYTES}", tmpfs_mount)
-        self.assertIn(f"nr_inodes={subject.MAX_PROFILE_SCRATCH_INODES}", tmpfs_mount)
-        self.assertNotIn("noswap", tmpfs_mount)
-        self.assertIn(f"uid={subject.CONTAINER_UID}", tmpfs_mount)
-        self.assertIn(f"gid={subject.CONTAINER_GID}", tmpfs_mount)
+        self.assertEqual(2, len([value for value in create if value == "--mount"]))
+        self.assertNotIn("--tmpfs", create)
+        mount_arguments = [create[index + 1] for index, value in enumerate(create[:-1]) if value == "--mount"]
+        self.assertIn("dst=/subject,ro=true,bind-propagation=rprivate", mount_arguments[0])
+        scratch_mount = next(value for value in mount_arguments if "dst=/scratch," in value)
+        self.assertIn("type=bind", scratch_mount)
+        self.assertIn("rw=true", scratch_mount)
+        self.assertIn("bind-propagation=rprivate", scratch_mount)
+        self.assertTrue(scratch_mount.startswith("type=bind,src=" + str(result.scratch_directory / "quota-limited-scratch-")))
+        mount_call = next(call for call, _ in self.executor.calls if call[0] == subject.SUDO_PATH and call[2] == "mount")
+        self.assertEqual([subject.SUDO_PATH, "-n", "mount", "-t", "tmpfs"], mount_call[:5])
+        self.assertEqual("-o", mount_call[5])
+        self.assertEqual(
+            "rw,nosuid,nodev,"
+            f"size={subject.MAX_PROFILE_SCRATCH_BYTES},"
+            f"nr_inodes={subject.MAX_PROFILE_SCRATCH_INODES},"
+            f"mode=0700,uid={os.geteuid()},gid={os.getegid()}",
+            mount_call[6],
+        )
+        self.assertEqual(["tmpfs", mount_call[-1]], mount_call[-2:])
+        unmount_call = next(call for call, _ in self.executor.calls if call[0] == subject.SUDO_PATH and call[2] == "umount")
+        self.assertEqual([subject.SUDO_PATH, "-n", "umount", "--", mount_call[-1]], unmount_call)
+        self.assertEqual(mount_call[-1], self.executor.mount_target)
+        self.assertFalse(Path(mount_call[-1]).exists())
+        self.assertEqual(["mount", "container-remove", "umount"], self.executor.cleanup_order)
+        self.assertTrue((result.scratch_directory / subject.SUBJECT_RESULT_RELATIVE_PATH).is_file())
+        self.assertFalse(any(mountpoint.iterdir() for mountpoint in result.scratch_directory.glob("quota-limited-scratch-*")))
         self.assertFalse(any(call[2] == "cp" for call, _ in self.executor.calls))
         start_options = next(options for call, options in self.executor.calls if call[2] == "start")
         self.assertEqual(
@@ -335,28 +399,49 @@ class EvidenceGateSubjectTests(unittest.TestCase):
         self.assertTrue(any(call[2:4] == ["rm", "--force"] for call, _ in self.executor.calls))
         self.assertFalse(any(call[2] == "start" for call, _ in self.executor.calls))
 
-    def test_scratch_inspection_rejects_missing_or_expanded_tmpfs_caps_and_wrong_mount_type(self) -> None:
-        expected = subject.SCRATCH_TMPFS_OPTIONS
-        hostile_options = (
-            expected.replace(f"size={subject.MAX_PROFILE_SCRATCH_BYTES}", f"size={subject.MAX_PROFILE_SCRATCH_BYTES + 1}"),
-            expected.replace(
-                f"nr_inodes={subject.MAX_PROFILE_SCRATCH_INODES},",
-                "",
-            ),
-            expected.replace(
-                f"nr_inodes={subject.MAX_PROFILE_SCRATCH_INODES}",
-                f"nr_inodes={subject.MAX_PROFILE_SCRATCH_INODES + 1}",
-            ),
-            expected + ",rw",
-            expected.replace("mode=0700", "mode=0777"),
-            expected.replace("nosuid", "nosuid,noswap"),
-            expected.replace(f"uid={subject.CONTAINER_UID}", f"uid={subject.CONTAINER_UID + 1}"),
-            expected.replace(f"gid={subject.CONTAINER_GID}", f"gid={subject.CONTAINER_GID + 1}"),
+    def test_podman_capability_presentation_requires_every_default_drop_and_no_additions(self) -> None:
+        # The native Podman 4.9 pilot expands --cap-drop=ALL into a list of
+        # default capabilities, rather than retaining the literal ALL value.
+        self.assertEqual(0, self.launch().exit_code)
+
+        invalid_presentations = (
+            {"CapDrop": sorted(subject.PODMAN_DEFAULT_CAPABILITIES - {"CAP_CHOWN"})},
+            {"CapDrop": sorted(subject.PODMAN_DEFAULT_CAPABILITIES) + ["CAP_CHOWN"]},
+            {"CapAdd": ["CAP_CHOWN"]},
         )
-        for index, options in enumerate(hostile_options):
-            with self.subTest(options=options):
+        for index, override in enumerate(invalid_presentations):
+            with self.subTest(override=override):
                 executor = FakeExecutor(self.root)
-                executor.config_override = {"Tmpfs": {"/scratch": options}}
+                executor.config_override = override
+                with self.assertRaises(subject.SubjectLauncherError) as caught:
+                    self.launch(
+                        scratch_directory=self.runner_temp / f"scratch-invalid-cap-{index}",
+                        _command_executor=executor,
+                    )
+                self.assertEqual("ASEGS012", caught.exception.code)
+                self.assertFalse(any(call[2] == "start" for call, _ in executor.calls))
+
+        literal_executor = FakeExecutor(self.root)
+        literal_executor.config_override = {"CapDrop": ["ALL"]}
+        self.assertEqual(
+            0,
+            self.launch(
+                scratch_directory=self.runner_temp / "scratch-literal-cap-drop",
+                _command_executor=literal_executor,
+            ).exit_code,
+        )
+
+    def test_scratch_bind_inspection_rejects_untrusted_source_access_and_propagation(self) -> None:
+        overrides = (
+            {"Source": str(self.runner_temp)},
+            {"RW": False},
+            {"Propagation": "rshared"},
+            {"Type": "tmpfs"},
+        )
+        for index, override in enumerate(overrides):
+            with self.subTest(override=override):
+                executor = FakeExecutor(self.root)
+                executor.scratch_mount_override = override
                 with self.assertRaises(subject.SubjectLauncherError) as caught:
                     self.launch(
                         scratch_directory=self.runner_temp / f"scratch-invalid-{index}",
@@ -367,19 +452,9 @@ class EvidenceGateSubjectTests(unittest.TestCase):
                 self.assertTrue(any(call[2:4] == ["rm", "--force"] for call, _ in executor.calls))
 
         executor = FakeExecutor(self.root)
-        executor.config_override = {"Tmpfs": {}}
-        with self.assertRaises(subject.SubjectLauncherError) as missing_tmpfs_error:
-            self.launch(scratch_directory=self.runner_temp / "scratch-missing-tmpfs", _command_executor=executor)
-        self.assertEqual("ASEGS012", missing_tmpfs_error.exception.code)
-        self.assertFalse(any(call[2] == "start" for call, _ in executor.calls))
-
-        executor = FakeExecutor(self.root)
-        executor.mounts_override = [
-            {"Type": "bind", "Source": str(self.subject_root), "Destination": "/subject", "RW": False},
-            {"Type": "bind", "Source": str(self.runner_temp), "Destination": "/scratch", "RW": True},
-        ]
+        executor.config_override = {"Tmpfs": {"/scratch": "unexpected"}}
         with self.assertRaises(subject.SubjectLauncherError) as caught:
-            self.launch(scratch_directory=self.runner_temp / "scratch-wrong-mount", _command_executor=executor)
+            self.launch(scratch_directory=self.runner_temp / "scratch-unexpected-tmpfs", _command_executor=executor)
         self.assertEqual("ASEGS012", caught.exception.code)
         self.assertFalse(any(call[2] == "start" for call, _ in executor.calls))
 
@@ -445,6 +520,91 @@ class EvidenceGateSubjectTests(unittest.TestCase):
         with self.assertRaises(subject.SubjectLauncherError) as caught:
             self.launch()
         self.assertEqual("ASEGS017", caught.exception.code)
+        self.assertEqual(["mount", "container-remove"], self.executor.cleanup_order)
+        self.assertTrue(Path(self.executor.mount_target or "").is_dir())
+
+    def test_host_tmpfs_mount_failure_stops_before_container_creation(self) -> None:
+        self.executor.fail_mount = True
+
+        with mock.patch.object(subject, "_host_scratch_mount_is_present", return_value=False):
+            with self.assertRaises(subject.SubjectLauncherError) as caught:
+                self.launch()
+
+        self.assertEqual("ASEGS019", caught.exception.code)
+        self.assertEqual(["mount"], self.executor.cleanup_order)
+        self.assertFalse(any(call[2] == "create" for call, _ in self.executor.calls))
+        self.assertFalse(Path(self.executor.mount_target or "").exists())
+
+        partial_executor = FakeExecutor(self.root)
+        partial_executor.fail_mount = True
+        with mock.patch.object(subject, "_host_scratch_mount_is_present", return_value=True):
+            with self.assertRaises(subject.SubjectLauncherError) as partial_failure:
+                self.launch(
+                    scratch_directory=self.runner_temp / "scratch-partial-mount",
+                    _command_executor=partial_executor,
+                )
+
+        self.assertEqual("ASEGS019", partial_failure.exception.code)
+        self.assertEqual(["mount", "umount"], partial_executor.cleanup_order)
+        self.assertFalse(any(call[2] == "create" for call, _ in partial_executor.calls))
+        self.assertFalse(Path(partial_executor.mount_target or "").exists())
+
+    def test_host_tmpfs_unmount_failure_invalidates_run_and_keeps_mountpoint(self) -> None:
+        self.executor.fail_unmount = True
+
+        with self.assertRaises(subject.SubjectLauncherError) as caught:
+            self.launch()
+
+        self.assertEqual("ASEGS017", caught.exception.code)
+        self.assertEqual(["mount", "container-remove", "umount"], self.executor.cleanup_order)
+        mountpoint = Path(self.executor.mount_target or "")
+        self.assertTrue(mountpoint.is_dir())
+        self.assertTrue((mountpoint.parent / subject.SUBJECT_RESULT_RELATIVE_PATH).is_file())
+
+    def test_mountinfo_parser_decodes_mountpoint_and_checks_live_tmpfs_limits(self) -> None:
+        mountpoint = self.root / "scratch mount"
+        mountpoint.mkdir(mode=0o700)
+        os.chmod(mountpoint, 0o700)
+        mountinfo_path = self.root / "mountinfo"
+        escaped_mountpoint = str(mountpoint).replace(" ", r"\040")
+
+        def write_mountinfo(*, inode_limit: int = subject.MAX_PROFILE_SCRATCH_INODES) -> None:
+            mountinfo_path.write_text(
+                "41 25 0:38 / "
+                f"{escaped_mountpoint} rw,nosuid,nodev - tmpfs tmpfs "
+                f"rw,nosuid,nodev,size={subject.MAX_PROFILE_SCRATCH_BYTES},"
+                f"nr_inodes={inode_limit},mode=700,uid={os.geteuid()},gid={os.getegid()}\n",
+                encoding="utf-8",
+            )
+
+        filesystem_stats = SimpleNamespace(
+            f_blocks=subject.MAX_PROFILE_SCRATCH_BYTES // 4096,
+            f_frsize=4096,
+            f_files=subject.MAX_PROFILE_SCRATCH_INODES,
+        )
+        with mock.patch.object(subject, "MOUNTINFO_PATH", mountinfo_path):
+            with mock.patch.object(subject.os, "statvfs", return_value=filesystem_stats):
+                write_mountinfo()
+                self.assertTrue(subject._host_scratch_mount_is_present(mountpoint))
+                subject._verify_host_scratch_mount(
+                    mountpoint,
+                    host_uid=os.geteuid(),
+                    host_gid=os.getegid(),
+                )
+
+                write_mountinfo(inode_limit=subject.MAX_PROFILE_SCRATCH_INODES + 1)
+                with self.assertRaises(subject.SubjectLauncherError) as caught:
+                    subject._verify_host_scratch_mount(
+                        mountpoint,
+                        host_uid=os.geteuid(),
+                        host_gid=os.getegid(),
+                    )
+                self.assertEqual("ASEGS019", caught.exception.code)
+
+                mountinfo_path.write_text("malformed mountinfo\n", encoding="utf-8")
+                with self.assertRaises(subject.SubjectLauncherError) as malformed:
+                    subject._host_scratch_mount_is_present(mountpoint)
+                self.assertEqual("ASEGS019", malformed.exception.code)
 
     def test_bounded_output_rejection_is_preserved_and_container_is_cleaned(self) -> None:
         self.executor.fail_start = subject._ProcessOutputExceeded()

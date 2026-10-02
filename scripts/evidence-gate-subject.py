@@ -4,9 +4,10 @@
 This is an execution primitive, not an evidence verifier or a gate.  It accepts
 only controller-owned paths, a digest-pinned image, a policy profile ID, and
 validated resource limits. The writable container scratch is a fixed-size,
-fixed-inode tmpfs; the trusted entrypoint streams its small fixed result record
-over the attached process output, where this launcher validates it and writes it
-to private host scratch. Other container scratch artifacts are discarded. The
+fixed-inode host tmpfs bind mount; the trusted entrypoint streams its small
+fixed result record over the attached process output, where this launcher
+validates it and writes it outside the mount to private host scratch. Other
+container scratch artifacts are discarded. The
 image must contain the trusted fixed entrypoint
 ``/usr/local/libexec/appsurface-subject-runner`` and its locked offline inputs.
 The entrypoint receives a fixed profile contract; this program never reads a
@@ -17,6 +18,11 @@ network/resource envelope has a separately reviewed implementation.
 The caller owns the new scratch directory after return and must treat every
 byte written there and all process output as untrusted.  Even exit code zero
 does not create complete Evidence or authorize a CI verdict.
+
+Normal completion and handled failures remove the container before unmounting
+the private host tmpfs. This process-local cleanup cannot run after SIGKILL or
+VM loss; an independent supervisor is still required before this primitive can
+support an eligible claim.
 """
 
 from __future__ import annotations
@@ -41,10 +47,20 @@ from typing import Any, Callable, Mapping, Sequence
 
 
 ENGINE_PATH = "/usr/bin:/usr/local/bin:/bin"
+SUDO_PATH = "/usr/bin/sudo"
+MOUNTINFO_PATH = Path("/proc/self/mountinfo")
 CONTAINER_ENTRYPOINT = "/usr/local/libexec/appsurface-subject-runner"
 CONTAINER_UID = 65532
 CONTAINER_GID = 65532
+PODMAN_DEFAULT_CAPABILITIES = frozenset(
+    {
+        "CAP_CHOWN", "CAP_DAC_OVERRIDE", "CAP_FOWNER", "CAP_FSETID", "CAP_KILL",
+        "CAP_NET_BIND_SERVICE", "CAP_SETFCAP", "CAP_SETGID", "CAP_SETPCAP",
+        "CAP_SETUID", "CAP_SYS_CHROOT",
+    }
+)
 ENGINE_PHASE_TIMEOUT_SECONDS = 10
+MOUNT_PHASE_TIMEOUT_SECONDS = 30
 CLEANUP_TIMEOUT_SECONDS = 5
 MAX_ENGINE_OUTPUT_BYTES = 256 * 1024
 MAX_PROFILE_TIMEOUT_SECONDS = 1200
@@ -60,14 +76,6 @@ IMAGE_REFERENCE_PATTERN = re.compile(r"[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64
 RUN_ID_PATTERN = re.compile(r"[1-9][0-9]{0,18}\Z")
 RUN_ATTEMPT_PATTERN = re.compile(r"[1-9][0-9]{0,8}\Z")
 SUBJECT_RESULT_RELATIVE_PATH = "evidence-subject-result.json"
-# Rootless Podman 4.9 rejects noswap on tmpfs. The fixed byte/inode quotas and
-# container memory limit remain enforceable; this contract makes no no-swap claim.
-SCRATCH_TMPFS_OPTIONS = (
-    "rw,nosuid,nodev,"
-    f"size={MAX_PROFILE_SCRATCH_BYTES},"
-    f"nr_inodes={MAX_PROFILE_SCRATCH_INODES},"
-    f"mode=0700,uid={CONTAINER_UID},gid={CONTAINER_GID}"
-)
 
 # This is a closed registry, intentionally independent of subject files and
 # policy-provided command strings. Resource-backed profiles are named here so
@@ -537,10 +545,14 @@ def _container_create_arguments(
     name: str,
     image: str,
     subject_root: Path,
+    scratch_mountpoint: Path,
     profile_arguments: Sequence[str],
     limits: SubjectLimits,
 ) -> list[str]:
     subject_mount = f"type=bind,src={subject_root},dst=/subject,ro=true,bind-propagation=rprivate"
+    scratch_mount = (
+        f"type=bind,src={scratch_mountpoint},dst=/scratch,rw=true,bind-propagation=rprivate"
+    )
     arguments = [
         engine,
         "--remote=false",
@@ -556,7 +568,6 @@ def _container_create_arguments(
         "--read-only",
         "--read-only-tmpfs=false",
         "--image-volume=ignore",
-        "--image-volume=ignore",
         "--userns=keep-id:uid=65532,gid=65532",
         "--user=65532:65532",
         "--cap-drop=ALL",
@@ -566,8 +577,8 @@ def _container_create_arguments(
         f"--cpus={_cpu_argument(limits.cpu_millis)}",
         "--mount",
         subject_mount,
-        "--tmpfs",
-        f"/scratch:{SCRATCH_TMPFS_OPTIONS}",
+        "--mount",
+        scratch_mount,
         "--unsetenv-all",
     ]
     arguments.extend(f"--env={value}" for value in CONTAINER_ENVIRONMENT)
@@ -589,44 +600,101 @@ def _one_inspect_object(data: bytes) -> Mapping[str, Any]:
     return inspected[0]
 
 
-def _scratch_tmpfs_options_are_bounded(value: Any) -> bool:
-    if not isinstance(value, str) or not value:
-        return False
-    flags: set[str] = set()
-    options: dict[str, str] = {}
-    for item in value.split(","):
-        if not item:
-            return False
-        key, separator, option_value = item.partition("=")
-        if separator:
-            if not key or not option_value or key in options:
-                return False
-            options[key] = option_value
-        else:
-            if key in flags:
-                return False
-            flags.add(key)
-    if flags != {"rw", "nosuid", "nodev"}:
-        return False
-    if set(options) != {"size", "nr_inodes", "mode", "uid", "gid"}:
-        return False
-    if (
-        options["size"] != str(MAX_PROFILE_SCRATCH_BYTES)
-        or options["nr_inodes"] != str(MAX_PROFILE_SCRATCH_INODES)
-        or options["uid"] != str(CONTAINER_UID)
-        or options["gid"] != str(CONTAINER_GID)
-    ):
-        return False
+def _decode_mountinfo_field(value: str) -> str:
+    return re.sub(r"\\([0-7]{3})", lambda match: chr(int(match.group(1), 8)), value)
+
+
+def _host_scratch_mount_is_present(mountpoint: Path) -> bool:
+    """Detect a partial mount after a failed mount command so cleanup can still remove it."""
     try:
-        return int(options["mode"], 8) == 0o700
-    except ValueError:
+        with MOUNTINFO_PATH.open(encoding="utf-8") as mountinfo:
+            for line in mountinfo:
+                left, separator, _ = line.rstrip("\n").partition(" - ")
+                fields = left.split()
+                if not separator or len(fields) < 6:
+                    raise ValueError("malformed mountinfo record")
+                if _decode_mountinfo_field(fields[4]) == str(mountpoint):
+                    return True
         return False
+    except (OSError, UnicodeError, ValueError, OverflowError):
+        raise _fail("ASEGS019", "The host scratch mount state could not be inspected safely.") from None
+
+
+def _size_option_bytes(value: str) -> int | None:
+    match = re.fullmatch(r"([0-9]+)([kKmMgGtT]?)", value)
+    if match is None:
+        return None
+    scales = {"": 1, "k": 1024, "m": 1024**2, "g": 1024**3, "t": 1024**4}
+    return int(match.group(1)) * scales[match.group(2).lower()]
+
+
+def _verify_host_scratch_mount(mountpoint: Path, *, host_uid: int, host_gid: int) -> None:
+    """Require the live host mount and statvfs limits to match the fixed contract."""
+    try:
+        matching_mounts: list[tuple[str, str, list[str], list[str]]] = []
+        with MOUNTINFO_PATH.open(encoding="utf-8") as mountinfo:
+            for line in mountinfo:
+                left, separator, right = line.rstrip("\n").partition(" - ")
+                fields = left.split()
+                if not separator or len(fields) < 6:
+                    raise ValueError("malformed mountinfo record")
+                if _decode_mountinfo_field(fields[4]) != str(mountpoint):
+                    continue
+                filesystem_fields = right.split()
+                if len(filesystem_fields) < 3:
+                    raise ValueError("malformed mountinfo filesystem fields")
+                matching_mounts.append(
+                    (
+                        filesystem_fields[0],
+                        filesystem_fields[1],
+                        fields[5].split(","),
+                        filesystem_fields[2].split(","),
+                    )
+                )
+        if len(matching_mounts) != 1:
+            raise ValueError("the scratch mount is missing or ambiguous")
+
+        filesystem_type, source, mount_options, super_options = matching_mounts[0]
+        option_flags = set(mount_options + super_options)
+        option_values: dict[str, str] = {}
+        for option in super_options:
+            key, separator, value = option.partition("=")
+            if separator:
+                if key in option_values:
+                    raise ValueError("duplicate tmpfs option")
+                option_values[key] = value
+
+        mount_stat = mountpoint.stat()
+        filesystem_stat = os.statvfs(mountpoint)
+        mode_value = int(option_values.get("mode", "-1"), 8)
+        actual_bytes = filesystem_stat.f_blocks * filesystem_stat.f_frsize
+        if (
+            filesystem_type != "tmpfs"
+            or source != "tmpfs"
+            or not {"rw", "nosuid", "nodev"}.issubset(option_flags)
+            or {"ro", "suid", "dev", "noswap"}.intersection(option_flags)
+            or _size_option_bytes(option_values.get("size", "")) != MAX_PROFILE_SCRATCH_BYTES
+            or option_values.get("nr_inodes") != str(MAX_PROFILE_SCRATCH_INODES)
+            or mode_value != 0o700
+            or option_values.get("uid") != str(host_uid)
+            or option_values.get("gid") != str(host_gid)
+            or not stat.S_ISDIR(mount_stat.st_mode)
+            or stat.S_IMODE(mount_stat.st_mode) != 0o700
+            or mount_stat.st_uid != host_uid
+            or mount_stat.st_gid != host_gid
+            or actual_bytes != MAX_PROFILE_SCRATCH_BYTES
+            or filesystem_stat.f_files != MAX_PROFILE_SCRATCH_INODES
+        ):
+            raise ValueError("the live tmpfs does not match the fixed quota and identity")
+    except (OSError, UnicodeError, ValueError, OverflowError):
+        raise _fail("ASEGS019", "The live quota-limited host scratch mount could not be verified.") from None
 
 
 def _verify_container_configuration(
     data: bytes,
     *,
     subject_root: Path,
+    scratch_mountpoint: Path,
     limits: SubjectLimits,
     profile_arguments: Sequence[str],
 ) -> None:
@@ -653,7 +721,14 @@ def _verify_container_configuration(
         raise _fail("ASEGS012", "The created container omitted capability-drop verification.")
     if not isinstance(security_options, list) or not all(isinstance(value, str) for value in security_options):
         raise _fail("ASEGS012", "The created container omitted no-new-privileges verification.")
-    if cap_drop != ["ALL"] or not {
+    # Rootless Podman 4.9 expands ALL into its default capability names in
+    # inspect, while other versions may retain the literal request.
+    dropped = set(cap_drop)
+    if (
+        not (cap_drop == ["ALL"] or (
+            len(dropped) == len(cap_drop) and PODMAN_DEFAULT_CAPABILITIES.issubset(dropped)
+        ))
+    ) or not {
         "no-new-privileges",
         "no-new-privileges:true",
     }.intersection(set(security_options)):
@@ -673,17 +748,15 @@ def _verify_container_configuration(
         raise _fail("ASEGS012", "The created container omitted device access verification.")
     if host.get("Privileged") is not False or devices:
         raise _fail("ASEGS012", "The created container has a privileged or device capability.")
-    tmpfs = host.get("Tmpfs")
-    if not isinstance(tmpfs, dict) or set(tmpfs) != {"/scratch"}:
-        raise _fail("ASEGS012", "The created container scratch is not the single approved quota-limited tmpfs.")
-    if not _scratch_tmpfs_options_are_bounded(tmpfs["/scratch"]):
-        raise _fail("ASEGS012", "The created container scratch byte, inode, or access limits do not match the fixed profile.")
+    if host.get("Tmpfs") not in (None, {}):
+        raise _fail("ASEGS012", "The created container has an undeclared tmpfs mount.")
     if (
         host.get("PortBindings") not in (None, {})
-        or host.get("PidMode") == "host"
-        or host.get("IpcMode") == "host"
-        or host.get("CgroupnsMode") != "private"
-        or host.get("UsernsMode") != "keep-id:uid=65532,gid=65532"
+        or host.get("PidMode") != "private"
+        or host.get("IpcMode") != "private"
+        or host.get("UTSMode") != "private"
+        or host.get("CgroupnsMode") not in (None, "private")
+        or host.get("UsernsMode") != "private"
     ):
         raise _fail("ASEGS012", "The created container shares a host namespace or publishes a port.")
 
@@ -698,10 +771,13 @@ def _verify_container_configuration(
         subject_mount.get("Type") != "bind"
         or Path(str(subject_mount.get("Source"))).resolve() != subject_root
         or subject_mount.get("RW") is not False
-        or scratch_mount.get("Type") != "tmpfs"
+        or subject_mount.get("Propagation") != "rprivate"
+        or scratch_mount.get("Type") != "bind"
+        or Path(str(scratch_mount.get("Source"))).resolve() != scratch_mountpoint
         or scratch_mount.get("RW") is not True
+        or scratch_mount.get("Propagation") != "rprivate"
     ):
-        raise _fail("ASEGS012", "Subject and scratch mount access does not match the read-only/quota-limited contract.")
+        raise _fail("ASEGS012", "Subject and scratch bind mount access does not match the read-only/private contract.")
 
 
 def _validate_subject_result_content(content: bytes, *, expected_status: str) -> None:
@@ -812,9 +888,10 @@ def launch_subject(
     _system_name: str | None = None,
     _effective_uid: int | None = None,
     _engine_path: str | None = None,
+    _host_mount_verifier: Callable[..., None] | None = None,
     _command_executor: CommandExecutor = _run_command,
 ) -> SubjectRunResult:
-    """Run a fixed profile with quota-limited scratch and export only its small result record."""
+    """Run a fixed profile with host-mounted quota-limited scratch and export its result record."""
     _validate_limits(limits)
     profile_arguments = _validate_profile(profile_id)
     _validate_image_reference(image_digest)
@@ -832,6 +909,7 @@ def launch_subject(
         raise _fail("ASEGS002", "The subject checkout and scratch directory must be disjoint.")
 
     event = cancel_event if cancel_event is not None else threading.Event()
+    host_gid = os.getegid()
     _check_cancel(event)
     engine = _resolve_podman() if _engine_path is None else _engine_path
     # Only the trusted engine receives host paths. No GitHub token, workflow
@@ -873,13 +951,52 @@ def launch_subject(
     if not stat.S_ISDIR(scratch_stat.st_mode) or stat.S_IMODE(scratch_stat.st_mode) != 0o700:
         raise _fail("ASEGS002", "The new scratch directory permissions are unsafe.")
 
+    scratch_mountpoint = scratch / f"quota-limited-scratch-{secrets.token_hex(8)}"
+    try:
+        scratch_mountpoint.mkdir(mode=0o700)
+        os.chmod(scratch_mountpoint, 0o700)
+    except OSError:
+        raise _fail("ASEGS002", "The private scratch mountpoint could not be created safely.") from None
+
     run_id = env["GITHUB_RUN_ID"]
     attempt = env["GITHUB_RUN_ATTEMPT"]
     container_name = f"ase-subject-{run_id}-{attempt}-{secrets.token_hex(6)}"
     create_attempted = False
+    mount_attempted = False
+    mount_cleanup_required = False
     primary_error: BaseException | None = None
     result: SubjectRunResult | None = None
     try:
+        _check_cancel(event)
+        mount_attempted = True
+        mount_options = (
+            "rw,nosuid,nodev,"
+            f"size={MAX_PROFILE_SCRATCH_BYTES},"
+            f"nr_inodes={MAX_PROFILE_SCRATCH_INODES},"
+            f"mode=0700,uid={effective_uid},gid={host_gid}"
+        )
+        mount_result = _command_executor(
+            [
+                SUDO_PATH,
+                "-n",
+                "mount",
+                "-t",
+                "tmpfs",
+                "-o",
+                mount_options,
+                "tmpfs",
+                str(scratch_mountpoint),
+            ],
+            timeout_seconds=MOUNT_PHASE_TIMEOUT_SECONDS,
+            maximum_output_bytes=4096,
+            environment=engine_environment,
+            cancel_event=event,
+        )
+        if mount_result.returncode != 0:
+            raise _fail("ASEGS019", "The quota-limited host scratch mount failed.")
+        mount_cleanup_required = True
+        mount_verifier = _verify_host_scratch_mount if _host_mount_verifier is None else _host_mount_verifier
+        mount_verifier(scratch_mountpoint, host_uid=effective_uid, host_gid=host_gid)
         _check_cancel(event)
         create_attempted = True
         _expect_success(
@@ -889,6 +1006,7 @@ def launch_subject(
                     name=container_name,
                     image=image_digest,
                     subject_root=subject_root,
+                    scratch_mountpoint=scratch_mountpoint,
                     profile_arguments=profile_arguments,
                     limits=limits,
                 ),
@@ -913,6 +1031,7 @@ def launch_subject(
         _verify_container_configuration(
             inspect_result.stdout,
             subject_root=subject_root,
+            scratch_mountpoint=scratch_mountpoint,
             limits=limits,
             profile_arguments=profile_arguments,
         )
@@ -942,6 +1061,13 @@ def launch_subject(
         )
     except BaseException as exc:
         primary_error = exc
+        if mount_attempted and not mount_cleanup_required:
+            try:
+                mount_cleanup_required = _host_scratch_mount_is_present(scratch_mountpoint)
+            except BaseException:
+                # An unreadable mount table cannot prove that the failed mount
+                # left no mount behind, so make a best-effort unmount attempt.
+                mount_cleanup_required = True
 
     cleanup_error: BaseException | None = None
     if create_attempted:
@@ -958,12 +1084,36 @@ def launch_subject(
         except BaseException as exc:
             cleanup_error = exc
 
+    mount_unmounted = not mount_cleanup_required
+    # A failed container removal may leave a running bind-mount user. Preserve
+    # its host mount for external cleanup rather than detaching it underneath
+    # that process.
+    if mount_cleanup_required and (not create_attempted or cleanup_error is None):
+        try:
+            unmount_result = _command_executor(
+                [SUDO_PATH, "-n", "umount", "--", str(scratch_mountpoint)],
+                timeout_seconds=CLEANUP_TIMEOUT_SECONDS,
+                maximum_output_bytes=4096,
+                environment=engine_environment,
+                cancel_event=threading.Event(),
+            )
+            if unmount_result.returncode == 0:
+                mount_unmounted = True
+            elif cleanup_error is None:
+                cleanup_error = _fail("ASEGS017", "The host scratch tmpfs cleanup failed; no claim may be issued.")
+        except BaseException as exc:
+            if cleanup_error is None:
+                cleanup_error = exc
+
+    if mount_unmounted and cleanup_error is None:
+        try:
+            scratch_mountpoint.rmdir()
+        except OSError as exc:
+            if cleanup_error is None:
+                cleanup_error = exc
+
     if cleanup_error is not None:
-        if isinstance(cleanup_error, SubjectLauncherError):
-            raise cleanup_error
-        if isinstance(cleanup_error, (_ProcessCancelled, _ProcessTimedOut, _ProcessOutputExceeded, _ProcessStartFailed, _ProcessCouldNotStop)):
-            _raise_process_error(cleanup_error, "container cleanup")
-        raise _fail("ASEGS017", "The subject container cleanup failed; no claim may be issued.") from None
+        raise _fail("ASEGS017", "The subject container or host scratch cleanup failed; no claim may be issued.") from None
     if primary_error is not None:
         if isinstance(primary_error, SubjectLauncherError):
             raise primary_error

@@ -312,7 +312,7 @@ record = {
             "state": final_state.get("Status"),
             "exitCode": final_state.get("ExitCode"),
             "mounts": [
-                {key: mount.get(key) for key in ("Type", "Destination", "RW")}
+                {key: mount.get(key) for key in ("Type", "Source", "Destination", "RW", "Propagation")}
                 for mount in final_mounts if isinstance(mount, dict)
             ],
         } if isinstance(final, dict) else None),
@@ -326,6 +326,7 @@ record = {
         "inodes": integer("SCRATCH_INODES"),
         "uid": integer("SCRATCH_UID"),
         "gid": integer("SCRATCH_GID"),
+        "hostUid": integer("PODMAN_RUNNER_UID"),
     },
 }
 Path(os.environ["PODMAN_EVIDENCE_PATH"]).write_text(
@@ -439,7 +440,6 @@ import runpy
 import sys
 values = runpy.run_path(sys.argv[1])
 print("|".join((
-    values["SCRATCH_TMPFS_OPTIONS"],
     str(values["MAX_PROFILE_SCRATCH_BYTES"]),
     str(values["MAX_PROFILE_SCRATCH_INODES"]),
     str(values["CONTAINER_UID"]),
@@ -448,21 +448,18 @@ print("|".join((
 ' "$repository_root/scripts/evidence-gate-subject.py")"; then
   podman_fail "$podman_phase" 'launcher-scratch-contract-unavailable'
 fi
-IFS='|' read -r scratch_tmpfs_options scratch_bytes scratch_inodes scratch_uid scratch_gid <<< "$scratch_contract"
+IFS='|' read -r scratch_bytes scratch_inodes scratch_uid scratch_gid <<< "$scratch_contract"
 if [[ "$scratch_bytes" != '4294967296' || "$scratch_inodes" != '262144' \
   || "$scratch_uid" != '65532' || "$scratch_gid" != '65532' ]]; then
   podman_fail "$podman_phase" 'launcher-scratch-contract-changed'
 fi
-if [[ "$scratch_tmpfs_options" != "rw,nosuid,nodev,size=$scratch_bytes,nr_inodes=$scratch_inodes,mode=0700,uid=$scratch_uid,gid=$scratch_gid" ]]; then
-  podman_fail "$podman_phase" 'launcher-scratch-options-changed'
-fi
-
+scratch_tmpfs_options="rw,nosuid,nodev,size=$scratch_bytes,nr_inodes=$scratch_inodes,mode=0700,uid=$podman_runner_uid,gid=$podman_runner_gid"
 podman_phase='mount-host-scratch'
 if ! mkdir -m 0700 "$scratch_host_mount"; then
   podman_fail "$podman_phase" 'scratch-mountpoint-create-failed'
 fi
 if ! timeout --signal=TERM --kill-after=5s 30s sudo -n mount -t tmpfs \
-  -o "rw,nosuid,nodev,size=$scratch_bytes,nr_inodes=$scratch_inodes,mode=0700,uid=$podman_runner_uid,gid=$podman_runner_gid" \
+  -o "$scratch_tmpfs_options" \
   tmpfs "$scratch_host_mount"; then
   if mountpoint -q "$scratch_host_mount"; then
     scratch_host_mounted=true

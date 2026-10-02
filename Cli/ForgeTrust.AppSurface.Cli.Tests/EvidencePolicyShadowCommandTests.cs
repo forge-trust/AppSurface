@@ -45,6 +45,30 @@ public sealed class EvidencePolicyShadowCommandTests
     }
 
     [Fact]
+    public async Task Command_Should_Write_To_A_New_Explicit_Json_Output_File()
+    {
+        using var temporaryDirectory = TempDirectory.Create("appsurface-policy-shadow-explicit-json-output-");
+        var fixture = Fixture("docs", EvidencePolicyShadowFixtureKind.Documentation, "docs/guide.md");
+        var inputs = await WriteInputsAsync(
+            temporaryDirectory.Path,
+            Fixtures(fixture),
+            Fixtures(fixture));
+        var outputPath = TestPathUtils.PathUnder(temporaryDirectory.Path, "nested", "shadow-result.json");
+
+        var run = await InvokeAsync(CreateArguments(inputs, outputPath));
+
+        Assert.Equal(0, run.ExitCode);
+        Assert.True(File.Exists(outputPath));
+        Assert.False(Directory.Exists(outputPath));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(
+            Path.GetDirectoryName(outputPath)!,
+            "evidence-policy-shadow.json")));
+        using var document = JsonDocument.Parse(await File.ReadAllBytesAsync(outputPath));
+        Assert.False(document.RootElement.GetProperty("claimEligible").GetBoolean());
+        Assert.True(document.RootElement.GetProperty("result").GetProperty("isCompatible").GetBoolean());
+    }
+
+    [Fact]
     public async Task Command_Should_Treat_An_Existing_Json_Named_Directory_As_A_Directory()
     {
         using var temporaryDirectory = TempDirectory.Create("appsurface-policy-shadow-json-named-directory-");
@@ -481,6 +505,31 @@ public sealed class EvidencePolicyShadowCommandTests
         Assert.Equal("Base", diagnostic.GetProperty("fixtureSource").GetString());
         Assert.Equal(
             "--base-policy must name an input file; no comparison was performed.",
+            diagnostic.GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public async Task Command_Should_Reject_An_Omitted_Candidate_Fixtures_Path_Even_Though_Missing_Files_Are_Allowed()
+    {
+        using var temporaryDirectory = TempDirectory.Create("appsurface-policy-shadow-blank-candidate-fixtures-");
+        var fixture = Fixture("docs", EvidencePolicyShadowFixtureKind.Documentation, "docs/guide.md");
+        var inputs = await WriteInputsAsync(
+            temporaryDirectory.Path,
+            Fixtures(fixture),
+            Fixtures(fixture));
+        inputs = inputs with { CandidateFixturesPath = string.Empty };
+        var outputPath = TestPathUtils.PathUnder(temporaryDirectory.Path, "blank-candidate-fixtures-result.json");
+
+        var run = await InvokeAsync(CreateArguments(inputs, outputPath));
+
+        Assert.NotEqual(0, run.ExitCode);
+        Assert.Contains("ASEPSCLI001", run.Error, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(await File.ReadAllBytesAsync(outputPath));
+        var diagnostic = Assert.Single(document.RootElement.GetProperty("result").GetProperty("diagnostics").EnumerateArray());
+        Assert.Equal("ASEPSCLI001", diagnostic.GetProperty("code").GetString());
+        Assert.Equal("Candidate", diagnostic.GetProperty("fixtureSource").GetString());
+        Assert.Equal(
+            "--candidate-fixtures must name an input file; no comparison was performed.",
             diagnostic.GetProperty("message").GetString());
     }
 

@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using ForgeTrust.AppSurface.Evidence.Contracts;
+using ForgeTrust.AppSurface.Testing;
 using Microsoft.Win32.SafeHandles;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
@@ -35,6 +36,35 @@ public sealed class EvidenceNoFollowArtifactExtractorTests
         Assert.Equal(expected.LongLength, result.LengthBytes);
         Assert.Equal(Convert.ToHexString(SHA256.HashData(expected)).ToLowerInvariant(), result.Sha256);
         Assert.Equal(expected, await File.ReadAllBytesAsync(Path.Join(temp.ArtifactRoot, "reports", "report.bin")));
+        Assert.True(await writer.VerifyWrittenArtifactsAsync());
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ShouldWriteAnEmptyArtifactWithTheEmptyContentDigest()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            await AssertUnsupportedPlatformFailsClosedAsync();
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        Directory.CreateDirectory(temp.ScratchRoot);
+        Directory.CreateDirectory(temp.ArtifactRoot);
+        Directory.CreateDirectory(TestPathUtils.PathUnder(temp.ScratchRoot, "subject"));
+        await File.WriteAllBytesAsync(TestPathUtils.PathUnder(temp.ScratchRoot, "subject", "empty.bin"), []);
+        using var root = OpenTrustedRoot(temp.ScratchRoot);
+        var writer = CreateWriter(temp.ArtifactRoot);
+
+        var results = await EvidenceNoFollowArtifactExtractor.ExtractAsync(
+            root,
+            writer,
+            [new EvidenceNoFollowArtifact("report", "subject/empty.bin", "reports/empty.bin")]);
+
+        var result = Assert.Single(results);
+        Assert.Equal(0, result.LengthBytes);
+        Assert.Equal(Convert.ToHexString(SHA256.HashData([])).ToLowerInvariant(), result.Sha256);
+        Assert.Empty(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(temp.ArtifactRoot, "reports", "empty.bin")));
         Assert.True(await writer.VerifyWrittenArtifactsAsync());
     }
 
@@ -477,6 +507,41 @@ public sealed class EvidenceNoFollowArtifactExtractorTests
 
         Assert.Empty(smallerLimitWriter.WrittenArtifacts);
         Assert.False(File.Exists(Path.Join(smallerLimitRoot, "bounded-reports", "report.bin")));
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ShouldKeepEarlierArtifactWhenLaterArtifactExceedsItsSlotLimit()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            await AssertUnsupportedPlatformFailsClosedAsync();
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        Directory.CreateDirectory(temp.ScratchRoot);
+        Directory.CreateDirectory(temp.ArtifactRoot);
+        Directory.CreateDirectory(TestPathUtils.PathUnder(temp.ScratchRoot, "subject"));
+        var reportContents = new byte[] { 1, 2, 3 };
+        await File.WriteAllBytesAsync(TestPathUtils.PathUnder(temp.ScratchRoot, "subject", "report.bin"), reportContents);
+        await File.WriteAllBytesAsync(TestPathUtils.PathUnder(temp.ScratchRoot, "subject", "summary.bin"), [4, 5]);
+        using var root = OpenTrustedRoot(temp.ScratchRoot);
+        var writer = CreateWriter(
+            temp.ArtifactRoot,
+            new EvidenceArtifactSlot("summary", "summaries", "application/octet-stream", Required: false, MaximumBytes: 1));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => EvidenceNoFollowArtifactExtractor.ExtractAsync(
+            root,
+            writer,
+            [
+                new EvidenceNoFollowArtifact("report", "subject/report.bin", "reports/report.bin"),
+                new EvidenceNoFollowArtifact("summary", "subject/summary.bin", "summaries/summary.bin"),
+            ]));
+
+        Assert.Equal("report", Assert.Single(writer.WrittenArtifacts).LogicalName);
+        Assert.Equal(reportContents, await File.ReadAllBytesAsync(TestPathUtils.PathUnder(temp.ArtifactRoot, "reports", "report.bin")));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(temp.ArtifactRoot, "summaries", "summary.bin")));
+        Assert.True(await writer.VerifyWrittenArtifactsAsync());
     }
 
     [Fact]

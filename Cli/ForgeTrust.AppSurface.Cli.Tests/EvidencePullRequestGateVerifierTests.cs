@@ -603,6 +603,26 @@ public sealed class EvidencePullRequestGateVerifierTests
     }
 
     [Fact]
+    public async Task VerifyAsync_ShouldRejectObligationSelectionMutationDuringArtifactVerification()
+    {
+        await using var fixture = await GateFixture.CreateAsync();
+        var selectedObligationIds = new List<string>(fixture.Manifest.SelectedObligationIds);
+        var manifest = fixture.Manifest with
+        {
+            SelectedObligationIds = selectedObligationIds,
+            ManifestDigest = string.Empty,
+        };
+        manifest = manifest with { ManifestDigest = EvidenceDigest.CanonicalSha256(manifest) };
+
+        var result = await fixture.VerifyAsync(
+            manifest: manifest,
+            artifactVerifier: new FakeArtifactVerifier(true, () => selectedObligationIds[0] = "forged"));
+
+        Assert.False(result.IsEligible);
+        Assert.Equal("ASEVG004", result.Code);
+    }
+
+    [Fact]
     public async Task VerifyAsync_ShouldRejectReleaseProfileSelectedForPullRequest()
     {
         await using var fixture = await GateFixture.CreateAsync();
@@ -755,6 +775,30 @@ public sealed class EvidencePullRequestGateVerifierTests
         await File.WriteAllTextAsync(alternateArtifactPath, "trusted artifact bytes");
         Directory.CreateSymbolicLink(producerRoot, alternateProducerRoot);
 
+        Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, fixture.Plan, fixture.Manifest));
+    }
+
+    [Fact]
+    public async Task NoFollowArtifactVerifier_ShouldRejectSymlinkedArtifactParentDirectoryOnLinux()
+    {
+        if (!SupportsNoFollowVerifier)
+        {
+            return;
+        }
+
+        await using var fixture = await GateFixture.CreateAsync();
+        var verifier = new EvidencePullRequestGateNoFollowArtifactVerifier();
+        var expectedBytes = await File.ReadAllBytesAsync(fixture.ArtifactPath);
+        var alternateReportsRoot = TestPathUtils.PathUnder(Path.GetDirectoryName(fixture.ArtifactRoot)!, "alternate-reports");
+        Directory.CreateDirectory(alternateReportsRoot);
+        var alternateArtifactPath = TestPathUtils.PathUnder(alternateReportsRoot, Path.GetFileName(fixture.ArtifactPath));
+        await File.WriteAllBytesAsync(alternateArtifactPath, expectedBytes);
+
+        var reportsRoot = Path.GetDirectoryName(fixture.ArtifactPath)!;
+        Directory.Delete(reportsRoot, recursive: true);
+        Directory.CreateSymbolicLink(reportsRoot, alternateReportsRoot);
+
+        Assert.Equal(expectedBytes, await File.ReadAllBytesAsync(fixture.ArtifactPath));
         Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, fixture.Plan, fixture.Manifest));
     }
 
@@ -1060,13 +1104,17 @@ public sealed class EvidencePullRequestGateVerifierTests
     private static bool SupportsNoFollowVerifier =>
         OperatingSystem.IsLinux() && RuntimeInformation.ProcessArchitecture is Architecture.X64 or Architecture.Arm64;
 
-    private sealed class FakeArtifactVerifier(bool result) : IEvidencePullRequestGateArtifactVerifier
+    private sealed class FakeArtifactVerifier(bool result, Action? onVerify = null) : IEvidencePullRequestGateArtifactVerifier
     {
         public Task<bool> VerifyArtifactsAsync(
             string trustedArtifactHandoffRootPath,
             EvidencePlan verifiedPlan,
             EvidenceManifest candidateManifest,
-            CancellationToken cancellationToken = default) => Task.FromResult(result);
+            CancellationToken cancellationToken = default)
+        {
+            onVerify?.Invoke();
+            return Task.FromResult(result);
+        }
     }
 
     private sealed class ThrowingArtifactVerifier : IEvidencePullRequestGateArtifactVerifier
