@@ -1,6 +1,6 @@
 # AppSurface evidence-gate diagnostics
 
-This guide maps the stable `ASEGG`, `ASEHB`, `ASEGH`, `ASEGS`, `ASESE`, and `ASEVC` diagnostics emitted by the verifier I/O layer, private handoff, host, subject launcher, fixed offline entrypoint, trusted verifier context resolver, and checked-in pilot workflow. `ASEGG` identifies `verify-gate` command processing, `ASEHB` identifies the controller-to-subject handoff, `ASEGH` identifies host execution and the non-claiming workflow verdict, `ASEGS` identifies the subject launcher, `ASESE` identifies the fixed offline entrypoint, and `ASEVC` identifies attempt-specific verifier identity resolution. The controller capture script reports bounded plain-language errors; it does not currently emit these code families.
+This guide maps the stable `ASEGG`, `ASEHB`, `ASEGH`, `ASEGS`, `ASESE`, `ASEPS`, and `ASEVC` diagnostics emitted by the verifier I/O layer, private handoff, host, subject launcher, fixed offline entrypoint, policy-shadow validator, trusted verifier context resolver, and checked-in pilot workflow. `ASEGG` identifies `verify-gate` command processing, `ASEHB` identifies the controller-to-subject handoff, `ASEGH` identifies host execution and the non-claiming workflow verdict, `ASEGS` identifies the subject launcher, `ASESE` identifies the fixed offline entrypoint, `ASEPS` identifies non-claiming policy-shadow comparison, and `ASEVC` identifies attempt-specific verifier identity resolution. The controller capture script reports bounded plain-language errors; it does not currently emit these code families.
 
 These codes report a failed or incomplete operation, except `ASEHB010`, which reports completed subject execution without a gate claim. None turns an observation into a gate pass. The separate `ASEVG` codes are final library-verdict results, documented in the planner's [trusted PR verdict reference](../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md#trusted-pr-verdict-boundary).
 
@@ -9,6 +9,21 @@ These codes report a failed or incomplete operation, except `ASEHB010`, which re
 `run` can exit `0` when the trusted policy explicitly selects an empty targeted profile and the host emits `NoEvidenceRequired`. That is a successful host result for that profile; it does not run a producer or publish a final CI verdict. Other profiles remain incomplete while their producer and resource registrations are absent.
 
 The checked-in `pull_request_target` workflow is a separate scaffold. Its controller resolves the captured diff through the base-owned policy, and its credentialless job validates the bounded handoff. An explicitly empty documentation profile needs no OCI run; a supported code profile can start only with a reviewed digest-pinned image and offline dependencies. Both results say `claimEligible: false`. The trusted verifier now recaptures current PR revisions, checks the downloaded handoff and bounded subject result against that capture, resolves the attempt-specific subject job, and runs `verify-gate` against a trusted host manifest when both upstream jobs succeed. Its final step deliberately emits `ASEGH003` and exits nonzero because the subject result does not prove checkout, isolation, artifacts, and all selected producers together. The branch-owned shadow job checks contracts only. A fully empty profile can yield an eligible *rehearsal* result from fresh PR/run/job API authority without a subject checkout attestor; nonempty profiles still lack the required checkout and isolation proof. Keep the pilot non-required and do not remove obligations or weaken checks to clear these diagnostics. See the [rollout record](evidence-gate-rollout.md) and [policy and producer matrix](evidence-gate-policy-matrix.md).
+
+## `ASEPS`: non-claiming policy-shadow comparison
+
+These findings come from the [policy-shadow validator](../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md#non-claiming-policy-shadow-comparison). They compare candidate policy and fixture data with a protected base policy and fixture set supplied by the caller. The library cannot establish that provenance or issue a required-check claim.
+
+| Code | Cause | Safe fix |
+| --- | --- | --- |
+| `ASEPS001` | The trusted base policy is invalid or exceeds the bounded policy shape. | Repair the protected base policy in a separately reviewed change; do not substitute candidate policy as the baseline. |
+| `ASEPS002` | The candidate policy is invalid or exceeds the bounded policy shape. | Repair the proposed policy and rerun the non-claiming comparison. |
+| `ASEPS003` | The base fixture set is empty, malformed, duplicated, or over limit, or candidate fixture input is malformed or over limit. | Restore bounded, unique fixture IDs and valid paths; preserve the base-owned fixture source. |
+| `ASEPS004` | Candidate fixture data removed or edited a base-owned case. | Restore that case unchanged; add supplemental candidate cases under new IDs. The base case remains active during comparison. |
+| `ASEPS005` | The base policy could not resolve a fixture. | Fix the protected base policy or fixture through a reviewed control-plane update. |
+| `ASEPS006` | The candidate policy could not resolve a fixture. | Fix the candidate rule/profile mapping without dropping the fixture. |
+| `ASEPS007` | A candidate selection omits or weakens a base-selected requirement. | Preserve the resource, producer, assertion, artifact, and obligation requirements selected by the base policy. |
+| `ASEPS008` | A control-plane fixture path has no explicit matching rule; conservative fallback alone selected it. | Add an explicit reviewed control-plane mapping while retaining at least the base-selected obligations. |
 
 ## `ASEVC`: trusted verifier context resolution
 

@@ -38,6 +38,12 @@ An empty targeted profile is valid for an explicit docs-only rule: it contribute
 
 `ValidateGatePolicy(policy)` exposes the same check for policy preflight. `Resolve` and `ValidatePolicy` deliberately retain local v1 behavior and do not perform cross-profile validation. Local planning therefore remains compatible, but its result alone does not prove that a policy is safe for a PR gate. Gate callers should use `ResolveForGate` with the same base-owned policy snapshot used for the run. A failed superset check reports `ASEVD129` before a plan is produced.
 
+## Non-claiming policy-shadow comparison
+
+[`EvidencePolicyShadowValidator.Validate`](EvidencePolicyShadowValidator.cs) compares a proposed policy with the protected base policy using an authoritative base-owned fixture set. Each fixture names a stable ID, a repository-relative changed path (optionally with its previous rename path), and one of five base-owned classifications: documentation, code, resource, control plane, or unknown. The validator resolves every case under both policies and rejects candidate selections that omit or weaken any base-selected resource, producer, assertion, artifact slot, or obligation. A control-plane fixture also requires an explicit policy rule; conservative fallback by itself is reported as an unrecognized control-plane path. Candidate fixture additions and edits can provide supplemental cases, but deleting or editing a base fixture is reported and does not remove the original case from evaluation.
+
+The caller must obtain the base policy, base fixtures, and path classifier from the protected base revision; passing candidate-controlled copies as those inputs would defeat the comparison. This library authenticates none of its inputs and returns only a bounded shadow result, never a manifest or required-check verdict. It accepts at most 64 fixtures per input set, 64 profiles, and 256 rules, and returns at most 32 deterministic diagnostics with an explicit truncation flag. A candidate policy must still pass `ValidateGatePolicy`; a passing shadow comparison does not establish subject isolation, producer evidence, or current GitHub revision freshness. See the [issue #777 rollout record](../../docs/evidence-gate-rollout.md) for the separate live control-plane pilot and required-check activation criteria.
+
 ## Revision-bound Git change capture
 
 For a revision-bound gate, [EvidenceGitChangeCapture](EvidenceGitChangeCapture.cs) captures the source diff and the path-selection stream from an explicit commit pair:

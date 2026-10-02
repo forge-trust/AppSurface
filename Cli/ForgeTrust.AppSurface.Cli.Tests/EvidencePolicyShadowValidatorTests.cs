@@ -1,0 +1,269 @@
+using ForgeTrust.AppSurface.Evidence.Contracts;
+using ForgeTrust.AppSurface.Evidence.Planner;
+
+namespace ForgeTrust.AppSurface.Cli.Tests;
+
+public sealed class EvidencePolicyShadowValidatorTests
+{
+    [Theory]
+    [InlineData("deleted")]
+    [InlineData("weakened")]
+    public void Validate_ShouldDetectDeletedOrWeakenedResourceRule(string change)
+    {
+        var basePolicy = CreatePolicy();
+        var candidatePolicy = CreatePolicyWithChangedResourceRule(basePolicy, change);
+        var fixture = Fixture("database", EvidencePolicyShadowFixtureKind.Resource, "resources/migrations/001.sql");
+
+        var result = EvidencePolicyShadowValidator.Validate(basePolicy, candidatePolicy, [fixture], [fixture]);
+
+        Assert.False(result.IsCompatible);
+        var selection = Assert.Single(result.Selections);
+        Assert.Equal("resource", selection.BaseProfileId);
+        Assert.NotEqual(selection.BaseProfileId, selection.CandidateProfileId);
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.Code == "ASEPS007"
+            && diagnostic.Path == fixture.ChangedPath.Path
+            && diagnostic.Message.Contains("resource 'resource-database'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_ShouldRetainBaseFixtureWhenCandidateRemovesIt()
+    {
+        var basePolicy = CreatePolicy();
+        var candidatePolicy = CreatePolicyWithChangedResourceRule(basePolicy, "deleted");
+        var baseFixture = Fixture("database", EvidencePolicyShadowFixtureKind.Resource, "resources/migrations/001.sql");
+
+        var result = EvidencePolicyShadowValidator.Validate(basePolicy, candidatePolicy, [baseFixture], []);
+
+        Assert.False(result.IsCompatible);
+        var baseSelection = Assert.Single(result.Selections);
+        Assert.Equal(EvidencePolicyShadowFixtureSource.Base, baseSelection.FixtureSource);
+        Assert.Equal(baseFixture.ChangedPath, baseSelection.ChangedPath);
+        Assert.Equal("resource", baseSelection.BaseProfileId);
+        Assert.Equal("code", baseSelection.CandidateProfileId);
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.Code == "ASEPS004"
+            && diagnostic.FixtureId == baseFixture.Id
+            && diagnostic.Message.Contains("removed", StringComparison.Ordinal));
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "ASEPS007" && diagnostic.Path == baseFixture.ChangedPath.Path);
+    }
+
+    [Fact]
+    public void Validate_ShouldKeepBaseFixtureWhenCandidateEditsItsInput()
+    {
+        var policy = CreatePolicy();
+        var baseFixture = Fixture("control", EvidencePolicyShadowFixtureKind.ControlPlane, ".github/workflows/evidence-gate.yml");
+        var candidateFixture = Fixture("control", EvidencePolicyShadowFixtureKind.Documentation, "docs/guide.md");
+
+        var result = EvidencePolicyShadowValidator.Validate(policy, policy, [baseFixture], [candidateFixture]);
+
+        Assert.False(result.IsCompatible);
+        Assert.Collection(
+            result.Selections.OrderBy(static selection => selection.FixtureSource),
+            selection =>
+            {
+                Assert.Equal(EvidencePolicyShadowFixtureSource.Base, selection.FixtureSource);
+                Assert.Equal(baseFixture.ChangedPath, selection.ChangedPath);
+                Assert.Equal("control", selection.BaseProfileId);
+                Assert.Equal("control", selection.CandidateProfileId);
+            },
+            selection =>
+            {
+                Assert.Equal(EvidencePolicyShadowFixtureSource.Candidate, selection.FixtureSource);
+                Assert.Equal(candidateFixture.ChangedPath, selection.ChangedPath);
+                Assert.Equal("documentation", selection.BaseProfileId);
+                Assert.Equal("documentation", selection.CandidateProfileId);
+            });
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.Code == "ASEPS004"
+            && diagnostic.FixtureSource == EvidencePolicyShadowFixtureSource.Candidate
+            && diagnostic.Message.Contains("edited", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_ShouldReportUnrecognizedControlPlanePathEvenWhenFallbackIsConservative()
+    {
+        var basePolicy = CreatePolicy();
+        var candidatePolicy = CreatePolicyWithChangedResourceRule(basePolicy, "deleted");
+        var fixture = Fixture("new-workflow", EvidencePolicyShadowFixtureKind.ControlPlane, ".github/workflows/new-gate.yml");
+
+        var result = EvidencePolicyShadowValidator.Validate(basePolicy, candidatePolicy, [fixture], [fixture]);
+
+        Assert.False(result.IsCompatible);
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.Code == "ASEPS008"
+            && diagnostic.FixtureSource == EvidencePolicyShadowFixtureSource.Candidate
+            && diagnostic.Path == fixture.ChangedPath.Path);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "ASEPS007");
+    }
+
+    [Fact]
+    public void Validate_ShouldResolveDocumentationCodeResourceControlPlaneAndUnknownCasesUnderBothPolicies()
+    {
+        var policy = CreatePolicy();
+        EvidencePolicyShadowFixture[] fixtures =
+        [
+            Fixture("docs", EvidencePolicyShadowFixtureKind.Documentation, "docs/guide.md"),
+            Fixture("code", EvidencePolicyShadowFixtureKind.Code, "src/Feature.cs"),
+            Fixture("resource", EvidencePolicyShadowFixtureKind.Resource, "resources/database/seed.sql"),
+            Fixture("control", EvidencePolicyShadowFixtureKind.ControlPlane, ".github/workflows/evidence-gate.yml"),
+            Fixture("unknown", EvidencePolicyShadowFixtureKind.Unknown, "new-area/unclassified.bin"),
+        ];
+
+        var result = EvidencePolicyShadowValidator.Validate(policy, policy, fixtures, fixtures);
+
+        Assert.True(result.IsCompatible);
+        Assert.Equal(5, result.Selections.Count);
+        Assert.Collection(
+            result.Selections,
+            selection => AssertProfiles(selection, "code", "code"),
+            selection => AssertProfiles(selection, "control", "control"),
+            selection => AssertProfiles(selection, "docs", "documentation"),
+            selection => AssertProfiles(selection, "resource", "resource"),
+            selection => AssertProfiles(selection, "unknown", "conservative"));
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
+    public void Validate_ShouldResolveBothSidesOfRenameFixtures()
+    {
+        var policy = CreatePolicy();
+        var fixture = new EvidencePolicyShadowFixture(
+            "cross-class-rename",
+            EvidencePolicyShadowFixtureKind.Resource,
+            new NormalizedDiffPath("src/NewFeature.cs", "renamed", "resources/OldFeature.cs"));
+
+        var result = EvidencePolicyShadowValidator.Validate(policy, policy, [fixture], [fixture]);
+
+        Assert.True(result.IsCompatible);
+        var selection = Assert.Single(result.Selections);
+        Assert.Equal("conservative", selection.BaseProfileId);
+        Assert.Equal("conservative", selection.CandidateProfileId);
+        Assert.Equal("resources/OldFeature.cs", selection.ChangedPath.PreviousPath);
+    }
+
+    [Fact]
+    public void Validate_ShouldCapDiagnosticsDeterministically()
+    {
+        var policy = CreatePolicy();
+        var baseFixtures = Enumerable.Range(0, 40)
+            .Select(index => Fixture($"fixture-{index:D2}", EvidencePolicyShadowFixtureKind.Code, $"src/Feature{index:D2}.cs"))
+            .ToArray();
+        var candidateFixtures = baseFixtures
+            .Select(fixture => fixture with
+            {
+                ChangedPath = new NormalizedDiffPath($"docs/{fixture.Id}.md"),
+            })
+            .ToArray();
+
+        var result = EvidencePolicyShadowValidator.Validate(policy, policy, baseFixtures, candidateFixtures);
+
+        Assert.False(result.IsCompatible);
+        Assert.Equal(EvidencePolicyShadowValidator.MaximumDiagnostics, result.Diagnostics.Count);
+        Assert.True(result.DiagnosticsTruncated);
+        Assert.Equal(
+            result.Diagnostics.OrderBy(static diagnostic => diagnostic.Code, StringComparer.Ordinal)
+                .ThenBy(static diagnostic => diagnostic.FixtureSource)
+                .ThenBy(static diagnostic => diagnostic.FixtureId, StringComparer.Ordinal)
+                .ThenBy(static diagnostic => diagnostic.Path, StringComparer.Ordinal)
+                .ThenBy(static diagnostic => diagnostic.Message, StringComparer.Ordinal),
+            result.Diagnostics);
+    }
+
+    [Fact]
+    public void Validate_ShouldReportInvalidCandidateGatePolicyWithoutClaimingCompatibility()
+    {
+        var policy = CreatePolicy();
+        var invalidCandidate = policy with { ConservativeProfileId = "documentation" };
+        var fixture = Fixture("code", EvidencePolicyShadowFixtureKind.Code, "src/Feature.cs");
+
+        var result = EvidencePolicyShadowValidator.Validate(policy, invalidCandidate, [fixture], [fixture]);
+
+        Assert.False(result.IsCompatible);
+        Assert.Empty(result.Selections);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "ASEPS002");
+    }
+
+    private static void AssertProfiles(EvidencePolicyShadowSelection selection, string fixtureId, string profileId)
+    {
+        Assert.Equal(EvidencePolicyShadowFixtureSource.Base, selection.FixtureSource);
+        Assert.Equal(fixtureId, selection.FixtureId);
+        Assert.Equal(profileId, selection.BaseProfileId);
+        Assert.Equal(profileId, selection.CandidateProfileId);
+    }
+
+    private static EvidencePolicyShadowFixture Fixture(
+        string id,
+        EvidencePolicyShadowFixtureKind kind,
+        string path) =>
+        new(id, kind, new NormalizedDiffPath(path));
+
+    private static EvidencePolicy CreatePolicy()
+    {
+        var documentation = new EvidenceProfile("documentation", EvidenceProfileScope.Targeted, [], [], []);
+        var code = CreateRequirementProfile("code", "code", hasResource: false);
+        var resource = CreateRequirementProfile("resource", "resource", hasResource: true);
+        var control = CreateRequirementProfile("control", "control", hasResource: true);
+        var conservative = new EvidenceProfile(
+            "conservative",
+            EvidenceProfileScope.Targeted,
+            [.. code.Resources, .. resource.Resources, .. control.Resources],
+            [.. code.Producers, .. resource.Producers, .. control.Producers],
+            [.. code.Obligations, .. resource.Obligations, .. control.Obligations]);
+
+        return new EvidencePolicy(
+            "shadow-test",
+            "1",
+            "conservative",
+            [conservative, documentation, code, resource, control],
+            [
+                new EvidencePolicyRule("docs", "docs/**", documentation.Id),
+                new EvidencePolicyRule("code", "src/**", code.Id),
+                new EvidencePolicyRule("resource", "resources/**", resource.Id),
+                new EvidencePolicyRule("control", ".github/**", control.Id),
+            ]);
+    }
+
+    private static EvidencePolicy CreatePolicyWithChangedResourceRule(EvidencePolicy policy, string change)
+    {
+        var rules = policy.Rules
+            .Where(static rule => rule.Id is "docs" or "code")
+            .ToList();
+        if (change == "weakened")
+        {
+            rules.Add(new EvidencePolicyRule("resource", "resources/**", "documentation"));
+        }
+
+        return policy with
+        {
+            ConservativeProfileId = "code",
+            Rules = rules,
+        };
+    }
+
+    private static EvidenceProfile CreateRequirementProfile(string profileId, string prefix, bool hasResource)
+    {
+        var resourceId = $"{prefix}-database";
+        var producerId = $"{prefix}-tests";
+        var assertionId = $"{prefix}/passed@1";
+        var resources = hasResource
+            ? new[] { new EvidenceResourceDeclaration(resourceId, "aspire_health", 30, []) }
+            : [];
+        var producer = new EvidenceProducerDeclaration(
+            producerId,
+            "integration-tests",
+            "1.0.0",
+            hasResource ? [resourceId] : [],
+            [assertionId],
+            [new EvidenceArtifactSlot("report", prefix, "application/json", Required: true, MaximumBytes: 1024)],
+            60);
+        var obligation = new EvidenceObligation(
+            $"{prefix}-obligation",
+            "integration",
+            $"The {prefix} profile must pass.",
+            [producerId],
+            assertionId);
+
+        return new EvidenceProfile(profileId, EvidenceProfileScope.Targeted, resources, [producer], [obligation]);
+    }
+}
