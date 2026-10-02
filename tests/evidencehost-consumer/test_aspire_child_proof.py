@@ -1,6 +1,7 @@
 """Portable controls and resource HTTP probes, never native acceptance."""
 import http.client
 import importlib.util
+import json
 import os
 from pathlib import Path
 import shutil
@@ -264,6 +265,236 @@ class IdentityRejectionDiagnostics(unittest.TestCase):
                 self.assertFalse(receipt["identity_diagnostic_written"])
                 self.assertEqual("application-identity-rejected", receipt["failure"])
                 self.assertNotIn("identity-canary", json.dumps(receipt))
+
+
+class ExecStartupControls(unittest.TestCase):
+    @staticmethod
+    def properties(active="active", sub="running", **extra):
+        return {"Type": "exec", "ActiveState": active, "SubState": sub,
+                "MainPID": "123", "ControlGroup": "/selected", **extra}
+
+    def test_command_selects_exec_and_queries_completed_startup_states_without_changing_caps(self):
+        argv = proof.service_command("selected", Path("/payload"), Path("/scratch"), Path("/dotnet/dotnet"),
+                                     999, 999, Path("/tools"), Path("/output"), Path("/control"), "normal")
+        self.assertIn("--property=Type=exec", argv)
+        self.assertIn("--property=TasksMax=64", argv)
+        self.assertIn("--property=MemoryMax=1G", argv)
+        self.assertFalse(any("PROCESSOR_COUNT" in value for value in argv))
+        with mock.patch.object(proof, "command", return_value=mock.Mock(stdout=b"Type=exec\nSubState=running\n")) as run:
+            self.assertEqual({"Type": "exec", "SubState": "running"}, proof.unit_properties("selected"))
+        self.assertIn("--property=ControlGroup,MainPID,Type,ActiveState,SubState", run.call_args.args[0])
+
+    def test_activating_root_candidate_is_not_observed_or_accepted(self):
+        with mock.patch.object(proof, "cgroup_pids") as pids, mock.patch.object(proof, "identity_matches") as identity:
+            result = proof.observe_unit_processes(self.properties("activating", "start"), 999, "/selected", {}, Path("/control"), 0, time.monotonic() + 1)
+        self.assertIsNone(result)
+        pids.assert_not_called()
+        identity.assert_not_called()
+
+    def test_completed_exec_applies_exact_uid_and_cgroup_guard_before_role_observation(self):
+        with mock.patch.object(proof, "cgroup_pids", return_value={123}), \
+                mock.patch.object(Path, "read_text", return_value="Uid:\t999\t999\t999\t999\n"), \
+                mock.patch.object(proof, "belongs_to_group", return_value=True) as membership, \
+                mock.patch.object(Path, "read_bytes", return_value=b"dotnet\0AspireChild.dll\0"):
+            result = proof.observe_unit_processes(self.properties(), 999, "/selected", {}, Path("/control"), 0, time.monotonic() + 1)
+        self.assertEqual({"123": "apphost"}, result)
+        membership.assert_called_once_with(123, "/selected")
+
+    def test_completed_exec_still_rejects_root_uid_and_wrong_cgroup(self):
+        for uid, group_matches in ((0, True), (999, False)):
+            with self.subTest(uid=uid), tempfile.TemporaryDirectory(prefix="exec-control-") as name:
+                receipt = {}
+                with mock.patch.object(proof, "cgroup_pids", return_value={123}), \
+                        mock.patch.object(Path, "read_text", return_value=f"Uid:\t{uid}\t{uid}\t{uid}\t{uid}\n"), \
+                        mock.patch.object(proof, "belongs_to_group", return_value=group_matches), \
+                        mock.patch.object(Path, "read_bytes") as cmdline:
+                    with self.assertRaises(RuntimeError):
+                        proof.observe_unit_processes(self.properties(), 999, "/selected", receipt, Path(name), 0, time.monotonic() + 1)
+                    cmdline.assert_not_called()
+                self.assertEqual("application-identity-rejected", receipt["failure"])
+                self.assertTrue(receipt["identity_diagnostic_written"])
+
+    def test_terminal_or_malformed_startup_never_runs_identity_guard(self):
+        cases = [self.properties("failed", "failed"), self.properties("inactive", "dead"),
+                 self.properties("deactivating", "stop"), self.properties("active", "exited"),
+                 self.properties(Type="simple"), self.properties(MainPID="0"),
+                 self.properties(MainPID="private-canary"), self.properties(ControlGroup=""), {}]
+        for properties in cases:
+            with self.subTest(properties=properties), mock.patch.object(proof, "identity_matches") as identity:
+                with self.assertRaisesRegex(proof.StartupFailure, "^application-exec-startup-failed$"):
+                    proof.observe_unit_processes(properties, 999, "/selected", {}, Path("/control"), 0, time.monotonic() + 1)
+                identity.assert_not_called()
+
+    def test_expired_startup_cannot_accept_even_a_running_exec_unit(self):
+        with mock.patch.object(proof.time, "monotonic", return_value=12), \
+                mock.patch.object(proof, "identity_matches") as identity:
+            with self.assertRaises(proof.StartupFailure):
+                proof.observe_unit_processes(self.properties(), 999, "/selected", {}, Path("/control"), 10, 12)
+        identity.assert_not_called()
+
+    def test_http_readiness_completed_after_deadline_is_not_accepted(self):
+        connection = mock.MagicMock()
+        connection.__enter__.return_value = connection
+        connection.getsockopt.return_value = proof.struct.pack("3i", 123, 999, 999)
+        connection.recv.side_effect = [b"HTTP/1.1 200 OK\r\n\r\nnative-http-ready", b""]
+        with mock.patch.object(proof.socket, "socket", return_value=connection), \
+                mock.patch.object(proof.socket, "SO_PEERCRED", 17, create=True), \
+                mock.patch.object(proof, "belongs_to_group", return_value=True), \
+                mock.patch.object(proof.time, "monotonic", side_effect=[10, 10, 10, 10, 12]):
+            with self.assertRaises(TimeoutError):
+                proof.ready_request(Path("/scratch/http.sock"), 999, "/selected", 11)
+
+    def test_http_operations_use_remaining_deadline_and_exact_peer_body(self):
+        connection = mock.MagicMock()
+        connection.__enter__.return_value = connection
+        connection.getsockopt.return_value = proof.struct.pack("3i", 123, 999, 999)
+        connection.recv.side_effect = [b"HTTP/1.1 200 OK\r\n\r\nnative-http-ready", b""]
+        with mock.patch.object(proof.socket, "socket", return_value=connection), \
+                mock.patch.object(proof.socket, "SO_PEERCRED", 17, create=True), \
+                mock.patch.object(proof, "belongs_to_group", return_value=True), \
+                mock.patch.object(proof.time, "monotonic", return_value=10.75):
+            self.assertEqual((True, 123, False), proof.ready_request(Path("/scratch/http.sock"), 999, "/selected", 11))
+        self.assertTrue(connection.settimeout.call_args_list)
+        self.assertTrue(all(call == mock.call(0.25) for call in connection.settimeout.call_args_list))
+
+
+class BudgetDiagnosticControls(unittest.TestCase):
+    GROUP = "/system.slice/issue779-child-" + "a" * 32 + ".service"
+    COUNTERS = {"pids.current": "64\n", "pids.max": "64\n", "pids.events": "max 7\n",
+                "memory.current": "123456\n", "memory.max": "1073741824\n",
+                "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"}
+
+    def capture(self, directory, receipt, counters=None):
+        cgroup = directory / "cgroup"
+        cgroup.mkdir()
+        for filename, value in (counters or self.COUNTERS).items():
+            (cgroup / filename).write_text(value)
+        original_open = os.open
+        opened = []
+
+        def selected_open(path, flags, **kwargs):
+            if flags & os.O_DIRECTORY:
+                self.assertEqual(Path("/sys/fs/cgroup") / self.GROUP.lstrip("/"), path)
+                fd = original_open(cgroup, flags)
+                opened.append(fd)
+                return fd
+            self.assertIn(path, self.COUNTERS)
+            self.assertTrue(flags & os.O_NOFOLLOW)
+            return original_open(path, flags, **kwargs)
+
+        with mock.patch.object(proof.os, "open", side_effect=selected_open), \
+                mock.patch.object(proof.time, "monotonic", return_value=12.5):
+            proof.record_budget_diagnostic(receipt, directory, self.GROUP, 10)
+        for fd in opened:
+            with self.assertRaises(OSError):
+                os.fstat(fd)
+
+    def test_real_numeric_capture_is_private_bounded_and_preserves_original_failure(self):
+        receipt = {"failure": "control-or-readiness-failure", "owned_exit": False, "cleanup": False}
+        with tempfile.TemporaryDirectory(prefix="budget-control-") as name:
+            directory = Path(name)
+            self.capture(directory, receipt)
+            path = directory / "budget-diagnostic.json"
+            self.assertEqual(0o600, path.stat().st_mode & 0o777)
+            self.assertEqual(os.geteuid(), path.stat().st_uid)
+            self.assertLessEqual(path.stat().st_size, 4096)
+            data = json.loads(path.read_bytes())
+            self.assertEqual(64, data["pids_current"])
+            self.assertEqual(64, data["pids_max"])
+            self.assertEqual(7, data["pids_events_max"])
+            self.assertEqual(0, data["memory_events"]["oom_kill"])
+            self.assertEqual(2.5, data["elapsed_seconds"])
+            self.assertEqual({"pids_current", "pids_max", "pids_events_max", "memory_current", "memory_max",
+                              "memory_events", "elapsed_seconds"}, set(data))
+        self.assertEqual({"failure": "control-or-readiness-failure", "owned_exit": False, "cleanup": False,
+                          "budget_diagnostic_category": "cgroup-task-memory-counters", "budget_diagnostic_written": True}, receipt)
+
+    def test_unlimited_maxima_and_optional_kernel_events_have_closed_null_values(self):
+        counters = {**self.COUNTERS, "pids.max": "max\n", "memory.max": "max\n",
+                    "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\n"}
+        with tempfile.TemporaryDirectory(prefix="budget-control-") as name:
+            self.capture(Path(name), {}, counters)
+            data = json.loads((Path(name) / "budget-diagnostic.json").read_bytes())
+            self.assertIsNone(data["pids_max"])
+            self.assertIsNone(data["memory_max"])
+            self.assertIsNone(data["memory_events"]["oom_group_kill"])
+            self.assertIsNone(data["memory_events"]["sock_throttled"])
+
+    def test_malformed_overflow_duplicate_missing_and_unknown_counters_fail_capture_only(self):
+        cases = [("pids.current", "-1"), ("pids.current", str(2**64)),
+                 ("pids.current", "private-counter-canary"), ("pids.events", "max 1\nmax 2\n"),
+                 ("memory.events", "oom 0\n"), ("memory.events", self.COUNTERS["memory.events"] + "private-counter-canary 1\n"),
+                 ("pids.current", "1" * 4097)]
+        for filename, value in cases:
+            with self.subTest(filename=filename, value_length=len(value)), tempfile.TemporaryDirectory(prefix="budget-control-") as name:
+                receipt = {"failure": "application-identity-rejected", "cleanup": False}
+                self.capture(Path(name), receipt, {**self.COUNTERS, filename: value})
+                self.assertFalse((Path(name) / "budget-diagnostic.json").exists())
+                self.assertFalse(receipt["budget_diagnostic_written"])
+                self.assertEqual("application-identity-rejected", receipt["failure"])
+                self.assertFalse(receipt["cleanup"])
+                self.assertNotIn("private-counter-canary", json.dumps(receipt))
+
+    def test_unselected_or_traversing_cgroup_cannot_open_any_counter(self):
+        for group in ("", "/system.slice/other.service", self.GROUP + "/child", self.GROUP + "/../other"):
+            with self.subTest(group=group), mock.patch.object(proof.os, "open") as opened:
+                receipt = {"failure": "original"}
+                proof.record_budget_diagnostic(receipt, Path("/control"), group, 0)
+                opened.assert_not_called()
+                self.assertFalse(receipt["budget_diagnostic_written"])
+                self.assertEqual("original", receipt["failure"])
+
+    def test_unreadable_group_and_write_failure_never_publish_exception_text(self):
+        with mock.patch.object(proof.os, "open", side_effect=OSError("private-counter-canary")):
+            receipt = {"failure": "original"}
+            proof.record_budget_diagnostic(receipt, Path("/control"), self.GROUP, 0)
+        self.assertFalse(receipt["budget_diagnostic_written"])
+        self.assertEqual("original", receipt["failure"])
+        self.assertNotIn("private-counter-canary", json.dumps(receipt))
+        with tempfile.TemporaryDirectory(prefix="budget-control-") as name:
+            receipt = {"failure": "original"}
+            original_open = Path.open
+
+            def write_failure(path, *args, **kwargs):
+                if path.name == "budget-diagnostic.json":
+                    raise OSError("private-counter-canary")
+                return original_open(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "open", autospec=True, side_effect=write_failure):
+                self.capture(Path(name), receipt)
+            self.assertFalse(receipt["budget_diagnostic_written"])
+            self.assertEqual("original", receipt["failure"])
+
+    def test_exclusive_destination_is_not_overwritten(self):
+        with tempfile.TemporaryDirectory(prefix="budget-control-") as name:
+            path = Path(name) / "budget-diagnostic.json"
+            path.write_text("existing-private-control")
+            receipt = {"failure": "original"}
+            self.capture(Path(name), receipt)
+            self.assertEqual("existing-private-control", path.read_text())
+            self.assertFalse(receipt["budget_diagnostic_written"])
+            self.assertEqual("original", receipt["failure"])
+
+    def test_counter_symlink_is_not_followed(self):
+        with tempfile.TemporaryDirectory(prefix="budget-control-") as name:
+            directory = Path(name)
+            (directory / "target").write_text("64\n")
+            (directory / "pids.current").symlink_to(directory / "target")
+            fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                with self.assertRaises(OSError):
+                    proof.read_cgroup_counter(fd, "pids.current")
+            finally:
+                os.close(fd)
+
+    def test_counter_output_bound_leaves_failure_and_no_written_file(self):
+        with tempfile.TemporaryDirectory(prefix="budget-control-") as name:
+            receipt = {"failure": "original"}
+            with mock.patch.object(proof, "BUDGET_DIAGNOSTIC_LIMIT", 200):
+                self.capture(Path(name), receipt)
+            self.assertFalse((Path(name) / "budget-diagnostic.json").exists())
+            self.assertFalse(receipt["budget_diagnostic_written"])
+            self.assertEqual("original", receipt["failure"])
 
 
 class PortableResourceHttpProbes(unittest.TestCase):

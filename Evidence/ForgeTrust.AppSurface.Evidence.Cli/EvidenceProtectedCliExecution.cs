@@ -1,29 +1,54 @@
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Evidence.Planner;
+using System.ComponentModel;
 
 namespace ForgeTrust.AppSurface.Evidence.Cli;
+
+/// <summary>Closed phases of the allocation/activation callback; None means it was not entered.</summary>
+internal enum EvidenceAllocationPhase { None, BeforeAllocation, Allocation, BeforeActivation, Activation, Completed }
+
+/// <summary>Closed exception categories; no exception text or runtime type names are retained.</summary>
+internal enum EvidenceAllocationErrorClass { None, Unknown, OutOfMemory, Io, AccessDenied, Unsupported, Argument, Cancelled, Timeout, Admission, InvalidOperation }
+
+/// <summary>Private diagnostic facts after joined allocation-stage failure. This record grants no authority.</summary>
+/// <param name="Phase">Last callback phase.</param>
+/// <param name="Operation">Last allocation operation.</param>
+/// <param name="StageOutcome">Closed stage outcome.</param>
+/// <param name="TerminalCode">First latched worker terminal code.</param>
+/// <param name="ErrorClass">Closed exception classification.</param>
+/// <param name="NativeErrno">Known direct Win32 inner errno from allocation, bounded to 1..4095; otherwise null.</param>
+internal sealed record EvidenceAllocationFailureDiagnostic(EvidenceAllocationPhase Phase,
+    EvidenceLinuxArtifactAllocationOperation Operation, EvidenceWorkerStageOutcome StageOutcome,
+    EvidenceWorkerTerminalCode TerminalCode, EvidenceAllocationErrorClass ErrorClass, int? NativeErrno)
+{
+    /// <summary>Gets the fixed private diagnostic schema.</summary>
+    public string Schema => "evidence-allocation-failure-v1";
+}
 
 /// <summary>Runs the first-party CLI through the same protected admission and bounded lifecycle as Aspire.</summary>
 /// <remarks>The production Trusted proof allowlist is empty until full consumer acceptance; this entry cannot bypass it.</remarks>
 internal static class EvidenceProtectedCliExecution
 {
     /// <summary>Uses only the authenticated descriptor to select the worker mode and inputs.</summary>
-    internal static async Task<EvidenceManifest> RunAsync(string controlChannel, CancellationToken cancellationToken)
+    internal static async Task<EvidenceManifest> RunAsync(string controlChannel, CancellationToken cancellationToken,
+        Action<EvidenceAllocationFailureDiagnostic>? diagnosticSink = null)
     {
         var worker = await EvidenceLinuxWorkerSupervisor.ConnectAsync(controlChannel, cancellationToken).ConfigureAwait(false);
-        return await RunAsync(worker, EvidenceModeSelection.Select(worker.Descriptor.Mode), cancellationToken).ConfigureAwait(false);
+        return await RunAsync(worker, EvidenceModeSelection.Select(worker.Descriptor.Mode), cancellationToken, diagnosticSink).ConfigureAwait(false);
     }
 
     /// <summary>Checks an explicit caller mode against the protected launcher before any callback.</summary>
     /// <remarks>Authenticated mode rejection follows the bounded owned-worker stop and exit-confirmation path before returning.</remarks>
-    internal static async Task<EvidenceManifest> RunAsync(EvidenceExecutionRequest request, CancellationToken cancellationToken)
+    internal static async Task<EvidenceManifest> RunAsync(EvidenceExecutionRequest request, CancellationToken cancellationToken,
+        Action<EvidenceAllocationFailureDiagnostic>? diagnosticSink = null)
     {
         var worker = await EvidenceLinuxWorkerSupervisor.ConnectAsync(request.ControlChannel, cancellationToken).ConfigureAwait(false);
-        return await RunAsync(worker, request.Mode, cancellationToken).ConfigureAwait(false);
+        return await RunAsync(worker, request.Mode, cancellationToken, diagnosticSink).ConfigureAwait(false);
     }
 
-    private static async Task<EvidenceManifest> RunAsync(EvidenceLinuxWorkerSupervisor worker, EvidenceExecutionMode mode, CancellationToken callerCancellation)
+    private static async Task<EvidenceManifest> RunAsync(EvidenceLinuxWorkerSupervisor worker, EvidenceExecutionMode mode,
+        CancellationToken callerCancellation, Action<EvidenceAllocationFailureDiagnostic>? diagnosticSink)
     {
         var descriptor = worker.Descriptor;
         var clock = TimeProvider.System;
@@ -69,21 +94,29 @@ internal static class EvidenceProtectedCliExecution
             admission = admitted.Value;
             if (!budget.TryBeginNextStage(callerCancellation, out stage))
                 throw new EvidenceAdmissionException("ASEVD421", "The protected allocation reserve is exhausted.");
+            var phase = EvidenceAllocationPhase.None;
+            var operation = EvidenceLinuxArtifactAllocationOperation.None;
             var allocated = await execution.ExecuteAsync(EvidenceRunStage.Admission, stage!.Duration,
                 token =>
                 {
+                    phase = EvidenceAllocationPhase.BeforeAllocation;
                     token.ThrowIfCancellationRequested();
+                    phase = EvidenceAllocationPhase.Allocation;
                     var allocatedRoot = EvidenceLinuxArtifactRoot.Allocate(descriptor.OutputParent, descriptor.OutputParentIdentity,
-                        descriptor.OutputSlot, descriptor.WorkerUid, descriptor.WorkerGid);
+                        descriptor.OutputSlot, descriptor.WorkerUid, descriptor.WorkerGid, out operation);
                     root = allocatedRoot; // Retain ownership even if cancellation wins before the callback returns.
+                    phase = EvidenceAllocationPhase.BeforeActivation;
                     token.ThrowIfCancellationRequested();
+                    phase = EvidenceAllocationPhase.Activation;
                     admission.Activate(allocatedRoot.Identity.ToString());
+                    phase = EvidenceAllocationPhase.Completed;
                     return ValueTask.FromResult(allocatedRoot);
                 }, callerCancellation).ConfigureAwait(false);
             budget.CompleteCurrentStage();
             if (allocated.Outcome != EvidenceWorkerStageOutcome.Passed)
             {
                 admission.LatchFailure();
+                ReportAllocationFailure(execution, allocated.Outcome, phase, operation, diagnosticSink);
                 throw new EvidenceAdmissionException("ASEVD409", "Fresh output allocation or activation failed.");
             }
 
@@ -182,6 +215,50 @@ internal static class EvidenceProtectedCliExecution
             // Production FailFast never unwinds this finally; a live callback cannot race handle disposal.
             if (root is not null && execution.OwnWorkStopped) await root.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Reports only a failed allocation stage after owned exit; any optional sink failure is ignored.</summary>
+    internal static void ReportAllocationFailure(EvidenceWorkerExecution execution, EvidenceWorkerStageOutcome outcome,
+        EvidenceAllocationPhase phase, EvidenceLinuxArtifactAllocationOperation operation,
+        Action<EvidenceAllocationFailureDiagnostic>? diagnosticSink)
+    {
+        if (diagnosticSink is null || outcome == EvidenceWorkerStageOutcome.Passed || !execution.OwnWorkStopped) return;
+        try
+        {
+            diagnosticSink(CreateAllocationFailureDiagnostic(phase, operation, outcome, execution.TerminalCode, execution.TerminalException));
+        }
+        catch (Exception) { } // A diagnostic channel cannot replace the original ASEVD409 failure.
+    }
+
+    /// <summary>Maps internal failure facts to closed values, discarding all arbitrary exception content.</summary>
+    internal static EvidenceAllocationFailureDiagnostic CreateAllocationFailureDiagnostic(EvidenceAllocationPhase phase,
+        EvidenceLinuxArtifactAllocationOperation operation, EvidenceWorkerStageOutcome outcome,
+        EvidenceWorkerTerminalCode terminalCode, Exception? error)
+    {
+        phase = Enum.IsDefined(phase) ? phase : EvidenceAllocationPhase.None;
+        operation = Enum.IsDefined(operation) ? operation : EvidenceLinuxArtifactAllocationOperation.None;
+        outcome = Enum.IsDefined(outcome) ? outcome : EvidenceWorkerStageOutcome.Failed;
+        terminalCode = Enum.IsDefined(terminalCode) ? terminalCode : EvidenceWorkerTerminalCode.StageFailed;
+        var errorClass = error switch
+        {
+            null => EvidenceAllocationErrorClass.None,
+            OutOfMemoryException => EvidenceAllocationErrorClass.OutOfMemory,
+            EvidenceAdmissionException => EvidenceAllocationErrorClass.Admission,
+            IOException => EvidenceAllocationErrorClass.Io,
+            UnauthorizedAccessException => EvidenceAllocationErrorClass.AccessDenied,
+            PlatformNotSupportedException or NotSupportedException => EvidenceAllocationErrorClass.Unsupported,
+            ArgumentException => EvidenceAllocationErrorClass.Argument,
+            OperationCanceledException => EvidenceAllocationErrorClass.Cancelled,
+            TimeoutException => EvidenceAllocationErrorClass.Timeout,
+            InvalidOperationException => EvidenceAllocationErrorClass.InvalidOperation,
+            _ => EvidenceAllocationErrorClass.Unknown,
+        };
+        int? errno = phase == EvidenceAllocationPhase.Allocation
+            && operation is not (EvidenceLinuxArtifactAllocationOperation.None or EvidenceLinuxArtifactAllocationOperation.ValidateArguments
+                or EvidenceLinuxArtifactAllocationOperation.CheckPlatform or EvidenceLinuxArtifactAllocationOperation.Completed)
+            && error is IOException { InnerException: Win32Exception native } && native.NativeErrorCode is >= 1 and <= 4095
+                ? native.NativeErrorCode : null;
+        return new(phase, operation, outcome, terminalCode, errorClass, errno);
     }
 
     private static async ValueTask WriteAndVerifyAsync(EvidenceLinuxArtifactRoot root, string path, byte[] bytes,

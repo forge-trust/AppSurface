@@ -46,6 +46,12 @@ Implementation is not equivalent to an admitted supported gate. Linux x86_64 sys
 
 For supported numeric coverage enforcement today, use the separate [`appsurface coverage run` and `coverage gate`](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate) workflow; it does not depend on EvidenceHost admission. The [#815 migration guide](../../releases/issue-815-vstest-hang.md#migration-choices) explains timing limits in that workflow.
 
+## Private worker allocation diagnostic
+
+The internal `EvidenceProtectedCliExecution.RunAsync` overloads accept an optional `Action<EvidenceAllocationFailureDiagnostic>` sink, defaulting to `null`. Only a failed allocation/activation stage with acknowledged owned-work exit invokes it. The record's fixed schema is `evidence-allocation-failure-v1`; fields are closed `phase`, allocation `operation`, `stageOutcome`, `terminalCode`, `errorClass`, and optional `nativeErrno`. Phases distinguish pre-allocation cancellation, allocation, pre-activation cancellation, activation and completed callbacks. Error classes include out-of-memory, I/O, access denial, unsupported operation, argument, cancellation, timeout, admission, invalid operation and unknown; no messages, runtime type names, paths, stacks or custom exception data are retained. An errno is retained only from a direct known `Win32Exception` inner exception of an allocation `IOException`, bounded to 1–4095. Other causes have no errno.
+
+Only `EvidenceWorkerCommand` serializes this typed record to one UTF-8 line of at most 1 KiB on its systemd worker error stream. The launcher retains that stream through its existing bounded private journal channel; this diagnostic is not a manifest, a public launcher response or evidence authority. The primary ASEVD409 diagnostic and rejection behavior remain unchanged. A missing sink or any sink failure preserves the original execution failure. Use the closed operation together with the outcome and terminal code to distinguish a filesystem failure from cancellation or activation; never infer a specific syscall failure solely from ASEVD409. See the [allocation contract](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#private-allocation-diagnostics) for the unchanged filesystem guards.
+
 ## Pitfalls
 
 - Do not run a repository-wide gate after intentionally filtering out required tests and expect a complete claim.

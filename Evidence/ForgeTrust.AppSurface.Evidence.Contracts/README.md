@@ -83,6 +83,12 @@ beneath the supplied `rootPath`; a host using that constructor supplies the prod
 Use the [protected artifact collection channel](../../docs/evidence/evidencehost-migration.md#protected-gate-and-artifacts)
 when consuming protected output; resolving a filesystem path does not authenticate its bytes or provenance.
 
+### Private allocation diagnostics
+
+The internal `EvidenceLinuxArtifactRoot.Allocate(parentPath, expectedParentIdentity, slotName, expectedUid, expectedGid, out operation)` overload retains an `EvidenceLinuxArtifactAllocationOperation` value before argument/platform validation, descriptor opens, identity checks, exclusive slot creation, and descriptor transfer. It returns `Completed` only on success. The original overload delegates to it and discards the operation. Both overloads preserve the same ownership, mode, symlink, mount, identity and freshness guards and exception types; there is no observer callback or exception-data channel.
+
+Use the operation only to locate a failed host operation, never to authenticate an output or grant admission. A failed operation can include multiple guarded checks; it does not by itself prove an errno or filesystem cause. The protected CLI combines it with a closed phase and failure classification through its [private worker diagnostic](../ForgeTrust.AppSurface.Evidence.Cli/README.md#private-worker-allocation-diagnostic). Successful allocation still requires separate admission activation and all existing stopped-work, verification and collection checks.
+
 ## Runtime admission and gate evaluation
 
 Runtime claim construction is separate from JSON structure and from downstream authorization:
