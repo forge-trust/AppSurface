@@ -1,6 +1,5 @@
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
-using System.Net.Sockets;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Testing;
 using Microsoft.Win32.SafeHandles;
