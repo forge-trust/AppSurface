@@ -11,6 +11,10 @@ if [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then
   echo 'Native Linux x64 is required for the offline subject image check.' >&2
   exit 2
 fi
+if [[ "$(dotnet --version)" != 10.0.401 ]]; then
+  echo 'The host restore must use the image-pinned .NET SDK 10.0.401.' >&2
+  exit 2
+fi
 
 work_root="$(mktemp -d "$runner_temp/appsurface-subject-image.XXXXXXXX")"
 global_packages="$work_root/global-packages"
