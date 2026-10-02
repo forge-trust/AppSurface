@@ -297,7 +297,7 @@ The exact existing repository policy test passed locally from source **1/1**,
 exit **0**, with no warnings, after the correction. Scoped formatting and
 source-built [Bootstrap tests](../../Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidenceHostBootstrapTests.cs)
 passed **42/42**. The new
-[closed catalogue prerequisite](../../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md#closed-application-catalogue-prerequisite)
+[closed catalogue prerequisite](../../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md#internal-closed-application-catalogue-prerequisite)
 passed **50/50** metadata controls. These macOS results validate the source
 repair and pure metadata checks; the native gate and shared execution remain
 required. The production catalogue remains empty and rejects with `ASEVD407`.
