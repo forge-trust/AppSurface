@@ -56,7 +56,7 @@ docker run --rm --platform linux/amd64 \
   --pull never --network none --read-only --user 65532:65532 \
   --cap-drop ALL --security-opt no-new-privileges \
   --pids-limit 256 --memory 4g --cpus 2 \
-  --mount "type=bind,src=$cold_root,dst=/work,rw=true" \
+  --mount "type=bind,src=$cold_root,dst=/work" \
   --tmpfs /tmp:rw,noexec,nosuid,nodev,size=512m,mode=1777 \
   --workdir /work/source \
   --env HOME=/work/home \
