@@ -585,11 +585,14 @@ public sealed class EvidenceHostRunnerTests
     }
 
     [Fact]
-    public async Task ParseableNonCanonicalPlanEmitsInvalidManifestAndFails()
+    public async Task ParseableNonCanonicalPlanSpanningMultipleReadsEmitsInvalidManifestAndFails()
     {
         using var fixture = await GateFixture.CreateAsync(docsOnly: true);
         var planBytes = await File.ReadAllBytesAsync(fixture.PlanPath);
-        await File.WriteAllBytesAsync(fixture.PlanPath, [.. planBytes, (byte)' ']);
+        var paddedPlanBytes = new byte[planBytes.Length + 64 * 1024];
+        planBytes.CopyTo(paddedPlanBytes, 0);
+        Array.Fill(paddedPlanBytes, (byte)' ', planBytes.Length, paddedPlanBytes.Length - planBytes.Length);
+        await File.WriteAllBytesAsync(fixture.PlanPath, paddedPlanBytes);
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
 

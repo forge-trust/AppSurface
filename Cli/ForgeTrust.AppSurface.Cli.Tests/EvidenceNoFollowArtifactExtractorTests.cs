@@ -295,6 +295,10 @@ public sealed class EvidenceNoFollowArtifactExtractorTests
         {
             new EvidenceNoFollowArtifactExtractionLimits { MaximumFileCount = 0 },
             new EvidenceNoFollowArtifactExtractionLimits { MaximumFileCount = -1 },
+            new EvidenceNoFollowArtifactExtractionLimits
+            {
+                MaximumFileCount = EvidenceNoFollowArtifactExtractionLimits.MaximumAllowedFileCount + 1,
+            },
             new EvidenceNoFollowArtifactExtractionLimits { MaximumTotalBytes = 0 },
             new EvidenceNoFollowArtifactExtractionLimits { MaximumTotalBytes = -1 },
             new EvidenceNoFollowArtifactExtractionLimits { MaximumDuration = TimeSpan.Zero },
@@ -571,6 +575,68 @@ public sealed class EvidenceNoFollowArtifactExtractorTests
         Assert.Equal("report", Assert.Single(writer.WrittenArtifacts).LogicalName);
         Assert.Equal(reportContents, await File.ReadAllBytesAsync(TestPathUtils.PathUnder(temp.ArtifactRoot, "reports", "report.bin")));
         Assert.False(File.Exists(TestPathUtils.PathUnder(temp.ArtifactRoot, "summaries", "summary.bin")));
+        Assert.True(await writer.VerifyWrittenArtifactsAsync());
+    }
+
+    [Theory]
+    [InlineData("append", "exceeds its declared or allowed length")]
+    [InlineData("truncate", "ended before its opened descriptor size")]
+    public async Task ExtractAsyncForTesting_ShouldRejectLaterSourceLengthChangesAfterOpeningAllSources(
+        string mutation,
+        string expectedFailure)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            await AssertUnsupportedPlatformFailsClosedAsync();
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        Directory.CreateDirectory(temp.ScratchRoot);
+        Directory.CreateDirectory(temp.ArtifactRoot);
+        Directory.CreateDirectory(Path.Join(temp.ScratchRoot, "subject"));
+        var firstContents = new byte[] { 1, 2, 3 };
+        var laterSourcePath = Path.Join(temp.ScratchRoot, "subject", "summary.bin");
+        await File.WriteAllBytesAsync(Path.Join(temp.ScratchRoot, "subject", "report.bin"), firstContents);
+        await File.WriteAllBytesAsync(laterSourcePath, [4, 5]);
+        using var root = OpenTrustedRoot(temp.ScratchRoot);
+        var writer = CreateWriter(
+            temp.ArtifactRoot,
+            new EvidenceArtifactSlot("summary", "summaries", "application/octet-stream", Required: false, MaximumBytes: 16));
+
+        void ChangeLaterSourceAfterFirstPass(string sourceRelativePath)
+        {
+            if (sourceRelativePath != "subject/report.bin")
+            {
+                return;
+            }
+
+            if (mutation == "append")
+            {
+                using var changedSource = new FileStream(laterSourcePath, FileMode.Append, FileAccess.Write, FileShare.Read);
+                changedSource.WriteByte(6);
+                return;
+            }
+
+            Assert.Equal("truncate", mutation);
+            using var truncatedSource = new FileStream(laterSourcePath, FileMode.Open, FileAccess.Write, FileShare.Read);
+            truncatedSource.SetLength(1);
+        }
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            EvidenceNoFollowArtifactExtractor.ExtractAsyncForTesting(
+                root,
+                writer,
+                [
+                    new EvidenceNoFollowArtifact("report", "subject/report.bin", "reports/report.bin"),
+                    new EvidenceNoFollowArtifact("summary", "subject/summary.bin", "summaries/summary.bin"),
+                ],
+                ChangeLaterSourceAfterFirstPass));
+
+        Assert.Contains(expectedFailure, exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("report", Assert.Single(writer.WrittenArtifacts).LogicalName);
+        Assert.Equal(firstContents, await File.ReadAllBytesAsync(Path.Join(temp.ArtifactRoot, "reports", "report.bin")));
+        Assert.False(File.Exists(Path.Join(temp.ArtifactRoot, "summaries", "summary.bin")));
         Assert.True(await writer.VerifyWrittenArtifactsAsync());
     }
 

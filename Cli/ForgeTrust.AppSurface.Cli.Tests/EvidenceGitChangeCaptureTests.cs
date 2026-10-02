@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
@@ -237,6 +238,31 @@ public sealed class EvidenceGitChangeCaptureTests
             EvidenceGitChangeCapture.VerifyAsync(repository.Path, snapshot));
 
         Assert.Equal("ASEVD136", exception.Code);
+    }
+
+    [Fact]
+    public async Task Verify_ShouldRejectSnapshotWhenItsExposedDiffBufferWasModified()
+    {
+        using var repository = new GitFixture();
+        File.WriteAllText(Path.Join(repository.Path, "readme.md"), "before\n");
+        repository.Run("add", "readme.md");
+        repository.Commit("base");
+        var baseRevision = repository.Run("rev-parse", "HEAD").Trim();
+        File.WriteAllText(Path.Join(repository.Path, "readme.md"), "after\n");
+        repository.Run("add", "readme.md");
+        repository.Commit("head");
+        var headRevision = repository.Run("rev-parse", "HEAD").Trim();
+        var snapshot = await EvidenceGitChangeCapture.CaptureAsync(repository.Path, baseRevision, headRevision);
+
+        Assert.True(MemoryMarshal.TryGetArray(snapshot.SourceDiff, out var sourceDiff));
+        Assert.NotNull(sourceDiff.Array);
+        Assert.True(sourceDiff.Count > 0);
+        sourceDiff.Array![sourceDiff.Offset] ^= 0x01;
+
+        var exception = await Assert.ThrowsAsync<EvidencePlanningException>(() =>
+            EvidenceGitChangeCapture.VerifyAsync(repository.Path, snapshot));
+
+        Assert.Equal("ASEVD133", exception.Code);
     }
 
     [Fact]

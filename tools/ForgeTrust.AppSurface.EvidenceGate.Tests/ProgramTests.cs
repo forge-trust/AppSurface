@@ -130,6 +130,34 @@ public sealed class ProgramTests
         Assert.Equal("ASEGG102", result.Code);
     }
 
+    [Fact]
+    public async Task VerifyGateAcceptsOptionalArtifactHandoffDirectory()
+    {
+        using var fixture = new TemporaryDirectory();
+        var outputDirectory = Path.Join(fixture.Path, "output");
+        using var standardOutput = new StringWriter();
+        using var standardError = new StringWriter();
+
+        var exitCode = await Program.RunAsync(
+            [
+                "verify-gate",
+                "--plan", Path.Join(fixture.Path, "missing-plan.json"),
+                "--manifest", Path.Join(fixture.Path, "manifest.json"),
+                "--policy", Path.Join(fixture.Path, "policy.json"),
+                "--repository", Path.Join(fixture.Path, "repository"),
+                "--identity", Path.Join(fixture.Path, "identity.json"),
+                "--artifacts-dir", Path.Join(fixture.Path, "artifacts"),
+                "--output-dir", outputDirectory,
+            ],
+            standardOutput,
+            standardError);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGG102", standardOutput.ToString(), StringComparison.Ordinal);
+        Assert.Contains("ASEGG102", standardError.ToString(), StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Join(outputDirectory, "evidence-gate-verification.json")));
+    }
+
     private sealed class TemporaryDirectory : IDisposable
     {
         public TemporaryDirectory()

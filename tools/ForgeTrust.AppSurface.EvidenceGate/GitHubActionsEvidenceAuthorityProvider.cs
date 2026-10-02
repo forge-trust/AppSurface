@@ -37,7 +37,8 @@ internal sealed class GitHubActionsEvidenceAuthorityProvider : IEvidencePullRequ
 
     /// <summary>Creates a provider from a caller-supplied environment reader for deterministic validation.</summary>
     /// <remarks>
-    /// The caller must supply only trusted process environment values. A missing or malformed bearer token or
+    /// The caller must supply only trusted process environment values. A missing or malformed
+    /// <see href="https://www.rfc-editor.org/rfc/rfc6750#section-2.1">Bearer credential</see> or
     /// HTTPS API endpoint returns <see langword="null"/>; this factory does not attest a subject checkout.
     /// Its fresh API snapshot may authorize only an explicitly empty profile, because the checkout revision
     /// remains blank until an independent subject-job attestor is registered.
@@ -47,7 +48,7 @@ internal sealed class GitHubActionsEvidenceAuthorityProvider : IEvidencePullRequ
     {
         ArgumentNullException.ThrowIfNull(readEnvironment);
         var token = readEnvironment("GITHUB_TOKEN");
-        if (string.IsNullOrWhiteSpace(token) || token.Length > 4096 || token.Any(char.IsControl))
+        if (string.IsNullOrEmpty(token) || token.Length > 4096 || !IsValidBearerToken(token))
         {
             return null;
         }
@@ -78,6 +79,27 @@ internal sealed class GitHubActionsEvidenceAuthorityProvider : IEvidencePullRequ
         {
             return null;
         }
+    }
+
+    private static bool IsValidBearerToken(string token)
+    {
+        var paddingStarted = false;
+        foreach (var character in token)
+        {
+            if (character == '=')
+            {
+                paddingStarted = true;
+                continue;
+            }
+
+            if (paddingStarted || character is not (>= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9'
+                    or '-' or '.' or '_' or '~' or '+' or '/'))
+            {
+                return false;
+            }
+        }
+
+        return token[0] != '=';
     }
 
     /// <inheritdoc />

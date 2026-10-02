@@ -626,6 +626,75 @@ public sealed class EvidencePlannerTests
     }
 
     [Fact]
+    public void ManifestBuilder_ShouldVerifyRevisionBoundPlansAndRejectMalformedBindings()
+    {
+        static EvidencePlan WithDigest(EvidencePlan plan)
+        {
+            var withoutDigest = plan with { PlanDigest = string.Empty };
+            return withoutDigest with { PlanDigest = EvidenceDigest.CanonicalSha256(withoutDigest) };
+        }
+
+        var localPlan = new EvidencePlanner().Resolve(CreatePolicy(), [new NormalizedDiffPath("src/Feature.cs")]);
+        var revisionBoundPlan = WithDigest(localPlan with
+        {
+            ContractVersion = "2.0",
+            BaseRevision = new string('a', 40),
+            HeadRevision = new string('b', 40),
+            SourceDiffDigest = new string('c', 64),
+            NameStatusDigest = new string('d', 64),
+            PullRequestRunIdentity = new EvidencePullRequestRunIdentity(1, 2, 3, "main", 4, 1),
+        });
+        var manifest = EvidenceManifestBuilder.Build(revisionBoundPlan, []);
+
+        Assert.True(EvidenceManifestBuilder.Verify(revisionBoundPlan, manifest));
+
+        var validSixtyFourCharacterRevision = WithDigest(revisionBoundPlan with
+        {
+            BaseRevision = new string('a', 64),
+            HeadRevision = new string('b', 64),
+        });
+        Assert.True(EvidenceManifestBuilder.Verify(
+            validSixtyFourCharacterRevision,
+            EvidenceManifestBuilder.Build(validSixtyFourCharacterRevision, [])));
+
+        var validLocalRevisionBoundPlan = WithDigest(revisionBoundPlan with { PullRequestRunIdentity = null });
+        Assert.True(EvidenceManifestBuilder.Verify(
+            validLocalRevisionBoundPlan,
+            EvidenceManifestBuilder.Build(validLocalRevisionBoundPlan, [])));
+
+        EvidencePlan[] malformedPlans =
+        [
+            revisionBoundPlan with { ContractVersion = "3.0" },
+            revisionBoundPlan with { BaseRevision = new string('A', 40) },
+            revisionBoundPlan with { BaseRevision = new string('a', 39) },
+            revisionBoundPlan with { HeadRevision = new string('c', 64) },
+            revisionBoundPlan with { HeadRevision = new string('B', 40) },
+            revisionBoundPlan with { SourceDiffDigest = new string('g', 64) },
+            revisionBoundPlan with { NameStatusDigest = new string('d', 63) },
+            revisionBoundPlan with { PullRequestRunIdentity = revisionBoundPlan.PullRequestRunIdentity! with { RepositoryId = 0 } },
+            revisionBoundPlan with { PullRequestRunIdentity = revisionBoundPlan.PullRequestRunIdentity! with { HeadRepositoryId = 0 } },
+            revisionBoundPlan with { PullRequestRunIdentity = revisionBoundPlan.PullRequestRunIdentity! with { PullRequestNumber = 0 } },
+            revisionBoundPlan with { PullRequestRunIdentity = revisionBoundPlan.PullRequestRunIdentity! with { TargetBranch = string.Empty } },
+            revisionBoundPlan with { PullRequestRunIdentity = revisionBoundPlan.PullRequestRunIdentity! with { TargetBranch = new string('x', 129) } },
+            revisionBoundPlan with { PullRequestRunIdentity = revisionBoundPlan.PullRequestRunIdentity! with { WorkflowRunId = 0 } },
+            revisionBoundPlan with { PullRequestRunIdentity = revisionBoundPlan.PullRequestRunIdentity! with { WorkflowRunAttempt = 0 } },
+        ];
+
+        Assert.All(malformedPlans, invalidPlan => Assert.False(EvidenceManifestBuilder.Verify(invalidPlan, manifest)));
+        Assert.False(EvidenceManifestBuilder.Verify(
+            localPlan with { BaseRevision = new string('a', 40) },
+            EvidenceManifestBuilder.Build(localPlan, [])));
+
+        Assert.False(EvidenceManifestBuilder.Verify(revisionBoundPlan, manifest with { BaseRevision = new string('e', 40) }));
+        Assert.False(EvidenceManifestBuilder.Verify(revisionBoundPlan, manifest with { HeadRevision = new string('f', 40) }));
+        Assert.False(EvidenceManifestBuilder.Verify(revisionBoundPlan, manifest with { SourceDiffDigest = new string('e', 64) }));
+        Assert.False(EvidenceManifestBuilder.Verify(revisionBoundPlan, manifest with { NameStatusDigest = new string('f', 64) }));
+        Assert.False(EvidenceManifestBuilder.Verify(
+            revisionBoundPlan,
+            manifest with { PullRequestRunIdentity = revisionBoundPlan.PullRequestRunIdentity! with { WorkflowRunAttempt = 2 } }));
+    }
+
+    [Fact]
     public void ManifestBuilder_ShouldInvalidatePassedProducerThatOmitsRequiredArtifact()
     {
         var profile = new EvidenceProfile(
@@ -896,6 +965,28 @@ public sealed class EvidencePlannerTests
 
         var missingEvidenceException = await Assert.ThrowsAsync<EvidenceCliException>(() => workflow.VerifyAsync(Path.Join(output, "missing-plan.json"), Path.Join(output, "missing-manifest.json"), CancellationToken.None));
         Assert.Contains("ASEVD208", missingEvidenceException.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CliWorkflow_ShouldRejectAnOversizedManifestBeforeDeserializingIt()
+    {
+        using var directory = TestDirectory.Create();
+        var workflow = new EvidenceCliWorkflow(new EvidencePlanner());
+        var policyPath = Path.Join(directory.Path, "policy.json");
+        await File.WriteAllBytesAsync(policyPath, EvidenceCanonicalJson.Serialize(CreatePolicy()));
+        var plan = await workflow.ExplainAsync(
+            new EvidencePlanningRequest(policyPath, ["docs/readme.md"], null),
+            CancellationToken.None);
+        var output = Path.Join(directory.Path, "output");
+        await workflow.WritePlanAsync(plan, output, CancellationToken.None);
+        var manifestPath = Path.Join(output, "evidence-manifest.json");
+        await File.WriteAllBytesAsync(manifestPath, new byte[(4 * 1024 * 1024) + 1]);
+
+        var exception = await Assert.ThrowsAsync<EvidenceCliException>(() => workflow.VerifyAsync(
+            Path.Join(output, "evidence-plan.json"), manifestPath, CancellationToken.None));
+
+        Assert.Contains("ASEVD209", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("4 MiB", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

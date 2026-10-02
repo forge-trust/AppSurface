@@ -17,6 +17,41 @@ public sealed class GitHubActionsEvidenceAuthorityProviderTests
     private const string WorkflowRunPath = "/repos/forge-trust/AppSurface/actions/runs/654321/attempts/1";
     private const string JobsPath = WorkflowRunPath + "/jobs?per_page=100";
 
+    [Theory]
+    [InlineData("token with spaces")]
+    [InlineData("token,with,commas")]
+    [InlineData("abc=def")]
+    [InlineData("=abc")]
+    [InlineData("abc\n")]
+    public void EnvironmentFactoryReturnsNoProviderForMalformedBearerToken(string token)
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["GITHUB_TOKEN"] = token,
+            ["GITHUB_API_URL"] = "https://api.example.test",
+        };
+
+        var provider = GitHubActionsEvidenceAuthorityProvider.TryCreateFromEnvironment(
+            name => values.GetValueOrDefault(name));
+
+        Assert.Null(provider);
+    }
+
+    [Fact]
+    public void EnvironmentFactoryAcceptsBearerCredentialCharactersAndTrailingPadding()
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["GITHUB_TOKEN"] = "Ab09-._~+/==",
+            ["GITHUB_API_URL"] = "https://api.example.test",
+        };
+
+        using var provider = GitHubActionsEvidenceAuthorityProvider.TryCreateFromEnvironment(
+            name => values.GetValueOrDefault(name));
+
+        Assert.NotNull(provider);
+    }
+
     [Fact]
     public void ProviderRejectsApiBaseAddressesThatAreNotSafeHttpsEndpoints()
     {

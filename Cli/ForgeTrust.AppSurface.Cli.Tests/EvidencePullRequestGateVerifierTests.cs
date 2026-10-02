@@ -431,6 +431,24 @@ public sealed class EvidencePullRequestGateVerifierTests
     }
 
     [Fact]
+    public async Task VerifyAsync_ShouldFailClosedWhenManifestCollectionThrowsDuringConsistencyVerification()
+    {
+        await using var fixture = await GateFixture.CreateAsync();
+        var manifest = fixture.Manifest with
+        {
+            ProducerResults = new ThrowOnEnumerationReadOnlyList<EvidenceProducerResult>(
+                fixture.Manifest.ProducerResults,
+                throwOnEnumeration: 3),
+        };
+
+        var result = await fixture.VerifyAsync(manifest: manifest);
+
+        Assert.False(result.IsEligible);
+        Assert.Equal("ASEVG004", result.Code);
+        Assert.Null(result.Summary);
+    }
+
+    [Fact]
     public async Task VerifyAsync_ShouldReturnCancelledForPlanningArtifactAndAuthorityCancellation()
     {
         await using var fixture = await GateFixture.CreateAsync();
@@ -753,6 +771,43 @@ public sealed class EvidencePullRequestGateVerifierTests
             var invalidManifest = ReplaceProducerResults(fixture.Manifest, [invalidResult]);
 
             Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, invalidPlan, invalidManifest));
+        }
+    }
+
+    [Fact]
+    public async Task NoFollowArtifactVerifier_ShouldRejectArtifactMetadataChangedAfterValidationOnLinux()
+    {
+        if (!SupportsNoFollowVerifier)
+        {
+            return;
+        }
+
+        await using var fixture = await GateFixture.CreateAsync();
+        var verifier = new EvidencePullRequestGateNoFollowArtifactVerifier();
+        var producerResult = fixture.Manifest.ProducerResults.Single();
+        var artifact = producerResult.Artifacts!.Single();
+        var invalidArtifacts = new[]
+        {
+            artifact with { LogicalName = "undeclared" },
+            artifact with { RelativePath = "outside/build.txt" },
+        };
+
+        foreach (var invalidArtifact in invalidArtifacts)
+        {
+            var manifest = fixture.Manifest with
+            {
+                ProducerResults =
+                [
+                    producerResult with
+                    {
+                        Artifacts = new ChangesAfterFirstEnumerationReadOnlyList<EvidenceArtifactResult>(
+                            [artifact],
+                            [invalidArtifact]),
+                    },
+                ],
+            };
+
+            Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, fixture.Plan, manifest));
         }
     }
 
@@ -1174,6 +1229,43 @@ public sealed class EvidencePullRequestGateVerifierTests
         public T this[int index] => throw new InvalidOperationException("The untrusted collection cannot be indexed.");
 
         public IEnumerator<T> GetEnumerator() => throw new InvalidOperationException("The untrusted collection cannot be enumerated.");
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class ChangesAfterFirstEnumerationReadOnlyList<T>(
+        IReadOnlyList<T> firstEnumeration,
+        IReadOnlyList<T> laterEnumerations) : IReadOnlyList<T>
+    {
+        private int _enumerations;
+
+        public int Count => firstEnumeration.Count;
+
+        public T this[int index] => firstEnumeration[index];
+
+        public IEnumerator<T> GetEnumerator() =>
+            (Interlocked.Increment(ref _enumerations) == 1 ? firstEnumeration : laterEnumerations).GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class ThrowOnEnumerationReadOnlyList<T>(IReadOnlyList<T> items, int throwOnEnumeration) : IReadOnlyList<T>
+    {
+        private int _enumerations;
+
+        public int Count => items.Count;
+
+        public T this[int index] => items[index];
+
+        public IEnumerator<T> GetEnumerator()
+        {
+            if (Interlocked.Increment(ref _enumerations) == throwOnEnumeration)
+            {
+                throw new InvalidOperationException("Manifest enumeration failed.");
+            }
+
+            return items.GetEnumerator();
+        }
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }

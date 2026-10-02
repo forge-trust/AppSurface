@@ -78,4 +78,32 @@ public sealed class EvidenceGateResultRendererTests
         Assert.Contains("claim=NoEvidenceRequired", EvidenceGateResultRenderer.RenderTerminal(result), StringComparison.Ordinal);
         Assert.Contains("Verified claim: `NoEvidenceRequired`", EvidenceGateResultRenderer.RenderMarkdown(result), StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void MarkdownReportsWhenBoundedObligationRationalesWereOmitted()
+    {
+        var summary = new EvidencePullRequestGateSummary(
+            "large-profile", "matched-policy-rules", [], [], [], [], [],
+            "aaaaaaaaaaaa", "bbbbbbbbbbbb", 0, 0, 0, 0, 2, true);
+        var result = new EvidencePullRequestGateVerificationResult(true, "ASEVG000", "Verified.", summary);
+
+        var markdown = EvidenceGateResultRenderer.RenderMarkdown(result);
+
+        Assert.Contains("### Obligation rationale\n- 2 more rationales omitted.", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TerminalSummaryReplacesWhitespaceAndFieldDelimitersInRevisionFields()
+    {
+        var summary = new EvidencePullRequestGateSummary(
+            "release gate;\n=alpha", "matched-policy-rules", [], [], [], [], [],
+            "abc def", "x;y=z\tq", 0, 0, 0, 0, 0, false);
+        var result = new EvidencePullRequestGateVerificationResult(true, "ASEVG000", "Verified.", summary);
+
+        var terminal = EvidenceGateResultRenderer.RenderTerminal(result);
+
+        Assert.Equal(
+            "gate=eligible; code=ASEVG000; claim=NoEvidenceRequired; profile=release_gate___alpha; base=abc_def; head=x_y_z_q; selected=0; closed=0; missing=0",
+            terminal);
+    }
 }

@@ -358,17 +358,17 @@ internal static class EvidenceHostRunner
 
     private static async Task<byte[]> ReadBoundedAsync(string path, int maximumBytes, CancellationToken cancellationToken)
     {
+        using var output = new MemoryStream();
         try
         {
             await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 16 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
-            using var output = new MemoryStream();
             var buffer = new byte[16 * 1024];
             while (true)
             {
                 var read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
                 if (read == 0)
                 {
-                    return output.ToArray();
+                    break;
                 }
 
                 if (output.Length + read > maximumBytes)
@@ -387,6 +387,8 @@ internal static class EvidenceHostRunner
         {
             throw new EvidenceGateInputException("ASEGH102", "A required Evidence input is unavailable.");
         }
+
+        return output.ToArray();
     }
 
     private static void EnsureOutputTargetsAreNew(string outputRoot)

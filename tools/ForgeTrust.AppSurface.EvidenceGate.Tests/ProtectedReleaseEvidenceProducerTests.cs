@@ -36,6 +36,25 @@ public sealed class ProtectedReleaseEvidenceProducerTests
     }
 
     [Fact]
+    public async Task DefaultInspectAuthorityFailsClosedWhenTheTrustedTagIsUnavailable()
+    {
+        using var fixture = new ProducerFixture();
+        var declaration = CreateDeclaration();
+        var invocationProvider = new FixedInvocationProvider(CreateInvocation());
+        var writer = new EvidenceArtifactWriter(declaration, GetWriterRoot(fixture.Root));
+        var producer = new ProtectedReleaseEvidenceProducer(fixture.Root, invocationProvider);
+
+        var result = await producer.ProduceAsync(CreateContext(declaration, writer), CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Invalid, result.Outcome);
+        Assert.Equal(1, invocationProvider.Calls);
+        Assert.Empty(result.SatisfiedAssertionIds);
+        Assert.Null(result.Artifacts);
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.Contains("Release inspect authority rejected", result.Diagnostic, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ValidatedInspectIdentityAndCommittedReleaseDigestsAreWrittenAsTypedEvidenceButRemainUnavailable()
     {
         using var fixture = new ProducerFixture();
