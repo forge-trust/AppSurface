@@ -26,3 +26,27 @@ failures made the wrapper exit **1 / ASCOV120**. Docs and visual suites passed. 
 95.09% line / 89.01% branch; the official aggregate/patch gate was not reached. See the
 [attempt 2 terminal record](../plans/issue-779-execution.md#attempt-2-terminal-result). A serialization
 compatibility repair written after this run's build also requires new validation and committed coverage.
+
+### Later passing runs
+
+The [attempt 13 execution record](../plans/issue-779-execution.md#coverage-attempt-13-and-packed-depthexception-proof)
+records a subsequent unchanged wrapper pass at `75f5f876adc1423357892f61057b2a4919180ee9`,
+against `origin/main` at `4aa8329c76f4279ad319747f9f3c14b9b8de51ef`, on October 1, 2026.
+It reports exit **0**, **15,032 passed / 0 failed / 4 existing skips**, zero build warnings/errors,
+aggregate coverage **95.112% line / 89.0425% branch**, and committed-patch coverage
+**98.419% line / 100% branch**. The earlier failed attempts above remain historical failures;
+they do not describe the outcome of every later run.
+
+A fresh recovery run on October 2, 2026 used the same source revision and comparison base,
+with four authored documents modified. The exact `./scripts/coverage-solution.sh` started at
+05:21:11 UTC and completed at 05:41:57 UTC with exit **0**: **54 successful projects**,
+**15,032 passed / 0 failed / 4 existing skips**, zero build warnings/errors, aggregate coverage
+**95.1057% line / 89.0287% branch**, and committed-patch coverage **98.419% line / 100% branch**.
+All 288 archived file hashes and all 2,653 tracked input hashes were checked; inputs remained
+unchanged during that run. Compiler process isolation resolved a local generated-XML access
+failure without changing the wrapper, test selection, thresholds, tolerance, or environment policy.
+
+These dated results establish their recorded inputs only. Subsequent documentation corrections
+still require the final [verification gate](../plans/issue-779-execution.md#required-checks);
+local coverage does not establish Ubuntu mechanism proof, protected admission, or completion
+of the [full consumer acceptance plan](issue779-consumer-acceptance.md).

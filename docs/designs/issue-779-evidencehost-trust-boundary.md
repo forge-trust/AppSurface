@@ -1,4 +1,4 @@
-<!-- /autoplan restore point: "/Users/andrew/.gstack/projects/forge-trust-Runnable/HEAD-autoplan-restore-20260930-issue779.md" -->
+<!-- Original approval snapshot: local gstack archive HEAD-autoplan-restore-20260930-issue779.md; exact archive location retained in session state. -->
 ## Implementation plan
 # Design: EvidenceHost trusted and observation proof (#779)
 
@@ -240,9 +240,9 @@ Stop: MAX_ITERATIONS
 
 ### Autoplan intake and provenance (2026-09-30)
 
-Active plan is this file; original approved bytes are saved at `/Users/andrew/.gstack/projects/forge-trust-Runnable/HEAD-autoplan-restore-20260930-issue779.md` (SHA-256 `3680736873490b3ffd970d7137f4f4edfcd919026ce6f4f9439a033968de8988`). GitHub base is `main`, HEAD `5dc141db81009348538d3f6b7634a99ccb34cd99`, detached branch. There is no code diff against origin/main. UI term matches are prose false positives (platform, performed, informative); no UI screens or rendering change. DX scope is enabled as developer tooling and by 57 term matches, input hash above. Outside provider preflight: Claude Code not installed; native reviews remain required and consensus is N/A.
+Active plan is this file; original approved bytes are saved at `HEAD-autoplan-restore-20260930-issue779.md in the local gstack project archive` (SHA-256 `3680736873490b3ffd970d7137f4f4edfcd919026ce6f4f9439a033968de8988`). GitHub base is `main`, HEAD `5dc141db81009348538d3f6b7634a99ccb34cd99`, detached branch. There is no code diff against origin/main. UI term matches are prose false positives (platform, performed, informative); no UI screens or rendering change. DX scope is enabled as developer tooling and by 57 term matches, input hash above. Outside provider preflight: Claude Code not installed; native reviews remain required and consensus is N/A.
 
-CEO methodology `/Users/andrew/.gstack/projects/forge-trust-Runnable/autoplan-ceo-methodology-ALU2hj/methodology.md`: all ranges 1–600, 601–1200, 1201–1800, 1801–2400, 2401–2518 requested and successfully recovered truncated continuations (250–315, 1470–1598, 2010–2190). Full methodology loaded through EOF. Parent handles setup, final report, outside voice, approval transport and telemetry. Brain-cache reads failed EPERM; source design and explicit answers supply the known context. Aside executable absent; landscape research used primary web sources.
+CEO methodology `autoplan-ceo-methodology-ALU2hj/methodology.md in the local gstack project archive`: all ranges 1–600, 601–1200, 1201–1800, 1801–2400, 2401–2518 requested and successfully recovered truncated continuations (250–315, 1470–1598, 2010–2190). Full methodology loaded through EOF. Parent handles setup, final report, outside voice, approval transport and telemetry. Brain-cache reads failed EPERM; source design and explicit answers supply the known context. Aside executable absent; landscape research used primary web sources.
 
 ### CEO Step 0: system audit and scope
 
@@ -600,7 +600,7 @@ The new mode-conflict, supervision, platform, output-collision, timeout and clea
 
 ### DX Pass 4 — Docs and learning (7 → 9/10)
 
-Hall Pass 4 loaded. Existing README → start-here → cookbook → contract/Aspire references is findable and should be retained. Update the claim table: ALL gate-eligible kinds, including targeted and no-evidence, require accepted Trusted admission; Release alone is no longer the only verifier-bound claim. Replace all omitted-mode and early-start snippets, generated starter README and Workflow.FormatSummary next actions. Include copy-paste planning sequence, supported Observation profile/launcher recipe, full proved Trusted setup and old-to-new bool/CLI/schema examples. Snippets are planned, not runnable today; use packed-consumer and existing MarkdownSnippets infrastructure to verify them after API stabilization. Add reference/decision/pitfall content for each changed public/internal API, defaults, supported platforms, root lifetime and failure outcomes. Match package/doc versions; link first meaningful named concept to its canonical page. No new playground/search engine: existing AppSurface Docs search is reused, its deployed availability not measured here.
+Hall Pass 4 loaded. Existing README → start-here → cookbook → contract/Aspire references is findable and should be retained. Update the claim table: ALL gate-eligible kinds, including targeted and no-evidence, require accepted Trusted admission; Release alone is no longer the only verifier-bound claim. Replace all omitted-mode and early-start snippets, generated starter README and Workflow.FormatSummary next actions. Include copy-paste planning sequence, supported Observation profile/launcher recipe, full proved Trusted setup and old-to-new bool/CLI/schema examples. Snippets are planned, not executable today; use packed-consumer and existing MarkdownSnippets infrastructure to verify them after API stabilization. Add reference/decision/pitfall content for each changed public/internal API, defaults, supported platforms, root lifetime and failure outcomes. Match package/doc versions; link first meaningful named concept to its canonical page. No new playground/search engine: existing AppSurface Docs search is reused, its deployed availability not measured here.
 
 ### DX Pass 5 — Upgrade and migration (7 → 8/10)
 
@@ -955,7 +955,7 @@ Principles: P1 completeness; P2 complete direct blast radius; P3 pragmatic scope
 
 ## Autoplan Final Approval Gate
 
-Status: **APPROVED AS-IS** — user response **A**, 2026-09-30 (recorded 2026-10-01T02:13:21Z). Approval covers the 31 Mechanical decisions, all seven Taste recommendations, the 13 aggregated tasks, the 57-group acceptance test plan and the deferred receipt item. Earlier office-hours approvals remain recorded. No product implementation, tests, build, push or PR occurred in this review. Local review history is recorded in ~/.gstack/projects/forge-trust-Runnable/HEAD-reviews.jsonl under run issue779-autoplan-approved-75fff8381cd54230b3edc5173cc02c05: three completed phase records plus four voice-coverage records, including skipped Design. Actual consumer/platform/supervision proof remains required before Trusted enablement.
+Status: **APPROVED AS-IS** — user response **A**, 2026-09-30 (recorded 2026-10-01T02:13:21Z). Approval covers the 31 Mechanical decisions, all seven Taste recommendations, the 13 aggregated tasks, the 57-group acceptance test plan and the deferred receipt item. Earlier office-hours approvals remain recorded. No product implementation, tests, build, push or PR occurred in this review. Local review history is recorded in the local gstack project archive’s HEAD-reviews.jsonl under run issue779-autoplan-approved-75fff8381cd54230b3edc5173cc02c05: three completed phase records plus four voice-coverage records, including skipped Design. Actual consumer/platform/supervision proof remains required before Trusted enablement.
 
 ### Plan summary
 
@@ -1001,51 +1001,51 @@ One new P3 item: [portable signed origin receipts](../../TODOS.md#evidencehost-f
 
 - [ ] **C-T1 (P1, human: 6h / agent: 2h) — consumer-proof** — Record and prove one protected/fork consumer boundary
   - Surfaced by: ceo-review — CEO native1–2 critical feasibility; S5/S6 external gate
-  - Files: /Users/andrew/Projects/forge-trust/runnable__saturn/docs/evidence/issue779-consumer-acceptance.md, /Users/andrew/Projects/forge-trust/runnable__saturn/.github/workflows/build.yml
+  - Files: docs/evidence/issue779-consumer-acceptance.md, .github/workflows/build.yml
 - [ ] **C-T2 (P1, human: 8h / agent: 1h) — admission** — Unify mode admission and claims across both entries
   - Surfaced by: ceo-review — CEO architecture: separate CLI claim and early Aspire startup
-  - Files: /Users/andrew/Projects/forge-trust/runnable__saturn/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceContracts.cs, /Users/andrew/Projects/forge-trust/runnable__saturn/Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceHostBootstrap.cs, /Users/andrew/Projects/forge-trust/runnable__saturn/Cli/ForgeTrust.AppSurface.Cli/EvidenceCommands.cs
+  - Files: Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceContracts.cs, Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceHostBootstrap.cs, Cli/ForgeTrust.AppSurface.Cli/EvidenceCommands.cs
   - Possible duplicate/overlap: E-T1: same admission workstream, different recorded file/scope set; no non-exact task deleted.
 - [ ] **C-T3 (P1, human: 8h / agent: 2h) — lifecycle** — Bind supervision and output activation before callbacks
   - Surfaced by: ceo-review — CEO spec S1/S4; timeout join before cleanup
-  - Files: /Users/andrew/Projects/forge-trust/runnable__saturn/Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceHostBootstrap.cs, /Users/andrew/Projects/forge-trust/runnable__saturn/Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceAspireApplication.cs, /Users/andrew/Projects/forge-trust/runnable__saturn/Cli/ForgeTrust.AppSurface.Cli/CoverageRun.cs
+  - Files: Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceHostBootstrap.cs, Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceAspireApplication.cs, Cli/ForgeTrust.AppSurface.Cli/CoverageRun.cs
 - [ ] **C-T4 (P1, human: 3h / agent: 20min) — cli-adoption** — Remove doctor environment authority and inventory gate migrations
   - Surfaced by: ceo-review — C1/C2 and CEO native3/5
-  - Files: /Users/andrew/Projects/forge-trust/runnable__saturn/Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceCliWorkflow.cs, /Users/andrew/Projects/forge-trust/runnable__saturn/Cli/ForgeTrust.AppSurface.Cli/EvidenceCommands.cs, /Users/andrew/Projects/forge-trust/runnable__saturn/guides/evidencehost-cookbook.md
+  - Files: Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceCliWorkflow.cs, Cli/ForgeTrust.AppSurface.Cli/EvidenceCommands.cs, guides/evidencehost-cookbook.md
 - [ ] **C-T5 (P1, human: 8h / agent: 1h) — verification** — Complete hostile positive schema platform and packed proofs
   - Surfaced by: ceo-review — CEO Sections3/6 and approved acceptance matrix
-  - Files: /Users/andrew/Projects/forge-trust/runnable__saturn/Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidenceHostBootstrapTests.cs
+  - Files: Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidenceHostBootstrapTests.cs
   - Possible duplicate/overlap: E-T4: same verification workstream, Eng expands the complete map; no non-exact task deleted.
 - [ ] **E-T1 (P1, human: 1 day / agent: 2h) — shared admission** — Implement pure shared admission claim capability and migrate both authored callers
   - Surfaced by: eng-review — AR1/AR2/CQ1/CQ2/E4
-  - Files: /Users/andrew/Projects/forge-trust/runnable__saturn/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceContracts.cs, /Users/andrew/Projects/forge-trust/runnable__saturn/Evidence/ForgeTrust.AppSurface.Evidence.Planner/EvidencePlanner.cs, /Users/andrew/Projects/forge-trust/runnable__saturn/Cli/ForgeTrust.AppSurface.Cli/EvidenceCommands.cs, /Users/andrew/Projects/forge-trust/runnable__saturn/Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceHostBootstrap.cs, /Users/andrew/Projects/forge-trust/runnable__saturn/Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceAspireApplication.cs
+  - Files: Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceContracts.cs, Evidence/ForgeTrust.AppSurface.Evidence.Planner/EvidencePlanner.cs, Cli/ForgeTrust.AppSurface.Cli/EvidenceCommands.cs, Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceHostBootstrap.cs, Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceAspireApplication.cs
   - Possible duplicate/overlap: C-T2: consolidate implementation ownership; retain both review obligations; no non-exact task deleted.
 - [ ] **E-T4 (P1, human: 2 days / agent: 3h) — verification** — Implement complete hostile caller lifecycle platform packed regression map
   - Surfaced by: eng-review — Section 3 eight gap clusters/E5
-  - Files: /Users/andrew/Projects/forge-trust/runnable__saturn/Cli/ForgeTrust.AppSurface.Cli.Tests/EvidencePlannerTests.cs, /Users/andrew/Projects/forge-trust/runnable__saturn/Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidenceHostBootstrapTests.cs, /Users/andrew/Projects/forge-trust/runnable__saturn/tests/evidencehost-consumer, /Users/andrew/Projects/forge-trust/runnable__saturn/tools/ForgeTrust.AppSurface.PackageIndex.Tests, /Users/andrew/Projects/forge-trust/runnable__saturn/tools/ForgeTrust.AppSurface.MarkdownSnippets.Tests, /Users/andrew/Projects/forge-trust/runnable__saturn/.github/workflows/build.yml
+  - Files: Cli/ForgeTrust.AppSurface.Cli.Tests/EvidencePlannerTests.cs, Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidenceHostBootstrapTests.cs, tests/evidencehost-consumer, tools/ForgeTrust.AppSurface.PackageIndex.Tests, tools/ForgeTrust.AppSurface.MarkdownSnippets.Tests, .github/workflows/build.yml
   - Possible duplicate/overlap: C-T5: consolidate test ownership; retain every original regression; no non-exact task deleted.
 - [ ] **D-T1 (P1, human: 4h / agent: 45min) — adoption** — Specify and verify planning Observation Trusted quickstarts and migration examples
   - Surfaced by: devex-review — DX-1/2/4; passes 1/2/4/5
-  - Files: /Users/andrew/Projects/forge-trust/runnable__saturn/start-here/evidencehost.md, /Users/andrew/Projects/forge-trust/runnable__saturn/guides/evidencehost-cookbook.md, /Users/andrew/Projects/forge-trust/runnable__saturn/Cli/ForgeTrust.AppSurface.Cli/README.md, /Users/andrew/Projects/forge-trust/runnable__saturn/Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceCliWorkflow.cs
+  - Files: start-here/evidencehost.md, guides/evidencehost-cookbook.md, Cli/ForgeTrust.AppSurface.Cli/README.md, Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceCliWorkflow.cs
   - Possible duplicate/overlap: C-T6: coordinate guide edits with migration/recovery content; no non-exact task deleted.
 - [ ] **D-T2 (P1, human: 3h / agent: 30min) — diagnostics** — Define secret-safe actionable diagnostics and fail-stop caller recovery
   - Surfaced by: devex-review — DX-3; pass 3
-  - Files: /Users/andrew/Projects/forge-trust/runnable__saturn/Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceCliWorkflow.cs, /Users/andrew/Projects/forge-trust/runnable__saturn/Cli/ForgeTrust.AppSurface.Cli/EvidenceCommands.cs, /Users/andrew/Projects/forge-trust/runnable__saturn/Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceHostBootstrap.cs, /Users/andrew/Projects/forge-trust/runnable__saturn/docs/evidence/issue779-diagnostics.md
+  - Files: Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceCliWorkflow.cs, Cli/ForgeTrust.AppSurface.Cli/EvidenceCommands.cs, Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceHostBootstrap.cs, docs/evidence/issue779-diagnostics.md
   - Possible duplicate/overlap: C-T3/C-T6: recovery diagnostics cross lifecycle and docs; no non-exact task deleted.
 - [ ] **D-T3 (P1, human: 2h / agent: 20min) — lifecycle docs** — Document immutable caps and permitted reductions
   - Surfaced by: devex-review — DX-5; pass 6
-  - Files: /Users/andrew/Projects/forge-trust/runnable__saturn/Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md, /Users/andrew/Projects/forge-trust/runnable__saturn/Cli/ForgeTrust.AppSurface.Cli/README.md, /Users/andrew/Projects/forge-trust/runnable__saturn/releases/issue-779-evidencehost-migration.md
+  - Files: Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md, Cli/ForgeTrust.AppSurface.Cli/README.md, releases/issue-779-evidencehost-migration.md
   - Possible duplicate/overlap: C-T6: coordinate lifecycle and migration reference edits; no non-exact task deleted.
 - [ ] **C-T6 (P2, human: 3h / agent: 30min) — docs-release** — Document procedure scope migration and fatal recovery
   - Surfaced by: ceo-review — C3 and CEO native6; Section9 coordinated rollout
-  - Files: /Users/andrew/Projects/forge-trust/runnable__saturn/start-here/evidencehost.md, /Users/andrew/Projects/forge-trust/runnable__saturn/guides/evidencehost-cookbook.md, /Users/andrew/Projects/forge-trust/runnable__saturn/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md, /Users/andrew/Projects/forge-trust/runnable__saturn/Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md, /Users/andrew/Projects/forge-trust/runnable__saturn/Cli/ForgeTrust.AppSurface.Cli/README.md
+  - Files: start-here/evidencehost.md, guides/evidencehost-cookbook.md, Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md, Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md, Cli/ForgeTrust.AppSurface.Cli/README.md
   - Possible duplicate/overlap: D-T1/D-T2/D-T3: overlapping documentation work, distinct acceptance requirements; no non-exact task deleted.
 - [ ] **E-T2 (P2, human: 4h / agent: 45min) — output budgets** — Enforce run-wide artifact and received process-output quotas
   - Surfaced by: eng-review — native Eng-1/CQ3/PF1/E1/E2
-  - Files: /Users/andrew/Projects/forge-trust/runnable__saturn/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceContracts.cs, /Users/andrew/Projects/forge-trust/runnable__saturn/Evidence/ForgeTrust.AppSurface.Evidence.Coverage/CoverageExecutionBoundary.cs, /Users/andrew/Projects/forge-trust/runnable__saturn/Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceHostBootstrap.cs, /Users/andrew/Projects/forge-trust/runnable__saturn/Cli/ForgeTrust.AppSurface.Cli.Tests/CoverageEvidenceProducerTests.cs
+  - Files: Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceContracts.cs, Evidence/ForgeTrust.AppSurface.Evidence.Coverage/CoverageExecutionBoundary.cs, Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceHostBootstrap.cs, Cli/ForgeTrust.AppSurface.Cli.Tests/CoverageEvidenceProducerTests.cs
 - [ ] **E-T3 (P2, human: 3h / agent: 30min) — job budgets** — Reserve teardown time and reject overcommitted stage budgets
   - Surfaced by: eng-review — native Eng-2/AR3/PF2/E3
-  - Files: /Users/andrew/Projects/forge-trust/runnable__saturn/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceContracts.cs, /Users/andrew/Projects/forge-trust/runnable__saturn/Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceHostBootstrap.cs, /Users/andrew/Projects/forge-trust/runnable__saturn/Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidenceHostBootstrapTests.cs
+  - Files: Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceContracts.cs, Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceHostBootstrap.cs, Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidenceHostBootstrapTests.cs
 
 ### Verification and implementation order
 

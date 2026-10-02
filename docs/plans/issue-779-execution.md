@@ -659,3 +659,91 @@ Receipts are under `/private/tmp/issue779-depth-focused-validation/` and
 `/private/tmp/issue779-depth-focused-parent/`. The scoped adversarial review report is
 `/private/tmp/issue779-depth-adversarial-review.md`. These checks cover the four new
 boundary controls and existing Evidence behavior; the full coverage gate remains required.
+
+### Coverage attempt 13 and packed depth/exception proof
+
+The exact unchanged `./scripts/coverage-solution.sh` completed at
+`75f5f876adc1423357892f61057b2a4919180ee9`, against
+`origin/main` `4aa8329c76f4279ad319747f9f3c14b9b8de51ef`, with exit **0** at
+2026-10-01T12:23:37Z. The build reported **0 warnings and 0 errors**;
+**15,032 tests passed, 0 failed and 4 skipped**. The official gate passed with
+aggregate line/branch coverage **95.112% / 89.0425%** and committed-patch
+line/branch coverage **98.419% / 100%**. Thresholds, tolerance, comparison base,
+non-sandbox requirement and configured skips were unchanged.
+
+The archive is `/private/tmp/issue779-coverage-attempt13-evidence/`; all **288**
+manifest entries were verified against their SHA-256 hashes. The original terminal
+receipt records thirteen orphaned MSBuild nodes. After inspection confirmed they
+belonged to the task's process group **6400**, the parent stopped that group and
+confirmed it absent. The separate cleanup receipt is
+`/private/tmp/issue779-coverage-attempt13/owned-group-cleanup.json`; archived evidence
+was preserved unchanged.
+
+The isolated packed Contracts consumer also passed at this revision using exact
+version `0.1.0-issue779-proof.20261001.7`. It verified span and nonseekable-stream
+depth boundaries, all four documented normalized stream failures, cancellation
+and custom-exception propagation, package/README/XML identity and matching
+package/cache/consumer DLL bytes. Pack and consumer restore/build/run exited **0**
+with no compiler warnings. The final receipt is
+`/private/tmp/issue779-packed-contracts-current-75f5/attempt-04/receipts/final-proof-receipt.json`.
+Earlier harness failures and corrected audits remain retained; they were not
+product failures or passing proof. The scoped enhancement loop completed after
+two of four available cycles, before its outside-review checkpoint.
+
+The preliminary draft still requires its fresh Ship audits, reviews, documentation
+audit and installed CLI checks. This local gate and packed proof do not establish
+Ubuntu supervision or protected runtime admission. The actual Ubuntu run and all
+remaining shared admission, lifecycle, caller and acceptance work remain required
+under the [staged plan](issue-779-preliminary-proof.md).
+
+
+### Preliminary Ship verification before publication
+
+Fresh Ship coverage and plan audits found **84% value-weighted / 92% any-test**
+coverage across 25 behavior groups and **4/4 preliminary implementation items**
+complete. Two assertion-quality weaknesses and two actual-Linux execution gaps remain
+explicit; no generated test or observed red/base-proof result is claimed. The unchanged
+full repository gate above remains the required measured coverage proof.
+
+The isolated installed CLI candidate at exact package version
+`0.1.0-issue779-proof.20261001.7` passed **20 CLI cases** covering initialization,
+help/version, planning doctor, explain, duplicate/invalid UTF-8/enum/null input and
+safe policy/plan/manifest diagnostics. The strict Linux subject-result verifier passed
+**4 Python tests**. The packaged Contracts consumer passed **37 observations**.
+All package, shim, source and command receipts were independently hash-checked;
+those checks do not substitute for an actual Ubuntu run.
+
+Fresh core, six specialist and native adversarial reviews completed. Their binding
+snapshots match. Optional enum-name caching and historical compatibility wording were
+retained as advisory notes. The native review retained one investigation: verify the
+actual runner and credential scope before relying on PR-controlled root proof or merging.
+The workflow uses a standard Ubuntu hosted label, read-only repository permission and
+non-persisted checkout credentials. Repository-level runner inventory reported zero
+self-hosted runners; organization-level inventory was inaccessible. The actual run
+metadata remains to be inspected after draft creation. The native fixture review was
+limited to summaries; the configured outside Claude Code command was unavailable.
+Neither gap is represented as a completed outside review or protected admission.
+
+The [preliminary scope](issue-779-preliminary-proof.md), actual Ubuntu proof and full
+[57-group continuation](issue-779-evidencehost-test-plan.md) remain distinct milestones.
+The draft references #779 without closing it. Public reader behavior is documented in
+[Contracts](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md#bounded-json-input),
+and release guidance follows the existing append-only unreleased entry.
+
+
+### Resume on 2026-10-02
+
+On resume, the earlier `/private/tmp/issue779-*` evidence directories were absent.
+The interrupted coverage/replay agent handles were missing, and no matching coverage
+or CLI replay process was live. Prior results above remain historical observations;
+the missing archives cannot support current receipt reuse. Fresh verification is being
+retained under the ignored `TestResults/issue779-recovery-20261002/` workspace directory.
+
+The two Ship-owned documentation audits returned incomplete: full reads of the long
+design, execution history and CLI reference were not completed. The adoption/status
+finding was corrected: the start guide and CLI reference explicitly mark protected
+PR/release gating unadmitted. Public design references now use repository-relative
+source paths and historical archive filenames. No runtime, test or gate policy changed.
+The Ship documentation attempt limit is exhausted; publication requires the specific
+named documentation-risk decision while all unwaivable validation gates remain required.
+Actual Ubuntu proof and the full #779 continuation remain pending.

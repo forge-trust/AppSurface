@@ -549,7 +549,7 @@ that resolves a local namespace other than `Development`, `Local`, or `Dev` must
 
 ### `appsurface evidence`
 
-Use EvidenceHost when a CI gate must explain why evidence is required for a changed path and must never promote a skipped or incomplete test profile into a full-coverage claim. Start with the [EvidenceHost guide](../../start-here/evidencehost.md). A selected coverage producer carries its exact `coverageGate` thresholds in the checked-in policy and `run` evaluates the existing gate in-process against that resolved policy.
+Use EvidenceHost to plan changed-risk evidence, explain selected obligations and inspect structural results. Start with the [EvidenceHost guide](../../start-here/evidencehost.md). Protected PR and release gating remains **unadmitted** in this preliminary #779 stage: shared runtime admission and actual consumer/platform proof are still required. Existing `run` claims and `verify` results do not establish that authority; the [consumer acceptance record](../../docs/evidence/issue779-consumer-acceptance.md) lists the required proofs and excluded providers. Use the existing [`coverage gate`](#appsurface-coverage-gate) for numeric coverage enforcement. A selected coverage producer carries its exact `coverageGate` thresholds in the checked-in policy and `run` evaluates the existing gate in-process against that resolved policy.
 
 ```bash
 appsurface evidence init --sample
