@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using ForgeTrust.AppSurface.Evidence.Contracts;
@@ -85,17 +86,26 @@ public sealed class EvidencePullRequestGateVerifierTests
     {
         await using var fixture = await GateFixture.CreateAsync();
 
-        var result = await fixture.VerifyAsync(
+        var missingRoot = await fixture.VerifyAsync(
             trustedArtifactHandoffRootPath: null,
             artifactVerifier: null,
             omitArtifactRoot: true,
             useFakeArtifactVerifier: false);
+        var missingVerifier = await fixture.VerifyAsync(
+            trustedArtifactHandoffRootPath: fixture.ArtifactRoot,
+            artifactVerifier: null,
+            useFakeArtifactVerifier: false);
 
-        Assert.False(result.IsEligible);
-        Assert.Equal("ASEVG009", result.Code);
-        Assert.NotNull(result.Summary);
-        Assert.Empty(result.Summary.ClosedObligationIds);
-        Assert.Equal(["compile"], result.Summary.MissingObligationIds);
+        Assert.False(missingRoot.IsEligible);
+        Assert.Equal("ASEVG009", missingRoot.Code);
+        Assert.NotNull(missingRoot.Summary);
+        Assert.Empty(missingRoot.Summary.ClosedObligationIds);
+        Assert.Equal(["compile"], missingRoot.Summary.MissingObligationIds);
+        Assert.False(missingVerifier.IsEligible);
+        Assert.Equal("ASEVG009", missingVerifier.Code);
+        Assert.NotNull(missingVerifier.Summary);
+        Assert.Empty(missingVerifier.Summary.ClosedObligationIds);
+        Assert.Equal(["compile"], missingVerifier.Summary.MissingObligationIds);
     }
 
     [Fact]
@@ -329,6 +339,265 @@ public sealed class EvidencePullRequestGateVerifierTests
         Assert.Equal("ASEVG004", result.Code);
         Assert.NotNull(result.Summary);
         Assert.Equal(["compile"], result.Summary.SelectedObligationIds);
+        Assert.Empty(result.Summary.ClosedObligationIds);
+        Assert.Equal(["compile"], result.Summary.MissingObligationIds);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_ShouldFailClosedForMalformedAndOverBudgetContracts()
+    {
+        await using var fixture = await GateFixture.CreateAsync();
+        var producer = fixture.Plan.Profile.Producers.Single();
+        var invalidPlans = new EvidencePlan[]
+        {
+            fixture.Plan with { PullRequestRunIdentity = fixture.RunIdentity with { TargetBranch = new string('m', 129) } },
+            fixture.Plan with { PolicyDigest = new string('d', EvidenceGitChangeCapture.MaximumPathBytes + 1) },
+            fixture.Plan with { MatchedRuleIds = ["source", new string('r', 129)] },
+            fixture.Plan with { ChangedPaths = [null!] },
+            fixture.Plan with { Profile = fixture.Plan.Profile with { Producers = [producer with { AssertionIds = null! }] } },
+            fixture.Plan with { PolicySnapshot = fixture.Policy with { Profiles = [] } },
+            fixture.Plan with
+            {
+                PolicySnapshot = fixture.Policy with
+                {
+                    Rules = Enumerable.Range(0, 4_000)
+                        .Select(_ => new EvidencePolicyRule(new string('i', 128), new string('p', 128), "targeted"))
+                        .ToArray(),
+                },
+            },
+        };
+
+        foreach (var plan in invalidPlans)
+        {
+            var result = await fixture.VerifyAsync(plan: plan);
+
+            Assert.False(result.IsEligible);
+            Assert.Equal("ASEVG002", result.Code);
+            Assert.Null(result.Summary);
+        }
+
+        var producerResult = fixture.Manifest.ProducerResults.Single();
+        var artifact = producerResult.Artifacts!.Single();
+        var invalidManifests = new EvidenceManifest[]
+        {
+            fixture.Manifest with { Metrics = null! },
+            fixture.Manifest with { ResourceResults = new EvidenceResourceResult[EvidenceProfileLimits.MaximumResources + 1] },
+            fixture.Manifest with { SelectedObligationIds = Enumerable.Repeat("compile", EvidenceProfileLimits.MaximumObligations + 1).ToArray() },
+            fixture.Manifest with
+            {
+                ProducerResults = [producerResult with { Diagnostic = new string('d', 513) }],
+            },
+            fixture.Manifest with
+            {
+                ProducerResults = [producerResult with { SatisfiedAssertionIds = [new string('a', 129)] }],
+            },
+            fixture.Manifest with
+            {
+                ProducerResults = [producerResult with { Artifacts = [artifact with { Sha256 = new string('a', EvidenceGitChangeCapture.MaximumPathBytes + 1) }] }],
+            },
+        };
+
+        foreach (var manifest in invalidManifests)
+        {
+            var result = await fixture.VerifyAsync(manifest: manifest);
+
+            Assert.False(result.IsEligible);
+            Assert.Equal("ASEVG002", result.Code);
+            Assert.Null(result.Summary);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyAsync_ShouldFailClosedWhenContractCollectionsThrowDuringValidation()
+    {
+        await using var fixture = await GateFixture.CreateAsync();
+
+        var malformedPlan = fixture.Plan with
+        {
+            ChangedPaths = new ThrowingReadOnlyList<NormalizedDiffPath>(),
+        };
+        var malformedManifest = fixture.Manifest with
+        {
+            ResourceResults = new ThrowingReadOnlyList<EvidenceResourceResult>(),
+        };
+
+        var planResult = await fixture.VerifyAsync(plan: malformedPlan);
+        var manifestResult = await fixture.VerifyAsync(manifest: malformedManifest);
+
+        Assert.Equal("ASEVG002", planResult.Code);
+        Assert.Null(planResult.Summary);
+        Assert.Equal("ASEVG002", manifestResult.Code);
+        Assert.Null(manifestResult.Summary);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_ShouldReturnCancelledForPlanningArtifactAndAuthorityCancellation()
+    {
+        await using var fixture = await GateFixture.CreateAsync();
+        using var planningCancellation = new CancellationTokenSource();
+        planningCancellation.Cancel();
+        using var artifactCancellation = new CancellationTokenSource();
+        using var authorityCancellation = new CancellationTokenSource();
+
+        var planningResult = await fixture.VerifyAsync(cancellationToken: planningCancellation.Token);
+        var artifactResult = await fixture.VerifyAsync(
+            artifactVerifier: new CancellingArtifactVerifier(artifactCancellation),
+            cancellationToken: artifactCancellation.Token);
+        var authorityResult = await fixture.VerifyAsync(
+            authorityProvider: new CancellingAuthorityProvider(authorityCancellation),
+            cancellationToken: authorityCancellation.Token);
+
+        Assert.Equal("ASEVG008", planningResult.Code);
+        Assert.Null(planningResult.Summary);
+        Assert.Equal("ASEVG008", artifactResult.Code);
+        Assert.NotNull(artifactResult.Summary);
+        Assert.Equal(["compile"], artifactResult.Summary.MissingObligationIds);
+        Assert.Equal("ASEVG008", authorityResult.Code);
+        Assert.Null(authorityResult.Summary);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_ShouldRejectNegativeExecutionDurationsAndInvalidEnvelopes()
+    {
+        await using var fixture = await GateFixture.CreateAsync();
+        var producerResult = fixture.Manifest.ProducerResults.Single();
+        var invalidManifests = new EvidenceManifest[]
+        {
+            EvidenceManifestBuilder.Build(fixture.Plan, fixture.Manifest.ProducerResults,
+                envelopeStatus: EvidenceEnvelopeStatus.Invalid),
+            EvidenceManifestBuilder.Build(fixture.Plan, fixture.Manifest.ProducerResults,
+                envelopeStatus: EvidenceEnvelopeStatus.Unavailable),
+            EvidenceManifestBuilder.Build(fixture.Plan, fixture.Manifest.ProducerResults,
+                envelopeStatus: EvidenceEnvelopeStatus.NotRequired),
+            EvidenceManifestBuilder.Build(fixture.Plan, fixture.Manifest.ProducerResults,
+                metrics: new EvidenceExecutionMetrics(PlanningMilliseconds: -1)),
+            EvidenceManifestBuilder.Build(fixture.Plan, fixture.Manifest.ProducerResults,
+                metrics: new EvidenceExecutionMetrics(ResourceReadinessMilliseconds: -1)),
+            EvidenceManifestBuilder.Build(fixture.Plan, fixture.Manifest.ProducerResults,
+                metrics: new EvidenceExecutionMetrics(ProducerMilliseconds: -1)),
+            EvidenceManifestBuilder.Build(fixture.Plan, fixture.Manifest.ProducerResults,
+                metrics: new EvidenceExecutionMetrics(CleanupMilliseconds: -1)),
+            EvidenceManifestBuilder.Build(fixture.Plan, fixture.Manifest.ProducerResults,
+                metrics: new EvidenceExecutionMetrics(TotalMilliseconds: -1)),
+            EvidenceManifestBuilder.Build(fixture.Plan,
+                [producerResult with { ElapsedMilliseconds = -1 }],
+                envelopeStatus: EvidenceEnvelopeStatus.ValidatedNotAttested),
+        };
+
+        foreach (var manifest in invalidManifests)
+        {
+            var result = await fixture.VerifyAsync(manifest: manifest, artifactVerifier: new FakeArtifactVerifier(true));
+
+            Assert.False(result.IsEligible);
+            Assert.Equal("ASEVG004", result.Code);
+            Assert.NotNull(result.Summary);
+        }
+
+        var profile = fixture.Policy.Profiles.Single(candidate => candidate.Id == "targeted") with
+        {
+            Resources = [new EvidenceResourceDeclaration("database", "completion", 30, [])],
+        };
+        var policy = fixture.Policy with
+        {
+            Profiles = fixture.Policy.Profiles.Select(candidate => candidate.Id == profile.Id ? profile : candidate).ToArray(),
+        };
+        var plan = await fixture.ResolvePlanAsync(policy);
+        var resourceManifest = EvidenceManifestBuilder.Build(
+            plan,
+            fixture.Manifest.ProducerResults,
+            envelopeStatus: EvidenceEnvelopeStatus.ValidatedNotAttested,
+            resourceResults: [new EvidenceResourceResult("database", EvidenceResourceOutcome.Ready, -1)]);
+
+        var resourceResult = await fixture.VerifyAsync(
+            plan: plan,
+            manifest: resourceManifest,
+            policy: policy,
+            artifactVerifier: new FakeArtifactVerifier(true));
+
+        Assert.False(resourceResult.IsEligible);
+        Assert.Equal("ASEVG004", resourceResult.Code);
+        Assert.NotNull(resourceResult.Summary);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_ShouldBoundSummariesAndDescribeConservativeFallback()
+    {
+        await using var fixture = await GateFixture.CreateAsync();
+        var fallbackPolicy = fixture.Policy with { Rules = [] };
+        var fallbackPlan = await fixture.ResolvePlanAsync(fallbackPolicy);
+        var fallbackManifest = EvidenceManifestBuilder.Build(
+            fallbackPlan,
+            fixture.Manifest.ProducerResults,
+            envelopeStatus: EvidenceEnvelopeStatus.ValidatedNotAttested);
+
+        var fallbackResult = await fixture.VerifyAsync(
+            plan: fallbackPlan,
+            manifest: fallbackManifest,
+            policy: fallbackPolicy);
+
+        Assert.True(fallbackResult.IsEligible);
+        Assert.NotNull(fallbackResult.Summary);
+        Assert.Equal("conservative-fallback", fallbackResult.Summary.SelectionRationale);
+        var fallbackRule = Assert.Single(fallbackResult.Summary.MatchedRules);
+        Assert.Equal("conservative:targeted", fallbackRule.Id);
+        Assert.Equal("conservative fallback", fallbackRule.Pattern);
+
+        var originalProfile = fixture.Policy.Profiles.Single(candidate => candidate.Id == "targeted");
+        var obligations = Enumerable.Range(0, EvidenceProfileLimits.MaximumObligations)
+            .Select(index => new EvidenceObligation(
+                $"compile-{index:D3}",
+                "code",
+                new string('r', 300),
+                ["build"],
+                "build/passed"))
+            .ToArray();
+        var boundedProfile = originalProfile with { Obligations = obligations };
+        var boundedPolicy = fixture.Policy with
+        {
+            Profiles = fixture.Policy.Profiles
+                .Select(candidate => candidate.Id == boundedProfile.Id ? boundedProfile : candidate)
+                .ToArray(),
+        };
+        var boundedPlan = await fixture.ResolvePlanAsync(boundedPolicy);
+        var boundedManifest = EvidenceManifestBuilder.Build(
+            boundedPlan,
+            fixture.Manifest.ProducerResults,
+            envelopeStatus: EvidenceEnvelopeStatus.ValidatedNotAttested);
+
+        var boundedResult = await fixture.VerifyAsync(
+            plan: boundedPlan,
+            manifest: boundedManifest,
+            policy: boundedPolicy);
+
+        Assert.True(boundedResult.IsEligible);
+        var summary = Assert.IsType<EvidencePullRequestGateSummary>(boundedResult.Summary);
+        Assert.Equal(EvidencePullRequestGateVerifier.MaximumSummaryItems, summary.SelectedObligationIds.Count);
+        Assert.Equal(EvidenceProfileLimits.MaximumObligations - EvidencePullRequestGateVerifier.MaximumSummaryItems, summary.OmittedSelectedObligationCount);
+        Assert.Equal(EvidencePullRequestGateVerifier.MaximumSummaryItems, summary.ClosedObligationIds.Count);
+        Assert.Equal(EvidenceProfileLimits.MaximumObligations - EvidencePullRequestGateVerifier.MaximumSummaryItems, summary.OmittedClosedObligationCount);
+        Assert.Empty(summary.MissingObligationIds);
+        Assert.Equal(EvidenceProfileLimits.MaximumObligations - EvidencePullRequestGateVerifier.MaximumSummaryItems, summary.OmittedObligationRationaleCount);
+        Assert.All(summary.ObligationRationales, rationale => Assert.Equal(256, rationale.Rationale.Length));
+        Assert.Equal("compile-000", summary.SelectedObligationIds[0]);
+        Assert.Equal("compile-063", summary.SelectedObligationIds[^1]);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_ShouldNotCloseSummaryObligationsForInconsistentManifest()
+    {
+        await using var fixture = await GateFixture.CreateAsync();
+        var inconsistent = fixture.Manifest with
+        {
+            ExecutionVerdict = EvidenceExecutionVerdict.Incomplete,
+            ManifestDigest = string.Empty,
+        };
+        inconsistent = inconsistent with { ManifestDigest = EvidenceDigest.CanonicalSha256(inconsistent) };
+
+        var result = await fixture.VerifyAsync(manifest: inconsistent);
+
+        Assert.False(result.IsEligible);
+        Assert.Equal("ASEVG004", result.Code);
+        Assert.NotNull(result.Summary);
         Assert.Empty(result.Summary.ClosedObligationIds);
         Assert.Equal(["compile"], result.Summary.MissingObligationIds);
     }
@@ -676,6 +945,43 @@ public sealed class EvidencePullRequestGateVerifierTests
             CancellationToken cancellationToken = default) => throw new IOException("Authority reader failed.");
     }
 
+    private sealed class CancellingArtifactVerifier(CancellationTokenSource cancellation)
+        : IEvidencePullRequestGateArtifactVerifier
+    {
+        public Task<bool> VerifyArtifactsAsync(
+            string trustedArtifactHandoffRootPath,
+            EvidencePlan verifiedPlan,
+            EvidenceManifest candidateManifest,
+            CancellationToken cancellationToken = default)
+        {
+            cancellation.Cancel();
+            throw new OperationCanceledException(cancellationToken);
+        }
+    }
+
+    private sealed class CancellingAuthorityProvider(CancellationTokenSource cancellation)
+        : IEvidencePullRequestGateAuthorityProvider
+    {
+        public Task<EvidencePullRequestGateAuthoritySnapshot?> ReadFreshAsync(
+            EvidencePullRequestGateExpectedIdentity expectedIdentity,
+            CancellationToken cancellationToken = default)
+        {
+            cancellation.Cancel();
+            throw new OperationCanceledException(cancellationToken);
+        }
+    }
+
+    private sealed class ThrowingReadOnlyList<T> : IReadOnlyList<T>
+    {
+        public int Count => 0;
+
+        public T this[int index] => throw new InvalidOperationException("The untrusted collection cannot be indexed.");
+
+        public IEnumerator<T> GetEnumerator() => throw new InvalidOperationException("The untrusted collection cannot be enumerated.");
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
     private sealed class GateFixture : IAsyncDisposable
     {
         private readonly string _repositoryPath;
@@ -827,7 +1133,8 @@ public sealed class EvidencePullRequestGateVerifierTests
             IEvidencePullRequestGateArtifactVerifier? artifactVerifier = null,
             string? trustedArtifactHandoffRootPath = null,
             bool omitArtifactRoot = false,
-            bool useFakeArtifactVerifier = true)
+            bool useFakeArtifactVerifier = true,
+            CancellationToken cancellationToken = default)
         {
             var planner = new EvidencePlanner();
             return EvidencePullRequestGateVerifier.VerifyAsync(
@@ -839,7 +1146,14 @@ public sealed class EvidencePullRequestGateVerifierTests
                 omitArtifactRoot ? null : trustedArtifactHandoffRootPath ?? ArtifactRoot,
                 artifactVerifier ?? (useFakeArtifactVerifier ? new FakeArtifactVerifier(true) : null),
                 plan ?? Plan,
-                manifest ?? Manifest);
+                manifest ?? Manifest,
+                cancellationToken);
+        }
+
+        public async Task<EvidencePlan> ResolvePlanAsync(EvidencePolicy policy)
+        {
+            var snapshot = await EvidenceGitChangeCapture.CaptureAsync(_repositoryPath, Plan.BaseRevision!, Plan.HeadRevision!);
+            return EvidenceRevisionPlanBuilder.ResolveForPullRequest(new EvidencePlanner(), policy, snapshot, RunIdentity);
         }
 
         public ValueTask DisposeAsync()

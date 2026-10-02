@@ -110,6 +110,71 @@ public sealed class EvidenceHostRunnerTests
         Assert.False(File.Exists(Path.Join(fixture.OutputDirectory, "evidence-manifest.json")));
     }
 
+    [Theory]
+    [InlineData("blank-version")]
+    [InlineData("long-version")]
+    [InlineData("blank-digest")]
+    [InlineData("long-digest")]
+    [InlineData("blank-profile")]
+    [InlineData("long-profile")]
+    [InlineData("blank-resource")]
+    [InlineData("too-many-resources")]
+    [InlineData("blank-producer")]
+    [InlineData("blank-obligation")]
+    public async Task PlanWithoutBoundedManifestIdentityCannotEmitAClaim(string defect)
+    {
+        using var fixture = await GateFixture.CreateAsync(docsOnly: true);
+        var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(fixture.PlanPath));
+        var profile = plan.Profile;
+        plan = defect switch
+        {
+            "blank-version" => plan with { ContractVersion = "" },
+            "long-version" => plan with { ContractVersion = new string('v', 17) },
+            "blank-digest" => plan with { PlanDigest = "" },
+            "long-digest" => plan with { PlanDigest = new string('a', 129) },
+            "blank-profile" => plan with { Profile = profile with { Id = "" } },
+            "long-profile" => plan with { Profile = profile with { Id = new string('p', 129) } },
+            "blank-resource" => plan with
+            {
+                Profile = profile with { Resources = [new EvidenceResourceDeclaration("", "completion", 1, [])] },
+            },
+            "too-many-resources" => plan with
+            {
+                Profile = profile with
+                {
+                    Resources = Enumerable.Range(0, EvidenceProfileLimits.MaximumResources + 1)
+                        .Select(index => new EvidenceResourceDeclaration($"resource-{index}", "completion", 1, []))
+                        .ToArray(),
+                },
+            },
+            "blank-producer" => plan with
+            {
+                Profile = profile with { Producers = [new EvidenceProducerDeclaration("", "test", "1", [], [], [], 1)] },
+            },
+            "blank-obligation" => plan with
+            {
+                Profile = profile with { Obligations = [new EvidenceObligation("", "test", "reason", [], "assertion")] },
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(defect)),
+        };
+        await File.WriteAllBytesAsync(fixture.PlanPath, EvidenceCanonicalJson.Serialize(plan));
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.OutputDirectory,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGH103", stderr.ToString(), StringComparison.Ordinal);
+        Assert.Empty(stdout.ToString());
+        Assert.False(File.Exists(Path.Join(fixture.OutputDirectory, "evidence-manifest.json")));
+    }
+
     [Fact]
     public async Task SyntacticallyMalformedPlanFailsBeforeHostCreation()
     {

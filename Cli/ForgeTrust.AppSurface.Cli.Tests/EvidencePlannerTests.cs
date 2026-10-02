@@ -191,6 +191,106 @@ public sealed class EvidencePlannerTests
     }
 
     [Fact]
+    public void ValidateGatePolicy_ShouldRejectReleaseScopeAsThePullRequestFallback()
+    {
+        var release = CreateCoverageProfile(EvidenceProfileScope.Release) with { Id = "conservative" };
+
+        AssertGatePolicyFailure(CreateGatePolicy(release), "not a targeted pull-request profile");
+    }
+
+    [Fact]
+    public void ValidateGatePolicy_ShouldRejectRulesThatSelectReleaseProfiles()
+    {
+        var conservative = CreateCoverageProfile(EvidenceProfileScope.Targeted) with { Id = "conservative" };
+        var release = CreateCoverageProfile(EvidenceProfileScope.Release);
+
+        AssertGatePolicyFailure(CreateGatePolicy(conservative, release), "selects non-targeted profile");
+    }
+
+    [Theory]
+    [InlineData("completion", 30)]
+    [InlineData("aspire_health", 31)]
+    public void ValidateGatePolicy_ShouldRejectWeakenedResourceReadinessOrDeadline(string readiness, int deadlineSeconds)
+    {
+        var targeted = CreateRequirementProfile("integration");
+        var conservative = targeted with
+        {
+            Id = "conservative",
+            Resources = [targeted.Resources[0] with { Readiness = readiness, DeadlineSeconds = deadlineSeconds }],
+        };
+
+        AssertGatePolicyFailure(CreateGatePolicy(conservative, targeted), "resource 'database'");
+    }
+
+    [Theory]
+    [InlineData("risk")]
+    [InlineData("rationale")]
+    [InlineData("assertion")]
+    public void ValidateGatePolicy_ShouldRejectChangedObligationMeaning(string change)
+    {
+        var targeted = CreateRequirementProfile("integration");
+        var obligation = targeted.Obligations[0];
+        var conservative = targeted with
+        {
+            Id = "conservative",
+            Producers = change == "assertion"
+                ? [targeted.Producers[0] with { AssertionIds = [.. targeted.Producers[0].AssertionIds, "integration/other@1"] }]
+                : targeted.Producers,
+            Obligations =
+            [
+                change switch
+                {
+                    "risk" => obligation with { RiskClass = "lower-risk" },
+                    "rationale" => obligation with { Rationale = "A different reason." },
+                    _ => obligation with { RequiredAssertionId = "integration/other@1" },
+                },
+            ],
+        };
+
+        AssertGatePolicyFailure(CreateGatePolicy(conservative, targeted), "obligation 'integration'");
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("line")]
+    [InlineData("branch")]
+    [InlineData("patch-line")]
+    [InlineData("patch-branch")]
+    [InlineData("mode")]
+    [InlineData("tolerance")]
+    public void ValidateGatePolicy_ShouldRejectWeakenedCoverageGate(string change)
+    {
+        var requiredGate = new EvidenceCoverageGateRequirements(
+            95,
+            85,
+            MinPatchLinePercent: 95,
+            MinPatchBranchPercent: 85,
+            PatchLineMode: "measurable",
+            TolerancePercent: 0.5m);
+        var targeted = CreateCoverageProfile(EvidenceProfileScope.Targeted) with
+        {
+            Producers = [CreateCoverageProfile(EvidenceProfileScope.Targeted).Producers[0] with { CoverageGate = requiredGate }],
+        };
+        var candidateGate = change switch
+        {
+            "line" => requiredGate with { MinLinePercent = 94 },
+            "branch" => requiredGate with { MinBranchPercent = 84 },
+            "patch-line" => requiredGate with { MinPatchLinePercent = null },
+            "patch-branch" => requiredGate with { MinPatchBranchPercent = 84 },
+            "mode" => requiredGate with { PatchLineMode = "codecov" },
+            "tolerance" => requiredGate with { TolerancePercent = 1 },
+            _ => null,
+        };
+        var conservative = targeted with
+        {
+            Id = "conservative",
+            Producers = [targeted.Producers[0] with { CoverageGate = candidateGate }],
+        };
+
+        AssertGatePolicyFailure(CreateGatePolicy(conservative, targeted), "producer 'coverage'");
+    }
+
+    [Fact]
     public void ValidateGatePolicy_ShouldRejectMissingResource()
     {
         var targeted = CreateRequirementProfile("integration");
