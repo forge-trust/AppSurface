@@ -134,14 +134,19 @@ public sealed class EvidenceHostRunnerTests
 
     [Theory]
     [InlineData("missing")]
+    [InlineData("missing-directory")]
     [InlineData("malformed")]
     public async Task UntrustedOrUnavailablePolicyCannotProduceACompleteClaim(string policyFailure)
     {
         using var fixture = await GateFixture.CreateAsync(docsOnly: true);
+        var policyPath = fixture.PolicyPath;
         switch (policyFailure)
         {
             case "missing":
                 File.Delete(fixture.PolicyPath);
+                break;
+            case "missing-directory":
+                policyPath = Path.Join(Path.GetDirectoryName(fixture.PolicyPath)!, "absent", "policy.json");
                 break;
             case "malformed":
                 await File.WriteAllTextAsync(fixture.PolicyPath, "{invalid-json");
@@ -152,16 +157,41 @@ public sealed class EvidenceHostRunnerTests
         using var stderr = new StringWriter();
         var exitCode = await EvidenceHostRunner.ExecuteAsync(
             fixture.PlanPath,
-            fixture.PolicyPath,
+            policyPath,
             fixture.RepositoryPath,
             fixture.OutputDirectory,
             stdout,
             stderr);
 
         Assert.Equal(2, exitCode);
-        Assert.Contains(policyFailure == "missing" ? "ASEGH102" : "ASEGH103", stderr.ToString(), StringComparison.Ordinal);
+        Assert.Contains(policyFailure == "malformed" ? "ASEGH103" : "ASEGH102", stderr.ToString(), StringComparison.Ordinal);
         var manifestPath = Path.Join(fixture.OutputDirectory, "evidence-manifest.json");
         var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(manifestPath));
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, manifest.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+    }
+
+    [Fact]
+    public async Task PolicyDirectoryCannotBeReadAsAFileOrProduceACompleteClaim()
+    {
+        using var fixture = await GateFixture.CreateAsync(docsOnly: true);
+        var policyDirectory = Path.Join(Path.GetDirectoryName(fixture.PolicyPath)!, "policy-directory");
+        Directory.CreateDirectory(policyDirectory);
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath,
+            policyDirectory,
+            fixture.RepositoryPath,
+            fixture.OutputDirectory,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGH105", stderr.ToString(), StringComparison.Ordinal);
+        var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(
+            await File.ReadAllBytesAsync(Path.Join(fixture.OutputDirectory, "evidence-manifest.json")));
         Assert.Equal(EvidenceExecutionVerdict.Invalid, manifest.ExecutionVerdict);
         Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
     }

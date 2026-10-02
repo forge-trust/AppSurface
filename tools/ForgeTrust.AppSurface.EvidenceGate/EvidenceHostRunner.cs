@@ -389,17 +389,6 @@ internal static class EvidenceHostRunner
         }
     }
 
-    private static TValue DeserializeCanonical<TValue>(byte[] bytes)
-    {
-        var value = EvidenceCanonicalJson.Deserialize<TValue>(bytes);
-        if (!EvidenceCanonicalJson.Serialize(value).AsSpan().SequenceEqual(bytes))
-        {
-            throw new EvidenceGateInputException("ASEGH103", "An Evidence JSON input is not canonical.");
-        }
-
-        return value;
-    }
-
     private static void EnsureOutputTargetsAreNew(string outputRoot)
     {
         foreach (var fileName in new[] { "evidence-plan.json", "evidence-manifest.json", "evidence-summary.json" })

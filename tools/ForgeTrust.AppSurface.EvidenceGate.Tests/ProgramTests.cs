@@ -38,6 +38,26 @@ public sealed class ProgramTests
         Assert.Empty(standardError.ToString());
     }
 
+    [Fact]
+    public async Task MainUsesFailClosedDispatchForHelpInvalidAndAcceptedCommands()
+    {
+        using var fixture = new TemporaryDirectory();
+        var planPath = Path.Join(fixture.Path, "plan.json");
+        await File.WriteAllTextAsync(planPath, "{not-json");
+
+        Assert.Equal(0, await Program.Main(["--help"]));
+        Assert.Equal(64, await Program.Main(["run"]));
+        Assert.Equal(64, await Program.Main(["verify-gate"]));
+        Assert.Equal(2, await Program.Main(
+        [
+            "run",
+            "--plan", planPath,
+            "--policy", Path.Join(fixture.Path, "policy.json"),
+            "--repository", Path.Join(fixture.Path, "repository"),
+            "--output-dir", Path.Join(fixture.Path, "output"),
+        ]));
+    }
+
     [Theory]
     [MemberData(nameof(InvalidArguments))]
     public async Task MalformedDuplicateOrMissingArgumentsAreRejected(string[] args)
