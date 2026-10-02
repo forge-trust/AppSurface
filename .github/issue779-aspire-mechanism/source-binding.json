@@ -1,8 +1,9 @@
 {
   "controller_fixes_verified": true,
-  "fixture_verification_receipt_sha256": "bc8cbe8d696c9264ca0da235601541d80be068e7c6d9e088d5b12ab4e2afb2d7",
+  "fixture_verification_receipt_sha256": "462080b23261d89c6141cdf46b6e82b34dab0e80156e3d5974819559e5b220e5",
   "incremental_fix_labels": [
-    "pending-initial-exec-startup"
+    "pending-initial-exec-startup",
+    "finite-task-cap128"
   ],
   "portable_controls": 88,
   "required_fix_receipts": [
@@ -17,7 +18,7 @@
   ],
   "schema": "issue779-aspire-mechanism-source-v1",
   "shared_admission": false,
-  "source_commit": "b672cd0b5c0edb8a091d0b270486965c951cbbfc",
+  "source_commit": "a9476ee70eeda3eaf114639fb6266ef54c7f3b36",
   "source_modes": {
     ".agent/rules.md": "0644",
     ".agent/workflows/pr_feedback_review.md": "0644",
@@ -5325,7 +5326,7 @@
     "tests/evidencehost-consumer/AspireChild/.gitignore": "e4b498b7c8f52fb3ffad74db10e4def129b835b2d807b3686612277bf150c51e",
     "tests/evidencehost-consumer/AspireChild/AspireChild.csproj": "405a9385ed7329b50b0bcae765160f75f77a87be5d3a8e38013aa8bdfb580870",
     "tests/evidencehost-consumer/AspireChild/Program.cs": "fbdbefe64f3e453f58ab3ea957eb6d56bbd5f493177325d33f74ba8d78c2bc7a",
-    "tests/evidencehost-consumer/AspireChild/README.md": "bbdac4e7bdbf90f20c26b0b505bffd2d943013130000ceae9c1867ffcaa00a24",
+    "tests/evidencehost-consumer/AspireChild/README.md": "496a8ca0163c1afccd3033f533198bbf0f40b4baf40c3c57633d741f7e2cd9d5",
     "tests/evidencehost-consumer/AspireChild/packages.linux-x64.lock.json": "b2ef5a0b2def57af75f9860c4c003a1153ddbc00f05456a743e818e24eeab2e1",
     "tests/evidencehost-consumer/AspireChild/packages.osx-arm64.lock.json": "7ab0618fbc7a0a09b2a35e3dd48b9f070f5a65b87683a95ab0b21eb65b7d79e7",
     "tests/evidencehost-consumer/ControlProtocolWorker/ControlProtocolWorker.csproj": "6f11055e96b701049690b38fc856bbf287c8b88ee0fa3a11d7ed53ead3ff2676",
@@ -5352,12 +5353,12 @@
     "tests/evidencehost-consumer/RuntimeSubject/packages.lock.json": "08a209e9962394c6e551555ff17f7956ad0f425f268491ec0be0b30d99c6d662",
     "tests/evidencehost-consumer/Worker.cs": "12827c8a2943e7693cf54a1a1341998512db05838a960bc1fe79471a6a4ea103",
     "tests/evidencehost-consumer/allocation.md": "3c03742343403ac66e9778119f821488a3c1d960b8f1ddc4bc8e9d17cc95add6",
-    "tests/evidencehost-consumer/aspire-child-proof.py": "c2e9efe0a295d9c4ecfbb10a9b9053c0261466498221a8c219da8886e0a80f73",
+    "tests/evidencehost-consumer/aspire-child-proof.py": "85d8f1cf1a8689481fac06f606ed53de5e335bd89f075d8df7e0ae798c239f61",
     "tests/evidencehost-consumer/linux-allocation-probe.c": "b0cc9d3885fe86725dcecd08e640a743a5ec0e35247b921880db03628bd01275",
     "tests/evidencehost-consumer/linux-proof.py": "7fd2338493b2a3e68ad3dfe17cca4f26432e7b6c549142093f645f0a6bb3da3c",
     "tests/evidencehost-consumer/runtime-proof.py": "061a55c2869c02038fb18c0acd1b6055381c0c01676a606b7bcb8a756c44f8d7",
     "tests/evidencehost-consumer/subject.py": "d27c90f3c8b903f0e70e44b73620afd90375c8f081d1d42fc9f5ab7c4238af98",
-    "tests/evidencehost-consumer/test_aspire_child_proof.py": "23c35fe892681edc55ae02a3f4916b2feff2764c967644cadc1fd6ced5c3d3ca",
+    "tests/evidencehost-consumer/test_aspire_child_proof.py": "22a86bb987e59326a06c55f9d928867043579787f1de0cb5d5cd79a94221b997",
     "tests/evidencehost-consumer/test_control_protocol.py": "d51901e0b5121227907eac1313a7a7f846bbaa5dc6d2cbe6322da7076c168377",
     "tests/evidencehost-consumer/test_control_protocol_fixture.py": "044b4fde00619198d51d1bec32540db6633a635e374ed426d9963842ea8b4d32",
     "tests/evidencehost-consumer/test_execution_broker.py": "9095b2d6a000e45ddec6382be1bf8ca6450cea89bdf12b183ff7aebae893c6f6",
