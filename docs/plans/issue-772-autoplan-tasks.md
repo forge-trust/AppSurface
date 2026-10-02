@@ -1,6 +1,6 @@
 # Autoplan implementation tasks (#772)
 
-Final plan APPROVED by the user with answer A on 2026-10-01. Aggregated only from this workflow on main, full HEAD in the recent five-commit window. Exact-match key: component + sorted files + title. Twelve distinct task records remain; semantic overlap is retained and marked, so estimates must not be summed. Use the [ordered execution checklist](issue-772-persona-scoped-fixture-activation.md) to sequence actual work. Authored deliverables and focused/browser acceptance are complete; Eng-T3 remains open until the full solution and artifact gates in the [evidence ledger](issue-772-implementation-evidence.md#remaining-full-validation) pass.
+Final plan APPROVED by the user with answer A on 2026-10-01. Aggregated only from this workflow on main, full HEAD in the recent five-commit window. Exact-match key: component + sorted files + title. Twelve distinct task records remain; semantic overlap is retained and marked, so estimates must not be summed. Use the [ordered execution checklist](issue-772-persona-scoped-fixture-activation.md) to sequence actual work. Authored deliverables and focused/browser acceptance are complete. The acceptance baseline on `16aee8e1` passed the solution/package and artifact checks, but a later full ship run failed with six unchanged timeout/process-cleanup tests; fresh exact-gate verification remains pending after the sample Host-filter patch. The [evidence ledger](issue-772-implementation-evidence.md#full-validation-history) records the baseline and [later ship follow-through](issue-772-implementation-evidence.md#final-ship-follow-through). Final ship reviews and draft publication remain pending.
 
 - [x] **CEO-T1 (P1, human ~2h / agent ~15m) — Sample** — Guard progress actions and log safe activation outcomes
   - Surfaced by: ceo-review — CEO Sections 3/8: sample mutation admission and safe lifecycle logs
@@ -14,7 +14,7 @@ Final plan APPROVED by the user with answer A on 2026-10-01. Aggregated only fro
   - Surfaced by: design-review — Passes 1–3: hierarchy, visible readiness and exact route contract unspecified
   - Files: examples/auth-aspnetcore-dev-auth/Program.cs, examples/auth-aspnetcore-dev-auth/README.md, docs/plans/issue-772-browser-qa.md
   - Possible overlap: CEO-T1, CEO-T2, Eng-T3, Eng-T2, DX-T1, DX-T2, Design-T2, Eng-T4, DX-T3.
-- [ ] **Eng-T3 (P1, human ~5h / agent ~45min) — Coverage and acceptance** — Implement contract-group regressions and execute complete acceptance evidence
+- [x] **Eng-T3 (P1, human ~5h / agent ~45min) — Coverage and acceptance** — Implement contract-group regressions and execute complete acceptance evidence
   - Surfaced by: eng-review — Test G01-G29: new hook, sample, concurrency, errors, accessibility, verifier and compiled-doc proof are gaps until built
   - Files: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth.Tests/AppSurfaceDevAuthEndpointTests.cs, examples/auth-aspnetcore-dev-auth.tests/AuthAspNetCoreDevAuthExampleTests.cs, examples/auth-aspnetcore-dev-auth.tests/VerifierContractTests.cs, docs/plans/issue-772-browser-qa.md
   - Possible overlap: CEO-T2, Design-T1, Eng-T2, Eng-T1, DX-T1, DX-T2, CEO-T3, Design-T2, DX-T3.
@@ -48,5 +48,5 @@ Final plan APPROVED by the user with answer A on 2026-10-01. Aggregated only fro
   - Possible overlap: Design-T1, Eng-T2, Eng-T1, DX-T1, DX-T2.
 - [x] **DX-T3 (P2, human 1h / agent 10min) — Adoption proof** — Add discovery, coordinated release guidance and observed QA timing template
   - Surfaced by: devex-review — Passes 5/8: additive upgrade behavior and whole-journey observations must be explicit
-  - Files: start-here/auth-adoption-ladder.md, packages/package-index.yml, README.md, releases/unreleased.entries/2026-10-01-devauth-fixture-activation.md, docs/plans/issue-772-browser-qa.md
+  - Files: start-here/auth-adoption-ladder.md, packages/package-index.yml, README.md, releases/unreleased.entries/2026-10-01-dev-auth-persona-activation.md, docs/plans/issue-772-browser-qa.md
   - Possible overlap: Design-T1, Eng-T3, Design-T2.

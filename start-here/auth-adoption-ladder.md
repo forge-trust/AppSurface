@@ -18,7 +18,7 @@ Target timings:
 | Task | Target |
 | --- | ---: |
 | Choose the correct auth package | 2 minutes |
-| Run the local DevAuth proof | 5 minutes |
+| Run the local DevAuth proof | 5-minute target; prepared-developer proxy observed 7m16.391s |
 | Run the local real-Keycloak proof | 5 minutes after container runtime is ready |
 | Wire an existing ASP.NET Core policy to `RequireSurfacePolicy(...)` | 7 minutes |
 | Add deterministic Auth.Testing coverage | 10 minutes |

@@ -1,6 +1,6 @@
 # Persona-scoped fixture activation execution plan (#772)
 
-Status: APPROVED by the user with final Autoplan answer A on 2026-10-01. The authored implementation is complete; full validation and publication remain pending. This file retains the approved requirements; the [implementation evidence](issue-772-implementation-evidence.md) records observed results. Source: [design and decision record](../designs/issue-772-persona-scoped-fixture-activation.md). Case: [#772](https://github.com/forge-trust/AppSurface/issues/772).
+Status: APPROVED by the user with final Autoplan answer A on 2026-10-01. The acceptance baseline on `16aee8e1` passed; a later full ship run failed with six unchanged timeout/process-cleanup tests. Fresh exact-gate verification after the sample Host-filter patch remains pending, as do final ship reviews and draft publication. This file retains the approved requirements; the [implementation evidence](issue-772-implementation-evidence.md) records observed results. Source: [design and decision record](../designs/issue-772-persona-scoped-fixture-activation.md). Case: [#772](https://github.com/forge-trust/AppSurface/issues/772).
 
 The outcome is one optional request-scoped host activation hook, awaited after DevAuth queues the protected persona cookie and before normal navigation. Extend the existing sample to prove that labeler and reviewer share one candidate while preserving separate completed work. Preserve the approved cookie order and host-owned failure policy.
 
@@ -36,7 +36,7 @@ The outcome is one optional request-scoped host activation hook, awaited after D
 
 ## 4. Deterministic proof and existing verifier
 
-- [x] Implement all G01-G29 groups from the [saved test plan](issue-772-test-plan.md), retaining E01-E05 regressions. The focused package and sample suites have passed; solution validation remains in the [evidence ledger](issue-772-implementation-evidence.md#remaining-full-validation).
+- [x] Implement all G01-G29 groups from the [saved test plan](issue-772-test-plan.md), retaining E01-E05 regressions. The focused package and sample suites have passed; solution validation remains in the [evidence ledger](issue-772-implementation-evidence.md#full-validation-history).
 - [x] Use independent cookie clients and explicit gates for both overlapping activation orders; prove exactly one ID, coherent state and unchanged completed work. Add product-action/reselection overlap and repeated completion cases. Avoid sleeps or stress runs as correctness proof.
 - [x] Extend [verify.sh](../../examples/auth-aspnetcore-dev-auth/verify.sh) and [VerifierContractTests](../../examples/auth-aspnetcore-dev-auth.tests/VerifierContractTests.cs) together for stable-ID, independent progress and repeated persona switches. Keep child-owned listening evidence, private cookie jars, disabled redirects/proxies, finite timeouts, classified failures, bounded redacted artifacts and owned-child cleanup. Parse IDs privately; do not echo arbitrary HTML/cookies. Inject partial failure/cancellation only in deterministic HTTP tests.
 - [x] Execute the [browser QA checklist](issue-772-browser-qa.md) against the actual loopback host; record observed browser/accessibility/recovery results separately from authored plans.
