@@ -121,6 +121,7 @@ public sealed class VerifierContractTests
     [InlineData("http-contract-failure", "HTTP_CONTRACT_FAILED")]
     [InlineData("candidate-id-drift", "HTTP_CONTRACT_FAILED")]
     [InlineData("candidate-id-missing", "HTTP_CONTRACT_FAILED")]
+    [InlineData("candidate-id-duplicate", "HTTP_CONTRACT_FAILED")]
     [InlineData("candidate-progress-reset", "HTTP_CONTRACT_FAILED")]
     [InlineData("candidate-action-redirect", "HTTP_CONTRACT_FAILED")]
     public async Task HttpFailure_IsClassifiedAfterChildOwnedListenEvidence(string mode, string reason)
@@ -984,11 +985,13 @@ public sealed class VerifierContractTests
             [[ "$mode" == "candidate-id-drift" && "$path" == "/candidate/review" ]] && candidate_id='synthetic-candidate-002'
             id_marker="data-candidate-id=\"$candidate_id\""
             [[ "$mode" == "candidate-id-missing" ]] && id_marker=''
+            [[ "$mode" == "candidate-id-duplicate" && "$path" == "/candidate/review" ]] && id_marker="$id_marker data-candidate-id=\"synthetic-candidate-002\""
             labeling='pending'; review='pending'
             [[ -f "${events}.label-completed" ]] && labeling='completed'
             [[ -f "${events}.review-completed" ]] && review='completed'
             [[ "$mode" == "candidate-progress-reset" && "$path" == "/candidate/review" ]] && labeling='pending'
             body="<h1>Candidate</h1><p>Fixtures ready</p><code $id_marker>$candidate_id</code><p>Labeling: $labeling</p><p>Review: $review</p>"
+            # Value: protects=duplicate candidate marker contract; fails_when=multiple IDs accepted; why_new=missing fake-response branch; seam=none
             ;;
           'POST /candidate/label/complete')
             status='303'; location='Location: /candidate/label'; : > "${events}.label-completed"

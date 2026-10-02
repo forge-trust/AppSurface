@@ -266,16 +266,19 @@ public sealed partial class AppSurfaceDevAuthEndpointTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
+    // Value: protects=captured cancellation prevents normal selection response; fails_when=post-await check rereads a replaced token;
+    // why_new=existing ignored-cancellation assertion leaves RequestAborted unchanged; seam=none
     public async Task SelectPersona_WhenHandlerIgnoresCancellation_DoesNotNavigateAfterNormalReturn(bool hasRedirectTarget)
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var probe = new PersonaSelectionProbe
         {
-            Activation = async (_, _, _) =>
+            Activation = async (_, activationContext, _) =>
             {
                 entered.TrySetResult();
                 await release.Task;
+                activationContext.RequestAborted = CancellationToken.None;
             },
         };
         await using var app = BuildAppWithProbe(probe);
@@ -297,6 +300,7 @@ public sealed partial class AppSurfaceDevAuthEndpointTests
         Assert.Equal(requestAborted.Token, exception.CancellationToken);
         Assert.Equal(1, probe.InvocationCount);
         Assert.Equal(requestAborted.Token, Assert.Single(probe.Activations).CancellationToken);
+        Assert.Equal(CancellationToken.None, context.RequestAborted);
         AssertSelectionFailureResponse(context);
     }
 
