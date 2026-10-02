@@ -110,14 +110,25 @@ guard, and finishes and disposes the queued writer, while withholding the receip
 
 Candidate proof runs for each bundle in both release channels before the artifact manifest can authorize publication.
 A failed command or missing, incomplete, mismatched or stale receipt leaves that gate closed. The published smoke
-carrier then compares restored archive and extracted role-recipe bytes with the candidate and runs the same proof.
+carrier then compares restored package contents and extracted role-recipe bytes with the candidate and runs the same proof.
 An earlier candidate result cannot stand in for the published proof. Source tests and tool help remain separate checks.
 
 The carrier binds `sourceCommit`, `runId`, and the immutable producer `artifactId` to the receipt and checks every
 first-party archive's nuspec package id, package version, canonical repository URL, and repository commit before the
-consumer runs. It rechecks the candidate bundle after the run. The public carrier requires every `ForgeTrust.*`
-archive restored into the isolated NuGet cache to match its candidate archive byte-for-byte, then compares the
-extracted PostgreSQL role recipe before invoking the shared consumer again. There is no path-change shortcut.
+consumer runs. It rechecks the candidate bundle after the run. The public smoke restore explicitly requests every
+`publish` and `support_publish` manifest entry, including support packages unreachable from public dependency roots.
+Each restored archive must have the same ZIP entry names and uncompressed contents as its candidate, except the
+optional root `.signature.p7s` envelope added or updated by [NuGet repository signing](https://learn.microsoft.com/en-us/nuget/reference/signed-packages-reference).
+Duplicate entry names, changed package metadata, added/missing payloads, or a changed extracted PostgreSQL role recipe
+close the gate. ZIP compression, entry order and timestamps are not payload identity.
+
+The shared consumer runs from copies of the approved candidate archives, whose original manifest SHA-512 values are
+checked before and after execution. Passing signed public archives to that candidate manifest would invalidate its
+hash binding. The version-2 `.carrier.json` uses `ProofKind: issue845-public-feed-package-content-identity` and records
+`CandidatePackageSha256` and `PublicPackageSha256` maps for every manifest package, plus the candidate receipt and
+shared proof receipt hashes. These raw archive hashes may differ after signing. The carrier proves payload identity;
+NuGet restore owns signature validation, and the carrier receipt makes no independent signature-authenticity claim.
+Retain both receipts and the original manifest; a whole-archive public hash must never replace a candidate manifest hash.
 
 Each canonical CLI result row carries a `Scenario` identity. The one-pair scenario proves forwarder Work, Flow, and
 Schedule before and after; the installed `work_only` pair scenarios also prove Work succeeds while Flow, Schedule,

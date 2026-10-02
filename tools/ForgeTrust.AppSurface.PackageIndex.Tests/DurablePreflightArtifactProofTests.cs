@@ -572,7 +572,8 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
         var restored = await fixture.CreateRestoredPackagesAsync();
         if (mismatch == "archive")
         {
-            await File.AppendAllTextAsync(fixture.RestoredProviderPackagePath(restored), "different");
+            using var archive = ZipFile.Open(fixture.RestoredProviderPackagePath(restored), ZipArchiveMode.Update);
+            archive.CreateEntry("unexpected-payload.txt");
         }
         else
         {
@@ -614,11 +615,149 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
         Assert.Equal(4, result.ScenarioCount);
         Assert.True(File.Exists(publicReceipt));
         var carrier = await JsonDocument.ParseAsync(File.OpenRead(publicReceipt + ".carrier.json"));
-        Assert.Equal("issue845-public-feed-byte-identity", carrier.RootElement.GetProperty("ProofKind").GetString());
+        Assert.Equal("issue845-public-feed-package-content-identity", carrier.RootElement.GetProperty("ProofKind").GetString());
+        Assert.Equal(2, carrier.RootElement.GetProperty("SchemaVersion").GetInt32());
         Assert.Equal(fixture.ManifestSha256, carrier.RootElement.GetProperty("ArtifactManifestSha256").GetString());
         Assert.Equal(fixture.CliSha256, carrier.RootElement.GetProperty("PublicPackageSha256").GetProperty("ForgeTrust.AppSurface.Cli").GetString());
         var scratch = runner.LastRequest!.Arguments[Array.IndexOf(runner.LastRequest.Arguments.ToArray(), "--artifact-dir") + 1];
         Assert.False(Directory.Exists(scratch));
+    }
+
+    [Theory]
+    [InlineData("added")]
+    [InlineData("replaced")]
+    [InlineData("removed")]
+    public async Task Published_SignatureEnvelopeChangesPreserveCandidateProofAndRecordBothArchiveHashes(string envelopeChange)
+    {
+        var fixture = await ProofFixture.CreateAsync(_root, candidateSigned: envelopeChange != "added", largePayload: true);
+        var candidateReceipt = TestPathUtils.PathUnder(_root, "candidate-receipt.json");
+        await File.WriteAllTextAsync(candidateReceipt, await fixture.CompleteReceiptJsonAsync());
+        var restored = await fixture.CreateRestoredPackagesAsync();
+        var restoredPath = fixture.RestoredProviderPackagePath(restored);
+        using (var archive = ZipFile.Open(restoredPath, ZipArchiveMode.Update))
+        {
+            archive.GetEntry(".signature.p7s")?.Delete();
+            if (envelopeChange != "removed")
+            {
+                await using var signature = archive.CreateEntry(".signature.p7s").Open();
+                await signature.WriteAsync(Encoding.UTF8.GetBytes("synthetic repository signature envelope"));
+            }
+        }
+        var publicHash = Convert.ToHexStringLower(SHA256.HashData(await File.ReadAllBytesAsync(restoredPath)));
+        Assert.NotEqual(fixture.ProviderSha256, publicHash);
+        var publicReceipt = TestPathUtils.PathUnder(_root, "public-receipt.json");
+        var runner = new FakeRunner(async (request, token) =>
+        {
+            var scratch = request.Arguments[Array.IndexOf(request.Arguments.ToArray(), "--artifact-dir") + 1];
+            Assert.Equal(await File.ReadAllBytesAsync(fixture.ProviderPackagePath, token),
+                await File.ReadAllBytesAsync(TestPathUtils.PathUnder(scratch, Path.GetFileName(fixture.ProviderPackagePath)), token));
+            await fixture.WriteCompleteReceiptAsync(request, token);
+            return new ExternalCommandResult(0, "issue-845-proof=passed\n", string.Empty);
+        });
+
+        await new DurablePreflightArtifactProof(runner).RunPublishedAsync(
+            fixture.Request, candidateReceipt, restored, publicReceipt, CancellationToken.None);
+
+        using var carrier = JsonDocument.Parse(await File.ReadAllTextAsync(publicReceipt + ".carrier.json"));
+        Assert.Equal("issue845-public-feed-package-content-identity", carrier.RootElement.GetProperty("ProofKind").GetString());
+        Assert.Equal(fixture.ProviderSha256, carrier.RootElement.GetProperty("CandidatePackageSha256")
+            .GetProperty("ForgeTrust.AppSurface.Durable.PostgreSql").GetString());
+        Assert.Equal(publicHash, carrier.RootElement.GetProperty("PublicPackageSha256")
+            .GetProperty("ForgeTrust.AppSurface.Durable.PostgreSql").GetString());
+        Assert.Equal(1, runner.Calls);
+        Assert.Equal(3, carrier.RootElement.GetProperty("CandidatePackageSha256").EnumerateObject().Count());
+        Assert.Equal(3, carrier.RootElement.GetProperty("PublicPackageSha256").EnumerateObject().Count());
+    }
+
+    [Theory]
+    [InlineData("invalid-zip")]
+    [InlineData("extra-payload")]
+    [InlineData("missing-payload")]
+    [InlineData("renamed-payload")]
+    [InlineData("changed-payload")]
+    [InlineData("changed-length")]
+    [InlineData("duplicate-payload")]
+    [InlineData("duplicate-signature")]
+    [InlineData("nested-signature")]
+    [InlineData("case-signature")]
+    public async Task Published_SignatureExemptionRejectsEveryOtherContentChangeBeforeProof(string mutation)
+    {
+        var fixture = await ProofFixture.CreateAsync(_root);
+        var candidateReceipt = TestPathUtils.PathUnder(_root, "candidate-receipt.json");
+        await File.WriteAllTextAsync(candidateReceipt, await fixture.CompleteReceiptJsonAsync());
+        var restored = await fixture.CreateRestoredPackagesAsync();
+        var path = fixture.RestoredDependencyPackagePath(restored);
+        if (mutation == "invalid-zip") await File.WriteAllTextAsync(path, "not a ZIP");
+        else
+        {
+            using var archive = ZipFile.Open(path, ZipArchiveMode.Update);
+            var nuspec = archive.Entries.Single(entry => entry.FullName.EndsWith(".nuspec", StringComparison.Ordinal));
+            var name = nuspec.FullName;
+            if (mutation == "missing-payload") nuspec.Delete();
+            else if (mutation is "changed-payload" or "changed-length" or "renamed-payload")
+            {
+                using var output = new MemoryStream();
+                await using (var input = nuspec.Open()) await input.CopyToAsync(output);
+                var bytes = output.ToArray();
+                nuspec.Delete();
+                if (mutation == "changed-length") bytes = [.. bytes, (byte)' '];
+                else if (mutation == "changed-payload") bytes[0] ^= 1;
+                await using var replacement = archive.CreateEntry(mutation == "renamed-payload" ? "renamed.nuspec" : name).Open();
+                await replacement.WriteAsync(bytes);
+            }
+            else
+            {
+                archive.CreateEntry(mutation switch
+                {
+                    "duplicate-payload" => name,
+                    "nested-signature" => "nested/.signature.p7s",
+                    "case-signature" => ".SIGNATURE.P7S",
+                    "duplicate-signature" => ".signature.p7s",
+                    _ => "extra.txt"
+                });
+                if (mutation == "duplicate-signature") archive.CreateEntry(".signature.p7s");
+            }
+        }
+        var publicReceipt = TestPathUtils.PathUnder(_root, "public-receipt.json");
+        var runner = new FakeRunner((_, _) => throw new InvalidOperationException("Changed content must not execute."));
+
+        await Assert.ThrowsAsync<PackageIndexException>(() => new DurablePreflightArtifactProof(runner).RunPublishedAsync(
+            fixture.Request, candidateReceipt, restored, publicReceipt, CancellationToken.None));
+
+        Assert.Equal(0, runner.Calls);
+        Assert.False(File.Exists(publicReceipt));
+        Assert.False(File.Exists(publicReceipt + ".carrier.json"));
+    }
+
+    [Theory]
+    [InlineData("archive")]
+    [InlineData("manifest")]
+    public async Task Published_CandidateStagingMutationDuringProofWithholdsBothReceipts(string mutation)
+    {
+        var fixture = await ProofFixture.CreateAsync(_root);
+        var candidateReceipt = TestPathUtils.PathUnder(_root, "candidate-receipt.json");
+        await File.WriteAllTextAsync(candidateReceipt, await fixture.CompleteReceiptJsonAsync());
+        var restored = await fixture.CreateRestoredPackagesAsync();
+        var publicReceipt = TestPathUtils.PathUnder(_root, "public-receipt.json");
+        string? scratch = null;
+        var runner = new FakeRunner(async (request, token) =>
+        {
+            scratch = request.Arguments[Array.IndexOf(request.Arguments.ToArray(), "--artifact-dir") + 1];
+            await fixture.WriteCompleteReceiptAsync(request, token);
+            if (mutation == "archive")
+                await File.AppendAllTextAsync(TestPathUtils.PathUnder(scratch, Path.GetFileName(fixture.ProviderPackagePath)), "changed", token);
+            else
+                await File.AppendAllTextAsync(fixture.Request.ArtifactManifestPath, " ", token);
+            return new ExternalCommandResult(0, "issue-845-proof=passed\n", string.Empty);
+        });
+
+        await Assert.ThrowsAsync<PackageIndexException>(() => new DurablePreflightArtifactProof(runner).RunPublishedAsync(
+            fixture.Request, candidateReceipt, restored, publicReceipt, CancellationToken.None));
+
+        Assert.Equal(1, runner.Calls);
+        Assert.False(Directory.Exists(scratch));
+        Assert.False(File.Exists(publicReceipt));
+        Assert.False(File.Exists(publicReceipt + ".carrier.json"));
     }
 
     [Theory]
@@ -1256,7 +1395,8 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
         public string ProviderSha256 { get; }
         public string DependencySha256 { get; }
 
-        public static async Task<ProofFixture> CreateAsync(string root, string? packageCommit = null, string? packageVersion = null)
+        public static async Task<ProofFixture> CreateAsync(string root, string? packageCommit = null, string? packageVersion = null,
+            bool candidateSigned = false, bool largePayload = false)
         {
             var artifacts = TestPathUtils.PathUnder(root, "candidate");
             Directory.CreateDirectory(artifacts);
@@ -1269,6 +1409,18 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
             await CreatePackageAsync(providerPath, "ForgeTrust.AppSurface.Durable.PostgreSql", nuspecVersion, nuspecCommit,
                 "create role appsurface_durable_owner;");
             await CreatePackageAsync(dependencyPath, "ForgeTrust.AppSurface.Durable", nuspecVersion, nuspecCommit);
+            if (candidateSigned)
+            {
+                using var archive = ZipFile.Open(providerPath, ZipArchiveMode.Update);
+                await using var signature = archive.CreateEntry(".signature.p7s").Open();
+                await signature.WriteAsync(Encoding.UTF8.GetBytes("synthetic candidate signature envelope"));
+            }
+            if (largePayload)
+            {
+                using var archive = ZipFile.Open(dependencyPath, ZipArchiveMode.Update);
+                await using var payload = archive.CreateEntry("lib/net10.0/payload.bin").Open();
+                await payload.WriteAsync(Enumerable.Range(0, 150_000).Select(index => (byte)(index % 251)).ToArray());
+            }
             var entries = new[]
             {
                 new PackageArtifactManifestEntry("ForgeTrust.AppSurface.Cli", "tools/cli.csproj", "publish", Path.GetFileName(cliPath), Hash512(cliPath), true, "appsurface"),

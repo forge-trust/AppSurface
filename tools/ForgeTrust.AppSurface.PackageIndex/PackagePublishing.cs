@@ -776,7 +776,8 @@ internal sealed class PackagePublishWorkflow
 }
 
 /// <summary>
-/// Restores published public packages and verifies published .NET tools from a clean NuGet configuration after publish completes.
+/// Restores every publish and support_publish package and verifies published .NET tools from a clean NuGet
+/// configuration after publish completes. Explicit support references cover packages unreachable from public roots.
 /// </summary>
 internal sealed class PackageSmokeInstallWorkflow
 {
@@ -859,7 +860,8 @@ internal sealed class PackageSmokeInstallWorkflow
             ?? throw new PackageIndexException("Package artifact manifest path must include a directory.");
         var entries = PackageArtifactManifestPlanValidator
             .Validate(plan, manifest, artifactDirectory)
-            .Where(entry => string.Equals(entry.ManifestEntry.Decision, "publish", StringComparison.OrdinalIgnoreCase))
+            .Where(entry => string.Equals(entry.ManifestEntry.Decision, "publish", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(entry.ManifestEntry.Decision, "support_publish", StringComparison.OrdinalIgnoreCase))
             .ToArray();
         Directory.CreateDirectory(request.WorkDirectory);
         var nugetConfigPath = Path.Combine(request.WorkDirectory, "NuGet.config");

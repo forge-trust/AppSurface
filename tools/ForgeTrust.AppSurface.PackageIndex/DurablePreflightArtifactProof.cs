@@ -10,7 +10,7 @@ namespace ForgeTrust.AppSurface.PackageIndex;
 
 /// <summary>
 /// Consumes the exact candidate NuGet bundle with the PostgreSQL runtime-preflight controller and
-/// checks the public-feed restore against those same package bytes before repeating the proof.
+/// checks every public-feed package payload against that bundle before repeating the proof.
 /// </summary>
 internal sealed class DurablePreflightArtifactProof
 {
@@ -185,8 +185,10 @@ internal sealed class DurablePreflightArtifactProof
     }
 
     /// <summary>
-    /// Compares clean public-feed restore results byte-for-byte with the approved candidate package bundle, then
-    /// invokes the same disposable proof against those restored CLI/provider archives.
+    /// Compares every clean public-feed ZIP entry with the approved candidate, excluding only the root NuGet
+    /// signature envelope. ZIP packaging metadata may differ. The shared proof consumes exact candidate archives
+    /// so its manifest hashes remain authoritative; the carrier records both candidate and public archive hashes.
+    /// Signature trust is the NuGet restore's responsibility, not a claim made by this payload comparison.
     /// </summary>
     internal async Task<DurablePreflightArtifactProofResult> RunPublishedAsync(
         DurablePreflightArtifactProofRequest request,
@@ -240,6 +242,12 @@ internal sealed class DurablePreflightArtifactProof
                 publicArtifactsDirectory,
                 cancellationToken);
             var comparisonMilliseconds = Stopwatch.GetElapsedTime(compareStart).TotalMilliseconds;
+            var stagedBundle = await ValidateBundleAsync(publicArtifactsDirectory, request.ArtifactManifestPath,
+                request.SourceCommit, cancellationToken);
+            if (!BundleIdentityMatches(candidateBundle, stagedBundle))
+            {
+                throw new PackageIndexException("The staged candidate package bundle changed during public-feed comparison.");
+            }
 
             await RunControllerAsync(request, publicArtifactsDirectory, request.ArtifactManifestPath,
                 receiptTemporaryPath, PublishedProofTimeoutMilliseconds, cancellationToken);
@@ -249,19 +257,26 @@ internal sealed class DurablePreflightArtifactProof
                 candidateBundle,
                 fixture,
                 cancellationToken);
+            var postProofBundle = await ValidateBundleAsync(publicArtifactsDirectory, request.ArtifactManifestPath,
+                request.SourceCommit, cancellationToken);
+            if (!BundleIdentityMatches(candidateBundle, postProofBundle))
+            {
+                throw new PackageIndexException("The staged candidate package bundle changed during the public-feed proof.");
+            }
 
             DeleteOwnedDirectory(publicArtifactsDirectory);
             publicArtifactsCleaned = true;
 
             var outerReceipt = new DurablePreflightPublicFeedReceipt(
-                SchemaVersion: 1,
-                ProofKind: "issue845-public-feed-byte-identity",
+                SchemaVersion: 2,
+                ProofKind: "issue845-public-feed-package-content-identity",
                 SourceCommit: request.SourceCommit,
                 RunId: request.RunId,
                 ArtifactId: request.ArtifactId,
                 CandidateReceiptSha256: await ComputeSha256Async(candidateReceiptPath, cancellationToken),
                 ArtifactManifestSha256: candidateBundle.ManifestSha256,
                 ArtifactManifestSha512: candidateBundle.ManifestSha512,
+                CandidatePackageSha256: candidateBundle.PackageSha256,
                 PublicPackageSha256: publicPackagePaths,
                 ExtractedRecipeSha256: candidateBundle.RecipeSha256,
                 PublicRestoreMilliseconds: comparisonMilliseconds,
@@ -401,6 +416,12 @@ internal sealed class DurablePreflightArtifactProof
         }
     }
 
+    /// <summary>
+    /// Requires each manifest package's exact ZIP entry names and uncompressed contents, except one optional root
+    /// <c>.signature.p7s</c> entry. Rejects duplicate entries, malformed archives and changes to any other entry.
+    /// Independently compares the extracted provider recipe, stages candidate archives plus the original manifest,
+    /// and returns raw public archive SHA-256 values. Callers must validate the staged candidate manifest binding.
+    /// </summary>
     internal static async Task<IReadOnlyDictionary<string, string>> CompareRestoredPackageBytesAsync(
         string candidateDirectory,
         string artifactManifestPath,
@@ -428,14 +449,14 @@ internal sealed class DurablePreflightArtifactProof
             var candidatePath = Path.Combine(candidateDirectory, entry.ArtifactFileName);
             var restoredPath = ResolveRestoredPackagePath(restoredPackagesPath, entry, manifest.PackageVersion);
             if (!IsRegularFile(candidatePath) || !IsRegularFile(restoredPath)
-                || !await FilesAreByteIdenticalAsync(candidatePath, restoredPath, cancellationToken))
+                || !await PackagePayloadsMatchAsync(candidatePath, restoredPath, cancellationToken))
             {
-                throw new PackageIndexException($"Public-feed restored '{entry.PackageId}' archive does not byte-match the exact candidate package.");
+                throw new PackageIndexException($"Public-feed restored '{entry.PackageId}' payload does not match the exact candidate package.");
             }
 
             var destination = Path.Combine(publicArtifactsDirectory, entry.ArtifactFileName);
-            File.Copy(restoredPath, destination, overwrite: false);
-            hashes.Add(entry.PackageId, await ComputeSha256Async(destination, cancellationToken));
+            File.Copy(candidatePath, destination, overwrite: false);
+            hashes.Add(entry.PackageId, await ComputeSha256Async(restoredPath, cancellationToken));
         }
 
         var recipeEntry = provider;
@@ -1183,22 +1204,55 @@ internal sealed class DurablePreflightArtifactProof
         return Path.Combine(packagesRoot, id, normalizedVersion, $"{id}.{normalizedVersion}.nupkg");
     }
 
-    private static async Task<bool> FilesAreByteIdenticalAsync(string left, string right, CancellationToken cancellationToken)
+    /// <summary>Compares signed or unsigned archive contents without treating a signature envelope as payload.</summary>
+    private static async Task<bool> PackagePayloadsMatchAsync(string left, string right, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var leftArchive = ZipFile.OpenRead(left);
+            using var rightArchive = ZipFile.OpenRead(right);
+            var leftEntries = UniquePayloadEntries(leftArchive);
+            var rightEntries = UniquePayloadEntries(rightArchive);
+            if (leftEntries.Count != rightEntries.Count) return false;
+            foreach (var (name, leftEntry) in leftEntries)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!rightEntries.TryGetValue(name, out var rightEntry) || leftEntry.Length != rightEntry.Length) return false;
+                await using var leftStream = leftEntry.Open();
+                await using var rightStream = rightEntry.Open();
+                if (!await StreamsAreByteIdenticalAsync(leftStream, rightStream, cancellationToken)) return false;
+            }
+            return true;
+        }
+        catch (InvalidDataException exception)
+        {
+            throw new PackageIndexException("Public-feed comparison requires valid NuGet ZIP archives.", exception);
+        }
+    }
+
+    /// <summary>Rejects ambiguous duplicate names, including signatures, before excluding the sole signature entry.</summary>
+    private static Dictionary<string, ZipArchiveEntry> UniquePayloadEntries(ZipArchive archive)
+    {
+        var entries = new Dictionary<string, ZipArchiveEntry>(StringComparer.Ordinal);
+        foreach (var entry in archive.Entries)
+        {
+            if (!entries.TryAdd(entry.FullName, entry))
+                throw new PackageIndexException("Public-feed comparison rejects duplicate NuGet ZIP entry names.");
+        }
+        entries.Remove(".signature.p7s");
+        return entries;
+    }
+
+    /// <summary>Compares entry streams in bounded buffers, allowing different underlying short-read boundaries.</summary>
+    private static async Task<bool> StreamsAreByteIdenticalAsync(Stream leftStream, Stream rightStream, CancellationToken cancellationToken)
     {
         const int BufferSize = 64 * 1024;
-        await using var leftStream = new FileStream(left, FileMode.Open, FileAccess.Read, FileShare.Read, BufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        await using var rightStream = new FileStream(right, FileMode.Open, FileAccess.Read, FileShare.Read, BufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        if (leftStream.Length != rightStream.Length)
-        {
-            return false;
-        }
-
         var leftBuffer = new byte[BufferSize];
         var rightBuffer = new byte[BufferSize];
         while (true)
         {
-            var leftRead = await leftStream.ReadAsync(leftBuffer, cancellationToken);
-            var rightRead = await rightStream.ReadAsync(rightBuffer, cancellationToken);
+            var leftRead = await leftStream.ReadAtLeastAsync(leftBuffer, BufferSize, throwOnEndOfStream: false, cancellationToken);
+            var rightRead = await rightStream.ReadAtLeastAsync(rightBuffer, BufferSize, throwOnEndOfStream: false, cancellationToken);
             if (leftRead != rightRead || !leftBuffer.AsSpan(0, leftRead).SequenceEqual(rightBuffer.AsSpan(0, rightRead)))
             {
                 return false;
@@ -1362,7 +1416,11 @@ internal sealed record DurablePreflightArtifactProofResult(
     double TotalMilliseconds,
     int ScenarioCount);
 
-/// <summary>Public-feed evidence that the restored package bytes matched the candidate bundle before proof.</summary>
+/// <summary>
+/// Version-2 public-feed evidence of package payload identity excluding only NuGet's signature envelope.
+/// Candidate and public maps contain every manifest package's raw archive SHA-256; the shared proof and original
+/// manifest retain candidate byte identity. This receipt does not independently attest signature authenticity.
+/// </summary>
 internal sealed record DurablePreflightPublicFeedReceipt(
     int SchemaVersion,
     string ProofKind,
@@ -1372,6 +1430,7 @@ internal sealed record DurablePreflightPublicFeedReceipt(
     string CandidateReceiptSha256,
     string ArtifactManifestSha256,
     string ArtifactManifestSha512,
+    IReadOnlyDictionary<string, string> CandidatePackageSha256,
     IReadOnlyDictionary<string, string> PublicPackageSha256,
     string ExtractedRecipeSha256,
     double PublicRestoreMilliseconds,

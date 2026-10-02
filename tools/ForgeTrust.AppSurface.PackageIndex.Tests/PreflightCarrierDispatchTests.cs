@@ -178,6 +178,11 @@ public sealed class PreflightCarrierDispatchTests : IDisposable
             smoke.Request(fixture.Request.ReceiptPath, smoke.PublishedReceiptPath), CancellationToken.None);
 
         Assert.All(report.Entries, entry => Assert.Equal(PackageSmokeInstallStatus.Restored, entry.Status));
+        Assert.Equal(fixture.Entries.Count, report.Entries.Count);
+        var restore = Assert.Single(smoke.Runner.Requests, request => request.Arguments.FirstOrDefault() == "restore");
+        var smokeProject = await File.ReadAllTextAsync(restore.Arguments[1]);
+        foreach (var entry in fixture.Entries.Where(entry => !entry.IsTool))
+            Assert.Contains($"Include=\"{entry.PackageId}\"", smokeProject, StringComparison.Ordinal);
         Assert.Contains(smoke.Runner.Requests, request => request.Arguments.FirstOrDefault() == "restore");
         Assert.Contains(smoke.Runner.Requests, request => request.Arguments.Take(2).SequenceEqual(["tool", "install"]));
         Assert.Contains(smoke.Runner.Requests, request => request.OperationName == "PostgreSQL preflight artifact proof");
