@@ -16,7 +16,7 @@ jobs:
       - name: Checkout exact tested source snapshot
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 3a3083ce47695189cfb9c8950b96a10bb021363c
+          ref: cdadf95bb91e46c21d46dc72a8317950e9fd5da4
           fetch-depth: 0
           persist-credentials: false
       - name: Setup .NET 10
@@ -43,7 +43,7 @@ jobs:
         env:
           EVIDENCEHOST_PROOF_LABEL: candidate-no-trust-acceptance
           EVIDENCEHOST_WORKFLOW_IDENTITY: ${{ github.workflow_ref }}
-          EVIDENCEHOST_SOURCE_HEAD_SHA: 3a3083ce47695189cfb9c8950b96a10bb021363c
+          EVIDENCEHOST_SOURCE_HEAD_SHA: cdadf95bb91e46c21d46dc72a8317950e9fd5da4
           EVIDENCEHOST_BASE_REVISION: 4aa8329c76f4279ad319747f9f3c14b9b8de51ef
           EVIDENCEHOST_RUN_ID: ${{ github.run_id }}
           EVIDENCEHOST_RUN_ATTEMPT: ${{ github.run_attempt }}

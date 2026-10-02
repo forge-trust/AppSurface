@@ -80,6 +80,27 @@ not handle external topology or confer permission to reuse failed production out
 
 ## Before public API freeze or Trusted support
 
+### Standalone gate and Aspire child controls
+
+The [protected gate consumer](ProtectedGateConsumer/README.md) is a separate
+executable using only public Contracts APIs. Its counted standard-input message
+contains a plan, nullable manifest and independently selected expected facts.
+Its [external-process controls](test_protected_gate_consumer.py) check bounded
+JSON ingestion, current-fact comparisons, Observation denial and fixed diagnostics.
+A coherent synthetic positive checks API behavior; standard input and exit zero
+do not authenticate the producer, expected facts or collected artifact bytes.
+The protected parent must establish those bindings before using its decision.
+
+The [Aspire child controller](AspireChild/README.md) prepares a real pinned
+AppHost/DCP bundle with one [native HTTP executable](NativeHttpResource/README.md).
+Its own root watchdog, systemd unit and independent Unix-socket peer checks
+exercise startup, readiness and bounded teardown. The portable controls run the
+resource DLL directly and check controller behavior; native Aspire/DCP/systemd
+execution has separate prerequisites and results. This provisional fixture uses
+one application/resource identity and has no admission capability. Shared-host
+ownership, resource capability mapping and protected consumer acceptance remain
+part of the approved implementation.
+
 For direct CLI/Aspire consumer-path regression tests, use the separate
 [root-owned protocol fixture](ExecutionBroker-README.md). Its subject results and cgroup
 metadata are synthetic; it does not replace the actual systemd or consumer CI proof.

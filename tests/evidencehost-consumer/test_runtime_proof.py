@@ -333,6 +333,26 @@ class StructuralVerificationProofTests(unittest.TestCase):
 
 
 class ObservationFailureDiagnosticTests(unittest.TestCase):
+    def test_startup_status_is_published_only_after_closed_schema_validation(self):
+        safe = {"schema": "evidence-launcher-failure-v1", "error_class": "LauncherError",
+                "cause": "worker-start-unit-failed", "operation": "worker-start", "exit_code": 1,
+                "worker_load_state": "loaded", "worker_result": "exit-code",
+                "worker_main_code": 1, "worker_main_status": 226}
+        for record, accepted in ((safe, True), ({**safe, "worker_result": ["secret-779"]}, False),
+                                 ({**safe, "worker_main_status": True}, False)):
+            with self.subTest(accepted=accepted, record=record), tempfile.TemporaryDirectory() as directory:
+                parent = Path(directory)
+                with patch.object(proof, "root_command", side_effect=[
+                        (1, b"secret-779 stdout", b"secret-779 stderr"),
+                        (0, json.dumps(record).encode(), b"secret-779 query stderr")]):
+                    with self.assertRaises(proof.ProofFailure) as failure:
+                        proof.run_observation_launcher(["launcher"], parent, parent)
+                self.assertNotIn("secret-779", str(failure.exception))
+                receipt = parent / "launcher-failure.json"
+                self.assertEqual(receipt.exists(), accepted)
+                if accepted:
+                    self.assertEqual(json.loads(receipt.read_text()), safe)
+
     def test_success_does_not_read_diagnostics_and_passes_option_only_to_observation(self):
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)

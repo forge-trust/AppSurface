@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Sdk Name="Aspire.AppHost.Sdk" Version="13.4.4" />
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsTestProject>false</IsTestProject>
+    <IsPackable>false</IsPackable>
+    <NuGetLockFilePath>packages.$(NETCoreSdkRuntimeIdentifier).lock.json</NuGetLockFilePath>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.AppHost" />
+    <ProjectReference Include="../NativeHttpResource/NativeHttpResource.csproj" IsAspireProjectResource="false" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+  <Target Name="CopyProofPayload" AfterTargets="Build">
+    <ItemGroup>
+      <ProofDcp Include="$(DcpDir)**/*" />
+      <ProofResource Include="../NativeHttpResource/bin/$(Configuration)/net10.0/*" />
+    </ItemGroup>
+    <Error Condition="!Exists('$(DcpCliPath)')" Text="Pinned SDK DCP payload is unavailable; no readiness fallback is allowed." />
+    <Copy SourceFiles="@(ProofDcp)" DestinationFiles="@(ProofDcp->'$(TargetDir)dcp/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ProofResource)" DestinationFolder="$(TargetDir)resource" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

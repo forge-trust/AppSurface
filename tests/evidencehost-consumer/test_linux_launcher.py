@@ -95,6 +95,88 @@ def broker_request(broker, request):
 
 
 class PrivateFailureDiagnosticTests(unittest.TestCase):
+    def test_worker_start_success_does_not_query_status(self):
+        unit = "evidencehost-012345abcdef-worker.service"
+        argv = ["/usr/bin/systemd-run", "--unit=" + unit, "secret-779"]
+        result = launcher.subprocess.CompletedProcess(argv, 0, b"secret-779", b"secret-779")
+        with patch.object(launcher.subprocess, "run", return_value=result) as command:
+            launcher._start_worker_unit(argv, unit)
+        self.assertEqual(command.call_count, 1)
+        self.assertEqual(command.call_args.args[0], argv)
+
+    def test_worker_start_failure_distinguishes_absent_rejected_and_started_unit_with_safe_status(self):
+        unit = "evidencehost-012345abcdef-worker.service"
+        start = launcher.subprocess.CompletedProcess([], 1, b"secret-779", b"secret-779")
+        cases = (
+            (1, b"LoadState=not-found\n", "worker-start-unit-absent", "not-found", None, None),
+            (0, b"LoadState=bad-setting\n", "worker-start-unit-rejected", "bad-setting", None, None),
+            (0, b"LoadState=loaded\nResult=exit-code\nExecMainCode=1\nExecMainStatus=226\n",
+             "worker-start-unit-failed", "loaded", "exit-code", (1, 226)),
+            (0, b"LoadState=loaded\nResult=resources\nExecMainCode=0\nExecMainStatus=0\n",
+             "worker-start-unit-failed", "loaded", "resources", (0, 0)),
+            (0, b"LoadState=loaded\nResult=success\n", "worker-start-command-failed", "loaded", "success", None),
+            (0, b"LoadState=secret-779\nResult=secret-779\nExecMainStatus=999\n",
+             "worker-start-status-unavailable", None, None, None),
+            (0, b"LoadState=loaded\nLoadState=not-found\n", "worker-start-status-unavailable", None, None, None),
+            (0, b"x" * 4097, "worker-start-status-unavailable", None, None, None),
+            (0, b"\xff", "worker-start-status-unavailable", None, None, None),
+            (3, b"LoadState=loaded\nResult=exit-code\n", "worker-start-status-unavailable", None, None, None),
+        )
+        for code, output, cause, load_state, result_state, numbers in cases:
+            with self.subTest(cause=cause, output=output[:100]):
+                query = launcher.subprocess.CompletedProcess([], code, output, b"secret-779")
+                with patch.object(launcher.subprocess, "run", side_effect=[start, query]) as command:
+                    with self.assertRaises(launcher.LauncherError) as failure:
+                        launcher._start_worker_unit(["/usr/bin/systemd-run", "secret-779"], unit)
+                record = launcher.failure_diagnostic(failure.exception)
+                self.assertEqual((record["cause"], record["operation"], record["exit_code"]), (cause, "worker-start", 1))
+                self.assertEqual(record.get("worker_load_state"), load_state)
+                self.assertEqual(record.get("worker_result"), result_state)
+                if numbers:
+                    self.assertEqual((record["worker_main_code"], record["worker_main_status"]), numbers)
+                self.assertNotIn("secret-779", json.dumps(record))
+                self.assertEqual(launcher.validate_failure_diagnostic(record), record)
+                self.assertEqual(command.call_args.args[0], ["/usr/bin/systemctl", "show", unit, "--no-pager",
+                    "--property=LoadState", "--property=Result", "--property=ExecMainCode", "--property=ExecMainStatus"])
+                self.assertEqual(command.call_args.kwargs["timeout"], 5)
+
+    def test_worker_start_query_failure_or_spawn_error_does_not_replace_original_failure_with_exception_text(self):
+        unit = "evidencehost-012345abcdef-worker.service"
+        start = launcher.subprocess.CompletedProcess([], 1, b"secret-779", b"secret-779")
+        for error in (OSError(13, "secret-779"), launcher.subprocess.TimeoutExpired("secret-779", 5)):
+            with self.subTest(error=type(error).__name__):
+                with patch.object(launcher.subprocess, "run", side_effect=[start, error]):
+                    with self.assertRaises(launcher.LauncherError) as failure:
+                        launcher._start_worker_unit(["/usr/bin/systemd-run"], unit)
+                record = launcher.failure_diagnostic(failure.exception)
+                self.assertEqual(record["cause"], "worker-start-status-unavailable")
+                self.assertEqual(record["exit_code"], 1)
+                self.assertNotIn("secret-779", json.dumps(record))
+        with patch.object(launcher.subprocess, "run", side_effect=OSError(2, "secret-779")) as command:
+            with self.assertRaises(launcher.LauncherError) as failure:
+                launcher._start_worker_unit(["/usr/bin/systemd-run"], unit)
+        self.assertEqual(command.call_count, 1)
+        self.assertEqual(launcher.failure_diagnostic(failure.exception)["errno"], 2)
+        with patch.object(launcher.subprocess, "run") as command:
+            with self.assertRaises(launcher.LauncherError):
+                launcher._start_worker_unit(["/usr/bin/systemd-run"], "other-secret-779.service")
+            command.assert_not_called()
+
+    def test_worker_start_status_schema_rejects_unknown_types_values_and_operations(self):
+        error = launcher.worker_exit_failure("worker-start-unit-failed", {})
+        error.operation = "worker-start"
+        error.worker_load_state = ["secret-779"]
+        error.worker_result = {"secret-779": True}
+        error.worker_main_status = True
+        record = launcher.failure_diagnostic(error)
+        self.assertNotIn("secret-779", json.dumps(record))
+        self.assertEqual(launcher.validate_failure_diagnostic(record), record)
+        for extra in ({"worker_result": ["exit-code"]}, {"worker_result": "secret-779"},
+                      {"worker_load_state": "secret-779"}, {"worker_main_code": True},
+                      {"worker_main_status": 256}, {"operation": "systemd-run", "worker_result": "exit-code"}):
+            with self.subTest(extra=extra), self.assertRaises(launcher.LauncherError):
+                launcher.validate_failure_diagnostic({**record, **extra})
+
     def test_existing_copy_guard_literals_are_exact_safe_diagnostic_causes(self):
         for cause in ("subject-entry-invalid", "subject-root-symlink", "subject-copy-path-invalid",
                       "subject-copy-path-overlap", "subject-copy-depth-limit", "subject-copy-entry-limit",
@@ -728,6 +810,99 @@ class OutputBudgetTests(unittest.TestCase):
                 self.assertEqual(len(result["stderr"].encode()), launcher.MAX_PREFIX)
             finally:
                 broker.close_artifact_handles()
+
+
+class SubjectOutputPumpTests(unittest.TestCase):
+    class Reads:
+        """Real pump input that permits short reads, EOF, and controlled read exceptions."""
+        def __init__(self, *values):
+            self.values = iter(values)
+
+        def read(self, size):
+            del size
+            value = next(self.values, b"")
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+    def exercise(self, stdout, stderr):
+        with tempfile.TemporaryDirectory() as temp:
+            broker, _root, _artifact = artifact_broker(temp)
+            broker.subject_root = broker.scratch = Path(temp).resolve()
+            process = type("Process", (), {"stdout": stdout, "stderr": stderr, "returncode": 0,
+                                           "wait": lambda self, timeout=None: 0})()
+            request = {"op": "run", "executable": str(broker.dotnet),
+                       "arguments": ["test", "fixture.csproj", "--results-directory",
+                                     str(broker.scratch / "test-output" / "run-pump")],
+                       "working_directory": str(broker.subject_root)}
+            try:
+                with patch.object(launcher, "openat2", side_effect=portable_openat2), \
+                     patch.object(launcher.subprocess, "Popen", return_value=process), \
+                     patch.object(launcher.subprocess, "run", return_value=launcher.subprocess.CompletedProcess([], 0, b"", b"")) as stop, \
+                     patch.object(broker, "_unit_properties", return_value={
+                         "User": str(os.getuid()), "KillMode": "control-group", "ControlGroup": "/system.slice/test.service"}), \
+                     patch.object(broker, "_group_empty", return_value=True):
+                    response = broker_request(broker, request)
+                    registered = "run-pump" in broker.allowed_results_roots
+                    closed, failed = broker.work_closed, broker.subject_output_failed
+                    if failed:
+                        self.assertFalse(broker._wait_for_owned_exit())
+                        self.assertFalse(broker._all_subject_groups_empty())
+                        self.assertFalse(broker_request(broker, {"op": "ready"})["ok"])
+                        broker.wait_completed = True
+                        self.assertFalse(broker_request(broker, {"op": "exit"})["ok"])
+                        self.assertFalse(broker.exited)
+                        self.assertFalse(broker_request(broker, {"op": "artifacts", "relative_root": "run-pump"})["ok"])
+                    return response, registered, closed, failed, stop.call_count, broker.output_quota.total
+            finally:
+                broker.close_artifact_handles()
+
+    def test_read_failure_in_either_owned_pipe_rejects_success_registration_and_exit_without_echo(self):
+        for name in ("stdout", "stderr"):
+            for error in (OSError("secret-779"), ValueError("secret-779")):
+                with self.subTest(name=name, error=type(error).__name__):
+                    streams = {"stdout": io.BytesIO(b"out"), "stderr": io.BytesIO(b"err")}
+                    streams[name] = self.Reads(b"partial", error)
+                    response, registered, closed, failed, stops, _received = self.exercise(**streams)
+                    self.assertEqual(response, {"ok": False, "error": "broker-request-failed"})
+                    self.assertFalse(registered)
+                    self.assertTrue(closed and failed)
+                    self.assertGreater(stops, 0)
+                    self.assertNotIn("secret-779", json.dumps(response))
+
+    def test_short_reads_require_actual_eof_and_count_all_bytes_before_truncation(self):
+        for maximum, truncated in ((64, False), (4, True)):
+            with self.subTest(maximum=maximum), patch.object(launcher, "MAX_PREFIX", maximum):
+                response, registered, closed, failed, stops, received = self.exercise(
+                    self.Reads(b"a", b"bc", b"defgh", b""), self.Reads(b"i", b"j", b""))
+            self.assertTrue(response["ok"])
+            self.assertEqual((response["received_bytes"], received), (10, 10))
+            self.assertEqual(response["stdout"], "abcdefgh"[:maximum])
+            self.assertEqual(response["stderr"], "ij")
+            self.assertEqual(response["output_truncated"], truncated)
+            self.assertTrue(registered)
+            self.assertFalse(closed or failed)
+            self.assertEqual(stops, 0)
+
+    def test_budget_mismatch_after_clean_eof_is_terminal_and_cannot_register_results(self):
+        for owner, method in ((launcher.OutputBudget, "add"), (launcher.OutputQuota, "count")):
+            with self.subTest(owner=owner.__name__), patch.object(owner, method, return_value=None):
+                response, registered, closed, failed, stops, _received = self.exercise(io.BytesIO(b"out"), io.BytesIO(b"err"))
+            self.assertFalse(response["ok"])
+            self.assertFalse(registered)
+            self.assertTrue(closed and failed)
+            self.assertGreater(stops, 0)
+
+    def test_normal_eof_after_quota_stop_preserves_budget_failure_and_does_not_register_results(self):
+        with patch.object(launcher, "MAX_JOB_OUTPUT", 3):
+            response, registered, closed, failed, stops, received = self.exercise(
+                self.Reads(b"ab", b"cd", b""), io.BytesIO(b""))
+        self.assertEqual(response, {"ok": False, "code": "ASEVD420"})
+        self.assertFalse(registered)
+        self.assertTrue(closed)
+        self.assertFalse(failed)
+        self.assertGreater(stops, 0)
+        self.assertEqual(received, 4)
 
 
 class ArtifactBrokerTests(unittest.TestCase):

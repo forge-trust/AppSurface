@@ -4,6 +4,7 @@ using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Planner;
+using ForgeTrust.AppSurface.Testing;
 using Xunit.Abstractions;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
@@ -56,7 +57,7 @@ public sealed class EvidenceProtectedCliExecutionTests(ITestOutputHelper output)
         Assert.Equal(manifest.ManifestDigest, diskManifest.ManifestDigest);
         var producerResult = Assert.Single(manifest.ProducerResults);
         var report = producerResult.Artifacts!.Single(item => item.LogicalName == "coverage-report");
-        var reportPath = Path.Combine(outputDirectory, producerResult.ProducerId, report.RelativePath);
+        var reportPath = TestPathUtils.PathUnder(outputDirectory, producerResult.ProducerId, report.RelativePath);
         Assert.Equal(report.LengthBytes, new FileInfo(reportPath).Length);
         await using var reportStream = File.OpenRead(reportPath);
         Assert.Equal(report.Sha256, Convert.ToHexString(await SHA256.HashDataAsync(reportStream)).ToLowerInvariant());

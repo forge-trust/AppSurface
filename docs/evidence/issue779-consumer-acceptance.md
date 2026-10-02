@@ -115,3 +115,39 @@ is a failed current runtime observation. It adds no entry to the Trusted allowli
 and does not satisfy protected workflow, fork or downstream acceptance. See the
 [execution record](../plans/issue-779-execution.md#native-candidate-results-and-invalid-outcome-regression-2026-10-02)
 for the focused fixes and remaining gates.
+
+### Native solution gate and systemd startup result (2026-10-02)
+
+[Native run 37028100295](https://github.com/forge-trust/AppSurface/actions/runs/37028100295)
+verified all 2707 source files at private snapshot
+`ce8375688cc62621c6de6259494ecea63dd91fd4` before and after execution. Its CLI
+Evidence selection passed **338/338** and Aspire selection passed **81/81**,
+with no failures or skips. The exact `./scripts/coverage-solution.sh` then
+reported **15266 passed / 1 failed / 2 skipped** across 54 test projects and
+exited **1** with `ASCOV120`. The remaining failure was the repository test-path
+policy: the physical report lookup needed `TestPathUtils.PathUnder` for a dynamic
+relative path. The two existing skips were the PostgreSQL previous-package
+rollback case and manual candidate-publication replay. Neither was introduced
+to accommodate this change.
+
+Merged coverage measured **94.88% line / 88.52% branch**. The wrapper stopped
+after the test failure, so aggregate threshold evaluation and patch coverage
+were **not reached**. The required 95/85 aggregate and patch thresholds, base
+revision and sandbox checks remain unchanged. Artifact `11238035677` has verified
+ZIP SHA-256 `c658c5e4a3908518f49dcb681e11610d28d8d3dc55801118f15e80c0fda732ef`.
+These results do not validate later source changes or the new standalone
+[protected gate consumer](../../tests/evidencehost-consumer/ProtectedGateConsumer/README.md)
+and [restricted Aspire child fixture](../../tests/evidencehost-consumer/AspireChild/README.md).
+
+[Systemd run 37032279319](https://github.com/forge-trust/AppSurface/actions/runs/37032279319)
+used snapshot `3a3083ce47695189cfb9c8950b96a10bb021363c`, including the bounded,
+hash-pinned six-file runtime-subject projection. All 2707 source hashes matched;
+subject and CLI builds reported zero warnings and errors. The worker's
+`systemd-run` submission/start returned **1**. Its closed diagnostic category was
+`systemd-operation-failed`, with operation `systemd-run`. No numeric worker status,
+completed runtime proof, typed manifest or structural-verification result was
+produced. Artifact `11237732048` has verified ZIP SHA-256
+`d42feb161195e48bed07dc70c8f2d937b4b04c37f902a4988ace7f200fa55d39`.
+Bounded startup status and the unit's private temporary-directory visibility are
+the next diagnosis; the exit alone establishes neither cause. Trusted remains
+excluded for every provider/platform entry above.

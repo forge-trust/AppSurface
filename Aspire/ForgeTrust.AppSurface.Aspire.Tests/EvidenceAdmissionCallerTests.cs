@@ -1,5 +1,6 @@
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Aspire.Tests;
 
@@ -50,6 +51,42 @@ public sealed class EvidenceAdmissionCallerTests
 
         Assert.Equal("ASEVD401", exception.Code);
         Assert.False(factoryCalled);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SharedCore_LegacyOptionsAndAcceptedEnvelopeCannotUpgradeObservationOrRedirectOutput(
+        bool requireTrustedEnvelope)
+    {
+        var plan = EvidenceHostAdmissionTestRun.CreateObservationPlan();
+        var legacyOutput = TestPathUtils.PathUnder(Path.GetTempPath(), "evidence-legacy-output-" + Guid.NewGuid().ToString("N"));
+        var legacyVerifier = new RecordingLegacyEnvelopeVerifier(new EvidenceEnvelopeResult(
+            Accepted: true,
+            Attested: true,
+            Diagnostic: "Legacy acceptance must not grant runtime authority."));
+        await using var host = EvidenceHostBootstrap.Create(
+            plan,
+            registration =>
+            {
+                registration.AddProducer(new PassingProducer());
+                registration.SetEnvelopeVerifier(legacyVerifier);
+            },
+            new EvidenceHostOptions(requireTrustedEnvelope, legacyOutput));
+        using var run = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Observation, host.Plan);
+
+        var manifest = await run.RunAsync(host);
+
+        Assert.Equal(EvidenceExecutionMode.Observation, manifest.Mode);
+        Assert.Equal(EvidenceExecutionVerdict.Passed, manifest.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.ObservationOnly, manifest.ClaimKind);
+        Assert.Equal(EvidenceClaimEligibility.Informational, manifest.Eligibility);
+        Assert.Null(manifest.EnvelopeAssertion);
+        Assert.Equal(0, legacyVerifier.Calls);
+        Assert.False(Directory.Exists(legacyOutput));
+        Assert.True(Directory.Exists(run.ArtifactDirectory));
+        Assert.Equal(EvidenceHostState.Completed, host.State);
+        Assert.True(EvidenceManifestBuilder.Verify(host.Plan, manifest));
     }
 
     [Fact]
@@ -239,6 +276,17 @@ public sealed class EvidenceAdmissionCallerTests
                 Id,
                 EvidenceProducerOutcome.Passed,
                 ["inventory/assertion@1"]));
+    }
+
+    private sealed class RecordingLegacyEnvelopeVerifier(EvidenceEnvelopeResult result) : IEvidenceExecutionEnvelopeVerifier
+    {
+        internal int Calls { get; private set; }
+
+        public ValueTask<EvidenceEnvelopeResult> VerifyAsync(EvidencePlan plan, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return ValueTask.FromResult(result);
+        }
     }
 
     private sealed class HeldProducer : IEvidenceProducer, IAsyncDisposable
