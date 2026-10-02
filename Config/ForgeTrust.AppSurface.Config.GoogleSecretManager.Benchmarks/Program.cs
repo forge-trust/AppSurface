@@ -27,7 +27,7 @@ internal static class Program
 
             return args[0] switch
             {
-                "proof" => RunProof(),
+                "proof" when args.Length == 1 => RunProof(),
                 "benchmark" => RunBenchmark(Arguments.Parse(args[1..])),
                 _ => PrintUsageAndFail()
             };
@@ -559,7 +559,14 @@ internal static class Program
             var values = new Dictionary<string, string>(StringComparer.Ordinal);
             for (var index = 0; index < args.Length; index += 2)
             {
-                if (index + 1 >= args.Length || !args[index].StartsWith("--", StringComparison.Ordinal))
+                if (index + 1 >= args.Length || !args[index].StartsWith("--", StringComparison.Ordinal)
+                    || string.IsNullOrWhiteSpace(args[index + 1])
+                    || args[index + 1].StartsWith("-", StringComparison.Ordinal))
+                {
+                    throw new ArgumentException();
+                }
+                if (args[index] is not ("--revision" or "--resource-count" or "--caller-count" or "--lookup-ms"
+                    or "--sample-ms" or "--repetitions" or "--threadpool-min"))
                 {
                     throw new ArgumentException();
                 }

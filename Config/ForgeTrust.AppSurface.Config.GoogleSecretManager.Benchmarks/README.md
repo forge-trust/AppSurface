@@ -16,7 +16,8 @@ and `sameResourceJoinersSharedOneCall: true`. The proof holds the fake client ca
 pass a start gate, signal readiness, and enter the shared lookup. It waits for every post-gate readiness signal and then
 confirms every joiner is blocked before releasing the owner, so the shared-flight assertion cannot mistake the start
 gate for the flight wait. It verifies all callers receive the same synthetic outcome and checks that the winning public
-configuration call and fake client use one managed thread. It exits nonzero if an assertion fails. It does not test internal
+configuration call and fake client use one managed thread. It exits nonzero if an assertion fails. `proof` accepts no
+additional arguments; extra arguments exit with code `2` and print usage. It does not test internal
 token-bearing cancellation or audit scheduling; those contracts are covered by the provider's focused tests and
 documented in the [Google provider reference](../ForgeTrust.AppSurface.Config.GoogleSecretManager/README.md#mapped-lookup-scheduling).
 This is a candidate proof: on the pre-change `origin/main` implementation, it is expected to exit nonzero only because
@@ -53,6 +54,7 @@ Each sample validates its expected fake-client calls: `resource-count` for disti
 and `0` for warm-cache after prewarming. It also reports the observed resolver count, checked against
 `min(resource-count, caller-count)` for distinct-cold and `caller-count` for the other scenarios. Call-count or resolver
 count mismatches fail the run.
+Unknown, repeated, missing, or malformed benchmark options exit with code `2` and emit only the value-free harness error.
 
 To verify that caller count is independent of resource count, run 16 mapped resources on four dedicated resolver threads:
 
