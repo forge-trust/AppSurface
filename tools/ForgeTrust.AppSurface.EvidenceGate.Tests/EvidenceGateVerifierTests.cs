@@ -89,7 +89,7 @@ public sealed class EvidenceGateVerifierTests
 
         if (OperatingSystem.IsLinux() && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture is System.Runtime.InteropServices.Architecture.X64 or System.Runtime.InteropServices.Architecture.Arm64)
         {
-            Assert.True(result.IsEligible);
+            Assert.True(result.IsEligible, $"{result.Code}: {result.Diagnostic}");
             Assert.Equal("ASEVG000", result.Code);
         }
         else
@@ -567,7 +567,12 @@ public sealed class EvidenceGateVerifierTests
                 ];
             }
 
-            var manifest = EvidenceManifestBuilder.Build(plan, producerResults);
+            var manifest = EvidenceManifestBuilder.Build(
+                plan,
+                producerResults,
+                envelopeStatus: includeArtifactEvidence
+                    ? EvidenceEnvelopeStatus.ValidatedNotAttested
+                    : EvidenceEnvelopeStatus.NotRequired);
             if (!authorityUnavailable && authority is null)
             {
                 authority = new EvidencePullRequestGateAuthoritySnapshot(
