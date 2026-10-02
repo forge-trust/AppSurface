@@ -115,8 +115,22 @@ internal sealed class DurablePreflightArtifactProof
         catch
         {
             DeleteIfPresent(receiptTemporaryPath);
-            DeleteIfPresent(request.ArtifactManifestPath);
-            if (approvedManifestPromoted) DeleteIfPresent(request.ApprovedManifestPath);
+            if (approvedManifestPromoted)
+            {
+                if (!File.Exists(request.ArtifactManifestPath) && !Directory.Exists(request.ArtifactManifestPath))
+                {
+                    // The approved path contains the caller's input until the entire proof succeeds.
+                    // Restore it on a later promotion failure instead of deleting the only copy.
+                    File.Move(request.ApprovedManifestPath, request.ArtifactManifestPath);
+                }
+                else
+                {
+                    // A caller recreated the input path during promotion. Keep that path untouched and
+                    // withhold the approved output created by this operation.
+                    DeleteIfPresent(request.ApprovedManifestPath);
+                }
+            }
+
             if (receiptPromoted) DeleteIfPresent(request.ReceiptPath);
             throw;
         }

@@ -394,6 +394,7 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
     public async Task Candidate_MissingFailedOrMalformedGuardLossEvidenceWithholdsApproval(string field, string mutation)
     {
         var fixture = await ProofFixture.CreateAsync(_root);
+        var manifestBytes = await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath);
         var runner = new FakeRunner(async (request, token) =>
         {
             var receipt = JsonNode.Parse(await fixture.CompleteReceiptJsonAsync())!.AsObject();
@@ -422,7 +423,7 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
 
         Assert.Contains(field == "guardLossNegativeProof" ? "guard-loss" : field, exception.Message, StringComparison.Ordinal);
         Assert.Equal(1, runner.Calls);
-        Assert.False(File.Exists(fixture.Request.ArtifactManifestPath));
+        Assert.Equal(manifestBytes, await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath));
         Assert.False(File.Exists(fixture.Request.ApprovedManifestPath));
         Assert.False(File.Exists(fixture.Request.ReceiptPath));
         Assert.Empty(Directory.GetFiles(_root, "candidate-receipt.json*.tmp"));
@@ -454,6 +455,7 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
     public async Task Candidate_InvalidRunnerOrReceiptDoesNotPromoteOrLeavePassingEvidence(string failure)
     {
         var fixture = await ProofFixture.CreateAsync(_root);
+        var manifestBytes = await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath);
         var runner = new FakeRunner(async (request, token) =>
         {
             if (failure == "nonzero")
@@ -489,9 +491,33 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
             new DurablePreflightArtifactProof(runner).RunCandidateAsync(fixture.Request, CancellationToken.None));
 
         Assert.Equal(1, runner.Calls);
-        Assert.False(File.Exists(fixture.Request.ArtifactManifestPath));
+        Assert.Equal(manifestBytes, await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath));
         Assert.False(File.Exists(fixture.Request.ApprovedManifestPath));
         Assert.False(File.Exists(fixture.Request.ReceiptPath));
+        Assert.Empty(Directory.GetFiles(_root, "candidate-receipt.json*.tmp"));
+    }
+
+    [Fact]
+    public async Task Candidate_CancellationPreservesCallerManifestAndRemovesTemporaryReceipt()
+    {
+        var fixture = await ProofFixture.CreateAsync(_root);
+        var manifestBytes = await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath);
+        using var cancellation = new CancellationTokenSource();
+        var runner = new FakeRunner(async (request, token) =>
+        {
+            await fixture.WriteCompleteReceiptAsync(request, token);
+            cancellation.Cancel();
+            return await Task.FromCanceled<ExternalCommandResult>(cancellation.Token);
+        });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new DurablePreflightArtifactProof(runner)
+            .RunCandidateAsync(fixture.Request, cancellation.Token));
+
+        Assert.Equal(1, runner.Calls);
+        Assert.Equal(manifestBytes, await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath));
+        Assert.False(File.Exists(fixture.Request.ApprovedManifestPath));
+        Assert.False(File.Exists(fixture.Request.ReceiptPath));
+        Assert.Empty(Directory.GetFiles(_root, "candidate-receipt.json*.tmp"));
     }
 
     [Theory]
@@ -518,6 +544,8 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
                 mutation == "version" ? "9.9.9" : Version);
         }
 
+        var manifestBytes = await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath);
+
         var runner = new FakeRunner(async (request, token) =>
         {
             await fixture.WriteCompleteReceiptAsync(request, token);
@@ -527,8 +555,10 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
             new DurablePreflightArtifactProof(runner).RunCandidateAsync(fixture.Request, CancellationToken.None));
 
         Assert.Equal(0, runner.Calls);
+        Assert.Equal(manifestBytes, await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath));
         Assert.False(File.Exists(fixture.Request.ApprovedManifestPath));
         Assert.False(File.Exists(fixture.Request.ReceiptPath));
+        Assert.Empty(Directory.GetFiles(_root, "candidate-receipt.json*.tmp"));
     }
 
     [Theory]
@@ -753,6 +783,7 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
     public async Task Candidate_UnprovenReleaseEvidenceWithholdsApprovalAndRemovesTemporaryReceipt(string mutation, string diagnostic)
     {
         var fixture = await ProofFixture.CreateAsync(_root);
+        var manifestBytes = await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath);
         var json = await MutateReleaseReceiptAsync(fixture, mutation);
         var runner = new FakeRunner(async (request, token) =>
         {
@@ -765,7 +796,7 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
 
         Assert.Contains(diagnostic, exception.Message, StringComparison.Ordinal);
         Assert.Equal(1, runner.Calls);
-        Assert.False(File.Exists(fixture.Request.ArtifactManifestPath));
+        Assert.Equal(manifestBytes, await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath));
         Assert.False(File.Exists(fixture.Request.ApprovedManifestPath));
         Assert.False(File.Exists(fixture.Request.ReceiptPath));
         Assert.Empty(Directory.GetFiles(_root, "candidate-receipt.json*.tmp"));
@@ -860,12 +891,15 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
     public async Task Candidate_ChangesDuringProofCannotPromotePassingEvidence(string mutation)
     {
         var fixture = await ProofFixture.CreateAsync(_root);
+        var manifestBytes = await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath);
+        byte[]? expectedManifestBytes = manifestBytes;
         var runner = new FakeRunner(async (request, token) =>
         {
             await fixture.WriteCompleteReceiptAsync(request, token);
             if (mutation == "bundle-changed")
             {
                 await File.AppendAllTextAsync(fixture.Request.ArtifactManifestPath, "\n", token);
+                expectedManifestBytes = await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath, token);
             }
             else
             {
@@ -881,10 +915,20 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
             new DurablePreflightArtifactProof(runner).RunCandidateAsync(fixture.Request, CancellationToken.None));
 
         Assert.Equal(1, runner.Calls);
-        Assert.False(File.Exists(fixture.Request.ArtifactManifestPath));
         Assert.Empty(Directory.GetFiles(_root, "candidate-receipt.json*.tmp"));
-        if (mutation == "approval-created") Assert.Equal("concurrent output", await File.ReadAllTextAsync(fixture.Request.ApprovedManifestPath));
-        else Assert.False(File.Exists(fixture.Request.ApprovedManifestPath));
+        if (mutation == "receipt-created")
+        {
+            Assert.Equal(manifestBytes, await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath));
+            Assert.False(File.Exists(fixture.Request.ApprovedManifestPath));
+        }
+        else
+        {
+            Assert.NotNull(expectedManifestBytes);
+            Assert.Equal(expectedManifestBytes, await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath));
+            if (mutation == "approval-created") Assert.Equal("concurrent output", await File.ReadAllTextAsync(fixture.Request.ApprovedManifestPath));
+            else Assert.False(File.Exists(fixture.Request.ApprovedManifestPath));
+        }
+
         if (mutation == "receipt-created") Assert.Equal("concurrent output", await File.ReadAllTextAsync(fixture.Request.ReceiptPath));
         else Assert.False(File.Exists(fixture.Request.ReceiptPath));
     }
@@ -901,6 +945,7 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
     public async Task Candidate_InvalidDisposableFixtureOrEntrypointFailsBeforeConsumer(string mutation)
     {
         var fixture = await ProofFixture.CreateAsync(_root);
+        var manifestBytes = await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath);
         var repository = await CreateDisposableRepositoryAsync(fixture.Request.RepositoryRoot);
         var rolePath = TestPathUtils.PathUnder(repository, "examples/durable-postgresql/role-pairs-full-and-work-only.example.json");
         switch (mutation)
@@ -924,9 +969,10 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
             fixture.Request with { RepositoryRoot = repository }, CancellationToken.None));
 
         Assert.Equal(0, runner.Calls);
-        Assert.False(File.Exists(fixture.Request.ArtifactManifestPath));
+        Assert.Equal(manifestBytes, await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath));
         Assert.False(File.Exists(fixture.Request.ApprovedManifestPath));
         Assert.False(File.Exists(fixture.Request.ReceiptPath));
+        Assert.Empty(Directory.GetFiles(_root, "candidate-receipt.json*.tmp"));
     }
 
     private async Task<string> CreateDisposableRepositoryAsync(string sourceRepository)
@@ -1085,15 +1131,17 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
         }
 
         await File.WriteAllTextAsync(fixture.Request.ArtifactManifestPath, manifest.ToJsonString(PackageArtifactJson.Options));
+        var manifestBytes = await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath);
         var runner = new FakeRunner((_, _) => throw new InvalidOperationException("Invalid bundle metadata cannot reach the consumer."));
 
         await Assert.ThrowsAsync<PackageIndexException>(() =>
             new DurablePreflightArtifactProof(runner).RunCandidateAsync(fixture.Request, CancellationToken.None));
 
         Assert.Equal(0, runner.Calls);
-        Assert.False(File.Exists(fixture.Request.ArtifactManifestPath));
+        Assert.Equal(manifestBytes, await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath));
         Assert.False(File.Exists(fixture.Request.ApprovedManifestPath));
         Assert.False(File.Exists(fixture.Request.ReceiptPath));
+        Assert.Empty(Directory.GetFiles(_root, "candidate-receipt.json*.tmp"));
     }
 
     private static async Task WriteArchiveEntryAsync(ZipArchive archive, string name, string content)

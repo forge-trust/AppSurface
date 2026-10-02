@@ -168,6 +168,19 @@ internal static class DisposableProofController
                 options.ReceiptPath, throwingCancellationCallback: true);
             durations["lane_callback_failure_cleanup_ms"] = timer.Elapsed.TotalMilliseconds;
 
+            // Exercise the actual cached activation drain fault while an exclusive writer is queued.
+            timer.Restart();
+            await CreateDatabaseAsync(admin, "preflight_activation_cleanup_failure", owner);
+            var activationFailureOwner = Connection(admin, "preflight_activation_cleanup_failure", owner, ownerPassword, false);
+            await ApplyWithExactCliAsync(cliPath, activationFailureOwner);
+            await SetStoreIdAsync(activationFailureOwner, disposableStoreId);
+            await InitializeEpochAsync(activationFailureOwner, disposableEpoch);
+            await ApplyPackagedRecipeAsync(pg, "preflight_activation_cleanup_failure", owner, options.RolePairsPath);
+            await VerifyActivationCleanupFailureAsync(admin, activationFailureOwner,
+                BuildLanePairs(pairs, dispatchPasswords, runtimePasswords)[0], disposableStoreId, disposableEpoch,
+                options.ReceiptPath);
+            durations["activation_cleanup_failure_ms"] = timer.Elapsed.TotalMilliseconds;
+
             if (scenarioResults.Count != 4 || allResults.Count != 14
                 || allResults.Count(r => r.Caller == "runtime") != 9
                 || allResults.Count(r => r.Caller == "owner-diagnostic") != 5)
@@ -445,7 +458,8 @@ internal static class DisposableProofController
         }
         catch (InvalidOperationException exception) when (!throwingCancellationCallback && ReferenceEquals(exception, injected)) { }
         catch (AggregateException exception) when (throwingCancellationCallback
-            && exception.Flatten().InnerExceptions.Any(inner => ReferenceEquals(inner, callbackFailure))) { }
+            && exception.Flatten().InnerExceptions.Any(inner => ReferenceEquals(inner, callbackFailure)))
+        { }
         finally { callbackRegistration.Dispose(); }
 
         if (guardPid <= 0 || executingPid <= 0 || guardPid == executingPid
@@ -732,6 +746,24 @@ internal static class DisposableProofController
         }
         finally
         {
+            await CleanupGuardedScenarioAsync(activationLease, guardLost, monitorTask, monitorStop,
+                guard, guardOperationGate, sharedGuardReleased, writerProbe, writerAttempt);
+        }
+    }
+
+    /// <summary>Drains the activation lease, monitor, guard, and queued writer even when an earlier cleanup fails.</summary>
+    /// <remarks>
+    /// Each stage runs in its own finally block with an independent deadline. A terminal activation drain fault
+    /// remains a proof failure; it cannot bypass guard release or leave the exclusive writer unobserved.
+    /// The writer attempt records only completed release and writer operations, never attempted cleanup.
+    /// </remarks>
+    private static async Task CleanupGuardedScenarioAsync(FixtureActivationLease? activationLease,
+        CancellationTokenSource guardLost, Task monitorTask, CancellationTokenSource monitorStop,
+        NpgsqlConnection guard, SemaphoreSlim guardOperationGate, bool sharedGuardReleased,
+        QueuedWriterProbe? writerProbe, QueuedWriterAttempt? writerAttempt)
+    {
+        try
+        {
             if (activationLease is not null)
             {
                 using var activationCleanup = new CancellationTokenSource(TimeSpan.FromSeconds(20));
@@ -748,27 +780,125 @@ internal static class DisposableProofController
                     await activationLease.DisposeAsync();
                 }
             }
-            await StopAndDrainGuardMonitorAsync(monitorTask, monitorStop);
-            if (!sharedGuardReleased)
+        }
+        finally
+        {
+            try
             {
-                using var cleanupDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                await StopAndDrainGuardMonitorAsync(monitorTask, monitorStop);
+            }
+            finally
+            {
                 try
                 {
-                    await ReleaseSharedGuardAsync(guard, guardOperationGate, cleanupDeadline.Token);
-                    sharedGuardReleased = true;
-                    if (queueWriter) writerAttempt!.GuardReleased = true;
+                    if (!sharedGuardReleased)
+                    {
+                        using var cleanupDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                        try
+                        {
+                            await ReleaseSharedGuardAsync(guard, guardOperationGate, cleanupDeadline.Token);
+                            if (writerAttempt is not null) writerAttempt.GuardReleased = true;
+                        }
+                        catch
+                        {
+                            await guard.CloseAsync();
+                            throw;
+                        }
+                    }
                 }
-                catch
+                finally
                 {
-                    await guard.CloseAsync();
-                    throw;
+                    if (writerProbe is not null && !writerProbe.Finished)
+                    {
+                        using var writerCleanup = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                        await writerProbe.FinishAsync(writerCleanup.Token);
+                        if (writerAttempt is not null) writerAttempt.WriterFinished = writerProbe.Finished;
+                    }
                 }
             }
-            if (writerProbe is not null && !writerProbe.Finished)
+        }
+    }
+
+    /// <summary>Proves that a terminal real-host drain fault still drains the monitor and releases a queued writer.</summary>
+    /// <remarks>
+    /// Uses the same cleanup path as every guarded scenario. The internal lifecycle hook throws only after the
+    /// real host, persisted drain marker, closed admission, and owned-session release have been verified. Disposal
+    /// then re-awaits that same faulted task. No successful receipt is permitted, and store identity stays fixed.
+    /// </remarks>
+    internal static async Task VerifyActivationCleanupFailureAsync(string adminCs, string ownerCs,
+        LaneProofRolePair pair, Guid storeId, Guid epoch, string receiptPath)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await using var guard = await OpenNonPooledAsync(ownerCs, deadline.Token);
+        await AcquireSharedGuardAsync(guard, deadline.Token);
+        using var guardLost = new CancellationTokenSource();
+        using var monitorStop = new CancellationTokenSource();
+        using var guardOperationGate = new SemaphoreSlim(1, 1);
+        var monitor = MonitorOwnerGuardAsync(guard, guardOperationGate, monitorStop.Token, guardLost);
+        var injected = new InvalidOperationException("Intentional verified activation drain failure.");
+        FixtureActivationLease? activation = null;
+        QueuedWriterProbe? writer = null;
+        var writerAttempt = new QueuedWriterAttempt();
+        var guardPid = guard.ProcessID;
+        var writerPid = 0;
+        var drainCheckpointObserved = false;
+        try
+        {
+            activation = await FixtureActivationProof.StartAsync(ownerCs, pair, storeId, epoch, deadline.Token,
+                (checkpoint, _) =>
+                {
+                    if (checkpoint == FixtureActivationCheckpoint.DrainVerified)
+                    {
+                        drainCheckpointObserved = true;
+                        throw injected;
+                    }
+                    return ValueTask.CompletedTask;
+                });
+            // Finish the real host drain before queuing an exclusive writer. A new runtime shared fence
+            // otherwise waits behind that writer and cannot reach the verified-drain failure checkpoint.
+            try
             {
-                await writerProbe.FinishAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(8));
-                if (queueWriter) writerAttempt!.WriterFinished = writerProbe.Finished;
+                await activation.DrainAsync(deadline.Token);
+                throw new InvalidOperationException("The activation drain failure hook did not run.");
             }
+            catch (InvalidOperationException exception) when (ReferenceEquals(exception, injected)) { }
+            writer = await StartQueuedWriterProbeAsync(ownerCs, deadline.Token);
+            writerPid = writer.BackendPid;
+            try
+            {
+                await CleanupGuardedScenarioAsync(activation, guardLost, monitor, monitorStop,
+                    guard, guardOperationGate, sharedGuardReleased: false, writer, writerAttempt);
+                throw new InvalidOperationException("A faulted activation drain unexpectedly returned cleanup success.");
+            }
+            catch (InvalidOperationException exception) when (ReferenceEquals(exception, injected)) { }
+
+            if (!drainCheckpointObserved || !monitor.IsCompleted || monitor.IsFaulted
+                || !writerAttempt.GuardReleased || !writerAttempt.WriterFinished || !writer.Finished)
+                throw new InvalidOperationException("Activation cleanup failure bypassed guard-monitor or queued-writer cleanup.");
+            if (File.Exists(receiptPath) || Directory.Exists(receiptPath))
+                throw new InvalidOperationException("Activation cleanup failure published a consumer receipt.");
+            var identity = await ReadIdentityAsync(ownerCs, deadline.Token);
+            if (identity.Store != storeId || identity.Epoch != epoch)
+                throw new InvalidOperationException("Activation cleanup failure changed the fixture identity.");
+            await using var observer = await OpenNonPooledAsync(adminCs, deadline.Token);
+            await using var released = new NpgsqlCommand("""
+                SELECT NOT EXISTS (SELECT 1 FROM pg_catalog.pg_locks
+                                   WHERE pid = ANY(@pids) AND locktype = 'advisory')
+                   AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_stat_activity WHERE pid = @writer);
+                """, observer);
+            released.Parameters.AddWithValue("pids", new[] { guardPid, writerPid });
+            released.Parameters.AddWithValue("writer", writerPid);
+            while (await released.ExecuteScalarAsync(deadline.Token) is not true)
+                await Task.Delay(TimeSpan.FromMilliseconds(25), deadline.Token);
+        }
+        finally
+        {
+            try
+            {
+                await CleanupGuardedScenarioAsync(activation, guardLost, monitor, monitorStop,
+                    guard, guardOperationGate, writerAttempt.GuardReleased, writer, writerAttempt);
+            }
+            catch (InvalidOperationException exception) when (ReferenceEquals(exception, injected)) { }
         }
     }
 
@@ -1482,18 +1612,25 @@ internal static class DisposableProofController
     {
         public bool Observed { get; } = true;
         public bool Finished { get; private set; }
+        public int BackendPid { get; } = connection.ProcessID;
 
         public async Task FinishAsync(CancellationToken cancellationToken)
         {
             if (Finished) return;
-            await lockTask.WaitAsync(TimeSpan.FromSeconds(8), cancellationToken);
-            await using var unlock = new NpgsqlCommand("SELECT pg_advisory_unlock(@key);", connection);
-            unlock.Parameters.AddWithValue("key", RecipeLock);
-            if (await unlock.ExecuteScalarAsync(cancellationToken).WaitAsync(TimeSpan.FromSeconds(5), cancellationToken) is not true)
-                throw new InvalidOperationException("Queued exclusive writer did not own its advisory lock after the scenario window.");
+            try
+            {
+                await lockTask.WaitAsync(TimeSpan.FromSeconds(8), cancellationToken);
+                await using var unlock = new NpgsqlCommand("SELECT pg_advisory_unlock(@key);", connection);
+                unlock.Parameters.AddWithValue("key", RecipeLock);
+                if (await unlock.ExecuteScalarAsync(cancellationToken).WaitAsync(TimeSpan.FromSeconds(5), cancellationToken) is not true)
+                    throw new InvalidOperationException("Queued exclusive writer did not own its advisory lock after the scenario window.");
+            }
+            finally
+            {
+                try { await command.DisposeAsync(); }
+                finally { await connection.DisposeAsync(); }
+            }
             Finished = true;
-            await command.DisposeAsync();
-            await connection.DisposeAsync();
         }
     }
 

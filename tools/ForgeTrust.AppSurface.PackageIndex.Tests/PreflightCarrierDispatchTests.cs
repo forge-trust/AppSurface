@@ -50,6 +50,7 @@ public sealed class PreflightCarrierDispatchTests : IDisposable
     public async Task CandidateCommand_FailedOrIncompleteRunnerWithholdsApprovalAndReceipt(int exit, string output)
     {
         var fixture = await CarrierFixture.CreateAsync(_root);
+        var manifestBytes = await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath);
         var runner = fixture.CreateControllerRunner(exit, output);
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
@@ -62,7 +63,7 @@ public sealed class PreflightCarrierDispatchTests : IDisposable
         Assert.Equal(string.Empty, stdout.ToString());
         Assert.Contains("PostgreSQL preflight artifact proof failed", stderr.ToString(), StringComparison.Ordinal);
         Assert.Single(runner.Requests);
-        Assert.False(File.Exists(fixture.Request.ArtifactManifestPath));
+        Assert.Equal(manifestBytes, await File.ReadAllBytesAsync(fixture.Request.ArtifactManifestPath));
         Assert.False(File.Exists(fixture.Request.ApprovedManifestPath));
         Assert.False(File.Exists(fixture.Request.ReceiptPath));
         Assert.Empty(Directory.GetFiles(fixture.ArtifactDirectory, "*.tmp"));

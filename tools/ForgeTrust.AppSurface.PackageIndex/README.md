@@ -105,6 +105,8 @@ blocks the candidate proof. The same checked cleanup covers observation and back
 guard-loss probes; an elapsed wait alone never counts as a drained child.
 An independent fixture repeats the observer-failure check with a throwing cancellation callback. Nested cleanup
 must still drain both owned tasks and release their sessions before propagating that callback failure.
+An actual verified activation-drain failure follows the same cleanup path: it drains the guard monitor, releases the
+guard, and finishes and disposes the queued writer, while withholding the receipt.
 
 Candidate proof runs for each bundle in both release channels before the artifact manifest can authorize publication.
 A failed command or missing, incomplete, mismatched or stale receipt leaves that gate closed. The published smoke
@@ -128,12 +130,14 @@ and completion, then the complete post-writer window. This discriminator is an a
 for the writer outcome union; the producer and shared contract must emit the same fields before release receipts can
 pass.
 
-The internal artifact-proof request owns the repository root, frozen artifact directory and manifest path, exact
-source commit, carrier run identifier and artifact identifier. Its candidate and published operations propagate
-cancellation to bounded child commands, validate complete proof receipts and retain package SHA-256 values alongside
-the artifact manifest's SHA-512 binding. Proof receipts contain synthetic role/store/epoch identity and stage timings;
-connection credentials stay in child-process environment variables. Consult the generated `--help` for the explicit
-carrier arguments, and retain the candidate receipt with the original bundle for the public smoke invocation.
+The internal artifact-proof request supplies the repository root, frozen artifact directory, caller-owned manifest
+path, exact source commit, carrier run identifier and artifact identifier. A successful candidate proof moves the
+manifest to the approved path; on failure, the carrier preserves it at the caller-supplied path, rolling back a
+partial promotion when that path remains available. Candidate and published operations propagate cancellation to
+bounded child commands, validate complete proof receipts and retain package SHA-256 values alongside the artifact
+manifest's SHA-512 binding. Proof receipts contain synthetic role/store/epoch identity and stage timings; connection
+credentials stay in child-process environment variables. Consult the generated `--help` for the explicit carrier
+arguments, and retain the candidate receipt with the original bundle for the public smoke invocation.
 
 The internal `Program.RunAsync` command boundary accepts an optional `preflightCommandRunner` for verification of
 candidate and published command dispatch. Omitting it uses `CliWrapCommandRunner` to launch the real
