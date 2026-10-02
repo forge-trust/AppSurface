@@ -2,11 +2,13 @@ import hashlib
 import json
 import tempfile
 import unittest
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
 from publish_guard import (
     EXPECTED_IMAGE,
+    EXPECTED_MAIN_RULESET_ID,
     EXPECTED_REF,
     EXPECTED_REPOSITORY,
     MAX_REGISTRY_METADATA_BYTES,
@@ -14,6 +16,7 @@ from publish_guard import (
     validate_environment,
     validate_image_identity,
     validate_main_head,
+    validate_main_ruleset,
     verify_archive,
     verify_registry_manifest,
 )
@@ -163,6 +166,71 @@ class PublishGuardTests(unittest.TestCase):
         for invalid_environment, invalid_branches in invalid_configurations:
             with self.subTest(environment=invalid_environment, branches=invalid_branches), self.assertRaises(ValueError):
                 validate_environment(invalid_environment, invalid_branches)
+
+    def test_main_ruleset_requires_reviewed_latest_revision_without_bypass(self):
+        ruleset = {
+            "id": EXPECTED_MAIN_RULESET_ID,
+            "enforcement": "active",
+            "target": "branch",
+            "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+            "bypass_actors": [],
+            "rules": [
+                {"type": "non_fast_forward"},
+                {
+                    "type": "pull_request",
+                    "parameters": {
+                        "required_approving_review_count": 1,
+                        "dismiss_stale_reviews_on_push": True,
+                        "require_last_push_approval": False,
+                    },
+                },
+            ],
+        }
+        validate_main_ruleset(ruleset, "main")
+        explicit_main_ruleset = deepcopy(ruleset)
+        explicit_main_ruleset["conditions"]["ref_name"]["include"] = ["refs/heads/main"]
+        validate_main_ruleset(explicit_main_ruleset, "main")
+        latest_push_ruleset = deepcopy(ruleset)
+        latest_push_ruleset["rules"][1]["parameters"].update(
+            dismiss_stale_reviews_on_push=False, require_last_push_approval=True
+        )
+        validate_main_ruleset(latest_push_ruleset, "main")
+
+        invalid = []
+        for field, value in (
+            ("id", EXPECTED_MAIN_RULESET_ID + 1),
+            ("enforcement", "evaluate"),
+            ("target", "tag"),
+            ("bypass_actors", None),
+            ("bypass_actors", [{"actor_type": "OrganizationAdmin", "bypass_mode": "always"}]),
+            ("rules", [ruleset["rules"][1]]),
+        ):
+            candidate = deepcopy(ruleset)
+            candidate[field] = value
+            invalid.append(candidate)
+        for selectors in (
+            {"include": ["refs/heads/release"], "exclude": []},
+            {"include": ["~DEFAULT_BRANCH"], "exclude": ["refs/heads/main"]},
+        ):
+            candidate = deepcopy(ruleset)
+            candidate["conditions"]["ref_name"] = selectors
+            invalid.append(candidate)
+        for parameters in (
+            {"required_approving_review_count": 0, "dismiss_stale_reviews_on_push": True},
+            {"required_approving_review_count": True, "dismiss_stale_reviews_on_push": True},
+            {"required_approving_review_count": 1, "dismiss_stale_reviews_on_push": False,
+             "require_last_push_approval": False},
+        ):
+            candidate = deepcopy(ruleset)
+            candidate["rules"][1]["parameters"] = parameters
+            invalid.append(candidate)
+        for candidate in invalid:
+            with self.subTest(candidate=candidate), self.assertRaises(ValueError):
+                validate_main_ruleset(candidate, "main")
+        with self.assertRaisesRegex(ValueError, "default branch"):
+            validate_main_ruleset(ruleset, "release")
+        with self.assertRaisesRegex(ValueError, "active reviewed ruleset"):
+            validate_main_ruleset(None, "main")
 
     def test_registry_manifest_requires_descriptor_raw_and_image_identity_to_agree(self):
         image_id = "sha256:" + "c" * 64

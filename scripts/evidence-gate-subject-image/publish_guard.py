@@ -14,6 +14,7 @@ from pathlib import Path
 EXPECTED_REPOSITORY = "forge-trust/AppSurface"
 EXPECTED_REF = "refs/heads/main"
 EXPECTED_IMAGE = "ghcr.io/forge-trust/appsurface-subject-native-validation"
+EXPECTED_MAIN_RULESET_ID = 7295365
 SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 HEX_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -119,6 +120,55 @@ def validate_environment(environment: dict, branch_policies: dict) -> None:
         raise ValueError("publisher environment must allow exactly the main branch")
 
 
+def validate_main_ruleset(ruleset: dict, default_branch: str) -> None:
+    """Require the current default branch to enforce review of the final revision without bypass."""
+    if default_branch != "main":
+        raise ValueError("publisher repository default branch must remain main")
+    if (
+        not isinstance(ruleset, dict)
+        or ruleset.get("id") != EXPECTED_MAIN_RULESET_ID
+        or ruleset.get("enforcement") != "active"
+        or ruleset.get("target") != "branch"
+    ):
+        raise ValueError("publisher main ruleset must be the active reviewed ruleset")
+
+    conditions = ruleset.get("conditions")
+    ref_name = conditions.get("ref_name") if isinstance(conditions, dict) else None
+    if (
+        not isinstance(ref_name, dict)
+        or not isinstance(ref_name.get("include"), list)
+        or not any(
+            selector in ref_name["include"]
+            for selector in ("~DEFAULT_BRANCH", "refs/heads/main")
+        )
+        or ref_name.get("exclude") != []
+    ):
+        raise ValueError("publisher main ruleset must include main without exclusions")
+    if ruleset.get("bypass_actors") != []:
+        raise ValueError("publisher main ruleset must not allow review bypass actors")
+
+    rules = ruleset.get("rules")
+    if not isinstance(rules, list) or not any(
+        isinstance(rule, dict) and rule.get("type") == "non_fast_forward"
+        for rule in rules
+    ):
+        raise ValueError("publisher main ruleset must prevent force pushes")
+    has_current_review = any(
+        isinstance(rule, dict)
+        and rule.get("type") == "pull_request"
+        and isinstance(rule.get("parameters"), dict)
+        and type(rule["parameters"].get("required_approving_review_count")) is int
+        and rule["parameters"]["required_approving_review_count"] >= 1
+        and (
+            rule["parameters"].get("dismiss_stale_reviews_on_push") is True
+            or rule["parameters"].get("require_last_push_approval") is True
+        )
+        for rule in rules
+    )
+    if not has_current_review:
+        raise ValueError("publisher main ruleset must review the latest pull-request revision")
+
+
 def verify_registry_manifest(
     descriptor_path: Path,
     raw_manifest_path: Path,
@@ -196,6 +246,10 @@ def build_parser() -> argparse.ArgumentParser:
     environment.add_argument("--environment-json", required=True, type=Path)
     environment.add_argument("--branch-policies-json", required=True, type=Path)
 
+    ruleset = commands.add_parser("main-ruleset", help="require reviewed, non-bypassable main")
+    ruleset.add_argument("--ruleset-json", required=True, type=Path)
+    ruleset.add_argument("--default-branch", required=True)
+
     manifest = commands.add_parser("manifest-digest", help="verify registry manifest bytes")
     manifest.add_argument("--descriptor", required=True, type=Path)
     manifest.add_argument("--raw-manifest", required=True, type=Path)
@@ -235,6 +289,9 @@ def main() -> int:
             if not isinstance(environment, dict) or not isinstance(branch_policies, dict):
                 raise ValueError("publisher environment inspection must return JSON objects")
             validate_environment(environment, branch_policies)
+        elif arguments.command == "main-ruleset":
+            ruleset = json.loads(arguments.ruleset_json.read_text(encoding="utf-8"))
+            validate_main_ruleset(ruleset, arguments.default_branch)
         else:
             print(
                 verify_registry_manifest(
