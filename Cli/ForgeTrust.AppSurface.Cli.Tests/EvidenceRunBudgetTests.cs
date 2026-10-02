@@ -281,6 +281,178 @@ public sealed class EvidenceRunBudgetTests
         Assert.True(budget.TryBeginCollection());
     }
 
+    [Fact]
+    public void TimeBudget_OverflowingSerialDeclarationsAreRejectedBeforeAnyStageAdmission()
+    {
+        var clock = new AdjustableTimeProvider();
+        Assert.False(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, TimeSpan.MaxValue,
+            [new(EvidenceRunStage.Resource, TimeSpan.MaxValue), new(EvidenceRunStage.Producer, TimeSpan.FromTicks(1))],
+            TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), out var rejected));
+        Assert.Null(rejected);
+    }
+
+    [Theory]
+    [InlineData(0, 1, 1, 1, (int)EvidenceRunStage.Start, 1)]
+    [InlineData(300, 0, 1, 1, (int)EvidenceRunStage.Start, 1)]
+    [InlineData(300, 1, 0, 1, (int)EvidenceRunStage.Start, 1)]
+    [InlineData(300, 1, 601, 1, (int)EvidenceRunStage.Start, 1)]
+    [InlineData(300, 1, 2, 0, (int)EvidenceRunStage.Start, 1)]
+    [InlineData(300, 1, 40, 31, (int)EvidenceRunStage.Start, 1)]
+    [InlineData(300, 1, 1, 1, (int)EvidenceRunStage.Start, 121)]
+    [InlineData(300, 1, 1, 1, 999, 1)]
+    public void TimeBudget_InvalidProtectedDeclarationsDoNotProduceAnAdmissibleBudget(
+        int allowance, int collection, int cleanup, int stopping, int stage, int duration)
+    {
+        Assert.False(EvidenceRunTimeBudget.TryCreateFromAllowance(new AdjustableTimeProvider(), TimeSpan.FromSeconds(allowance),
+            [new((EvidenceRunStage)stage, TimeSpan.FromSeconds(duration))],
+            TimeSpan.FromSeconds(collection), TimeSpan.FromSeconds(cleanup), TimeSpan.FromSeconds(stopping), out var budget));
+        Assert.Null(budget);
+    }
+
+    [Fact]
+    public void TimeBudget_NullStageCannotBeAdmittedAsUnboundedWork()
+    {
+        Assert.False(EvidenceRunTimeBudget.TryCreateFromAllowance(new AdjustableTimeProvider(), TimeSpan.FromSeconds(20),
+            [null!], TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), out var budget));
+        Assert.Null(budget);
+    }
+
+    [Fact]
+    public void TimeBudget_StageCompletionCannotAdvanceTwiceOrOverlapFinalCollection()
+    {
+        var clock = new AdjustableTimeProvider();
+        Assert.True(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, TimeSpan.FromSeconds(20),
+            [new(EvidenceRunStage.Resource, TimeSpan.FromSeconds(3)), new(EvidenceRunStage.Producer, TimeSpan.FromSeconds(2))],
+            TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2), out var budget));
+        Assert.False(budget!.CompleteCurrentStage());
+        Assert.False(budget.CompleteCollection());
+        Assert.Equal(TimeSpan.Zero, budget.CleanupRemaining);
+        Assert.True(budget.TryBeginNextStage(default, out var resource));
+        Assert.Equal(EvidenceRunStage.Resource, resource!.Stage);
+        Assert.False(budget.TryBeginCollection());
+        clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.Equal(TimeSpan.FromSeconds(2), budget.CurrentStageRemaining);
+        Assert.True(budget.CompleteCurrentStage());
+        Assert.False(budget.CompleteCurrentStage());
+        Assert.True(budget.TryBeginNextStage(default, out var producer));
+        Assert.Equal(EvidenceRunStage.Producer, producer!.Stage);
+        Assert.True(budget.CompleteCurrentStage());
+        Assert.True(budget.TryAbandonStagesAndBeginCleanup(stageClosed: true));
+        Assert.False(budget.TryAbandonStagesAndBeginCleanup(stageClosed: true));
+        Assert.True(budget.CompleteCleanup());
+        Assert.False(budget.CompleteCleanup());
+        Assert.Equal(TimeSpan.Zero, budget.CollectionRemaining);
+        Assert.True(budget.TryBeginCollection());
+        Assert.False(budget.TryBeginCollection());
+        Assert.False(budget.TryBeginNextStage(default, out _));
+        clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.Equal(TimeSpan.FromSeconds(1), budget.CollectionRemaining);
+        Assert.True(budget.CompleteCollection());
+        Assert.False(budget.CompleteCollection());
+    }
+
+    [Fact]
+    public void TimeBudget_CleanupExpiryCannotBeReportedCompleteOrConsumeCollectionReserve()
+    {
+        var clock = new AdjustableTimeProvider();
+        Assert.True(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, TimeSpan.FromSeconds(7), [],
+            TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2), out var budget));
+        Assert.False(budget!.CompleteCleanup());
+        Assert.True(budget.TryAbandonStagesAndBeginCleanup(stageClosed: true));
+        clock.Advance(TimeSpan.FromSeconds(5));
+        Assert.Equal(TimeSpan.FromSeconds(2), budget.JobRemaining);
+        Assert.Equal(TimeSpan.Zero, budget.CleanupRemaining);
+        Assert.Equal(TimeSpan.Zero, budget.StoppingAllowance);
+        Assert.False(budget.CompleteCleanup());
+        Assert.False(budget.TryBeginCollection());
+        clock.Advance(TimeSpan.FromSeconds(2));
+        Assert.False(budget.TryAbandonStagesAndBeginCleanup(stageClosed: true));
+    }
+
+    [Fact]
+    public void TimeBudget_CollectionClampsToJobDeadlineAndCannotRestartCleanup()
+    {
+        var clock = new AdjustableTimeProvider();
+        Assert.True(EvidenceRunTimeBudget.TryCreateFromAllowance(clock, TimeSpan.FromSeconds(3), [],
+            TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), out var budget));
+        Assert.True(budget!.TryAbandonStagesAndBeginCleanup(stageClosed: true));
+        Assert.True(budget.CompleteCleanup());
+        Assert.True(budget.TryBeginCollection());
+        Assert.False(budget.TryAbandonStagesAndBeginCleanup(stageClosed: true));
+        clock.Advance(TimeSpan.FromSeconds(3));
+        Assert.Equal(TimeSpan.Zero, budget.CollectionRemaining);
+        Assert.Equal(TimeSpan.Zero, budget.JobRemaining);
+        Assert.True(budget.CompleteCollection());
+        Assert.False(budget.TryBeginCollection());
+    }
+
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(false, -1)]
+    [InlineData(true, 0)]
+    [InlineData(true, -1)]
+    public void QuotaFactories_RejectNonpositiveProtectedLimitsBeforeAnyNotification(bool processOutput, long limit)
+    {
+        var notified = false;
+        Assert.Throws<ArgumentOutOfRangeException>(() => processOutput
+            ? EvidenceRunByteQuota.CreateProcessOutput(limit, () => notified = true)
+            : EvidenceRunByteQuota.CreateArtifact(limit, () => notified = true));
+        Assert.False(notified);
+    }
+
+    [Fact]
+    public void Quota_InvalidChargesDoNotLatchFailureOrConsumeAValidWriteAllowance()
+    {
+        var notifications = 0;
+        var quota = EvidenceRunByteQuota.CreateArtifact(5, () => notifications++);
+        Assert.Throws<ArgumentOutOfRangeException>(() => quota.TryReserve(-1, out _));
+        Assert.Throws<ArgumentOutOfRangeException>(() => quota.TryChargeReceived(-1));
+        Assert.True(quota.TryChargeReceived(0));
+        Assert.True(quota.TryReserve(3, out var reservation));
+        reservation!.Commit();
+        Assert.True(quota.TryChargeReceived(2));
+        Assert.Equal(5, quota.AccountedBytes);
+        Assert.False(quota.IsFailed);
+        Assert.Equal(0, notifications);
+    }
+
+    [Fact]
+    public void Quota_AbortingAnEmptyWriteIsIdempotentAndCannotReleaseCommittedBytes()
+    {
+        var quota = EvidenceRunByteQuota.CreateArtifact(3);
+        Assert.True(quota.TryReserve(0, out var empty));
+        empty!.Dispose();
+        empty.Dispose();
+        Assert.Throws<InvalidOperationException>(() => empty.Commit());
+        Assert.True(quota.TryReserve(3, out var complete));
+        complete!.Commit();
+        complete.Dispose();
+        Assert.Throws<InvalidOperationException>(() => complete.Commit());
+        Assert.Equal(3, quota.AccountedBytes);
+        Assert.False(quota.TryReserve(1, out _));
+    }
+
+    [Fact]
+    public void Quota_ReservationCrossingRetainsLatchAfterReleaseAndSwallowsNotificationFault()
+    {
+        var notifications = 0;
+        var quota = EvidenceRunByteQuota.CreateArtifact(5, () =>
+        {
+            notifications++;
+            throw new InvalidOperationException("safe fixture notification failure");
+        });
+        Assert.True(quota.TryReserve(4, out var pending));
+        Assert.False(quota.TryReserve(2, out var rejected));
+        Assert.Null(rejected);
+        pending!.Dispose();
+        Assert.Equal(0, quota.AccountedBytes);
+        Assert.True(quota.IsFailed);
+        Assert.False(quota.TryReserve(0, out _));
+        Assert.False(quota.TryChargeReceived(0));
+        Assert.False(quota.TryChargeReceived(1));
+        Assert.Equal(1, notifications);
+    }
+
     private sealed class AdjustableTimeProvider : TimeProvider
     {
         private long _timestamp;

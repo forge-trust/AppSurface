@@ -160,6 +160,112 @@ class ProofControls(unittest.TestCase):
                 proof.watchdog("issue779-child-test.service", 0, done, control, mock.Mock())
 
 
+class IdentityRejectionDiagnostics(unittest.TestCase):
+    """Private failure capture never changes the kernel identity acceptance rule."""
+
+    @staticmethod
+    def _record(receipt, control, facts, properties=None):
+        with mock.patch.object(proof, "belongs_to_group", return_value=True), \
+                mock.patch.object(proof.time, "monotonic", return_value=12.5):
+            proof.record_identity_rejection(receipt, control, 123, 999, facts, "/selected",
+                                            properties or {"MainPID": "123", "ActiveState": "activating"}, 10)
+
+    def test_uid_rejection_retains_guard_tuple_in_bounded_private_file(self):
+        import json
+        facts = {}
+        with mock.patch.object(Path, "read_text", return_value="Uid:\t0\t0\t0\t0\n"), \
+                mock.patch.object(proof, "belongs_to_group") as membership:
+            self.assertFalse(proof.identity_matches(123, 999, "/selected", facts))
+            membership.assert_not_called()
+        self.assertEqual({"uid": [0, 0, 0, 0]}, facts)
+        with tempfile.TemporaryDirectory(prefix="identity-control-") as name:
+            control = Path(name)
+            control.chmod(0o700)
+            receipt = {}
+            self._record(receipt, control, facts)
+            path = control / "identity-rejection.json"
+            self.assertEqual(0o600, path.stat().st_mode & 0o777)
+            self.assertEqual(os.geteuid(), path.stat().st_uid)
+            self.assertLessEqual(path.stat().st_size, 4096)
+            self.assertEqual({"candidate_pid": 123, "target_uid": 999, "uid": [0, 0, 0, 0],
+                              "cgroup_matches": True, "main_pid": 123, "active_state": "activating",
+                              "elapsed_seconds": 2.5}, json.loads(path.read_text()))
+        self.assertEqual("application-identity-rejected", receipt["failure"])
+        self.assertEqual("startup-identity-validation", receipt["failure_stage"])
+        self.assertTrue(receipt["identity_diagnostic_written"])
+
+    def test_cgroup_rejection_retains_guard_result_without_rereading_membership(self):
+        import json
+        facts = {}
+        with mock.patch.object(Path, "read_text", return_value="Uid:\t999\t999\t999\t999\n"), \
+                mock.patch.object(proof, "belongs_to_group", return_value=False) as membership:
+            self.assertFalse(proof.identity_matches(123, 999, "/selected", facts))
+            with tempfile.TemporaryDirectory(prefix="identity-control-") as name:
+                with mock.patch.object(proof.time, "monotonic", return_value=12.5):
+                    proof.record_identity_rejection({}, Path(name), 123, 999, facts, "/selected",
+                                                    {"MainPID": "123", "ActiveState": "active"}, 10)
+                data = json.loads((Path(name) / "identity-rejection.json").read_bytes())
+                self.assertFalse(data["cgroup_matches"])
+                self.assertEqual([999, 999, 999, 999], data["uid"])
+            membership.assert_called_once_with(123, "/selected")
+
+    def test_active_state_is_closed_and_canary_cannot_enter_safe_or_private_json(self):
+        import json
+        canary = "identity-canary-private-command-path-error"
+        with tempfile.TemporaryDirectory(prefix="identity-control-") as name:
+            receipt = {}
+            self._record(receipt, Path(name), {"uid": [0, 0, 0, 0]},
+                         {"MainPID": "123", "ActiveState": canary, "Ignored": canary})
+            private = (Path(name) / "identity-rejection.json").read_text()
+            self.assertEqual("unknown", json.loads(private)["active_state"])
+            self.assertNotIn(canary, private)
+            self.assertNotIn(canary, json.dumps(receipt))
+
+    def test_byte_bound_rejects_capture_before_creating_file(self):
+        with tempfile.TemporaryDirectory(prefix="identity-control-") as name:
+            receipt = {}
+            with mock.patch.object(proof, "IDENTITY_DIAGNOSTIC_LIMIT", 1):
+                self._record(receipt, Path(name), {"uid": [0, 0, 0, 0]})
+            self.assertFalse((Path(name) / "identity-rejection.json").exists())
+        self.assertFalse(receipt["identity_diagnostic_written"])
+        self.assertEqual("application-identity-rejected", receipt["failure"])
+
+    def test_capture_failure_and_existing_file_preserve_original_rejection(self):
+        import json
+        for existing in (False, True):
+            with self.subTest(existing=existing), tempfile.TemporaryDirectory(prefix="identity-control-") as name:
+                control = Path(name)
+                path = control / "identity-rejection.json"
+                receipt = {"owned_exit": False, "cleanup": False}
+                if existing:
+                    path.write_text("existing-private-control\n")
+                    self._record(receipt, control, {"uid": [0, 0, 0, 0]})
+                    self.assertEqual("existing-private-control\n", path.read_text())
+                else:
+                    with mock.patch.object(Path, "open", side_effect=OSError("identity-canary-write-error")):
+                        self._record(receipt, control, {"uid": [0, 0, 0, 0]})
+                    self.assertFalse(path.exists())
+                self.assertFalse(receipt["identity_diagnostic_written"])
+                proof.record_stop_result(receipt, "factory-stall", 0)
+                proof.preserve_identity_rejection(receipt)
+                self.assertEqual("application-identity-rejected", receipt["failure"])
+                self.assertEqual("startup-identity-validation", receipt["failure_stage"])
+                self.assertFalse(receipt["owned_exit"])
+                self.assertFalse(receipt["cleanup"])
+                self.assertNotIn("identity-canary", json.dumps(receipt))
+
+    def test_invalid_numeric_facts_cannot_publish_untrusted_data(self):
+        import json
+        for uid in ([0, 0, 0], [0, 0, 0, "identity-canary-uid"], [0, 0, 0, True], [0, 0, 0, -1]):
+            with self.subTest(uid=uid), tempfile.TemporaryDirectory(prefix="identity-control-") as name:
+                receipt = {}
+                self._record(receipt, Path(name), {"uid": uid})
+                self.assertFalse((Path(name) / "identity-rejection.json").exists())
+                self.assertFalse(receipt["identity_diagnostic_written"])
+                self.assertEqual("application-identity-rejected", receipt["failure"])
+                self.assertNotIn("identity-canary", json.dumps(receipt))
+
+
 class PortableResourceHttpProbes(unittest.TestCase):
     """Exercise the existing resource DLL with fake inputs and ordinary file modes.
 

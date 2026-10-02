@@ -489,6 +489,447 @@ public sealed class EvidenceWorkerExecutionTests
         await Assert.ThrowsAsync<EvidenceWorkerTestInterruptionException>(() => run);
     }
 
+    [Theory]
+    [InlineData(false, "test-run")]
+    [InlineData(true, "")]
+    [InlineData(true, " ")]
+    public void Constructor_RejectsUnarmedOrUnidentifiedSupervisorBeforeAnyStop(bool armed, string runId)
+    {
+        var supervisor = new TestSupervisor { Armed = armed, RunIdentifier = runId };
+        Assert.Throws<ArgumentException>(() => Create(supervisor, new ManualTimeProvider()));
+        Assert.Equal(0, supervisor.StopRequests);
+    }
+
+    [Theory]
+    [InlineData(0, 20, 5, 0)]
+    [InlineData(120, 0, 5, 0)]
+    [InlineData(120, 601, 5, 0)]
+    [InlineData(120, 20, 0, 0)]
+    [InlineData(120, 40, 31, 0)]
+    [InlineData(120, 4, 5, 0)]
+    [InlineData(120, 20, 5, -1)]
+    [InlineData(120, 20, 5, 61)]
+    [InlineData(5, 20, 5, 5)]
+    public void Constructor_RejectsBudgetsThatCannotProtectStopOrCollection(
+        int jobSeconds, int cleanupSeconds, int stoppingSeconds, int collectionSeconds)
+    {
+        var supervisor = new TestSupervisor();
+        Assert.Throws<ArgumentOutOfRangeException>(() => new EvidenceWorkerExecution(
+            supervisor, new ManualTimeProvider(), TimeSpan.FromSeconds(jobSeconds),
+            TimeSpan.FromSeconds(cleanupSeconds), TimeSpan.FromSeconds(stoppingSeconds),
+            _ => new EvidenceWorkerTestInterruptionException("fatal"),
+            collectionReserve: TimeSpan.FromSeconds(collectionSeconds)));
+        Assert.Equal(0, supervisor.StopRequests);
+    }
+
+    [Theory]
+    [InlineData((int)EvidenceRunStage.Admission, 0)]
+    [InlineData((int)EvidenceRunStage.Admission, 31)]
+    [InlineData((int)EvidenceRunStage.Start, 121)]
+    [InlineData(999, 1)]
+    public async Task ExecuteAsync_RejectsInvalidDeclaredDeadlineWithoutStartingWork(int stage, int seconds)
+    {
+        var supervisor = new TestSupervisor();
+        var execution = Create(supervisor, new ManualTimeProvider());
+        var invoked = false;
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => execution.ExecuteAsync((EvidenceRunStage)stage,
+            TimeSpan.FromSeconds(seconds), _ =>
+            {
+                invoked = true;
+                return ValueTask.FromResult(true);
+            }).AsTask());
+        Assert.False(invoked);
+        Assert.Equal(0, supervisor.StopRequests);
+        Assert.Equal(EvidenceWorkerTerminalCode.None, execution.TerminalCode);
+    }
+
+    [Fact]
+    public async Task RequestTerminalStopAsync_RejectsNoneAndUsesFreshStopTokenForCancelledCaller()
+    {
+        var supervisor = new TestSupervisor();
+        var execution = Create(supervisor, new ManualTimeProvider());
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            execution.RequestTerminalStopAsync(EvidenceWorkerTerminalCode.None).AsTask());
+        Assert.False(execution.IsAdmissionClosed);
+        using var caller = new CancellationTokenSource();
+        caller.Cancel();
+
+        await execution.RequestTerminalStopAsync(EvidenceWorkerTerminalCode.StageFailed, caller.Token);
+        await execution.RequestTerminalStopAsync(EvidenceWorkerTerminalCode.DeadlineExceeded);
+
+        Assert.Equal(EvidenceWorkerTerminalCode.CallerCancelled, execution.TerminalCode);
+        Assert.Equal(caller.Token, Assert.IsType<OperationCanceledException>(execution.TerminalException).CancellationToken);
+        Assert.True(supervisor.SawFreshStoppingToken);
+        Assert.True(execution.OwnWorkStopped);
+        Assert.Equal(1, supervisor.StopRequests);
+        Assert.False(execution.RegisterDisposer(_ => ValueTask.CompletedTask));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_LateSuccessCannotRestoreFailedOrReplacedLease(bool replaceLease)
+    {
+        var supervisor = new TestSupervisor();
+        var execution = Create(supervisor, new ManualTimeProvider());
+        var result = await execution.ExecuteAsync(EvidenceRunStage.Resource, TimeSpan.FromSeconds(1), _ =>
+        {
+            if (replaceLease) supervisor.RunIdentifier = "replacement-run";
+            else execution.LatchFailure();
+            return ValueTask.FromResult("late success");
+        });
+
+        Assert.Equal(replaceLease ? EvidenceWorkerStageOutcome.Rejected : EvidenceWorkerStageOutcome.Failed, result.Outcome);
+        Assert.Null(result.Value);
+        Assert.Equal(replaceLease ? EvidenceWorkerTerminalCode.AdmissionClosed : EvidenceWorkerTerminalCode.StageFailed, execution.TerminalCode);
+        Assert.True(execution.OwnWorkStopped);
+        Assert.Null(execution.TrackOwnedWork(_ => ValueTask.CompletedTask));
+        Assert.False(execution.RegisterDisposer(_ => ValueTask.CompletedTask));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_CallbackFaultIsSettledAndCannotProduceAPassedValue(bool cancelledCaller)
+    {
+        var supervisor = new TestSupervisor();
+        var execution = Create(supervisor, new ManualTimeProvider());
+        using var caller = new CancellationTokenSource();
+        var fault = new OperationCanceledException("safe fixture cancellation", caller.Token);
+        var result = await execution.ExecuteAsync<string>(EvidenceRunStage.Producer, TimeSpan.FromSeconds(1), _ =>
+        {
+            if (cancelledCaller) caller.Cancel();
+            return ValueTask.FromException<string>(fault);
+        }, caller.Token);
+
+        Assert.Equal(cancelledCaller ? EvidenceWorkerStageOutcome.Cancelled : EvidenceWorkerStageOutcome.Failed, result.Outcome);
+        Assert.Null(result.Value);
+        Assert.Equal(cancelledCaller ? EvidenceWorkerTerminalCode.CallerCancelled : EvidenceWorkerTerminalCode.StageFailed, execution.TerminalCode);
+        Assert.True(execution.OwnWorkStopped);
+        Assert.True(supervisor.ExitAcknowledged);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_WaitsForOwnedChildAfterCallbackAndJoinsItOnTerminalSignal(bool callerCancels)
+    {
+        var clock = new ManualTimeProvider();
+        var supervisor = new TestSupervisor();
+        var execution = Create(supervisor, clock);
+        using var caller = new CancellationTokenSource();
+        var childStarted = NewSignal();
+        var childRelease = NewSignal();
+        var callbackReturned = NewSignal();
+        var run = execution.ExecuteAsync(EvidenceRunStage.Producer, TimeSpan.FromSeconds(10), _ =>
+        {
+            Assert.NotNull(execution.TrackOwnedWork(async _ =>
+            {
+                childStarted.TrySetResult();
+                await childRelease.Task;
+            }));
+            callbackReturned.TrySetResult();
+            return ValueTask.FromResult("callback completed");
+        }, caller.Token).AsTask();
+        await childStarted.Task;
+        await callbackReturned.Task;
+        await clock.WaitForTimerCreationsAsync(1);
+        Assert.False(run.IsCompleted);
+        if (callerCancels) caller.Cancel();
+        else clock.Advance(TimeSpan.FromSeconds(10));
+        await supervisor.StopRequested.Task;
+        Assert.False(run.IsCompleted);
+        childRelease.TrySetResult();
+
+        var result = await run;
+        Assert.Equal(callerCancels ? EvidenceWorkerStageOutcome.Cancelled : EvidenceWorkerStageOutcome.TimedOut, result.Outcome);
+        Assert.Null(result.Value);
+        Assert.Equal(callerCancels ? EvidenceWorkerTerminalCode.CallerCancelled : EvidenceWorkerTerminalCode.DeadlineExceeded, execution.TerminalCode);
+        Assert.True(execution.OwnWorkStopped);
+        Assert.True(supervisor.ExitAcknowledged);
+    }
+
+    [Fact]
+    public async Task StopAndDisposeAsync_FaultedDisposerDoesNotSkipEarlierOwnersOrRestoreEligibility()
+    {
+        var execution = Create(new TestSupervisor(), new ManualTimeProvider());
+        var order = new List<string>();
+        var fault = new InvalidOperationException("safe fixture disposer failure");
+        Assert.True(execution.RegisterDisposer(_ => { order.Add("parent"); return ValueTask.CompletedTask; }));
+        Assert.True(execution.RegisterDisposer(_ => { order.Add("child"); return ValueTask.FromException(fault); }));
+
+        Assert.False(await execution.StopAndDisposeAsync());
+        Assert.Equal(["child", "parent"], order);
+        Assert.Same(fault, execution.TerminalException);
+        Assert.Equal(EvidenceWorkerTerminalCode.CleanupFailed, execution.TerminalCode);
+        Assert.True(execution.OwnWorkStopped);
+        Assert.False(execution.CleanupCompleted);
+        var collected = await execution.CollectAsync(TimeSpan.FromSeconds(1), _ => ValueTask.FromResult("failure manifest"));
+        Assert.Equal(EvidenceWorkerStageOutcome.Passed, collected.Outcome);
+        Assert.Equal("failure manifest", collected.Value);
+        Assert.Equal(EvidenceWorkerTerminalCode.CleanupFailed, execution.TerminalCode);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StopAndDisposeAsync_SupervisorFaultFailsStopBeforeDisposal(bool duringStopRequest)
+    {
+        var supervisor = new TestSupervisor();
+        var fault = new InvalidOperationException("safe fixture supervisor failure");
+        if (duringStopRequest) supervisor.OnStopRequest = _ => ValueTask.FromException(fault);
+        else supervisor.OnClose = () => throw fault;
+        var execution = Create(supervisor, new ManualTimeProvider());
+        var disposed = false;
+        execution.RegisterDisposer(_ => { disposed = true; return ValueTask.CompletedTask; });
+
+        var fatal = await Assert.ThrowsAsync<EvidenceWorkerTestInterruptionException>(() => execution.StopAndDisposeAsync().AsTask());
+        Assert.Contains(duringStopRequest ? "request owned-work stop" : "closed safely", fatal.Message, StringComparison.Ordinal);
+        Assert.False(disposed);
+        Assert.False(execution.OwnWorkStopped);
+        Assert.False(execution.CleanupCompleted);
+        Assert.Equal(duringStopRequest ? EvidenceWorkerTerminalCode.CleanupFailed : EvidenceWorkerTerminalCode.None, execution.TerminalCode);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StopAndDisposeAsync_StalledSupervisorCannotConsumeStoppingGraceOrRunDisposers(bool duringExit)
+    {
+        var clock = new ManualTimeProvider();
+        var entered = NewSignal();
+        var settled = NewSignal();
+        async ValueTask Stall(CancellationToken token)
+        {
+            entered.TrySetResult();
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, token); }
+            finally { settled.TrySetResult(); }
+        }
+        var supervisor = new TestSupervisor();
+        if (duringExit) supervisor.OnWaitForExit = Stall;
+        else supervisor.OnStopRequest = Stall;
+        var execution = Create(supervisor, clock);
+        var disposed = false;
+        execution.RegisterDisposer(_ => { disposed = true; return ValueTask.CompletedTask; });
+        var cleanup = execution.StopAndDisposeAsync().AsTask();
+        await entered.Task;
+        clock.Advance(Grace);
+
+        var fatal = await Assert.ThrowsAsync<EvidenceWorkerTestInterruptionException>(() => cleanup);
+        await settled.Task;
+        Assert.Contains(duringExit ? "acknowledge owned-work exit" : "stop request", fatal.Message, StringComparison.Ordinal);
+        Assert.False(disposed);
+        Assert.False(execution.OwnWorkStopped);
+        Assert.False(execution.CleanupCompleted);
+    }
+
+    [Fact]
+    public async Task StopAndDisposeAsync_CannotSpendTheProtectedCollectionReserve()
+    {
+        var clock = new ManualTimeProvider();
+        var supervisor = new TestSupervisor();
+        var execution = new EvidenceWorkerExecution(supervisor, clock, TimeSpan.FromSeconds(20),
+            TimeSpan.FromSeconds(10), Grace, _ => new EvidenceWorkerTestInterruptionException("fatal"),
+            collectionReserve: TimeSpan.FromSeconds(5));
+        var disposed = false;
+        execution.RegisterDisposer(_ => { disposed = true; return ValueTask.CompletedTask; });
+        clock.Advance(TimeSpan.FromSeconds(15));
+        await Assert.ThrowsAsync<EvidenceWorkerTestInterruptionException>(() => execution.StopAndDisposeAsync().AsTask());
+        Assert.False(disposed);
+        Assert.Equal(0, supervisor.StopRequests);
+        Assert.False(execution.OwnWorkStopped);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(61)]
+    public async Task CollectAsync_RejectsUnboundedDeadlineBeforeInvokingCollector(int seconds)
+    {
+        var execution = Create(new TestSupervisor(), new ManualTimeProvider());
+        var invoked = false;
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => execution.CollectAsync(
+            TimeSpan.FromSeconds(seconds), _ => { invoked = true; return ValueTask.FromResult(true); }).AsTask());
+        Assert.False(invoked);
+        Assert.False(execution.CollectionCompleted);
+    }
+
+    [Fact]
+    public async Task CollectAsync_RequiresStoppedOwnersAndRejectsAReplacedLeaseOrRepeatedCollection()
+    {
+        var supervisor = new TestSupervisor();
+        var execution = Create(supervisor, new ManualTimeProvider());
+        var calls = 0;
+        ValueTask<string> Collect(CancellationToken _) { calls++; return ValueTask.FromResult("manifest"); }
+        Assert.Equal(EvidenceWorkerStageOutcome.Rejected, (await execution.CollectAsync(TimeSpan.FromSeconds(1), Collect)).Outcome);
+        Assert.True(await execution.StopAndDisposeAsync());
+        supervisor.RunIdentifier = "replaced-run";
+        Assert.Equal(EvidenceWorkerStageOutcome.Rejected, (await execution.CollectAsync(TimeSpan.FromSeconds(1), Collect)).Outcome);
+        supervisor.RunIdentifier = "test-run";
+        Assert.Equal(EvidenceWorkerStageOutcome.Passed, (await execution.CollectAsync(TimeSpan.FromSeconds(1), Collect)).Outcome);
+        Assert.Equal(EvidenceWorkerStageOutcome.Rejected, (await execution.CollectAsync(TimeSpan.FromSeconds(1), Collect)).Outcome);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task CollectAsync_CancelledBeforeAdmissionCanStillCollectAFailureManifestLater()
+    {
+        var execution = Create(new TestSupervisor(), new ManualTimeProvider());
+        Assert.True(await execution.StopAndDisposeAsync());
+        using var caller = new CancellationTokenSource();
+        caller.Cancel();
+        var invoked = false;
+        var cancelled = await execution.CollectAsync(TimeSpan.FromSeconds(1), _ =>
+        {
+            invoked = true;
+            return ValueTask.FromResult("should not run");
+        }, caller.Token);
+        Assert.Equal(EvidenceWorkerStageOutcome.Cancelled, cancelled.Outcome);
+        Assert.False(invoked);
+        Assert.False(execution.CollectionCompleted);
+        var failure = await execution.CollectAsync(TimeSpan.FromSeconds(1), _ => ValueTask.FromResult("failure manifest"));
+        Assert.Equal(EvidenceWorkerStageOutcome.Passed, failure.Outcome);
+        Assert.Equal("failure manifest", failure.Value);
+        Assert.Equal(EvidenceWorkerTerminalCode.CallerCancelled, execution.TerminalCode);
+    }
+
+    [Fact]
+    public async Task CollectAsync_RejectsWhenTheWholeDeadlineCannotFitCollection()
+    {
+        var clock = new ManualTimeProvider();
+        var execution = Create(new TestSupervisor(), clock);
+        Assert.True(await execution.StopAndDisposeAsync());
+        clock.Advance(Job - TimeSpan.FromTicks(1));
+        var invoked = false;
+        var result = await execution.CollectAsync(TimeSpan.FromSeconds(1), _ =>
+        {
+            invoked = true;
+            return ValueTask.FromResult("must not run");
+        });
+        Assert.Equal(EvidenceWorkerStageOutcome.Rejected, result.Outcome);
+        Assert.False(invoked);
+        Assert.False(execution.CollectionCompleted);
+    }
+
+    [Fact]
+    public async Task TrackOwnedWork_ExpiredLeaseCannotLaunchAChild()
+    {
+        var supervisor = new TestSupervisor();
+        var execution = Create(supervisor, new ManualTimeProvider());
+        supervisor.Armed = false;
+        var invoked = false;
+        Assert.Null(execution.TrackOwnedWork(_ =>
+        {
+            invoked = true;
+            return ValueTask.CompletedTask;
+        }));
+        Assert.False(invoked);
+        await execution.RequestTerminalStopAsync(EvidenceWorkerTerminalCode.AdmissionClosed);
+        Assert.True(execution.OwnWorkStopped);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CollectAsync_DiscardsAValueWhenCollectorInvalidatesLeaseOrLatchesFailure(bool replaceLease)
+    {
+        var supervisor = new TestSupervisor();
+        var execution = Create(supervisor, new ManualTimeProvider());
+        Assert.True(await execution.StopAndDisposeAsync());
+        var collected = await execution.CollectAsync(TimeSpan.FromSeconds(1), _ =>
+        {
+            if (replaceLease) supervisor.RunIdentifier = "replacement-run";
+            else execution.LatchFailure();
+            return ValueTask.FromResult("must not be returned");
+        });
+        Assert.Equal(EvidenceWorkerStageOutcome.Failed, collected.Outcome);
+        Assert.Null(collected.Value);
+        Assert.False(execution.CollectionCompleted);
+        Assert.Equal(replaceLease ? EvidenceWorkerTerminalCode.AdmissionClosed : EvidenceWorkerTerminalCode.StageFailed, execution.TerminalCode);
+    }
+
+    [Fact]
+    public async Task CollectAsync_CollectorFaultBecomesFailedWithoutExposingAPassedValue()
+    {
+        var execution = Create(new TestSupervisor(), new ManualTimeProvider());
+        Assert.True(await execution.StopAndDisposeAsync());
+        var fault = new InvalidOperationException("safe fixture collector failure");
+        var collected = await execution.CollectAsync<string>(TimeSpan.FromSeconds(1), _ => ValueTask.FromException<string>(fault));
+        Assert.Equal(EvidenceWorkerStageOutcome.Failed, collected.Outcome);
+        Assert.Null(collected.Value);
+        Assert.Same(fault, execution.TerminalException);
+        Assert.Equal(EvidenceWorkerTerminalCode.StageFailed, execution.TerminalCode);
+        Assert.False(execution.CollectionCompleted);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CollectAsync_CancellationOrTimeoutJoinsLateCollectorAndRejectsItsValue(bool callerCancels)
+    {
+        var clock = new ManualTimeProvider();
+        var execution = Create(new TestSupervisor(), clock);
+        Assert.True(await execution.StopAndDisposeAsync());
+        using var caller = new CancellationTokenSource();
+        var baselineTimers = clock.TimerCreations;
+        var started = NewSignal();
+        var release = NewSignal();
+        var run = execution.CollectAsync(TimeSpan.FromSeconds(1), async _ =>
+        {
+            started.TrySetResult();
+            await release.Task;
+            return "late manifest";
+        }, caller.Token).AsTask();
+        await started.Task;
+        await clock.WaitForTimerCreationsAsync(baselineTimers + 1);
+        if (callerCancels) caller.Cancel();
+        else clock.Advance(TimeSpan.FromSeconds(1));
+        await clock.WaitForTimerCreationsAsync(baselineTimers + 2);
+        Assert.False(run.IsCompleted);
+        Assert.False(execution.OwnWorkStopped);
+        release.TrySetResult();
+        var result = await run;
+        Assert.Equal(callerCancels ? EvidenceWorkerStageOutcome.Cancelled : EvidenceWorkerStageOutcome.TimedOut, result.Outcome);
+        Assert.Null(result.Value);
+        Assert.Equal(callerCancels ? EvidenceWorkerTerminalCode.CallerCancelled : EvidenceWorkerTerminalCode.DeadlineExceeded, execution.TerminalCode);
+        Assert.True(execution.OwnWorkStopped);
+        Assert.False(execution.CollectionCompleted);
+    }
+
+    [Fact]
+    public async Task CollectAsync_UnsettledCollectorFailsStopAtGraceBoundary()
+    {
+        var clock = new ManualTimeProvider();
+        var execution = Create(new TestSupervisor(), clock);
+        Assert.True(await execution.StopAndDisposeAsync());
+        var baselineTimers = clock.TimerCreations;
+        var started = NewSignal();
+        var release = NewSignal();
+        var settled = NewSignal();
+        var run = execution.CollectAsync(TimeSpan.FromSeconds(1), async _ =>
+        {
+            started.TrySetResult();
+            await release.Task;
+            settled.TrySetResult();
+            return "untrusted late manifest";
+        }).AsTask();
+        await started.Task;
+        await clock.WaitForTimerCreationsAsync(baselineTimers + 1);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await clock.WaitForTimerCreationsAsync(baselineTimers + 2);
+        clock.Advance(Grace);
+        try
+        {
+            var fatal = await Assert.ThrowsAsync<EvidenceWorkerTestInterruptionException>(() => run);
+            Assert.Contains("collection did not settle", fatal.Message, StringComparison.Ordinal);
+            Assert.False(execution.CollectionCompleted);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await settled.Task;
+        }
+    }
+
     private static EvidenceWorkerExecution Create(TestSupervisor supervisor, ManualTimeProvider clock) =>
         new(supervisor, clock, Job, Cleanup, Grace, message => new EvidenceWorkerTestInterruptionException(message));
 
@@ -512,10 +953,13 @@ public sealed class EvidenceWorkerExecutionTests
         internal bool ExitAcknowledged { get; private set; }
         internal bool SawFreshStoppingToken { get; private set; }
         internal bool Armed { get; set; } = true;
-        internal Action? OnClose { get; init; }
+        internal Action? OnClose { get; set; }
         internal Action? OnExit { get; init; }
+        internal string RunIdentifier { get; set; } = "test-run";
+        internal Func<CancellationToken, ValueTask>? OnStopRequest { get; set; }
+        internal Func<CancellationToken, ValueTask>? OnWaitForExit { get; set; }
         public bool IsArmed => Armed;
-        public string RunId => "test-run";
+        public string RunId => RunIdentifier;
 
         public void CloseAdmission() => OnClose?.Invoke();
 
@@ -524,12 +968,13 @@ public sealed class EvidenceWorkerExecutionTests
             StopRequests++;
             SawFreshStoppingToken = !stoppingToken.IsCancellationRequested;
             StopRequested.TrySetResult();
-            return ValueTask.CompletedTask;
+            return OnStopRequest?.Invoke(stoppingToken) ?? ValueTask.CompletedTask;
         }
 
         public ValueTask WaitForOwnedExitAsync(CancellationToken stoppingToken)
         {
             OnExit?.Invoke();
+            if (OnWaitForExit is not null) return OnWaitForExit(stoppingToken);
             if (HoldExitAcknowledgement)
             {
                 return ValueTask.FromException(new InvalidOperationException("Exit acknowledgement was not received."));
@@ -550,6 +995,7 @@ public sealed class EvidenceWorkerExecutionTests
         private int _createdTimers;
 
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        internal int TimerCreations { get { lock (_gate) return _createdTimers; } }
         public override DateTimeOffset GetUtcNow() { lock (_gate) return _utcNow; }
         public override long GetTimestamp() { lock (_gate) return _timestamp; }
 

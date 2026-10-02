@@ -60,6 +60,79 @@ RUN_ID_PATTERN = re.compile(r"^([0-9]+)/([0-9]+)$")
 SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{40,64}$")
 RUNTIME_WORKSPACE_PARENT = Path("/run")
 RUNTIME_WORKSPACE_PREFIX = "appsurface-evidencehost-runtime-"
+PRIVATE_WORKER_JOURNAL_NAME = "launcher-worker-journal.log"
+PRIVATE_WORKER_JOURNAL_ARCHIVE = "worker-journal.tar"
+MAX_PRIVATE_WORKER_JOURNAL_BYTES = 4096
+MAX_PRIVATE_WORKER_JOURNAL_ARCHIVE_BYTES = 10240
+PRIVATE_WORKER_JOURNAL_ROOT_SCRIPT = '''import io,os,re,stat,sys,tarfile
+def identity(info):
+    return (info.st_dev,info.st_ino,info.st_uid,info.st_gid,info.st_mode,info.st_nlink,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+def archive_from_directory(directory_fd,*,expected_owner_uid=0,expected_owner_gid=0):
+    # Owner overrides are portable test seams; the production entry always uses root.
+    parent=os.fstat(directory_fd)
+    if not stat.S_ISDIR(parent.st_mode) or parent.st_uid!=expected_owner_uid or parent.st_gid!=expected_owner_gid or stat.S_IMODE(parent.st_mode)!=0o755:
+        raise ValueError()
+    name="launcher-worker-journal.log"
+    fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC|os.O_NONBLOCK,dir_fd=directory_fd)
+    try:
+        before=os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_uid!=expected_owner_uid or before.st_gid!=expected_owner_gid or stat.S_IMODE(before.st_mode)!=0o600 or before.st_nlink!=1 or not 0<=before.st_size<=4096:
+            raise ValueError()
+        if identity(before)!=identity(os.stat(name,dir_fd=directory_fd,follow_symlinks=False)):
+            raise ValueError()
+        data=bytearray()
+        while len(data)<before.st_size:
+            part=os.read(fd,before.st_size-len(data))
+            if not part:
+                raise ValueError()
+            data.extend(part)
+        if identity(before)!=identity(os.fstat(fd)) or identity(before)!=identity(os.stat(name,dir_fd=directory_fd,follow_symlinks=False)):
+            raise ValueError()
+        current=os.fstat(directory_fd)
+        if (parent.st_dev,parent.st_ino,parent.st_uid,parent.st_gid,parent.st_mode)!=(current.st_dev,current.st_ino,current.st_uid,current.st_gid,current.st_mode):
+            raise ValueError()
+        output=io.BytesIO()
+        with tarfile.open(fileobj=output,mode="w",format=tarfile.USTAR_FORMAT) as archive:
+            member=tarfile.TarInfo(name)
+            member.mode=0o600
+            member.uid=member.gid=0
+            member.size=len(data)
+            archive.addfile(member,io.BytesIO(data))
+        result=output.getvalue()
+        if len(result)>10240:
+            raise ValueError()
+        return result
+    finally:
+        os.close(fd)
+def main():
+    if os.geteuid()!=0 or len(sys.argv)!=4 or not re.fullmatch(r"[0-9a-f]{32}",sys.argv[1]) or any(not re.fullmatch(r"[0-9]{1,20}",value) for value in sys.argv[2:]):
+        raise ValueError()
+    parent=os.open("/run",os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
+    child=-1
+    try:
+        info=os.fstat(parent)
+        if info.st_uid!=0 or info.st_gid!=0 or info.st_mode&0o022:
+            raise ValueError()
+        name="appsurface-evidencehost-runtime-"+sys.argv[1]
+        child=os.open(name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=parent)
+        info=os.fstat(child)
+        if (info.st_dev,info.st_ino)!=(int(sys.argv[2]),int(sys.argv[3])):
+            raise ValueError()
+        result=archive_from_directory(child)
+        named=os.stat(name,dir_fd=parent,follow_symlinks=False)
+        if (info.st_dev,info.st_ino,info.st_uid,info.st_gid,info.st_mode)!=(named.st_dev,named.st_ino,named.st_uid,named.st_gid,named.st_mode):
+            raise ValueError()
+        sys.stdout.buffer.write(result)
+    finally:
+        if child>=0:
+            os.close(child)
+        os.close(parent)
+if __name__=="__main__":
+    try:
+        main()
+    except Exception:
+        sys.exit(1)
+'''
 RUNTIME_WORKSPACE_ROOT_SCRIPT = '''import os,re,stat,sys
 mode,token,uid,gid=sys.argv[1:5]
 uid,gid=int(uid),int(gid)
@@ -780,6 +853,97 @@ def protect_launcher_workspace(work_root: Path) -> None:
         fail("The launcher workspace parent protection did not take effect.")
 
 
+def _valid_private_journal_archive(data: bytes) -> bool:
+    """Accept one canonical USTAR member; content remains private hostile bytes."""
+    if not isinstance(data, bytes) or len(data) > MAX_PRIVATE_WORKER_JOURNAL_ARCHIVE_BYTES:
+        return False
+    try:
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as archive:
+            members = archive.getmembers()
+            if len(members) != 1:
+                return False
+            member = members[0]
+            if (member.name != PRIVATE_WORKER_JOURNAL_NAME or member.type != tarfile.REGTYPE
+                    or member.mode != 0o600 or member.uid != 0 or member.gid != 0
+                    or not 0 <= member.size <= MAX_PRIVATE_WORKER_JOURNAL_BYTES
+                    or member.linkname or member.pax_headers or member.uname or member.gname or member.mtime != 0):
+                return False
+            source = archive.extractfile(member)
+            if source is None:
+                return False
+            with source:
+                content = source.read(MAX_PRIVATE_WORKER_JOURNAL_BYTES + 1)
+            if len(content) != member.size:
+                return False
+        canonical = io.BytesIO()
+        with tarfile.open(fileobj=canonical, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+            expected = tarfile.TarInfo(PRIVATE_WORKER_JOURNAL_NAME)
+            expected.mode, expected.uid, expected.gid, expected.size = 0o600, 0, 0, len(content)
+            archive.addfile(expected, io.BytesIO(content))
+        return canonical.getvalue() == data
+    except (OSError, ValueError, tarfile.TarError):
+        return False
+
+
+def retain_private_worker_journal(work_root: Path, proof_directory: Path) -> bool:
+    """Optionally retain one root-validated journal archive without rendering any bytes.
+
+    Root receives only the UUID and pinned device/inode of this fresh /run workspace.
+    This private diagnostic has no success, provenance or admission authority.
+    Every missing/invalid/copy failure returns false without changing the launch failure.
+    """
+    parent_fd = private_fd = archive_fd = -1
+    try:
+        if not runtime_workspace_path(work_root):
+            return False
+        info = work_root.lstat()
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+                or stat.S_IMODE(info.st_mode) != 0o755):
+            return False
+        code, data, _stderr = root_command(
+            ["/usr/bin/python3", "-I", "-c", PRIVATE_WORKER_JOURNAL_ROOT_SCRIPT,
+             work_root.name[len(RUNTIME_WORKSPACE_PREFIX):], str(info.st_dev), str(info.st_ino)],
+            cwd=ROOT, timeout=10, label="retain private worker journal", binary_output=True)
+        if code != 0 or not _valid_private_journal_archive(data):
+            return False
+        parent_fd = os.open(proof_directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        parent = os.fstat(parent_fd)
+        if parent.st_uid != os.geteuid() or parent.st_gid != os.getegid() or parent.st_mode & 0o022:
+            return False
+        os.mkdir("private-diagnostics", 0o700, dir_fd=parent_fd)
+        private_fd = os.open("private-diagnostics", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                             dir_fd=parent_fd)
+        private = os.fstat(private_fd)
+        if (private.st_uid != os.geteuid() or private.st_gid != os.getegid()
+                or stat.S_IMODE(private.st_mode) != 0o700):
+            return False
+        archive_fd = os.open(PRIVATE_WORKER_JOURNAL_ARCHIVE,
+                             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                             0o600, dir_fd=private_fd)
+        os.fchmod(archive_fd, 0o600)
+        with os.fdopen(archive_fd, "wb", closefd=False) as output:
+            output.write(data)
+            output.flush()
+        final = os.fstat(archive_fd)
+        named = os.stat(PRIVATE_WORKER_JOURNAL_ARCHIVE, dir_fd=private_fd, follow_symlinks=False)
+        named_private = os.stat("private-diagnostics", dir_fd=parent_fd, follow_symlinks=False)
+        named_parent = proof_directory.lstat()
+        return (stat.S_ISREG(final.st_mode) and final.st_uid == os.geteuid() and final.st_gid == os.getegid()
+                and stat.S_IMODE(final.st_mode) == 0o600 and final.st_nlink == 1 and final.st_size == len(data)
+                and (final.st_dev, final.st_ino) == (named.st_dev, named.st_ino)
+                and (private.st_dev, private.st_ino) == (named_private.st_dev, named_private.st_ino)
+                and (parent.st_dev, parent.st_ino) == (named_parent.st_dev, named_parent.st_ino))
+    except (ProofFailure, OSError, ValueError, TypeError, subprocess.SubprocessError):
+        return False
+    finally:
+        for fd in (archive_fd, private_fd, parent_fd):
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+
 def run_observation_launcher(command: list[str], work_root: Path, proof_directory: Path) -> tuple[bytes, bytes]:
     """On failure publish only a validated host-category receipt, never launcher output tails.
 
@@ -811,6 +975,7 @@ def run_observation_launcher(command: list[str], work_root: Path, proof_director
                 pass
     except ProofFailure:
         pass
+    retain_private_worker_journal(work_root, proof_directory)
     if safe_record is None:
         fail(f"Production Observation launcher exited {code}; safe diagnostic unavailable.")
     encoded = json.dumps(safe_record, sort_keys=True, separators=(",", ":")) + "\n"

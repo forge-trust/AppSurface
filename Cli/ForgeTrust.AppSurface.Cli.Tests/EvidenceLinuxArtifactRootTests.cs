@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using ForgeTrust.AppSurface.Evidence.Contracts;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -167,6 +168,163 @@ public sealed class EvidenceLinuxArtifactRootTests
             var identity = EvidenceLinuxArtifactRoot.InspectDirectoryIdentity(parent);
             foreach (var name in new[] { "", ".", "..", "a/b", "a\\b", "bad\nname" })
                 Assert.Throws<ArgumentException>(() => EvidenceLinuxArtifactRoot.Allocate(parent, identity, name, identity.Uid, identity.Gid));
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    [Fact]
+    public void Unbounded_or_relative_parent_paths_are_rejected_before_platform_or_allocation_work()
+    {
+        foreach (var path in new[] { null, " ", "relative-parent", "/" + new string('a', 4097) })
+        {
+            Assert.ThrowsAny<ArgumentException>(() => EvidenceLinuxArtifactRoot.Allocate(path!, default, "run", 1, 1));
+            Assert.ThrowsAny<ArgumentException>(() => EvidenceLinuxArtifactRoot.InspectDirectoryIdentity(path!));
+        }
+    }
+
+    [Fact]
+    public void Allocation_requires_exact_parent_owner_group_and_mode_without_creating_a_slot()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Throws<PlatformNotSupportedException>(() => EvidenceLinuxArtifactRoot.Allocate("/tmp", default, "slot", 0, 0));
+            return;
+        }
+
+        var parent = NewPrivateDirectory();
+        try
+        {
+            var identity = EvidenceLinuxArtifactRoot.InspectDirectoryIdentity(parent);
+            Assert.Throws<IOException>(() => EvidenceLinuxArtifactRoot.Allocate(parent, identity, "wrong-owner", identity.Uid ^ 1, identity.Gid));
+            Assert.Throws<IOException>(() => EvidenceLinuxArtifactRoot.Allocate(parent, identity, "wrong-group", identity.Uid, identity.Gid ^ 1));
+            File.SetUnixFileMode(parent, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute);
+            Assert.Throws<IOException>(() => EvidenceLinuxArtifactRoot.Allocate(parent, identity, "shared-parent", identity.Uid, identity.Gid));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(parent));
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    [Fact]
+    public async Task Verification_requires_retained_bytes_length_and_a_well_formed_digest()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Throws<PlatformNotSupportedException>(() => EvidenceLinuxArtifactRoot.Allocate("/tmp", default, "slot", 0, 0));
+            return;
+        }
+
+        var parent = NewPrivateDirectory();
+        try
+        {
+            var identity = EvidenceLinuxArtifactRoot.InspectDirectoryIdentity(parent);
+            await using var root = EvidenceLinuxArtifactRoot.Allocate(parent, identity, "run", identity.Uid, identity.Gid);
+            var payload = "retained"u8.ToArray();
+            var hash = Convert.ToHexString(SHA256.HashData(payload));
+            await root.WriteAsync("report.bin", payload, default);
+            foreach (var length in new[] { -1L, 256L * 1024 * 1024 + 1 })
+                await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => root.VerifyAsync("report.bin", length, hash, default).AsTask());
+            foreach (var invalid in new[] { null, "", new string('g', 64), new string('a', 63), new string('a', 65) })
+                await Assert.ThrowsAsync<ArgumentException>(() => root.VerifyAsync("report.bin", payload.Length, invalid!, default).AsTask());
+            await Assert.ThrowsAsync<IOException>(() => root.VerifyAsync("unwritten.bin", payload.Length, hash, default).AsTask());
+            await Assert.ThrowsAsync<IOException>(() => root.VerifyAsync("report.bin", payload.Length + 1, hash, default).AsTask());
+            await root.VerifyAsync("report.bin", payload.Length, hash.ToLowerInvariant(), default);
+            await root.WriteAsync("empty.bin", ReadOnlyMemory<byte>.Empty, default);
+            await root.VerifyAsync("empty.bin", 0, Convert.ToHexString(SHA256.HashData(Array.Empty<byte>())), default);
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Replacing_a_retained_root_or_parent_prevents_further_writes_and_verification(bool replaceParent)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Throws<PlatformNotSupportedException>(() => EvidenceLinuxArtifactRoot.Allocate("/tmp", default, "slot", 0, 0));
+            return;
+        }
+
+        var parent = NewPrivateDirectory();
+        var original = parent + "-retained";
+        try
+        {
+            var identity = EvidenceLinuxArtifactRoot.InspectDirectoryIdentity(parent);
+            await using var root = EvidenceLinuxArtifactRoot.Allocate(parent, identity, "run", identity.Uid, identity.Gid);
+            var payload = "original bytes"u8.ToArray();
+            await root.WriteAsync("report.bin", payload, default);
+            var replaced = replaceParent ? parent : TestPathUtils.PathUnder(parent, "run");
+            original = replaced + "-retained";
+            Directory.Move(replaced, original);
+            Directory.CreateDirectory(replaced);
+            File.SetUnixFileMode(replaced, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            await Assert.ThrowsAsync<IOException>(() => root.WriteAsync("late.bin", payload, default).AsTask());
+            await Assert.ThrowsAsync<IOException>(() => root.VerifyAsync("report.bin", payload.Length, Convert.ToHexString(SHA256.HashData(payload)), default).AsTask());
+            Assert.Empty(Directory.EnumerateFileSystemEntries(replaced));
+            var retainedReport = TestPathUtils.PathUnder(original, replaceParent ? "run/report.bin" : "report.bin");
+            Assert.Equal(payload, File.ReadAllBytes(retainedReport));
+        }
+        finally
+        {
+            if (Directory.Exists(parent)) Directory.Delete(parent, recursive: true);
+            if (Directory.Exists(original)) Directory.Delete(original, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Cancellation_and_disposal_cannot_start_new_artifact_work()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Throws<PlatformNotSupportedException>(() => EvidenceLinuxArtifactRoot.Allocate("/tmp", default, "slot", 0, 0));
+            return;
+        }
+
+        var parent = NewPrivateDirectory();
+        try
+        {
+            var identity = EvidenceLinuxArtifactRoot.InspectDirectoryIdentity(parent);
+            await using var root = EvidenceLinuxArtifactRoot.Allocate(parent, identity, "run", identity.Uid, identity.Gid);
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+            var payload = "neighbor"u8.ToArray();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => root.WriteAsync("cancelled.bin", payload, cancellation.Token).AsTask());
+            Assert.Empty(Directory.EnumerateFileSystemEntries(TestPathUtils.PathUnder(parent, "run")));
+            await root.WriteAsync("allowed.bin", payload, default);
+            var hash = Convert.ToHexString(SHA256.HashData(payload));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => root.VerifyAsync("allowed.bin", payload.Length, hash, cancellation.Token).AsTask());
+            await root.VerifyAsync("allowed.bin", payload.Length, hash, default);
+            await root.DisposeAsync();
+            await root.DisposeAsync();
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => root.WriteAsync("late.bin", payload, default).AsTask());
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => root.VerifyAsync("allowed.bin", payload.Length, hash, default).AsTask());
+            Assert.False(File.Exists(TestPathUtils.PathUnder(parent, "run", "late.bin")));
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    [Fact]
+    public async Task Unsafe_nested_directory_mode_rejects_writes_without_leaking_a_descriptor()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Throws<PlatformNotSupportedException>(() => EvidenceLinuxArtifactRoot.Allocate("/tmp", default, "slot", 0, 0));
+            return;
+        }
+
+        var parent = NewPrivateDirectory();
+        try
+        {
+            var identity = EvidenceLinuxArtifactRoot.InspectDirectoryIdentity(parent);
+            await using var root = EvidenceLinuxArtifactRoot.Allocate(parent, identity, "run", identity.Uid, identity.Gid);
+            var nested = TestPathUtils.PathUnder(parent, "run", "nested");
+            Directory.CreateDirectory(nested);
+            File.SetUnixFileMode(nested, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead);
+            await Assert.ThrowsAsync<IOException>(() => root.WriteAsync("nested/rejected.bin", "payload"u8.ToArray(), default).AsTask());
+            Assert.Empty(Directory.EnumerateFileSystemEntries(nested));
+            Assert.DoesNotContain(Directory.EnumerateFileSystemEntries("/proc/self/fd"), descriptor => NamesDirectory(descriptor, nested));
+            File.SetUnixFileMode(nested, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            await root.WriteAsync("nested/allowed.bin", "payload"u8.ToArray(), default);
         }
         finally { Directory.Delete(parent, recursive: true); }
     }

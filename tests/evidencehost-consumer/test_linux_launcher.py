@@ -13,6 +13,7 @@ import time
 import unittest
 from argparse import Namespace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("evidencehost_linux_launcher", Path(__file__).parents[2] / "scripts" / "evidencehost-linux-launcher.py")
@@ -95,6 +96,158 @@ def broker_request(broker, request):
 
 
 class PrivateFailureDiagnosticTests(unittest.TestCase):
+    def test_worker_journal_reader_binds_unit_and_caps_real_pipe_bytes(self):
+        class JournalProcess:
+            def __init__(self, data, code):
+                read_fd, write_fd = os.pipe()
+                self.stdout = os.fdopen(read_fd, "rb")
+                os.write(write_fd, data)
+                os.close(write_fd)
+                self.code = code
+                self.killed = False
+
+            def wait(self, timeout):
+                self.timeout = timeout
+                return self.code
+
+            def poll(self):
+                return self.code
+
+            def kill(self):
+                self.killed = True
+
+        unit = "evidencehost-012345abcdef-worker.service"
+        for data, code, expected in ((b"ASEVD402: secret-779\n", 0, "collected"),
+                                     (b"", 0, "missing"), (b"", 1, "unavailable"),
+                                     (b"x" * 4097, 0, "truncated")):
+            with self.subTest(expected=expected):
+                process = JournalProcess(data, code)
+                with patch.object(launcher.subprocess, "Popen", return_value=process) as spawn:
+                    state, received = launcher._read_worker_journal(unit)
+                self.assertEqual(state, expected)
+                self.assertEqual(received, data[:4096])
+                self.assertLessEqual(process.timeout, 5)
+                self.assertEqual(spawn.call_args.args[0], ["/usr/bin/journalctl", "--unit=" + unit,
+                    "--no-pager", "--output=cat", "--quiet", "--lines=32"])
+                self.assertEqual(spawn.call_args.kwargs["stderr"], launcher.subprocess.DEVNULL)
+                self.assertTrue(process.stdout.closed)
+        with patch.object(launcher.subprocess, "Popen") as spawn:
+            self.assertEqual(launcher._read_worker_journal("other-secret-779.service"), ("unavailable", b""))
+            spawn.assert_not_called()
+        with patch.object(launcher.subprocess, "Popen", side_effect=OSError(2, "secret-779")):
+            self.assertEqual(launcher._read_worker_journal(unit), ("unavailable", b""))
+
+    def test_worker_journal_read_error_and_deadline_reap_without_exception_echo(self):
+        for read_error in (False, True):
+            with self.subTest(read_error=read_error):
+                read_fd, write_fd = os.pipe()
+                os.write(write_fd, b"secret-779")
+                os.close(write_fd)
+                with os.fdopen(read_fd, "rb") as stream, patch.object(launcher.subprocess, "Popen") as spawn:
+                    process = spawn.return_value
+                    process.stdout = stream
+                    process.poll.return_value = None
+                    process.wait.return_value = 0
+                    with patch.object(launcher.selectors, "DefaultSelector") as selector, \
+                         patch.object(launcher.os, "read", side_effect=OSError(5, "secret-779")):
+                        selector.return_value.__enter__.return_value.select.return_value = [True] if read_error else []
+                        state, data = launcher._read_worker_journal("evidencehost-012345abcdef-worker.service")
+                    self.assertEqual((state, data), ("read-error" if read_error else "unavailable", b""))
+                    process.kill.assert_called_once_with()
+                    self.assertLessEqual(process.wait.call_args.kwargs["timeout"], 5)
+
+    def test_protocol_failure_private_journal_canary_and_locked_checkpoints(self):
+        with tempfile.TemporaryDirectory() as directory:
+            broker, _, _ = artifact_broker(directory)
+            broker.unit_prefix = "evidencehost-012345abcdef"
+            broker.ready_seen = broker.work_closed = True
+            broker.active_handlers = 2
+            broker.active_runs = 1
+            parent = Path(directory)
+            fd = launcher.open_diagnostic_directory(parent, expected_owner_uid=os.geteuid())
+            error = launcher.worker_exit_failure("worker-protocol-incomplete", {"ExecMainCode": "1", "ExecMainStatus": "1"})
+            raw = b"secret-779 ASEVD402: control\nASEVD999: unknown\nXASEVD420: fake\nASEVD402: duplicate\n"
+            try:
+                with patch.object(launcher.os, "fstat", return_value=SimpleNamespace(st_mode=stat.S_IFDIR | 0o700, st_uid=0)), \
+                     patch.object(launcher, "_read_worker_journal", return_value=("collected", raw)) as query:
+                    launcher.capture_worker_protocol_failure(error, broker, fd)
+                query.assert_called_once_with("evidencehost-012345abcdef-worker.service")
+                record = launcher.failure_diagnostic(error)
+                self.assertEqual(launcher.validate_failure_diagnostic(record), record)
+                self.assertEqual(record["worker_journal_codes"], ["ASEVD402"])
+                self.assertTrue(record["worker_journal_written"])
+                self.assertEqual(record["worker_journal_bytes"], len(raw))
+                self.assertEqual((record["broker_ready_seen"], record["broker_wait_completed"], record["broker_exited"],
+                                  record["broker_work_closed"], record["broker_active_handlers"], record["broker_active_runs"]),
+                                 (True, False, False, True, 2, 1))
+                self.assertEqual((record["worker_main_code"], record["worker_main_status"]), (1, 1))
+                self.assertNotIn("secret-779", json.dumps(record))
+                private = parent / launcher.WORKER_JOURNAL_FILE
+                self.assertEqual(private.read_bytes(), raw)
+                self.assertEqual(stat.S_IMODE(private.stat().st_mode), 0o600)
+                launcher.write_failure_diagnostic(fd, error)
+                self.assertNotIn(b"secret-779", (parent / launcher.FAILURE_DIAGNOSTIC_FILE).read_bytes())
+            finally:
+                os.close(fd)
+                broker.active_handlers = broker.active_runs = 0
+                broker.close_artifact_handles()
+
+    def test_protocol_capture_errors_and_exclusive_private_file_preserve_original_failure(self):
+        for condition in ("symlink", "occupied", "oversize", "read-error", "missing", "unprotected"):
+            with self.subTest(condition=condition), tempfile.TemporaryDirectory() as directory:
+                broker, _, _ = artifact_broker(directory)
+                broker.unit_prefix = "evidencehost-012345abcdef"
+                parent = Path(directory)
+                target = parent / "target"
+                target.write_bytes(b"preserved")
+                destination = parent / launcher.WORKER_JOURNAL_FILE
+                if condition == "symlink":
+                    destination.symlink_to(target)
+                elif condition == "occupied":
+                    destination.write_bytes(b"preserved")
+                fd = launcher.open_diagnostic_directory(parent, expected_owner_uid=os.geteuid())
+                error = launcher.worker_exit_failure("worker-protocol-incomplete", {"ExecMainCode": "1", "ExecMainStatus": "1"})
+                try:
+                    result = ("missing", b"") if condition == "missing" else ("collected", b"x" * (4097 if condition == "oversize" else 4))
+                    with patch.object(launcher.os, "fstat", return_value=SimpleNamespace(
+                            st_mode=stat.S_IFDIR | (0o777 if condition == "unprotected" else 0o700), st_uid=0)), \
+                         patch.object(launcher, "_read_worker_journal", return_value=result,
+                                      side_effect=OSError(5, "secret-779") if condition == "read-error" else None) as query:
+                        launcher.capture_worker_protocol_failure(error, broker, fd)
+                    record = launcher.failure_diagnostic(error)
+                    self.assertEqual(launcher.validate_failure_diagnostic(record), record)
+                    self.assertEqual((record["cause"], record["worker_main_status"]), ("worker-protocol-incomplete", 1))
+                    self.assertNotIn("secret-779", json.dumps(record))
+                    self.assertEqual(record["worker_journal_written"], condition == "missing")
+                    if condition in ("symlink", "occupied"):
+                        self.assertEqual(destination.read_bytes(), b"preserved")
+                    if condition == "unprotected":
+                        query.assert_not_called()
+                    self.assertEqual(target.read_bytes(), b"preserved")
+                finally:
+                    os.close(fd)
+                    broker.close_artifact_handles()
+
+    def test_protocol_diagnostic_schema_has_exact_types_bounds_and_no_default_journal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            broker, _, _ = artifact_broker(directory)
+            error = launcher.worker_exit_failure("worker-protocol-incomplete", {})
+            try:
+                with patch.object(launcher, "_read_worker_journal") as query:
+                    launcher.capture_worker_protocol_failure(error, broker, None)
+                query.assert_not_called()
+                good = launcher.failure_diagnostic(error)
+                self.assertNotIn("worker_journal_state", good)
+                for extra in ({"broker_ready_seen": 1}, {"broker_active_handlers": True},
+                              {"broker_active_handlers": 4097}, {"broker_active_runs": 2},
+                              {"worker_journal_bytes": 4097}, {"worker_journal_written": 1},
+                              {"worker_journal_state": ["secret-779"]}, {"worker_journal_codes": ["ASEVD999"]},
+                              {"worker_journal_codes": [["secret-779"]]}, {"cause": "worker-unsuccessful"}):
+                    with self.subTest(extra=extra), self.assertRaises(launcher.LauncherError):
+                        launcher.validate_failure_diagnostic({**good, **extra})
+            finally:
+                broker.close_artifact_handles()
+
     def test_worker_start_success_does_not_query_status(self):
         unit = "evidencehost-012345abcdef-worker.service"
         argv = ["/usr/bin/systemd-run", "--unit=" + unit, "secret-779"]
@@ -805,6 +958,9 @@ class OutputBudgetTests(unittest.TestCase):
                 expected_stderr = len(b"err" * (launcher.MAX_PREFIX // 3 + 7))
                 self.assertEqual(result["received_bytes"], expected_stdout + expected_stderr)
                 self.assertEqual(result["exit_code"], 17)
+                self.assertEqual(broker.subject_commands_started, 1)
+                self.assertEqual(broker.command_output_receipts,
+                                 [(expected_stdout + expected_stderr, expected_stdout, expected_stderr)])
                 self.assertTrue(result["output_truncated"])
                 self.assertEqual(len(result["stdout"].encode()), launcher.MAX_PREFIX)
                 self.assertEqual(len(result["stderr"].encode()), launcher.MAX_PREFIX)
@@ -1067,6 +1223,312 @@ class ArtifactBrokerTests(unittest.TestCase):
                 self.assertLess(time.monotonic() - started, 0.5)
             finally:
                 broker.active_runs = 0
+                broker.close_artifact_handles()
+
+
+class RootCompletionTests(unittest.TestCase):
+    """Real retained directory handles; ownership/protocol inputs are explicitly fixture state."""
+    def completion_fixture(self, root):
+        broker, _, _ = artifact_broker(root)
+        parent = Path(root) / "final-parent"
+        output = parent / "result"
+        output.mkdir(parents=True, mode=0o700)
+        os.chmod(parent, 0o700)
+        os.chmod(output, 0o700)
+        broker.descriptor = {"cgroup": "/system.slice/fixture-worker.service",
+                             "output_parent_identity": launcher.output_parent_identity(parent),
+                             "run_id": "100/1", "paths": ["declared.cs"], "proof_digest": ""}
+        broker.ready_seen = broker.exited = broker.wait_completed = broker.work_closed = True
+        broker.subject_commands_started = 1
+        broker.command_output_receipts = [(7, 4, 3)]
+        broker.output_quota.count(7)
+        properties = {"Result": "success", "User": "fixture-worker", "KillMode": "control-group",
+                      "ExecMainCode": "1", "ExecMainStatus": "0", "ControlGroup": broker.descriptor["cgroup"]}
+        return broker, output, properties
+
+    def complete(self, broker, output, properties):
+        with patch.object(broker, "_group_empty", return_value=True), \
+                patch.object(broker, "_all_subject_groups_empty", return_value=True):
+            return launcher._completion_after_owned_exit(broker, output, "fixture-worker", properties)
+
+    def test_retains_original_output_and_defensively_copies_root_facts_after_path_replacement(self):
+        with tempfile.TemporaryDirectory() as root:
+            broker, output, properties = self.completion_fixture(root)
+            try:
+                (output / "declared.bin").write_bytes(b"original")
+                with self.complete(broker, output, properties) as completion:
+                    identity = completion.output_identity
+                    facts = completion.descriptor
+                    facts["paths"].append("forged.cs")
+                    broker.descriptor["paths"].append("later.cs")
+                    identity["inode"] = 0
+                    self.assertEqual(completion.descriptor["paths"], ["declared.cs"])
+                    self.assertNotEqual(completion.output_identity["inode"], 0)
+                    output.rename(output.with_name("retained"))
+                    output.mkdir(mode=0o700)
+                    (output / "declared.bin").write_bytes(b"replacement")
+                    fd = completion.duplicate_output_directory()
+                    parent_fd = completion.duplicate_output_parent()
+                    try:
+                        artifact = os.open("declared.bin", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
+                        try:
+                            self.assertEqual(os.read(artifact, 32), b"original")
+                        finally:
+                            os.close(artifact)
+                        self.assertEqual(os.fstat(fd).st_ino, completion.output_identity["inode"])
+                        self.assertEqual(os.fstat(parent_fd).st_ino, completion.output_parent_identity["inode"])
+                        self.assertEqual(completion.subject_output_receipts, ((7, 4, 3),))
+                    finally:
+                        os.close(fd)
+                        os.close(parent_fd)
+                completion.close()
+                with self.assertRaises(launcher.LauncherError):
+                    completion.duplicate_output_directory()
+                with self.assertRaises(launcher.LauncherError):
+                    completion.duplicate_output_parent()
+                with self.assertRaises(launcher.LauncherError):
+                    completion.__enter__()
+            finally:
+                broker.close_artifact_handles()
+
+    def test_requires_every_protocol_ack_and_no_active_handler_write_or_failed_pump(self):
+        values = (("ready_seen", False), ("exited", False), ("wait_completed", False),
+                  ("work_closed", False), ("active_runs", 1), ("active_handlers", 1),
+                  ("active_artifact_operations", 1), ("subject_output_failed", True),
+                  ("deadline", 0))
+        for name, value in values:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as root:
+                broker, output, properties = self.completion_fixture(root)
+                try:
+                    setattr(broker, name, value)
+                    with self.assertRaisesRegex(launcher.LauncherError, "completion-ownership-unconfirmed"):
+                        self.complete(broker, output, properties)
+                finally:
+                    broker.active_runs = broker.active_handlers = broker.active_artifact_operations = 0
+                    broker.close_artifact_handles()
+
+    def test_requires_each_started_command_eofs_exact_shared_bytes_and_no_quota_overflow(self):
+        cases = (((7, 4, 2),), ((6, 3, 3),), (), ((7, 4, 3), (0, 0, 0)), ((7, -1, 8),))
+        for receipts in cases:
+            with self.subTest(receipts=receipts), tempfile.TemporaryDirectory() as root:
+                broker, output, properties = self.completion_fixture(root)
+                try:
+                    broker.command_output_receipts = list(receipts)
+                    with self.assertRaisesRegex(launcher.LauncherError, "completion-output-unconfirmed"):
+                        self.complete(broker, output, properties)
+                finally:
+                    broker.close_artifact_handles()
+        with tempfile.TemporaryDirectory() as root:
+            broker, output, properties = self.completion_fixture(root)
+            try:
+                broker.output_quota.exceeded.set()
+                with self.assertRaisesRegex(launcher.LauncherError, "completion-output-unconfirmed"):
+                    self.complete(broker, output, properties)
+            finally:
+                broker.close_artifact_handles()
+
+    def test_worker_nonzero_exit_or_active_descendant_rejects_completion(self):
+        cases = ({"Result": "exit-code"}, {"User": "other"}, {"KillMode": "process"},
+                 {"ExecMainCode": "0"}, {"ExecMainStatus": "1"})
+        for changed in cases:
+            with self.subTest(changed=changed), tempfile.TemporaryDirectory() as root:
+                broker, output, properties = self.completion_fixture(root)
+                try:
+                    with self.assertRaisesRegex(launcher.LauncherError, "completion-ownership-unconfirmed"):
+                        self.complete(broker, output, {**properties, **changed})
+                finally:
+                    broker.close_artifact_handles()
+        for method in ("_group_empty", "_all_subject_groups_empty"):
+            with self.subTest(method=method), tempfile.TemporaryDirectory() as root:
+                broker, output, properties = self.completion_fixture(root)
+                try:
+                    with patch.object(broker, "_group_empty", return_value=method != "_group_empty"), \
+                            patch.object(broker, "_all_subject_groups_empty", return_value=method != "_all_subject_groups_empty"):
+                        with self.assertRaisesRegex(launcher.LauncherError, "completion-ownership-unconfirmed"):
+                            launcher._completion_after_owned_exit(broker, output, "fixture-worker", properties)
+                finally:
+                    broker.close_artifact_handles()
+
+    def test_rejects_parent_substitution_output_symlink_and_nonprivate_mode(self):
+        for attack in ("parent", "symlink", "mode"):
+            with self.subTest(attack=attack), tempfile.TemporaryDirectory() as root:
+                broker, output, properties = self.completion_fixture(root)
+                try:
+                    if attack == "parent":
+                        output.parent.rename(output.parent.with_name("old-parent"))
+                        output.mkdir(parents=True, mode=0o700)
+                        os.chmod(output.parent, 0o700)
+                    elif attack == "symlink":
+                        output.rename(output.with_name("old-output"))
+                        output.symlink_to(output.with_name("old-output"), target_is_directory=True)
+                    else:
+                        os.chmod(output, 0o750)
+                    with self.assertRaises((launcher.LauncherError, OSError)):
+                        self.complete(broker, output, properties)
+                finally:
+                    broker.close_artifact_handles()
+
+    def test_path_compatible_launch_closes_retained_completion_and_propagates_failures(self):
+        with tempfile.TemporaryDirectory() as root:
+            broker, output, properties = self.completion_fixture(root)
+            try:
+                completion = self.complete(broker, output, properties)
+                with patch.object(launcher, "launch_with_completion", return_value=completion):
+                    self.assertEqual(launcher.launch(Namespace()), output)
+                with self.assertRaises(launcher.LauncherError):
+                    completion.duplicate_output_directory()
+                with patch.object(launcher, "launch_with_completion", side_effect=launcher.LauncherError("worker-unsuccessful")):
+                    with self.assertRaisesRegex(launcher.LauncherError, "worker-unsuccessful"):
+                        launcher.launch(Namespace())
+            finally:
+                broker.close_artifact_handles()
+
+    def test_pretransfer_cleanup_error_closes_both_real_descriptors_and_quarantines_accounts(self):
+        for stage in ("listener", "broker", "scratch"):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as root:
+                broker, output, properties = self.completion_fixture(root)
+                completion = self.complete(broker, output, properties)
+                identities = (completion.output_identity, completion.output_parent_identity)
+                closed = []
+                real_close = os.close
+                def record_close(fd):
+                    identity = launcher._identity_from_stat(os.fstat(fd))
+                    if identity in identities:
+                        closed.append(fd)
+                    real_close(fd)
+                error = OSError(5, "cleanup-canary")
+                listener = SimpleNamespace(close=lambda: None)
+                control, scratch = Path(root) / "control", Path(root) / "scratch"
+                control.mkdir()
+                scratch.mkdir()
+                try:
+                    with patch.object(launcher.os, "close", side_effect=record_close), \
+                         patch.object(launcher, "_delete_run_accounts") as delete, \
+                         patch.object(listener, "close", side_effect=error if stage == "listener" else None), \
+                         patch.object(broker, "close_artifact_handles", side_effect=error if stage == "broker" else None), \
+                         patch.object(launcher.shutil, "rmtree", side_effect=error if stage == "scratch" else None):
+                        with self.assertRaises(OSError) as failure:
+                            launcher._finish_launch_transfer(completion, ["worker", "subject"], ["results"],
+                                listener, [], broker, -1, control, scratch)
+                        self.assertIs(failure.exception, error)
+                        delete.assert_not_called()
+                    self.assertEqual(len(closed), 2)
+                    for fd in closed:
+                        with self.assertRaises(OSError):
+                            os.fstat(fd)
+                    self.assertTrue(output.is_dir())
+                    with self.assertRaises(launcher.LauncherError):
+                        completion.duplicate_output_directory()
+                finally:
+                    completion.close()
+                    broker.close_artifact_handles()
+
+    def test_successful_transfer_retains_accounts_during_collection_then_close_deletes_once(self):
+        with tempfile.TemporaryDirectory() as root:
+            broker, output, properties = self.completion_fixture(root)
+            completion = self.complete(broker, output, properties)
+            (output / "collected.bin").write_bytes(b"protected-output")
+            control, scratch = Path(root) / "control", Path(root) / "scratch"
+            control.mkdir()
+            scratch.mkdir()
+            users, groups = ["worker", "subject"], ["results"]
+            try:
+                result = launcher.subprocess.CompletedProcess([], 0, b"", b"")
+                with patch.object(launcher.subprocess, "run", return_value=result) as command:
+                    retained = launcher._finish_launch_transfer(completion, users, groups, None, [], broker, -1, control, scratch)
+                    self.assertIs(retained, completion)
+                    self.assertFalse(control.exists() or scratch.exists())
+                    command.assert_not_called()
+                    users.append("later-user")
+                    groups.append("later-group")
+                    fd = retained.duplicate_output_directory()
+                    try:
+                        artifact = os.open("collected.bin", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
+                        try:
+                            self.assertEqual(os.read(artifact, 64), b"protected-output")
+                        finally:
+                            os.close(artifact)
+                    finally:
+                        os.close(fd)
+                    command.assert_not_called()
+                    retained.close()
+                    retained.close()
+                    self.assertEqual([call.args[0] for call in command.call_args_list],
+                        [["/usr/sbin/userdel", "subject"], ["/usr/sbin/userdel", "worker"],
+                         ["/usr/sbin/groupdel", "results"]])
+            finally:
+                completion.close()
+                broker.close_artifact_handles()
+
+    def test_account_cleanup_failure_is_latched_and_legacy_path_cannot_hide_it(self):
+        for legacy in (False, True):
+            with self.subTest(legacy=legacy), tempfile.TemporaryDirectory() as root:
+                broker, output, properties = self.completion_fixture(root)
+                completion = self.complete(broker, output, properties)
+                completion._retain_run_accounts(["worker"], ["results"])
+                result = launcher.subprocess.CompletedProcess([], 6, b"cleanup-canary", b"cleanup-canary")
+                try:
+                    with patch.object(launcher.subprocess, "run", return_value=result) as command, \
+                         patch.object(launcher, "launch_with_completion", return_value=completion):
+                        with self.assertRaisesRegex(launcher.LauncherError, "systemd-operation-failed") as failure:
+                            launcher.launch(Namespace()) if legacy else completion.close()
+                        with self.assertRaises(launcher.LauncherError) as repeated:
+                            completion.close()
+                        self.assertIs(repeated.exception, failure.exception)
+                        command.assert_called_once()
+                        self.assertNotIn("cleanup-canary", str(failure.exception))
+                        with self.assertRaises(launcher.LauncherError):
+                            completion.duplicate_output_directory()
+                        with self.assertRaises(launcher.LauncherError):
+                            completion.duplicate_output_parent()
+                finally:
+                    broker.close_artifact_handles()
+
+    def test_close_attempts_second_descriptor_and_accounts_after_first_close_error(self):
+        with tempfile.TemporaryDirectory() as root:
+            broker, output, properties = self.completion_fixture(root)
+            completion = self.complete(broker, output, properties)
+            completion._retain_run_accounts(["worker"], ["results"])
+            real_close = os.close
+            closed = []
+            error = OSError(5, "close-canary")
+            def failing_close(fd):
+                real_close(fd)
+                closed.append(fd)
+                if len(closed) == 1:
+                    raise error
+            try:
+                with patch.object(launcher.os, "close", side_effect=failing_close), \
+                     patch.object(launcher, "_delete_run_accounts") as delete:
+                    with self.assertRaises(OSError) as failure:
+                        completion.close()
+                    self.assertIs(failure.exception, error)
+                    self.assertEqual(len(closed), 2)
+                    delete.assert_called_once_with(("worker",), ("results",), strict=True)
+                    with self.assertRaises(OSError):
+                        completion.close()
+                    delete.assert_called_once()
+                for fd in closed:
+                    with self.assertRaises(OSError):
+                        os.fstat(fd)
+            finally:
+                broker.close_artifact_handles()
+
+    def test_legacy_path_deletes_retained_accounts_before_returning(self):
+        with tempfile.TemporaryDirectory() as root:
+            broker, output, properties = self.completion_fixture(root)
+            completion = self.complete(broker, output, properties)
+            completion._retain_run_accounts(["worker"], ["results"])
+            try:
+                with patch.object(launcher, "launch_with_completion", return_value=completion), \
+                     patch.object(launcher, "_delete_run_accounts") as delete:
+                    self.assertEqual(launcher.launch(Namespace()), output)
+                    delete.assert_called_once_with(("worker",), ("results",), strict=True)
+                    completion.close()
+                    delete.assert_called_once()
+                with self.assertRaises(launcher.LauncherError):
+                    completion.duplicate_output_parent()
+            finally:
                 broker.close_artifact_handles()
 
 

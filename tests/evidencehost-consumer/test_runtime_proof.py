@@ -1,10 +1,12 @@
 """Regression controls for candidate proof rejection; these grant no runtime acceptance."""
 import importlib.util
 import hashlib
+import io
 import json
 import os
 import stat
 import tempfile
+import tarfile
 import uuid
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -407,6 +409,177 @@ class ObservationFailureDiagnosticTests(unittest.TestCase):
                         proof.run_observation_launcher(["launcher"], parent, parent)
                 self.assertNotIn("secret-779", str(failure.exception))
                 self.assertFalse((parent / "launcher-failure.json").exists())
+
+
+class PrivateWorkerJournalRetentionTests(unittest.TestCase):
+    @staticmethod
+    def helper():
+        namespace = {"__name__": "private_journal_portable_control"}
+        exec(compile(proof.PRIVATE_WORKER_JOURNAL_ROOT_SCRIPT, "<private journal root helper>", "exec"), namespace)
+        return namespace["archive_from_directory"]
+
+    @staticmethod
+    def archive(data=b"secret-779 private journal", **changes):
+        result = io.BytesIO()
+        with tarfile.open(fileobj=result, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+            member = tarfile.TarInfo(proof.PRIVATE_WORKER_JOURNAL_NAME)
+            member.mode, member.uid, member.gid, member.size = 0o600, 0, 0, len(data)
+            for name, value in changes.items():
+                setattr(member, name, value)
+            archive.addfile(member, io.BytesIO(data) if member.isreg() else None)
+        return result.getvalue()
+
+    def test_root_helper_reads_exact_fixed_file_and_exports_only_bounded_root_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            parent.chmod(0o755)
+            journal = parent / proof.PRIVATE_WORKER_JOURNAL_NAME
+            journal.write_bytes(b"secret-779" + b"x" * (4096 - 10))
+            journal.chmod(0o600)
+            (parent / "unrelated").write_text("not selected")
+            fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                data = self.helper()(fd, expected_owner_uid=os.geteuid(), expected_owner_gid=os.getegid())
+            finally:
+                os.close(fd)
+            self.assertTrue(proof._valid_private_journal_archive(data))
+            self.assertLessEqual(len(data), proof.MAX_PRIVATE_WORKER_JOURNAL_ARCHIVE_BYTES)
+            with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as archive:
+                self.assertEqual(archive.getnames(), [proof.PRIVATE_WORKER_JOURNAL_NAME])
+                member = archive.getmembers()[0]
+                self.assertEqual((member.uid, member.gid, member.mode, member.size), (0, 0, 0o600, 4096))
+                self.assertEqual(archive.extractfile(member).read(), journal.read_bytes())
+
+    def test_root_helper_rejects_links_modes_nonregular_missing_oversize_and_unowned_file(self):
+        for kind in ("missing", "symlink", "hardlink", "mode", "directory", "oversize", "unowned", "parent-mode"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                parent = Path(directory)
+                parent.chmod(0o755)
+                journal = parent / proof.PRIVATE_WORKER_JOURNAL_NAME
+                if kind == "directory":
+                    journal.mkdir(mode=0o600)
+                elif kind == "symlink":
+                    journal.symlink_to(parent / "unrelated")
+                elif kind != "missing":
+                    journal.write_bytes(b"x" * (4097 if kind == "oversize" else 4))
+                    journal.chmod(0o644 if kind == "mode" else 0o600)
+                    if kind == "hardlink": os.link(journal, parent / "other-name")
+                if kind == "parent-mode": parent.chmod(0o777)
+                original = os.fstat
+                def inspect(fd):
+                    info = original(fd)
+                    if kind == "unowned" and stat.S_ISREG(info.st_mode):
+                        values = {name: getattr(info, name) for name in ("st_dev", "st_ino", "st_uid", "st_gid", "st_mode", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")}
+                        return SimpleNamespace(**{**values, "st_uid": os.geteuid() + 1})
+                    return info
+                fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    with patch.object(proof.os, "fstat", side_effect=inspect):
+                        with self.assertRaises((ValueError, OSError)):
+                            self.helper()(fd, expected_owner_uid=os.geteuid(), expected_owner_gid=os.getegid())
+                finally:
+                    os.close(fd)
+
+    def test_root_helper_rejects_file_change_and_read_error_without_exporting_archive(self):
+        for change in (False, True):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as directory:
+                parent = Path(directory)
+                parent.chmod(0o755)
+                journal = parent / proof.PRIVATE_WORKER_JOURNAL_NAME
+                journal.write_bytes(b"journal")
+                journal.chmod(0o600)
+                original = os.read
+                def read(fd, limit):
+                    if not change:
+                        raise OSError(5, "secret-779")
+                    data = original(fd, limit)
+                    journal.write_bytes(b"changed journal")
+                    return data
+                fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    with patch.object(proof.os, "read", side_effect=read):
+                        with self.assertRaises((ValueError, OSError)):
+                            self.helper()(fd, expected_owner_uid=os.geteuid(), expected_owner_gid=os.getegid())
+                finally:
+                    os.close(fd)
+
+    def test_driver_keeps_archive_600_private_and_root_command_has_no_arbitrary_path(self):
+        with portable_runtime_workspace() as directory:
+            parent = Path(directory)
+            parent.chmod(0o755)
+            public = parent / "proof"
+            public.mkdir(mode=0o755)
+            data = self.archive()
+            with patch.object(Path, "lstat", StructuralVerificationProofTests.protected_lstat(parent)), \
+                 patch.object(proof, "root_command", return_value=(0, data, b"secret-779 stderr")) as root:
+                self.assertTrue(proof.retain_private_worker_journal(parent, public))
+                self.assertFalse(proof.retain_private_worker_journal(parent, public))
+            private = public / "private-diagnostics"
+            archive = private / proof.PRIVATE_WORKER_JOURNAL_ARCHIVE
+            self.assertEqual(archive.read_bytes(), data)
+            self.assertEqual(stat.S_IMODE(private.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(archive.stat().st_mode), 0o600)
+            command = root.call_args.args[0]
+            self.assertEqual(command[:4], ["/usr/bin/python3", "-I", "-c", proof.PRIVATE_WORKER_JOURNAL_ROOT_SCRIPT])
+            self.assertEqual(command[4], parent.name[len(proof.RUNTIME_WORKSPACE_PREFIX):])
+            self.assertNotIn(str(parent), command)
+            self.assertNotIn(str(public), command)
+            self.assertEqual(root.call_args.kwargs["timeout"], 10)
+            self.assertTrue(root.call_args.kwargs["binary_output"])
+
+    def test_archive_validation_and_root_failures_cannot_copy_invalid_or_public_data(self):
+        invalid = (b"secret-779", self.archive(mode=0o644), self.archive(uid=1),
+                   self.archive(name="unexpected.log"), self.archive(type=tarfile.SYMTYPE, linkname="secret-779"),
+                   self.archive(b"x" * 4097), self.archive() + b"secret-779",
+                   b"x" * (proof.MAX_PRIVATE_WORKER_JOURNAL_ARCHIVE_BYTES + 1))
+        for data in invalid:
+            with self.subTest(length=len(data)):
+                self.assertFalse(proof._valid_private_journal_archive(data))
+        for result in ((1, b"secret-779", b"secret-779"), (0, invalid[0], b""),
+                       proof.ProofFailure("secret-779 copy failure")):
+            with self.subTest(result=type(result).__name__), portable_runtime_workspace() as directory:
+                parent = Path(directory)
+                parent.chmod(0o755)
+                public = parent / "proof"
+                public.mkdir()
+                with patch.object(Path, "lstat", StructuralVerificationProofTests.protected_lstat(parent)), \
+                     patch.object(proof, "root_command", side_effect=result if isinstance(result, Exception) else None,
+                                  return_value=result):
+                    self.assertFalse(proof.retain_private_worker_journal(parent, public))
+                self.assertFalse((public / "private-diagnostics").exists())
+        with patch.object(proof, "root_command") as root:
+            self.assertFalse(proof.retain_private_worker_journal(Path("/tmp/arbitrary"), Path("/tmp/arbitrary")))
+            root.assert_not_called()
+
+    def test_observation_failure_retains_only_private_archive_and_original_checkpoint_json(self):
+        safe = {"schema": "evidence-launcher-failure-v1", "error_class": "LauncherError",
+                "cause": "worker-protocol-incomplete", "operation": "worker-exit",
+                "worker_main_code": 1, "worker_main_status": 1, "broker_ready_seen": True,
+                "broker_wait_completed": False, "broker_exited": False, "broker_work_closed": True,
+                "broker_active_handlers": 0, "broker_active_runs": 0, "worker_journal_codes": ["ASEVD402"]}
+        for kind, archive_result in (("retained", (0, self.archive(), b"secret-779")),
+                                     ("root-failed", (1, b"secret-779", b"secret-779")),
+                                     ("timeout", proof.ProofFailure("secret-779 timeout")),
+                                     ("copy-failed", (0, self.archive(), b"secret-779"))):
+            with self.subTest(kind=kind), portable_runtime_workspace() as directory:
+                parent = Path(directory)
+                parent.chmod(0o755)
+                public = parent / "proof"
+                public.mkdir()
+                if kind == "copy-failed":
+                    (public / "private-diagnostics").symlink_to(public, target_is_directory=True)
+                with patch.object(Path, "lstat", StructuralVerificationProofTests.protected_lstat(parent)), \
+                     patch.object(proof, "root_command", side_effect=[
+                         (1, b"secret-779 stdout", b"secret-779 stderr"),
+                         (0, json.dumps(safe).encode(), b"secret-779 query stderr"), archive_result]):
+                    with self.assertRaises(proof.ProofFailure) as failure:
+                        proof.run_observation_launcher(["launcher"], parent, public)
+                self.assertIn("Production Observation launcher exited 1.", str(failure.exception))
+                self.assertNotIn("secret-779", str(failure.exception))
+                self.assertEqual(json.loads((public / "launcher-failure.json").read_text()), safe)
+                self.assertNotIn("secret-779", (public / "launcher-failure.json").read_text())
+                private = public / "private-diagnostics/worker-journal.tar"
+                self.assertEqual(private.exists(), kind == "retained")
 
 
 class LauncherWorkspaceProofTests(unittest.TestCase):

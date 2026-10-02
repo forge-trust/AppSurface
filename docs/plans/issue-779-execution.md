@@ -1140,3 +1140,35 @@ the driver publishes only validated fields. Default public launcher diagnostics
 remain unchanged. The structural-verification child is created privately before
 root ownership of its parent, then checked before writing fresh collected copies.
 These portable controls do not substitute for the next actual systemd run.
+
+The [full-source native gate](https://github.com/forge-trust/AppSurface/actions/runs/37037592365)
+reached the unchanged solution gate: 15269 tests passed, none failed and two
+existing tests were skipped. Aggregate coverage was 94.88% lines and 88.522%
+branches, but patch coverage was 82.852% lines and 76.6374% branches. The
+required gate exited **1**, `ASCOV020`. Measured worker, budget, protected
+producer and host gaps are being addressed through meaningful behavior tests;
+the gate policy and comparison base remain unchanged.
+
+The next complete snapshot, `2b7da72fa2eba5d15300052efc5818fb868d7f9d`,
+failed [systemd Observation](https://github.com/forge-trust/AppSurface/actions/runs/37039914626)
+after namespace setup, with worker exit status 1 and an incomplete protocol.
+It also failed all five [Aspire mechanism controls](https://github.com/forge-trust/AppSurface/actions/runs/37039916803).
+The store correction reached DCP configuration, revealing the fixture's
+incorrect option section. The corrected `DcpPublisher` arguments now build
+without warnings, and forty portable child controls pass. A bounded private
+identity diagnostic preserves the original startup rejection and its kernel
+facts. Fresh source-bound native execution remains required for both paths.
+
+An internal root completion context now retains the authenticated descriptor,
+output identities and directory handles for same-parent collection. Portable
+collector controls cover actual bytes, links, replacement, modes and bounds;
+account lifetime and cleanup ownership are now repaired and reviewed. Launcher
+controls passed **72/72** and runtime-driver controls passed **30/30**. A failed
+cleanup closes both retained descriptors, and successful collection reserves
+the run accounts until completion closes. A fixed root-owned journal is retained
+as a bounded private archive while the original failure remains unchanged.
+These are portable checks, with no admission authority. Native completion verification, the immutable
+controlled release fixture, shared Aspire resource integration and the complete
+protected consumer matrix remain required. See the
+[acceptance record](../evidence/issue779-consumer-acceptance.md) for the exact
+failed runs and their limits.
