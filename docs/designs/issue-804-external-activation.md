@@ -1127,7 +1127,7 @@ The driver aggregator ran against detached branch name empty string and the last
 
 Possible duplicate work / execution mapping: CEO T2 is contained in E-T6; CEO T1/T3 and DX-T2/T3 in E-T7; CEO T4 in E-T5/E-T7; DX-T1 in E-T4/E-T7. All14 provenance entries remain visible; execute the7 engineering groups with these obligations integrated. Do not add overlapping estimates. Integrated planning estimate: human ~46 active hours / CC+gstack ~16.5 active hours, assuming available prerequisites; infrastructure and waiting time remain variable and onboarding time is unmeasured.
 
-Implementation QA plan: 31-family test plan (local-only record: `/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-HEAD-eng-review-test-plan-20261001-045026.md`). Feature tests currently implemented/executed0/31, planned31/31; no coverage or runtime success is claimed.
+Implementation QA plan: 31-family test plan (local planning record, not published). Feature tests currently implemented/executed0/31, planned31/31; no coverage or runtime success is claimed.
 
 ### Final gate state
 
@@ -1140,7 +1140,7 @@ Durable learnings recorded and verified: accepted phase markers occur in both Im
 
 The user selected A (approve as-is) at D1 on 2026-10-01. The approved baseline includes all29 auto-decisions, all14 phase task entries integrated into7 implementation groups, and the31-family QA plan. No overrides or unresolved choices remain. Phase records above preserve their historical state at completion; this approval resolves the later parent gate.
 
-Review run `issue804-autoplan-48693-1790824901-a6425f08` is persisted in HEAD review logs (local-only record: `/Users/andrew/.gstack/projects/forge-trust-Runnable/HEAD-reviews.jsonl`): CEO clean, DX clean, Eng issues_open with3 planned repairs, and4 voice records including skipped Design. Every expected record field was verified against the saved log. Missing Claude Code coverage remains unavailable and native model identity remains unknown; no consensus is inferred. Two operational learnings and the explicit human approval answer were also logged.
+Review run `issue804-autoplan-48693-1790824901-a6425f08` is persisted in local `HEAD-reviews.jsonl`: CEO clean, DX clean, Eng issues_open with3 planned repairs, and4 voice records including skipped Design. Every expected record field was verified against the saved log. Missing Claude Code coverage remains unavailable and native model identity remains unknown; no consensus is inferred. Two operational learnings and the explicit human approval answer were also logged.
 
 Approved checkpoint SHA-256 `ee28420dfe963848afaee2319850f9bd7c384d3c9aa90098ce55b4db15d21e1e` identifies the plan after the approval metadata update and before this completion-report update; reviewed gate SHA-256 `7517d0aaf65713d9ed7896d27abbf2f93895b122ef813bb78a3c049622afe9a2` remains recorded in the logs. Only approval/report metadata changed after the final review. Implementation requirements, immutable restore point and accepted phase blocks are unchanged. This plan remains untracked in the repository; no feature code, runtime verification, commit or PR was created by Autoplan.
 
