@@ -98,6 +98,33 @@ Trusted `ASEVD407` response. The record contains only fixed host cause/error cat
 allowlisted operation/numeric exit or errno fields, never exception text, subject output or descriptors.
 Worker protocol/unsuccessful-exit failures additionally retain bounded numeric `ExecMainCode` and
 `ExecMainStatus` as `worker_main_code`/`worker_main_status` under the fixed `worker-exit` operation.
+For `worker-protocol-incomplete`, the record also snapshots the broker under its condition lock:
+`broker_ready_seen`, `broker_wait_completed`, `broker_exited` and `broker_work_closed` are exact
+booleans; `broker_active_handlers` is an integer from 0 through 4096 and `broker_active_runs` from
+0 through 1. These observed flags locate a failed protocol checkpoint; they do not certify that
+a response was received or satisfy the [root completion contract](../../../scripts/evidencehost-linux-launcher.py).
+
+With the diagnostic option, only this launch's internally generated worker unit is queried through
+`/usr/bin/journalctl`. Collection and process reaping share a five-second deadline; only the first
+4096 stdout bytes are read, and journal-command stderr is discarded. A full prefix is conservatively
+classified as truncated. The raw prefix, which may contain hostile or sensitive text, is written
+only to the fixed, exclusive, no-follow `launcher-worker-journal.log` with root ownership and mode
+`0600` beneath the pinned protected diagnostic directory. Raw bytes must remain private and never
+enter safe JSON or public console/log text. The driver can retain the bounded prefix only through
+the separate private archive described below. An occupied filename or symlink is preserved, not replaced.
+
+The safe JSON adds optional `worker_journal_state` (`collected`, `missing`, `unavailable`, `truncated`
+or `read-error`), exact boolean `worker_journal_written`, integer `worker_journal_bytes` from 0 through
+4096, and `worker_journal_codes`. That list contains only distinct explicitly allowlisted tokens
+followed by a colon: `ASEVD211`, `ASEVD401` through `ASEVD411`, `ASEVD420` and `ASEVD421`. Unknown
+codes, arbitrary journal strings, paths, commands, exception bytes and raw output never enter the
+safe JSON. Even an allowlisted token remains untrusted diagnostic data and cannot replace the host
+failure cause, numeric exit status, owned-exit acknowledgement or gate decision. Missing journals,
+read failures and private write failures retain the original failure. Without the diagnostic option
+there is no journal query or private journal file. Importing root parents may pass an already pinned
+protected `diagnostic_directory_fd` keyword to `launch` or `launch_with_completion`; this optional
+failure capture does not change their Path/completion results or completion checks.
+
 If the initial worker `systemd-run` command exits nonzero, the launcher queries only that generated
 worker unit, with a five-second deadline and a 4 KiB response limit. Under `worker-start`, it retains
 the original command exit code, bounded numeric main-process codes and closed `worker_load_state` /
@@ -126,3 +153,28 @@ protected file through root after failure, validates its closed schema, and publ
 categories. A missing or invalid diagnostic cannot satisfy the proof. It reserves its driver-owned
 `0700` structural-verification directory before protecting the parent, then uses fresh `0600` local
 plan/manifest copies after acknowledged exit. Neither diagnostics nor private copies grant authority.
+
+### Private journal retention on a failed disposable run
+
+The [driver's `retain_private_worker_journal` helper](../runtime-proof.py) retains diagnostics after
+the root launcher exits unsuccessfully. Its isolated root command accepts only the generated `/run`
+workspace UUID and pinned device/inode; it accepts no arbitrary root path or file selector. It opens
+the fixed `launcher-worker-journal.log` through no-follow directory/file descriptors and requires a
+regular root-owned/root-group `0600` file, one link and at most 4096 bytes. It checks the named and
+held identity, ownership, permissions, length and timestamps before/after reading, and rechecks the
+workspace binding before returning bytes. Missing, linked, nonprivate, unowned or changed inputs fail
+without printing exception text or journal data.
+
+The root helper has a ten-second process deadline and emits one canonical USTAR archive, at most
+10240 bytes, with exactly the fixed journal member and root `0600` metadata. The driver validates
+that complete archive before exclusively creating `proof_directory/private-diagnostics/worker-journal.tar`
+as its own `0600` file under a fresh, no-follow `0700` directory. It checks destination identity and
+one-link ownership after writing. The existing candidate artifact path retains this private binary
+archive; raw contents must not be rendered into public diagnostics or treated as proof authority.
+The root-helper ownership overrides exist only for portable file controls; production always requires root.
+
+Retention is optional failure diagnosis. Missing/invalid journals, root-helper errors and local copy
+failures preserve the original launcher exit, safe cause, numeric status and checkpoint JSON. They
+never make execution pass. Success performs no private diagnostic collection. The [portable driver
+controls](../test_runtime_proof.py) verify fixed-name selection, file/link/mode/ownership/byte limits,
+identity drift, private destination permissions, canary isolation and original-failure preservation.

@@ -217,6 +217,166 @@ public sealed class EvidenceRestrictedCoverageProducerTests
         Assert.Equal(0, reporter.MergeCount);
     }
 
+    [Theory]
+    [InlineData("assertions-null")]
+    [InlineData("assertions-empty")]
+    [InlineData("assertion-unknown")]
+    [InlineData("line-negative")]
+    [InlineData("line-over-hundred")]
+    [InlineData("branch-over-hundred")]
+    [InlineData("tolerance-negative")]
+    [InlineData("patch-line-over-hundred")]
+    [InlineData("patch-branch-negative")]
+    [InlineData("patch-mode-unknown")]
+    [InlineData("slots-null")]
+    [InlineData("slot-null")]
+    [InlineData("slot-empty-name")]
+    [InlineData("slot-empty-root")]
+    [InlineData("slot-empty-media")]
+    [InlineData("slot-negative-capacity")]
+    [InlineData("slot-excessive-capacity")]
+    [InlineData("slot-duplicate-name")]
+    [InlineData("slot-unknown-required")]
+    [InlineData("slot-patch-without-gate")]
+    [InlineData("slot-traversal")]
+    public async Task RunAsync_ShouldRejectInvalidProtectedDeclarationsBeforeAnySubjectOrReporterWork(string control)
+    {
+        using var directory = TestDirectory.Create();
+        var valid = CreateDeclaration([]);
+        var slot = new EvidenceArtifactSlot("coverage-report", "coverage", "application/xml", true, 1024);
+        var gate = valid.CoverageGate!;
+        var declaration = control switch
+        {
+            "assertions-null" => valid with { AssertionIds = null! },
+            "assertions-empty" => valid with { AssertionIds = [] },
+            "assertion-unknown" => valid with { AssertionIds = ["subject/spoofed-pass@1"] },
+            "line-negative" => valid with { CoverageGate = gate with { MinLinePercent = -1 } },
+            "line-over-hundred" => valid with { CoverageGate = gate with { MinLinePercent = 101 } },
+            "branch-over-hundred" => valid with { CoverageGate = gate with { MinBranchPercent = 101 } },
+            "tolerance-negative" => valid with { CoverageGate = gate with { TolerancePercent = -1 } },
+            "patch-line-over-hundred" => valid with { CoverageGate = gate with { MinPatchLinePercent = 101 } },
+            "patch-branch-negative" => valid with { CoverageGate = gate with { MinPatchBranchPercent = -1 } },
+            "patch-mode-unknown" => valid with { CoverageGate = gate with { PatchLineMode = "subject-selected" } },
+            "slots-null" => valid with { ArtifactSlots = null! },
+            "slot-null" => valid with { ArtifactSlots = [null!] },
+            "slot-empty-name" => valid with { ArtifactSlots = [slot with { LogicalName = "" }] },
+            "slot-empty-root" => valid with { ArtifactSlots = [slot with { RelativeRoot = "" }] },
+            "slot-empty-media" => valid with { ArtifactSlots = [slot with { MediaType = "" }] },
+            "slot-negative-capacity" => valid with { ArtifactSlots = [slot with { MaximumBytes = -1 }] },
+            "slot-excessive-capacity" => valid with { ArtifactSlots = [slot with { MaximumBytes = EvidenceArtifactWriter.MaximumTotalArtifactBytes + 1 }] },
+            "slot-duplicate-name" => valid with { ArtifactSlots = [slot, slot with { RelativeRoot = "other" }] },
+            "slot-unknown-required" => valid with { ArtifactSlots = [slot with { LogicalName = "subject-pass" }] },
+            "slot-patch-without-gate" => valid with { ArtifactSlots = [slot with { LogicalName = "coverage-patch-targets", MediaType = "application/json" }] },
+            "slot-traversal" => valid with { ArtifactSlots = [slot with { RelativeRoot = "../outside" }] },
+            _ => throw new ArgumentOutOfRangeException(nameof(control)),
+        };
+        var transport = new FakeRestrictedRun([Report(PassingCobertura)]);
+        var reporter = new CopyingReportGenerator();
+        var writer = new EvidenceArtifactWriter(valid, TestPathUtils.PathUnder(directory.Path, "artifacts"));
+        var diff = new EvidenceDiffSnapshot([], "protected-empty.diff", Convert.ToHexString(SHA256.HashData(Array.Empty<byte>())).ToLowerInvariant());
+
+        var result = await CreateProducer(transport, reporter).RunAsync(
+            declaration, TestPathUtils.PathUnder(directory.Path, "subject.slnx"), diff, writer, CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Invalid, result.Outcome);
+        Assert.Empty(result.SatisfiedAssertionIds);
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.Equal(0, transport.RunCount);
+        Assert.Equal(0, transport.CollectCount);
+        Assert.Equal(0, reporter.MergeCount);
+        Assert.DoesNotContain("subject/spoofed", result.Diagnostic, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("null-report")]
+    [InlineData("blank-path")]
+    [InlineData("overlong-path")]
+    [InlineData("non-normalized-path")]
+    [InlineData("wrong-filename")]
+    [InlineData("case-collision")]
+    [InlineData("empty-bytes")]
+    [InlineData("wrong-xml-root")]
+    public async Task RunAsync_ShouldRejectHostileReportMetadataWithoutGivingItToTheProtectedMerger(string control)
+    {
+        using var directory = TestDirectory.Create();
+        IReadOnlyList<RestrictedCoverageReport> reports = control switch
+        {
+            "null-report" => [null!],
+            "blank-path" => [Report(PassingCobertura, " ")],
+            "overlong-path" => [Report(PassingCobertura, new string('a', 4097))],
+            "non-normalized-path" => [Report(PassingCobertura, "shard\\coverage.cobertura.xml")],
+            "wrong-filename" => [Report(PassingCobertura, "shard/subject-pass.xml")],
+            "case-collision" => [Report(PassingCobertura, "shard/coverage.cobertura.xml"), Report(PassingCobertura, "SHARD/coverage.cobertura.xml")],
+            "empty-bytes" => [new RestrictedCoverageReport("shard/coverage.cobertura.xml", ReadOnlyMemory<byte>.Empty)],
+            "wrong-xml-root" => [Report("<subject-pass />")],
+            _ => throw new ArgumentOutOfRangeException(nameof(control)),
+        };
+        var reporter = new CopyingReportGenerator();
+        var declaration = CreateDeclaration([]);
+        var writer = new EvidenceArtifactWriter(declaration, TestPathUtils.PathUnder(directory.Path, "artifacts"));
+
+        var result = await CreateProducer(new FakeRestrictedRun(reports), reporter).RunAsync(
+            declaration, TestPathUtils.PathUnder(directory.Path, "subject.slnx"), null, writer, CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Invalid, result.Outcome);
+        Assert.Empty(result.SatisfiedAssertionIds);
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.Equal(0, reporter.MergeCount);
+    }
+
+    [Theory]
+    [InlineData("unknown-optional", EvidenceProducerOutcome.Passed)]
+    [InlineData("patch-optional", EvidenceProducerOutcome.Passed)]
+    [InlineData("undersized-optional", EvidenceProducerOutcome.Passed)]
+    [InlineData("zero-capacity", EvidenceProducerOutcome.Invalid)]
+    public async Task RunAsync_ShouldKeepOptionalArtifactCapacitySeparateFromRequiredCoverageEvidence(
+        string control, EvidenceProducerOutcome expected)
+    {
+        using var directory = TestDirectory.Create();
+        var slot = new EvidenceArtifactSlot("coverage-report", "coverage", "application/xml", false, 1024);
+        slot = control switch
+        {
+            "unknown-optional" => slot with { LogicalName = "unregistered-optional" },
+            "patch-optional" => slot with { LogicalName = "coverage-patch-targets", MediaType = "application/json" },
+            "undersized-optional" => slot with { MaximumBytes = 1 },
+            "zero-capacity" => slot with { MaximumBytes = 0 },
+            _ => throw new ArgumentOutOfRangeException(nameof(control)),
+        };
+        var declaration = CreateDeclaration([slot]);
+        var writer = new EvidenceArtifactWriter(declaration, TestPathUtils.PathUnder(directory.Path, "artifacts"));
+        var transport = new FakeRestrictedRun([Report(PassingCobertura)]);
+        var reporter = new CopyingReportGenerator();
+
+        var result = await CreateProducer(transport, reporter).RunAsync(
+            declaration, TestPathUtils.PathUnder(directory.Path, "subject.slnx"), null, writer, CancellationToken.None);
+
+        Assert.Equal(expected, result.Outcome);
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.Equal(1, transport.RunCount);
+        Assert.Equal(1, reporter.MergeCount);
+        Assert.Equal(expected == EvidenceProducerOutcome.Passed ? new[] { AssertionId } : [], result.SatisfiedAssertionIds);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldHonorCancellationBeforeInvokingTheRestrictedSubject()
+    {
+        using var directory = TestDirectory.Create();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var declaration = CreateDeclaration([]);
+        var writer = new EvidenceArtifactWriter(declaration, TestPathUtils.PathUnder(directory.Path, "artifacts"));
+        var transport = new FakeRestrictedRun([Report(PassingCobertura)]);
+        var reporter = new CopyingReportGenerator();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => CreateProducer(transport, reporter).RunAsync(
+            declaration, TestPathUtils.PathUnder(directory.Path, "subject.slnx"), null, writer, cancellation.Token));
+
+        Assert.Equal(0, transport.RunCount);
+        Assert.Equal(0, transport.CollectCount);
+        Assert.Equal(0, reporter.MergeCount);
+        Assert.Empty(writer.WrittenArtifacts);
+    }
+
     private static async Task<EvidenceProducerResult> RunWithReportsAsync(
         EvidenceProducerDeclaration declaration,
         string root,
