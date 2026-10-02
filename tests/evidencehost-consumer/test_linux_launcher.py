@@ -12,6 +12,7 @@ import threading
 import time
 import unittest
 from argparse import Namespace
+from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -498,6 +499,87 @@ class PrivateFailureDiagnosticTests(unittest.TestCase):
 
 
 class LauncherValidationTests(unittest.TestCase):
+    def test_actual_worker_start_argv_allows_required_openat2_and_preserves_isolation(self):
+        # Execute the production launch path up to its unit-start boundary. Native root,
+        # account and systemd operations are explicit doubles; argv emission is real.
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp).resolve()
+            tool, subject, output = base / "tool", base / "subject", base / "output"
+            for directory in (tool, subject, output):
+                directory.mkdir()
+            policy = tool / "policy.json"
+            policy.write_text("{}")
+            (tool / "ForgeTrust.AppSurface.Cli.dll").write_bytes(b"fixture")
+            args = Namespace(mode="observation", run_id="100/1", job_seconds=90,
+                base_revision="b" * 40, subject_revision="c" * 40, workflow_identity="fixture",
+                observation_profile=[], observation_producer=[], solution=str(subject / "fixture.sln"),
+                path=[], output_slot="result")
+            real_read_text, real_is_file = Path.read_text, Path.is_file
+            real_mkdtemp = tempfile.mkdtemp
+            stopped = launcher.LauncherError("worker-start-failed")
+            with ExitStack() as patches:
+                patches.enter_context(patch.object(launcher.sys, "platform", "linux"))
+                patches.enter_context(patch.object(launcher.os, "geteuid", return_value=0))
+                patches.enter_context(patch.object(Path, "read_text", lambda path, *a, **kw:
+                    "systemd" if str(path) == "/proc/1/comm" else real_read_text(path, *a, **kw)))
+                patches.enter_context(patch.object(Path, "is_file", lambda path:
+                    True if str(path) == "/sys/fs/cgroup/cgroup.controllers" else real_is_file(path)))
+                patches.enter_context(patch.object(launcher, "ensure_openat2_supported"))
+                patches.enter_context(patch.object(launcher, "validate_args", return_value=(tool, subject, policy, output)))
+                patches.enter_context(patch.object(launcher, "protected_diff_snapshot", return_value=(None, None)))
+                patches.enter_context(patch.object(launcher, "validate_budgets", return_value={}))
+                patches.enter_context(patch.object(launcher, "declared_subject_inputs", return_value=(args.solution, [])))
+                patches.enter_context(patch.object(launcher.tempfile, "mkdtemp", side_effect=lambda **kw:
+                    real_mkdtemp(prefix=kw["prefix"], dir=base)))
+                patches.enter_context(patch.object(launcher, "_create_run_accounts"))
+                patches.enter_context(patch.object(launcher.pwd, "getpwnam", return_value=SimpleNamespace(pw_uid=1234, pw_gid=1235)))
+                # Supply distinct exact identities to the existing separation check.
+                launcher.pwd.getpwnam.side_effect = [SimpleNamespace(pw_uid=1234, pw_gid=1235),
+                                                   SimpleNamespace(pw_uid=2345, pw_gid=2346)]
+                patches.enter_context(patch.object(launcher.grp, "getgrnam", return_value=SimpleNamespace(gr_gid=3456)))
+                patches.enter_context(patch.object(launcher.os, "chown"))
+                patches.enter_context(patch.object(launcher, "prepare_scratch_layout"))
+                patches.enter_context(patch.object(launcher, "_copy_subject_tree", side_effect=lambda source, destination, *ids: destination))
+                patches.enter_context(patch.object(launcher, "open_test_output_root", return_value=-1))
+                patches.enter_context(patch.object(launcher, "prepare_tool_root"))
+                listener = patches.enter_context(patch.object(launcher.socket, "socket"))
+                listener.return_value.bind.side_effect = lambda path: Path(path).touch()
+                patches.enter_context(patch.object(launcher.shutil, "which", return_value=launcher.sys.executable))
+                patches.enter_context(patch.object(launcher, "_systemd", return_value=launcher.subprocess.CompletedProcess([], 0, b"systemd 255\n", b"")))
+                patches.enter_context(patch.object(launcher.subprocess, "run", return_value=launcher.subprocess.CompletedProcess([], 0)))
+                start = patches.enter_context(patch.object(launcher, "_start_worker_unit", side_effect=stopped))
+                with self.assertRaises(launcher.LauncherError) as failure:
+                    launcher.launch_with_completion(args)
+                self.assertIs(failure.exception, stopped)
+            start.assert_called_once()
+            argv, unit = start.call_args.args
+            properties = [value.removeprefix("--property=").split("=", 1)
+                          for value in argv if value.startswith("--property=")]
+            self.assertEqual(len(properties), len(dict(properties)))
+            emitted = dict(properties)
+            worker = unit.removeprefix("evidencehost-").removesuffix("-worker.service")
+            self.assertEqual(emitted["User"], "evw" + worker)
+            self.assertEqual(emitted["Group"], emitted["User"])
+            self.assertEqual(emitted["RestrictSUIDSGID"], "no")
+            expected = {"Type": "exec", "KillMode": "control-group", "RuntimeMaxSec": "90",
+                "TimeoutStopSec": "2", "SendSIGKILL": "yes", "NoNewPrivileges": "yes",
+                "CapabilityBoundingSet": "", "AmbientCapabilities": "", "ProtectControlGroups": "yes",
+                "PrivateTmp": "yes", "ProtectSystem": "strict", "ProtectHome": "yes", "LimitCORE": "0",
+                "TasksMax": "64", "MemoryMax": "1G", "Restart": "no", "RemainAfterExit": "yes"}
+            for name, value in expected.items():
+                self.assertEqual(emitted[name], value, name)
+            self.assertEqual(set(emitted), {*expected, "User", "Group", "RestrictSUIDSGID",
+                "ReadOnlyPaths", "ReadWritePaths", "InaccessiblePaths"})
+            readonly = emitted["ReadOnlyPaths"].split()
+            self.assertEqual(readonly[0], str(tool))
+            prepared_subject = Path(readonly[1])
+            self.assertEqual(prepared_subject.name, "subject")
+            self.assertTrue(prepared_subject.parent.is_relative_to(base))
+            self.assertEqual(emitted["InaccessiblePaths"], str(prepared_subject.parent / "test-output"))
+            self.assertEqual(emitted["ReadWritePaths"], str(output / ("run-" + worker)))
+            self.assertIn("--expand-environment=no", argv)
+            self.assertIn("--unit=" + unit, argv)
+
     def test_trusted_allowlist_rejection_has_its_exact_safe_diagnostic(self):
         with patch.object(launcher, "parser") as parser, \
                 patch.object(launcher, "launch", side_effect=launcher.LauncherError("trusted-proof-not-allowlisted")), \
@@ -945,7 +1027,7 @@ class OutputBudgetTests(unittest.TestCase):
             process = FakeProcess()
             try:
                 with patch.object(launcher, "openat2", side_effect=portable_openat2), \
-                     patch.object(launcher.subprocess, "Popen", return_value=process), \
+                     patch.object(launcher.subprocess, "Popen", return_value=process) as spawn, \
                      patch.object(broker, "_unit_properties", return_value={
                          "User": str(os.getuid()), "KillMode": "control-group", "ControlGroup": "/system.slice/test.service",
                      }), \
@@ -964,6 +1046,16 @@ class OutputBudgetTests(unittest.TestCase):
                 self.assertTrue(result["output_truncated"])
                 self.assertEqual(len(result["stdout"].encode()), launcher.MAX_PREFIX)
                 self.assertEqual(len(result["stderr"].encode()), launcher.MAX_PREFIX)
+                argv = spawn.call_args.args[0]
+                emitted = dict(value.removeprefix("--property=").split("=", 1)
+                               for value in argv if value.startswith("--property="))
+                self.assertEqual(emitted["RestrictSUIDSGID"], "yes")
+                self.assertEqual(emitted["NoNewPrivileges"], "yes")
+                self.assertEqual(emitted["CapabilityBoundingSet"], "")
+                self.assertEqual(emitted["AmbientCapabilities"], "")
+                self.assertEqual(emitted["User"], str(broker.subject_uid))
+                self.assertEqual(emitted["Group"], str(broker.subject_gid))
+                self.assertEqual(emitted["SupplementaryGroups"], str(broker.results_gid))
             finally:
                 broker.close_artifact_handles()
 

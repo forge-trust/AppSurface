@@ -7,6 +7,27 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 
 public sealed class EvidenceProtectedWorkerInputsTests
 {
+    [Theory]
+    [InlineData("evidence-worker-linux-v2")]
+    [InlineData("unknown-protocol-canary")]
+    public void CreateContextRejectsUnsupportedOrIncompleteApplicationProtocolBeforeProducingFacts(string schema)
+    {
+        var policy = CreatePolicy();
+        var plan = new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("src/Feature.cs")]);
+        var descriptor = CreateDescriptor("/protected-tools", "/protected-tools/policy.json", new string('a', 64)) with
+        {
+            Schema = schema,
+        };
+
+        var rejected = Assert.Throws<EvidenceAdmissionException>(() =>
+            EvidenceProtectedWorkerInputs.CreateContext(descriptor, policy, plan));
+
+        Assert.Equal("ASEVD404", rejected.Code);
+        Assert.Null(rejected.InnerException);
+        Assert.DoesNotContain("canary", rejected.Message, StringComparison.Ordinal);
+        Assert.False(EvidenceProtectedWorkerInputs.AcceptedConsumerProof(descriptor));
+    }
+
     [Fact]
     public async Task ResolveAsync_BindsExactBoundedPolicyBytesAndReresolvesCanonicalPlan()
     {

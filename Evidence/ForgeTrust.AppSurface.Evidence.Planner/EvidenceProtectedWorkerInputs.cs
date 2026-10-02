@@ -36,14 +36,35 @@ internal static class EvidenceProtectedWorkerInputs
     }
 
     /// <summary>Builds the internal registration facts solely from the protected policy and launcher descriptor.</summary>
+    /// <param name="descriptor">Authenticated root descriptor with independently allocated worker identities.</param>
+    /// <param name="protectedPolicy">Complete protected policy read under counted byte limits.</param>
+    /// <param name="protectedResolvedPlan">Plan re-resolved from that policy and protected paths/diff.</param>
+    /// <returns>Admission input facts; accepted consumer proof remains a separate closed registry decision.</returns>
+    /// <remarks>
+    /// V1 retains its producer/resource binding. V2 first resolves the complete application against the
+    /// immutable compiled catalogue, then includes its definition, grants and full identity map in the
+    /// capability digest. An empty compiled table rejects before any context or application lease exists.
+    /// </remarks>
     internal static EvidenceAdmissionContext CreateContext(
         EvidenceLinuxWorkerDescriptor descriptor, EvidencePolicy protectedPolicy, EvidencePlan protectedResolvedPlan)
     {
-        var catalogueDigest = EvidenceDigest.CanonicalSha256(new
+        EvidenceClosedApplicationDefinition? application = null;
+        if (descriptor.Schema == "evidence-worker-linux-v2" || descriptor.Application is not null)
+        {
+            // Structural descriptor parsing is not registration authority. Select only
+            // a complete immutable compiled entry after protected policy/plan resolution.
+            application = EvidenceClosedApplicationCatalogue.Resolve(protectedPolicy, protectedResolvedPlan, descriptor);
+        }
+        else if (descriptor.Schema != "evidence-worker-linux-v1")
+        {
+            throw new EvidenceAdmissionException("ASEVD404", "The protected worker protocol has no supported catalogue binding.");
+        }
+
+        var catalogueDigest = application is null ? EvidenceDigest.CanonicalSha256(new
         {
             Producers = protectedResolvedPlan.Profile.Producers,
             Resources = protectedResolvedPlan.Profile.Resources,
-        });
+        }) : descriptor.Application!.CatalogueDigest;
         var allocationDigest = EvidenceDigest.CanonicalSha256(new
         {
             descriptor.OutputParentIdentity,
@@ -52,7 +73,7 @@ internal static class EvidenceProtectedWorkerInputs
             descriptor.WorkerUid,
             descriptor.WorkerGid,
         });
-        var capabilitiesDigest = EvidenceDigest.CanonicalSha256(new
+        var capabilitiesDigest = application is null ? EvidenceDigest.CanonicalSha256(new
         {
             descriptor.Provider,
             descriptor.Platform,
@@ -60,6 +81,22 @@ internal static class EvidenceProtectedWorkerInputs
             SensitiveProjectionKeys = Array.Empty<string>(),
             RestrictedSubjectUid = descriptor.SubjectUid,
             RestrictedSubjectGid = descriptor.SubjectGid,
+        }) : EvidenceDigest.CanonicalSha256(new
+        {
+            descriptor.Provider,
+            descriptor.Platform,
+            WorkerProtocol = descriptor.Schema,
+            ProtectedSecrets = false,
+            SensitiveProjectionKeys = Array.Empty<string>(),
+            descriptor.WorkerUid,
+            descriptor.WorkerGid,
+            RestrictedSubjectUid = descriptor.SubjectUid,
+            RestrictedSubjectGid = descriptor.SubjectGid,
+            Application = application,
+            descriptor.Application!.ApplicationUid,
+            descriptor.Application.ApplicationGid,
+            descriptor.Application.ResultsGid,
+            descriptor.Application.ResourceAccessGid,
         });
         var assertion = new EvidenceEnvelopeAssertion("1.0", "appsurface-linux-protected-worker", "1.0",
             descriptor.Provider, descriptor.WorkflowIdentity, descriptor.RunId, descriptor.BaseRevision,

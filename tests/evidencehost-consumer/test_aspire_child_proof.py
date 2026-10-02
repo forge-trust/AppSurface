@@ -18,6 +18,9 @@ spec = importlib.util.spec_from_file_location("aspire_child_proof", Path(__file_
 proof = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(proof)
 
+SELECTED_UNIT = "issue779-child-" + "a" * 32 + ".service"
+SELECTED_GROUP = "/system.slice/" + SELECTED_UNIT
+
 
 class ProofControls(unittest.TestCase):
     def test_combined_budget_latches_without_upgrade(self):
@@ -106,19 +109,19 @@ class ProofControls(unittest.TestCase):
         pump = mock.Mock()
         pump.is_alive.return_value = False
         with mock.patch.object(proof, "stop_unit") as stop, mock.patch.object(proof, "cgroup_pids", return_value=set()):
-            self.assertEqual((True, False), proof.stop_and_join("selected", process, "/selected", [pump]))
-            stop.assert_called_once_with("selected")
+            self.assertEqual((True, False), proof.stop_and_join(SELECTED_UNIT, process, SELECTED_GROUP, [pump]))
+            stop.assert_called_once_with(SELECTED_UNIT)
             process.wait.assert_called_once()
             pump.join.assert_called_once()
 
     def test_stalled_stop_escalates_only_after_grace(self):
         process = mock.Mock()
         process.poll.return_value = None
-        ticks = iter([0, 0.1, 6])
+        ticks = iter([0, 0.1, 6, 6, 6, 6])
         with mock.patch.object(proof, "stop_unit") as stop, mock.patch.object(proof.time, "monotonic", side_effect=lambda: next(ticks)), \
                 mock.patch.object(proof.time, "sleep") as sleep, mock.patch.object(proof, "cgroup_pids", return_value=set()):
-            self.assertEqual((True, True), proof.stop_and_join("selected", process, "/selected", []))
-            self.assertEqual([mock.call("selected"), mock.call("selected", force=True)], stop.call_args_list)
+            self.assertEqual((True, True), proof.stop_and_join(SELECTED_UNIT, process, SELECTED_GROUP, []))
+            self.assertEqual([mock.call(SELECTED_UNIT), mock.call(SELECTED_UNIT, force=True)], stop.call_args_list)
             sleep.assert_called_once()
 
     def test_unjoined_pump_never_confirms_owned_exit(self):
@@ -127,7 +130,7 @@ class ProofControls(unittest.TestCase):
         pump = mock.Mock()
         pump.is_alive.return_value = True
         with mock.patch.object(proof, "stop_unit"), mock.patch.object(proof, "cgroup_pids", return_value=set()):
-            self.assertEqual((False, False), proof.stop_and_join("selected", process, "/selected", [pump]))
+            self.assertEqual((False, False), proof.stop_and_join(SELECTED_UNIT, process, SELECTED_GROUP, [pump]))
 
     def test_teardown_output_burst_latches_final_quota_failure(self):
         budget = proof.OutputBudget(5)
@@ -139,7 +142,7 @@ class ProofControls(unittest.TestCase):
         process = mock.Mock()
         process.poll.return_value = 0
         with mock.patch.object(proof, "stop_unit"), mock.patch.object(proof, "cgroup_pids", return_value=set()):
-            proof.stop_and_join("selected", process, "/selected", [pump])
+            proof.stop_and_join(SELECTED_UNIT, process, SELECTED_GROUP, [pump])
         proof.final_output_receipt(receipt, budget)
         self.assertEqual("output-quota-exceeded", receipt["failure"])
         self.assertEqual(6, receipt["output_bytes"])
@@ -159,6 +162,397 @@ class ProofControls(unittest.TestCase):
                 self.assertTrue(force)
             with mock.patch.object(proof.os, "setsid"), mock.patch.object(proof, "stop_unit", side_effect=stop):
                 proof.watchdog("issue779-child-test.service", 0, done, control, mock.Mock())
+
+
+class StartupQueryAndStopDiscoveryControls(unittest.TestCase):
+    """Closed query evidence and physical lifetime controls, no native service execution."""
+
+    @staticmethod
+    def properties(**extra):
+        return {"_query_exit_status": 0, "LoadState": "loaded", "Type": "exec", "ActiveState": "active",
+                "SubState": "running", "MainPID": "123", "ControlGroup": SELECTED_GROUP, **extra}
+
+    @classmethod
+    def missing(cls):
+        return cls.properties(LoadState="not-found", Type="", ActiveState="inactive", SubState="dead",
+                              MainPID="0", ControlGroup="")
+
+    @staticmethod
+    def query_result(properties, status=0, stderr=b""):
+        raw = "".join(f"{key}={value}\n" for key, value in properties.items() if not key.startswith("_"))
+        return subprocess.CompletedProcess([], status, raw.encode("ascii"), stderr)
+
+    def test_successful_not_found_then_loaded_start_then_running_keeps_identity_guard_closed(self):
+        samples = [self.missing(), self.properties(ActiveState="activating", SubState="start", MainPID="0"),
+                   self.properties()]
+        with tempfile.TemporaryDirectory() as name, mock.patch.object(proof, "command", side_effect=[
+                self.query_result(value) for value in samples]) as query, mock.patch.object(proof, "identity_matches") as identity:
+            receipt = {}
+            seen = False
+            for expected, sample in zip((False, False, True), samples):
+                properties, complete = proof.query_exec_startup(SELECTED_UNIT, time.monotonic() + 1, seen,
+                                                               receipt, Path(name), time.monotonic())
+                self.assertEqual(expected, complete)
+                seen = seen or properties["LoadState"] == "loaded"
+            self.assertEqual(3, query.call_count)
+            self.assertTrue(all(SELECTED_UNIT in call.args[0] for call in query.call_args_list))
+            self.assertNotIn("failure", receipt)
+            identity.assert_not_called()
+
+    def test_not_found_after_loaded_exec_is_terminal_with_private_closed_facts(self):
+        with tempfile.TemporaryDirectory() as name, mock.patch.object(proof, "command", return_value=self.query_result(self.missing())):
+            receipt = {}
+            with self.assertRaises(proof.StartupFailure):
+                proof.query_exec_startup(SELECTED_UNIT, time.monotonic() + 1, True, receipt, Path(name), time.monotonic())
+            self.assertTrue(receipt["startup_diagnostic_written"])
+            self.assertEqual("not-found", json.loads((Path(name) / "startup-diagnostic.json").read_text())["load_state"])
+
+    def test_nonzero_query_captures_status_and_original_cause_survives_watchdog_and_output_failure(self):
+        with tempfile.TemporaryDirectory() as name, mock.patch.object(proof, "command", return_value=self.query_result(
+                self.properties(), 5, b"private-query-canary")):
+            receipt = {}
+            with self.assertRaises(proof.StartupFailure):
+                proof.query_exec_startup(SELECTED_UNIT, time.monotonic() + 1, False, receipt, Path(name), time.monotonic())
+            path = Path(name) / "startup-diagnostic.json"
+            self.assertEqual(0o600, path.stat().st_mode & 0o777)
+            self.assertLessEqual(path.stat().st_size, 4096)
+            self.assertEqual(5, json.loads(path.read_text())["query_exit_status"])
+            self.assertNotIn("private-query-canary", path.read_text() + json.dumps(receipt))
+            receipt.update(failure="watchdog-unavailable", watchdog_clean_exit=False, owned_exit=False)
+            proof.final_output_receipt(receipt, proof.OutputBudget(), [])
+            proof.preserve_identity_rejection(receipt)
+            self.assertEqual(proof.STARTUP_FAILURE, receipt["failure"])
+            self.assertEqual(proof.STARTUP_STAGE, receipt["failure_stage"])
+            self.assertFalse(receipt["owned_exit"])
+            self.assertFalse(receipt["output_complete"])
+            self.assertFalse(receipt["watchdog_clean_exit"])
+
+    def test_timeout_query_records_unknown_status_without_raw_exception(self):
+        with tempfile.TemporaryDirectory() as name, mock.patch.object(proof, "command", side_effect=
+                subprocess.TimeoutExpired("private-query-canary", 1, stderr=b"private-query-canary")):
+            receipt = {}
+            with self.assertRaises(proof.StartupFailure):
+                proof.query_exec_startup(SELECTED_UNIT, time.monotonic() + 1, False, receipt, Path(name), time.monotonic())
+            data = json.loads((Path(name) / "startup-diagnostic.json").read_text())
+            self.assertEqual({"load_state", "type", "active_state", "sub_state", "main_pid", "query_exit_status", "elapsed_seconds"}, set(data))
+            self.assertIsNone(data["query_exit_status"])
+            self.assertEqual(0, data["main_pid"])
+            self.assertNotIn("private-query-canary", json.dumps(data) + json.dumps(receipt))
+
+    def test_terminal_malformed_and_foreign_properties_are_not_pending(self):
+        cases = [self.properties(LoadState="masked"), self.properties(ActiveState="inactive", SubState="dead"),
+                 self.properties(Type="private-query-canary"), self.properties(SubState="private-query-canary"),
+                 self.properties(MainPID="4294967296"), self.properties(ControlGroup="/system.slice/other.service"),
+                 self.missing() | {"_query_exit_status": 4}, self.missing() | {"MainPID": "123"}]
+        for sample in cases:
+            with self.subTest(sample=sample), tempfile.TemporaryDirectory() as name, mock.patch.object(
+                    proof, "command", return_value=self.query_result(sample, sample["_query_exit_status"])):
+                receipt = {}
+                with self.assertRaises(proof.StartupFailure):
+                    proof.query_exec_startup(SELECTED_UNIT, time.monotonic() + 1, False, receipt, Path(name), time.monotonic())
+                self.assertTrue(receipt["startup_diagnostic_written"])
+                self.assertNotIn("private-query-canary", (Path(name) / "startup-diagnostic.json").read_text())
+
+    def test_expired_missing_query_is_failure_with_last_observation(self):
+        with tempfile.TemporaryDirectory() as name, mock.patch.object(proof, "command", return_value=self.query_result(self.missing())):
+            receipt = {}
+            with self.assertRaises(proof.StartupFailure):
+                proof.query_exec_startup(SELECTED_UNIT, time.monotonic() - 1, False, receipt, Path(name), time.monotonic())
+            self.assertEqual("not-found", json.loads((Path(name) / "startup-diagnostic.json").read_text())["load_state"])
+
+    def test_deadline_between_query_and_observation_captures_first_cause_before_teardown(self):
+        with tempfile.TemporaryDirectory() as name, mock.patch.object(proof, "command", return_value=self.query_result(self.properties())):
+            receipt = {}
+            with mock.patch.object(proof.time, "monotonic", return_value=11):
+                properties, complete = proof.query_exec_startup(SELECTED_UNIT, 12, False, receipt, Path(name), 0)
+            self.assertTrue(complete)
+            with mock.patch.object(proof.time, "monotonic", return_value=12), mock.patch.object(proof, "identity_matches") as identity:
+                try:
+                    proof.observe_unit_processes(properties, 999, SELECTED_GROUP, receipt, Path(name), 0, 12)
+                except proof.StartupFailure as error:
+                    proof.record_control_failure(receipt, error, Path(name), properties, 0)
+                else:
+                    self.fail("Expired observation cannot accept a running unit")
+                identity.assert_not_called()
+            self.assertTrue(receipt["startup_diagnostic_written"])
+            self.assertEqual("StartupFailure", receipt["error_class"])
+            self.assertEqual(12, json.loads((Path(name) / "startup-diagnostic.json").read_text())["elapsed_seconds"])
+            receipt.update(failure="watchdog-unavailable", owned_exit=False, watchdog_clean_exit=False)
+            proof.preserve_identity_rejection(receipt)
+            self.assertEqual(proof.STARTUP_FAILURE, receipt["failure"])
+            self.assertFalse(receipt["owned_exit"])
+
+    def test_duplicate_and_oversized_query_cannot_prove_startup(self):
+        for raw in (b"Type=exec\nType=exec\n", b"x" * 4097):
+            with self.subTest(size=len(raw)), mock.patch.object(proof, "command", return_value=subprocess.CompletedProcess([], 0, raw, b"")):
+                properties = proof.unit_properties(SELECTED_UNIT)
+                with self.assertRaises(proof.StartupFailure):
+                    proof.exec_startup_complete(properties, time.monotonic() + 1)
+
+    def test_query_never_selects_foreign_or_malformed_unit(self):
+        for unit in ("other.service", "issue779-child-../foreign.service", "issue779-child-" + "g" * 32 + ".service"):
+            with self.subTest(unit=unit), mock.patch.object(proof, "command") as query:
+                with self.assertRaises(ValueError):
+                    proof.unit_properties(unit)
+                query.assert_not_called()
+
+    def test_failed_existing_or_oversized_capture_preserves_original_failure(self):
+        for failure in ("existing", "write", "size"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as name:
+                path = Path(name) / "startup-diagnostic.json"
+                if failure == "existing":
+                    path.write_bytes(b"existing-private-data")
+                receipt = {}
+                original_open = Path.open
+                def opened(candidate, *args, **kwargs):
+                    if failure == "write" and candidate == path:
+                        raise OSError("private-query-canary")
+                    return original_open(candidate, *args, **kwargs)
+                with mock.patch.object(Path, "open", opened), mock.patch.object(proof, "STARTUP_DIAGNOSTIC_LIMIT", 1 if failure == "size" else 4096):
+                    proof.record_startup_failure(receipt, Path(name), self.properties(), time.monotonic())
+                self.assertFalse(receipt["startup_diagnostic_written"])
+                receipt["failure"] = "watchdog-unavailable"
+                proof.preserve_identity_rejection(receipt)
+                self.assertEqual(proof.STARTUP_FAILURE, receipt["failure"])
+                if failure == "existing":
+                    self.assertEqual(b"existing-private-data", path.read_bytes())
+                else:
+                    self.assertFalse(path.exists())
+                self.assertNotIn("private-query-canary", json.dumps(receipt))
+
+    def test_invalid_query_status_and_pid_have_closed_private_defaults(self):
+        with tempfile.TemporaryDirectory() as name:
+            receipt = {}
+            proof.record_startup_failure(receipt, Path(name), self.properties(
+                _query_exit_status=999999, MainPID="private-query-canary", LoadState="private-query-canary",
+                Type="private-query-canary", ActiveState="private-query-canary", SubState="private-query-canary"), time.monotonic())
+            data = json.loads((Path(name) / "startup-diagnostic.json").read_text())
+            self.assertEqual(0, data["main_pid"])
+            self.assertIsNone(data["query_exit_status"])
+            self.assertEqual("unknown", data["load_state"])
+            self.assertNotIn("private-query-canary", json.dumps(data))
+
+    def test_real_fork_stop_discovers_late_exact_group_and_watchdog_disarms_cleanly(self):
+        import multiprocessing
+        context = multiprocessing.get_context("fork")
+        child_done = context.Event()
+        child = context.Process(target=child_done.wait, args=(3,))
+        class JoinedChild:
+            def poll(self):
+                return child.exitcode
+            def wait(self, timeout):
+                child.join(timeout)
+                if child.is_alive():
+                    raise subprocess.TimeoutExpired("portable-child", timeout)
+                return child.exitcode
+        with tempfile.TemporaryDirectory() as name:
+            reader, writer = context.Pipe(duplex=False)
+            watchdog_done = context.Event()
+            monitor = context.Process(target=proof.watchdog, args=(SELECTED_UNIT, time.monotonic() + 10, watchdog_done, Path(name), writer))
+            queries = []
+            def command(argv, **kwargs):
+                if argv[1] == "show":
+                    queries.append(argv)
+                    return self.query_result(self.missing() if len(queries) == 1 else self.properties(
+                        ActiveState="inactive", SubState="dead", MainPID="0"))
+                self.assertEqual(["systemctl", "kill", "--kill-whom=main", "--signal=TERM", SELECTED_UNIT], argv)
+                child_done.set()
+                return subprocess.CompletedProcess(argv, 0, b"", b"")
+            with mock.patch.object(proof, "command", side_effect=command), mock.patch.object(proof, "cgroup_pids", return_value=set()) as pids:
+                child.start()
+                monitor.start()
+                writer.close()
+                try:
+                    proof.await_watchdog_ack(monitor, reader, timeout=1)
+                    self.assertEqual((True, False), proof.stop_and_join(SELECTED_UNIT, JoinedChild(), "", [], guard=lambda: proof.require_watchdog_alive(monitor)))
+                    self.assertGreaterEqual(len(queries), 2)
+                    self.assertTrue(all(call.args[0] == SELECTED_GROUP for call in pids.call_args_list))
+                    self.assertEqual(0, child.exitcode)
+                    proof.disarm_watchdog(monitor, watchdog_done, reader)
+                    self.assertEqual(0, monitor.exitcode)
+                finally:
+                    child_done.set()
+                    watchdog_done.set()
+                    WatchdogAndPumpControls._finish_process(child)
+                    WatchdogAndPumpControls._finish_process(monitor)
+                    reader.close()
+
+    def test_unknown_or_foreign_group_never_confirms_exit_and_force_targets_selected_unit(self):
+        foreign = "/system.slice/issue779-child-" + "b" * 32 + ".service"
+        for initial, observed in (("", ""), (foreign, SELECTED_GROUP), ("", foreign)):
+            with self.subTest(initial=initial, observed=observed):
+                process = mock.Mock()
+                process.poll.return_value = 0
+                with mock.patch.object(proof, "COOPERATIVE_SECONDS", 0.001), mock.patch.object(proof, "CLEANUP_SECONDS", 0.002), \
+                        mock.patch.object(proof, "stop_unit") as stop, mock.patch.object(proof, "unit_properties", return_value=self.properties(ControlGroup=observed)), \
+                        mock.patch.object(proof, "cgroup_pids", return_value=set()) as pids:
+                    owned, escalated = proof.stop_and_join(SELECTED_UNIT, process, initial, [])
+                self.assertFalse(owned)
+                self.assertTrue(escalated)
+                self.assertEqual([mock.call(SELECTED_UNIT), mock.call(SELECTED_UNIT, force=True)], stop.call_args_list)
+                self.assertTrue(all(call.args[0] == SELECTED_GROUP for call in pids.call_args_list))
+
+    def test_discovery_cannot_clear_root_uid_rejection_or_prior_watchdog_loss(self):
+        with tempfile.TemporaryDirectory() as name:
+            receipt = {}
+            with mock.patch.object(proof, "cgroup_pids", return_value={123}), mock.patch.object(
+                    Path, "read_text", return_value="Uid:\t0\t0\t0\t0\n"), mock.patch.object(proof, "belongs_to_group", return_value=True):
+                with self.assertRaises(RuntimeError):
+                    proof.observe_unit_processes(self.properties(), 999, SELECTED_GROUP, receipt, Path(name), 0, time.monotonic() + 1)
+            process = mock.Mock()
+            process.poll.return_value = 0
+            with mock.patch.object(proof, "stop_unit"), mock.patch.object(proof, "unit_properties", return_value=self.properties()), \
+                    mock.patch.object(proof, "cgroup_pids", return_value=set()):
+                self.assertEqual((True, False), proof.stop_and_join(SELECTED_UNIT, process, "", []))
+            proof.preserve_identity_rejection(receipt)
+            self.assertEqual(proof.IDENTITY_FAILURE, receipt["failure"])
+            monitor = WatchdogAndPumpControls._monitor()
+            done = mock.Mock()
+            with self.assertRaises(proof.WatchdogFailure):
+                proof.disarm_watchdog(monitor, done, mock.Mock(), physical_exit=True, ownership_lost=True)
+            done.set.assert_not_called()
+            with self.assertRaises(proof.WatchdogFailure):
+                proof.disarm_watchdog(monitor, done, mock.Mock(), physical_exit=False)
+            done.set.assert_not_called()
+
+
+class ExitedLauncherOrchestrationControls(unittest.TestCase):
+    """Execute controller orchestration with fake launcher/query outcomes, no native service."""
+
+    def _run_exited_launcher(self, *, activating_first=False, read_failure=None):
+        import io
+        from types import SimpleNamespace
+        original_path = Path
+        with tempfile.TemporaryDirectory(prefix="exited-launcher-") as name:
+            root = original_path(name)
+            run_root = root / "run"
+            run_root.mkdir()
+            controllers = root / "cgroup.controllers"
+            controllers.touch()
+            bundle = root / "bundle"
+            bundle.mkdir()
+            dotnet = root / "dotnet"
+            dotnet.touch()
+            tools, output = root / "tools", root / "output"
+            tools.mkdir()
+            output.mkdir()
+            resource = original_path(__file__).parent / "NativeHttpResource/bin/Debug/net10.0/NativeHttpResource.dll"
+            shutil.copyfile(resource, tools / "protected-tool.dll")
+            args = SimpleNamespace(bundle=bundle, dotnet=dotnet, protected_tools=tools,
+                                   protected_output=output, subject_uid=999, subject_gid=999, case="normal")
+            class ExitedLauncher:
+                def __init__(self):
+                    self.stdout, self.stderr = io.BytesIO(), io.BytesIO()
+                    self.returncode = 1
+                    self.polls = [None, 1] if activating_first else [1]
+                def poll(self):
+                    return self.polls.pop(0) if self.polls else self.returncode
+            process = ExitedLauncher()
+            monitor = WatchdogAndPumpControls._monitor()
+            events, query_timeouts = [], []
+            pending = StartupQueryAndStopDiscoveryControls.properties(ActiveState="activating", SubState="start", MainPID="0")
+            terminal = StartupQueryAndStopDiscoveryControls.properties(ActiveState="failed", SubState="failed", MainPID="0")
+            samples = iter(([pending] if activating_first else []) + [read_failure if read_failure is not None else terminal])
+            def query(unit, timeout=5):
+                self.assertEqual(SELECTED_UNIT, unit)
+                self.assertGreater(timeout, 0)
+                self.assertLessEqual(timeout, 5)
+                events.append("query")
+                query_timeouts.append(timeout)
+                result = next(samples)
+                if isinstance(result, Exception):
+                    raise result
+                return result
+            control = run_root / SELECTED_UNIT.removesuffix(".service") / "control"
+            original_capture = proof.record_startup_failure
+            def capture(receipt, destination, properties, started):
+                if receipt.get("failure_stage") != proof.STARTUP_STAGE:
+                    events.append("capture")
+                original_capture(receipt, destination, properties, started)
+            def stop(unit, launcher, group, pumps, guard):
+                self.assertEqual(SELECTED_UNIT, unit)
+                self.assertIs(process, launcher)
+                self.assertTrue((control / "startup-diagnostic.json").is_file())
+                events.append("TERM")
+                proof.stop_unit(unit)
+                for thread in pumps:
+                    thread.join(timeout=1)
+                    self.assertFalse(thread.is_alive())
+                guard()
+                return True, False
+            def stage(source, destination):
+                destination.mkdir()
+                return {}
+            def selected_path(value, *parts):
+                if str(value) == "/run":
+                    return run_root
+                if str(value) == "/sys/fs/cgroup/cgroup.controllers":
+                    return controllers
+                return original_path(value, *parts)
+            def disarm(*args, **kwargs):
+                monitor.exitcode = 0
+            original_chmod = original_path.chmod
+            def root_fixture_chmod(candidate, mode, *args, **kwargs):
+                # The controller is root and can create declared.txt in a 0555 directory.
+                # This fake-root portable fixture grants its actual owner that setup write.
+                if candidate == control.parent / "payload/proof-input":
+                    mode |= 0o200
+                return original_chmod(candidate, mode, *args, **kwargs)
+            with mock.patch.object(proof.sys, "platform", "linux"), \
+                    mock.patch.multiple(proof.os, geteuid=mock.Mock(return_value=0), chown=mock.Mock()), \
+                    mock.patch.object(proof.pwd, "getpwuid"), \
+                    mock.patch.object(proof, "Path", side_effect=selected_path), \
+                    mock.patch.object(original_path, "chmod", root_fixture_chmod), \
+                    mock.patch.object(proof.uuid, "uuid4", return_value=SimpleNamespace(hex="a" * 32)), \
+                    mock.patch.object(proof, "prepare_payload", side_effect=stage), \
+                    mock.patch.object(proof.multiprocessing, "Event"), mock.patch.object(proof.multiprocessing, "Pipe", return_value=(mock.Mock(), mock.Mock())), \
+                    mock.patch.object(proof.multiprocessing, "Process", return_value=monitor), \
+                    mock.patch.object(proof, "await_watchdog_ack"), mock.patch.object(proof, "disarm_watchdog", side_effect=disarm), \
+                    mock.patch.object(proof.subprocess, "Popen", return_value=process), \
+                    mock.patch.object(proof, "unit_properties", side_effect=query), \
+                    mock.patch.object(proof, "record_startup_failure", side_effect=capture), \
+                    mock.patch.object(proof, "record_budget_diagnostic"), mock.patch.object(proof, "stop_and_join", side_effect=stop), \
+                    mock.patch.object(proof, "command") as command, mock.patch.object(proof, "identity_matches") as identity, \
+                    mock.patch("builtins.print") as printed:
+                code = proof.prove(args)
+            self.assertEqual(1, code)
+            self.assertEqual(["query", "query", "capture", "TERM"] if activating_first else ["query", "capture", "TERM"], events)
+            command.assert_called_once_with(["systemctl", "kill", "--kill-whom=main", "--signal=TERM", SELECTED_UNIT], check=False)
+            identity.assert_not_called()
+            receipt = json.loads(printed.call_args.args[0])
+            self.assertEqual(proof.STARTUP_FAILURE, receipt["failure"])
+            self.assertEqual("StartupFailure", receipt["error_class"])
+            self.assertTrue(receipt["startup_diagnostic_written"])
+            self.assertTrue(receipt["output_complete"])
+            path = control / "startup-diagnostic.json"
+            self.assertEqual(0o600, path.stat().st_mode & 0o777)
+            self.assertLessEqual(path.stat().st_size, 4096)
+            facts = json.loads(path.read_text())
+            expected = pending if read_failure is not None else terminal
+            self.assertEqual(expected["ActiveState"], facts["active_state"])
+            self.assertEqual(expected["SubState"], facts["sub_state"])
+            self.assertEqual("loaded", facts["load_state"])
+            self.assertEqual("exec", facts["type"])
+            self.assertEqual(0, facts["main_pid"])
+            self.assertEqual(0, facts["query_exit_status"])
+            self.assertNotIn("private-query-canary", json.dumps(receipt) + json.dumps(facts))
+
+    def test_launcher_already_exited_before_first_poll_captures_terminal_facts_before_term_and_fails(self):
+        self._run_exited_launcher()
+
+    def test_activating_launcher_exits_between_queries_refreshes_terminal_facts_before_term_and_fails(self):
+        self._run_exited_launcher(activating_first=True)
+
+    def test_final_read_failure_keeps_old_activating_facts_and_original_startup_failure(self):
+        for error in (OSError("private-query-canary"), subprocess.TimeoutExpired("private-query-canary", 1)):
+            with self.subTest(error_class=type(error).__name__):
+                self._run_exited_launcher(activating_first=True, read_failure=error)
+
+    def test_expired_startup_bound_cannot_start_refresh_or_replace_previous_facts(self):
+        previous = StartupQueryAndStopDiscoveryControls.properties(ActiveState="activating", SubState="start")
+        with mock.patch.object(proof.time, "monotonic", return_value=12), mock.patch.object(proof, "unit_properties") as query:
+            self.assertIs(previous, proof.refresh_unconfirmed_startup(SELECTED_UNIT, 12, previous))
+        query.assert_not_called()
 
 
 class IdentityRejectionDiagnostics(unittest.TestCase):
@@ -270,7 +664,7 @@ class IdentityRejectionDiagnostics(unittest.TestCase):
 class ExecStartupControls(unittest.TestCase):
     @staticmethod
     def properties(active="active", sub="running", **extra):
-        return {"Type": "exec", "ActiveState": active, "SubState": sub,
+        return {"LoadState": "loaded", "_query_exit_status": 0, "Type": "exec", "ActiveState": active, "SubState": sub,
                 "MainPID": "123", "ControlGroup": "/selected", **extra}
 
     def test_command_selects_exec_and_queries_completed_startup_states_without_changing_caps(self):
@@ -280,9 +674,9 @@ class ExecStartupControls(unittest.TestCase):
         self.assertIn("--property=TasksMax=64", argv)
         self.assertIn("--property=MemoryMax=1G", argv)
         self.assertFalse(any("PROCESSOR_COUNT" in value for value in argv))
-        with mock.patch.object(proof, "command", return_value=mock.Mock(stdout=b"Type=exec\nSubState=running\n")) as run:
-            self.assertEqual({"Type": "exec", "SubState": "running"}, proof.unit_properties("selected"))
-        self.assertIn("--property=ControlGroup,MainPID,Type,ActiveState,SubState", run.call_args.args[0])
+        with mock.patch.object(proof, "command", return_value=mock.Mock(returncode=0, stdout=b"Type=exec\nSubState=running\n")) as run:
+            self.assertEqual({"_query_exit_status": 0, "Type": "exec", "SubState": "running"}, proof.unit_properties(SELECTED_UNIT))
+        self.assertIn("--property=LoadState,ControlGroup,MainPID,Type,ActiveState,SubState", run.call_args.args[0])
 
     def test_activating_root_candidate_is_not_observed_or_accepted(self):
         with mock.patch.object(proof, "cgroup_pids") as pids, mock.patch.object(proof, "identity_matches") as identity:

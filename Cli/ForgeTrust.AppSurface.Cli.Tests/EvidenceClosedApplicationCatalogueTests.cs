@@ -7,6 +7,102 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class EvidenceClosedApplicationCatalogueTests
 {
     [Fact]
+    public void AuthenticatedDescriptorMapsAllNineRolesAndCompleteGrantsWithoutGrantingAdmission()
+    {
+        var entry = Candidate();
+        entry = entry with { BundleFiles = [.. entry.BundleFiles,
+            new("apphost/dependency.dll", EvidenceClosedBundleRole.Dependency, 12, new string('c', 64), 0x124),
+            new("apphost/AppHost.deps.json", EvidenceClosedBundleRole.DependencyManifest, 23, new string('d', 64), 0x124)] };
+        var descriptor = Descriptor(entry);
+        var binding = EvidenceClosedApplicationCatalogue.CreateBinding(descriptor, entry.Policy, Plan(entry.Policy));
+
+        Assert.Equal(EvidenceCanonicalJson.Serialize(Binding(entry)), EvidenceCanonicalJson.Serialize(binding));
+        Assert.Equal(9, binding.BundleFiles.Select(static file => file.Role).Distinct().Count());
+        EvidenceClosedApplicationCatalogue.VerifyCandidateBinding(entry, binding.CatalogueDigest, entry.Policy, Plan(entry.Policy), binding);
+        var rejected = Assert.Throws<EvidenceAdmissionException>(() =>
+            EvidenceClosedApplicationCatalogue.Resolve(entry.Policy, Plan(entry.Policy), descriptor));
+        Assert.Equal("ASEVD407", rejected.Code);
+        var contextRejected = Assert.Throws<EvidenceAdmissionException>(() =>
+            EvidenceProtectedWorkerInputs.CreateContext(descriptor, entry.Policy, Plan(entry.Policy)));
+        Assert.Equal("ASEVD407", contextRejected.Code);
+        Assert.False(EvidenceProtectedWorkerInputs.AcceptedConsumerProof(descriptor));
+    }
+
+    [Fact]
+    public void DescriptorMappingPreservesActualProviderAndPlatformAndCopiesNestedMetadata()
+    {
+        var entry = Candidate();
+        var descriptor = Descriptor(entry) with { Provider = "unregistered-provider", Platform = "unregistered-platform" };
+        var binding = EvidenceClosedApplicationCatalogue.CreateBinding(descriptor, entry.Policy, Plan(entry.Policy));
+        Assert.Equal(descriptor.Provider, binding.Provider);
+        Assert.Equal(descriptor.Platform, binding.Platform);
+        Reject(entry, binding);
+
+        descriptor = descriptor with { Provider = "github-actions", Platform = "linux-x64" };
+        binding = EvidenceClosedApplicationCatalogue.CreateBinding(descriptor, entry.Policy, Plan(entry.Policy));
+        ((string[])descriptor.Application!.Producers[0].RequiredResources)[0] = "changed";
+        ((string[])descriptor.Application.Capabilities.ReadOnlyInputs)[0] = "changed";
+        Assert.Equal("http", binding.Producers[0].RequiredResources[0]);
+        Assert.Equal("proof-input/declared.txt", binding.Capabilities.ReadOnlyInputs[0]);
+        Assert.Throws<NotSupportedException>(() => ((IList<EvidenceClosedBundleFile>)binding.BundleFiles).Clear());
+        Assert.Throws<NotSupportedException>(() => ((IList<string>)binding.Producers[0].AssertionIds).Clear());
+    }
+
+    [Theory]
+    [InlineData("v1")]
+    [InlineData("unknown-schema")]
+    [InlineData("missing-application")]
+    [InlineData("sdk-version")]
+    [InlineData("bad-id")]
+    [InlineData("bad-digest")]
+    [InlineData("unknown-role")]
+    [InlineData("null-file")]
+    [InlineData("null-capabilities")]
+    [InlineData("null-inputs")]
+    [InlineData("null-resources")]
+    [InlineData("null-resource")]
+    [InlineData("null-producers")]
+    [InlineData("null-producer")]
+    [InlineData("null-assertions")]
+    [InlineData("root-application")]
+    [InlineData("shared-results-group")]
+    public void DescriptorMappingRejectsMalformedMetadataWithFixedClosedDiagnostic(string change)
+    {
+        var entry = Candidate();
+        var descriptor = Descriptor(entry);
+        var application = descriptor.Application!;
+        descriptor = change switch
+        {
+            "v1" => descriptor with { Schema = "evidence-worker-linux-v1" },
+            "unknown-schema" => descriptor with { Schema = "unknown-protocol-canary" },
+            "missing-application" => descriptor with { Application = null },
+            _ => descriptor with { Application = change switch
+            {
+                "sdk-version" => application with { AspireSdkVersion = "unsupported-sdk-canary" },
+                "bad-id" => application with { ApplicationId = "invalid/id-canary" },
+                "bad-digest" => application with { EntryDigest = new string('A', 64) },
+                "unknown-role" => application with { BundleFiles = [application.BundleFiles[0] with { Role = (EvidenceLinuxApplicationBundleRole)999 }, .. application.BundleFiles.Skip(1)] },
+                "null-file" => application with { BundleFiles = [null!, .. application.BundleFiles.Skip(1)] },
+                "null-capabilities" => application with { Capabilities = null! },
+                "null-inputs" => application with { Capabilities = application.Capabilities with { ReadOnlyInputs = null! } },
+                "null-resources" => application with { Resources = null! },
+                "null-resource" => application with { Resources = [null!] },
+                "null-producers" => application with { Producers = null! },
+                "null-producer" => application with { Producers = [null!] },
+                "null-assertions" => application with { Producers = [application.Producers[0] with { AssertionIds = null! }] },
+                "root-application" => application with { ApplicationUid = 0 },
+                _ => application with { ResultsGid = application.ApplicationGid },
+            } },
+        };
+
+        var rejected = Assert.Throws<EvidenceAdmissionException>(() =>
+            EvidenceClosedApplicationCatalogue.CreateBinding(descriptor, entry.Policy, Plan(entry.Policy)));
+        Assert.Equal("ASEVD404", rejected.Code);
+        Assert.Null(rejected.InnerException);
+        Assert.DoesNotContain("canary", rejected.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ProductionResolveRemainsClosedForACompletelyMatchingCandidate()
     {
         var entry = Candidate();
@@ -227,6 +323,26 @@ public sealed class EvidenceClosedApplicationCatalogueTests
         Assert.DoesNotContain(canary, error.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void DependencyManifestInventoryRequiresAReadOnlyDepsFile()
+    {
+        var entry = Candidate();
+        var file = new EvidenceClosedBundleFile("apphost/apphost.deps.json",
+            EvidenceClosedBundleRole.DependencyManifest, 1, new string('a', 64), 0x124);
+        var complete = entry with { BundleFiles = [.. entry.BundleFiles, file] };
+        var binding = Binding(complete);
+
+        EvidenceClosedApplicationCatalogue.VerifyCandidateBinding(complete, binding.CatalogueDigest,
+            complete.Policy, Plan(complete.Policy), binding);
+
+        foreach (var invalid in new[] { file with { RelativePath = "apphost/apphost.json" }, file with { Mode = 0x16d } })
+        {
+            var error = Assert.Throws<EvidenceAdmissionException>(() =>
+                EvidenceClosedApplicationCatalogue.Snapshot(entry with { BundleFiles = [.. entry.BundleFiles, invalid] }));
+            Assert.Equal("ASEVD404", error.Code);
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -278,6 +394,25 @@ public sealed class EvidenceClosedApplicationCatalogueTests
         EvidenceClosedApplicationCatalogue.ComputeEntryDigest(entry), "github-actions", "linux-x64", "evidence-worker-linux-v2",
         entry.Resources.Select(static item => item.Declaration).ToArray(), entry.Producers.Select(static item => item.Declaration).ToArray(),
         entry.BundleFiles, entry.Capabilities, new(1001, 1001, 1002, 1002, 1003, 1003, 2001, 2002));
+
+    private static EvidenceLinuxWorkerDescriptor Descriptor(EvidenceClosedApplicationDefinition entry)
+    {
+        var binding = Binding(entry);
+        return new("evidence-worker-linux-v2", "run/attempt-1", 123, 1001, 1001, 1002, 1002,
+            "worker.service", "/system.slice/worker.service", DateTimeOffset.UtcNow.AddMinutes(5),
+            "/tools", "/subject", "/output", "slot", "/usr/bin/dotnet", "/scratch/test-output", "/tools/policy.json",
+            "observation", "/control/broker/control.sock", new string('a', 64), new string('b', 40), new string('c', 40),
+            "workflow:protected", "github-actions", "linux-x64", new string('d', 64), new string('e', 64),
+            new(8, 1, 42, 1001, 1001), ["native-http"], ["coverage"], ["src/Feature.cs"], 10, 30, 30, 60, 5,
+            Application: new(entry.Id, entry.Version, entry.BuildId, binding.CatalogueDigest, binding.EntryDigest,
+                entry.AspireSdkVersion, entry.Resources.Select(static item => item.Declaration).ToArray(),
+                entry.Producers.Select(static item => item.Declaration).ToArray(),
+                entry.BundleFiles.Select(static item => new EvidenceLinuxApplicationBundleFile(item.RelativePath,
+                    (EvidenceLinuxApplicationBundleRole)item.Role, item.LengthBytes, item.Sha256, item.Mode)).ToArray(),
+                new(entry.Capabilities.ReadOnlyInputs, entry.Capabilities.ScratchBytes, entry.Capabilities.MemoryBytes,
+                    entry.Capabilities.MaximumTasks, entry.Capabilities.MaximumOutputBytes, entry.Capabilities.StartSeconds,
+                    entry.Capabilities.StoppingSeconds), 1003, 1003, 2001, 2002));
+    }
 
     private static IReadOnlyList<EvidenceClosedBundleFile> ChangedFile(IReadOnlyList<EvidenceClosedBundleFile> files, EvidenceClosedBundleFile changed, int index = 0) =>
         files.Select((file, position) => position == index ? changed : file).ToArray();

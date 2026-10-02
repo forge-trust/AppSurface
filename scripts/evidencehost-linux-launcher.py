@@ -983,12 +983,16 @@ def capture_job_deadline(job_seconds: int) -> tuple[str, float]:
 def worker_unit_properties(worker_name: str, tool_root: Path, subject_root: Path,
                            test_output_root: Path, output_parent: Path,
                            job_seconds: int) -> dict[str, str]:
-    """Expose tooling and the source map read-only without granting raw artifact access."""
+    """Expose tooling and the source map read-only without granting raw artifact access.
+
+    Disable worker RestrictSUIDSGID because systemd 255 blocks mandatory openat2
+    under that filter. Subject units retain it; all other isolation remains here.
+    """
     return {
         "User": worker_name, "Group": worker_name, "Type": "exec",
         "KillMode": "control-group", "RuntimeMaxSec": str(job_seconds), "TimeoutStopSec": "2",
         "SendSIGKILL": "yes", "NoNewPrivileges": "yes", "CapabilityBoundingSet": "",
-        "AmbientCapabilities": "", "ProtectControlGroups": "yes", "RestrictSUIDSGID": "yes",
+        "AmbientCapabilities": "", "ProtectControlGroups": "yes", "RestrictSUIDSGID": "no",
         "PrivateTmp": "yes", "ProtectSystem": "strict", "ProtectHome": "yes", "LimitCORE": "0",
         "TasksMax": "64", "MemoryMax": "1G", "Restart": "no", "RemainAfterExit": "yes",
         "ReadOnlyPaths": f"{tool_root} {subject_root}", "ReadWritePaths": str(output_parent),

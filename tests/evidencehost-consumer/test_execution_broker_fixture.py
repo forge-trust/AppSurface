@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Portable descriptor controls for the root execution-broker fixture."""
 import importlib.util
+import json
+import os
 from pathlib import Path
 import re
 import stat
+import struct
 import tempfile
 import unittest
-from unittest.mock import call, patch
+from unittest.mock import Mock, call, patch
 import xml.etree.ElementTree as ET
 
 source = Path(__file__).with_name("test_execution_broker.py")
@@ -16,6 +19,35 @@ spec.loader.exec_module(broker)
 
 
 class DescriptorTests(unittest.TestCase):
+    def test_peer_pin_creates_one_immutable_root_selected_control_snapshot(self):
+        with tempfile.TemporaryDirectory(prefix="execution-broker-control-") as temporary:
+            root = Path(temporary)
+            output = root / "output"
+            output.mkdir()
+            control = root / "control"
+            (control / "broker").mkdir(parents=True)
+            scenario = broker.Scenario("cli-coverage", root, root / "tool", root / "subject",
+                                       output, 1001, 1002, 1003, 1004, "/usr/bin/dotnet",
+                                       root / "tool" / "policy.json", "a" * 64,
+                                       root / "operations.jsonl", control / "broker" / "control.sock")
+            peer = Mock()
+            peer.getsockopt.return_value = struct.pack("3i", 12345, 1001, 1002)
+            snapshot = control / "worker-control.json"
+            self.assertFalse(snapshot.exists())
+            # The credential bytes are a portable fixture control. macOS does not
+            # expose the Linux SO_PEERCRED constant; actual kernel peers remain native-only.
+            with patch.object(broker.socket, "SO_PEERCRED", 17, create=True), patch.object(broker.os, "chown") as chown:
+                self.assertEqual((12345, 1001, 1002), scenario.pin_peer(peer))
+                self.assertEqual((12345, 1001, 1002), scenario.pin_peer(peer))
+            captured = json.loads(snapshot.read_bytes())
+            self.assertEqual(scenario.descriptor, captured)
+            self.assertEqual(os.getpid(), captured["broker_pid"])
+            self.assertEqual(str(snapshot), captured["descriptor_path"])
+            self.assertEqual(str(control / "broker" / "control.sock"), captured["socket_path"])
+            self.assertEqual(0o440, stat.S_IMODE(snapshot.stat().st_mode))
+            self.assertEqual(2, chown.call_count, "A repeated identical peer must reuse the retained snapshot.")
+            self.assertIn(call(snapshot, 0, 1002, follow_symlinks=False), chown.call_args_list)
+
     def test_every_scenario_creates_a_run_bound_to_its_root_and_authenticated_peer(self):
         with tempfile.TemporaryDirectory(prefix="execution-broker-") as temporary:
             root = Path(temporary)
@@ -27,7 +59,7 @@ class DescriptorTests(unittest.TestCase):
                     scenario = broker.Scenario(name, root, root / "tool", root / "subject",
                                                output, 1001, 1002, 1003, 1004, "/usr/bin/dotnet",
                                                root / "policy.json", "a" * 64,
-                                               root / f"{name}.jsonl", root / f"{name}.sock")
+                                               root / f"{name}.jsonl", root / name / "broker" / "control.sock")
                     descriptor = scenario.make_descriptor((12345, 1001, 1002))
                     self.assertEqual(f"fixture-{root.name}-{name}/1", descriptor["run_id"])
                     self.assertNotIn(descriptor["run_id"], run_ids)
@@ -35,7 +67,13 @@ class DescriptorTests(unittest.TestCase):
                     self.assertEqual((12345, 1001, 1002),
                                      (descriptor["worker_pid"], descriptor["worker_uid"], descriptor["worker_gid"]))
                     self.assertEqual(scenario.parent_identity, descriptor["output_parent_identity"])
-                    self.assertEqual(str(root / f"{name}.sock"), descriptor["socket_path"])
+                    self.assertEqual(str(root / name / "broker" / "control.sock"), descriptor["socket_path"])
+                    self.assertEqual(os.getpid(), descriptor["broker_pid"])
+                    self.assertEqual(str(root / name / "worker-control.json"), descriptor["descriptor_path"])
+                    self.assertEqual("b" * 40, descriptor["base_revision"])
+                    self.assertEqual("c" * 40, descriptor["subject_revision"])
+                    self.assertIsNone(descriptor["diff_file"])
+                    self.assertIsNone(descriptor["diff_sha256"])
             self.assertEqual(len(broker.SCENARIOS), len(run_ids))
 
 
