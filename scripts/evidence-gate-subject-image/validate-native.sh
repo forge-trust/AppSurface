@@ -227,6 +227,7 @@ write_podman_evidence() {
   python3 -c '
 import json
 import os
+import re
 from pathlib import Path
 
 def read_json(path):
@@ -278,8 +279,9 @@ record = {
         "podmanImageId": os.environ["PODMAN_IMAGE_ID"],
         "platform": os.environ["IMAGE_OS"] + "/" + os.environ["IMAGE_ARCH"],
         "identityMatched": (
-            os.environ["DOCKER_IMAGE_ID"] != "unavailable"
-            and os.environ["DOCKER_IMAGE_ID"] == os.environ["PODMAN_IMAGE_ID"]
+            re.fullmatch(r"[0-9a-f]{64}", os.environ["DOCKER_IMAGE_ID"].removeprefix("sha256:")) is not None
+            and os.environ["DOCKER_IMAGE_ID"].removeprefix("sha256:")
+            == os.environ["PODMAN_IMAGE_ID"].removeprefix("sha256:")
         ),
     },
     "container": {
@@ -438,7 +440,11 @@ if ! podman_image_id="$(timeout --signal=TERM --kill-after=5s 30s \
   "$podman_cli_path" --remote=false image inspect --format '{{.Id}}' "$image_tag")"; then
   podman_fail "$podman_phase" 'podman-image-inspect-failed'
 fi
-if [[ "$podman_image_id" != "$docker_image_id" ]]; then
+docker_image_hex="${docker_image_id#sha256:}"
+podman_image_hex="${podman_image_id#sha256:}"
+if [[ ! "$docker_image_hex" =~ ^[0-9a-f]{64}$ \
+  || ! "$podman_image_hex" =~ ^[0-9a-f]{64}$ \
+  || "$podman_image_hex" != "$docker_image_hex" ]]; then
   podman_fail "$podman_phase" 'transferred-image-identity-mismatch'
 fi
 rm -f "$podman_archive"
