@@ -1,0 +1,21 @@
+# The base is an immutable multi-platform .NET 10 SDK manifest. The built image
+# must also be published and consumed by its own registry digest; a local tag
+# or this base digest alone is never sufficient for the evidence gate.
+FROM mcr.microsoft.com/dotnet/sdk:10.0.102@sha256:6ba533cc61a5d8c5e7d4b3a3e33e2ddc2efef200b112e4d658303516bfd24255
+
+# Python runs the fixed, base-owned subject entrypoint. The final registry
+# digest binds the resolved Ubuntu package versions as well as the SDK image.
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY evidence-gate-subject-entrypoint.py /usr/local/libexec/appsurface-subject-runner
+COPY locked-dependencies/ /opt/appsurface/locked-dependencies/
+
+RUN chmod 0555 /usr/local/libexec/appsurface-subject-runner \
+    && chmod -R a+rX /opt/appsurface/locked-dependencies \
+    && test -x /usr/bin/python3 \
+    && test -x /usr/bin/dotnet
+
+USER 65532:65532
+ENTRYPOINT ["/usr/local/libexec/appsurface-subject-runner"]

@@ -13,12 +13,37 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      validate_subject_image:
+        description: Validate the non-claiming evidence subject image and cold offline restore on native Linux x64.
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.head.label || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  evidence-subject-image-validation:
+    name: Evidence subject image validation (non-claiming)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.validate_subject_image }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout the implementation branch without credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Verify real feed, build image, and restore from empty cache
+        run: bash ./scripts/evidence-gate-subject-image/validate-native.sh
+
   config-package-contract:
     name: Config package contract (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
