@@ -53,7 +53,22 @@ static IDistributedApplicationBuilder CreateConsumerBuilder()
 }
 ```
 
-The intended resource lane creates readiness adapters for `AddAspireHealthResource` after its admitted application starts, then owns its bounded stop/dispose lifecycle. Application ownership must be retained immediately after build, before start can fail. Startup failure is stopped and joined by the shared lifecycle before disposal; the start callback must not dispose the lease itself. Direct readiness probes use `AddResource(declaration, probe)`. Producers use `AddProducer(declaration, producer)`. Legacy id-only registration overloads remain source compatible but cannot satisfy the exact admitted declaration check.
+The restricted resource path selects an immutable definition from the [closed application catalogue](../ForgeTrust.AppSurface.Evidence.Planner/README.md#internal-closed-application-catalogue-prerequisite). It retains a pending local application lease before application-start I/O, checks complete registrations, then asks the authenticated root broker to start the exact application ID and entry digest. It never executes a public builder factory. The production catalogue and acceptance registry remain empty, so matching metadata cannot enable this path.
+
+`AddAspireHealthResource` supplies declaration and resource-name metadata for that selected definition. Root readiness adapters are captured before start and execute only inside their actual bounded Resource stage. Each resource has one attempt; the adapter links cancellation to that stage and tracks the entire root request even if its returned task is ignored. A public call without the internal stage binding is rejected. Readiness requires the typed root receipt for the prior application lease, resource, UID and cgroup; a caller notification or arbitrary health callback supplies no authority. Direct `AddResource(declaration, probe)` remains available for metadata and the synthetic lifecycle tests but cannot substitute for a closed restricted adapter.
+
+Restricted producers use [the shared coverage factory](../ForgeTrust.AppSurface.Evidence.Coverage/README.md#fixed-restricted-coverage-registration):
+
+```csharp
+using ForgeTrust.AppSurface.Evidence.Coverage;
+
+registration.AddProducer(producerDeclaration,
+    EvidenceRestrictedCoverageProducerFactory.Create(producerDeclaration));
+```
+
+The factory returns inspectable sealed metadata. The host captures and validates those exact references against complete selected declarations before startup. Public resource and producer maps are read-only views; later registrations cannot replace a captured adapter. Public same-declaration producer substitutes and legacy id-only registrations fail the restricted audit. Every actual Producer callback binds the same protected writer, admitted plan, captured diff bytes, shared process-output quota and lifecycle to the factory's one-attempt internal lease. Neither matching metadata nor a local artifact writer can issue it.
+
+Root stop/wait must establish physical exit of application and producer groups and completion of output pumps before local disposal or artifact collection. Local application disposal checks the lifecycle's joined pre-disposal phase; it adds no independent grace or timer. `OwnWorkStopped` is a final predicate that includes registered disposer tasks and must not be checked from inside one of those same tasks. Premature local disposal stays failed on retry. The [shared lifecycle contract](../ForgeTrust.AppSurface.Evidence.Contracts/README.md) describes stopping, cleanup and collection reserves. Startup failure follows that same stop/join path before disposal.
 
 Observation accepts only a protected dependency-free targeted profile and issues informational evidence. The registered verifier API and envelope-shaped values cannot enable Trusted runtime admission until a full protected consumer acceptance proof exists; current production context deliberately rejects Trusted with `ASEVD407`. The control-channel request alone grants no authority. The protected Linux launcher is the current candidate mechanism; full runtime acceptance is pending. macOS, Windows, direct in-process execution, and unrelated long-lived host processes are unsupported.
 

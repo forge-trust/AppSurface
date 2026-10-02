@@ -164,6 +164,101 @@ class ProofControls(unittest.TestCase):
                 proof.watchdog("issue779-child-test.service", 0, done, control, mock.Mock())
 
 
+class StartupExecutionDiagnosticControls(unittest.TestCase):
+    """Selected-unit metadata controls; optional facts cannot authorize startup."""
+
+    @staticmethod
+    def properties(**extra):
+        return {"LoadState": "loaded", "ControlGroup": SELECTED_GROUP, "MainPID": "123", "Type": "exec",
+                "ActiveState": "active", "SubState": "running", **extra}
+
+    def test_selected_query_retains_all_required_names_timeout_and_only_numeric_job(self):
+        raw = b"Result=exit-code\nExecMainPID=321\nExecMainCode=1\nExecMainStatus=203\nJob=42\n"
+        with mock.patch.object(proof, "command", return_value=subprocess.CompletedProcess([], 0, raw, b"private-canary")) as query:
+            properties = proof.unit_properties(SELECTED_UNIT, timeout=0.25)
+        query.assert_called_once_with(["systemctl", "show", "--all", SELECTED_UNIT,
+                                      "--property=" + ",".join(proof.UNIT_PROPERTY_NAMES + proof.STARTUP_DIAGNOSTIC_PROPERTY_NAMES)],
+                                     timeout=0.25, check=False)
+        self.assertEqual(("LoadState", "ControlGroup", "MainPID", "Type", "ActiveState", "SubState"), proof.UNIT_PROPERTY_NAMES)
+        self.assertEqual({"result": "exit-code", "exec_main_pid": 321, "exec_main_code": 1,
+                          "exec_main_status": 203, "job_id": 42}, proof.startup_execution_diagnostics(properties))
+
+    def test_queued_loaded_inactive_and_exited_process_capture_distinct_facts_but_both_reject(self):
+        samples = [(dict(Result="success", ExecMainPID="0", ExecMainCode="0", ExecMainStatus="0", Job="42"),
+                    {"result": "success", "exec_main_pid": 0, "exec_main_code": 0, "exec_main_status": 0, "job_id": 42}),
+                   (dict(Result="exit-code", ExecMainPID="321", ExecMainCode="1", ExecMainStatus="203", Job=""),
+                    {"result": "exit-code", "exec_main_pid": 321, "exec_main_code": 1, "exec_main_status": 203, "job_id": 0})]
+        for fields, expected in samples:
+            with self.subTest(fields=fields), tempfile.TemporaryDirectory() as name:
+                sample = self.properties(ActiveState="inactive", SubState="dead", MainPID="0", ControlGroup="", **fields)
+                raw = "".join(f"{key}={value}\n" for key, value in sample.items()).encode("ascii")
+                receipt = {}
+                with mock.patch.object(proof, "command", return_value=subprocess.CompletedProcess([], 0, raw, b"private-canary")), \
+                        mock.patch.object(proof, "identity_matches") as identity:
+                    with self.assertRaises(proof.StartupFailure):
+                        proof.query_exec_startup(SELECTED_UNIT, time.monotonic() + 1, False, receipt, Path(name), time.monotonic())
+                    identity.assert_not_called()
+                path = Path(name) / "startup-diagnostic.json"
+                data = json.loads(path.read_bytes())
+                self.assertEqual(expected, {key: data[key] for key in expected})
+                self.assertEqual(0, data["main_pid"])
+                self.assertEqual(0o600, path.stat().st_mode & 0o777)
+                self.assertLessEqual(path.stat().st_size, 4096)
+                self.assertEqual({"failure": proof.STARTUP_FAILURE, "failure_stage": proof.STARTUP_STAGE,
+                                  "startup_diagnostic_written": True}, receipt)
+                self.assertNotIn("private-canary", path.read_text() + json.dumps(receipt))
+
+    def test_absent_optional_fields_are_unknown_and_null_without_changing_active_acceptance(self):
+        sample = self.properties()
+        self.assertEqual({"result": "unknown", "exec_main_pid": None, "exec_main_code": None,
+                          "exec_main_status": None, "job_id": None}, proof.startup_execution_diagnostics(sample))
+        self.assertTrue(proof.exec_startup_complete(sample | {"_query_exit_status": 0}, time.monotonic() + 1))
+
+    def test_observed_zero_and_empty_job_are_distinct_from_absent_fields(self):
+        sample = dict(Result="success", ExecMainPID="0", ExecMainCode="0", ExecMainStatus="0", Job="")
+        self.assertEqual({"result": "success", "exec_main_pid": 0, "exec_main_code": 0,
+                          "exec_main_status": 0, "job_id": 0}, proof.startup_execution_diagnostics(sample))
+        self.assertIsNone(proof.startup_execution_diagnostics({"Job": "0"})["job_id"])
+
+    def test_numeric_bounds_follow_pinned_uint32_and_int32_properties(self):
+        sample = dict(Result="signal", ExecMainPID="4294967295", ExecMainCode="-2147483648",
+                      ExecMainStatus="2147483647", Job="4294967295")
+        self.assertEqual({"result": "signal", "exec_main_pid": 4294967295, "exec_main_code": -2147483648,
+                          "exec_main_status": 2147483647, "job_id": 4294967295}, proof.startup_execution_diagnostics(sample))
+
+    def test_malformed_values_do_not_fabricate_zero_or_echo_canaries(self):
+        for value in (None, True, 7, [], {}, "private-canary", "1 private-canary", "1.0", "9" * 100):
+            with self.subTest(value=value):
+                data = proof.startup_execution_diagnostics(dict.fromkeys(proof.STARTUP_DIAGNOSTIC_PROPERTY_NAMES, value))
+                self.assertEqual({"result": "unknown", "exec_main_pid": None, "exec_main_code": None,
+                                  "exec_main_status": None, "job_id": None}, data)
+                self.assertNotIn("private-canary", json.dumps(data))
+        sample = dict(ExecMainPID="4294967296", ExecMainCode="-2147483649", ExecMainStatus="2147483648", Job="-1")
+        self.assertTrue(all(value is None for key, value in proof.startup_execution_diagnostics(sample).items() if key != "result"))
+
+    def test_duplicate_and_nonascii_optional_properties_cannot_change_required_guard(self):
+        required = "".join(f"{key}={value}\n" for key, value in self.properties().items()).encode("ascii")
+        extra = b"Result=success\nResult=exit-code\nExecMainPID=12\nExecMainPID=13\nExecMainCode=\xff\nExecMainStatus\nJob=/private-canary\n"
+        with mock.patch.object(proof, "command", return_value=subprocess.CompletedProcess([], 0, required + extra, b"")):
+            properties = proof.unit_properties(SELECTED_UNIT)
+        self.assertNotIn("_malformed", properties)
+        self.assertTrue(proof.exec_startup_complete(properties, time.monotonic() + 1))
+        self.assertEqual({"result": "unknown", "exec_main_pid": None, "exec_main_code": None,
+                          "exec_main_status": None, "job_id": None}, proof.startup_execution_diagnostics(properties))
+
+    def test_unknown_result_and_signal_status_are_private_closed_facts(self):
+        with tempfile.TemporaryDirectory() as name:
+            receipt = {}
+            proof.record_startup_failure(receipt, Path(name), self.properties(Result="private-canary", ExecMainPID="12",
+                                          ExecMainCode="2", ExecMainStatus="15", Job=""), time.monotonic())
+            data = json.loads((Path(name) / "startup-diagnostic.json").read_bytes())
+            self.assertEqual("unknown", data["result"])
+            self.assertEqual(2, data["exec_main_code"])
+            self.assertEqual(15, data["exec_main_status"])
+            self.assertNotIn("exec_main_code", receipt)
+            self.assertNotIn("private-canary", json.dumps(data) + json.dumps(receipt))
+
+
 class StartupQueryAndStopDiscoveryControls(unittest.TestCase):
     """Closed query evidence and physical lifetime controls, no native service execution."""
 
@@ -234,9 +329,10 @@ class StartupQueryAndStopDiscoveryControls(unittest.TestCase):
             with self.assertRaises(proof.StartupFailure):
                 proof.query_exec_startup(SELECTED_UNIT, time.monotonic() + 1, False, receipt, Path(name), time.monotonic())
             data = json.loads((Path(name) / "startup-diagnostic.json").read_text())
-            self.assertEqual({"load_state", "type", "active_state", "sub_state", "main_pid", "query_exit_status", "elapsed_seconds"}, set(data))
+            self.assertEqual({"load_state", "type", "active_state", "sub_state", "main_pid", "query_exit_status", "elapsed_seconds",
+                              "result", "exec_main_pid", "exec_main_code", "exec_main_status", "job_id"}, set(data))
             self.assertIsNone(data["query_exit_status"])
-            self.assertEqual(0, data["main_pid"])
+            self.assertIsNone(data["main_pid"])
             self.assertNotIn("private-query-canary", json.dumps(data) + json.dumps(receipt))
 
     def test_terminal_malformed_and_foreign_properties_are_not_pending(self):
@@ -327,7 +423,7 @@ class StartupQueryAndStopDiscoveryControls(unittest.TestCase):
                 _query_exit_status=999999, MainPID="private-query-canary", LoadState="private-query-canary",
                 Type="private-query-canary", ActiveState="private-query-canary", SubState="private-query-canary"), time.monotonic())
             data = json.loads((Path(name) / "startup-diagnostic.json").read_text())
-            self.assertEqual(0, data["main_pid"])
+            self.assertIsNone(data["main_pid"])
             self.assertIsNone(data["query_exit_status"])
             self.assertEqual("unknown", data["load_state"])
             self.assertNotIn("private-query-canary", json.dumps(data))
@@ -676,7 +772,8 @@ class ExecStartupControls(unittest.TestCase):
         self.assertFalse(any("PROCESSOR_COUNT" in value for value in argv))
         with mock.patch.object(proof, "command", return_value=mock.Mock(returncode=0, stdout=b"Type=exec\nSubState=running\n")) as run:
             self.assertEqual({"_query_exit_status": 0, "Type": "exec", "SubState": "running"}, proof.unit_properties(SELECTED_UNIT))
-        self.assertIn("--property=LoadState,ControlGroup,MainPID,Type,ActiveState,SubState", run.call_args.args[0])
+        self.assertIn("--property=LoadState,ControlGroup,MainPID,Type,ActiveState,SubState,Result,ExecMainPID,ExecMainCode,ExecMainStatus,Job",
+                      run.call_args.args[0])
 
     def test_activating_root_candidate_is_not_observed_or_accepted(self):
         with mock.patch.object(proof, "cgroup_pids") as pids, mock.patch.object(proof, "identity_matches") as identity:

@@ -41,6 +41,9 @@ SUB_STATES = frozenset(("dead", "condition", "start-pre", "start", "start-post",
                         "stop-post", "final-watchdog", "final-sigterm", "final-sigkill", "failed", "auto-restart",
                         "auto-restart-queued", "cleaning", "unknown"))
 UNIT_PROPERTY_NAMES = ("LoadState", "ControlGroup", "MainPID", "Type", "ActiveState", "SubState")
+STARTUP_DIAGNOSTIC_PROPERTY_NAMES = ("Result", "ExecMainPID", "ExecMainCode", "ExecMainStatus", "Job")
+SERVICE_RESULTS = frozenset(("success", "resources", "protocol", "timeout", "exit-code", "signal", "core-dump",
+                             "watchdog", "start-limit-hit", "oom-kill", "exec-condition", "unknown"))
 ACTIVE_STATES = frozenset(("active", "reloading", "inactive", "failed", "activating", "deactivating",
                            "maintenance", "refreshing", "unknown"))
 
@@ -68,18 +71,27 @@ def unit_properties(unit, timeout=5):
     """Query only the generated unit; retain status without exposing raw stderr."""
     selected_group(unit)
     result = command(["systemctl", "show", "--all", unit,
-                      "--property=LoadState,ControlGroup,MainPID,Type,ActiveState,SubState"],
+                      "--property=" + ",".join(UNIT_PROPERTY_NAMES + STARTUP_DIAGNOSTIC_PROPERTY_NAMES)],
                      timeout=timeout, check=False)
     properties = {"_query_exit_status": result.returncode}
     if len(result.stdout) > STARTUP_DIAGNOSTIC_LIMIT:
         properties["_malformed"] = True
         return properties
-    for line in result.stdout.decode("ascii").splitlines():
-        key, separator, value = line.partition("=")
-        if not separator or key in properties or key not in UNIT_PROPERTY_NAMES:
+    for line in result.stdout.splitlines():
+        key, separator, value = line.partition(b"=")
+        key = key.decode("ascii")
+        if key in STARTUP_DIAGNOSTIC_PROPERTY_NAMES:
+            # Optional diagnostics cannot change the six required startup checks.
+            # Duplicate/non-ASCII values are unknown, never authoritative defaults.
+            try:
+                value = value.decode("ascii")
+            except UnicodeDecodeError:
+                value = None
+            properties[key] = None if key in properties or not separator else value
+        elif not separator or key in properties or key not in UNIT_PROPERTY_NAMES:
             properties["_malformed"] = True
         else:
-            properties[key] = value
+            properties[key] = value.decode("ascii")
     return properties
 
 
@@ -88,6 +100,26 @@ def unit_main_pid(properties):
     if not isinstance(value, str) or not re.fullmatch(r"[0-9]{1,10}", value) or int(value) > 0xffffffff:
         raise StartupFailure(STARTUP_FAILURE)
     return int(value)
+
+
+def diagnostic_integer(value, minimum, maximum):
+    """Parse bounded observed decimal metadata; absence or malformed data is null."""
+    if not isinstance(value, str) or not re.fullmatch(r"-?[0-9]{1,10}", value):
+        return None
+    parsed = int(value)
+    return parsed if minimum <= parsed <= maximum else None
+
+
+def startup_execution_diagnostics(properties):
+    """Closed process/job facts only; no startup, identity or cleanup authority."""
+    result = properties.get("Result")
+    job = properties.get("Job")
+    return {"result": result if isinstance(result, str) and result in SERVICE_RESULTS else "unknown",
+            "exec_main_pid": diagnostic_integer(properties.get("ExecMainPID"), 0, 0xffffffff),
+            "exec_main_code": diagnostic_integer(properties.get("ExecMainCode"), -0x80000000, 0x7fffffff),
+            "exec_main_status": diagnostic_integer(properties.get("ExecMainStatus"), -0x80000000, 0x7fffffff),
+            # Pinned v255 systemctl prints the Job tuple's ID, or blank for no job.
+            "job_id": 0 if job == "" else diagnostic_integer(job, 1, 0xffffffff)}
 
 
 def exec_startup_complete(properties, deadline, loaded_exec_seen=False):
@@ -129,13 +161,14 @@ def record_startup_failure(receipt, control, properties, started):
         try:
             pid = unit_main_pid(properties)
         except StartupFailure:
-            pid = 0
+            pid = None
         data = {"load_state": properties.get("LoadState") if properties.get("LoadState") in LOAD_STATES else "unknown",
                 "type": "unset" if properties.get("Type") == "" else properties.get("Type") if properties.get("Type") in SERVICE_TYPES else "unknown",
                 "active_state": properties.get("ActiveState") if properties.get("ActiveState") in ACTIVE_STATES else "unknown",
                 "sub_state": properties.get("SubState") if properties.get("SubState") in SUB_STATES else "unknown",
                 "main_pid": pid, "query_exit_status": status,
                 "elapsed_seconds": round(max(0, time.monotonic() - started), 6)}
+        data.update(startup_execution_diagnostics(properties))
         encoded = json.dumps(data, allow_nan=False, separators=(",", ":")).encode() + b"\n"
         if len(encoded) > STARTUP_DIAGNOSTIC_LIMIT:
             return

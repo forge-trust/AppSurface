@@ -379,3 +379,76 @@ The production catalogue and consumer-proof resolver remain closed. The
 root v2 handler, separately restricted shared Aspire execution, protected
 downstream gate and all 57 required acceptance groups remain prerequisites
 for release acceptance.
+
+### Shared producer and host integration checkpoint (2026-10-02)
+
+The [fixed restricted coverage registration](../../Evidence/ForgeTrust.AppSurface.Evidence.Coverage/README.md#fixed-restricted-coverage-registration)
+now contains the single shared procedure used by the CLI and the
+[supervised Aspire bootstrap](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#explicit-supervised-bootstrap).
+The public sealed registration exposes immutable declaration metadata. Execution
+requires the protected writer's internal, single-attempt callback binding to the
+actual supervisor, admission, protected plan, copied diff, shared output quota
+and current stage token. The binding tracks the whole procedure before returning
+its task and is invalidated when the callback ends. No friend assembly, public
+transport factory or consumer-proof authority was added.
+
+Focused macOS source validation passed **457 distinct cases across the recorded
+runs**: catalogue 207, coverage procedure 45, coverage failures 10, protected CLI
+22, factory 31, worker lifecycle 73, host bootstrap 42 and restricted host
+registration 27. Locked Aspire restore and scoped formatting exited zero; the
+successful test commands had zero failures, skips or compiler diagnostics.
+The initial obsolete assertion and subsequent ten factory fixture setup failures
+were retained in their failed receipts and corrected before the final factory
+31/31 and Aspire 142/142 runs. These checks verify metadata, procedure and shared
+lifecycle behavior on macOS. They do not measure new coverage or exercise a
+native application start.
+
+The host validates captured concrete producer references before application
+start and exposes read-only registration maps. Readiness work consumes a private
+binding to the current resource stage. Application-local cleanup requires the
+[joined cleanup phase](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md#shared-lifecycle-and-output-limits),
+which is established after physical stop and pre-disposer work join; the final
+global completion predicate also includes the currently running disposer.
+Regression controls cover premature cleanup and the registered disposer ordering.
+The compiled application catalogue and consumer-proof resolver remain empty.
+
+### Frozen v11 native outcomes and next corrections (2026-10-02)
+
+The complete frozen source `da4dddd1ae4b7437b4fc0990f22bc8bc5e572935`
+contains **2730 files**. The archive, submitted workflow and source bindings
+were checked against every source hash and executable mode; the independent
+Aspire review additionally matched the untruncated remote source tree and all
+2730 Git blobs. This establishes the tested source identity, without admitting
+that source as protected tooling.
+
+[Production Observation run 37063146983](https://github.com/forge-trust/AppSurface/actions/runs/37063146983)
+failed at the first control-protocol handshake with `ASEVD402`. Artifact
+`11251278044` retained the failure log. The production CLI, allocation and
+Observation manifest were not reached. The fixture still used the old run/path
+grammar and output identities; its subsequent correction passed seven portable
+controls. A new native run must exercise the corrected fixture and the production
+path.
+
+[Aspire mechanism run 37063150354](https://github.com/forge-trust/AppSurface/actions/runs/37063150354)
+restored and built pinned Aspire/DCP 13.4.4 with zero warnings/errors, then failed
+**all five controls**. Artifacts `11252135026` and `11251695436` were downloaded
+within fixed bounds and their GitHub digests verified. Each startup diagnostic
+reported a loaded `Type=exec` unit that was inactive/dead with `MainPID=0`; each
+launcher exited zero while the controller retained startup failure. Child stdout
+and stderr were empty. No AppHost/DCP/resource identity or HTTP denial proof was
+observed. Controller-owned exit and watchdog cleanup were unconfirmed; output
+was quarantined, and the wrapper later confirmed empty groups. The retained
+facts do not explain why the unit was inactive and provide no basis for raising
+task or memory limits.
+
+The next [Aspire child diagnostic](../../tests/evidencehost-consumer/AspireChild/README.md#native-proof-controls-parent-ci-only)
+adds bounded private `Result`, main-exit and queued-job facts. Its **82/82**
+portable controls passed, while the thirteen startup/identity/stop/pump/watchdog
+guard functions remained unchanged. Separately, the
+[subject completion correction](../../tests/evidencehost-consumer/ExecutionBroker-README.md#production-subject-command-completion)
+captures terminal main-process facts before explicit unit stop, then joins the
+launcher and both pumps and checks the generated cgroup is empty. Its **79/79**
+portable controls passed. Both changes require fresh native validation. Neither
+the portable controls nor the failed v11 runs satisfy protected/shared execution,
+the downstream gate, the unchanged solution coverage gate or all 57 acceptance
+groups.

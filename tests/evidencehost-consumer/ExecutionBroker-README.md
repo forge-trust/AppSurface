@@ -39,6 +39,26 @@ The [production launcher's worker unit](../../scripts/evidencehost-linux-launche
 
 The [native two-control compatibility probe](https://github.com/forge-trust/AppSurface/actions/runs/37058052231) used identical worker properties except this setting: `yes` produced errno 38, while `no` opened the filesystem root successfully. Both controls verified the actual non-root UID/GID, exact generated cgroup, `NoNewPrivs=1`, zero effective capabilities, and empty owned groups after stop before account cleanup. Worker capability sets remain empty, `NoNewPrivileges=yes`, `PrivateTmp=yes`, `ProtectHome=yes`, `ProtectSystem=strict`, tooling/source paths read-only, raw subject artifacts inaccessible, and only the owned output parent writable. Identity, cgroup, quota, lease, and account-lifetime guards are unchanged. The [portable launcher regressions](test_linux_launcher.py) inspect actual emitted worker and subject unit arguments. These results establish syscall compatibility and configuration emission only; a fresh published production Observation proof is still required.
 
+## Production subject command completion
+
+The [production broker](../../scripts/evidencehost-linux-launcher.py) keeps subject services with
+`RemainAfterExit=yes` and launches them with `systemd-run --wait --pipe`. Pinned
+[systemd v255](https://github.com/systemd/systemd/blob/v255/man/systemd-run.xml#L195-L200) retains a finished
+service until explicit stop; [`--wait`](https://github.com/systemd/systemd/blob/v255/man/systemd-run.xml#L406-L415)
+waits for deactivation. The broker therefore polls the exact generated unit within the job deadline, validates
+its actual User/Group and control-group policy, and captures terminal MainPID/ExecMainCode/ExecMainStatus before
+stopping it. Normal per-command stop keeps the broker lease available for subsequent approved commands.
+
+Explicit stop, launcher exit and both output-pump joins share one finite stopping/cleanup allowance. A pruned
+ControlGroup property after main exit does not replace physical exit: the broker retains the exact generated
+`/system.slice/<unit>` path and verifies its kernel group is empty after stop and joins. No post-stop unit query
+is required after garbage collection. Missing terminal facts, identity mismatch, cancellation, deadline expiry,
+launcher-status mismatch or unacknowledged output reject the command and cannot register a results root.
+Actual zero/nonzero command status, exact received-byte quotas, error-free EOF, and all existing subject sandbox
+properties remain required. The [portable completion controls](test_linux_launcher.py) use a process double
+that remains waiting until explicit stop and rejects inspection after stop; they establish ordering and guard
+behavior, with no native systemd or consumer acceptance claim.
+
 ## Validation record
 
 The coordinating parent reports that native CLI verification passed 327 tests with no warnings. Formatting verification passed for both owned C# test files. These results do not establish Linux fixture or systemd-backed published-gate acceptance.
