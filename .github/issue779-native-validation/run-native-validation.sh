@@ -50,7 +50,7 @@ dotnet build tests/evidencehost-consumer/LifecycleWorker/LifecycleWorker.csproj 
 dotnet build tests/evidencehost-consumer/ControlProtocolWorker/ControlProtocolWorker.csproj --no-restore 2>&1 | tee "$task_receipts/control-build.log"
 dotnet build tests/evidencehost-consumer/ProtectedGateConsumer/ProtectedGateConsumer.csproj --no-restore 2>&1 | tee "$task_receipts/gate-consumer-build.log"
 dotnet build tests/evidencehost-consumer/AspireChild/AspireChild.csproj --no-restore 2>&1 | tee "$task_receipts/aspire-child-build.log"
-python3 -B tests/evidencehost-consumer/test_protected_gate_consumer.py 2>&1 | tee "$task_receipts/gate-consumer-portable.log"
+python3 -B tests/evidencehost-consumer/test_protected_gate_consumer.py --consumer "$task_repo/tests/evidencehost-consumer/ProtectedGateConsumer/bin/Debug/net10.0/EvidenceHost.ProtectedGateConsumer.dll" 2>&1 | tee "$task_receipts/gate-consumer-portable.log"
 python3 -B tests/evidencehost-consumer/test_aspire_child_proof.py 2>&1 | tee "$task_receipts/aspire-child-portable.log"
 dotnet build Web/ForgeTrust.RazorWire.IntegrationTests/ForgeTrust.RazorWire.IntegrationTests.csproj --no-restore 2>&1 | tee "$task_receipts/browser-build.log"
 # Browser dependencies and binaries are installed using the repository's pinned Playwright payload.
