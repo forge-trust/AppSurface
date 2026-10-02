@@ -1,6 +1,8 @@
 """Portable controls and resource HTTP probes, never native acceptance."""
 import http.client
 from contextlib import ExitStack
+# Keep long mock setups in ExitStack: each item in a with statement consumes
+# a separate compiler frame block, including on the native Python 3.12 runner.
 import importlib.util
 import json
 import os
@@ -943,11 +945,12 @@ class ExecStartupControls(unittest.TestCase):
         return {"LoadState": "loaded", "_query_exit_status": 0, "Type": "exec", "ActiveState": active, "SubState": sub,
                 "MainPID": "123", "ControlGroup": "/selected", **extra}
 
-    def test_command_selects_exec_and_queries_completed_startup_states_without_changing_caps(self):
+    def test_command_selects_exec_and_queries_completed_startup_with_fixed_task_and_memory_caps(self):
         argv = proof.service_command("selected", Path("/payload"), Path("/scratch"), Path("/dotnet/dotnet"),
                                      999, 999, Path("/tools"), Path("/output"), Path("/control"), "normal")
         self.assertIn("--property=Type=exec", argv)
-        self.assertIn("--property=TasksMax=64", argv)
+        self.assertEqual(["--property=TasksMax=128"],
+                         [value for value in argv if value.startswith("--property=TasksMax=")])
         self.assertIn("--property=MemoryMax=1G", argv)
         self.assertFalse(any("PROCESSOR_COUNT" in value for value in argv))
         with mock.patch.object(proof, "command", return_value=mock.Mock(returncode=0, stdout=b"Type=exec\nSubState=running\n")) as run:
