@@ -70,6 +70,32 @@ class HarnessFailure(RuntimeError):
     """A stable, value-free harness failure."""
 
 
+def replacement_failure(category: str, operation: str | None, worker_exit: int | None,
+                        result: object = None) -> HarnessFailure:
+    """Project replacement failure facts into fixed enums without raw worker output.
+
+    Unknown values become closed sentinels; only an observed Linux exit integer and
+    recognized worker status/diagnostic enter the bounded console receipt. This is
+    diagnostic metadata, never an alternative to the exact rejection assertion.
+    """
+    categories = {"worker-result-mismatch", "worker-result-missing", "worker-result-invalid",
+                  "worker-result-shape", "worker-echoed-protocol-canary", "worker-timeout"}
+    statuses = {"rejected", "protocol-error", "connected", "stopped", "application-held",
+                "application-control", "cancelled", "collected"}
+    codes = {"ASEVD402", "ASEVD410", "ASEVD420", "ASEVD421", "ASEVD422"}
+    value = result if isinstance(result, dict) else {}
+    status, code = value.get("status"), value.get("code")
+    details = {
+        "category": category if category in categories else "replacement-control-failed",
+        "mode": "stop" if operation is None else operation if operation in ("start", "wait") else "unrecognized",
+        "worker_exit": worker_exit if type(worker_exit) is int and -64 <= worker_exit <= 255 else None,
+        "worker_status": status if isinstance(status, str) and status in statuses else None if status is None else "unrecognized",
+        "worker_code": code if isinstance(code, str) and code in codes else None if code is None else "unrecognized",
+    }
+    return HarnessFailure("case-failed:broker-pid-replacement:safeHarnessFailure="
+                          + json.dumps(details, sort_keys=True, separators=(",", ":")))
+
+
 def read_request(connection: socket.socket) -> dict:
     connection.settimeout(8)
     raw = bytearray()
@@ -659,9 +685,14 @@ def run_broker_replacement(script: Path, root: Path, home: Path, worker_dll: Pat
         worker.stdin.write("stop\n" if application_operation is None else "operate\n")
         worker.stdin.flush()
         stdout, _stderr = worker.communicate(timeout=15)
-        result = parse_result(stdout)
+        if "protocol-canary" in stdout or "protocol-canary" in _stderr:
+            raise replacement_failure("worker-echoed-protocol-canary", application_operation, worker.returncode)
+        try:
+            result = parse_result(stdout)
+        except HarnessFailure as failure:
+            raise replacement_failure(str(failure), application_operation, worker.returncode) from None
         if worker.returncode != 20 or result != {"status": "rejected", "code": "ASEVD402"}:
-            raise HarnessFailure("case-failed:broker-pid-replacement")
+            raise replacement_failure("worker-result-mismatch", application_operation, worker.returncode, result)
         second.wait(timeout=10)
         if second.returncode != 0:
             raise HarnessFailure("broker-failed:broker-pid-replacement")
@@ -672,7 +703,8 @@ def run_broker_replacement(script: Path, root: Path, home: Path, worker_dll: Pat
         if worker is not None:
             worker.kill()
             worker.wait()
-        raise HarnessFailure("case-timeout:broker-pid-replacement") from None
+        raise replacement_failure("worker-timeout", application_operation,
+                                  worker.returncode if worker is not None else None) from None
     finally:
         stop_child(worker)
         stop_child(second, release=True)

@@ -74,11 +74,24 @@ of those synthetic acknowledgements. Replacement controls assert identity reject
 execution establishes broker/worker peer authentication and byte framing; portable controls establish neither.
 No scenario creates a Passed consumer receipt, shared admission, Trusted eligibility or native Aspire acceptance.
 
+Replacement failures append a bounded `safeHarnessFailure` JSON object to the fixed harness category. Its
+five fields are `category`, `mode` (`stop`, `start`, `wait`, or `unrecognized`), `worker_exit` (the observed
+Linux process exit value, or null), `worker_status`, and `worker_code`. Status and diagnostic values use closed
+allowlists; unknown values become `unrecognized`, and absent values become null. No worker stdout, stderr,
+exception, path, extra result member, or canary is included. Missing/malformed results and canary echoes still
+fail; the exact required replacement result remains exit 20 with `rejected`/`ASEVD402`, and the replacement
+broker must still receive zero request bytes. These diagnostics do not allow another result to pass.
+
+[Runtime-v12](https://github.com/forge-trust/AppSurface/actions/runs/37075209730) recorded all 17 v1 and 21 regular
+v2 controls passing, then failed at the first application replacement control. That historical failure did
+not record the worker exit/status/code; those values remain unknown. The new diagnostic projection is verified
+by portable process-double controls and awaits a fresh native run. The full 40-case matrix has not passed.
+
 The CLI still accepts `--worker-dll` for the full matrix, and hidden `--serve SOCKET SCENARIO DOTNET` is the
 disposable broker process entry point. The worker takes `SOCKET MODE`; existing modes remain unchanged,
 new regular modes use the scenario names in `APPLICATION_CASES`, and the replacement coordinator alone uses
 `application-hold-start`/`application-hold-wait`. Build completion on macOS validates source only. The 40-case
-root/nonroot matrix remains unverified until its separately bounded native Linux checkpoint runs.
+root/nonroot matrix is not yet fully verified by a separately bounded native Linux checkpoint.
 
 Run the portable metadata/layout controls without .NET or root:
 
