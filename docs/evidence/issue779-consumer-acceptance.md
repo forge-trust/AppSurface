@@ -301,3 +301,9 @@ passed **42/42**. The new
 passed **50/50** metadata controls. These macOS results validate the source
 repair and pure metadata checks; the native gate and shared execution remain
 required. The production catalogue remains empty and rejects with `ASEVD407`.
+
+A subsequent catalogue review found that a later null bundle path could
+throw before returning the fixed invalid-metadata diagnostic. Validation now
+checks all paths before comparing prefixes. The final scoped catalogue suite
+passed **52/52**, including candidate and observed-inventory regressions,
+with no warnings. This repair preserves the empty production registration.
