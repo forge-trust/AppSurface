@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -37,6 +38,29 @@ class ProofControls(unittest.TestCase):
         self.assertIn("--property=PrivateNetwork=yes", argv)
         self.assertIn("-i", argv)
         self.assertEqual(1, argv.count("/run/payload/AspireChild.dll"))
+
+    def test_root_selected_store_base_overrides_ambient_path_in_cleared_environment(self):
+        import json
+        scratch = Path("/run/issue779-child-selected/scratch")
+        with mock.patch.dict(os.environ, {"ASPIRE__STORE__PATH": "/ambient/redirect",
+                                          "ISSUE779_AMBIENT_SENTINEL": "must-not-cross"}):
+            argv = proof.service_command("issue779-child-selected.service", Path("/run/payload"), scratch,
+                                         Path("/opt/dotnet/dotnet"), 2001, 2002, Path("/protected/tools"),
+                                         Path("/protected/output"), Path("/run/control"), "normal")
+            self.assertIn(f"--property=ReadWritePaths={scratch}", argv)
+            environment_start = argv.index("/usr/bin/env")
+            application_start = argv.index("/opt/dotnet/dotnet", environment_start)
+            environment_command = argv[environment_start:application_start]
+            self.assertEqual(["/usr/bin/env", "-i"], environment_command[:2])
+            self.assertEqual([f"ASPIRE__STORE__PATH={scratch / '.aspire-store'}"],
+                             [value for value in environment_command if value.startswith("ASPIRE__STORE__PATH=")])
+            result = subprocess.run(environment_command + [sys.executable, "-c",
+                                    "import json, os; print(json.dumps({"
+                                    "'store': os.environ.get('ASPIRE__STORE__PATH'),"
+                                    "'ambient': os.environ.get('ISSUE779_AMBIENT_SENTINEL')}))"],
+                                    check=True, capture_output=True, timeout=2)
+        self.assertEqual({"store": str(scratch / ".aspire-store"), "ambient": None},
+                         json.loads(result.stdout))
 
     def test_missing_dcp_is_a_failure_not_fake_readiness(self):
         with tempfile.TemporaryDirectory() as name:

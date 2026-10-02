@@ -295,6 +295,7 @@ def service_command(unit, payload, scratch, dotnet, uid, gid, tools, output, con
     argv += [f"--property={value}" for value in properties]
     # env -i prevents inherited root credentials and tool/cache paths crossing the boundary.
     argv += ["/usr/bin/env", "-i", f"HOME={scratch}", f"TMPDIR={scratch}",
+             f"ASPIRE__STORE__PATH={scratch / '.aspire-store'}",
              "DOTNET_NOLOGO=1", "DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1", "DOTNET_CLI_TELEMETRY_OPTOUT=1",
              f"PROOF_PROTECTED_TOOLS={tools}", f"PROOF_PROTECTED_OUTPUT={output}",
              f"PROOF_ALLOWED_INPUT={allowed_input}",
