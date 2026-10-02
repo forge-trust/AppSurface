@@ -390,6 +390,55 @@ public sealed class ProtectedReleaseEvidenceProducerTests
     }
 
     [Fact]
+    public async Task ProductionRemoteReadUsesOnlyThePinnedRepositoryAndExactTagRefs()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip("The fake git shell shim requires a Unix host.");
+        }
+
+        using var fixture = new ProducerFixture();
+        var shimDirectory = TestPathUtils.PathUnder(fixture.Root, "git-shim");
+        Directory.CreateDirectory(shimDirectory);
+        var argumentsPath = TestPathUtils.PathUnder(fixture.Root, "git-arguments.txt");
+        var shimPath = TestPathUtils.PathUnder(shimDirectory, "git");
+        await File.WriteAllTextAsync(
+            shimPath,
+            $"#!/bin/sh\nprintf '%s\\n' \"$@\" > {QuoteForShell(argumentsPath)}\n"
+            + $"printf '%s\\t%s\\n' {QuoteForShell(TagObjectId)} {QuoteForShell($"refs/tags/{Tag}")}\n"
+            + $"printf '%s\\t%s\\n' {QuoteForShell(PeeledCommit)} {QuoteForShell($"refs/tags/{Tag}^{{}}")}\n");
+        File.SetUnixFileMode(
+            shimPath,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            | UnixFileMode.GroupRead | UnixFileMode.GroupExecute
+            | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+        var originalPath = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Process);
+
+        try
+        {
+            Environment.SetEnvironmentVariable("PATH", shimDirectory, EnvironmentVariableTarget.Process);
+
+            var observation = await new GitProtectedReleaseRemoteTagAuthority().ReadAsync(Tag, CancellationToken.None);
+
+            Assert.Equal(new ProtectedReleaseRemoteTagObservation(TagObjectId, PeeledCommit), observation);
+            var arguments = await File.ReadAllLinesAsync(argumentsPath);
+            Assert.Equal(
+                [
+                    "-c", "credential.helper=", "-c", "credential.interactive=false", "-c", "core.askPass=",
+                    "-c", "http.extraHeader=", "-c", "http.proxy=", "-c", "protocol.allow=never",
+                    "-c", "protocol.https.allow=always", "ls-remote", "--tags", "--",
+                    GitProtectedReleaseRemoteTagAuthority.ProtectedRepositoryRemoteUrl,
+                    $"refs/tags/{Tag}", $"refs/tags/{Tag}^{{}}",
+                ],
+                arguments);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath, EnvironmentVariableTarget.Process);
+        }
+    }
+
+    [Fact]
     public async Task OversizedRemoteAdvertisementStopsReadingAndRejectsTheResponse()
     {
         using var fixture = new ProducerFixture();
