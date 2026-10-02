@@ -87,7 +87,7 @@ FAILURE_DIAGNOSTIC_FILE = "launcher-failure.json"
 FAILURE_DIAGNOSTIC_LIMIT = 4096
 FAILURE_DIAGNOSTIC_CAUSES = frozenset({
     "unclassified-host-failure", "requires-root-systemd-linux", "requires-cgroup-v2",
-    "requires-systemd-255", "openat2-x86-64-required", "systemd-operation-failed",
+    "requires-systemd-255", "openat2-x86-64-required", "systemd-operation-failed", "host-command-start-failed",
     "identity-separation-failed", "prepared-subject-overlaps-protected-root",
     "trusted-cli-missing", "worker-start-failed", "worker-timeout",
     "broker-handler-not-joined", "worker-protocol-incomplete", "worker-unsuccessful",
@@ -96,7 +96,7 @@ FAILURE_DIAGNOSTIC_CAUSES = frozenset({
     "tool-root-path-not-canonical", "tool-root-symlink-component", "tool-root-path-missing",
     "tool-root-owner-changed", "tool-root-entry-invalid", "trusted-proof-not-allowlisted",
 })
-FAILURE_DIAGNOSTIC_OPERATIONS = frozenset({"systemctl", "systemd-run", "useradd", "groupadd", "worker-exit"})
+FAILURE_DIAGNOSTIC_OPERATIONS = frozenset({"systemctl", "systemd-run", "useradd", "groupadd", "userdel", "groupdel", "worker-exit"})
 TRUSTED_PROOF_DIGEST_ALLOWLIST: frozenset[str] = frozenset()
 MAX_REQUEST = 64 * 1024
 MAX_PREFIX = 1024 * 1024
@@ -138,10 +138,12 @@ _LIBC.syscall.restype = ctypes.c_long
 class LauncherError(RuntimeError):
     """Safe, non-sensitive operational failure category."""
 
-    def __init__(self, cause: str, *, operation: str | None = None, exit_code: int | None = None):
+    def __init__(self, cause: str, *, operation: str | None = None, exit_code: int | None = None,
+                 errno: int | None = None):
         super().__init__(cause)
         self.operation = operation
         self.exit_code = exit_code
+        self.errno = errno
         self.worker_main_code = None
         self.worker_main_status = None
 
@@ -159,7 +161,7 @@ def failure_diagnostic(error: Exception) -> dict:
         record["operation"] = error.operation
         if type(error.exit_code) is int and -128 <= error.exit_code <= 255:
             record["exit_code"] = error.exit_code
-    if isinstance(error, OSError) and type(error.errno) is int and 0 <= error.errno <= 4095:
+    if isinstance(error, (LauncherError, OSError)) and type(error.errno) is int and 0 <= error.errno <= 4095:
         record["errno"] = error.errno
     if isinstance(error, LauncherError) and error.operation == "worker-exit":
         for name, maximum in (("worker_main_code", 6), ("worker_main_status", 255)):
@@ -1400,11 +1402,37 @@ class Broker:
                     self.condition.notify_all()
 
 
-def _systemd(argv: list[str], timeout: int = 8) -> subprocess.CompletedProcess:
-    result = subprocess.run(argv, capture_output=True, env=ENV, timeout=timeout, check=False)
-    if result.returncode:
+def _systemd(argv: list[str], timeout: int = 8, *, check: bool = True) -> subprocess.CompletedProcess:
+    """Run a fixed host command; spawning failures expose only a known operation and bounded errno."""
+    operation = Path(argv[0]).name
+    if operation not in FAILURE_DIAGNOSTIC_OPERATIONS:
+        operation = None
+    try:
+        result = subprocess.run(argv, capture_output=True, env=ENV, timeout=timeout, check=False)
+    except OSError as error:
+        raise LauncherError("host-command-start-failed", operation=operation, errno=error.errno) from None
+    if check and result.returncode:
         raise LauncherError("systemd-operation-failed", operation=Path(argv[0]).name, exit_code=result.returncode)
     return result
+
+
+def _create_run_accounts(worker_name: str, subject_name: str, results_group: str,
+                         users: list[str], groups: list[str]) -> None:
+    """Use trusted absolute utilities and track each account only after successful creation."""
+    for name in (worker_name, subject_name):
+        _systemd(["/usr/sbin/useradd", "--system", "--user-group", "--no-create-home",
+                  "--shell", "/usr/sbin/nologin", name])
+        users.append(name)
+    _systemd(["/usr/sbin/groupadd", "--system", results_group])
+    groups.append(results_group)
+
+
+def _delete_run_accounts(users: list[str], groups: list[str]) -> None:
+    """Delete only this run's tracked accounts in reverse order, preserving best-effort exit handling."""
+    for name in reversed(users):
+        _systemd(["/usr/sbin/userdel", name], timeout=5, check=False)
+    for name in reversed(groups):
+        _systemd(["/usr/sbin/groupdel", name], timeout=5, check=False)
 
 
 def launch(args: argparse.Namespace) -> Path:
@@ -1457,11 +1485,7 @@ def launch(args: argparse.Namespace) -> Path:
     test_output_fd = -1
     handlers: list[threading.Thread] = []
     try:
-        for name in (worker_name, subject_name):
-            _systemd(["useradd", "--system", "--user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", name])
-            users.append(name)
-        _systemd(["groupadd", "--system", results_group])
-        groups.append(results_group)
+        _create_run_accounts(worker_name, subject_name, results_group, users, groups)
         wu, su = pwd.getpwnam(worker_name), pwd.getpwnam(subject_name)
         rgid = grp.getgrnam(results_group).gr_gid
         if wu.pw_uid == su.pw_uid or not wu.pw_uid or not su.pw_uid: raise LauncherError("identity-separation-failed")
@@ -1604,8 +1628,7 @@ def launch(args: argparse.Namespace) -> Path:
             os.close(test_output_fd)
         # Preserve/quarantine the worker-owned output anchor whenever termination is uncertain.
         if exposed:
-            for name in reversed(users): subprocess.run(["userdel",name],capture_output=True,env=ENV,timeout=5,check=False)
-            for name in reversed(groups): subprocess.run(["groupdel",name],capture_output=True,env=ENV,timeout=5,check=False)
+            _delete_run_accounts(users, groups)
             shutil.rmtree(root,ignore_errors=True)
             shutil.rmtree(scratch, ignore_errors=True)
 

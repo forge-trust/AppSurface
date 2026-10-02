@@ -95,6 +95,48 @@ def broker_request(broker, request):
 
 
 class PrivateFailureDiagnosticTests(unittest.TestCase):
+    def test_account_creation_and_cleanup_use_absolute_host_utilities_and_track_ownership(self):
+        users, groups = [], []
+        result = launcher.subprocess.CompletedProcess([], 0, b"", b"")
+        with patch.object(launcher.subprocess, "run", return_value=result) as run:
+            launcher._create_run_accounts("worker", "subject", "results", users, groups)
+            launcher._delete_run_accounts(users, groups)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(commands, [
+            ["/usr/sbin/useradd", "--system", "--user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", "worker"],
+            ["/usr/sbin/useradd", "--system", "--user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", "subject"],
+            ["/usr/sbin/groupadd", "--system", "results"],
+            ["/usr/sbin/userdel", "subject"], ["/usr/sbin/userdel", "worker"], ["/usr/sbin/groupdel", "results"],
+        ])
+        self.assertEqual((users, groups), (["worker", "subject"], ["results"]))
+        self.assertTrue(all(call.kwargs["env"] == launcher.ENV for call in run.call_args_list))
+        users, groups = [], []
+        with patch.object(launcher.subprocess, "run", side_effect=[result, OSError(2, "secret-779")]):
+            with self.assertRaises(launcher.LauncherError):
+                launcher._create_run_accounts("worker", "subject", "results", users, groups)
+        self.assertEqual((users, groups), (["worker"], []))
+
+    def test_host_spawn_failures_keep_only_fixed_cause_known_operation_and_exact_bounded_errno(self):
+        cases = (("/usr/sbin/useradd", 2, "useradd", 2),
+                 ("/usr/sbin/groupdel", 13, "groupdel", 13),
+                 ("/private/secret-779", 2, None, 2),
+                 ("/usr/sbin/useradd", True, "useradd", None),
+                 ("/usr/sbin/useradd", 4096, "useradd", None))
+        for executable, number, operation, expected_errno in cases:
+            with self.subTest(executable=executable, errno=number):
+                error = OSError("secret-779")
+                error.errno = number
+                with patch.object(launcher.subprocess, "run", side_effect=error):
+                    with self.assertRaises(launcher.LauncherError) as failure:
+                        launcher._systemd([executable, "secret-779"])
+                record = launcher.failure_diagnostic(failure.exception)
+                self.assertEqual(record["cause"], "host-command-start-failed")
+                self.assertEqual(record.get("operation"), operation)
+                self.assertEqual(record.get("errno"), expected_errno)
+                self.assertNotIn("secret-779", str(failure.exception))
+                self.assertNotIn("secret-779", json.dumps(record))
+                self.assertEqual(launcher.validate_failure_diagnostic(record), record)
+
     def test_worker_exit_reason_contains_only_bounded_numeric_systemd_fields(self):
         for cause in ("worker-protocol-incomplete", "worker-unsuccessful"):
             with self.subTest(cause=cause):
@@ -221,7 +263,9 @@ class LauncherValidationTests(unittest.TestCase):
             self.assertEqual(json.loads(stderr.getvalue()), {"status": "failed", "diagnostic": "ASEVD407"})
 
     def test_other_launcher_failures_never_echo_exception_canaries(self):
-        for error in (launcher.LauncherError("secret-779"), OSError("secret-779"), ValueError("secret-779")):
+        for error in (launcher.LauncherError("secret-779"),
+                      launcher.LauncherError("host-command-start-failed", operation="useradd", errno=2),
+                      OSError("secret-779"), ValueError("secret-779")):
             with patch.object(launcher, "parser") as parser, patch.object(launcher, "launch", side_effect=error), \
                     patch.object(launcher.sys, "stderr", io.StringIO()) as stderr:
                 parser.return_value.parse_args.return_value = Namespace(diagnostic_directory=None)

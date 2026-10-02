@@ -42,6 +42,10 @@ Trusted `ASEVD407` response. The record contains only fixed host cause/error cat
 allowlisted operation/numeric exit or errno fields, never exception text, subject output or descriptors.
 Worker protocol/unsuccessful-exit failures additionally retain bounded numeric `ExecMainCode` and
 `ExecMainStatus` as `worker_main_code`/`worker_main_status` under the fixed `worker-exit` operation.
+Root account creation and cleanup use the fixed `/usr/sbin/useradd`, `/usr/sbin/groupadd`,
+`/usr/sbin/userdel` and `/usr/sbin/groupdel` executables, independently of the sanitized worker PATH.
+A host command that cannot spawn records `host-command-start-failed`, its allowlisted operation
+and bounded numeric errno; no attempted argv, paths or operating-system exception text is published.
 
 The [runtime driver](../runtime-proof.py) requests this record for Observation only, reads a bounded
 protected file through root after failure, validates its closed schema, and publishes only those safe
