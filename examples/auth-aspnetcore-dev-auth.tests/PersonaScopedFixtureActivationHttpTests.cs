@@ -24,6 +24,90 @@ public sealed class PersonaScopedFixtureActivationHttpTests
     private const string ScenarioId = "synthetic-candidate-001";
     private const string ReloadConfigEnvironmentVariable = "DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE";
 
+    [Theory]
+    [InlineData("localhost")]
+    [InlineData("localhost:5058")]
+    [InlineData("127.0.0.1")]
+    [InlineData("127.0.0.1:5058")]
+    [InlineData("[::1]")]
+    [InlineData("[::1]:5058")]
+    public async Task HostAdmission_AllowsExplicitLoopbackAuthorities(string host)
+    {
+        await WithFactoryAsync(async factory =>
+        {
+            using var client = CreateClient(factory);
+            client.DefaultRequestHeaders.Host = host;
+            using var control = await client.GetAsync("/_appsurface/dev-auth/");
+            Assert.Equal(HttpStatusCode.OK, control.StatusCode);
+            using var selected = await SelectAsync(client, "labeler");
+            Assert.Equal(HttpStatusCode.Found, selected.StatusCode);
+            using var landing = await client.GetAsync("/candidate/label");
+            Assert.Equal(HttpStatusCode.OK, landing.StatusCode);
+            Assert.True(Assert.IsType<LocalCandidateSnapshot>(
+                factory.Services.GetRequiredService<LocalCandidateFixtureStore>().Read()).LabelerReady);
+        });
+    }
+
+    [Theory]
+    [InlineData("unapproved.example")]
+    [InlineData("unapproved.example:5058")]
+    [InlineData("")]
+    public async Task HostAdmission_RejectsUnknownOrEmptyAuthorityBeforeIdentityAndFixtureChanges(string host)
+    {
+        await WithFactoryAsync(async factory =>
+        {
+            using var client = CreateClient(factory);
+            var store = factory.Services.GetRequiredService<LocalCandidateFixtureStore>();
+            var routes = new[]
+            {
+                (HttpMethod.Get, "/_appsurface/dev-auth/"),
+                (HttpMethod.Get, "/_appsurface/dev-auth/status"),
+                (HttpMethod.Post, "/_appsurface/dev-auth/select/reviewer"),
+                (HttpMethod.Post, "/_appsurface/dev-auth/clear"),
+                (HttpMethod.Get, "/candidate/label"),
+                (HttpMethod.Get, "/candidate/review"),
+                (HttpMethod.Post, "/candidate/label/complete"),
+                (HttpMethod.Post, "/candidate/review/complete"),
+            };
+
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                var before = store.Read();
+                foreach (var (method, path) in routes)
+                {
+                    using var request = new HttpRequestMessage(method, path);
+                    if (host.Length == 0)
+                    {
+                        // HttpClient supplies a Host; inject the parsed empty header at the test host boundary.
+                        request.Headers.Add("X-Test-Blank-Header", "Host");
+                    }
+                    else
+                    {
+                        request.Headers.Host = host;
+                        request.Headers.Add("Origin", $"http://{host}");
+                    }
+
+                    using var rejected = await client.SendAsync(request);
+                    Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+                    Assert.False(rejected.Headers.Contains("Set-Cookie"));
+                    Assert.Null(rejected.Headers.Location);
+                    Assert.Equal(before, store.Read());
+                }
+
+                if (attempt == 0)
+                {
+                    Assert.Null(store.Read());
+                    using var selected = await SelectAsync(client, "labeler");
+                    Assert.Equal(HttpStatusCode.Found, selected.StatusCode);
+                }
+            }
+
+            using var statusResponse = await client.GetAsync("/_appsurface/dev-auth/status");
+            using var status = JsonDocument.Parse(await statusResponse.Content.ReadAsStringAsync());
+            Assert.Equal("labeler", status.RootElement.GetProperty("personaId").GetString());
+        });
+    }
+
     [Fact]
     public void StoreTransitions_RejectMissingUnknownAndUnreadyWorkWithoutChangingSnapshots()
     {
@@ -78,6 +162,8 @@ public sealed class PersonaScopedFixtureActivationHttpTests
             using var landing = await client.GetAsync(page);
             var body = await landing.Content.ReadAsStringAsync();
             Assert.Equal(HttpStatusCode.OK, landing.StatusCode);
+            // Value: protects=ready landing cache policy; fails_when=200 omits NoStore; why_new=typed assertion; seam=none
+            Assert.True(landing.Headers.CacheControl?.NoStore);
             Assert.Contains($"data-candidate-id=\"{ScenarioId}\"", body, StringComparison.Ordinal);
         });
     }
@@ -191,7 +277,9 @@ public sealed class PersonaScopedFixtureActivationHttpTests
             {
                 using var read = await client.GetAsync(page);
                 var readBody = await read.Content.ReadAsStringAsync();
+                // Value: protects=missing/unready read-only conflict cache policy; fails_when=409 omits NoStore; why_new=typed assertion; seam=none
                 Assert.Equal(HttpStatusCode.Conflict, read.StatusCode);
+                Assert.True(read.Headers.CacheControl?.NoStore);
                 Assert.Contains("Fixtures not ready", readBody, StringComparison.Ordinal);
                 Assert.Contains($"Reselect {personaId}", readBody, StringComparison.Ordinal);
                 Assert.Equal(before, store.Read());
@@ -199,6 +287,7 @@ public sealed class PersonaScopedFixtureActivationHttpTests
                 using var mutation = await client.PostAsync(action, content: null);
                 var mutationBody = await mutation.Content.ReadAsStringAsync();
                 Assert.Equal(HttpStatusCode.Conflict, mutation.StatusCode);
+                Assert.True(mutation.Headers.CacheControl?.NoStore);
                 Assert.Contains("Fixtures not ready", mutationBody, StringComparison.Ordinal);
                 Assert.Equal(before, store.Read());
             }
@@ -606,6 +695,27 @@ public sealed class PersonaScopedFixtureActivationHttpTests
             Assert.IsAssignableFrom<OperationCanceledException>(preCanceled);
             Assert.False(prepareCalled);
 
+            using var preparationCancellation = new CancellationTokenSource();
+            var preparationToken = preparationCancellation.Token;
+            var preparationContext = new DefaultHttpContext();
+            preparationContext.TraceIdentifier = "trace-preparation-canceled";
+            var preparationReturnedNormally = false;
+            var preparationCancellationError = await Record.ExceptionAsync(async () => await LocalFixtureActivation.RunAsync(
+                configuredOptions.Users.Personas["reviewer"],
+                preparationContext,
+                preparationToken,
+                scope.ServiceProvider.GetRequiredService<ILogger<LocalFixtureActivation>>(),
+                _ =>
+                {
+                    preparationCancellation.Cancel();
+                    preparationReturnedNormally = true;
+                    return ValueTask.CompletedTask;
+                }));
+            // Value: protects=post-preparation cancellation contract; fails_when=swallowed or substituted token; why_new=missing branch evidence; seam=none
+            Assert.True(preparationReturnedNormally);
+            var preparationCanceledException = Assert.IsAssignableFrom<OperationCanceledException>(preparationCancellationError);
+            Assert.Equal(preparationToken, preparationCanceledException.CancellationToken);
+
             var entries = string.Join("\n", logProvider.Entries);
             Assert.Contains("Outcome=start", entries, StringComparison.Ordinal);
             Assert.Contains("Outcome=success", entries, StringComparison.Ordinal);
@@ -615,6 +725,8 @@ public sealed class PersonaScopedFixtureActivationHttpTests
             Assert.Contains("TraceId=trace-correlation-safe", entries, StringComparison.Ordinal);
             Assert.Contains("TraceId=trace-cancellation-safe", entries, StringComparison.Ordinal);
             Assert.Contains("TraceId=trace-pre-canceled", entries, StringComparison.Ordinal);
+            Assert.Contains("TraceId=trace-preparation-canceled PersonaId=reviewer Outcome=cancel", entries, StringComparison.Ordinal);
+            Assert.DoesNotContain("TraceId=trace-preparation-canceled PersonaId=reviewer Outcome=success", entries, StringComparison.Ordinal);
             Assert.Contains("PersonaId=labeler", entries, StringComparison.Ordinal);
             Assert.Contains("PersonaId=reviewer", entries, StringComparison.Ordinal);
             Assert.DoesNotContain("COOKIE_SECRET_SENTINEL", entries, StringComparison.Ordinal);
@@ -755,7 +867,7 @@ public sealed class PersonaScopedFixtureActivationHttpTests
                 }
 
                 var blankHeader = context.Request.Headers["X-Test-Blank-Header"].FirstOrDefault();
-                if (blankHeader is "Origin" or "Referer")
+                if (blankHeader is "Origin" or "Referer" or "Host")
                 {
                     context.Request.Headers[blankHeader] = string.Empty;
                 }

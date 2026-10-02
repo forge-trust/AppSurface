@@ -4,9 +4,17 @@ using AuthAspNetCoreDevAuthExample;
 using ForgeTrust.AppSurface.Auth.AspNetCore;
 using ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HostFiltering;
 using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Admit only local authorities before any identity or fixture mutation.
+builder.Services.AddHostFiltering(options =>
+{
+    options.AllowedHosts = ["localhost", "127.0.0.1", "[::1]"];
+    options.AllowEmptyHosts = false;
+});
 
 builder.Services.AddAuthorization(options =>
 {
@@ -60,6 +68,7 @@ builder.Services.AddScoped<IAppSurfaceDevAuthPersonaSelectionHandler, LocalFixtu
 
 var app = builder.Build();
 
+app.UseHostFiltering();
 app.UseMiddleware<LocalFixtureActivationFailureMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
