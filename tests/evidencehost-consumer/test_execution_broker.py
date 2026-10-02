@@ -35,6 +35,7 @@ SANDBOX_MARKER_ENVIRONMENT = ("CODEX_SANDBOX", "SANDBOX_MODE", "IN_SANDBOX", "IS
 SCENARIOS: dict[str, tuple[str, str, str]] = {
     "cli-coverage": ("observation", "coverage", "coverage"),
     "cli-trusted": ("trusted", "coverage", "none"),
+    "cli-mode-conflict": ("observation", "coverage", "none"),
     "cli-policy-drift": ("observation", "coverage", "none"),
     "cli-subject-failure": ("observation", "coverage", "failure"),
     "cli-output-overflow": ("observation", "coverage", "overflow"),
@@ -128,6 +129,7 @@ class Scenario:
                  socket_path: Path):
         mode, profile, behavior = SCENARIOS[name]
         self.name = name
+        self.run_id = f"fixture-{base.name}-{name}/1"
         self.worker_uid = worker_uid
         self.worker_gid = worker_gid
         self.subject_uid = subject_uid
@@ -210,7 +212,7 @@ class Scenario:
         now = time.time()
         return {
             "schema": "evidence-worker-linux-v1",
-            "run_id": f"fixture-{base.name}-{self.name}/1",
+            "run_id": self.run_id,
             "worker_pid": peer[0], "worker_uid": peer[1], "worker_gid": peer[2],
             "subject_uid": self.subject_uid, "subject_gid": self.subject_gid,
             "unit": unit, "cgroup": cgroup,

@@ -519,7 +519,7 @@ class OutputBudgetTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             subject_root = Path(temp).resolve() / "subject"
             subject_root.mkdir()
-            dotnet = Path("/usr/bin/dotnet")
+            dotnet = Path("/usr/bin/dotnet").resolve()
             broker = launcher.Broker(
                 {}, os.getuid(), os.getpid(), os.getgid(), os.getuid(), os.getgid(), os.getgid(), subject_root,
                 (), Path(temp), dotnet, "test-evidence", time.monotonic() + 60,

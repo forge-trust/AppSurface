@@ -16,11 +16,10 @@ internal static class EvidenceProtectedCliExecution
     }
 
     /// <summary>Checks an explicit caller mode against the protected launcher before any callback.</summary>
+    /// <remarks>Authenticated mode rejection follows the bounded owned-worker stop and exit-confirmation path before returning.</remarks>
     internal static async Task<EvidenceManifest> RunAsync(EvidenceExecutionRequest request, CancellationToken cancellationToken)
     {
         var worker = await EvidenceLinuxWorkerSupervisor.ConnectAsync(request.ControlChannel, cancellationToken).ConfigureAwait(false);
-        if (EvidenceModeSelection.Select(worker.Descriptor.Mode) != request.Mode)
-            throw new EvidenceAdmissionException("ASEVD401", "The caller mode conflicts with the protected launcher.");
         return await RunAsync(worker, request.Mode, cancellationToken).ConfigureAwait(false);
     }
 
@@ -36,6 +35,9 @@ internal static class EvidenceProtectedCliExecution
         EvidenceAdmissionResult? admission = null;
         try
         {
+            if (EvidenceModeSelection.Select(descriptor.Mode) != mode)
+                throw new EvidenceAdmissionException("ASEVD401", "The caller mode conflicts with the protected launcher.");
+
             var resolved = await execution.ExecuteAsync(EvidenceRunStage.Admission,
                 TimeSpan.FromSeconds(descriptor.AdmissionSeconds),
                 async token => await EvidenceProtectedWorkerInputs.ResolveAsync(descriptor, token).ConfigureAwait(false),

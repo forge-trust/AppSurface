@@ -20,8 +20,4 @@
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Aspire.Tests" />
   </ItemGroup>
 
-  <ItemGroup>
-    <None Include="README.md" Pack="true" PackagePath="" />
-  </ItemGroup>
-
 </Project>

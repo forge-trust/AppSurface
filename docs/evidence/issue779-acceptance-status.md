@@ -16,8 +16,8 @@ records **81/81** current native macOS Aspire Evidence tests, exit **0**, with n
 failures, skips or warnings, including the new protected broker fixture class.
 It includes single-use rejection after authentication/admission failure, cancellation
 before ownership, concurrent Run/Dispose with a held producer, and disposal before
-execution. The current native macOS CLI Evidence filter passed **327/327**, exit
-**0**, with no failures, skips or warnings, and compiles the new direct broker cases.
+execution. The current native macOS CLI Evidence filter passed **328/328**, exit
+**0**, with no failures, skips or warnings, and compiles the new direct broker cases, including the mode-conflict cleanup regression.
 The parent recovered its completed process exit from the runtime command record.
 These selections overlap prior
 runs and are not acceptance-group totals.
@@ -27,8 +27,11 @@ controls pass **2/2**, exit **0**. A [new root-broker fixture](../../tests/evide
 and paired [CLI](../../Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProtectedCliExecutionTests.cs)/[Aspire](../../Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidenceProtectedAspireExecutionTests.cs)
 cases exercise actual consumer entries with synthetic subject results and cgroup metadata.
 Their Linux production paths remain unverified. The x64 SDK and direct VSTest attempts
-both failed before test results under QEMU on the ARM64 Docker engine. A native Linux
-x64 run is required; the native macOS unsupported-platform controls do not replace it.
+both failed before test results under QEMU on the ARM64 Docker engine. Native Linux
+x64 validation is now available through the confirmed AppSurface GitHub Actions
+owner. Its first run stopped at a launcher fixture path error before C# or coverage;
+the fixture is repaired and a revised run is required. Native macOS controls do
+not replace the Linux execution paths.
 The unchanged solution coverage gate remains unverified on current source.
 
 The current CLI package `0.1.0-issue779-current.20261002.1` built and installed from

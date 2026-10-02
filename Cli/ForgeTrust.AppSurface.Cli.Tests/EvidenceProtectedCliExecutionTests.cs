@@ -68,6 +68,22 @@ public sealed class EvidenceProtectedCliExecutionTests
     }
 
     [Fact]
+    public async Task RunAsync_RejectsCallerModeConflictAndStopsAuthenticatedWorkerBeforeAllocationOrSubjectRun()
+    {
+        var fixture = await RequireFixtureAsync("cli-mode-conflict");
+        if (fixture is null) return;
+        var exception = await Assert.ThrowsAsync<EvidenceAdmissionException>(() =>
+            EvidenceProtectedCliExecution.RunAsync(
+                new EvidenceExecutionRequest(EvidenceExecutionMode.Trusted, fixture.Socket), CancellationToken.None));
+
+        Assert.Equal("ASEVD401", exception.Code);
+        Assert.Contains("The caller mode conflicts with the protected launcher.", exception.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(fixture.OutputDirectory));
+        Assert.Equal(["ready", "stop", "wait"], ReadOperations(fixture));
+        AssertPeerMatchesTestHost(fixture);
+    }
+
+    [Fact]
     public async Task RunAsync_RejectsTrustedModeWithoutConsumerProofBeforeAllocationOrSubjectRun()
     {
         var fixture = await RequireFixtureAsync("cli-trusted");

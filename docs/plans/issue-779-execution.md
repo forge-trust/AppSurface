@@ -935,3 +935,48 @@ parent also recovered the current CLI filter process exit **0** from the runtime
 record (the watcher had only reported its 327-pass log). These results validate
 compilation, shared behavior and unsupported-platform rejection; Linux positive
 paths and the exact solution coverage gate remain pending.
+
+
+### Native GitHub validation and first fixture corrections (2026-10-02)
+
+The previously confirmed AppSurface CI ownership provides a native Linux route.
+A separate `codex/issue779-native-validation-20261002` branch contains a validation
+harness and an isolated source snapshot; PR850 remains at `4dd992ec`. The harness
+checks all source hashes, preserves the recorded comparison base and runs the
+unchanged solution wrapper. It is validation work, not a feature publication or
+a clean enhancement conclusion.
+
+[Native run37016357414](https://github.com/forge-trust/AppSurface/actions/runs/37016357414)
+failed before the gate: 38 launcher cases passed and one fixture error rejected
+the unresolved `/usr/bin/dotnet` alias. The fixture now uses a canonical approved
+path for both configuration and request; the production guard remains unchanged.
+The launcher suite passes 39 locally. The source before/after checks matched on
+that run; artifact11229473438 retains the actual logs. No C# or coverage pass was
+produced by this run. The earlier request for a separate native host no longer
+blocks this validation route.
+
+A portable descriptor regression exposed and repairs an independent fixture
+NameError: the broker constructor now retains its unique root/scenario run ID
+rather than referencing `main`'s local variable from a method. Descriptor creation
+is verified for every configured scenario and authenticated peer/root binding.
+The CLI's authenticated caller-mode check is moved inside owned execution cleanup
+so rejected mode conflicts stop and join before returning `ASEVD401`. A paired
+production broker regression requires `ready -> stop -> wait` with no subject or
+artifact operations and no output allocation. Native execution remains pending.
+
+Three touched Evidence package projects duplicated the implicit README item
+already packed by `Directory.Build.targets`, producing existing `NU5118` warnings.
+Their redundant Include item groups are removed; the shared packing rule and
+PackageReadmeFile remain. Fresh exact-version SDK package/README verification is
+in progress without warning suppression or disabled NuGet audit. These changes
+invalidate the first source bundle and require a fresh candidate and native gate.
+
+
+After the CLI cleanup correction, scoped whitespace formatting passed and the
+current native macOS CLI Evidence filter passed **328/328**, exit **0**, with no
+failures, skips or warnings. This includes the new mode-conflict fixture class
+under the explicit unsupported-platform guard; the Linux operation sequence
+remains pending. The descriptor regression passes one test across all twelve
+scenario rows. A revised Linux runner executes focused CLI/Aspire consumer checks
+under a fresh root broker before the longer exact solution gate, which gets its
+own new broker. Focused success does not replace the unchanged gate.
