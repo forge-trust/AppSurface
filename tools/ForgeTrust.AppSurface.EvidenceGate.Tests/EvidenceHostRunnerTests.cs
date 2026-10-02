@@ -323,6 +323,126 @@ public sealed class EvidenceHostRunnerTests
     }
 
     [Fact]
+    public async Task InvalidTrustedPolicyPreservesItsPlanningDiagnostic()
+    {
+        using var fixture = await GateFixture.CreateAsync(docsOnly: true);
+        var policy = EvidenceCanonicalJson.Deserialize<EvidencePolicy>(await File.ReadAllBytesAsync(fixture.PolicyPath));
+        await File.WriteAllBytesAsync(
+            fixture.PolicyPath,
+            EvidenceCanonicalJson.Serialize(policy with { ConservativeProfileId = "missing-profile" }));
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.OutputDirectory,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEVD104", stderr.ToString(), StringComparison.Ordinal);
+        var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(
+            await File.ReadAllBytesAsync(Path.Join(fixture.OutputDirectory, "evidence-manifest.json")));
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, manifest.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+    }
+
+    [Fact]
+    public async Task InvalidReleasePlanEmitsSortedTerminalResultsWithInvalidEnvelope()
+    {
+        using var fixture = await GateFixture.CreateAsync(docsOnly: false);
+        var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(fixture.PlanPath));
+        var draft = plan with
+        {
+            Profile = plan.Profile with
+            {
+                Scope = EvidenceProfileScope.Release,
+                Resources =
+                [
+                    new EvidenceResourceDeclaration("z-resource", "completion", 1, []),
+                    new EvidenceResourceDeclaration("a-resource", "completion", 1, []),
+                    .. plan.Profile.Resources,
+                ],
+                Producers =
+                [
+                    new EvidenceProducerDeclaration("z-producer", "source-check", "1.0", [], ["assertion"], [], 60),
+                    new EvidenceProducerDeclaration("a-producer", "source-check", "1.0", [], ["assertion"], [], 60),
+                    .. plan.Profile.Producers,
+                ],
+            },
+            PlanDigest = string.Empty,
+        };
+        await File.WriteAllBytesAsync(
+            fixture.PlanPath,
+            EvidenceCanonicalJson.Serialize(draft with { PlanDigest = EvidenceDigest.CanonicalSha256(draft) }));
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.OutputDirectory,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGH104", stderr.ToString(), StringComparison.Ordinal);
+        var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(
+            await File.ReadAllBytesAsync(Path.Join(fixture.OutputDirectory, "evidence-manifest.json")));
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, manifest.ExecutionVerdict);
+        Assert.Equal(EvidenceEnvelopeStatus.Invalid, manifest.EnvelopeStatus);
+        Assert.Equal(new[] { "a-resource", "database", "z-resource" }, manifest.ResourceResults.Select(static result => result.ResourceId));
+        Assert.Equal(new[] { "a-producer", "source-check", "z-producer" }, manifest.ProducerResults.Select(static result => result.ProducerId));
+    }
+
+    [Fact]
+    public async Task InvalidPlanPathIsReportedAsUnsafeInput()
+    {
+        using var fixture = await GateFixture.CreateAsync(docsOnly: true);
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath + "\0",
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.OutputDirectory,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGH102", stderr.ToString(), StringComparison.Ordinal);
+        Assert.Empty(stdout.ToString());
+        Assert.False(Directory.Exists(fixture.OutputDirectory));
+    }
+
+    [Fact]
+    public async Task UnexpectedOutputWriterFailureReturnsGenericHostFailure()
+    {
+        using var fixture = await GateFixture.CreateAsync(docsOnly: false);
+        using var stdout = new ThrowingTextWriter(new NotSupportedException("The caller's output writer is unavailable."));
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.OutputDirectory,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGH199", stderr.ToString(), StringComparison.Ordinal);
+        var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(
+            await File.ReadAllBytesAsync(Path.Join(fixture.OutputDirectory, "evidence-manifest.json")));
+        Assert.Equal(EvidenceExecutionVerdict.Incomplete, manifest.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+    }
+
+    [Fact]
     public async Task ReviewedFormattedPolicyCanProduceAnEmptyHostClaim()
     {
         using var fixture = await GateFixture.CreateAsync(docsOnly: true);
@@ -440,6 +560,40 @@ public sealed class EvidenceHostRunnerTests
     }
 
     [Fact]
+    public async Task CanonicalPlanExpansionBeyondOutputLimitFailsBeforeWritingResults()
+    {
+        using var fixture = await GateFixture.CreateAsync(docsOnly: true);
+        var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(fixture.PlanPath));
+        var expandedPlan = plan with { ChangedPaths = [new NormalizedDiffPath(new string('\u0080', 700_000))] };
+        var canonicalBytes = EvidenceCanonicalJson.Serialize(expandedPlan);
+        var canonicalJson = System.Text.Encoding.UTF8.GetString(canonicalBytes);
+        var escapedCharacter = JsonSerializer.Serialize("\u0080")[1..^1];
+        Assert.Equal("\\u0080", escapedCharacter);
+
+        var boundedInputJson = canonicalJson.Replace(escapedCharacter, "\u0080", StringComparison.Ordinal);
+        var boundedInputBytes = System.Text.Encoding.UTF8.GetBytes(boundedInputJson);
+        Assert.True(boundedInputBytes.Length <= 4 * 1024 * 1024);
+        Assert.True(canonicalBytes.Length > 4 * 1024 * 1024);
+        await File.WriteAllBytesAsync(fixture.PlanPath, boundedInputBytes);
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.OutputDirectory,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGH106", stderr.ToString(), StringComparison.Ordinal);
+        Assert.Empty(stdout.ToString());
+        Assert.False(File.Exists(Path.Join(fixture.OutputDirectory, "evidence-plan.json")));
+        Assert.False(File.Exists(Path.Join(fixture.OutputDirectory, "evidence-manifest.json")));
+    }
+
+    [Fact]
     public async Task TamperedPlanDigestEmitsInvalidManifestAndFailsAgainstTrustedGitSnapshot()
     {
         using var fixture = await GateFixture.CreateAsync(docsOnly: true);
@@ -483,6 +637,28 @@ public sealed class EvidenceHostRunnerTests
         Assert.Contains("profile=[invalid-token]", stdout.ToString(), StringComparison.Ordinal);
         Assert.Contains("plan=[invalid-digest]", stdout.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("unsafe\nprofile", stdout.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WrongLengthPlanDigestIsRedactedInHostTerminalStatus()
+    {
+        using var fixture = await GateFixture.CreateAsync(docsOnly: true);
+        var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(fixture.PlanPath));
+        await File.WriteAllBytesAsync(fixture.PlanPath, EvidenceCanonicalJson.Serialize(plan with { PlanDigest = "short" }));
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceHostRunner.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.OutputDirectory,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("plan=[invalid-digest]", stdout.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("plan=short", stdout.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -532,6 +708,11 @@ public sealed class EvidenceHostRunnerTests
         Assert.Equal(130, exitCode);
         Assert.Contains("ASEGH130", stderr.ToString(), StringComparison.Ordinal);
         Assert.False(File.Exists(Path.Join(fixture.OutputDirectory, "evidence-manifest.json")));
+    }
+
+    private sealed class ThrowingTextWriter(Exception exception) : StringWriter
+    {
+        public override Task WriteLineAsync(string? value) => Task.FromException(exception);
     }
 
     private sealed class GateFixture(string root, string repositoryPath, string policyPath, string planPath, string outputDirectory) : IDisposable

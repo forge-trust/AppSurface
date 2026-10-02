@@ -716,7 +716,13 @@ public sealed class EvidencePullRequestGateVerifierTests
 
         Assert.False(await verifier.VerifyArtifactsAsync(fixture.ArtifactRoot, traversalPlan, traversalManifest));
 
-        foreach (var invalidProducerId in new[] { string.Empty, "build\n" })
+        foreach (var invalidProducerId in new[]
+        {
+            string.Empty,
+            "build\n",
+            "build\\nested",
+            new string('p', EvidenceGitChangeCapture.MaximumPathBytes),
+        })
         {
             var invalidProducer = producer with { Id = invalidProducerId };
             var invalidPlan = fixture.Plan with

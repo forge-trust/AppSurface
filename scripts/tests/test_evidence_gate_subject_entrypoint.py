@@ -220,6 +220,39 @@ class FixedOfflineSubjectEntrypointTests(unittest.TestCase):
             self.assertEqual("ASESE002", result["diagnostic"]["code"])
             self.assertFalse(result["claimEligible"])
 
+    def test_subject_nuget_configuration_is_rejected_before_restore(self) -> None:
+        for relative_path in ("NuGet.Config", "nested/nuget.config"):
+            with self.subTest(relative_path=relative_path), tempfile.TemporaryDirectory() as temporary:
+                parent = Path(temporary).resolve()
+                subject, scratch, feed = self.prepared_roots(parent)
+                self.make_subject(subject)
+                controlled_config = subject / relative_path
+                controlled_config.parent.mkdir(parents=True, exist_ok=True)
+                controlled_config.write_text("<configuration />", encoding="utf-8")
+                calls: list[list[str]] = []
+
+                def runner(arguments: list[str], **_options: object) -> entrypoint.ProcessResult:
+                    calls.append(arguments)
+                    if arguments == ["dotnet", "--version"]:
+                        return process_result(stdout=b"10.0.100\n")
+                    if arguments == ["dotnet", "--list-runtimes"]:
+                        return process_result(stdout=b"Microsoft.NETCore.App 10.0.2 [/dotnet]\n")
+                    self.fail(f"Restore must not run with subject NuGet configuration: {arguments!r}")
+
+                with self.patch_paths(subject, scratch, feed):
+                    code = entrypoint.execute(
+                        self.invocation(),
+                        mountinfo_text=self.mountinfo(subject, scratch, feed),
+                        effective_uid=os.geteuid(),
+                        runner=runner,
+                    )
+
+                self.assertEqual(2, code)
+                self.assertEqual([["dotnet", "--version"], ["dotnet", "--list-runtimes"]], calls)
+                result = json.loads((scratch / entrypoint.RESULT_RELATIVE_PATH).read_text(encoding="ascii"))
+                self.assertEqual("ASESE003", result["diagnostic"]["code"])
+                self.assertFalse(result["claimEligible"])
+
     def test_project_declared_linux_runtime_lock_is_used(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             parent = Path(temporary).resolve()
@@ -315,6 +348,9 @@ class FixedOfflineSubjectEntrypointTests(unittest.TestCase):
             offline_config = Path(restore[restore.index("--configfile") + 1]).read_text(encoding="utf-8")
             self.assertIn("<clear/>", offline_config)
             self.assertIn(f'<add key="locked-dependencies" value="{feed}"/>', offline_config)
+            user_config = scratch / "dotnet-home/.nuget/NuGet/NuGet.Config"
+            self.assertEqual(offline_config, user_config.read_text(encoding="utf-8"))
+            self.assertEqual(0o600, stat.S_IMODE(user_config.stat().st_mode))
             coverage_run, coverage_gate = entrypoint._coverage_commands(
                 scratch / entrypoint.STAGED_SUBJECT_RELATIVE_PATH,
                 scratch,

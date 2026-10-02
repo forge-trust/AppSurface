@@ -60,12 +60,13 @@ internal static class EvidenceGateVerifier
                 manifest,
                 cancellationToken).ConfigureAwait(false);
 
-            await WriteResultOutputsAsync(outputRoot, result, CancellationToken.None).ConfigureAwait(false);
             await standardOutput.WriteLineAsync(EvidenceGateResultRenderer.RenderTerminal(result)).ConfigureAwait(false);
             if (!result.IsEligible)
             {
                 await standardError.WriteLineAsync($"{result.Code}: {result.Diagnostic}").ConfigureAwait(false);
             }
+
+            await WriteResultOutputsAsync(outputRoot, result, CancellationToken.None).ConfigureAwait(false);
 
             return result.IsEligible ? 0 : 2;
         }
@@ -154,9 +155,11 @@ internal static class EvidenceGateVerifier
         }
 
         Directory.CreateDirectory(outputRoot);
-        await WriteNewAsync(Path.Join(outputRoot, "evidence-gate-verification.json"), resultBytes, cancellationToken).ConfigureAwait(false);
         await WriteNewAsync(Path.Join(outputRoot, "evidence-gate-summary.json"), summaryBytes, cancellationToken).ConfigureAwait(false);
         await WriteNewAsync(Path.Join(outputRoot, "evidence-gate-summary.md"), markdownBytes, cancellationToken).ConfigureAwait(false);
+        // Publish the authoritative machine verdict last. Earlier output or
+        // presentation failures must never leave an eligible result behind.
+        await WriteNewAsync(Path.Join(outputRoot, "evidence-gate-verification.json"), resultBytes, cancellationToken).ConfigureAwait(false);
     }
 
     private static TValue DeserializeCanonical<TValue>(byte[] bytes)

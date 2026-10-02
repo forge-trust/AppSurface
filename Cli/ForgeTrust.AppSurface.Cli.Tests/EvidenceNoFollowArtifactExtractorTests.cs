@@ -347,6 +347,43 @@ public sealed class EvidenceNoFollowArtifactExtractorTests
     }
 
     [Fact]
+    public async Task ExtractAsync_ShouldAcceptArtifactsAtCallerFileCountAndByteLimits()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            await AssertUnsupportedPlatformFailsClosedAsync();
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        Directory.CreateDirectory(temp.ScratchRoot);
+        Directory.CreateDirectory(temp.ArtifactRoot);
+        Directory.CreateDirectory(Path.Join(temp.ScratchRoot, "subject"));
+        var report = new byte[] { 1, 2 };
+        var summary = new byte[] { 3, 4 };
+        await File.WriteAllBytesAsync(Path.Join(temp.ScratchRoot, "subject", "report.bin"), report);
+        await File.WriteAllBytesAsync(Path.Join(temp.ScratchRoot, "subject", "summary.bin"), summary);
+        using var root = OpenTrustedRoot(temp.ScratchRoot);
+        var writer = CreateWriter(
+            temp.ArtifactRoot,
+            new EvidenceArtifactSlot("summary", "summaries", "application/octet-stream", Required: false, EvidenceArtifactWriter.MaximumTotalArtifactBytes));
+
+        var results = await EvidenceNoFollowArtifactExtractor.ExtractAsync(
+            root,
+            writer,
+            [
+                new EvidenceNoFollowArtifact("report", "subject/report.bin", "reports/report.bin"),
+                new EvidenceNoFollowArtifact("summary", "subject/summary.bin", "summaries/summary.bin"),
+            ],
+            new EvidenceNoFollowArtifactExtractionLimits { MaximumFileCount = 2, MaximumTotalBytes = 4 });
+
+        Assert.Equal(new[] { "report", "summary" }, results.Select(static result => result.LogicalName));
+        Assert.Equal(report, await File.ReadAllBytesAsync(Path.Join(temp.ArtifactRoot, "reports", "report.bin")));
+        Assert.Equal(summary, await File.ReadAllBytesAsync(Path.Join(temp.ArtifactRoot, "summaries", "summary.bin")));
+        Assert.True(await writer.VerifyWrittenArtifactsAsync());
+    }
+
+    [Fact]
     public async Task ExtractAsync_ShouldRejectNonDirectoryRootAndMissingSourcesWithoutWriting()
     {
         if (!OperatingSystem.IsLinux())
@@ -473,6 +510,42 @@ public sealed class EvidenceNoFollowArtifactExtractorTests
             [new EvidenceNoFollowArtifact("report", "subject/report.bin", "reports/report.bin")],
             MutateSource));
 
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.False(File.Exists(Path.Join(temp.ArtifactRoot, "reports", "report.bin")));
+    }
+
+    [Fact]
+    public async Task ExtractAsyncForTesting_ShouldPropagateCallerCancellationDuringVerification()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            await AssertUnsupportedPlatformFailsClosedAsync();
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        Directory.CreateDirectory(temp.ScratchRoot);
+        Directory.CreateDirectory(temp.ArtifactRoot);
+        Directory.CreateDirectory(Path.Join(temp.ScratchRoot, "subject"));
+        await File.WriteAllBytesAsync(Path.Join(temp.ScratchRoot, "subject", "report.bin"), [1, 2, 3]);
+        using var root = OpenTrustedRoot(temp.ScratchRoot);
+        var writer = CreateWriter(temp.ArtifactRoot);
+        using var cancellation = new CancellationTokenSource();
+
+        void CancelAfterFirstPass(string sourceRelativePath)
+        {
+            Assert.Equal("subject/report.bin", sourceRelativePath);
+            cancellation.Cancel();
+        }
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => EvidenceNoFollowArtifactExtractor.ExtractAsyncForTesting(
+            root,
+            writer,
+            [new EvidenceNoFollowArtifact("report", "subject/report.bin", "reports/report.bin")],
+            CancelAfterFirstPass,
+            cancellationToken: cancellation.Token));
+
+        Assert.True(cancellation.IsCancellationRequested);
         Assert.Empty(writer.WrittenArtifacts);
         Assert.False(File.Exists(Path.Join(temp.ArtifactRoot, "reports", "report.bin")));
     }

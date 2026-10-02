@@ -104,6 +104,35 @@ public sealed class EvidenceGateVerifierTests
     }
 
     [Fact]
+    public async Task VerifyGateUnexpectedTerminalWriterFailureEmitsFixedIneligibleResult()
+    {
+        using var fixture = await VerifyFixture.CreateAsync();
+        using var stdout = new ThrowOnceTextWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await EvidenceGateVerifier.ExecuteAsync(
+            fixture.PlanPath,
+            fixture.ManifestPath,
+            fixture.PolicyPath,
+            fixture.RepositoryPath,
+            fixture.IdentityPath,
+            fixture.OutputDirectory,
+            artifactHandoffRootPath: null,
+            fixture.AuthorityProvider,
+            artifactVerifier: null,
+            stdout,
+            stderr);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("ASEGG199", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Contains("ASEGG199", stderr.ToString(), StringComparison.Ordinal);
+        var result = EvidenceCanonicalJson.Deserialize<EvidencePullRequestGateVerificationResult>(
+            await File.ReadAllBytesAsync(Path.Join(fixture.OutputDirectory, "evidence-gate-verification.json")));
+        Assert.False(result.IsEligible);
+        Assert.Equal("ASEGG199", result.Code);
+    }
+
+    [Fact]
     public async Task VerifyGateRejectsMalformedOrOversizedHandoffWithMachineFailureResult()
     {
         using var malformedFixture = await VerifyFixture.CreateAsync();
@@ -471,5 +500,21 @@ public sealed class EvidenceGateVerifierTests
         public Task<EvidencePullRequestGateAuthoritySnapshot?> ReadFreshAsync(
             EvidencePullRequestGateExpectedIdentity expectedIdentity,
             CancellationToken cancellationToken = default) => Task.FromResult(snapshot);
+    }
+
+    private sealed class ThrowOnceTextWriter : StringWriter
+    {
+        private bool _thrown;
+
+        public override Task WriteLineAsync(string? value)
+        {
+            if (!_thrown)
+            {
+                _thrown = true;
+                throw new NotSupportedException("The terminal output writer failed unexpectedly.");
+            }
+
+            return base.WriteLineAsync(value);
+        }
     }
 }

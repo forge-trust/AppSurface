@@ -697,6 +697,52 @@ public sealed class EvidencePlannerTests
         Assert.False(await writer.VerifyWrittenArtifactsAsync());
     }
 
+    [Fact]
+    public async Task ArtifactWriter_ShouldRejectUndeclaredStreamSlotBeforeReadingOrReserving()
+    {
+        using var directory = TestDirectory.Create();
+        var producer = new EvidenceProducerDeclaration(
+            "coverage", "coverage", "1", [], [],
+            [new EvidenceArtifactSlot("report", "coverage", "text/plain", Required: true, MaximumBytes: 16)], 60);
+        var writer = new EvidenceArtifactWriter(producer, directory.Path);
+        using var undeclaredSource = new MemoryStream("report"u8.ToArray());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => writer.WriteAsync(
+            "missing",
+            "coverage/report.txt",
+            undeclaredSource,
+            6).AsTask());
+
+        Assert.Equal(0, undeclaredSource.Position);
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.False(File.Exists(Path.Join(directory.Path, "coverage", "report.txt")));
+
+        using var declaredSource = new MemoryStream("report"u8.ToArray());
+        var artifact = await writer.WriteAsync("report", "coverage/report.txt", declaredSource, 6);
+
+        Assert.Equal("report", artifact.LogicalName);
+        Assert.True(await writer.VerifyWrittenArtifactsAsync());
+    }
+
+    [Fact]
+    public async Task ArtifactWriter_ShouldRejectVerificationWhenWrittenArtifactSlotIsRemoved()
+    {
+        using var directory = TestDirectory.Create();
+        var slots = new List<EvidenceArtifactSlot>
+        {
+            new("report", "coverage", "text/plain", Required: true, MaximumBytes: 16),
+        };
+        var producer = new EvidenceProducerDeclaration("coverage", "coverage", "1", [], [], slots, 60);
+        var writer = new EvidenceArtifactWriter(producer, directory.Path);
+
+        await writer.WriteAsync("report", "coverage/report.txt", "report"u8.ToArray());
+        Assert.True(await writer.VerifyWrittenArtifactsAsync());
+
+        slots.Clear();
+
+        Assert.False(await writer.VerifyWrittenArtifactsAsync());
+    }
+
     [Theory]
     [InlineData("short", 6)]
     [InlineData("too-long", 4)]

@@ -45,6 +45,28 @@ public sealed class EvidencePolicyShadowCommandTests
     }
 
     [Fact]
+    public async Task Command_Should_Treat_An_Existing_Json_Named_Directory_As_A_Directory()
+    {
+        using var temporaryDirectory = TempDirectory.Create("appsurface-policy-shadow-json-named-directory-");
+        var fixture = Fixture("docs", EvidencePolicyShadowFixtureKind.Documentation, "docs/guide.md");
+        var inputs = await WriteInputsAsync(
+            temporaryDirectory.Path,
+            Fixtures(fixture),
+            Fixtures(fixture));
+        var outputDirectory = Directory.CreateDirectory(
+            TestPathUtils.PathUnder(temporaryDirectory.Path, "shadow-output.json")).FullName;
+
+        var run = await InvokeAsync(CreateArguments(inputs, outputDirectory));
+
+        Assert.Equal(0, run.ExitCode);
+        Assert.True(Directory.Exists(outputDirectory));
+        Assert.False(File.Exists(outputDirectory));
+        var outputPath = TestPathUtils.PathUnder(outputDirectory, "evidence-policy-shadow.json");
+        using var document = JsonDocument.Parse(await File.ReadAllBytesAsync(outputPath));
+        Assert.True(document.RootElement.GetProperty("result").GetProperty("isCompatible").GetBoolean());
+    }
+
+    [Fact]
     public async Task Command_Should_Treat_Missing_Candidate_Fixtures_As_Empty_And_Report_Base_Deletion()
     {
         using var temporaryDirectory = TempDirectory.Create("appsurface-policy-shadow-deleted-");
@@ -121,8 +143,12 @@ public sealed class EvidencePolicyShadowCommandTests
                 .GetString());
     }
 
-    [Fact]
-    public async Task Command_Should_Fail_Closed_When_Any_Input_Exceeds_The_Byte_Limit()
+    [Theory]
+    [InlineData(true, "Base")]
+    [InlineData(false, "Candidate")]
+    public async Task Command_Should_Fail_Closed_And_Redact_Oversized_Input(
+        bool isBasePolicy,
+        string expectedSource)
     {
         using var temporaryDirectory = TempDirectory.Create("appsurface-policy-shadow-oversized-");
         const string hostileText = "oversized-input-RAW-SENTINEL";
@@ -131,9 +157,10 @@ public sealed class EvidencePolicyShadowCommandTests
             temporaryDirectory.Path,
             Fixtures(fixture),
             Fixtures(fixture));
+        var inputPath = isBasePolicy ? inputs.BasePolicyPath : inputs.CandidateFixturesPath;
         var oversizedInput = new byte[(1024 * 1024) + 1];
         Encoding.UTF8.GetBytes(hostileText).CopyTo(oversizedInput, 0);
-        await File.WriteAllBytesAsync(inputs.BasePolicyPath, oversizedInput);
+        await File.WriteAllBytesAsync(inputPath, oversizedInput);
         var outputPath = TestPathUtils.PathUnder(temporaryDirectory.Path, "oversized-result.json");
 
         var run = await InvokeAsync(CreateArguments(inputs, outputPath));
@@ -149,11 +176,64 @@ public sealed class EvidencePolicyShadowCommandTests
         var root = document.RootElement;
         Assert.False(root.GetProperty("claimEligible").GetBoolean());
         Assert.False(root.GetProperty("result").GetProperty("isCompatible").GetBoolean());
-        Assert.Equal(
-            "ASEPSCLI003",
-            Assert.Single(root.GetProperty("result").GetProperty("diagnostics").EnumerateArray())
-                .GetProperty("code")
-                .GetString());
+        var diagnostic = Assert.Single(root.GetProperty("result").GetProperty("diagnostics").EnumerateArray());
+        Assert.Equal("ASEPSCLI003", diagnostic.GetProperty("code").GetString());
+        Assert.Equal(expectedSource, diagnostic.GetProperty("fixtureSource").GetString());
+    }
+
+    [Fact]
+    public async Task Command_Should_Accept_A_Valid_Policy_At_The_One_Mebibyte_Input_Limit()
+    {
+        using var temporaryDirectory = TempDirectory.Create("appsurface-policy-shadow-exact-input-limit-");
+        var fixture = Fixture("docs", EvidencePolicyShadowFixtureKind.Documentation, "docs/guide.md");
+        var inputs = await WriteInputsAsync(
+            temporaryDirectory.Path,
+            Fixtures(fixture),
+            Fixtures(fixture));
+        var policyBytes = EvidenceCanonicalJson.Serialize(CreatePolicy());
+        var exactLimitPolicyBytes = Enumerable.Repeat((byte)' ', 1024 * 1024).ToArray();
+        policyBytes.CopyTo(exactLimitPolicyBytes, 0);
+        await File.WriteAllBytesAsync(inputs.BasePolicyPath, exactLimitPolicyBytes);
+        var outputPath = TestPathUtils.PathUnder(temporaryDirectory.Path, "exact-input-limit-result.json");
+
+        var run = await InvokeAsync(CreateArguments(inputs, outputPath));
+
+        Assert.Equal(0, run.ExitCode);
+        Assert.Contains("claimEligible=false", run.Output, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(await File.ReadAllBytesAsync(outputPath));
+        Assert.True(document.RootElement.GetProperty("result").GetProperty("isCompatible").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Command_Should_Reject_Unbounded_Input_When_A_Device_Reports_No_Length()
+    {
+        var unboundedInputPath = TestPathUtils.PathUnder(Path.DirectorySeparatorChar.ToString(), "dev", "zero");
+        if (!File.Exists(unboundedInputPath))
+        {
+            return;
+        }
+
+        Assert.Equal(0, new FileInfo(unboundedInputPath).Length);
+
+        using var temporaryDirectory = TempDirectory.Create("appsurface-policy-shadow-unbounded-input-");
+        var fixture = Fixture("docs", EvidencePolicyShadowFixtureKind.Documentation, "docs/guide.md");
+        var inputs = await WriteInputsAsync(
+            temporaryDirectory.Path,
+            Fixtures(fixture),
+            Fixtures(fixture));
+        inputs = inputs with { BasePolicyPath = unboundedInputPath };
+        var outputPath = TestPathUtils.PathUnder(temporaryDirectory.Path, "unbounded-input-result.json");
+
+        var run = await InvokeAsync(CreateArguments(inputs, outputPath));
+
+        Assert.NotEqual(0, run.ExitCode);
+        Assert.Contains("ASEPSCLI003", run.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain(unboundedInputPath, run.AllText, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(await File.ReadAllBytesAsync(outputPath));
+        var diagnostic = Assert.Single(document.RootElement.GetProperty("result").GetProperty("diagnostics").EnumerateArray());
+        Assert.Equal("ASEPSCLI003", diagnostic.GetProperty("code").GetString());
+        Assert.Equal("Base", diagnostic.GetProperty("fixtureSource").GetString());
+        Assert.DoesNotContain(unboundedInputPath, document.RootElement.GetRawText(), StringComparison.Ordinal);
     }
 
     [Fact]

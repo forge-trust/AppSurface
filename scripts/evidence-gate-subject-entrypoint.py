@@ -389,6 +389,8 @@ def _copy_subject_tree(source: Path, destination: Path, *, deadline: float) -> t
                 continue
             if not stat.S_ISREG(before.st_mode):
                 raise EntrypointError("ASESE003", "The subject tree contains an unsupported file type.")
+            if entry.name.casefold() == "nuget.config":
+                raise EntrypointError("ASESE003", "Subject-controlled NuGet configuration is unsupported.")
             if before.st_nlink != 1:
                 raise EntrypointError("ASESE003", "The subject tree contains a hard-linked file.")
             copied_files += 1
@@ -757,6 +759,15 @@ def execute(
         _copy_subject_tree(invocation.subject_root, staged_root, deadline=deadline)
         _validate_solution_locks(staged_root)
         _write_offline_config(scratch / RESTORE_CONFIG_RELATIVE_PATH)
+        try:
+            user_config_directory = Path(environment["HOME"]) / ".nuget" / "NuGet"
+            user_config_directory.mkdir(parents=True, mode=0o700)
+        except OSError:
+            raise EntrypointError("ASESE003", "The private NuGet SDK resolver configuration directory could not be created.") from None
+        # Project SDK resolution happens during MSBuild evaluation, before the
+        # restore command applies --configfile. Give that resolver the same
+        # fixed offline feed; no subject NuGet.Config may override it.
+        _write_offline_config(user_config_directory / "NuGet.Config")
 
         restore_result = runner(
             [

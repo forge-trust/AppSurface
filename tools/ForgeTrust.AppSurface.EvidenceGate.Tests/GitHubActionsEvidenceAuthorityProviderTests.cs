@@ -18,6 +18,36 @@ public sealed class GitHubActionsEvidenceAuthorityProviderTests
     private const string JobsPath = WorkflowRunPath + "/jobs?per_page=100";
 
     [Fact]
+    public void ProviderRejectsApiBaseAddressesThatAreNotSafeHttpsEndpoints()
+    {
+        using var httpClient = new HttpClient();
+        var insecureTransport = new UriBuilder(Uri.UriSchemeHttp, "api.example.test").Uri;
+        var credentialBearingAddress = new UriBuilder(Uri.UriSchemeHttps, "api.example.test")
+        {
+            UserName = "synthetic-user",
+            Password = "synthetic-password",
+        }.Uri;
+
+        foreach (var address in new[] { insecureTransport, credentialBearingAddress })
+        {
+            var exception = Assert.Throws<ArgumentException>(() =>
+                new GitHubActionsEvidenceAuthorityProvider(httpClient, address));
+
+            Assert.Equal("apiBaseAddress", exception.ParamName);
+        }
+    }
+
+    [Fact]
+    public async Task UnavailableProviderReturnsNoAuthoritySnapshot()
+    {
+        var provider = new UnavailableEvidenceAuthorityProvider();
+
+        var snapshot = await provider.ReadFreshAsync(CreateExpectedIdentity());
+
+        Assert.Null(snapshot);
+    }
+
+    [Fact]
     public async Task ProviderReturnsFreshSnapshotAfterCheckoutIsBoundToCurrentRunAndJob()
     {
         var expectedIdentity = CreateExpectedIdentity();
