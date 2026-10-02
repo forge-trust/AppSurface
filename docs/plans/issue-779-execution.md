@@ -1172,3 +1172,21 @@ controlled release fixture, shared Aspire resource integration and the complete
 protected consumer matrix remain required. See the
 [acceptance record](../evidence/issue779-consumer-acceptance.md) for the exact
 failed runs and their limits.
+
+The complete frozen snapshot `8a964188e85561d57119133d26b552f9412e2445`
+also failed [systemd Observation](https://github.com/forge-trust/AppSurface/actions/runs/37047555055)
+and [Aspire mechanism execution](https://github.com/forge-trust/AppSurface/actions/runs/37047560583).
+All 2725 frozen hashes and dispatched workflow bindings matched. The runtime
+worker reached readiness and completed its wait, then reported `ASEVD409`;
+the erased internal allocation/activation exception still needs a closed private
+diagnostic. Aspire reached DCP and resource startup, where thread creation failed;
+task and memory counters are needed to distinguish the cause. Its factory-stall
+identity guard correctly rejected an observed root UID, without establishing
+factory execution. The [acceptance record](../evidence/issue779-consumer-acceptance.md#frozen-source-allocation-and-resource-startup-failures-2026-10-02)
+preserves these failed results and their limits. The [unchanged coverage run](https://github.com/forge-trust/AppSurface/actions/runs/37047553718)
+subsequently exited **1** (`ASCOV120`) because the fixture-path policy rejected
+a dynamic `Path.Join` in the Bootstrap artifact test. Its measured aggregate
+was 94.98% line / 88.79% branch; the patch gate was not reached. There were
+15,393 passes, one failure, two existing skips and zero compiler warnings.
+The source correction uses `TestPathUtils.PathUnder`, followed by the exact
+existing policy regression and a new complete frozen native run.

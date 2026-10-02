@@ -1,6 +1,9 @@
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.ComponentModel;
+using System.Text;
+using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Planner;
@@ -12,6 +15,120 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class EvidenceProtectedCliExecutionTests(ITestOutputHelper output)
 {
     private const string BrokerEnvironmentVariable = "EVIDENCEHOST_TEST_BROKER_SOCKET";
+
+    [Theory]
+    [InlineData(-1, null)]
+    [InlineData(0, null)]
+    [InlineData(1, 1)]
+    [InlineData(17, 17)]
+    [InlineData(4095, 4095)]
+    [InlineData(4096, null)]
+    public void AllocationDiagnostic_bounds_errno_and_omits_exception_canaries(int errno, int? expected)
+    {
+        const string canary = "secret-subject-path-token";
+        var error = new IOException(canary, new Win32Exception(errno, canary));
+        error.Data[canary] = canary;
+        var diagnostic = EvidenceProtectedCliExecution.CreateAllocationFailureDiagnostic(EvidenceAllocationPhase.Allocation,
+            EvidenceLinuxArtifactAllocationOperation.CreateSlot, EvidenceWorkerStageOutcome.Failed,
+            EvidenceWorkerTerminalCode.StageFailed, error);
+        Assert.Equal(expected, diagnostic.NativeErrno);
+        Assert.Equal(EvidenceAllocationErrorClass.Io, diagnostic.ErrorClass);
+        using var console = new FakeInMemoryConsole();
+        EvidenceWorkerCommand.WriteAllocationDiagnostic(console, diagnostic);
+        var line = console.ReadErrorString();
+        Assert.True(Encoding.UTF8.GetByteCount(line) <= 1024);
+        Assert.DoesNotContain(canary, line, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, console.ReadOutputString());
+        using var json = JsonDocument.Parse(line);
+        Assert.Equal("evidence-allocation-failure-v1", json.RootElement.GetProperty("schema").GetString());
+        Assert.Equal("CreateSlot", json.RootElement.GetProperty("operation").GetString());
+        Assert.Equal("Io", json.RootElement.GetProperty("errorClass").GetString());
+        Assert.Equal(7, json.RootElement.EnumerateObject().Count());
+    }
+
+    [Fact]
+    public void AllocationDiagnostic_classifies_only_closed_error_values_and_native_allocation_errno()
+    {
+        var cases = new (Exception? Error, EvidenceAllocationErrorClass Class)[]
+        {
+            (null, EvidenceAllocationErrorClass.None),
+            (new Exception("canary"), EvidenceAllocationErrorClass.Unknown),
+            (new OutOfMemoryException("canary"), EvidenceAllocationErrorClass.OutOfMemory),
+            (new UnauthorizedAccessException("canary"), EvidenceAllocationErrorClass.AccessDenied),
+            (new PlatformNotSupportedException("canary"), EvidenceAllocationErrorClass.Unsupported),
+            (new ArgumentException("canary"), EvidenceAllocationErrorClass.Argument),
+            (new OperationCanceledException("canary"), EvidenceAllocationErrorClass.Cancelled),
+            (new TimeoutException("canary"), EvidenceAllocationErrorClass.Timeout),
+            (new EvidenceAdmissionException("ASEVD409", "canary"), EvidenceAllocationErrorClass.Admission),
+            (new InvalidOperationException("canary"), EvidenceAllocationErrorClass.InvalidOperation),
+        };
+        foreach (var (error, expected) in cases)
+        {
+            var diagnostic = EvidenceProtectedCliExecution.CreateAllocationFailureDiagnostic(EvidenceAllocationPhase.Activation,
+                EvidenceLinuxArtifactAllocationOperation.Completed, EvidenceWorkerStageOutcome.Failed,
+                EvidenceWorkerTerminalCode.StageFailed, error);
+            Assert.Equal(expected, diagnostic.ErrorClass);
+            Assert.Null(diagnostic.NativeErrno);
+        }
+        var native = new IOException("canary", new Win32Exception(13, "canary"));
+        foreach (var phase in new[] { EvidenceAllocationPhase.BeforeAllocation, EvidenceAllocationPhase.BeforeActivation, EvidenceAllocationPhase.Activation })
+            Assert.Null(EvidenceProtectedCliExecution.CreateAllocationFailureDiagnostic(phase,
+                EvidenceLinuxArtifactAllocationOperation.CreateSlot, EvidenceWorkerStageOutcome.Failed,
+                EvidenceWorkerTerminalCode.StageFailed, native).NativeErrno);
+        var unknown = EvidenceProtectedCliExecution.CreateAllocationFailureDiagnostic((EvidenceAllocationPhase)999,
+            (EvidenceLinuxArtifactAllocationOperation)999, (EvidenceWorkerStageOutcome)999, (EvidenceWorkerTerminalCode)999, native);
+        Assert.Equal(EvidenceAllocationPhase.None, unknown.Phase);
+        Assert.Equal(EvidenceLinuxArtifactAllocationOperation.None, unknown.Operation);
+        Assert.Equal(EvidenceWorkerStageOutcome.Failed, unknown.StageOutcome);
+        Assert.Equal(EvidenceWorkerTerminalCode.StageFailed, unknown.TerminalCode);
+        Assert.Null(unknown.NativeErrno);
+    }
+
+    [Fact]
+    public async Task AllocationDiagnostic_sink_runs_only_after_join_and_cannot_replace_original_failure()
+    {
+        var supervisor = new DiagnosticSupervisor();
+        var execution = new EvidenceWorkerExecution(supervisor, TimeProvider.System, TimeSpan.FromMinutes(1),
+            TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2));
+        var calls = 0;
+        Action<EvidenceAllocationFailureDiagnostic> sink = _ => calls++;
+        EvidenceProtectedCliExecution.ReportAllocationFailure(execution, EvidenceWorkerStageOutcome.Failed,
+            EvidenceAllocationPhase.Allocation, EvidenceLinuxArtifactAllocationOperation.CreateSlot, sink);
+        Assert.Equal(0, calls);
+        var original = new IOException("secret-canary", new Win32Exception(17));
+        var stage = await execution.ExecuteAsync<int>(EvidenceRunStage.Admission, TimeSpan.FromSeconds(1), _ => throw original);
+        Assert.Equal(EvidenceWorkerStageOutcome.Failed, stage.Outcome);
+        Assert.True(supervisor.Joined);
+        Assert.Same(original, execution.TerminalException);
+        EvidenceProtectedCliExecution.ReportAllocationFailure(execution, EvidenceWorkerStageOutcome.Passed,
+            EvidenceAllocationPhase.Completed, EvidenceLinuxArtifactAllocationOperation.Completed, sink);
+        Assert.Equal(0, calls);
+        EvidenceProtectedCliExecution.ReportAllocationFailure(execution, stage.Outcome, EvidenceAllocationPhase.Allocation,
+            EvidenceLinuxArtifactAllocationOperation.CreateSlot, diagnostic =>
+            {
+                calls++;
+                Assert.True(supervisor.Joined);
+                Assert.Equal(17, diagnostic.NativeErrno);
+                throw new IOException("sink-canary");
+            });
+        Assert.Equal(1, calls);
+        Assert.Same(original, execution.TerminalException);
+        Assert.Equal(EvidenceWorkerTerminalCode.StageFailed, execution.TerminalCode);
+    }
+
+    private sealed class DiagnosticSupervisor : IEvidenceExecutionSupervisor
+    {
+        public bool IsArmed => true;
+        public string RunId => "diagnostic-control";
+        internal bool Joined { get; private set; }
+        public void CloseAdmission() { }
+        public ValueTask RequestStopAsync(CancellationToken stoppingToken) => ValueTask.CompletedTask;
+        public ValueTask WaitForOwnedExitAsync(CancellationToken stoppingToken)
+        {
+            Joined = true;
+            return ValueTask.CompletedTask;
+        }
+    }
 
     [Fact]
     public async Task ConnectAsync_RejectsUnsupportedPlatformOrMissingFixtureChannel()

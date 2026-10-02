@@ -227,3 +227,77 @@ controls pass. These source checks require a new exact native run; they do
 not turn either earlier failure into acceptance. Shared Aspire execution,
 protected downstream acceptance and all remaining acceptance groups are
 still required, and Trusted support remains excluded.
+
+### Frozen-source allocation and resource startup failures (2026-10-02)
+
+The next complete snapshot, `8a964188e85561d57119133d26b552f9412e2445`,
+contains 2725 source files. Both dispatched workflows, the Aspire wrapper and
+binding, and every frozen source hash were independently verified. Downloaded
+artifact digests matched GitHub's recorded digests.
+
+[Systemd run 37047555055](https://github.com/forge-trust/AppSurface/actions/runs/37047555055)
+exited **1** after warning-free subject and CLI builds. The worker reached
+readiness and completed its wait, with no active handlers or subject runs,
+but did not send the terminal protocol acknowledgement. Its root-owned
+private journal contained `ASEVD409`, output allocation or activation failure.
+The journal was retained as one bounded regular member with mode 0600; raw
+journal bytes were excluded from the public diagnostic. The allocation stage
+currently discards its internal exception when reporting that code, so the
+specific filesystem, cancellation or activation cause remains unverified.
+No completed runtime proof, manifest or coverage measurement was produced.
+
+[Aspire mechanism run 37047560583](https://github.com/forge-trust/AppSurface/actions/runs/37047560583)
+exited **1**, with **zero of five** controls passing. Locked restore and native
+build exited zero without warning diagnostics. The four HTTP cases observed
+AppHost, DCP and resource processes, then resource startup failed while creating
+threads. Task-limit exhaustion versus memory exhaustion remains unresolved;
+the retained receipts lack the necessary cgroup counters. No healthy readiness
+or authenticated HTTP 503 control was established.
+
+The factory-stall identity diagnostic recorded candidate/MainPID 3568, expected
+UID 999, actual UID tuple `[0,0,0,0]`, matching cgroup membership and active unit
+state. The unchanged identity guard rejected it. These facts do not establish
+that the factory callback ran or prove a particular startup race. All five cases
+reported empty owned groups, completed cleanup, clean watchdog acknowledgement
+and exit, and both error-free pump EOFs. Successful teardown does not validate
+the failed positive or negative controls.
+
+Further diagnosis retains closed allocation operation and stage facts, and
+checks completed executable startup plus bounded task/memory counters in the
+[child fixture](../../tests/evidencehost-consumer/AspireChild/README.md).
+Namespace, ownership, admission and gate requirements still apply. Shared Aspire
+execution, protected downstream acceptance and all 57 required groups remain
+incomplete; every production Trusted support entry remains excluded.
+
+### Frozen-source fixture-path policy failure (2026-10-02)
+
+The [unchanged coverage run 37047553718](https://github.com/forge-trust/AppSurface/actions/runs/37047553718)
+used the same complete frozen snapshot `8a964188e85561d57119133d26b552f9412e2445`.
+The dispatched workflow and script, before/after source receipts, all 2725
+hashes, preserved comparison base and downloaded artifact digest matched.
+It exited **1** with `ASCOV120`: the repository fixture-path policy rejected
+`Path.Join` with `artifact.RelativePath` in the
+[Bootstrap artifact test](../../Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidenceHostBootstrapTests.cs).
+
+Focused CLI tests passed **403/403** and Aspire tests passed **143/143**.
+The solution recorded **15,393 passed / 1 failed / 2 existing skips** across
+54 projects, with 53 project exits zero and no compiler warnings or errors.
+Measured aggregate coverage was **94.98% line / 88.79% branch**. The patch
+gate was not reached, so this run provides no current patch percentage or
+green coverage gate.
+
+The source correction uses the existing
+[`TestPathUtils.PathUnder` policy](../../tests/ForgeTrust.AppSurface.Testing.Tests/TestFixturePathPolicyTests.cs).
+The corrected test and the closed-catalogue metadata prerequisite require a
+fresh complete source capture and unchanged native gate. These changes do
+not resolve the separate runtime allocation or Aspire resource startup
+failures above or create admission authority.
+
+The exact existing repository policy test passed locally from source **1/1**,
+exit **0**, with no warnings, after the correction. Scoped formatting and
+source-built [Bootstrap tests](../../Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidenceHostBootstrapTests.cs)
+passed **42/42**. The new
+[closed catalogue prerequisite](../../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md#internal-closed-application-catalogue-prerequisite)
+passed **50/50** metadata controls. These macOS results validate the source
+repair and pure metadata checks; the native gate and shared execution remain
+required. The production catalogue remains empty and rejects with `ASEVD407`.

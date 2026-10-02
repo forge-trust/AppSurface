@@ -3,6 +3,9 @@ using CliFx.Binding;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Cli;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace ForgeTrust.AppSurface.Cli;
 
@@ -21,7 +24,8 @@ internal sealed partial class EvidenceWorkerCommand : ICommand
         {
             if (string.IsNullOrWhiteSpace(ControlChannel))
                 throw new EvidenceAdmissionException("ASEVD402", "An authenticated independent worker control channel is required.");
-            var manifest = await EvidenceProtectedCliExecution.RunAsync(ControlChannel, console.RegisterCancellationHandler()).ConfigureAwait(false);
+            var manifest = await EvidenceProtectedCliExecution.RunAsync(ControlChannel, console.RegisterCancellationHandler(),
+                diagnostic => WriteAllocationDiagnostic(console, diagnostic)).ConfigureAwait(false);
             if (manifest.ClaimKind == EvidenceClaimKind.None)
                 throw new CommandException("ASEVD211: Evidence execution was incomplete. Inspect the protected failure manifest and use a fresh supervised run after owned exit.");
         }
@@ -31,5 +35,18 @@ internal sealed partial class EvidenceWorkerCommand : ICommand
         {
             throw new CommandException("ASEVD402: Protected worker control or input validation failed. Fix: inspect the launcher and use a fresh supervised run. See start-here/evidencehost.md.");
         }
+    }
+
+    /// <summary>Writes one fixed-schema, bounded private worker-journal line, never an exception or path.</summary>
+    internal static void WriteAllocationDiagnostic(IConsole console, EvidenceAllocationFailureDiagnostic diagnostic)
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        options.Converters.Add(new JsonStringEnumConverter<EvidenceAllocationPhase>(allowIntegerValues: false));
+        options.Converters.Add(new JsonStringEnumConverter<EvidenceLinuxArtifactAllocationOperation>(allowIntegerValues: false));
+        options.Converters.Add(new JsonStringEnumConverter<EvidenceWorkerStageOutcome>(allowIntegerValues: false));
+        options.Converters.Add(new JsonStringEnumConverter<EvidenceWorkerTerminalCode>(allowIntegerValues: false));
+        options.Converters.Add(new JsonStringEnumConverter<EvidenceAllocationErrorClass>(allowIntegerValues: false));
+        var line = JsonSerializer.Serialize(diagnostic, options);
+        if (Encoding.UTF8.GetByteCount(line) + 1 <= 1024) console.Error.WriteLine(line);
     }
 }

@@ -13,7 +13,9 @@ public sealed class EvidenceLinuxArtifactRootTests
     {
         if (!OperatingSystem.IsLinux())
         {
-            Assert.Throws<PlatformNotSupportedException>(() => EvidenceLinuxArtifactRoot.Allocate("/tmp", default, "slot", 0, 0));
+            var operation = EvidenceLinuxArtifactAllocationOperation.None;
+            Assert.Throws<PlatformNotSupportedException>(() => EvidenceLinuxArtifactRoot.Allocate("/tmp", default, "slot", 0, 0, out operation));
+            Assert.Equal(EvidenceLinuxArtifactAllocationOperation.CheckPlatform, operation);
             return;
         }
 
@@ -23,8 +25,9 @@ public sealed class EvidenceLinuxArtifactRootTests
             var identity = EvidenceLinuxArtifactRoot.InspectDirectoryIdentity(parent);
             var bytes = Encoding.UTF8.GetBytes("retained evidence payload");
             var hash = Convert.ToHexString(SHA256.HashData(bytes));
-            await using (var root = EvidenceLinuxArtifactRoot.Allocate(parent, identity, "run-slot", identity.Uid, identity.Gid))
+            await using (var root = EvidenceLinuxArtifactRoot.Allocate(parent, identity, "run-slot", identity.Uid, identity.Gid, out var operation))
             {
+                Assert.Equal(EvidenceLinuxArtifactAllocationOperation.Completed, operation);
                 Assert.NotEqual(default, root.Identity);
                 await root.WriteAsync("nested/evidence.bin", bytes, default);
                 await root.VerifyAsync("nested/evidence.bin", bytes.Length, hash, default);
@@ -57,17 +60,21 @@ public sealed class EvidenceLinuxArtifactRootTests
         try
         {
             var identity = EvidenceLinuxArtifactRoot.InspectDirectoryIdentity(parent);
-            Assert.Throws<IOException>(() => EvidenceLinuxArtifactRoot.Allocate(parent, identity, "occupied", identity.Uid, identity.Gid));
+            var operation = EvidenceLinuxArtifactAllocationOperation.None;
+            Assert.Throws<IOException>(() => EvidenceLinuxArtifactRoot.Allocate(parent, identity, "occupied", identity.Uid, identity.Gid, out operation));
+            Assert.Equal(EvidenceLinuxArtifactAllocationOperation.CreateSlot, operation);
 
             var symlink = Path.Combine(parent, "linked");
             Directory.CreateSymbolicLink(symlink, occupied);
-            Assert.Throws<IOException>(() => EvidenceLinuxArtifactRoot.Allocate(parent, identity, "linked", identity.Uid, identity.Gid));
+            Assert.Throws<IOException>(() => EvidenceLinuxArtifactRoot.Allocate(parent, identity, "linked", identity.Uid, identity.Gid, out operation));
+            Assert.Equal(EvidenceLinuxArtifactAllocationOperation.CreateSlot, operation);
 
             var moved = parent + "-moved";
             Directory.Move(parent, moved);
             Directory.CreateDirectory(parent);
             if (OperatingSystem.IsLinux()) File.SetUnixFileMode(parent, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            Assert.Throws<IOException>(() => EvidenceLinuxArtifactRoot.Allocate(parent, identity, "substituted", identity.Uid, identity.Gid));
+            Assert.Throws<IOException>(() => EvidenceLinuxArtifactRoot.Allocate(parent, identity, "substituted", identity.Uid, identity.Gid, out operation));
+            Assert.Equal(EvidenceLinuxArtifactAllocationOperation.CheckParentIdentity, operation);
             Directory.Delete(parent);
             Directory.Delete(moved, recursive: true);
         }
@@ -177,7 +184,9 @@ public sealed class EvidenceLinuxArtifactRootTests
     {
         foreach (var path in new[] { null, " ", "relative-parent", "/" + new string('a', 4097) })
         {
-            Assert.ThrowsAny<ArgumentException>(() => EvidenceLinuxArtifactRoot.Allocate(path!, default, "run", 1, 1));
+            var operation = EvidenceLinuxArtifactAllocationOperation.None;
+            Assert.ThrowsAny<ArgumentException>(() => EvidenceLinuxArtifactRoot.Allocate(path!, default, "run", 1, 1, out operation));
+            Assert.Equal(EvidenceLinuxArtifactAllocationOperation.ValidateArguments, operation);
             Assert.ThrowsAny<ArgumentException>(() => EvidenceLinuxArtifactRoot.InspectDirectoryIdentity(path!));
         }
     }
