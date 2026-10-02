@@ -227,6 +227,26 @@ public sealed class EvidenceClosedApplicationCatalogueTests
         Assert.DoesNotContain(canary, error.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LaterNullBundlePathRejectsWithTheFixedDiagnostic(bool observedInventory)
+    {
+        var entry = Candidate();
+        var binding = Binding(entry);
+        var malformed = ChangedFile(entry.BundleFiles,
+            entry.BundleFiles[^1] with { RelativePath = null! }, entry.BundleFiles.Count - 1);
+
+        var error = observedInventory
+            ? Assert.Throws<EvidenceAdmissionException>(() =>
+                EvidenceClosedApplicationCatalogue.VerifyCandidateBinding(entry, binding.CatalogueDigest,
+                    entry.Policy, Plan(entry.Policy), binding with { BundleFiles = malformed }))
+            : Assert.Throws<EvidenceAdmissionException>(() =>
+                EvidenceClosedApplicationCatalogue.Snapshot(entry with { BundleFiles = malformed }));
+
+        Assert.Equal("ASEVD404", error.Code);
+    }
+
     [Fact]
     public void CatalogueRejectsDuplicateIdsDuplicatePolicyProfileBindingsAndExcessEntries()
     {

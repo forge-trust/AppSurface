@@ -264,7 +264,7 @@ internal static partial class EvidenceClosedApplicationCatalogue
     private static void ValidateBundle(IReadOnlyList<EvidenceClosedBundleFile> files)
     {
         Require(Count(files, MaximumBundleFiles) && files.Count >= 6);
-        Require(files.All(static item => item is not null));
+        Require(files.All(static item => item is not null && Relative(item.RelativePath)));
         Require(files.Select(static item => item.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).Count() == files.Count);
         long total = 0;
         foreach (var item in files)
