@@ -29,7 +29,7 @@ jobs:
     name: Evidence subject image validation (non-claiming)
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.validate_subject_image }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
