@@ -209,6 +209,8 @@ class Scenario:
             if self.peer is None:
                 self.peer = peer
                 self.descriptor = self.make_descriptor(peer)
+                write_root_file(Path(self.descriptor["descriptor_path"]),
+                                json.dumps(self.descriptor, separators=(",", ":")).encode() + b"\n", self.worker_gid)
                 peer_path = Path(self.log_file).with_suffix(".peer.json")
                 record = {"pid": peer[0], "uid": peer[1], "gid": peer[2]}
                 write_root_file(peer_path, json.dumps(record, separators=(",", ":")).encode() + b"\n", self.worker_gid)
@@ -227,7 +229,7 @@ class Scenario:
         return {
             "schema": "evidence-worker-linux-v1",
             "run_id": self.run_id,
-            "worker_pid": peer[0], "worker_uid": peer[1], "worker_gid": peer[2],
+            "worker_pid": peer[0], "broker_pid": os.getpid(), "worker_uid": peer[1], "worker_gid": peer[2],
             "subject_uid": self.subject_uid, "subject_gid": self.subject_gid,
             "unit": unit, "cgroup": cgroup,
             "job_deadline_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now + 600)),
@@ -237,9 +239,10 @@ class Scenario:
             "test_output_root": str(self.subject / "test-output"),
             "policy_file": str(self.policy_file), "mode": self.mode,
             "socket_path": str(self.socket_path),
+            "descriptor_path": str(self.socket_path.parent.parent / "worker-control.json"),
             "entry_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-            "base_revision": "779fixturebase0000000000000000000000000000",
-            "subject_revision": "779fixturesubject00000000000000000000000",
+            "base_revision": "b" * 40,
+            "subject_revision": "c" * 40,
             "workflow_identity": "fixture:issue-779:consumer-tests",
             "provider": "github-actions", "platform": "linux-x64",
             "proof_digest": "0" * 64, "policy_sha256": policy_digest,
@@ -251,6 +254,7 @@ class Scenario:
             "collection_seconds": 20, "cleanup_seconds": 30,
             "stopping_seconds": 5,
             "solution": str(self.subject / "fixture.slnx"),
+            "diff_file": None, "diff_sha256": None,
         }
 
     def log(self, operation: str, peer: tuple[int, int, int], request: dict[str, Any]) -> None:
@@ -413,6 +417,11 @@ def main(argv: list[str]) -> int:
     servers: list[socketserver.ThreadingUnixStreamServer] = []
     threads: list[threading.Thread] = []
     for name in SCENARIOS:
+        control_root = socket_dir / name
+        broker_root = control_root / "broker"
+        for directory in (control_root, broker_root):
+            directory.mkdir(mode=0o710)
+            chown_mode(directory, 0, args.worker_gid, 0o710)
         output = output_root / name
         output.mkdir(mode=0o700)
         chown_mode(output, args.worker_uid, args.worker_gid, 0o700)
@@ -422,7 +431,7 @@ def main(argv: list[str]) -> int:
         chown_mode(log_file, args.worker_uid, args.worker_gid, 0o600)
         scenario = Scenario(name, base, tool, subject, output, args.worker_uid, args.worker_gid,
                             args.subject_uid, args.subject_gid, dotnet, policy_file, policy_digest,
-                            log_file, socket_dir / f"{name}.sock")
+                            log_file, broker_root / "control.sock")
         server = scenario_server(scenario, args.worker_gid)
         metadata_file = socket_dir / f"{name}.json"
         write_root_file(metadata_file, json.dumps(scenario.metadata, separators=(",", ":")).encode() + b"\n", args.worker_gid)

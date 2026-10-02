@@ -89,6 +89,14 @@ The internal `EvidenceLinuxArtifactRoot.Allocate(parentPath, expectedParentIdent
 
 Use the operation only to locate a failed host operation, never to authenticate an output or grant admission. A failed operation can include multiple guarded checks; it does not by itself prove an errno or filesystem cause. The protected CLI combines it with a closed phase and failure classification through its [private worker diagnostic](../ForgeTrust.AppSurface.Evidence.Cli/README.md#private-worker-allocation-diagnostic). Successful allocation still requires separate admission activation and all existing stopped-work, verification and collection checks.
 
+Unsupported `openat2` failures retain the direct known errno (1, 22, 38 or 95)
+as a `Win32Exception` inner exception while preserving
+`PlatformNotSupportedException` and the same fixed message. The private
+allocation diagnostic accepts those four numeric values only for the closed
+`openat2` operations in the allocation phase; missing, nested, unexpected or
+unrelated errors retain a null errno. This adds diagnostic evidence and supplies
+no fallback or capability. See the [private worker diagnostic reference](../ForgeTrust.AppSurface.Evidence.Cli/README.md#private-worker-allocation-diagnostic).
+
 ## Runtime admission and gate evaluation
 
 Runtime claim construction is separate from JSON structure and from downstream authorization:
@@ -176,6 +184,83 @@ acknowledgement takes the fatal termination path; it cannot restore eligibility 
 
 The restricted coverage path additionally limits each Cobertura report to 20 MiB and the report count to 64; the
 same 256 MiB aggregate bounds apply. See the [restricted coverage implementation and packaging notes](../../docs/evidence/evidencehost-migration.md#restricted-coverage-path-and-packaging).
+
+## Internal restricted application protocol v2 prerequisite
+
+[`EvidenceLinuxApplicationProtocol`](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceLinuxApplicationProtocol.cs) adds a closed application descriptor and typed startup/readiness acknowledgements to the existing root-authenticated Linux supervisor. It is internal protocol preparation. The production Trusted proof resolver remains false, the production application catalogue remains empty, and public application factories remain rejected with `ASEVD407`. See the [closed catalogue prerequisite](../ForgeTrust.AppSurface.Evidence.Planner/README.md#internal-closed-application-catalogue-prerequisite) and [Aspire support status](../../docs/evidence/evidencehost-migration.md#support-status). A parsed descriptor or receipt supplies no proof or runtime admission by itself.
+
+### Authenticated outer worker descriptor
+
+`EvidenceLinuxWorkerSupervisor.ConnectAsync` keeps actual Linux root `SO_PEERCRED` authentication and the current nonroot worker PID/UID/GID comparison. Its pure internal `ParseWorkerDescriptor(JsonElement)` parser accepts exactly `evidence-worker-linux-v1` or `evidence-worker-linux-v2` as metadata. V1 rejects any `application` field, including explicit JSON null. V2 requires the non-null application object described below. Parsing alone does not construct a supervisor, create admission or accept consumer proof.
+
+The actual root-launcher grammar has these **38 required fields**, including `broker_pid` and `descriptor_path`:
+
+```text
+schema run_id worker_pid broker_pid worker_uid worker_gid subject_uid subject_gid
+unit cgroup job_deadline_utc tool_root subject_root output_parent output_slot
+dotnet_path test_output_root policy_file mode socket_path descriptor_path entry_sha256
+base_revision subject_revision workflow_identity provider platform proof_digest
+policy_sha256 output_parent_identity observation_profile_ids observation_producer_ids
+paths admission_seconds start_seconds collection_seconds cleanup_seconds stopping_seconds
+```
+
+V2 adds required `application` as field 39. The only optional fields are `diff_file`, `diff_sha256` and `solution`; the current [root launcher](https://github.com/forge-trust/AppSurface/blob/main/scripts/evidencehost-linux-launcher.py) always emits these three, with nullable values when absent. Unknown, duplicate or case-aliased fields reject at the descriptor, identity and ready-wrapper levels. Required fields must be non-null with exact JSON types. The sole permitted empty string is `proof_digest`; a nonempty value must be lower-case SHA-256 and remains request data, not proof authority.
+
+Worker/broker PIDs are positive Int32 and distinct. Worker and producer (`subject_uid`/`subject_gid`) identities are positive UInt32 with separate UIDs and primary GIDs. `output_parent_identity` has exactly `device_major`, `device_minor`, `inode`, `uid`, `gid`; the inode is positive UInt64, all other components UInt32, and its owner/group must equal the worker map. These are comparison facts, not retained filesystem handles.
+
+`run_id` is bounded to 256 characters with exactly two nonempty ASCII name components separated by `/`; the parser preserves synthetic fixture run names and actual numeric CI run/attempt IDs. `unit` is a bounded ASCII `*.service` name and `cgroup` must equal `/system.slice/<unit>`. Root and file paths are normalized absolute Unix paths bounded to 4095 UTF-8 bytes; the socket limit is 100 bytes. Control paths are exactly `<control-root>/worker-control.json` and `<control-root>/broker/control.sock`. The control root is disjoint from tooling, subject and output roots, which are themselves pairwise disjoint. Policy and non-null diff are contained beneath tooling; non-null solution is contained beneath subject. The canonical global `dotnet_path` may be outside tooling. No filesystem ownership or mount proof is inferred from these textual paths.
+
+`mode` is exactly `observation` or `trusted`; provider/platform remain `github-actions`/`linux-x64`. Revisions and workflow identity are nonblank control-free text bounded to 256 characters. Entry/policy/diff digests are lower-case SHA-256. A non-null diff requires its digest, and a digest without its diff rejects. Observation profile and producer ID arrays contain at most 32 unique ASCII names of at most 96 characters. `paths` contains at most 4096 unique normalized relative paths, each at most 4095 UTF-8 bytes. Lists permit no nulls, traversal, empty segments or backslash aliases and are copied read-only.
+
+The five positive stage caps retain the existing ceilings: admission 30 seconds, startup 120, collection 60, cleanup 600 and stopping 30; stopping cannot exceed cleanup. The ready success wrapper contains exactly `ok: true`, `descriptor` and numeric `job_remaining_seconds`. `ParseWorkerRemainingAllowance(JsonElement)` requires a finite positive allowance at most 3600 seconds and rejects values that round to a zero-duration allowance. Connect retains the monotonic timestamp from before the handshake; parsing never renews the job budget.
+
+`ValidateWorkerRuntimeBinding(descriptor, socketPath, authenticatedBrokerPid, currentPid, currentUid, currentGid, utcNow)` is an internal pure comparison that returns no capability. Connect supplies these observations from its actual socket and process: broker PID must match the authenticated root peer, worker PID/UID/GID and socket must match the current execution, and the descriptor wall deadline must remain future. Malformed descriptor/allowance data produces fixed `ASEVD402` diagnostics without raw values or an inner exception. Linux/platform and existing missing-channel behavior remain separate checks. Root v2 emission and real application handlers remain pending; accepting typed v2 metadata does not enable Trusted admission or public factories.
+
+### Closed descriptor schema
+
+`ParseApplicationDescriptor(JsonElement, workerUid, workerGid, producerUid, producerGid)` receives only the `application` object from the authenticated worker descriptor. The outer worker handshake supplies provider/platform/protocol and actual worker/producer identities. Those outer checks, root byte inspection and compile-owned catalogue matching are independent requirements. The application object has exactly these 14 required, case-sensitive snake-case fields; no field has a default:
+
+| Fields | Meaning and bounds |
+| --- | --- |
+| `application_id`, `application_version`, `build_id` | Nonblank ASCII identifiers of at most 128 characters, using letters, digits, `.`, `_` and `-`. Immutable compiled identity, never a runtime registry selector supplied by a subject. |
+| `catalogue_digest`, `entry_digest` | Exactly 64 lower-case hexadecimal characters. Structural data must match protected compile-owned expectations; a supplied digest does not authenticate itself. |
+| `aspire_sdk_version` | Exactly `13.4.4`. |
+| `resources`, `producers` | Nonempty complete declaration arrays, at most 16 resources and 32 producers. IDs are unique; dependencies name declared resources and resource self-dependencies reject. |
+| `bundle_files` | Complete immutable inventory, 6–256 files, at most 128 MiB per file and 512 MiB aggregate. |
+| `capabilities` | Exact finite application grants below. |
+| `application_uid`, `application_gid`, `results_gid`, `resource_access_gid` | Unsigned 32-bit kernel identity values. Worker, producer and application UIDs are positive and pairwise distinct. Worker, producer, application, results and resource-access GIDs are positive and pairwise distinct. Actual supplementary groups and filesystem access remain root-enforced requirements. |
+
+Every object at every depth rejects missing, unknown, duplicated or case-aliased fields, null required values and wrong JSON types. Application metadata is bounded to 1 MiB of UTF-8 JSON. Arrays are copied into read-only collections; records retain no `JsonDocument` lifetime dependency. Descriptor errors produce fixed `ASEVD402` text without echoing supplied values.
+
+Resource objects require `id`, `readiness` (`aspire_health` or `completion`), `deadline_seconds` (1–120) and `requires` (at most 16 unique resource IDs). Producer objects require `id`, `kind`, `version`, `required_resources` (at most 16 unique IDs), `assertion_ids` (at most 128 unique nonblank strings, each at most 128 characters), `artifact_slots` (at most 128 unique logical names), `timeout_seconds` (1–600) and `coverage_gate`. A declaration's kind/version is data; only the protected catalogue may authorize an implementation.
+
+Artifact slots require `logical_name`, `relative_root`, `media_type`, `required` (JSON Boolean) and `maximum_bytes` (0–256 MiB). A non-null coverage gate requires all six fields: `min_line_percent`, `min_branch_percent`, nullable `min_patch_line_percent`, nullable `min_patch_branch_percent`, `patch_line_mode` (`measurable` or `codecov`) and `tolerance_percent`. Percentages are JSON numbers from 0 through 100. `coverage_gate` itself may be explicit JSON null; omitting it is invalid. No declaration field is silently defaulted.
+
+Each bundle file requires `relative_path`, `role`, `length_bytes`, `sha256` and `mode`. Relative names use ASCII letters/digits, `.`, `_`, `-` and `/`, with no absolute path, empty segment, `.` or `..` segment; maximum length is 256 characters. Hashes are lower-case SHA-256. `mode` is numeric Unix permission bits: decimal `292` (`0444`) or `365` (`0555`). DCP and extensions require `0555`; every other role requires `0444`. All paths are validated before collision checks. Duplicate names, case aliases and file/directory prefix collisions reject.
+
+The nine exact role strings are `apphost`, `apphost_runtime_configuration`, `resource`, `resource_runtime_configuration`, `dcp`, `dcp_extension`, `dependency`, `declared_input` and `dependency_manifest`. AppHost/resource roles end in `.dll`; runtime configurations end in `.runtimeconfig.json`; DCP is exactly `dcp/dcp`; extensions are beneath `dcp/ext/`; dependency manifests end in `.deps.json` and remain read-only. AppHost, its runtime configuration, resource, its runtime configuration, DCP and declared input each occur exactly once. Dependencies, extensions and dependency manifests may have multiple entries. The root/Planner mapper must preserve every role's suffix and mode checks, including the ninth dependency-manifest role.
+
+Capabilities require `read_only_inputs` (exactly one normalized declared-input bundle name), `scratch_bytes` and `memory_bytes` (each 1–1 GiB), `maximum_tasks` (1–64), `maximum_output_bytes` (1–1 MiB), `start_seconds` (1–120) and `stopping_seconds` (1–30). The closed shape supplies no secrets, external-network, privileged-group or protected/result-root projection grant. It contains no bundle host path, command arguments, environment map, delegate or factory.
+
+### Requests, acknowledgements and lifecycle
+
+`StartApplicationAsync(appId, entryDigest, token)` checks local admission closure and monotonic arming before I/O, requires the exact descriptor ID/digest, and permits one startup attempt per supervisor. A failed or cancelled attempt cannot be retried in that supervisor. It sends only:
+
+```json
+{"op":"application-start","application_id":"native-http-app","entry_digest":"<64 lower-case hexadecimal characters>"}
+```
+
+Its root response must contain exactly `ok: true`, `lease_id` (32 lower-case hexadecimal characters), `apphost_pid` (1–2147483647), exact `application_uid` and `application_gid`, exact `cgroup` `/system.slice/issue779-app-<lease_id>.service`, and `owned: true`. The immutable `EvidenceLinuxApplicationStartReceipt` reports owned-process metadata and makes no readiness claim.
+
+`WaitForApplicationResourceAsync(leaseId, resourceId, token)` requires local admission/arming, the previously validated startup lease and an exact descriptor resource ID before I/O. It sends only:
+
+```json
+{"op":"resource-wait","lease_id":"<32 lower-case hexadecimal characters>","resource_id":"http"}
+```
+
+Its root response must contain exactly `ok: true`, the exact `lease_id`, `resource_id`, `application_uid` and `cgroup`, plus `kernel_peer_checked: true`, `http_status: 200`, `healthy: true` and `received_bytes` from 0 through 4096. Boolean text, AppHost output or a healthy value without the independent peer check cannot establish readiness. `ParseApplicationStartReceipt` and `ParseApplicationResourceReceipt` are intentionally internal pure validators for these acknowledgements; validation failure produces fixed `ASEVD410` text. No supplied value or subject exception is echoed.
+
+Both operations reuse the existing `RequestAsync` credential checks against the pinned root broker PID. Cancellation remains cancellation; a broker denial, malformed acknowledgement or transport failure cannot upgrade eligibility. Existing stop/wait requests use fresh connections. The root implementation still must extend owned stop/join to the application, all descendants and both output pumps before collection, and independent resource observation must inspect actual kernel peer identity and bounded HTTP bytes. Typed metadata does not perform those root operations. Root v2 emission/handlers and Aspire adapter integration remain pending; pure parser controls and macOS compilation are not Linux/systemd or Trusted-positive acceptance.
 
 ## Pitfalls
 
