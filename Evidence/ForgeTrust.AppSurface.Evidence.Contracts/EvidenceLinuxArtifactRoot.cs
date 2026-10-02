@@ -389,7 +389,7 @@ internal sealed class EvidenceLinuxArtifactRoot : IAsyncDisposable
         if (fd < 0)
         {
             var error = Marshal.GetLastPInvokeError();
-            if (error is 1 or 22 or 38 or 95) throw new PlatformNotSupportedException("Required Linux openat2 resolution is unsupported or blocked.");
+            if (error is 1 or 22 or 38 or 95) throw new PlatformNotSupportedException("Required Linux openat2 resolution is unsupported or blocked.", new System.ComponentModel.Win32Exception(error));
             throw new IOException("Safe descriptor-relative filesystem operation failed.", new System.ComponentModel.Win32Exception(error));
         }
         return new SafeFileHandle((IntPtr)fd, ownsHandle: true);

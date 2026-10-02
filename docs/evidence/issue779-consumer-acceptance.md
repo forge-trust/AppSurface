@@ -307,3 +307,75 @@ throw before returning the fixed invalid-metadata diagnostic. Validation now
 checks all paths before comparing prefixes. The final scoped catalogue suite
 passed **52/52**, including candidate and observed-inventory regressions,
 with no warnings. This repair preserves the empty production registration.
+
+### Frozen-source native patch gate and syscall compatibility (2026-10-02)
+
+[Native run 37054363272](https://github.com/forge-trust/AppSurface/actions/runs/37054363272)
+tested frozen source `02ca14024d3f7d051c186925a69151786705702e`, with all
+2727 SHA-256 bindings and remote Git blob identities verified. The dispatched
+workflow, full manifest, before/after source checks and artifact `11248639375`
+matched. Its ZIP SHA-256 is
+`e91baa72b5e38ae8be772e3cd825b5f05f5795e42fdd4e6f8d37a0687a0d4eec`.
+All 54 solution test projects exited zero: **15,454 passed / 0 failed / 2
+existing skips**. Focused native tests passed **CLI 463/463** and **Aspire
+143/143**. Eight build summaries recorded zero warnings and zero errors.
+
+The unchanged [solution coverage gate](../../scripts/coverage-solution.sh)
+reached patch evaluation and exited **1**, `ASCOV020`:
+
+| Dimension | Measured | Effective threshold | Result |
+| --- | ---: | ---: | --- |
+| Aggregate line | 94.9807% | 94.5% | Met |
+| Aggregate branch | 88.7247% | 84.5% | Met |
+| Patch line | 88.7301% | 94.5% | Failed |
+| Patch branch | 83.8465% | 84.5% | Failed |
+
+Configured thresholds remain 95% line / 85% branch for aggregate and patch,
+with the existing 0.5 percentage-point tolerance and Codecov patch semantics.
+The diagnostic comparison base remains
+`4aa8329c76f4279ad319747f9f3c14b9b8de51ef`. The primary `origin/main` had
+advanced to `ec5d927e38ef89758699406926f0b09207f1605d` independently of the
+frozen source. Latest-main integration and a fresh final gate remain required;
+this historical-base result does not cover subsequent application-protocol
+or policy edits.
+
+The same frozen source's
+[systemd Observation run 37054367100](https://github.com/forge-trust/AppSurface/actions/runs/37054367100)
+failed before opening the output parent. Its retained private allocation frame
+was `Allocation / OpenFilesystemRoot / Unsupported`, with `nativeErrno: null`.
+That receipt establishes neither a successful allocation nor its exact errno.
+The current diagnostic correction retains a direct known errno for supported
+unsupported-syscall exceptions, as described in the
+[private allocation diagnostic reference](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md#private-allocation-diagnostics).
+
+The independent
+[native compatibility probe 37058052231](https://github.com/forge-trust/AppSurface/actions/runs/37058052231)
+then passed both controls under identical worker properties except
+`RestrictSUIDSGID`: `yes` returned errno **38**, and `no` successfully opened
+the filesystem root with `openat2`. Both verified actual UID 999/GID 987,
+`NoNewPrivs=1`, zero effective capabilities, exact kernel cgroup membership,
+and empty owned groups after stop. Its artifact `11249356111` has verified
+ZIP SHA-256
+`532668381b3f02795040eb548e4851f3450e8250f9fe6eb7253a7596458ee307`.
+The resulting worker-only policy correction and retained subject restriction
+are documented in the
+[execution broker reference](../../tests/evidencehost-consumer/ExecutionBroker-README.md#production-worker-syscall-compatibility).
+A fresh production Observation run is still required.
+
+### Aspire startup remains unproved (2026-10-02)
+
+[Aspire mechanism run 37054371143](https://github.com/forge-trust/AppSurface/actions/runs/37054371143)
+restored and built pinned Aspire/DCP 13.4.4 successfully on native Ubuntu
+24.04/systemd 255, with zero warnings/errors, but passed **0/5 controls**.
+All five reported startup failure followed by unavailable watchdog cleanup;
+they quarantined output and left physical exit unconfirmed. The wrapper later
+confirmed empty groups. No AppHost/DCP/resource identity, HTTP denial proof
+or task/memory counter evidence was retained. The next controller correction
+must preserve the first failure, capture bounded startup-query facts, and
+discover the selected unit's actual cgroup during teardown. No task or memory
+allowance increase follows from these missing observations.
+
+The production catalogue and consumer-proof resolver remain closed. The
+root v2 handler, separately restricted shared Aspire execution, protected
+downstream gate and all 57 required acceptance groups remain prerequisites
+for release acceptance.

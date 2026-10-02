@@ -31,6 +31,16 @@ IDENTITY_STAGE = "startup-identity-validation"
 IDENTITY_DIAGNOSTIC_LIMIT = 4096
 BUDGET_DIAGNOSTIC_LIMIT = 4096
 BUDGET_DIAGNOSTIC_CATEGORY = "cgroup-task-memory-counters"
+STARTUP_FAILURE = "application-exec-startup-failed"
+STARTUP_STAGE = "startup-unit-query"
+STARTUP_DIAGNOSTIC_LIMIT = 4096
+LOAD_STATES = frozenset(("stub", "loaded", "not-found", "bad-setting", "error", "merged", "masked", "unknown"))
+SERVICE_TYPES = frozenset(("simple", "exec", "forking", "oneshot", "dbus", "notify", "notify-reload", "idle", "unset", "unknown"))
+SUB_STATES = frozenset(("dead", "condition", "start-pre", "start", "start-post", "running", "exited", "reload",
+                        "reload-signal", "reload-notify", "stop", "stop-watchdog", "stop-sigterm", "stop-sigkill",
+                        "stop-post", "final-watchdog", "final-sigterm", "final-sigkill", "failed", "auto-restart",
+                        "auto-restart-queued", "cleaning", "unknown"))
+UNIT_PROPERTY_NAMES = ("LoadState", "ControlGroup", "MainPID", "Type", "ActiveState", "SubState")
 ACTIVE_STATES = frozenset(("active", "reloading", "inactive", "failed", "activating", "deactivating",
                            "maintenance", "refreshing", "unknown"))
 
@@ -47,24 +57,124 @@ def command(argv, timeout=5, check=True):
     return subprocess.run(argv, capture_output=True, timeout=timeout, check=check)
 
 
-def unit_properties(unit):
-    raw = command(["systemctl", "show", unit, "--property=ControlGroup,MainPID,Type,ActiveState,SubState"]).stdout.decode()
-    return dict(line.split("=", 1) for line in raw.splitlines() if "=" in line)
+def selected_group(unit):
+    """A generated service has exactly one eligible root-selected cgroup."""
+    if not re.fullmatch(r"issue779-child-[0-9a-f]{32}\.service", unit):
+        raise ValueError("invalid-selected-unit")
+    return "/system.slice/" + unit
 
 
-def exec_startup_complete(properties, deadline):
+def unit_properties(unit, timeout=5):
+    """Query only the generated unit; retain status without exposing raw stderr."""
+    selected_group(unit)
+    result = command(["systemctl", "show", "--all", unit,
+                      "--property=LoadState,ControlGroup,MainPID,Type,ActiveState,SubState"],
+                     timeout=timeout, check=False)
+    properties = {"_query_exit_status": result.returncode}
+    if len(result.stdout) > STARTUP_DIAGNOSTIC_LIMIT:
+        properties["_malformed"] = True
+        return properties
+    for line in result.stdout.decode("ascii").splitlines():
+        key, separator, value = line.partition("=")
+        if not separator or key in properties or key not in UNIT_PROPERTY_NAMES:
+            properties["_malformed"] = True
+        else:
+            properties[key] = value
+    return properties
+
+
+def unit_main_pid(properties):
+    value = properties.get("MainPID", "")
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9]{1,10}", value) or int(value) > 0xffffffff:
+        raise StartupFailure(STARTUP_FAILURE)
+    return int(value)
+
+
+def exec_startup_complete(properties, deadline, loaded_exec_seen=False):
     """Only Type=exec active/running permits subsequent exact identity checks."""
-    if time.monotonic() >= deadline or properties.get("Type") != "exec":
-        raise StartupFailure("application-exec-startup-failed")
+    if (time.monotonic() >= deadline or type(properties.get("_query_exit_status")) is not int or
+            properties.get("_query_exit_status") != 0 or properties.get("_malformed") or
+            not set(UNIT_PROPERTY_NAMES).issubset(properties) or
+            properties.get("LoadState") not in LOAD_STATES - {"unknown"} or
+            (properties.get("Type") != "" and properties.get("Type") not in SERVICE_TYPES - {"unknown", "unset"}) or
+            properties.get("ActiveState") not in ACTIVE_STATES - {"unknown"} or
+            properties.get("SubState") not in SUB_STATES - {"unknown"}):
+        raise StartupFailure(STARTUP_FAILURE)
+    pid = unit_main_pid(properties)
     state = properties.get("ActiveState"), properties.get("SubState")
+    if properties["LoadState"] == "not-found":
+        if (not loaded_exec_seen and properties["Type"] == "" and state == ("inactive", "dead") and
+                pid == 0 and properties.get("ControlGroup") == ""):
+            return False
+        raise StartupFailure(STARTUP_FAILURE)
+    if properties["LoadState"] != "loaded" or properties["Type"] != "exec":
+        raise StartupFailure(STARTUP_FAILURE)
     if state == ("active", "running"):
-        pid = properties.get("MainPID", "")
-        if not re.fullmatch(r"[0-9]{1,10}", pid) or not 0 < int(pid) <= 0xffffffff or not properties.get("ControlGroup"):
-            raise StartupFailure("application-exec-startup-failed")
+        if pid == 0 or not properties.get("ControlGroup"):
+            raise StartupFailure(STARTUP_FAILURE)
         return True
     if state[0] == "activating" and state[1] in ("condition", "start-pre", "start", "start-post"):
         return False
-    raise StartupFailure("application-exec-startup-failed")
+    raise StartupFailure(STARTUP_FAILURE)
+
+
+def record_startup_failure(receipt, control, properties, started):
+    """Latch the first startup cause and retain only closed bounded query facts."""
+    if receipt.get("failure_stage") in (IDENTITY_STAGE, STARTUP_STAGE):
+        return
+    receipt.update(failure=STARTUP_FAILURE, failure_stage=STARTUP_STAGE, startup_diagnostic_written=False)
+    try:
+        status = properties.get("_query_exit_status")
+        status = status if type(status) is int and -255 <= status <= 255 else None
+        try:
+            pid = unit_main_pid(properties)
+        except StartupFailure:
+            pid = 0
+        data = {"load_state": properties.get("LoadState") if properties.get("LoadState") in LOAD_STATES else "unknown",
+                "type": "unset" if properties.get("Type") == "" else properties.get("Type") if properties.get("Type") in SERVICE_TYPES else "unknown",
+                "active_state": properties.get("ActiveState") if properties.get("ActiveState") in ACTIVE_STATES else "unknown",
+                "sub_state": properties.get("SubState") if properties.get("SubState") in SUB_STATES else "unknown",
+                "main_pid": pid, "query_exit_status": status,
+                "elapsed_seconds": round(max(0, time.monotonic() - started), 6)}
+        encoded = json.dumps(data, allow_nan=False, separators=(",", ":")).encode() + b"\n"
+        if len(encoded) > STARTUP_DIAGNOSTIC_LIMIT:
+            return
+        with (control / "startup-diagnostic.json").open("xb") as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write(encoded)
+        receipt["startup_diagnostic_written"] = True
+    except Exception:
+        pass
+
+
+def query_exec_startup(unit, deadline, loaded_exec_seen, receipt, control, started):
+    """Only a successful not-found query before loaded exec is pending."""
+    properties = {}
+    try:
+        properties = unit_properties(unit, timeout=max(0.001, min(5, deadline - time.monotonic())))
+        complete = exec_startup_complete(properties, deadline, loaded_exec_seen)
+        group = properties.get("ControlGroup", "")
+        if group and group != selected_group(unit):
+            raise StartupFailure(STARTUP_FAILURE)
+        return properties, complete
+    except (OSError, subprocess.SubprocessError, ValueError, StartupFailure):
+        record_startup_failure(receipt, control, properties, started)
+        raise StartupFailure(STARTUP_FAILURE) from None
+
+
+def refresh_unconfirmed_startup(unit, deadline, properties):
+    """One diagnostic-only query before capture; a failed read retains prior facts."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return properties
+    try:
+        latest = unit_properties(unit, timeout=min(5, remaining))
+        if (type(latest.get("_query_exit_status")) is int and latest.get("_query_exit_status") == 0 and
+                not latest.get("_malformed") and set(UNIT_PROPERTY_NAMES).issubset(latest)):
+            return latest
+    except (OSError, subprocess.SubprocessError, ValueError):
+        pass
+    return properties
 
 
 def observe_unit_processes(properties, uid, group, receipt, control, started, deadline):
@@ -156,7 +266,7 @@ def record_budget_diagnostic(receipt, control, group, started):
 
 
 def cgroup_pids(group):
-    if not group.startswith("/system.slice/issue779-child-") or ".." in group:
+    if not re.fullmatch(r"/system.slice/issue779-child-[0-9a-f]{32}\.service", group):
         raise ValueError("Unexpected root-selected unit cgroup.")
     directory = Path("/sys/fs/cgroup") / group.lstrip("/")
     if not directory.exists():
@@ -186,9 +296,22 @@ def identity_matches(pid, uid, group, facts=None):
 
 
 def preserve_identity_rejection(receipt):
-    """The first identity rejection remains terminal even if later cleanup also fails."""
+    """The first startup or identity rejection survives later cleanup failures."""
     if receipt.get("failure_stage") == IDENTITY_STAGE:
         receipt["failure"] = IDENTITY_FAILURE
+    elif receipt.get("failure_stage") == STARTUP_STAGE:
+        receipt["failure"] = STARTUP_FAILURE
+
+
+def record_control_failure(receipt, error, control, properties, started):
+    """The orchestration catch also captures expiry between query and observation."""
+    if isinstance(error, StartupFailure):
+        record_startup_failure(receipt, control, properties, started)
+    receipt["failure"] = ("watchdog-unavailable" if isinstance(error, WatchdogFailure) else
+                          STARTUP_FAILURE if isinstance(error, StartupFailure) else
+                          "control-or-readiness-failure")
+    preserve_identity_rejection(receipt)
+    receipt["error_class"] = type(error).__name__
 
 
 def record_identity_rejection(receipt, control, pid, target_uid, facts, group, properties, started):
@@ -263,24 +386,59 @@ def stop_unit(unit, force=False):
 
 
 def stop_and_join(unit, process, group, pumps, guard=None):
-    """Fresh cooperative grace, then force only when process/cgroup exit is absent."""
+    """Discover exact ownership during a finite stop; unknown emptiness is no proof."""
+    expected = selected_group(unit)
+    rejected_group = bool(group and group != expected)
+    group = group if group == expected else ""
+
+    def discover(deadline):
+        nonlocal group, rejected_group
+        if group or time.monotonic() >= deadline:
+            return
+        try:
+            properties = unit_properties(unit, timeout=max(0.001, min(1, deadline - time.monotonic())))
+            candidate = properties.get("ControlGroup", "")
+            if candidate and candidate != expected:
+                rejected_group = True
+                return
+            if (type(properties.get("_query_exit_status")) is int and properties.get("_query_exit_status") == 0 and
+                    not properties.get("_malformed") and set(UNIT_PROPERTY_NAMES).issubset(properties) and
+                    properties.get("LoadState") == "loaded" and properties.get("Type") == "exec" and
+                    properties.get("ActiveState") in ACTIVE_STATES - {"unknown"} and
+                    properties.get("SubState") in SUB_STATES - {"unknown"}):
+                unit_main_pid(properties)
+                if candidate == expected:
+                    group = candidate
+        except (OSError, subprocess.SubprocessError, ValueError, StartupFailure):
+            pass
+
     stop_unit(unit)
     cooperative_deadline = time.monotonic() + COOPERATIVE_SECONDS
+    cleanup_deadline = cooperative_deadline + CLEANUP_SECONDS - COOPERATIVE_SECONDS
     while time.monotonic() < cooperative_deadline:
         if guard is not None:
             guard()
+        discover(cooperative_deadline)
         if process.poll() is not None and group and not cgroup_pids(group):
             break
         time.sleep(0.05)
-    escalated = process.poll() is None or not group or bool(cgroup_pids(group))
+    escalated = rejected_group or process.poll() is None or not group or bool(cgroup_pids(group))
     if escalated:
         stop_unit(unit, force=True)
-    process.wait(timeout=CLEANUP_SECONDS - COOPERATIVE_SECONDS)
-    for thread in pumps:
-        thread.join(timeout=2)
+    process.wait(timeout=max(0.001, cleanup_deadline - time.monotonic()))
+    while time.monotonic() < cleanup_deadline:
         if guard is not None:
             guard()
-    return bool(group) and not cgroup_pids(group) and all(not thread.is_alive() for thread in pumps), escalated
+        discover(cleanup_deadline)
+        if group and not cgroup_pids(group):
+            break
+        time.sleep(0.05)
+    for thread in pumps:
+        thread.join(timeout=max(0, min(2, cleanup_deadline - time.monotonic())))
+        if guard is not None:
+            guard()
+    return (not rejected_group and bool(group) and not cgroup_pids(group) and
+            all(not thread.is_alive() for thread in pumps)), escalated
 
 
 def final_output_receipt(receipt, budget, states=None):
@@ -327,9 +485,11 @@ def await_watchdog_ack(monitor, reader, timeout=WATCHDOG_ACK_SECONDS):
         raise WatchdogFailure("watchdog-ack-unavailable") from error
 
 
-def disarm_watchdog(monitor, done, reader):
+def disarm_watchdog(monitor, done, reader, physical_exit=True, ownership_lost=False):
     """Require live ownership until disarm, the disarm ACK and a clean joined exit."""
     require_watchdog_alive(monitor)
+    if ownership_lost or not physical_exit:
+        raise WatchdogFailure("watchdog-disarm-unconfirmed")
     done.set()
     try:
         if not reader.poll(2) or reader.recv_bytes(64) != b"disarmed":
@@ -513,6 +673,7 @@ def prove(args):
     watchdog_lost = False
     physical_exit = False
     group = ""
+    properties = {}
     budget = OutputBudget()
     deadline = time.monotonic() + JOB_SECONDS
 
@@ -556,15 +717,16 @@ def prove(args):
         ready_deadline = min(deadline, time.monotonic() + READINESS_SECONDS)
         observed = {}
         startup_confirmed = False
+        loaded_exec_seen = False
         while time.monotonic() < ready_deadline and process.poll() is None and not budget.exceeded.is_set():
             require_watchdog_alive(monitor)
-            try:
-                properties = unit_properties(unit)
-            except (OSError, subprocess.SubprocessError, ValueError) as error:
-                if not startup_confirmed:
-                    raise StartupFailure("application-exec-startup-failed") from error
-                raise
+            properties, complete = query_exec_startup(unit, ready_deadline, loaded_exec_seen, receipt, control,
+                                                       deadline - JOB_SECONDS)
+            loaded_exec_seen = loaded_exec_seen or (properties["LoadState"] == "loaded" and properties["Type"] == "exec")
             group = properties.get("ControlGroup", "") or group
+            if not complete:
+                time.sleep(0.05)
+                continue
             current = observe_unit_processes(properties, args.subject_uid, group, receipt, control,
                                              deadline - JOB_SECONDS, ready_deadline)
             if current is None:
@@ -597,7 +759,9 @@ def prove(args):
             time.sleep(0.1)
         require_watchdog_alive(monitor)
         if not startup_confirmed:
-            raise StartupFailure("application-exec-startup-failed")
+            properties = refresh_unconfirmed_startup(unit, ready_deadline, properties)
+            record_startup_failure(receipt, control, properties, deadline - JOB_SECONDS)
+            raise StartupFailure(STARTUP_FAILURE)
         receipt["observed_processes"] = observed
         receipt["output_bytes"] = budget.count
         receipt["output_quota_exceeded"] = budget.exceeded.is_set()
@@ -631,11 +795,7 @@ def prove(args):
             raise RuntimeError("Combined child output quota exceeded.")
         receipt["control_result"] = "cancel-requested" if args.case == "cancel" else "bounded-control-complete"
     except Exception as error:
-        receipt["failure"] = ("watchdog-unavailable" if isinstance(error, WatchdogFailure) else
-                              "application-exec-startup-failed" if isinstance(error, StartupFailure) else
-                              "control-or-readiness-failure")
-        preserve_identity_rejection(receipt)
-        receipt["error_class"] = type(error).__name__
+        record_control_failure(receipt, error, control, properties, deadline - JOB_SECONDS)
     finally:
         if process is not None:
             record_budget_diagnostic(receipt, control, group, deadline - JOB_SECONDS)
@@ -660,11 +820,12 @@ def prove(args):
                 require_watchdog_alive(monitor)
                 if watchdog_lost or not physical_exit:
                     raise WatchdogFailure("watchdog-disarm-unconfirmed")
-                disarm_watchdog(monitor, done, ack_reader)
+                disarm_watchdog(monitor, done, ack_reader, physical_exit=physical_exit, ownership_lost=watchdog_lost)
                 receipt["watchdog_clean_exit"] = True
                 receipt["watchdog_exit_code"] = monitor.exitcode
             except WatchdogFailure:
                 receipt["failure"] = "watchdog-unavailable"
+                receipt["watchdog_failure"] = "watchdog-unavailable"
                 receipt["watchdog_clean_exit"] = False
                 receipt["watchdog_exit_code"] = monitor.exitcode
                 receipt["owned_exit"] = False

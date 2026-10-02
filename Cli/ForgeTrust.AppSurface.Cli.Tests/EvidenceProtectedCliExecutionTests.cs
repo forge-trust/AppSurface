@@ -46,6 +46,73 @@ public sealed class EvidenceProtectedCliExecutionTests(ITestOutputHelper output)
         Assert.Equal(7, json.RootElement.EnumerateObject().Count());
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(22)]
+    [InlineData(38)]
+    [InlineData(95)]
+    public void AllocationDiagnostic_retains_only_known_unsupported_openat2_errno_without_exception_content(int errno)
+    {
+        const string canary = "private-path-secret-canary";
+        var error = new PlatformNotSupportedException(canary, new Win32Exception(errno, canary));
+        error.Data[canary] = canary;
+        foreach (var operation in UnsupportedOpenOperations)
+        {
+            var diagnostic = EvidenceProtectedCliExecution.CreateAllocationFailureDiagnostic(EvidenceAllocationPhase.Allocation,
+                operation, EvidenceWorkerStageOutcome.Failed, EvidenceWorkerTerminalCode.StageFailed, error);
+            Assert.Equal(errno, diagnostic.NativeErrno);
+            Assert.Equal(EvidenceAllocationErrorClass.Unsupported, diagnostic.ErrorClass);
+            using var console = new FakeInMemoryConsole();
+            EvidenceWorkerCommand.WriteAllocationDiagnostic(console, diagnostic);
+            var line = console.ReadErrorString();
+            Assert.True(Encoding.UTF8.GetByteCount(line) <= 1024);
+            Assert.DoesNotContain(canary, line, StringComparison.Ordinal);
+            Assert.Equal(string.Empty, console.ReadOutputString());
+            using var json = JsonDocument.Parse(line);
+            Assert.Equal(errno, json.RootElement.GetProperty("nativeErrno").GetInt32());
+            Assert.Equal("Unsupported", json.RootElement.GetProperty("errorClass").GetString());
+        }
+    }
+
+    [Fact]
+    public void AllocationDiagnostic_omits_unsupported_errno_without_exact_inner_phase_and_open_operation()
+    {
+        var errors = new Exception[]
+        {
+            new PlatformNotSupportedException("canary"),
+            new PlatformNotSupportedException("canary", new IOException("canary", new Win32Exception(38))),
+            new PlatformNotSupportedException("canary", new Exception("canary")),
+            new NotSupportedException("canary", new Win32Exception(38)),
+        };
+        foreach (var errno in new[] { -1, 0, 2, 13, 17, 4095, 4096 })
+            errors = [.. errors, new PlatformNotSupportedException("canary", new Win32Exception(errno))];
+        foreach (var error in errors)
+            Assert.Null(EvidenceProtectedCliExecution.CreateAllocationFailureDiagnostic(EvidenceAllocationPhase.Allocation,
+                EvidenceLinuxArtifactAllocationOperation.OpenFilesystemRoot, EvidenceWorkerStageOutcome.Failed,
+                EvidenceWorkerTerminalCode.StageFailed, error).NativeErrno);
+
+        var known = new PlatformNotSupportedException("canary", new Win32Exception(38));
+        foreach (var operation in Enum.GetValues<EvidenceLinuxArtifactAllocationOperation>().Except(UnsupportedOpenOperations)
+            .Append((EvidenceLinuxArtifactAllocationOperation)999))
+            Assert.Null(EvidenceProtectedCliExecution.CreateAllocationFailureDiagnostic(EvidenceAllocationPhase.Allocation,
+                operation, EvidenceWorkerStageOutcome.Failed, EvidenceWorkerTerminalCode.StageFailed, known).NativeErrno);
+        foreach (var phase in Enum.GetValues<EvidenceAllocationPhase>().Where(static phase => phase != EvidenceAllocationPhase.Allocation)
+            .Append((EvidenceAllocationPhase)999))
+            Assert.Null(EvidenceProtectedCliExecution.CreateAllocationFailureDiagnostic(phase,
+                EvidenceLinuxArtifactAllocationOperation.OpenFilesystemRoot, EvidenceWorkerStageOutcome.Failed,
+                EvidenceWorkerTerminalCode.StageFailed, known).NativeErrno);
+    }
+
+    private static readonly EvidenceLinuxArtifactAllocationOperation[] UnsupportedOpenOperations =
+    [
+        EvidenceLinuxArtifactAllocationOperation.OpenFilesystemRoot,
+        EvidenceLinuxArtifactAllocationOperation.OpenParent,
+        EvidenceLinuxArtifactAllocationOperation.CheckParentName,
+        EvidenceLinuxArtifactAllocationOperation.OpenSlot,
+        EvidenceLinuxArtifactAllocationOperation.CheckSlotName,
+        EvidenceLinuxArtifactAllocationOperation.RecheckParentName,
+    ];
+
     [Fact]
     public void AllocationDiagnostic_classifies_only_closed_error_values_and_native_allocation_errno()
     {

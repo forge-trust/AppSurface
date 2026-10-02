@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -6,7 +7,12 @@ using System.Text.Json;
 namespace ForgeTrust.AppSurface.Evidence.Contracts;
 
 /// <summary>Protected Linux launcher facts delivered over a root-owned credential-checked control channel.</summary>
-/// <remarks>This provisional internal schema is not an envelope, portable receipt or public provider registration.</remarks>
+/// <remarks>
+/// This provisional internal schema is not an envelope, portable receipt or public provider registration.
+/// BrokerPid and DescriptorPath retain actual launcher metadata; only ConnectAsync binds the PID to a root peer.
+/// Application is absent in v1 and required in v2. Optional constructor defaults support internal data callers only.
+/// All parsed path/profile/producer lists are defensively copied and wrapped read-only.
+/// </remarks>
 internal sealed record EvidenceLinuxWorkerDescriptor(
     string Schema,
     string RunId,
@@ -36,9 +42,9 @@ internal sealed record EvidenceLinuxWorkerDescriptor(
     string ProofDigest,
     string PolicySha256,
     EvidenceLinuxArtifactIdentity OutputParentIdentity,
-    string[] ObservationProfileIds,
-    string[] ObservationProducerIds,
-    string[] Paths,
+    IReadOnlyList<string> ObservationProfileIds,
+    IReadOnlyList<string> ObservationProducerIds,
+    IReadOnlyList<string> Paths,
     int AdmissionSeconds,
     int StartSeconds,
     int CollectionSeconds,
@@ -46,7 +52,10 @@ internal sealed record EvidenceLinuxWorkerDescriptor(
     int StoppingSeconds,
     string? DiffFile = null,
     string? Solution = null,
-    string? DiffSha256 = null);
+    string? DiffSha256 = null,
+    EvidenceLinuxApplicationDescriptor? Application = null,
+    int BrokerPid = 0,
+    string? DescriptorPath = null);
 
 /// <summary>A bounded restricted-child result delivered only after the broker confirms child and pump exit.</summary>
 internal sealed record EvidenceRestrictedProcessResult(int ExitCode, string Stdout, string Stderr, bool OutputTruncated,
@@ -108,59 +117,121 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
         var handshakeStarted = TimeProvider.System.GetTimestamp();
         using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
         int brokerPid;
-        JsonElement response;
+        EvidenceLinuxWorkerDescriptor descriptor;
+        TimeSpan allowance;
         try
         {
             await socket.ConnectAsync(new UnixDomainSocketEndPoint(socketPath), handshakeCancellation.Token).ConfigureAwait(false);
             brokerPid = RequireRootPeer(socket);
-            response = await ExchangeAsync(socket, new { op = "ready" }, handshakeCancellation.Token).ConfigureAwait(false);
+            var response = await ExchangeAsync(socket, new { op = "ready" }, handshakeCancellation.Token).ConfigureAwait(false);
+            allowance = ParseWorkerRemainingAllowance(response);
+            descriptor = ParseWorkerDescriptor(response.GetProperty("descriptor"));
+            ValidateWorkerRuntimeBinding(descriptor, socketPath, brokerPid, Environment.ProcessId, GetUid(), GetGid(), DateTimeOffset.UtcNow);
         }
         catch (OperationCanceledException) when (handshakeDeadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
             throw new EvidenceAdmissionException("ASEVD402", "Protected worker authentication exceeded its admission deadline.");
         }
-        var remainingSeconds = response.GetProperty("job_remaining_seconds").GetDouble();
-        if (!double.IsFinite(remainingSeconds) || remainingSeconds is <= 0 or > 3600)
-            throw new EvidenceAdmissionException("ASEVD402", "The protected monotonic job allowance is invalid.");
-        var facts = response.GetProperty("descriptor");
-        var descriptor = new EvidenceLinuxWorkerDescriptor(
-            Text(facts, "schema"), Text(facts, "run_id"), facts.GetProperty("worker_pid").GetInt32(),
-            facts.GetProperty("worker_uid").GetUInt32(), facts.GetProperty("worker_gid").GetUInt32(),
-            facts.GetProperty("subject_uid").GetUInt32(), facts.GetProperty("subject_gid").GetUInt32(),
-            Text(facts, "unit"), Text(facts, "cgroup"), facts.GetProperty("job_deadline_utc").GetDateTimeOffset(),
-            Text(facts, "tool_root"), Text(facts, "subject_root"), Text(facts, "output_parent"), Text(facts, "output_slot"),
-            Text(facts, "dotnet_path"), Text(facts, "test_output_root"),
-            Text(facts, "policy_file"), Text(facts, "mode"), Text(facts, "socket_path"), Text(facts, "entry_sha256"),
-            Text(facts, "base_revision"), Text(facts, "subject_revision"), Text(facts, "workflow_identity"),
-            Text(facts, "provider"), Text(facts, "platform"), Text(facts, "proof_digest", allowEmpty: true),
-            Text(facts, "policy_sha256"), ReadParentIdentity(facts.GetProperty("output_parent_identity")),
-            Strings(facts, "observation_profile_ids"), Strings(facts, "observation_producer_ids"), Strings(facts, "paths"),
-            facts.GetProperty("admission_seconds").GetInt32(), facts.GetProperty("start_seconds").GetInt32(),
-            facts.GetProperty("collection_seconds").GetInt32(), facts.GetProperty("cleanup_seconds").GetInt32(), facts.GetProperty("stopping_seconds").GetInt32(),
-            Optional(facts, "diff_file"), Optional(facts, "solution"), Optional(facts, "diff_sha256"));
-        if (descriptor.Schema != "evidence-worker-linux-v1" || descriptor.SocketPath != socketPath
-            || descriptor.WorkerPid != Environment.ProcessId || descriptor.WorkerUid != GetUid() || descriptor.WorkerGid != GetGid()
-            || descriptor.WorkerUid == 0 || descriptor.SubjectUid == 0 || descriptor.SubjectUid == descriptor.WorkerUid
-            || descriptor.SubjectGid == descriptor.WorkerGid || descriptor.JobDeadlineUtc <= DateTimeOffset.UtcNow
-            || !descriptor.Cgroup.StartsWith("/system.slice/", StringComparison.Ordinal)
-            || descriptor.ToolRoot == descriptor.SubjectRoot || descriptor.OutputParent == descriptor.SubjectRoot
-            || descriptor.OutputParent == descriptor.ToolRoot
-            || new[] { descriptor.ToolRoot, descriptor.SubjectRoot, descriptor.OutputParent, descriptor.PolicyFile,
-                descriptor.DotnetPath, descriptor.TestOutputRoot }.Any(static value => !Path.IsPathFullyQualified(value))
-            || !Contained(descriptor.ToolRoot, descriptor.PolicyFile)
-            || (descriptor.DiffFile is not null && (!Contained(descriptor.ToolRoot, descriptor.DiffFile)
-                || descriptor.DiffSha256 is not { Length: 64 } || !descriptor.DiffSha256.All(char.IsAsciiHexDigit)))
-            || (descriptor.DiffFile is null && descriptor.DiffSha256 is not null)
-            || descriptor.Provider != "github-actions" || descriptor.Platform != "linux-x64"
-            || descriptor.AdmissionSeconds is < 1 or > 30 || descriptor.StartSeconds is < 1 or > 120
-            || descriptor.CollectionSeconds is < 1 or > 60 || descriptor.CleanupSeconds is < 1 or > 600
-            || descriptor.StoppingSeconds is < 1 or > 30 || descriptor.StoppingSeconds > descriptor.CleanupSeconds)
-        {
-            throw new EvidenceAdmissionException("ASEVD402", "The protected worker descriptor is stale, mismatched or unsupported.");
-        }
+        catch (EvidenceAdmissionException error) when (error.Code != "ASEVD402") { throw InvalidWorkerDescriptor(); }
+        catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException
+            or FormatException or OverflowException) { throw InvalidWorkerDescriptor(); }
 
-        return new EvidenceLinuxWorkerSupervisor(socketPath, brokerPid, descriptor, handshakeStarted,
-            TimeSpan.FromSeconds(remainingSeconds));
+        return new EvidenceLinuxWorkerSupervisor(socketPath, brokerPid, descriptor, handshakeStarted, allowance);
+    }
+
+    /// <summary>Parses a closed v1/v2 descriptor as immutable data, without authenticating a peer or issuing admission.</summary>
+    /// <param name="facts">Root descriptor object with actual launcher fields, including broker PID and descriptor path.</param>
+    /// <returns>Bounded metadata; only ConnectAsync can construct an armed supervisor after runtime binding.</returns>
+    /// <exception cref="EvidenceAdmissionException">Fixed ASEVD402 for malformed, ambiguous or unsupported metadata.</exception>
+    internal static EvidenceLinuxWorkerDescriptor ParseWorkerDescriptor(JsonElement facts)
+    {
+        WorkerRequire(facts.ValueKind == JsonValueKind.Object);
+        WorkerRequire(Encoding.UTF8.GetByteCount(facts.GetRawText()) <= MaximumResponseBytes);
+        WorkerRequire(facts.TryGetProperty("schema", out var schemaValue));
+        var schema = WorkerText(schemaValue, 128);
+        WorkerRequire(schema is "evidence-worker-linux-v1" or "evidence-worker-linux-v2");
+        var required = new[] { "schema", "run_id", "worker_pid", "broker_pid", "worker_uid", "worker_gid", "subject_uid", "subject_gid",
+            "unit", "cgroup", "job_deadline_utc", "tool_root", "subject_root", "output_parent", "output_slot", "dotnet_path", "test_output_root",
+            "policy_file", "mode", "socket_path", "descriptor_path", "entry_sha256", "base_revision", "subject_revision", "workflow_identity",
+            "provider", "platform", "proof_digest", "policy_sha256", "output_parent_identity", "observation_profile_ids", "observation_producer_ids",
+            "paths", "admission_seconds", "start_seconds", "collection_seconds", "cleanup_seconds", "stopping_seconds" };
+        if (schema == "evidence-worker-linux-v2") required = [.. required, "application"];
+        WorkerObject(facts, required, ["diff_file", "diff_sha256", "solution"]);
+        var workerUid = WorkerUInt(facts, "worker_uid"); var workerGid = WorkerUInt(facts, "worker_gid");
+        var subjectUid = WorkerUInt(facts, "subject_uid"); var subjectGid = WorkerUInt(facts, "subject_gid");
+        WorkerRequire(workerUid > 0 && workerGid > 0 && subjectUid > 0 && subjectGid > 0
+            && workerUid != subjectUid && workerGid != subjectGid);
+        EvidenceLinuxApplicationDescriptor? application = schema == "evidence-worker-linux-v2"
+            ? ParseApplicationDescriptor(facts.GetProperty("application"), workerUid, workerGid, subjectUid, subjectGid) : null;
+        var descriptor = new EvidenceLinuxWorkerDescriptor(
+            schema, WorkerString(facts, "run_id", 256), WorkerInt(facts, "worker_pid", 1, int.MaxValue),
+            workerUid, workerGid, subjectUid, subjectGid, WorkerString(facts, "unit", 128), WorkerString(facts, "cgroup", 256),
+            WorkerDate(facts, "job_deadline_utc"), WorkerPath(facts, "tool_root"), WorkerPath(facts, "subject_root"),
+            WorkerPath(facts, "output_parent"), WorkerString(facts, "output_slot", 96), WorkerPath(facts, "dotnet_path"),
+            WorkerPath(facts, "test_output_root"), WorkerPath(facts, "policy_file"), WorkerString(facts, "mode", 32),
+            WorkerPath(facts, "socket_path", 100), WorkerHash(facts, "entry_sha256"), WorkerString(facts, "base_revision", 256),
+            WorkerString(facts, "subject_revision", 256), WorkerString(facts, "workflow_identity", 256), WorkerString(facts, "provider", 128),
+            WorkerString(facts, "platform", 128), WorkerString(facts, "proof_digest", 64, allowEmpty: true), WorkerHash(facts, "policy_sha256"),
+            ReadParentIdentity(facts.GetProperty("output_parent_identity")), WorkerStrings(facts, "observation_profile_ids", 32, identifiers: true),
+            WorkerStrings(facts, "observation_producer_ids", 32, identifiers: true), WorkerStrings(facts, "paths", 4096, identifiers: false),
+            WorkerInt(facts, "admission_seconds", 1, 30), WorkerInt(facts, "start_seconds", 1, 120),
+            WorkerInt(facts, "collection_seconds", 1, 60), WorkerInt(facts, "cleanup_seconds", 1, 600), WorkerInt(facts, "stopping_seconds", 1, 30),
+            WorkerOptionalPath(facts, "diff_file"), WorkerOptionalPath(facts, "solution"), WorkerOptionalHash(facts, "diff_sha256"),
+            application, WorkerInt(facts, "broker_pid", 1, int.MaxValue), WorkerPath(facts, "descriptor_path"));
+        var runParts = descriptor.RunId.Split('/');
+        WorkerRequire(runParts.Length == 2 && runParts.All(static item => WorkerName(item, 128))
+            && WorkerName(descriptor.Unit, 128) && descriptor.Unit.EndsWith(".service", StringComparison.Ordinal)
+            && descriptor.Cgroup == "/system.slice/" + descriptor.Unit && WorkerName(descriptor.OutputSlot, 96));
+        WorkerRequire(descriptor.BrokerPid != descriptor.WorkerPid && descriptor.Provider == "github-actions" && descriptor.Platform == "linux-x64"
+            && descriptor.Mode is "observation" or "trusted" && descriptor.StoppingSeconds <= descriptor.CleanupSeconds
+            && (descriptor.ProofDigest.Length == 0 || WorkerLowerHash(descriptor.ProofDigest)));
+        WorkerRequire(!WorkerRootsOverlap(descriptor.ToolRoot, descriptor.SubjectRoot)
+            && !WorkerRootsOverlap(descriptor.ToolRoot, descriptor.OutputParent) && !WorkerRootsOverlap(descriptor.SubjectRoot, descriptor.OutputParent)
+            && Contained(descriptor.ToolRoot, descriptor.PolicyFile)
+            && (descriptor.DiffFile is null ? descriptor.DiffSha256 is null : descriptor.DiffSha256 is not null && Contained(descriptor.ToolRoot, descriptor.DiffFile))
+            && (descriptor.Solution is null || Contained(descriptor.SubjectRoot, descriptor.Solution)));
+        var descriptorPath = descriptor.DescriptorPath!;
+        var separator = descriptorPath.LastIndexOf('/');
+        var controlRoot = descriptorPath[..separator];
+        WorkerRequire(controlRoot.Length > 0 && descriptorPath[(separator + 1)..] == "worker-control.json"
+            && descriptor.SocketPath == controlRoot + "/broker/control.sock"
+            && !WorkerRootsOverlap(controlRoot, descriptor.ToolRoot) && !WorkerRootsOverlap(controlRoot, descriptor.SubjectRoot)
+            && !WorkerRootsOverlap(controlRoot, descriptor.OutputParent));
+        WorkerRequire(descriptor.OutputParentIdentity.Inode > 0 && descriptor.OutputParentIdentity.Uid == workerUid
+            && descriptor.OutputParentIdentity.Gid == workerGid);
+        return descriptor;
+    }
+
+    /// <summary>Parses the closed ready success wrapper and frozen allowance as data only.</summary>
+    /// <param name="response">Exact ok/descriptor/job_remaining_seconds wrapper.</param>
+    /// <returns>Positive finite allowance at most one hour; does not reset the handshake timestamp.</returns>
+    internal static TimeSpan ParseWorkerRemainingAllowance(JsonElement response)
+    {
+        WorkerObject(response, ["ok", "descriptor", "job_remaining_seconds"], []);
+        WorkerRequire(response.GetProperty("ok").ValueKind == JsonValueKind.True && response.GetProperty("descriptor").ValueKind == JsonValueKind.Object);
+        var number = response.GetProperty("job_remaining_seconds");
+        WorkerRequire(number.ValueKind == JsonValueKind.Number && number.TryGetDouble(out var seconds)
+            && double.IsFinite(seconds) && seconds is > 0 and <= 3600);
+        var allowance = TimeSpan.FromSeconds(number.GetDouble());
+        WorkerRequire(allowance > TimeSpan.Zero);
+        return allowance;
+    }
+
+    /// <summary>Compares parsed facts to independently observed runtime identity; constructs no supervisor or admission.</summary>
+    /// <param name="descriptor">Parsed protected metadata.</param>
+    /// <param name="socketPath">Actual requested control channel.</param>
+    /// <param name="authenticatedBrokerPid">PID read from the actual root SO_PEERCRED.</param>
+    /// <param name="currentPid">Actual current worker process ID.</param>
+    /// <param name="currentUid">Actual current worker UID.</param>
+    /// <param name="currentGid">Actual current worker primary GID.</param>
+    /// <param name="utcNow">Actual current time, used only for expiry comparison.</param>
+    internal static void ValidateWorkerRuntimeBinding(EvidenceLinuxWorkerDescriptor descriptor, string socketPath,
+        int authenticatedBrokerPid, int currentPid, uint currentUid, uint currentGid, DateTimeOffset utcNow)
+    {
+        WorkerRequire(descriptor is not null && descriptor.SocketPath == socketPath && authenticatedBrokerPid > 0
+            && descriptor.BrokerPid == authenticatedBrokerPid && descriptor.WorkerPid == currentPid
+            && currentUid > 0 && currentGid > 0 && descriptor.WorkerUid == currentUid && descriptor.WorkerGid == currentGid
+            && descriptor.JobDeadlineUtc > utcNow);
     }
 
     /// <inheritdoc />
@@ -306,15 +377,84 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
         return text;
     }
 
-    private static string[] Strings(JsonElement value, string name) =>
-        value.GetProperty(name).EnumerateArray().Select(static item => item.GetString() ?? throw new EvidenceAdmissionException("ASEVD402", "A required control list is invalid.")).ToArray();
-    private static string? Optional(JsonElement value, string name) =>
-        value.TryGetProperty(name, out var item) && item.ValueKind != JsonValueKind.Null ? item.GetString() : null;
     private static bool Contained(string root, string file) => file.StartsWith(root.TrimEnd('/') + "/", StringComparison.Ordinal);
 
-    private static EvidenceLinuxArtifactIdentity ReadParentIdentity(JsonElement identity) => new(
-        identity.GetProperty("device_major").GetUInt32(), identity.GetProperty("device_minor").GetUInt32(),
-        identity.GetProperty("inode").GetUInt64(), identity.GetProperty("uid").GetUInt32(), identity.GetProperty("gid").GetUInt32());
+    private static EvidenceLinuxArtifactIdentity ReadParentIdentity(JsonElement identity)
+    {
+        WorkerObject(identity, ["device_major", "device_minor", "inode", "uid", "gid"], []);
+        var inode = identity.GetProperty("inode");
+        WorkerRequire(inode.ValueKind == JsonValueKind.Number && inode.TryGetUInt64(out var number) && number > 0);
+        return new(WorkerUInt(identity, "device_major"), WorkerUInt(identity, "device_minor"), inode.GetUInt64(),
+            WorkerUInt(identity, "uid"), WorkerUInt(identity, "gid"));
+    }
+
+    private static void WorkerObject(JsonElement value, IReadOnlyList<string> required, IReadOnlyList<string> optional)
+    {
+        WorkerRequire(value.ValueKind == JsonValueKind.Object);
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var property in value.EnumerateObject())
+            WorkerRequire(names.Add(property.Name) && (required.Contains(property.Name, StringComparer.Ordinal)
+                || optional.Contains(property.Name, StringComparer.Ordinal)));
+        WorkerRequire(required.All(name => value.TryGetProperty(name, out _)));
+    }
+
+    private static string WorkerText(JsonElement value, int maximum, bool allowEmpty = false)
+    {
+        WorkerRequire(value.ValueKind == JsonValueKind.String);
+        var text = value.GetString();
+        WorkerRequire(text is not null && text.Length <= maximum && (allowEmpty || !string.IsNullOrWhiteSpace(text)) && !text.Any(char.IsControl));
+        return text;
+    }
+    private static string WorkerString(JsonElement value, string name, int maximum, bool allowEmpty = false) =>
+        WorkerText(value.GetProperty(name), maximum, allowEmpty);
+    private static int WorkerInt(JsonElement value, string name, int minimum, int maximum)
+    {
+        var item = value.GetProperty(name); WorkerRequire(item.ValueKind == JsonValueKind.Number
+            && item.TryGetInt32(out var number) && number >= minimum && number <= maximum);
+        return item.GetInt32();
+    }
+    private static uint WorkerUInt(JsonElement value, string name)
+    {
+        var item = value.GetProperty(name); WorkerRequire(item.ValueKind == JsonValueKind.Number && item.TryGetUInt32(out _));
+        return item.GetUInt32();
+    }
+    private static DateTimeOffset WorkerDate(JsonElement value, string name)
+    {
+        var item = value.GetProperty(name); WorkerRequire(item.ValueKind == JsonValueKind.String && item.TryGetDateTimeOffset(out _));
+        return item.GetDateTimeOffset();
+    }
+    private static string WorkerHash(JsonElement value, string name)
+    {
+        var hash = WorkerString(value, name, 64); WorkerRequire(WorkerLowerHash(hash)); return hash;
+    }
+    private static string? WorkerOptionalHash(JsonElement value, string name) =>
+        !value.TryGetProperty(name, out var item) || item.ValueKind == JsonValueKind.Null ? null : WorkerHash(value, name);
+    private static string? WorkerOptionalPath(JsonElement value, string name) =>
+        !value.TryGetProperty(name, out var item) || item.ValueKind == JsonValueKind.Null ? null : WorkerPath(value, name);
+    private static string WorkerPath(JsonElement value, string name, int maximumBytes = 4095)
+    {
+        var path = WorkerString(value, name, maximumBytes);
+        WorkerRequire(path.Length > 1 && path[0] == '/' && !path.Contains('\\') && Encoding.UTF8.GetByteCount(path) <= maximumBytes
+            && WorkerSegments(path[1..]));
+        return path;
+    }
+    private static IReadOnlyList<string> WorkerStrings(JsonElement value, string name, int maximum, bool identifiers)
+    {
+        var array = value.GetProperty(name); WorkerRequire(array.ValueKind == JsonValueKind.Array && array.GetArrayLength() <= maximum);
+        var values = array.EnumerateArray().Select(item => WorkerText(item, identifiers ? 96 : 4095)).ToArray();
+        WorkerRequire(values.Distinct(StringComparer.Ordinal).Count() == values.Length);
+        WorkerRequire(values.All(item => identifiers ? WorkerName(item, 96) : item[0] != '/' && !item.Contains('\\')
+            && Encoding.UTF8.GetByteCount(item) <= 4095 && WorkerSegments(item)));
+        return Array.AsReadOnly(values);
+    }
+    private static bool WorkerName(string value, int maximum) => value.Length is > 0 && value.Length <= maximum
+        && char.IsAsciiLetterOrDigit(value[0]) && value.All(static item => char.IsAsciiLetterOrDigit(item) || item is '.' or '_' or '-');
+    private static bool WorkerSegments(string value) => value.Split('/').All(static part => part.Length > 0 && part is not "." and not "..");
+    private static bool WorkerLowerHash(string value) => value is { Length: 64 }
+        && value.All(static item => item is >= '0' and <= '9' or >= 'a' and <= 'f');
+    private static bool WorkerRootsOverlap(string left, string right) => left == right || Contained(left, right) || Contained(right, left);
+    private static void WorkerRequire([DoesNotReturnIf(false)] bool condition) { if (!condition) throw InvalidWorkerDescriptor(); }
+    private static EvidenceAdmissionException InvalidWorkerDescriptor() => new("ASEVD402", "The protected worker descriptor or acknowledgement is invalid.");
 
     [LibraryImport("libc", EntryPoint = "getuid")]
     private static partial uint GetUid();

@@ -253,11 +253,18 @@ internal static class EvidenceProtectedCliExecution
             InvalidOperationException => EvidenceAllocationErrorClass.InvalidOperation,
             _ => EvidenceAllocationErrorClass.Unknown,
         };
-        int? errno = phase == EvidenceAllocationPhase.Allocation
+        var allocationOperation = phase == EvidenceAllocationPhase.Allocation
             && operation is not (EvidenceLinuxArtifactAllocationOperation.None or EvidenceLinuxArtifactAllocationOperation.ValidateArguments
-                or EvidenceLinuxArtifactAllocationOperation.CheckPlatform or EvidenceLinuxArtifactAllocationOperation.Completed)
-            && error is IOException { InnerException: Win32Exception native } && native.NativeErrorCode is >= 1 and <= 4095
-                ? native.NativeErrorCode : null;
+                or EvidenceLinuxArtifactAllocationOperation.CheckPlatform or EvidenceLinuxArtifactAllocationOperation.Completed);
+        int? errno = allocationOperation && error is IOException { InnerException: Win32Exception native }
+            && native.NativeErrorCode is >= 1 and <= 4095 ? native.NativeErrorCode : null;
+        if (allocationOperation && operation is (EvidenceLinuxArtifactAllocationOperation.OpenFilesystemRoot
+            or EvidenceLinuxArtifactAllocationOperation.OpenParent or EvidenceLinuxArtifactAllocationOperation.CheckParentName
+            or EvidenceLinuxArtifactAllocationOperation.OpenSlot or EvidenceLinuxArtifactAllocationOperation.CheckSlotName
+            or EvidenceLinuxArtifactAllocationOperation.RecheckParentName)
+            && error is PlatformNotSupportedException { InnerException: Win32Exception unsupported }
+            && unsupported.NativeErrorCode is 1 or 22 or 38 or 95)
+            errno = unsupported.NativeErrorCode;
         return new(phase, operation, outcome, terminalCode, errorClass, errno);
     }
 
