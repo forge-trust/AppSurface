@@ -132,12 +132,20 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
         {
             throw new EvidenceAdmissionException("ASEVD402", "Protected worker authentication exceeded its admission deadline.");
         }
-        catch (EvidenceAdmissionException error) when (error.Code != "ASEVD402") { throw InvalidWorkerDescriptor(); }
+        catch (EvidenceAdmissionException error) { throw NormalizeWorkerHandshakeFailure(error); }
         catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException
-            or FormatException or OverflowException) { throw InvalidWorkerDescriptor(); }
+            or FormatException or OverflowException) { throw NormalizeWorkerHandshakeFailure(error); }
 
         return new EvidenceLinuxWorkerSupervisor(socketPath, brokerPid, descriptor, handshakeStarted, allowance);
     }
+
+    /// <summary>Preserves a host-selected channel diagnostic and normalizes malformed handshake failures.</summary>
+    /// <param name="error">Failure from the credential or bounded ready-response checks.</param>
+    /// <returns>The original ASEVD402 admission exception, or a fixed ASEVD402 with no supplied values or inner error.</returns>
+    /// <remarks>This data-only helper authenticates no peer and creates no supervisor or admission capability.</remarks>
+    internal static EvidenceAdmissionException NormalizeWorkerHandshakeFailure(Exception error) =>
+        error is EvidenceAdmissionException admission && admission.Code == "ASEVD402"
+            ? admission : InvalidWorkerDescriptor();
 
     /// <summary>Parses a closed v1/v2 descriptor as immutable data, without authenticating a peer or issuing admission.</summary>
     /// <param name="facts">Root descriptor object with actual launcher fields, including broker PID and descriptor path.</param>

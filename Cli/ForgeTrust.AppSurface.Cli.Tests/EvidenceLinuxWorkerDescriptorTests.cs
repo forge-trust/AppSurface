@@ -11,6 +11,40 @@ public sealed class EvidenceLinuxWorkerDescriptorTests
     private const string Control = "/run/closed-control/broker/control.sock";
     private static readonly DateTimeOffset Clock = DateTimeOffset.Parse("2060-01-01T00:00:00Z");
 
+    [Theory]
+    [InlineData("root-peer")]
+    [InlineData("wire-rejection")]
+    [InlineData("other-admission")]
+    [InlineData("invalid-operation")]
+    [InlineData("json")]
+    public void HandshakeFailurePreservesChannelIdentityAndSanitizesOtherWireFailures(string failure)
+    {
+        Exception original = failure switch
+        {
+            "root-peer" => new EvidenceAdmissionException("ASEVD402", "A root-owned independent supervisor is required."),
+            "wire-rejection" => new EvidenceAdmissionException("ASEVD420", Canary),
+            "other-admission" => new EvidenceAdmissionException("ASEVD410", Canary),
+            "invalid-operation" => new InvalidOperationException(Canary),
+            _ => new JsonException(Canary)
+        };
+
+        var normalized = EvidenceLinuxWorkerSupervisor.NormalizeWorkerHandshakeFailure(original);
+
+        Assert.Equal("ASEVD402", normalized.Code);
+        Assert.Null(normalized.InnerException);
+        Assert.DoesNotContain(Canary, normalized.Message, StringComparison.Ordinal);
+        if (failure == "root-peer")
+        {
+            Assert.Same(original, normalized);
+            Assert.Contains("A root-owned independent supervisor is required.", normalized.Message, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.NotSame(original, normalized);
+            Assert.Contains("The protected worker descriptor or acknowledgement is invalid.", normalized.Message, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public void ActualRootV1FieldsAndNullableOptionsParseWithoutApplicationOrAuthority()
     {
