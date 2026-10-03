@@ -4,12 +4,14 @@ using ForgeTrust.AppSurface.Evidence.Contracts;
 namespace ForgeTrust.AppSurface.Evidence.Aspire;
 
 /// <summary>
-/// Owns one consumer-composed Aspire application used only by an EvidenceHost run.
+/// Retains the legacy consumer-composed Aspire application lease for source compatibility.
 /// </summary>
 /// <remarks>
-/// Build the supplied <see cref="IDistributedApplicationBuilder"/> in test or CI composition code,
-/// then register readiness adapters from this lease with <see cref="EvidenceHostBootstrap"/>. This
-/// type does not inspect the entry assembly and must not be added to normal application startup.
+/// The public <see cref="StartAsync"/> method rejects a supplied builder with ASEVD400 before
+/// building or starting it. A preconfigured builder cannot establish authenticated admission or
+/// the root-owned restricted application lease required by <see cref="EvidenceHostBootstrap"/>.
+/// Current production application registration remains closed until its consumer proof is accepted;
+/// this compatibility API must not be added to normal application startup.
 /// </remarks>
 public sealed class EvidenceAspireApplication : IAsyncDisposable
 {
@@ -23,18 +25,19 @@ public sealed class EvidenceAspireApplication : IAsyncDisposable
     }
 
     /// <summary>
-    /// Builds and starts an explicitly supplied consumer Aspire application.
+    /// Rejects a preconfigured consumer Aspire builder before application construction.
     /// </summary>
     /// <param name="builder">Consumer-composed Aspire builder.</param>
-    /// <param name="cancellationToken">Cancellation requested while building or starting the application.</param>
-    /// <returns>An evidence-owned application lease that stops and disposes the application.</returns>
+    /// <param name="cancellationToken">Retained for source compatibility; rejection precedes application work.</param>
+    /// <returns>A faulted task containing an <see cref="EvidenceAdmissionException"/> with code ASEVD400.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="builder"/> is null.</exception>
     public static Task<EvidenceAspireApplication> StartAsync(
         IDistributedApplicationBuilder builder,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(builder);
-        // A pre-built builder may already have run arbitrary consumer configuration. The supported
-        // path accepts a factory so construction itself can be deferred until admission is active.
+        // A preconfigured builder may already have run consumer configuration. Keep this compatibility
+        // entry point closed before build or start; restricted application ownership belongs to the host.
         _ = cancellationToken;
         return Task.FromException<EvidenceAspireApplication>(
             new EvidenceAdmissionException("ASEVD400", "Use the host-owned admitted Aspire application factory."));

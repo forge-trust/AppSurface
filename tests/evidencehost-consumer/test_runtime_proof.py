@@ -1379,5 +1379,167 @@ class RootWorkspaceOperationTests(unittest.TestCase):
                 chmod.assert_not_called()
 
 
+
+class CanonicalObservationMetadataTests(unittest.TestCase):
+    """Observed Pascal metadata with synthetic Passed data only, never native proof."""
+    OBSERVED_PLAN_JSON = '{"ChangedPaths":[{"Kind":"modified","Path":"tests/evidencehost-consumer/RuntimeSubject/Program.cs","PreviousPath":null},{"Kind":"modified","Path":"tests/evidencehost-consumer/RuntimeSubject/RuntimeSubject.csproj","PreviousPath":null}],"ContractVersion":"1.0","DiffDigest":"7bb96a385e2b8110ee4f9e8b9107b7ee5f93d321845c1ab0b21f16c9423351a7","MatchedRuleIds":["conservative:runtime-observation"],"PlanDigest":"c8d3dfe89f0868ed4611c8f65f2db4651a36609a6c6f898ac2f33c6bff656542","PolicyDigest":"0e6b0ef9a1dafd3bb2d62617be38a5a3926e5b47b6a68591731d1ef9e1874366","PolicyId":"evidencehost-runtime-proof","PolicySnapshot":{"ConservativeProfileId":"runtime-observation","Id":"evidencehost-runtime-proof","Profiles":[{"Id":"runtime-observation","Obligations":[{"Id":"runtime-coverage-report-required","Rationale":"The consumer fixture must execute and return a real Cobertura coverage report.","RequiredAssertionId":"appsurface/coverage/behavioral-patch@1","RequiredProducerIds":["runtime-coverage"],"RiskClass":"runtime-boundary-proof"}],"Producers":[{"ArtifactSlots":[{"LogicalName":"coverage-report","MaximumBytes":20971520,"MediaType":"application/xml","RelativeRoot":"merged","Required":true}],"AssertionIds":["appsurface/coverage/behavioral-patch@1"],"CoverageGate":{"MinBranchPercent":0,"MinLinePercent":0,"MinPatchBranchPercent":null,"MinPatchLinePercent":null,"PatchLineMode":"measurable","TolerancePercent":0},"Id":"runtime-coverage","Kind":"coverage","RequiredResources":[],"TimeoutSeconds":120,"Version":"1.0.0"}],"Resources":[],"Scope":"Targeted"}],"Rules":[],"Version":"1"},"Profile":{"Id":"runtime-observation","Obligations":[{"Id":"runtime-coverage-report-required","Rationale":"The consumer fixture must execute and return a real Cobertura coverage report.","RequiredAssertionId":"appsurface/coverage/behavioral-patch@1","RequiredProducerIds":["runtime-coverage"],"RiskClass":"runtime-boundary-proof"}],"Producers":[{"ArtifactSlots":[{"LogicalName":"coverage-report","MaximumBytes":20971520,"MediaType":"application/xml","RelativeRoot":"merged","Required":true}],"AssertionIds":["appsurface/coverage/behavioral-patch@1"],"CoverageGate":{"MinBranchPercent":0,"MinLinePercent":0,"MinPatchBranchPercent":null,"MinPatchLinePercent":null,"PatchLineMode":"measurable","TolerancePercent":0},"Id":"runtime-coverage","Kind":"coverage","RequiredResources":[],"TimeoutSeconds":120,"Version":"1.0.0"}],"Resources":[],"Scope":"Targeted"}}'
+
+    def fixture(self):
+        plan = json.loads(self.OBSERVED_PLAN_JSON)
+        report = b'<coverage line-rate="1" branch-rate="1"><packages /></coverage>'
+        obligation = "runtime-coverage-report-required"
+        manifest = {
+            "ContractVersion": "1.0", "PlanDigest": plan["PlanDigest"],
+            "ManifestDigest": "e" * 64, "ExecutionVerdict": "Passed",
+            "Mode": "Observation", "ClaimKind": "ObservationOnly", "Eligibility": "Informational",
+            "EnvelopeStatus": "NotRequired", "ResourceResults": [],
+            "SelectedObligationIds": [obligation], "ClosedObligationIds": [obligation],
+            "UnmediatedObligationIds": [],
+            "Metrics": {"CleanupCompleted": True, "CleanupDiagnostic": None},
+            "ProducerResults": [{
+                "ProducerId": proof.PRODUCER_ID, "Outcome": "Passed", "SatisfiedAssertionIds": [proof.ASSERTION_ID],
+                "Diagnostic": None, "ElapsedMilliseconds": 1, "Artifacts": [{
+                    "LogicalName": "coverage-report", "RelativePath": "merged/coverage.cobertura.xml",
+                    "MediaType": "application/xml", "LengthBytes": len(report),
+                    "Sha256": hashlib.sha256(report).hexdigest(),
+                }],
+            }],
+        }
+        summary = {name: manifest[name] for name in
+                   ("Mode", "ClaimKind", "Eligibility", "ExecutionVerdict", "EnvelopeStatus")}
+        summary.update(Procedure="registered-protected-producer", SandboxAttestation=False)
+        return plan, manifest, summary, report
+
+    def artifacts(self, plan, manifest, summary, report):
+        return {"evidence-plan.json": json.dumps(plan).encode(),
+                "evidence-manifest.json": json.dumps(manifest).encode(),
+                "evidence-summary.json": json.dumps(summary).encode(), "coverage-report": report}
+
+    def test_observed_canonical_plan_and_synthetic_passed_metadata_are_parseable_only(self):
+        plan, manifest, summary, report = self.fixture()
+        verification = proof.verify_observation_output(self.artifacts(plan, manifest, summary, report), proof.create_policy())
+        self.assertEqual(plan["PolicySnapshot"], proof.expected_runtime_policy_snapshot(proof.create_policy()))
+        gate = plan["PolicySnapshot"]["Profiles"][0]["Producers"][0]["CoverageGate"]
+        self.assertEqual({"MinLinePercent": 0, "MinBranchPercent": 0, "MinPatchLinePercent": None,
+                          "MinPatchBranchPercent": None, "PatchLineMode": "measurable", "TolerancePercent": 0}, gate)
+        self.assertEqual(manifest, verification["manifest"])
+        self.assertEqual(hashlib.sha256(report).hexdigest(), verification["coverageReportSha256"])
+
+    def test_wrong_key_casing_is_rejected_at_each_consumed_boundary(self):
+        cases = (("plan", "PolicySnapshot"), ("plan", "Profile"), ("plan", "PlanDigest"),
+                 ("manifest", "Mode"), ("manifest", "Eligibility"), ("manifest", "EnvelopeStatus"),
+                 ("manifest", "ProducerResults"), ("manifest", "ManifestDigest"),
+                 ("summary", "Procedure"), ("summary", "Mode"), ("summary", "ExecutionVerdict"),
+                 ("metrics", "CleanupCompleted"), ("producer", "Outcome"), ("artifact", "Sha256"))
+        for container, name in cases:
+            with self.subTest(container=container, name=name):
+                plan, manifest, summary, report = self.fixture()
+                target = {"plan": plan, "manifest": manifest, "summary": summary,
+                          "metrics": manifest["Metrics"], "producer": manifest["ProducerResults"][0],
+                          "artifact": manifest["ProducerResults"][0]["Artifacts"][0]}[container]
+                target[name[0].lower() + name[1:]] = target.pop(name)
+                with self.assertRaises(proof.ProofFailure):
+                    proof.verify_observation_output(self.artifacts(plan, manifest, summary, report), proof.create_policy())
+
+    def test_full_snapshot_defaults_and_policy_content_must_match(self):
+        for field, value in (("MinPatchLinePercent", 1), ("MinPatchBranchPercent", 1),
+                             ("PatchLineMode", "codecov"), ("TolerancePercent", 0.5),
+                             ("MinLinePercent", 95), ("MinBranchPercent", 85)):
+            with self.subTest(field=field):
+                plan, manifest, summary, report = self.fixture()
+                plan["PolicySnapshot"]["Profiles"][0]["Producers"][0]["CoverageGate"][field] = value
+                with self.assertRaises(proof.ProofFailure):
+                    proof.verify_observation_output(self.artifacts(plan, manifest, summary, report), proof.create_policy())
+        for field in ("MinPatchLinePercent", "MinPatchBranchPercent", "PatchLineMode"):
+            with self.subTest(missing=field):
+                plan, manifest, summary, report = self.fixture()
+                del plan["PolicySnapshot"]["Profiles"][0]["Producers"][0]["CoverageGate"][field]
+                with self.assertRaises(proof.ProofFailure):
+                    proof.verify_observation_output(self.artifacts(plan, manifest, summary, report), proof.create_policy())
+        plan, manifest, summary, report = self.fixture()
+        policy = proof.create_policy(); policy["profiles"][0]["producers"][0]["timeoutSeconds"] += 1
+        with self.assertRaises(proof.ProofFailure):
+            proof.verify_observation_output(self.artifacts(plan, manifest, summary, report), policy)
+
+    def test_profile_resource_and_snapshot_identity_mismatches_reject(self):
+        for target, field, value in (("profile", "Id", "different"), ("profile", "Resources", [{"Id": "external"}]),
+                                    ("profile", "Scope", "Release"), ("snapshot", "Id", "different"),
+                                    ("manifest", "ResourceResults", [{"ResourceId": "external", "Outcome": "Ready"}])):
+            with self.subTest(target=target, field=field):
+                plan, manifest, summary, report = self.fixture()
+                {"profile": plan["Profile"], "snapshot": plan["PolicySnapshot"], "manifest": manifest}[target][field] = value
+                with self.assertRaises(proof.ProofFailure):
+                    proof.verify_observation_output(self.artifacts(plan, manifest, summary, report), proof.create_policy())
+
+    def test_wrong_mode_eligibility_envelope_cleanup_verdict_or_outcome_reject(self):
+        cases = (("manifest", "Mode", "Trusted"), ("manifest", "ClaimKind", "TargetedComplete"),
+                 ("manifest", "Eligibility", "PullRequestGate"), ("manifest", "EnvelopeAssertion", {"synthetic": True}),
+                 ("manifest", "envelopeAssertion", {"synthetic": True}), ("manifest", "EnvelopeStatus", "ValidatedNotAttested"),
+                 ("manifest", "ExecutionVerdict", "Incomplete"), ("metrics", "CleanupCompleted", False),
+                 ("producer", "Outcome", "Failed"), ("producer", "ProducerId", "different"),
+                 ("summary", "Eligibility", "None"), ("summary", "SandboxAttestation", True))
+        for target, field, value in cases:
+            with self.subTest(target=target, field=field):
+                plan, manifest, summary, report = self.fixture()
+                {"manifest": manifest, "metrics": manifest["Metrics"], "producer": manifest["ProducerResults"][0],
+                 "summary": summary}[target][field] = value
+                with self.assertRaises(proof.ProofFailure):
+                    proof.verify_observation_output(self.artifacts(plan, manifest, summary, report), proof.create_policy())
+
+    def test_digest_and_artifact_metadata_or_bytes_mismatches_reject(self):
+        cases = (("manifest", "PlanDigest", "a" * 64), ("manifest", "ManifestDigest", ""),
+                 ("artifact", "RelativePath", "outside/report.xml"), ("artifact", "LengthBytes", 0),
+                 ("artifact", "Sha256", "a" * 64), ("artifact", "LogicalName", "wrong"))
+        for target, field, value in cases:
+            with self.subTest(target=target, field=field):
+                plan, manifest, summary, report = self.fixture()
+                {"manifest": manifest, "artifact": manifest["ProducerResults"][0]["Artifacts"][0]}[target][field] = value
+                with self.assertRaises(proof.ProofFailure):
+                    proof.verify_observation_output(self.artifacts(plan, manifest, summary, report), proof.create_policy())
+        plan, manifest, summary, report = self.fixture()
+        with self.assertRaises(proof.ProofFailure):
+            proof.verify_observation_output(self.artifacts(plan, manifest, summary, report + b"changed"), proof.create_policy())
+        for invalid in (b"<coverage", b"<other />"):
+            with self.subTest(xml=invalid):
+                plan, manifest, summary, _ = self.fixture()
+                metadata = manifest["ProducerResults"][0]["Artifacts"][0]
+                metadata.update(LengthBytes=len(invalid), Sha256=hashlib.sha256(invalid).hexdigest())
+                with self.assertRaises(proof.ProofFailure):
+                    proof.verify_observation_output(self.artifacts(plan, manifest, summary, invalid), proof.create_policy())
+
+    def publish(self, directory, artifacts, verification):
+        proof.write_public_artifacts(
+            directory, artifacts, {"EVIDENCE_RUN_ID": "123/1", "EVIDENCE_BASE_REVISION": "a" * 40,
+            "EVIDENCE_SUBJECT_REVISION": "b" * 40, "EVIDENCE_WORKFLOW_IDENTITY": "synthetic-data-only"},
+            "b" * 40, {}, "c" * 64, json.dumps(proof.create_policy()).encode(), "d" * 64,
+            "e" * 64, "synthetic/reporter", "f" * 64, verification, "fixture", {}, {})
+
+    def test_public_record_extracts_canonical_digests_without_changing_source_bytes(self):
+        plan, manifest, summary, report = self.fixture()
+        artifacts = self.artifacts(plan, manifest, summary, report)
+        verification = proof.verify_observation_output(artifacts, proof.create_policy())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); self.publish(root, artifacts, verification)
+            record = json.loads((root / "runtime-proof.json").read_bytes())
+            self.assertEqual(plan["PlanDigest"], record["planDigest"])
+            self.assertEqual(manifest["ManifestDigest"], record["manifestDigest"])
+            self.assertFalse(record["gateEligible"])
+            self.assertEqual("none", record["admission"])
+            self.assertEqual(artifacts["evidence-plan.json"], (root / "evidence-plan.json").read_bytes())
+
+    def test_public_digest_missing_wrong_case_or_mismatch_rejects_before_writes(self):
+        for target, field, value in (("plan", "PlanDigest", None), ("manifest", "ManifestDigest", None),
+                                    ("manifest", "PlanDigest", "a" * 64)):
+            with self.subTest(target=target, field=field), tempfile.TemporaryDirectory() as directory:
+                plan, manifest, summary, report = self.fixture()
+                artifacts = self.artifacts(plan, manifest, summary, report)
+                verification = proof.verify_observation_output(artifacts, proof.create_policy())
+                document = verification[target]
+                if value is None: document[field[0].lower() + field[1:]] = document.pop(field)
+                else: document[field] = value
+                with self.assertRaises(proof.ProofFailure):
+                    self.publish(Path(directory), artifacts, verification)
+                self.assertEqual([], os.listdir(directory))
+
 if __name__ == "__main__":
     unittest.main()

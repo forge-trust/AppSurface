@@ -1654,48 +1654,106 @@ def verify_collected_structure(cli_dll: Path, artifacts: dict[str, bytes], work_
     return hashlib.sha256(stdout + stderr).hexdigest()
 
 
+def expected_runtime_policy_snapshot(policy: dict) -> dict:
+    """Map only this fixed input fixture to the current Contracts serialization shape.
+
+    This is an explicit metadata comparison, not a general serializer or digest
+    implementation. Canonical bindings are still verified by the published CLI.
+    """
+    if policy != create_policy():
+        fail("The supplied policy differs from the fixed runtime fixture.")
+    profile = policy["profiles"][0]
+    producer = profile["producers"][0]
+    slot = producer["artifactSlots"][0]
+    obligation = profile["obligations"][0]
+    gate = producer["coverageGate"]
+    return {
+        "Id": policy["id"], "Version": policy["version"],
+        "ConservativeProfileId": policy["conservativeProfileId"], "Rules": [],
+        "Profiles": [{
+            "Id": profile["id"], "Scope": profile["scope"], "Resources": [],
+            "Producers": [{
+                "Id": producer["id"], "Kind": producer["kind"], "Version": producer["version"],
+                "RequiredResources": [], "AssertionIds": list(producer["assertionIds"]),
+                "TimeoutSeconds": producer["timeoutSeconds"],
+                "ArtifactSlots": [{"LogicalName": slot["logicalName"], "RelativeRoot": slot["relativeRoot"],
+                                   "MediaType": slot["mediaType"], "Required": slot["required"],
+                                   "MaximumBytes": slot["maximumBytes"]}],
+                "CoverageGate": {"MinLinePercent": gate["minLinePercent"],
+                                 "MinBranchPercent": gate["minBranchPercent"],
+                                 "MinPatchLinePercent": None, "MinPatchBranchPercent": None,
+                                 "PatchLineMode": "measurable", "TolerancePercent": gate["tolerancePercent"]},
+            }],
+            "Obligations": [{"Id": obligation["id"], "RiskClass": obligation["riskClass"],
+                             "Rationale": obligation["rationale"],
+                             "RequiredProducerIds": list(obligation["requiredProducerIds"]),
+                             "RequiredAssertionId": obligation["requiredAssertionId"]}],
+        }],
+    }
+
+
+def canonical_output_digests(plan: dict, manifest: dict) -> tuple[str, str]:
+    """Read exact emitted digest keys before publication; never recompute canonical authority."""
+    if ("planDigest" in plan or "planDigest" in manifest or "manifestDigest" in manifest):
+        fail("Collected digest fields do not use the canonical Contracts casing.")
+    plan_digest, manifest_digest = plan.get("PlanDigest"), manifest.get("ManifestDigest")
+    if (not isinstance(plan_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", plan_digest)
+            or not isinstance(manifest_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", manifest_digest)
+            or manifest.get("PlanDigest") != plan_digest):
+        fail("The manifest does not bind the exact emitted plan and manifest digests.")
+    return plan_digest, manifest_digest
+
+
 def verify_observation_output(artifacts: dict[str, bytes], policy: dict) -> dict:
+    """Check current canonical Observation metadata; structural verification remains separate."""
     plan = load_json_artifact(artifacts, "evidence-plan.json")
     manifest = load_json_artifact(artifacts, "evidence-manifest.json")
     summary = load_json_artifact(artifacts, "evidence-summary.json")
-    if plan.get("policySnapshot") != policy:
+    expected_policy = expected_runtime_policy_snapshot(policy)
+    if plan.get("PolicySnapshot") != expected_policy:
         fail("The immutable plan policy snapshot differs from the policy supplied to the launcher.")
-    if plan.get("profile", {}).get("id") != PROFILE_ID:
+    if plan.get("Profile", {}).get("Id") != PROFILE_ID:
         fail("The protected plan did not select the dependency-free Observation profile.")
-    if plan.get("profile", {}).get("resources") != []:
+    if plan.get("Profile", {}).get("Resources") != [] or manifest.get("ResourceResults") != []:
         fail("The Observation profile unexpectedly selected an external resource.")
-    if manifest.get("planDigest") != plan.get("planDigest") or not plan.get("planDigest"):
-        fail("The manifest does not bind the exact emitted plan digest.")
-    if manifest.get("mode", "").casefold() != "observation":
+    if plan["Profile"] != expected_policy["Profiles"][0]:
+        fail("The selected profile differs from the fixed canonical policy profile.")
+    canonical_output_digests(plan, manifest)
+    if manifest.get("Mode") != "Observation":
         fail("The production manifest does not record Observation mode.")
-    if manifest.get("claimKind", "").casefold() != "observationonly":
+    if manifest.get("ClaimKind") != "ObservationOnly":
         fail("The production manifest does not record an ObservationOnly claim.")
-    if manifest.get("eligibility", "").casefold() != "informational":
+    if manifest.get("Eligibility") != "Informational":
         fail("The Observation manifest is not explicitly informational and gate-ineligible.")
-    if manifest.get("envelopeAssertion") is not None:
+    if ("envelopeAssertion" in manifest or manifest.get("EnvelopeAssertion") is not None
+            or manifest.get("EnvelopeStatus") != "NotRequired"):
         fail("Observation unexpectedly contains a protected Trusted envelope assertion.")
-    if manifest.get("metrics", {}).get("cleanupCompleted") is not True:
+    if manifest.get("Metrics", {}).get("CleanupCompleted") is not True:
         fail("The production manifest does not confirm completed cleanup.")
-    if summary.get("mode", "").casefold() != "observation" or summary.get("eligibility", "").casefold() != "informational":
+    if (manifest.get("ExecutionVerdict") != "Passed"
+            or any(summary.get(name) != manifest.get(name) for name in
+                   ("Mode", "Eligibility", "ClaimKind", "ExecutionVerdict", "EnvelopeStatus"))
+            or summary.get("Procedure") != "registered-protected-producer"
+            or summary.get("SandboxAttestation") is not False):
         fail("The final summary does not preserve the Observation gate-ineligible status.")
 
     producer = next(
-        (item for item in manifest.get("producerResults", []) if item.get("producerId") == PRODUCER_ID),
+        (item for item in manifest.get("ProducerResults", []) if item.get("ProducerId") == PRODUCER_ID),
         None,
     )
-    if producer is None or producer.get("outcome", "").casefold() != "passed":
+    if producer is None or producer.get("Outcome") != "Passed":
         fail("The required production coverage producer did not pass.")
     report_metadata = next(
-        (item for item in producer.get("artifacts", []) if item.get("logicalName") == "coverage-report"),
+        (item for item in producer.get("Artifacts", []) if item.get("LogicalName") == "coverage-report"),
         None,
     )
     report = artifacts["coverage-report"]
     if report_metadata is None:
         fail("The manifest omits its required Cobertura artifact metadata.")
     report_hash = hashlib.sha256(report).hexdigest()
-    if report_metadata.get("relativePath") != "merged/coverage.cobertura.xml":
+    if report_metadata.get("RelativePath") != "merged/coverage.cobertura.xml":
         fail("The required coverage report has an unexpected manifest path.")
-    if report_metadata.get("lengthBytes") != len(report) or report_metadata.get("sha256") != report_hash:
+    if report_metadata.get("LengthBytes") != len(report) or report_metadata.get("Sha256") != report_hash:
         fail("The required coverage report bytes do not match the manifest metadata.")
     try:
         report_root = ET.fromstring(report)
@@ -1721,6 +1779,7 @@ def write_public_artifacts(
     build_log_hash: str, verification: dict, observation_slot: str, mechanism_results: dict[str, str],
     staged_subject_hashes: dict[str, str],
 ) -> None:
+    plan_digest, manifest_digest = canonical_output_digests(verification["plan"], verification["manifest"])
     file_map = {
         "evidence-plan.json": "evidence-plan.json",
         "evidence-manifest.json": "evidence-manifest.json",
@@ -1756,8 +1815,8 @@ def write_public_artifacts(
         "stagedSubjectManifestSha256": hashlib.sha256(
             json.dumps(staged_subject_hashes, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
         "policySha256": hashlib.sha256(policy_bytes).hexdigest(),
-        "planDigest": verification["plan"].get("planDigest"),
-        "manifestDigest": verification["manifest"].get("manifestDigest"),
+        "planDigest": plan_digest,
+        "manifestDigest": manifest_digest,
         "policySnapshotMatches": True,
         "coverageReport": {
             "path": "coverage.cobertura.xml",
