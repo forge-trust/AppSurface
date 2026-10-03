@@ -482,9 +482,10 @@ public sealed class PostgreSqlSchemaIntegrationTests
         Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, (await manager.GetStatusAsync()).Compatibility);
 
         await blockerTransaction.RollbackAsync();
-        var retried = await manager.ApplyAsync();
+        var retryManager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource, [delayedMigration]);
+        var retried = await retryManager.ApplyAsync();
         Assert.Equal([1], retried.AppliedVersions);
-        Assert.True((await manager.GetStatusAsync()).IsCompatible);
+        Assert.True((await retryManager.GetStatusAsync()).IsCompatible);
     }
 
     [Fact]
