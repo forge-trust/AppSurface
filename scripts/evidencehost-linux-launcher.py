@@ -107,6 +107,7 @@ APPLICATION_SCHEMA = "evidence-worker-linux-v2"
 FAILURE_DIAGNOSTIC_SCHEMA = "evidence-launcher-failure-v1"
 FAILURE_DIAGNOSTIC_FILE = "launcher-failure.json"
 FAILURE_DIAGNOSTIC_LIMIT = 4096
+WORKER_JOURNAL_LIMIT = 16 * 1024
 WORKER_JOURNAL_FILE = "launcher-worker-journal.log"
 WORKER_JOURNAL_SECONDS = 5
 WORKER_JOURNAL_CODES = frozenset({"ASEVD211", "ASEVD401", "ASEVD402", "ASEVD403", "ASEVD404",
@@ -238,7 +239,7 @@ def failure_diagnostic(error: Exception) -> dict:
             record["worker_journal_state"] = journal["worker_journal_state"]
         if type(journal.get("worker_journal_written")) is bool:
             record["worker_journal_written"] = journal["worker_journal_written"]
-        if type(journal.get("worker_journal_bytes")) is int and 0 <= journal["worker_journal_bytes"] <= FAILURE_DIAGNOSTIC_LIMIT:
+        if type(journal.get("worker_journal_bytes")) is int and 0 <= journal["worker_journal_bytes"] <= WORKER_JOURNAL_LIMIT:
             record["worker_journal_bytes"] = journal["worker_journal_bytes"]
         codes = journal.get("worker_journal_codes")
         if (isinstance(codes, list) and len(codes) <= len(WORKER_JOURNAL_CODES)
@@ -259,7 +260,7 @@ def worker_exit_failure(cause: str, properties: dict[str, str]) -> LauncherError
 
 
 def _read_worker_journal(unit: str) -> tuple[str, bytes]:
-    """Read only a generated worker unit, with a combined five-second/4096-byte bound.
+    """Read only a generated worker unit, with a combined five-second/16-KiB raw-byte bound.
 
     stderr is discarded. Reaping gets the final half-second of the same deadline;
     a full prefix is conservatively marked truncated without reading another byte.
@@ -272,7 +273,7 @@ def _read_worker_journal(unit: str) -> tuple[str, bytes]:
     process = None
     try:
         process = subprocess.Popen(
-            ["/usr/bin/journalctl", "--unit=" + unit, "--no-pager", "--output=cat", "--quiet", "--lines=32"],
+            ["/usr/bin/journalctl", "--unit=" + unit, "--no-pager", "--output=cat", "--quiet", "--lines=256"],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             env=ENV, cwd="/", close_fds=True)
         os.set_blocking(process.stdout.fileno(), False)
@@ -284,13 +285,13 @@ def _read_worker_journal(unit: str) -> tuple[str, bytes]:
                     break
                 if not selector.select(remaining):
                     break
-                part = os.read(process.stdout.fileno(), FAILURE_DIAGNOSTIC_LIMIT - len(data))
+                part = os.read(process.stdout.fileno(), WORKER_JOURNAL_LIMIT - len(data))
                 if not part:
                     code = process.wait(timeout=max(0.001, deadline - time.monotonic()))
                     state = ("collected" if data else "missing") if code == 0 else "unavailable"
                     break
                 data.extend(part)
-                if len(data) == FAILURE_DIAGNOSTIC_LIMIT:
+                if len(data) == WORKER_JOURNAL_LIMIT:
                     state = "truncated"
                     break
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -329,7 +330,7 @@ def capture_worker_protocol_failure(error: LauncherError, broker: Broker, direct
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
             return
         state, data = _read_worker_journal(broker.unit_prefix + "-worker.service")
-        if not isinstance(data, bytes) or len(data) > FAILURE_DIAGNOSTIC_LIMIT:
+        if not isinstance(data, bytes) or len(data) > WORKER_JOURNAL_LIMIT:
             return
         error.worker_journal.update({
             "worker_journal_state": state if isinstance(state, str) and state in WORKER_JOURNAL_STATES else "unavailable",
@@ -395,7 +396,7 @@ def validate_failure_diagnostic(record: object) -> dict:
         for name in (*BROKER_DIAGNOSTIC_BOOLEANS, "worker_journal_written"):
             if name in record and type(record[name]) is not bool:
                 raise LauncherError("invalid-private-diagnostic")
-        for name, maximum in {**BROKER_DIAGNOSTIC_COUNTS, "worker_journal_bytes": FAILURE_DIAGNOSTIC_LIMIT}.items():
+        for name, maximum in {**BROKER_DIAGNOSTIC_COUNTS, "worker_journal_bytes": WORKER_JOURNAL_LIMIT}.items():
             if name in record and (type(record[name]) is not int or not 0 <= record[name] <= maximum):
                 raise LauncherError("invalid-private-diagnostic")
         if "worker_journal_state" in record and (not isinstance(record["worker_journal_state"], str)

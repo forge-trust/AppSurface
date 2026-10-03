@@ -126,6 +126,42 @@ class DiagnosticDataControls(unittest.TestCase):
         self.assertNotIn(canary, raw)
         self.assertEqual(hashlib.sha256(raw).hexdigest(), digest)
 
+    def test_raw_worker_journal_16k_and_closed_json_4k_are_independent_private_limits(self):
+        workspace, output = self.roots()
+        prefix = b"fatal-header-test-canary\n" + b"managed-stack-frame\n" * 64
+        self.assertNotIn(b"fatal-header-test-canary", b"".join(prefix.splitlines(keepends=True)[-32:]))
+        raw = prefix + b"x" * (16*1024 - len(prefix))
+        journal = self.write(workspace, "failure-cli/launcher-worker-journal.log", raw)
+        safe_json = b"{}" + b" " * (4096 - 2)
+        self.write(workspace, "failure-cli/launcher-failure.json", safe_json)
+        self.write(workspace, "failure-cli/unknown-worker-journal.log", b"unknown-canary")
+        console = io.StringIO()
+        with redirect_stdout(console), redirect_stderr(console):
+            self.retain(workspace, output)
+        self.assertEqual("", console.getvalue())
+        self.assertEqual(0o600, stat.S_IMODE(journal.stat().st_mode))
+        self.assertEqual(0o700, stat.S_IMODE(journal.parent.stat().st_mode))
+        _, contents, index = self.archive(output)
+        self.assertEqual({"index.json", "failure-cli/launcher-worker-journal.log", "failure-cli/launcher-failure.json"}, set(contents))
+        self.assertEqual(raw, contents["failure-cli/launcher-worker-journal.log"])
+        self.assertEqual(safe_json, contents["failure-cli/launcher-failure.json"])
+        self.assertEqual({4096, 16384}, {item["retained_length"] for item in index})
+
+    def test_worker_journal_selected_links_and_public_mode_cannot_be_retained(self):
+        for shape in ("symlink", "hardlink", "public-mode"):
+            with self.subTest(shape=shape):
+                workspace, output = self.roots()
+                outside = self.write(workspace, "outside-journal", b"outside-journal-canary")
+                journal = self.write(workspace, "failure-host/launcher-worker-journal.log", b"private-journal")
+                if shape == "public-mode":
+                    journal.chmod(0o644)
+                else:
+                    journal.unlink()
+                    if shape == "symlink": journal.symlink_to(outside)
+                    else: os.link(outside, journal)
+                self.reject_without_archive(workspace, output, OSError if shape == "symlink" else module.PreparationFailure)
+                self.assertEqual(b"outside-journal-canary", outside.read_bytes())
+
     def test_selected_links_modes_and_wrong_owner_reject_before_archive(self):
         for shape in ("symlink", "hardlink", "file-mode", "directory-mode", "directory-link", "wrong-owner"):
             with self.subTest(shape=shape):
@@ -181,7 +217,7 @@ class DiagnosticDataControls(unittest.TestCase):
     def test_complete_file_bounds_index_oversize_and_aggregate_bound_rejects(self):
         workspace, output = self.roots()
         limits = {"build-binding.json": 1024*1024, "build-logs/command-01.json": 16*1024,
-                  "failure-cli/launcher-failure.json": 4096, "failure-host/launcher-worker-journal.log": 4096,
+                  "failure-cli/launcher-failure.json": 4096, "failure-host/launcher-worker-journal.log": 16*1024,
                   "failure-cli/subject-failure-output/stdout.prefix": 519168,
                   "failure-host/subject-failure-output/stderr.prefix": 519168,
                   "collected-cli/evidence-plan.json": 128*1024, "collected-host/manifest.json": 128*1024}

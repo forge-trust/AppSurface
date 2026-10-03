@@ -102,3 +102,28 @@ no synthetic object is counted as a protected positive completion.
 
 No tests have run at source-ready. These prepared controls make no root/native,
 owned-exit, producer, consumer, qualification or gate claim.
+
+## Private worker fatal-journal diagnostics
+
+The [private launcher](../../../scripts/evidencehost-linux-launcher.py) queries only
+its root-generated worker unit with `journalctl --lines=256`, retaining a prefix
+of at most 16 KiB within the existing five-second read/reap bound. A full prefix
+is marked truncated. This widens preceding stack context; it does not guarantee
+that an initiating fatal message survives every long journal or identify its cause.
+
+`WORKER_JOURNAL_LIMIT` is separate from the unchanged 4 KiB
+`FAILURE_DIAGNOSTIC_LIMIT` for safe failure JSON. Raw journal bytes stay in the
+exclusive no-follow `0600` journal file beneath the protected diagnostic directory;
+only bounded byte counts, states and allowlisted ASEVD tokens enter the closed JSON.
+Raw content and tokens are diagnostic observations, never admission or gate authority.
+The [private archive controller](run-qualification.py) selects only the fixed journal
+filename with the same 16 KiB limit, retaining existing ownership, no-follow,
+identity, five-second archive and total-size checks.
+
+Prepared [launcher controls](../test_linux_launcher.py) use a bounded real-pipe
+writer and model journal tail selection to retain a header more than 32 lines back.
+[Archive controls](test_diagnostics.py) check separate raw/JSON limits, fixed names,
+private modes and link rejection. These changes are private diagnostic preparation;
+no new tests or native execution have run for this fork at source-ready. They do not
+change the original failure/status, execution caps, lifecycle or accepted proof.
+Qualification outputs remain `None`/`None`; production registries stay empty.
