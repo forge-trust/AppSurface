@@ -249,5 +249,82 @@ class PreparationDataControls(unittest.TestCase):
         self.assert_rejected(lambda: prepare.bundle_inventory(root))
 
 
+    def test_seal_subject_tree_normalizes_archive_modes_without_changing_bytes(self):
+        subject = self.root / "archive-subject"
+        directories = [subject, subject / "tests", subject / "calculation",
+                       subject / "calculation" / "nested"]
+        for directory in directories:
+            directory.mkdir(exist_ok=True)
+            os.chmod(directory, 0o775)
+        contents = {
+            subject / "QualificationSubject.csproj": b"inert project metadata\n",
+            subject / "tests" / "QualificationSubjectTests.cs": b"inert test source\n",
+            subject / "calculation" / "nested" / "input.txt": b"unchanged\x00bytes\n",
+        }
+        for file, content in contents.items():
+            file.write_bytes(content)
+            os.chmod(file, 0o664)
+        for directory in directories:
+            self.assertEqual(0o775, stat.S_IMODE(directory.lstat().st_mode))
+        for file in contents:
+            self.assertEqual(0o664, stat.S_IMODE(file.lstat().st_mode))
+        try:
+            prepare.seal_subject_tree(subject)
+            for directory in directories:
+                self.assertEqual(0o555, stat.S_IMODE(directory.lstat().st_mode))
+            for file, content in contents.items():
+                self.assertEqual(0o444, stat.S_IMODE(file.lstat().st_mode))
+                self.assertEqual(content, file.read_bytes())
+        finally:
+            # Restore only our known directories/files so temporary cleanup can unlink them.
+            for directory in directories:
+                os.chmod(directory, 0o700)
+            for file in contents:
+                os.chmod(file, 0o600)
+
+    def test_seal_subject_tree_rejects_unsafe_entries_before_any_permission_change(self):
+        for shape in ("root-link", "file-link", "directory-link", "hardlink", "fifo"):
+            with self.subTest(shape=shape):
+                case = self.root / shape
+                case.mkdir()
+                subject = case / "subject"
+                subject.mkdir()
+                nested = subject / "nested"
+                nested.mkdir()
+                outside = case / "outside"
+                outside.mkdir()
+                owned = subject / "a-owned.txt"
+                owned.write_bytes(b"owned file must remain unchanged")
+                canary = outside / "canary.txt"
+                canary.write_bytes(b"outside canary must remain unchanged")
+                for directory in (subject, nested, outside):
+                    os.chmod(directory, 0o775)
+                for file in (owned, canary):
+                    os.chmod(file, 0o664)
+                candidate = subject
+                unsafe = subject / "z-unsafe"
+                if shape == "root-link":
+                    candidate = case / "subject-link"
+                    candidate.symlink_to(subject, target_is_directory=True)
+                elif shape == "file-link":
+                    unsafe.symlink_to(canary)
+                elif shape == "directory-link":
+                    unsafe.symlink_to(outside, target_is_directory=True)
+                elif shape == "hardlink":
+                    os.link(owned, unsafe)
+                else:
+                    os.mkfifo(unsafe)
+                original_chmod = os.chmod
+                with patch.object(prepare.os, "chmod", wraps=original_chmod) as chmod:
+                    self.assert_rejected(lambda: prepare.seal_subject_tree(candidate))
+                chmod.assert_not_called()
+                for directory in (subject, nested, outside):
+                    self.assertEqual(0o775, stat.S_IMODE(directory.lstat().st_mode))
+                for file in (owned, canary):
+                    self.assertEqual(0o664, stat.S_IMODE(file.lstat().st_mode))
+                self.assertEqual(b"owned file must remain unchanged", owned.read_bytes())
+                self.assertEqual(b"outside canary must remain unchanged", canary.read_bytes())
+
+
 if __name__ == "__main__":
     unittest.main()

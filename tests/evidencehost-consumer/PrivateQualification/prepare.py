@@ -224,6 +224,31 @@ def bundle_inventory(bundle):
     return result
 
 
+def seal_subject_tree(subject):
+    """Seal the trusted copied snapshot before its protected preflight.
+
+    Git tar entries can carry group-write bits even though the checked-out
+    sources are read-only to untrusted accounts. Remove those bits explicitly;
+    the later root preflight still verifies ownership and every frozen byte.
+    This helper evaluates no project, package, test, or subject command.
+    """
+    require(subject.is_dir() and not subject.is_symlink())
+    paths = list(subject.rglob("*"))
+    for path in paths:
+        info = path.lstat()
+        require(not stat.S_ISLNK(info.st_mode)
+                and (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)))
+        if stat.S_ISREG(info.st_mode):
+            require(info.st_nlink == 1)
+    for path in paths:
+        if path.is_file():
+            os.chmod(path, 0o444)
+    for path in reversed(paths):
+        if path.is_dir():
+            os.chmod(path, 0o555)
+    os.chmod(subject, 0o555)
+
+
 def expand(template, replacements):
     value = template.read_text()
     for marker, replacement in replacements.items():
@@ -284,6 +309,7 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
         path = build / name
         if path.exists():
             shutil.copy2(path, subject / name)
+    seal_subject_tree(subject)
     subject_map = {p.relative_to(subject).as_posix(): sha(p.read_bytes()) for p in sorted(subject.rglob("*")) if p.is_file()}
     subject_revision = sha(json.dumps(subject_map, sort_keys=True, separators=(",", ":")).encode())
     replacements = {"__QUALIFICATION_RUN_ID__": run_id, "__QUALIFICATION_WORKFLOW_IDENTITY__": workflow_identity,

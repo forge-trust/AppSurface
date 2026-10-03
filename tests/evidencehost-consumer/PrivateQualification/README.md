@@ -60,6 +60,12 @@ changes cannot alter the separately pinned deployment copy. Each trusted build c
 process group, disabled server reuse, finite kill/reap/group-absence checks and an exclusive durable command
 receipt. Nonzero exits, oversized logs, expired deadlines and incomplete ownership remain failures.
 
+The copied subject snapshot is separately sealed to `0555` directories and `0444` files before immutable
+preflight. Git tar entries may carry `0775`/`0664` modes; copying those modes does not satisfy the protected
+snapshot's no-write requirement. Sealing changes no bytes and evaluates no subject project. The launcher
+later creates its independently owned writable subject copy only inside the armed run. The subject revision
+remains the separately bound SHA256 tree identifier; it is not represented as an invented Git commit.
+
 [`run-qualification.py`](run-qualification.py) calls the actual launcher's `launch_with_completion` for both
 entries, passing the compiled profile/application/entry selection and one 900-second deadline per fresh run.
 Admission/start/collection/cleanup/stopping allowances are 30/120/60/60/5 seconds; resource readiness is
@@ -78,7 +84,7 @@ matching report bytes and closed obligations while forcing `ClaimKind=None` and 
 
 The root controller emits only a fixed terminal category. Its private archive selects fixed root-owned,
 single-link `0600` files beneath retained `0700` diagnostic directories. It includes bounded build/verifier
-command receipts, at most 16 KiB per log tail, bounded launcher journal and subject prefixes, and complete
+command receipts, closed early import/tool/subject preflight stages, at most 16 KiB per log tail, bounded launcher journal and subject prefixes, and complete
 small collected plan/manifest/report copies. The index distinguishes tails, complete files and oversized
 omissions; capture failure cannot change the original execution result. Archive data is canonical USTAR,
 at most 4 MiB with 3 MiB retained payload, copied to a runner `0700` directory with `0600` files. It supplies
