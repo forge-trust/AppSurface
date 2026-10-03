@@ -102,34 +102,77 @@ class PrivateFailureDiagnosticTests(unittest.TestCase):
             def __init__(self, data, code):
                 read_fd, write_fd = os.pipe()
                 self.stdout = os.fdopen(read_fd, "rb")
-                os.write(write_fd, data)
-                os.close(write_fd)
+                os.set_blocking(write_fd, False)
                 self.code = code
                 self.killed = False
+                self.stop_writer = threading.Event()
+                self.writer_errors = []
+
+                def write():
+                    offset = 0
+                    deadline = time.monotonic() + 5
+                    try:
+                        while offset < len(data) and not self.stop_writer.is_set():
+                            if time.monotonic() >= deadline:
+                                self.writer_errors.append("writer-deadline")
+                                break
+                            try:
+                                offset += os.write(write_fd, data[offset:])
+                            except BlockingIOError:
+                                self.stop_writer.wait(0.01)
+                            except BrokenPipeError:
+                                break
+                    finally:
+                        os.close(write_fd)
+
+                self.writer = threading.Thread(target=write, daemon=True)
+                self.writer.start()
 
             def wait(self, timeout):
                 self.timeout = timeout
+                self.writer.join(timeout)
+                if self.writer.is_alive():
+                    raise launcher.subprocess.TimeoutExpired("journal-fixture", timeout)
                 return self.code
 
             def poll(self):
-                return self.code
+                return None if self.writer.is_alive() else self.code
 
             def kill(self):
                 self.killed = True
+                self.stop_writer.set()
 
         unit = "evidencehost-012345abcdef-worker.service"
         for data, code, expected in ((b"ASEVD402: secret-779\n", 0, "collected"),
                                      (b"", 0, "missing"), (b"", 1, "unavailable"),
-                                     (b"x" * 4097, 0, "truncated")):
+                                     (b"x" * 16385, 0, "truncated"),
+                                     (b"fatal-header-test-canary\n" + b"managed-stack-frame\n" * 64, 0, "collected")):
             with self.subTest(expected=expected):
-                process = JournalProcess(data, code)
-                with patch.object(launcher.subprocess, "Popen", return_value=process) as spawn:
-                    state, received = launcher._read_worker_journal(unit)
+                processes = []
+                def start(argv, **kwargs):
+                    del kwargs
+                    lines = int(argv[-1].split("=")[1])
+                    process = JournalProcess(b"".join(data.splitlines(keepends=True)[-lines:]), code)
+                    processes.append(process)
+                    return process
+                try:
+                    with patch.object(launcher.subprocess, "Popen", side_effect=start) as spawn:
+                        state, received = launcher._read_worker_journal(unit)
+                finally:
+                    for process in processes:
+                        process.kill()
+                        process.writer.join(1)
+                        if not process.stdout.closed:
+                            process.stdout.close()
+                self.assertEqual(1, len(processes))
+                process = processes[0]
+                self.assertFalse(process.writer.is_alive())
+                self.assertEqual([], process.writer_errors)
                 self.assertEqual(state, expected)
-                self.assertEqual(received, data[:4096])
+                self.assertEqual(received, data[:16384])
                 self.assertLessEqual(process.timeout, 5)
                 self.assertEqual(spawn.call_args.args[0], ["/usr/bin/journalctl", "--unit=" + unit,
-                    "--no-pager", "--output=cat", "--quiet", "--lines=32"])
+                    "--no-pager", "--output=cat", "--quiet", "--lines=256"])
                 self.assertEqual(spawn.call_args.kwargs["stderr"], launcher.subprocess.DEVNULL)
                 self.assertTrue(process.stdout.closed)
         with patch.object(launcher.subprocess, "Popen") as spawn:
@@ -168,6 +211,8 @@ class PrivateFailureDiagnosticTests(unittest.TestCase):
             fd = launcher.open_diagnostic_directory(parent, expected_owner_uid=os.geteuid())
             error = launcher.worker_exit_failure("worker-protocol-incomplete", {"ExecMainCode": "1", "ExecMainStatus": "1"})
             raw = b"secret-779 ASEVD402: control\nASEVD999: unknown\nXASEVD420: fake\nASEVD402: duplicate\n"
+            raw += b"x" * (launcher.WORKER_JOURNAL_LIMIT - len(raw))
+            self.assertEqual((4096, 16384), (launcher.FAILURE_DIAGNOSTIC_LIMIT, len(raw)))
             try:
                 with patch.object(launcher.os, "fstat", return_value=SimpleNamespace(st_mode=stat.S_IFDIR | 0o700, st_uid=0)), \
                      patch.object(launcher, "_read_worker_journal", return_value=("collected", raw)) as query:
@@ -187,7 +232,9 @@ class PrivateFailureDiagnosticTests(unittest.TestCase):
                 self.assertEqual(private.read_bytes(), raw)
                 self.assertEqual(stat.S_IMODE(private.stat().st_mode), 0o600)
                 launcher.write_failure_diagnostic(fd, error)
-                self.assertNotIn(b"secret-779", (parent / launcher.FAILURE_DIAGNOSTIC_FILE).read_bytes())
+                safe_json = (parent / launcher.FAILURE_DIAGNOSTIC_FILE).read_bytes()
+                self.assertNotIn(b"secret-779", safe_json)
+                self.assertLessEqual(len(safe_json), launcher.FAILURE_DIAGNOSTIC_LIMIT)
             finally:
                 os.close(fd)
                 broker.active_handlers = broker.active_runs = 0
@@ -209,7 +256,7 @@ class PrivateFailureDiagnosticTests(unittest.TestCase):
                 fd = launcher.open_diagnostic_directory(parent, expected_owner_uid=os.geteuid())
                 error = launcher.worker_exit_failure("worker-protocol-incomplete", {"ExecMainCode": "1", "ExecMainStatus": "1"})
                 try:
-                    result = ("missing", b"") if condition == "missing" else ("collected", b"x" * (4097 if condition == "oversize" else 4))
+                    result = ("missing", b"") if condition == "missing" else ("collected", b"x" * (16385 if condition == "oversize" else 4))
                     with patch.object(launcher.os, "fstat", return_value=SimpleNamespace(
                             st_mode=stat.S_IFDIR | (0o777 if condition == "unprotected" else 0o700), st_uid=0)), \
                          patch.object(launcher, "_read_worker_journal", return_value=result,
@@ -241,7 +288,7 @@ class PrivateFailureDiagnosticTests(unittest.TestCase):
                 self.assertNotIn("worker_journal_state", good)
                 for extra in ({"broker_ready_seen": 1}, {"broker_active_handlers": True},
                               {"broker_active_handlers": 4097}, {"broker_active_runs": 2},
-                              {"worker_journal_bytes": 4097}, {"worker_journal_written": 1},
+                              {"worker_journal_bytes": 16385}, {"worker_journal_written": 1},
                               {"worker_journal_state": ["secret-779"]}, {"worker_journal_codes": ["ASEVD999"]},
                               {"worker_journal_codes": [["secret-779"]]}, {"cause": "worker-timeout"}):
                     with self.subTest(extra=extra), self.assertRaises(launcher.LauncherError):
