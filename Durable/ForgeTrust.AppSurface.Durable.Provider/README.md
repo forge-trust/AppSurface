@@ -15,7 +15,9 @@ adopter package never depends on Provider. Production providers implement this p
 - adapting a provider claim to an adopter-registered Work executor.
 
 Ordinary applications and reusable modules should reference only `ForgeTrust.AppSurface.Durable`. This package does not
-provide PostgreSQL storage, migrations, polling, schedule execution, hosted services, endpoints, metrics, or tracing.
+provide PostgreSQL storage, migrations, polling, schedule execution, hosted services, endpoints, metrics, an OpenTelemetry
+SDK, or export configuration. Its external-activation service emits a bounded activity through the shared
+`ActivitySource`; hosts own listening, sampling, processing, and export.
 
 ## Slice 7 discovery boundary
 
@@ -34,6 +36,12 @@ flow is documented in the [Slice 7 Durable guide](../README.md#slice-7-discovery
 `IDurableRuntimePump` is the common bounded activation primitive for a continuously hosted loop, scheduled job,
 function, HTTP wake-up, or broker notification. A wake-up is advisory: implementations must recover eligible work from
 their authoritative state even when notifications are lost, duplicated, delayed, or reordered.
+
+For a generic external wake host that needs a separate request budget, health observation, one admission call, closed
+safe outcomes, and standard activation activity tags, use
+[`IDurableExternalActivationService`](../external-activation-v1.md) and register it with
+`AddDurableExternalActivation()`. The extension is passive: it maps no endpoint and starts no pump or background loop.
+Keep authentication, payload rejection, HTTP status/body mapping, deployment enablement, and probe choice in the host.
 
 Do not translate broker receipt into a claim, effect permit, or terminal fact. A wake-only adapter must call the pump
 without carrying application payloads. A future targeted-dispatch or broker-native provider must revalidate its opaque
@@ -60,8 +68,11 @@ runtimeControlPlaneReady = health.IsReady;
 // health.CanAttemptPump may inform display/backoff, but admission remains the authority.
 ```
 
-External activators should resolve `IDurableRuntimePumpAdmission` and call `TryRunOnceAsync` directly. Handle every
-`DurableRuntimePumpAttemptKind` in an exhaustive switch:
+Direct admission remains available to existing callers and to provider-focused integrations that intentionally own the
+lower-level four-kind result mapping. A new cross-host wake endpoint should use the external activation service so its
+request deadline, health precheck, activity, and ten-outcome mapping do not have to be reconstructed in each transport.
+When a caller deliberately uses `IDurableRuntimePumpAdmission`, handle every `DurableRuntimePumpAttemptKind` in an
+exhaustive switch:
 
 | Kind | Result | Execution certainty |
 | --- | --- | --- |
@@ -89,6 +100,7 @@ Every public type in this package belongs to one of these provider-facing famili
 | Application-authorized operator implementers | Operator outcome/resolution/result/request types and `IDurableWorkOperatorClient` | Reconcile, resolve, safely retry, or recovery-release suspended Work |
 | Application-authorized retention implementers | `IDurableFlowRetentionClient`, bounded assessment/manifest/package/receipt/hold/purge types | Prove one exact terminal Flow source set before a separately authorized purge |
 | Flow-repair operator implementers | `IFlowRepairOperatorClient`, repair request/evidence/assessment/result/receipt types | Inspect and repair only the two evidence-backed child-effect assertions |
+| External-activation hosts | `DurableExternalActivationRequest`, `DurableExternalActivationOutcomeKind`, `DurableExternalActivationResult`, `IDurableExternalActivationService`, `DurableExternalActivationServiceCollectionExtensions` | Attempt one externally requested pass with explicit cooperative budget, validated results, and bounded activity evidence; the host retains transport and policy |
 
 The SPI accepts and returns public Durable identifiers and command fingerprints. Collection results defensively copy
 inputs, default identifiers are rejected, timestamps normalize to UTC, page sizes are bounded, and every mutation uses
@@ -197,7 +209,11 @@ PostgreSQL provider supplies Work, Flow, Schedule, hosted activation, drain/reco
 conformance; the review checklist remains the prerelease publication gate.
 
 See the [`ASDURxxx` diagnostics catalog](../../troubleshooting/durable-diagnostics.md) for currently available contract,
-PostgreSQL Work, and hosted-runtime codes.
+PostgreSQL Work, hosted-runtime, and external-activation codes. The canonical
+[external activation reference](../external-activation-v1.md) owns the result, cancellation, recovery, and telemetry
+contract; the PostgreSQL
+[external wake-host guidance](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md#external-activation-host) covers the
+provider boundary.
 
 From the repository root, `./Durable/verify-packed-consumers.sh` packs the three public-preview packages and their local
 dependencies, then compiles and runs isolated adopter and provider consumers against only those packages.

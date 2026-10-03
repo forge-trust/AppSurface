@@ -2081,4 +2081,300 @@ class FreshResultsOwnershipControls(unittest.TestCase):
         self.exercise(chown_error=True)
 
 
+class SubjectFailurePrefixControls(unittest.TestCase):
+    """Real pipes/FDs with portable ownership, never a root execution lease."""
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name).resolve()
+        self.broker, _, _ = artifact_broker(self.root)
+        self.broker.subject_root = self.broker.scratch = self.root
+        self.broker.descriptor = {"cgroup": "/system.slice/test-evidence-worker.service"}
+        self.addCleanup(self.broker.close_artifact_handles)
+        self.directory = self.root / "diagnostics"
+        self.directory.mkdir(mode=0o700)
+        self.fd = os.open(self.directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        self.addCleanup(os.close, self.fd)
+
+    def run_command(self, status=1, stdout=b"out\x00\xff", stderr=b"secret-canary\xfe", *, failure=None):
+        events = []
+        process = SimpleNamespace(stdout=io.BytesIO(stdout), stderr=io.BytesIO(stderr), returncode=None)
+        if failure == "pump":
+            process.stderr = SubjectOutputPumpTests.Reads(stderr, OSError("private-read-canary"))
+
+        def wait(timeout=None):
+            self.assertIn("stop", events)
+            events.append("wait")
+            if failure == "wait":
+                raise launcher.subprocess.TimeoutExpired("private-command", timeout)
+            process.returncode = status
+            return status
+
+        process.wait = wait
+        process.poll = lambda: process.returncode
+        process.kill = lambda: setattr(process, "returncode", -9)
+
+        def stop(argv, **kwargs):
+            del argv, kwargs
+            events.append("stop")
+            return launcher.subprocess.CompletedProcess([], 0, b"", b"")
+
+        def group_empty(group):
+            del group
+            self.assertIn("wait", events)
+            events.append("physical-empty")
+            if failure == "group":
+                raise OSError("private-group-canary")
+            return True
+
+        props = {"LoadState": "loaded", "ActiveState": "active" if status == 0 else "failed",
+                 "SubState": "exited" if status == 0 else "failed", "MainPID": "0",
+                 "User": str(self.broker.subject_uid), "Group": str(self.broker.subject_gid),
+                 "KillMode": "control-group", "ControlGroup": "",
+                 "Result": "success" if status == 0 else "exit-code", "ExecMainCode": "1",
+                 "ExecMainStatus": str(status)}
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(launcher.subprocess, "Popen", return_value=process))
+            stack.enter_context(patch.object(launcher.subprocess, "run", side_effect=stop))
+            stack.enter_context(patch.object(self.broker, "_unit_properties", return_value=props))
+            stack.enter_context(patch.object(self.broker, "_group_empty", side_effect=group_empty))
+            if failure == "quota":
+                stack.enter_context(patch.object(launcher._application, "MAX_JOB_OUTPUT", 1))
+            if failure == "counts":
+                stack.enter_context(patch.object(launcher.OutputQuota, "count", return_value=None))
+            if failure:
+                with self.assertRaises(launcher.LauncherError):
+                    self.broker._run({"executable": str(self.broker.dotnet), "arguments": ["build", "fixture.csproj"],
+                                      "working_directory": str(self.root)})
+                return events
+            response = self.broker._run({"executable": str(self.broker.dotnet), "arguments": ["build", "fixture.csproj"],
+                                         "working_directory": str(self.root)})
+        self.assertEqual(status, response["exit_code"])
+        self.assertEqual(["stop", "wait", "physical-empty"], events)
+        return response
+
+    def write_portable(self, prefixes=None):
+        return launcher._capture_subject_failure_prefixes_fd(
+            self.fd, self.broker.failed_subject_prefixes if prefixes is None else prefixes,
+            expected_owner_uid=os.geteuid(), expected_owner_gid=os.getegid())
+
+    def closed(self):
+        self.broker.ready_seen = self.broker.wait_completed = self.broker.exited = self.broker.work_closed = True
+
+    def test_confirmed_failure_preserves_exact_binary_prefixes_and_private_modes(self):
+        self.run_command()
+        self.assertEqual((b"out\x00\xff", b"secret-canary\xfe"), self.broker.failed_subject_prefixes)
+        self.assertTrue(self.write_portable())
+        child = self.directory / launcher.SUBJECT_FAILURE_DIRECTORY
+        self.assertEqual(0o700, stat.S_IMODE(child.stat().st_mode))
+        self.assertEqual(set(launcher.SUBJECT_FAILURE_NAMES), set(os.listdir(child)))
+        for name, content in zip(launcher.SUBJECT_FAILURE_NAMES, self.broker.failed_subject_prefixes):
+            path = child / name
+            self.assertEqual(content, path.read_bytes())
+            info = path.stat()
+            self.assertEqual((os.geteuid(), os.getegid(), 0o600, 1),
+                             (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode), info.st_nlink))
+        record = launcher.failure_diagnostic(launcher.LauncherError("worker-unsuccessful"))
+        self.assertNotIn("secret-canary", json.dumps(record))
+        self.assertNotIn("subject_failure", json.dumps(record))
+
+    def test_success_has_no_pair_and_cannot_create_capture(self):
+        self.run_command(status=0)
+        self.closed()
+        self.assertIsNone(self.broker.failed_subject_prefixes)
+        with patch.object(launcher, "_capture_subject_failure_prefixes_fd") as write:
+            self.assertFalse(launcher.capture_subject_failure_prefixes(self.broker, self.fd, True))
+        write.assert_not_called()
+        self.assertFalse((self.directory / launcher.SUBJECT_FAILURE_DIRECTORY).exists())
+
+    def test_only_last_confirmed_nonzero_replaces_pair(self):
+        self.run_command(stdout=b"first", stderr=b"first-error")
+        self.run_command(status=0, stdout=b"successful", stderr=b"")
+        self.assertEqual((b"first", b"first-error"), self.broker.failed_subject_prefixes)
+        self.run_command(status=17, stdout=b"last\x00", stderr=b"last\xff")
+        self.assertEqual((b"last\x00", b"last\xff"), self.broker.failed_subject_prefixes)
+        self.assertTrue(self.write_portable())
+        self.assertEqual(b"last\xff", (self.directory / launcher.SUBJECT_FAILURE_DIRECTORY / "stderr.prefix").read_bytes())
+        self.run_command(stdout=b"unconfirmed", failure="group")
+        self.assertEqual((b"last\x00", b"last\xff"), self.broker.failed_subject_prefixes)
+
+    def test_prefix_cap_does_not_change_received_quota_or_response_cap(self):
+        out = b"a" * (launcher.MAX_PREFIX + 11)
+        err = b"b" * (launcher.MAX_PREFIX + 13)
+        response = self.run_command(stdout=out, stderr=err)
+        self.assertEqual(len(out) + len(err), self.broker.output_quota.received_bytes())
+        self.assertEqual(launcher.MAX_PREFIX, len(response["stdout"]))
+        self.assertEqual((519168, 519168), tuple(map(len, self.broker.failed_subject_prefixes)))
+        self.assertTrue(self.write_portable())
+        self.assertEqual(2 * 519168, sum((self.directory / launcher.SUBJECT_FAILURE_DIRECTORY / name).stat().st_size
+                                       for name in launcher.SUBJECT_FAILURE_NAMES))
+
+    def test_unconfirmed_wait_pump_counts_quota_or_group_never_retains_pair(self):
+        for failure in ("wait", "pump", "counts", "quota", "group"):
+            with self.subTest(failure=failure):
+                # Each failure starts from a distinct actual broker and quota.
+                old = self.broker
+                self.broker, _, _ = artifact_broker(self.root / failure)
+                self.broker.subject_root = self.broker.scratch = self.root
+                try:
+                    self.run_command(failure=failure)
+                    self.assertIsNone(self.broker.failed_subject_prefixes)
+                finally:
+                    self.broker.close_artifact_handles()
+                    self.broker = old
+
+    def test_closed_positive_reaches_fd_writer_once_without_exposing_capture_state(self):
+        self.run_command()
+        self.closed()
+        with patch.object(self.broker, "_group_empty", return_value=True) as group, \
+             patch.object(launcher, "_capture_subject_failure_prefixes_fd", return_value=True) as write:
+            self.assertTrue(launcher.capture_subject_failure_prefixes(self.broker, self.fd, True))
+        group.assert_called_once_with(self.broker.descriptor["cgroup"])
+        write.assert_called_once_with(self.fd, (b"out\x00\xff", b"secret-canary\xfe"))
+
+    def test_each_invalid_checkpoint_or_active_operation_blocks_writer(self):
+        self.run_command()
+        self.closed()
+        changes = [(name, False) for name in ("ready_seen", "wait_completed", "exited", "work_closed")]
+        changes += [(name, value) for name in ("active_handlers", "active_runs", "active_artifact_operations",
+                                               "active_application_operations") for value in (1, False)]
+        changes += [("subject_output_failed", True), ("application_work_failed", True)]
+        for name, value in changes:
+            with self.subTest(name=name, value=value), \
+                 patch.object(self.broker, name, value), \
+                 patch.object(launcher, "_capture_subject_failure_prefixes_fd") as write:
+                self.assertFalse(launcher.capture_subject_failure_prefixes(self.broker, self.fd, True))
+                write.assert_not_called()
+
+    def test_missing_owned_exit_exceeded_quota_or_live_worker_blocks_capture(self):
+        self.run_command()
+        self.closed()
+        for owned in (False, None, 1):
+            with self.subTest(owned=owned), patch.object(launcher, "_capture_subject_failure_prefixes_fd") as write:
+                self.assertFalse(launcher.capture_subject_failure_prefixes(self.broker, self.fd, owned))
+                write.assert_not_called()
+        self.broker.output_quota.exceeded.set()
+        with patch.object(launcher, "_capture_subject_failure_prefixes_fd") as write:
+            self.assertFalse(launcher.capture_subject_failure_prefixes(self.broker, self.fd, True))
+            write.assert_not_called()
+        self.broker.output_quota.exceeded.clear()
+        with patch.object(self.broker, "_group_empty", return_value=False), \
+             patch.object(launcher, "_capture_subject_failure_prefixes_fd") as write:
+            self.assertFalse(launcher.capture_subject_failure_prefixes(self.broker, self.fd, True))
+            write.assert_not_called()
+
+    def test_invalid_pair_and_wrong_parent_owner_or_permissions_create_nothing(self):
+        for pair in (None, [b"a", b"b"], (b"a",), (bytearray(b"a"), b"b"),
+                     (b"a" * (launcher.MAX_SUBJECT_FAILURE_PREFIX + 1), b"b")):
+            with self.subTest(pair_type=type(pair).__name__):
+                self.assertFalse(launcher._capture_subject_failure_prefixes_fd(
+                    self.fd, pair, expected_owner_uid=os.geteuid(), expected_owner_gid=os.getegid()))
+        self.assertFalse(launcher._capture_subject_failure_prefixes_fd(
+            self.fd, (b"a", b"b"), expected_owner_uid=os.geteuid() + 1, expected_owner_gid=os.getegid()))
+        os.chmod(self.directory, 0o770)
+        self.assertFalse(self.write_portable((b"a", b"b")))
+        self.assertFalse((self.directory / launcher.SUBJECT_FAILURE_DIRECTORY).exists())
+
+    def test_existing_directory_or_symlink_is_not_adopted_or_overwritten(self):
+        child = self.directory / launcher.SUBJECT_FAILURE_DIRECTORY
+        for kind in ("directory", "symlink"):
+            with self.subTest(kind=kind):
+                if kind == "directory":
+                    child.mkdir(mode=0o700)
+                    (child / "stdout.prefix").write_bytes(b"existing")
+                else:
+                    child.symlink_to(self.root / "test-output", target_is_directory=True)
+                self.assertFalse(self.write_portable((b"new", b"new")))
+                if kind == "directory":
+                    self.assertEqual(b"existing", (child / "stdout.prefix").read_bytes())
+                    (child / "stdout.prefix").unlink(); child.rmdir()
+                else:
+                    self.assertTrue(child.is_symlink()); child.unlink()
+
+    def test_file_symlink_and_hardlink_collisions_preserve_target(self):
+        target = self.root / "target"
+        target.write_bytes(b"untouched-canary")
+        real_open = os.open
+        for kind in ("symlink", "hardlink"):
+            with self.subTest(kind=kind):
+                child = self.directory / launcher.SUBJECT_FAILURE_DIRECTORY
+                def collision(path, flags, *args, **kwargs):
+                    if path == "stdout.prefix":
+                        if kind == "symlink": (child / path).symlink_to(target)
+                        else: os.link(target, child / path)
+                    return real_open(path, flags, *args, **kwargs)
+                with patch.object(launcher.os, "open", side_effect=collision):
+                    self.assertFalse(self.write_portable((b"new", b"new")))
+                self.assertEqual(b"untouched-canary", target.read_bytes())
+                (child / "stdout.prefix").unlink(); child.rmdir()
+
+    def test_short_write_error_closes_fds_and_removes_owned_partial_files(self):
+        real_open = os.open; descriptors = []
+        def opened(*args, **kwargs):
+            fd = real_open(*args, **kwargs); descriptors.append(fd); return fd
+        with patch.object(launcher.os, "open", side_effect=opened), \
+             patch.object(launcher.os, "write", return_value=0):
+            self.assertFalse(self.write_portable((b"a", b"b")))
+        self.assertFalse((self.directory / launcher.SUBJECT_FAILURE_DIRECTORY).exists())
+        for fd in descriptors:
+            with self.assertRaises(OSError): os.fstat(fd)
+
+    def test_named_file_substitution_is_rejected_without_deleting_replacement(self):
+        real_write = os.write; replaced = False
+        child = self.directory / launcher.SUBJECT_FAILURE_DIRECTORY
+        def write(fd, data):
+            nonlocal replaced
+            count = real_write(fd, data)
+            if not replaced:
+                replaced = True
+                (child / "stdout.prefix").unlink()
+                (child / "stdout.prefix").write_bytes(b"replacement-canary")
+                os.chmod(child / "stdout.prefix", 0o600)
+            return count
+        with patch.object(launcher.os, "write", side_effect=write):
+            self.assertFalse(self.write_portable((b"a", b"b")))
+        self.assertEqual(b"replacement-canary", (child / "stdout.prefix").read_bytes())
+
+    def test_named_directory_substitution_does_not_adopt_or_delete_replacement(self):
+        real_write = os.write; replaced = False
+        child = self.directory / launcher.SUBJECT_FAILURE_DIRECTORY
+        retained = self.directory / "retained-original"
+        def write(fd, data):
+            nonlocal replaced
+            count = real_write(fd, data)
+            if not replaced:
+                replaced = True
+                child.rename(retained)
+                child.mkdir(mode=0o700)
+                (child / "replacement").write_bytes(b"untouched")
+            return count
+        with patch.object(launcher.os, "write", side_effect=write):
+            self.assertFalse(self.write_portable((b"a", b"b")))
+        self.assertEqual(b"untouched", (child / "replacement").read_bytes())
+        self.assertTrue(retained.is_dir())
+
+    def test_file_mode_change_and_parent_identity_change_reject_capture(self):
+        for change in ("file-mode", "parent-mode"):
+            with self.subTest(change=change):
+                real_write = os.write
+                def write(fd, data):
+                    count = real_write(fd, data)
+                    os.fchmod(fd, 0o660) if change == "file-mode" else os.chmod(self.directory, 0o750)
+                    return count
+                with patch.object(launcher.os, "write", side_effect=write):
+                    self.assertFalse(self.write_portable((b"a", b"b")))
+                os.chmod(self.directory, 0o700)
+                self.assertFalse((self.directory / launcher.SUBJECT_FAILURE_DIRECTORY).exists())
+
+    def test_capture_io_failure_preserves_original_failure_and_closed_public_schema(self):
+        self.run_command(); self.closed()
+        error = launcher.LauncherError("worker-unsuccessful")
+        before = launcher.failure_diagnostic(error)
+        with patch.object(self.broker, "_group_empty", return_value=True), \
+             patch.object(launcher, "_capture_subject_failure_prefixes_fd", side_effect=OSError("secret-canary")):
+            self.assertFalse(launcher.capture_subject_failure_prefixes(self.broker, self.fd, True))
+        self.assertEqual(before, launcher.failure_diagnostic(error))
+        self.assertNotIn("secret-canary", json.dumps(before))
+
+
 if __name__ == "__main__": unittest.main()

@@ -75,6 +75,94 @@ PRIVATE_FAILURE_OUTPUT_ARCHIVE = "failure-output.tar"
 MAX_PRIVATE_FAILURE_FILE_BYTES = 128 * 1024
 MAX_PRIVATE_FAILURE_OUTPUT_BYTES = 384 * 1024
 MAX_PRIVATE_FAILURE_ARCHIVE_BYTES = 400 * 1024
+PRIVATE_SUBJECT_PREFIX_DIRECTORY = "subject-failure-output"
+PRIVATE_SUBJECT_PREFIX_NAMES = ("stdout.prefix", "stderr.prefix")
+PRIVATE_SUBJECT_PREFIX_ARCHIVE = "subject-failure-output.tar"
+MAX_PRIVATE_SUBJECT_PREFIX_BYTES = 519168
+MAX_PRIVATE_SUBJECT_PREFIX_ARCHIVE_BYTES = 1024 * 1024
+PRIVATE_SUBJECT_PREFIX_ROOT_SCRIPT = '''import io,os,re,stat,sys,tarfile,time
+NAMES=("stdout.prefix","stderr.prefix")
+def identity(info):
+    return (info.st_dev,info.st_ino,info.st_uid,info.st_gid,info.st_mode,info.st_nlink,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+def remaining(deadline):
+    if time.monotonic()>=deadline: raise ValueError()
+def archive_subject_prefixes(work_fd,*,expected_root_uid=0,expected_root_gid=0,deadline=None):
+    # Owner overrides are data-only portable FD controls; main always requires root.
+    if deadline is None: deadline=time.monotonic()+5
+    remaining(deadline)
+    work=os.fstat(work_fd)
+    if not stat.S_ISDIR(work.st_mode) or (work.st_uid,work.st_gid)!=(expected_root_uid,expected_root_gid) or stat.S_IMODE(work.st_mode)!=0o755:
+        raise ValueError()
+    child=-1;files=[]
+    try:
+        child=os.open("subject-failure-output",os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=work_fd)
+        selected=os.fstat(child)
+        if not stat.S_ISDIR(selected.st_mode) or (selected.st_uid,selected.st_gid)!=(expected_root_uid,expected_root_gid) or stat.S_IMODE(selected.st_mode)!=0o700 or identity(selected)!=identity(os.stat("subject-failure-output",dir_fd=work_fd,follow_symlinks=False)) or sorted(os.listdir(child))!=sorted(NAMES):
+            raise ValueError()
+        for name in NAMES:
+            remaining(deadline)
+            fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC|os.O_NONBLOCK,dir_fd=child)
+            files.append((name,fd,None))
+            before=os.fstat(fd);files[-1]=(name,fd,before)
+            if not stat.S_ISREG(before.st_mode) or (before.st_uid,before.st_gid)!=(expected_root_uid,expected_root_gid) or stat.S_IMODE(before.st_mode)!=0o600 or before.st_nlink!=1 or not 0<=before.st_size<=519168 or identity(before)!=identity(os.stat(name,dir_fd=child,follow_symlinks=False)):
+                raise ValueError()
+        contents={}
+        for name,fd,before in files:
+            remaining(deadline);data=bytearray()
+            while len(data)<before.st_size:
+                remaining(deadline)
+                part=os.read(fd,min(65536,before.st_size-len(data)))
+                if not part: raise ValueError()
+                data.extend(part)
+            if os.read(fd,1) or identity(before)!=identity(os.fstat(fd)) or identity(before)!=identity(os.stat(name,dir_fd=child,follow_symlinks=False)):
+                raise ValueError()
+            contents[name]=bytes(data)
+        output=io.BytesIO()
+        with tarfile.open(fileobj=output,mode="w",format=tarfile.USTAR_FORMAT) as archive:
+            for name in NAMES:
+                remaining(deadline)
+                item=tarfile.TarInfo(name);item.mode=0o600;item.uid=item.gid=item.mtime=0;item.size=len(contents[name])
+                archive.addfile(item,io.BytesIO(contents[name]))
+        result=output.getvalue()
+        if len(result)>1048576: raise ValueError()
+        for name,fd,before in files:
+            remaining(deadline)
+            if identity(before)!=identity(os.fstat(fd)) or identity(before)!=identity(os.stat(name,dir_fd=child,follow_symlinks=False)): raise ValueError()
+        if sorted(os.listdir(child))!=sorted(NAMES) or identity(selected)!=identity(os.fstat(child)) or identity(selected)!=identity(os.stat("subject-failure-output",dir_fd=work_fd,follow_symlinks=False)) or identity(work)!=identity(os.fstat(work_fd)):
+            raise ValueError()
+        remaining(deadline)
+        return result
+    finally:
+        for name,fd,before in files:
+            try: os.close(fd)
+            except OSError: pass
+        if child>=0:
+            try: os.close(child)
+            except OSError: pass
+def main():
+    deadline=time.monotonic()+5
+    if os.geteuid()!=0 or len(sys.argv)!=4 or not re.fullmatch(r"[0-9a-f]{32}",sys.argv[1]) or any(not re.fullmatch(r"[0-9]{1,20}",v) for v in sys.argv[2:]): raise ValueError()
+    descriptors=[]
+    try:
+        parent=os.open("/run",os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC);descriptors.append(parent)
+        outer=os.fstat(parent)
+        if not stat.S_ISDIR(outer.st_mode) or outer.st_uid!=0 or outer.st_gid!=0 or outer.st_mode&0o022: raise ValueError()
+        name="appsurface-evidencehost-runtime-"+sys.argv[1]
+        work=os.open(name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=parent);descriptors.append(work)
+        before=os.fstat(work)
+        if (before.st_dev,before.st_ino)!=(int(sys.argv[2]),int(sys.argv[3])) or identity(before)!=identity(os.stat(name,dir_fd=parent,follow_symlinks=False)): raise ValueError()
+        result=archive_subject_prefixes(work,deadline=deadline)
+        if identity(before)!=identity(os.fstat(work)) or identity(before)!=identity(os.stat(name,dir_fd=parent,follow_symlinks=False)): raise ValueError()
+        remaining(deadline)
+        sys.stdout.buffer.write(result)
+    finally:
+        for fd in reversed(descriptors):
+            try: os.close(fd)
+            except OSError: pass
+if __name__=="__main__":
+    try: main()
+    except Exception: sys.exit(1)
+'''
 PRIVATE_FAILURE_OUTPUT_ROOT_SCRIPT = '''import io,os,re,stat,sys,tarfile
 NAMES=("evidence-plan.json","evidence-manifest.json","evidence-summary.json")
 def identity(info):
@@ -1207,6 +1295,124 @@ def retain_private_failure_output(work_root: Path, output_parent: Path, slot: st
                 pass
 
 
+def _valid_private_subject_prefix_archive(data: bytes) -> bool:
+    """Require exactly two canonical fixed-order USTAR members of private hostile bytes."""
+    if not isinstance(data, bytes) or len(data) > MAX_PRIVATE_SUBJECT_PREFIX_ARCHIVE_BYTES:
+        return False
+    try:
+        contents = []
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as archive:
+            members = archive.getmembers()
+            if [member.name for member in members] != list(PRIVATE_SUBJECT_PREFIX_NAMES):
+                return False
+            for member in members:
+                if (member.type != tarfile.REGTYPE or member.mode != 0o600 or member.uid or member.gid
+                        or member.mtime or member.uname or member.gname or member.linkname or member.pax_headers
+                        or not 0 <= member.size <= MAX_PRIVATE_SUBJECT_PREFIX_BYTES):
+                    return False
+                stream = archive.extractfile(member)
+                if stream is None:
+                    return False
+                with stream:
+                    content = stream.read(MAX_PRIVATE_SUBJECT_PREFIX_BYTES + 1)
+                if len(content) != member.size:
+                    return False
+                contents.append(content)
+        canonical = io.BytesIO()
+        with tarfile.open(fileobj=canonical, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+            for name, content in zip(PRIVATE_SUBJECT_PREFIX_NAMES, contents):
+                member = tarfile.TarInfo(name)
+                member.mode, member.uid, member.gid, member.mtime, member.size = 0o600, 0, 0, 0, len(content)
+                archive.addfile(member, io.BytesIO(content))
+        return canonical.getvalue() == data
+    except (OSError, ValueError, tarfile.TarError):
+        return False
+
+
+def retain_private_subject_prefixes(work_root: Path, proof_directory: Path, record: dict) -> bool:
+    """Copy one private subject-prefix archive after validated unsuccessful joined worker exit.
+
+    Root receives only this driver's selected /run UUID and observed device/inode. The
+    fixed root-owned 0700 child contains exactly two single-link root 0600 files, each
+    at most 519168 bytes. Root reads pinned FDs and rechecks bytes/metadata/names within
+    five seconds. Its canonical USTAR result is at most 1 MiB and is written exclusively
+    as runner-owned 0600 private-diagnostics/subject-failure-output.tar. Missing, unsafe,
+    changed, occupied or failed capture returns False; no raw bytes are rendered and
+    neither archive contents nor retention can replace the original failure/admit work.
+    """
+    fds = []
+    try:
+        launcher = load_launcher_contract()
+        record = launcher.validate_failure_diagnostic(record)
+        if (record.get("cause") != "worker-unsuccessful" or record.get("operation") != "worker-exit"
+                or type(record.get("worker_main_code")) is not int or record["worker_main_code"] != 1
+                or type(record.get("worker_main_status")) is not int or not 1 <= record["worker_main_status"] <= 255
+                or any(record.get(name) is not True for name in
+                       ("broker_ready_seen", "broker_wait_completed", "broker_exited", "broker_work_closed"))
+                or any(type(record.get(name)) is not int or record[name] != 0 for name in
+                       ("broker_active_handlers", "broker_active_runs")) or not runtime_workspace_path(work_root)):
+            return False
+        work = work_root.lstat()
+        if (not stat.S_ISDIR(work.st_mode) or work.st_uid != 0 or work.st_gid != 0
+                or stat.S_IMODE(work.st_mode) != 0o755):
+            return False
+        code, data, _stderr = root_command(
+            ["/usr/bin/python3", "-I", "-c", PRIVATE_SUBJECT_PREFIX_ROOT_SCRIPT,
+             work_root.name[len(RUNTIME_WORKSPACE_PREFIX):], str(work.st_dev), str(work.st_ino)],
+            cwd=ROOT, timeout=5, label="retain private subject failure prefixes", binary_output=True)
+        if code != 0 or not _valid_private_subject_prefix_archive(data):
+            return False
+        parent_fd = os.open(proof_directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        fds.append(parent_fd)
+        parent = os.fstat(parent_fd)
+        if parent.st_uid != os.geteuid() or parent.st_gid != os.getegid() or parent.st_mode & 0o022:
+            return False
+        try:
+            os.mkdir("private-diagnostics", 0o700, dir_fd=parent_fd)
+        except FileExistsError:
+            pass
+        private_fd = os.open("private-diagnostics", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                             dir_fd=parent_fd)
+        fds.append(private_fd)
+        private = os.fstat(private_fd)
+        if private.st_uid != os.geteuid() or private.st_gid != os.getegid() or stat.S_IMODE(private.st_mode) != 0o700:
+            return False
+        fd = os.open(PRIVATE_SUBJECT_PREFIX_ARCHIVE,
+                     os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=private_fd)
+        fds.append(fd)
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb", closefd=False) as stream:
+            stream.write(data)
+            stream.flush()
+        before = os.fstat(fd)
+        def identity(info):
+            return (info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode, info.st_nlink,
+                    info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.geteuid() or before.st_gid != os.getegid()
+                or stat.S_IMODE(before.st_mode) != 0o600 or before.st_nlink != 1 or before.st_size != len(data)
+                or identity(before) != identity(os.fstat(fd))
+                or identity(before) != identity(os.stat(PRIVATE_SUBJECT_PREFIX_ARCHIVE, dir_fd=private_fd, follow_symlinks=False))):
+            return False
+        for opened, initial, named in ((parent_fd, parent, proof_directory.lstat()),
+                                      (private_fd, private, os.stat("private-diagnostics", dir_fd=parent_fd,
+                                                                   follow_symlinks=False))):
+            current = os.fstat(opened)
+            if ((initial.st_dev, initial.st_ino, initial.st_uid, initial.st_gid, initial.st_mode)
+                    != (current.st_dev, current.st_ino, current.st_uid, current.st_gid, current.st_mode)
+                    or identity(current) != identity(named)):
+                return False
+        return True
+    except Exception:
+        # Optional private diagnostics must never replace or disclose the original failure.
+        return False
+    finally:
+        for fd in reversed(fds):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
 def run_observation_launcher(command: list[str], work_root: Path, proof_directory: Path, *,
                              output_parent: Path | None = None, slot: str | None = None) -> tuple[bytes, bytes]:
     """On failure publish only a validated host-category receipt, never launcher output tails.
@@ -1246,6 +1452,8 @@ def run_observation_launcher(command: list[str], work_root: Path, proof_director
     retain_private_worker_journal(work_root, proof_directory)
     if safe_record is not None and output_parent is not None and slot is not None:
         retain_private_failure_output(work_root, output_parent, slot, proof_directory, safe_record)
+    if safe_record is not None:
+        retain_private_subject_prefixes(work_root, proof_directory, safe_record)
     if safe_record is None:
         fail(f"Production Observation launcher exited {code}; safe diagnostic unavailable.")
     encoded = json.dumps(safe_record, sort_keys=True, separators=(",", ":")) + "\n"
