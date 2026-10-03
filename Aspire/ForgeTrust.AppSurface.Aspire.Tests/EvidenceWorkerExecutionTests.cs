@@ -1075,6 +1075,111 @@ public sealed class EvidenceWorkerExecutionTests
         Assert.Equal("ASEVD410", Assert.Throws<EvidenceAdmissionException>(() => admission.ValidateActive(plan)).Code);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_OuterCancellationAfterCallbackCompletionRejectsLateSuccess()
+    {
+        var innerClock = new ManualTimeProvider();
+        var clock = new TimestampGateTimeProvider(innerClock);
+        var supervisor = new TestSupervisor();
+        var execution = new EvidenceWorkerExecution(supervisor, clock, Job, Cleanup, Grace,
+            message => new EvidenceWorkerTestInterruptionException(message));
+        using var outer = new CancellationTokenSource();
+        var started = NewSignal();
+        var releaseCallback = NewSignal();
+        TimestampReadGate? gate = null;
+        Task? stop = null;
+        var run = Task.Run(async () => await execution.ExecuteAsync(EvidenceRunStage.Producer,
+            TimeSpan.FromSeconds(10), async _ =>
+            {
+                started.TrySetResult();
+                await releaseCallback.Task;
+                return "completed callback value";
+            }));
+        try
+        {
+            await started.Task.WaitAsync(BarrierTimeout);
+            await innerClock.WaitForTimerCreationsAsync(1).WaitAsync(BarrierTimeout);
+            // Pause the preliminary job sample outside the execution lock, after the
+            // callback has joined. Outer cancellation must win before value acceptance.
+            gate = clock.GateAfterTimestampReads(1);
+            releaseCallback.TrySetResult();
+            await gate.Reached.WaitAsync(BarrierTimeout);
+            outer.Cancel();
+            stop = execution.RequestTerminalStopAsync(EvidenceWorkerTerminalCode.StageFailed, outer.Token).AsTask();
+            await stop.WaitAsync(BarrierTimeout);
+            var originalCause = Assert.IsType<OperationCanceledException>(execution.TerminalException);
+            Assert.Equal(outer.Token, originalCause.CancellationToken);
+            Assert.True(execution.OwnWorkStopped);
+            Assert.True(supervisor.ExitAcknowledged);
+            Assert.Equal(1, supervisor.StopRequests);
+            gate.Release();
+
+            var result = await run.WaitAsync(BarrierTimeout);
+            Assert.Equal(EvidenceWorkerStageOutcome.Cancelled, result.Outcome);
+            Assert.Null(result.Value);
+            Assert.Equal(EvidenceWorkerTerminalCode.CallerCancelled, execution.TerminalCode);
+            Assert.Same(originalCause, execution.TerminalException);
+            Assert.True(execution.OwnWorkStopped);
+            Assert.Equal(1, supervisor.StopRequests);
+        }
+        finally
+        {
+            gate?.Release();
+            releaseCallback.TrySetResult();
+            if (stop is not null) await Task.WhenAll(stop, run).WaitAsync(BarrierTimeout);
+            else await run.WaitAsync(BarrierTimeout);
+        }
+    }
+
+    [Fact]
+    public async Task CollectAsync_CancellationJoinsLateFaultWithoutReplacingFirstCause()
+    {
+        var clock = new ManualTimeProvider();
+        var execution = Create(new TestSupervisor(), clock);
+        Assert.True(await execution.StopAndDisposeAsync());
+        using var caller = new CancellationTokenSource();
+        var baselineTimers = clock.TimerCreations;
+        var started = NewSignal();
+        var cancellationObserved = NewSignal();
+        var releaseCollector = NewSignal();
+        var lateFault = new InvalidOperationException("safe fixture late collector failure");
+        var run = execution.CollectAsync<string>(TimeSpan.FromSeconds(1), async token =>
+        {
+            using var registration = token.Register(() => cancellationObserved.TrySetResult());
+            started.TrySetResult();
+            await releaseCollector.Task;
+            throw lateFault;
+        }, caller.Token).AsTask();
+        try
+        {
+            await started.Task.WaitAsync(BarrierTimeout);
+            await clock.WaitForTimerCreationsAsync(baselineTimers + 1).WaitAsync(BarrierTimeout);
+            caller.Cancel();
+            await cancellationObserved.Task.WaitAsync(BarrierTimeout);
+            // Grace timer creation confirms cancellation has latched and collection is
+            // joining the still-owned collector rather than accepting its completion.
+            await clock.WaitForTimerCreationsAsync(baselineTimers + 2).WaitAsync(BarrierTimeout);
+            var originalCause = Assert.IsType<OperationCanceledException>(execution.TerminalException);
+            Assert.Equal(caller.Token, originalCause.CancellationToken);
+            Assert.False(run.IsCompleted);
+            Assert.False(execution.OwnWorkStopped);
+            releaseCollector.TrySetResult();
+
+            var result = await run.WaitAsync(BarrierTimeout);
+            Assert.Equal(EvidenceWorkerStageOutcome.Cancelled, result.Outcome);
+            Assert.Null(result.Value);
+            Assert.Equal(EvidenceWorkerTerminalCode.CallerCancelled, execution.TerminalCode);
+            Assert.Same(originalCause, execution.TerminalException);
+            Assert.True(execution.OwnWorkStopped);
+            Assert.False(execution.CollectionCompleted);
+        }
+        finally
+        {
+            releaseCollector.TrySetResult();
+            await run.WaitAsync(BarrierTimeout);
+        }
+    }
+
     /// <summary>Gates one captured clock sample while the underlying monotonic clock advances.</summary>
     /// <remarks>Timer notifications remain under the existing ManualTimeProvider's independent control.</remarks>
     private sealed class TimestampGateTimeProvider(ManualTimeProvider inner) : TimeProvider
