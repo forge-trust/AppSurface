@@ -107,6 +107,42 @@ def persist_and_validate(workspace, entry, artifacts, plan, metadata):
     return copies, validate_result(artifacts, plan, entry, metadata)
 
 
+def entry_preflight(binding, workspace, entry):
+    """Load selected code and verify immutable snapshots before any launch.
+
+    A fixed private stage records early rejection without an exception message,
+    input path, partial success or execution authority. Capture failure preserves
+    the original exception. Actual launch remains in the owning root procedure.
+    """
+    require(entry in ("cli", "host"))
+    stage = "launcher-import"
+    try:
+        build = Path(binding["build_root"])
+        launcher = load(build / "scripts/evidencehost-linux-launcher.py", "qualification_launcher")
+        stage = "collector-import"
+        collector = load(build / "tests/evidencehost-consumer/PrivateQualification/retained-output.py", "qualification_collector")
+        stage = "tool-preflight"
+        tool = Path(binding["tools"][entry]["path"])
+        immutable_tree(tool, binding["tools"][entry]["sha256"])
+        stage = "subject-preflight"
+        subject = Path(binding["subject_root"])
+        immutable_tree(subject, binding["subject_sha256"])
+        return launcher, collector, tool, subject
+    except Exception as error:
+        try:
+            failure_class = type(error).__name__
+            if failure_class not in {"PreparationFailure", "ImportError", "ModuleNotFoundError", "OSError", "PermissionError", "FileNotFoundError"}:
+                failure_class = "unknown"
+            path = workspace / ("preflight-" + entry + ".json")
+            with path.open("x") as stream:
+                os.chmod(path, 0o600)
+                json.dump({"entry": entry, "stage": stage, "error_class": failure_class}, stream, sort_keys=True)
+                stream.write("\n")
+        except Exception:
+            pass
+        raise
+
+
 def retain_diagnostics(workspace, output, *, expected_owner_uid=0):
     """Retain a bounded private archive from closed root-owned diagnostic names only.
 
@@ -118,6 +154,7 @@ def retain_diagnostics(workspace, output, *, expected_owner_uid=0):
     selected.extend((f"build-logs/build-{index:02d}.log", 16*1024, True) for index in range(1, 33))
     selected.extend((f"build-logs/command-{index:02d}.json", 16*1024, False) for index in range(1, 33))
     for entry in ("cli", "host"):
+        selected.append((f"preflight-{entry}.json", 4096, False))
         selected.extend((f"failure-{entry}/"+name, maximum, False) for name, maximum in (
             ("launcher-failure.json", 4096), ("launcher-worker-journal.log", 4096),
             ("subject-failure-output/stdout.prefix", 519168), ("subject-failure-output/stderr.prefix", 519168)))
@@ -183,12 +220,7 @@ def retain_diagnostics(workspace, output, *, expected_owner_uid=0):
 def one_entry(binding, workspace, entry):
     """Launch, pin output, collect bytes, close accounts, then evaluate structural data."""
     build = Path(binding["build_root"])
-    launcher = load(build / "scripts/evidencehost-linux-launcher.py", "qualification_launcher")
-    collector = load(build / "tests/evidencehost-consumer/PrivateQualification/retained-output.py", "qualification_collector")
-    tool = Path(binding["tools"][entry]["path"])
-    immutable_tree(tool, binding["tools"][entry]["sha256"])
-    subject = Path(binding["subject_root"])
-    immutable_tree(subject, binding["subject_sha256"])
+    launcher, collector, tool, subject = entry_preflight(binding, workspace, entry)
     output = workspace / ("output-"+entry)
     output.mkdir(mode=0o700)
     os.chmod(output, 0o700)

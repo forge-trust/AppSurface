@@ -5,6 +5,7 @@ from pathlib import Path
 import stat
 import tempfile
 import unittest
+from unittest.mock import patch
 
 SPEC = importlib.util.spec_from_file_location("qualification_result_data", Path(__file__).with_name("run-qualification.py"))
 module = importlib.util.module_from_spec(SPEC)
@@ -51,6 +52,27 @@ class ResultDataControls(unittest.TestCase):
                 self.assertEqual(data, path.read_bytes())
                 self.assertEqual(0o600, stat.S_IMODE(path.stat().st_mode))
             self.assertEqual(0o700, stat.S_IMODE((root/"collected-host").stat().st_mode))
+
+    def test_early_subject_rejection_keeps_closed_stage_and_original_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            failure = module.PreparationFailure("private-path-and-message-canary")
+            binding = {"build_root": str(root), "tools": {"cli": {"path": str(root), "sha256": {}}},
+                       "subject_root": str(root), "subject_sha256": {}}
+            with patch.object(module, "load", return_value=object()), patch.object(module, "immutable_tree", side_effect=[None, failure]):
+                with self.assertRaises(module.PreparationFailure) as caught:
+                    module.entry_preflight(binding, root, "cli")
+            self.assertIs(failure, caught.exception)
+            path = root/"preflight-cli.json"
+            self.assertEqual({"entry": "cli", "stage": "subject-preflight", "error_class": "PreparationFailure"}, json.loads(path.read_bytes()))
+            self.assertEqual(0o600, stat.S_IMODE(path.stat().st_mode))
+            self.assertNotIn("private-path-and-message-canary", path.read_text())
+            # An occupied diagnostic destination cannot replace the original error.
+            with patch.object(module, "load", side_effect=failure):
+                with self.assertRaises(module.PreparationFailure) as repeated:
+                    module.entry_preflight(binding, root, "cli")
+            self.assertIs(failure, repeated.exception)
+            self.assertEqual("subject-preflight", json.loads(path.read_bytes())["stage"])
 
 
 if __name__ == "__main__":
