@@ -1329,6 +1329,8 @@ def execute_handoff(
             image_digest=image_digest,
             scratch_directory=scratch,
             profile_id=profile_id,
+            source_diff=entries["source.diff"],
+            source_diff_sha256=manifest["SourceDiffSha256"],
             limits=limits,
             _environment=env,
         )

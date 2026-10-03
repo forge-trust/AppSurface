@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import io
 import json
@@ -147,6 +148,8 @@ class FakeExecutor:
         mounts = [create_call[index + 1] for index, value in enumerate(create_call[:-1]) if value == "--mount"]
         subject_mount = next(value for value in mounts if "dst=/subject," in value)
         subject_source = next(value.split("=", 1)[1] for value in subject_mount.split(",") if value.startswith("src="))
+        diff_mount = next(value for value in mounts if "dst=/source.diff," in value)
+        diff_source = next(value.partition("=")[2] for value in diff_mount.split(",") if value.startswith("src="))
         scratch_mount = next(
             value for value in mounts if "dst=/scratch," in value
         )
@@ -173,7 +176,7 @@ class FakeExecutor:
             {
                 "Config": {
                     "Entrypoint": [subject.CONTAINER_ENTRYPOINT],
-                    "Cmd": list(subject.PROFILE_ENTRYPOINT_ARGUMENTS["code-coverage"]),
+                    "Cmd": create_call[create_call.index(self.image) + 1 :],
                     "User": "65532:65532",
                     "WorkingDir": "/subject",
                     "Env": environment,
@@ -202,6 +205,13 @@ class FakeExecutor:
                         "Type": "bind",
                         "Source": subject_source,
                         "Destination": "/subject",
+                        "RW": False,
+                        "Propagation": "rprivate",
+                    },
+                    {
+                        "Type": "bind",
+                        "Source": diff_source,
+                        "Destination": "/source.diff",
                         "RW": False,
                         "Propagation": "rprivate",
                     },
@@ -374,6 +384,9 @@ class EvidenceGateSubjectTests(unittest.TestCase):
         self.root = Path(self.temporary_directory.name).resolve()
         self.subject_root = self.root / "trusted-subject-snapshot"
         self.subject_root.mkdir()
+        self.source_diff = self.root / "source.diff"
+        self.source_diff.write_bytes(b"controller captured unified diff\n")
+        self.source_diff_sha256 = hashlib.sha256(self.source_diff.read_bytes()).hexdigest()
         self.runner_temp = self.root / "runner-temp"
         self.runner_temp.mkdir()
         self.home = self.root / "runner-home"
@@ -408,6 +421,8 @@ class EvidenceGateSubjectTests(unittest.TestCase):
             "image_digest": IMAGE,
             "scratch_directory": self.runner_temp / "subject-scratch",
             "profile_id": "code-coverage",
+            "source_diff": self.source_diff,
+            "source_diff_sha256": self.source_diff_sha256,
             "limits": self.limits,
             "_environment": self.environment,
             "_system_name": "Linux",
@@ -467,6 +482,7 @@ class EvidenceGateSubjectTests(unittest.TestCase):
         self.assertIn(f"--entrypoint={subject.CONTAINER_ENTRYPOINT}", create)
         self.assertIn(IMAGE, create)
         self.assertIn("--profile-id=code-coverage", create)
+        self.assertIn(f"--diff-sha256={self.source_diff_sha256}", create)
         self.assertNotIn(hostile_command, " ".join(create))
         self.assertNotIn("--entrypoint=/bin/sh", create)
         self.assertNotIn("GITHUB_TOKEN", " ".join(create))
@@ -479,10 +495,13 @@ class EvidenceGateSubjectTests(unittest.TestCase):
             any("token" in value.casefold() for value in create if value != owner_label_argument)
         )
         self.assertFalse(any("socket" in value.casefold() for value in create))
-        self.assertEqual(2, len([value for value in create if value == "--mount"]))
+        self.assertEqual(3, len([value for value in create if value == "--mount"]))
         self.assertNotIn("--tmpfs", create)
         mount_arguments = [create[index + 1] for index, value in enumerate(create[:-1]) if value == "--mount"]
         self.assertIn("dst=/subject,ro=true,bind-propagation=rprivate", mount_arguments[0])
+        diff_mount = next(value for value in mount_arguments if "dst=/source.diff," in value)
+        self.assertIn(f"src={self.source_diff}", diff_mount)
+        self.assertIn("dst=/source.diff,ro=true,bind-propagation=rprivate", diff_mount)
         scratch_mount = next(value for value in mount_arguments if "dst=/scratch," in value)
         self.assertIn("type=bind", scratch_mount)
         self.assertIn("rw=true", scratch_mount)
@@ -545,6 +564,38 @@ class EvidenceGateSubjectTests(unittest.TestCase):
         with self.assertRaises(subject.SubjectLauncherError) as path_error:
             self.launch(subject_checkout=alias)
         self.assertEqual("ASEGS002", path_error.exception.code)
+        self.assertEqual([], self.executor.calls)
+
+    def test_rejects_source_diff_digest_mismatch_before_engine_use(self) -> None:
+        with self.assertRaises(subject.SubjectLauncherError) as caught:
+            self.launch(source_diff_sha256="0" * 64)
+        self.assertEqual("ASEGS020", caught.exception.code)
+        self.assertEqual([], self.executor.calls)
+
+    def test_rejects_source_diff_inside_subject_checkout_before_engine_use(self) -> None:
+        subject_diff = self.subject_root / "source.diff"
+        content = b"head-controlled diff\n"
+        subject_diff.write_bytes(content)
+        with self.assertRaises(subject.SubjectLauncherError) as caught:
+            self.launch(
+                source_diff=subject_diff,
+                source_diff_sha256=hashlib.sha256(content).hexdigest(),
+            )
+        self.assertEqual("ASEGS020", caught.exception.code)
+        self.assertEqual([], self.executor.calls)
+
+    def test_rejects_missing_linked_and_oversized_source_diff_before_engine_use(self) -> None:
+        missing = self.root / "missing.diff"
+        linked = self.root / "linked.diff"
+        linked.symlink_to(self.source_diff)
+        for path in (missing, linked):
+            with self.subTest(path=path), self.assertRaises(subject.SubjectLauncherError) as caught:
+                self.launch(source_diff=path)
+            self.assertEqual("ASEGS002", caught.exception.code)
+        with mock.patch.object(subject, "MAX_SOURCE_DIFF_BYTES", 4):
+            with self.assertRaises(subject.SubjectLauncherError) as oversized:
+                self.launch()
+        self.assertEqual("ASEGS020", oversized.exception.code)
         self.assertEqual([], self.executor.calls)
 
     def test_rejects_runner_capability_gaps_and_unbounded_limits(self) -> None:
@@ -980,6 +1031,8 @@ class EvidenceGateSubjectTests(unittest.TestCase):
                         "--image-digest", IMAGE,
                         "--scratch-directory", str(self.runner_temp / "cli-scratch"),
                         "--profile-id", "code-coverage",
+                        "--source-diff", str(self.source_diff),
+                        "--source-diff-sha256", self.source_diff_sha256,
                         "--timeout-seconds", "60",
                         "--memory-mib", "512",
                         "--cpu-millis", "1000",

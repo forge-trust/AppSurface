@@ -7,11 +7,11 @@ controller's fixed profile arguments; it never accepts a command or image from
 the subject.  The subject checkout is validated as a read-only mount and copied
 without following links into private scratch, where .NET may write build output.
 
-The result is an execution record, not an Evidence claim.  This primitive does
-not bind a controller diff or enforce patch-coverage thresholds; the current
-full solution also needs container-backed tests that this offline envelope
-cannot run. A later trusted verifier must independently validate any artifacts
-and the execution envelope before a complete producer can exist.
+The result is an execution record, not an Evidence claim.  The fixed profile
+checks aggregate and patch coverage against the controller-captured diff, but
+the current full solution also needs container-backed tests that this offline
+envelope cannot run. A later trusted verifier must independently validate any
+artifacts and the execution envelope before a complete producer can exist.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import selectors
 import signal
 import stat
@@ -35,6 +36,7 @@ import xml.etree.ElementTree as ElementTree
 SUBJECT_ROOT = Path("/subject")
 SCRATCH_ROOT = Path("/scratch")
 DEPENDENCY_SOURCE = Path("/opt/appsurface/locked-dependencies")
+PATCH_DIFF_PATH = Path("/source.diff")
 SOLUTION_RELATIVE_PATH = Path("ForgeTrust.AppSurface.slnx")
 CLI_RELATIVE_PATH = Path("Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj")
 RESULT_RELATIVE_PATH = Path("evidence-subject-result.json")
@@ -47,11 +49,13 @@ MAX_OUTPUT_BYTES = 1024 * 1024
 MAX_RESULT_BYTES = 16 * 1024
 MAX_SUBJECT_FILES = 250_000
 MAX_SUBJECT_BYTES = 2 * 1024 * 1024 * 1024
+MAX_SOURCE_DIFF_BYTES = 20 * 1024 * 1024
 COPY_CHUNK_BYTES = 1024 * 1024
 DOTNET_PATH = "/usr/local/bin:/usr/bin:/bin"
 DOTNET_MAJOR_VERSION = 10
 SDK_RUNTIME_IDENTIFIER = "linux-x64"
 SDK_RUNTIME_IDENTIFIER_PROPERTY = "$(NETCoreSdkRuntimeIdentifier)"
+SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 
 FIXED_PROFILE_ID = "code-coverage"
 FIXED_SUBJECT_ARGUMENT = "--subject-root=/subject"
@@ -80,6 +84,8 @@ class Invocation:
     subject_root: Path
     scratch_root: Path
     dependency_source: Path
+    diff_file: Path
+    diff_sha256: str
     offline: bool
 
 
@@ -119,13 +125,19 @@ def parse_invocation(argv: Sequence[str] | None = None) -> Invocation:
     parser.add_argument("--subject-root", required=True, choices=(str(SUBJECT_ROOT),))
     parser.add_argument("--scratch-root", required=True, choices=(str(SCRATCH_ROOT),))
     parser.add_argument("--dependency-source", required=True, choices=(str(DEPENDENCY_SOURCE),))
+    parser.add_argument("--diff-file", required=True, choices=(str(PATCH_DIFF_PATH),))
+    parser.add_argument("--diff-sha256", required=True)
     parser.add_argument("--offline", action="store_true", required=True)
     args = parser.parse_args(argv)
+    if SHA256_PATTERN.fullmatch(args.diff_sha256) is None:
+        raise EntrypointError("ASESE012", "The controller source diff digest is malformed.")
     return Invocation(
         profile_id=args.profile_id,
         subject_root=Path(args.subject_root),
         scratch_root=Path(args.scratch_root),
         dependency_source=Path(args.dependency_source),
+        diff_file=Path(args.diff_file),
+        diff_sha256=args.diff_sha256,
         offline=args.offline,
     )
 
@@ -170,10 +182,62 @@ def _canonical_directory(path: Path, name: str) -> Path:
     return resolved
 
 
+def _validate_source_diff(path: Path, expected_sha256: str) -> None:
+    if path != PATCH_DIFF_PATH or SHA256_PATTERN.fullmatch(expected_sha256) is None:
+        raise EntrypointError("ASESE012", "The controller source diff configuration is invalid.")
+    descriptor = -1
+    try:
+        metadata = path.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+            raise EntrypointError("ASESE012", "The controller source diff is not a physical regular file.")
+        if path.resolve(strict=True) != path or metadata.st_size > MAX_SOURCE_DIFF_BYTES:
+            raise EntrypointError("ASESE012", "The controller source diff is noncanonical or exceeds its byte limit.")
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0))
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or (opened.st_dev, opened.st_ino) != (metadata.st_dev, metadata.st_ino)
+            or opened.st_size > MAX_SOURCE_DIFF_BYTES
+        ):
+            raise EntrypointError("ASESE012", "The controller source diff changed or exceeds its byte limit.")
+        digest = hashlib.sha256()
+        total = 0
+        while True:
+            chunk = os.read(descriptor, min(COPY_CHUNK_BYTES, MAX_SOURCE_DIFF_BYTES + 1 - total))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_SOURCE_DIFF_BYTES:
+                raise EntrypointError("ASESE012", "The controller source diff exceeds its byte limit.")
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+        if (
+            total != opened.st_size
+            or (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+            != (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns)
+            or digest.hexdigest() != expected_sha256
+        ):
+            raise EntrypointError(
+                "ASESE012", "The mounted source diff is missing, changed, or does not match its controller digest."
+            )
+    except EntrypointError:
+        raise
+    except (OSError, RuntimeError, ValueError):
+        raise EntrypointError("ASESE012", "The controller source diff is unavailable or unsafe.") from None
+    finally:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                raise EntrypointError("ASESE012", "The controller source diff could not be closed safely.") from None
+
+
 def validate_mounts(
     subject_root: Path,
     scratch_root: Path,
     dependency_source: Path,
+    diff_file: Path,
+    diff_sha256: str,
     *,
     mountinfo_text: str,
     effective_uid: int,
@@ -181,14 +245,25 @@ def validate_mounts(
     subject = _canonical_directory(subject_root, "The subject root")
     scratch = _canonical_directory(scratch_root, "The scratch root")
     dependency = _canonical_directory(dependency_source, "The locked dependency source")
+    _validate_source_diff(diff_file, diff_sha256)
     mounts = read_mounts(mountinfo_text)
 
-    if subject != SUBJECT_ROOT or scratch != SCRATCH_ROOT or dependency != DEPENDENCY_SOURCE:
-        raise EntrypointError("ASESE001", "The subject, scratch, and dependency roots must use their fixed paths.")
+    if (
+        subject != SUBJECT_ROOT
+        or scratch != SCRATCH_ROOT
+        or dependency != DEPENDENCY_SOURCE
+        or diff_file != PATCH_DIFF_PATH
+    ):
+        raise EntrypointError(
+            "ASESE001", "The subject, scratch, dependency, and source diff must use their fixed paths."
+        )
     if mounts.get(SUBJECT_ROOT) is None or "ro" not in mounts[SUBJECT_ROOT]:
         raise EntrypointError("ASESE001", "The subject mount is not read-only.")
     if mounts.get(SCRATCH_ROOT) is None or "rw" not in mounts[SCRATCH_ROOT]:
         raise EntrypointError("ASESE001", "The scratch mount is not writable.")
+    diff_options = mounts.get(PATCH_DIFF_PATH)
+    if diff_options is None or "ro" not in diff_options or "rw" in diff_options:
+        raise EntrypointError("ASESE001", "The controller source diff mount is not read-only.")
 
     scratch_info = scratch.stat()
     if scratch_info.st_uid != effective_uid or stat.S_IMODE(scratch_info.st_mode) != 0o700:
@@ -584,7 +659,7 @@ def _dotnet_version(
     return [version_step, runtime_step]
 
 
-def _coverage_commands(staged_root: Path, scratch_root: Path) -> tuple[list[str], list[str]]:
+def _coverage_commands(staged_root: Path, scratch_root: Path, diff_file: Path) -> tuple[list[str], list[str]]:
     cli_project = str(staged_root / CLI_RELATIVE_PATH)
     solution = str(staged_root / SOLUTION_RELATIVE_PATH)
     coverage_output = str(scratch_root / OUTPUT_RELATIVE_PATH / "coverage-merged")
@@ -642,6 +717,14 @@ def _coverage_commands(staged_root: Path, scratch_root: Path) -> tuple[list[str]
         "95",
         "--min-branch",
         "85",
+        "--min-patch-line",
+        "95",
+        "--min-patch-branch",
+        "85",
+        "--patch-line-mode",
+        "codecov",
+        "--diff-file",
+        str(diff_file),
         "--output",
         gate_output,
     ]
@@ -732,6 +815,8 @@ def execute(
             invocation.subject_root,
             scratch,
             invocation.dependency_source,
+            invocation.diff_file,
+            invocation.diff_sha256,
             mountinfo_text=mounts_text,
             effective_uid=uid,
         )
@@ -803,7 +888,7 @@ def execute(
             )
 
         (scratch / OUTPUT_RELATIVE_PATH).mkdir(mode=0o700)
-        coverage_run, coverage_gate = _coverage_commands(staged_root, scratch)
+        coverage_run, coverage_gate = _coverage_commands(staged_root, scratch, invocation.diff_file)
         coverage_result = runner(
             coverage_run,
             working_directory=staged_root,

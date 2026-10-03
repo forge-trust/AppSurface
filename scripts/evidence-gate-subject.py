@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -75,7 +76,10 @@ MAX_PROFILE_OUTPUT_BYTES = 1024 * 1024
 MAX_PROFILE_SCRATCH_BYTES = 4 * 1024 * 1024 * 1024
 MAX_PROFILE_SCRATCH_INODES = 262_144
 MAX_SUBJECT_RESULT_BYTES = 16 * 1024
+MAX_SOURCE_DIFF_BYTES = 20 * 1024 * 1024
 MIN_OUTPUT_BYTES = 4096
+SOURCE_DIFF_CONTAINER_PATH = "/source.diff"
+SOURCE_DIFF_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 IMAGE_REFERENCE_PATTERN = re.compile(r"[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}\Z")
 RUN_ID_PATTERN = re.compile(r"[1-9][0-9]{0,18}\Z")
 RUN_ATTEMPT_PATTERN = re.compile(r"[1-9][0-9]{0,8}\Z")
@@ -108,6 +112,7 @@ PROFILE_ENTRYPOINT_ARGUMENTS: Mapping[str, tuple[str, ...]] = {
         "--subject-root=/subject",
         "--scratch-root=/scratch",
         "--dependency-source=/opt/appsurface/locked-dependencies",
+        "--diff-file=/source.diff",
         "--offline",
     ),
 }
@@ -748,6 +753,65 @@ def _validate_profile(profile_id: str) -> tuple[str, ...]:
     return arguments
 
 
+def _validate_source_diff(value: str | os.PathLike[str], expected_sha256: str) -> Path:
+    if not isinstance(expected_sha256, str) or SOURCE_DIFF_SHA256_PATTERN.fullmatch(expected_sha256) is None:
+        raise _fail("ASEGS020", "The controller source diff digest is malformed.")
+    raw = os.fspath(value)
+    if not isinstance(raw, str) or any(character in raw for character in ",\r\n"):
+        raise _fail("ASEGS020", "The controller source diff path contains an unsafe mount option character.")
+    path = _path_without_symlink_components(value, "The controller source diff")
+    descriptor = -1
+    try:
+        metadata = path.lstat()
+        if (
+            stat.S_ISLNK(metadata.st_mode)
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
+            or metadata.st_size <= 0
+            or metadata.st_size > MAX_SOURCE_DIFF_BYTES
+        ):
+            raise _fail("ASEGS020", "The controller source diff is not a bounded, private regular file.")
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0))
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or (opened.st_dev, opened.st_ino) != (metadata.st_dev, metadata.st_ino)
+            or opened.st_size <= 0
+            or opened.st_size > MAX_SOURCE_DIFF_BYTES
+        ):
+            raise _fail("ASEGS020", "The controller source diff changed or exceeds its byte limit.")
+        digest = hashlib.sha256()
+        total = 0
+        while True:
+            chunk = os.read(descriptor, min(1024 * 1024, MAX_SOURCE_DIFF_BYTES + 1 - total))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_SOURCE_DIFF_BYTES:
+                raise _fail("ASEGS020", "The controller source diff exceeds its byte limit.")
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+        if (
+            total != opened.st_size
+            or (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+            != (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns)
+            or digest.hexdigest() != expected_sha256
+        ):
+            raise _fail("ASEGS020", "The controller source diff changed or does not match its digest.")
+    except SubjectLauncherError:
+        raise
+    except (OSError, RuntimeError, ValueError):
+        raise _fail("ASEGS020", "The controller source diff is unavailable or unsafe.") from None
+    finally:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                raise _fail("ASEGS020", "The controller source diff could not be closed safely.") from None
+    return path
+
+
 def _resolve_podman() -> str:
     candidate = shutil.which("podman", path=ENGINE_PATH)
     if candidate is None:
@@ -985,11 +1049,13 @@ def _container_create_arguments(
     image: str,
     owner_token: str,
     subject_root: Path,
+    source_diff: Path,
     scratch_mountpoint: Path,
     profile_arguments: Sequence[str],
     limits: SubjectLimits,
 ) -> list[str]:
     subject_mount = f"type=bind,src={subject_root},dst=/subject,ro=true,bind-propagation=rprivate"
+    diff_mount = f"type=bind,src={source_diff},dst={SOURCE_DIFF_CONTAINER_PATH},ro=true,bind-propagation=rprivate"
     scratch_mount = (
         f"type=bind,src={scratch_mountpoint},dst=/scratch,rw=true,bind-propagation=rprivate"
     )
@@ -1018,6 +1084,8 @@ def _container_create_arguments(
         f"--cpus={_cpu_argument(limits.cpu_millis)}",
         "--mount",
         subject_mount,
+        "--mount",
+        diff_mount,
         "--mount",
         scratch_mount,
         "--unsetenv-all",
@@ -1135,6 +1203,7 @@ def _verify_container_configuration(
     data: bytes,
     *,
     subject_root: Path,
+    source_diff: Path,
     scratch_mountpoint: Path,
     limits: SubjectLimits,
     profile_arguments: Sequence[str],
@@ -1205,24 +1274,31 @@ def _verify_container_configuration(
     ):
         raise _fail("ASEGS012", "The created container shares a host namespace or publishes a port.")
 
-    if len(mounts) != 2:
+    if len(mounts) != 3:
         raise _fail("ASEGS012", "The created container has an unexpected host mount.")
     by_destination = {mount.get("Destination"): mount for mount in mounts if isinstance(mount, dict)}
-    if set(by_destination) != {"/subject", "/scratch"}:
+    if set(by_destination) != {"/subject", SOURCE_DIFF_CONTAINER_PATH, "/scratch"}:
         raise _fail("ASEGS012", "The created container has an unexpected host mount.")
     subject_mount = by_destination["/subject"]
+    diff_mount = by_destination[SOURCE_DIFF_CONTAINER_PATH]
     scratch_mount = by_destination["/scratch"]
     if (
         subject_mount.get("Type") != "bind"
         or Path(str(subject_mount.get("Source"))).resolve() != subject_root
         or subject_mount.get("RW") is not False
         or subject_mount.get("Propagation") != "rprivate"
+        or diff_mount.get("Type") != "bind"
+        or Path(str(diff_mount.get("Source"))).resolve() != source_diff
+        or diff_mount.get("RW") is not False
+        or diff_mount.get("Propagation") != "rprivate"
         or scratch_mount.get("Type") != "bind"
         or Path(str(scratch_mount.get("Source"))).resolve() != scratch_mountpoint
         or scratch_mount.get("RW") is not True
         or scratch_mount.get("Propagation") != "rprivate"
     ):
-        raise _fail("ASEGS012", "Subject and scratch bind mount access does not match the read-only/private contract.")
+        raise _fail(
+            "ASEGS012", "Subject, source diff, and scratch bind mounts do not match the read-only/private contract."
+        )
 
 
 def _validate_subject_result_content(content: bytes, *, expected_status: str) -> Mapping[str, Any]:
@@ -1358,6 +1434,8 @@ def launch_subject(
     image_digest: str,
     scratch_directory: str | os.PathLike[str],
     profile_id: str,
+    source_diff: str | os.PathLike[str],
+    source_diff_sha256: str,
     limits: SubjectLimits,
     cancel_event: threading.Event | None = None,
     _environment: Mapping[str, str] | None = None,
@@ -1371,6 +1449,8 @@ def launch_subject(
     """Run a fixed profile with host-mounted quota-limited scratch and export its result record."""
     _validate_limits(limits)
     profile_arguments = _validate_profile(profile_id)
+    diff_path = _validate_source_diff(source_diff, source_diff_sha256)
+    profile_arguments = (*profile_arguments, f"--diff-sha256={source_diff_sha256}")
     _validate_image_reference(image_digest)
     subject_root = _validate_subject_root(subject_checkout)
     env = dict(os.environ if _environment is None else _environment)
@@ -1384,6 +1464,15 @@ def launch_subject(
     scratch = _validate_scratch_path(scratch_directory, runner_temp)
     if scratch == subject_root or scratch in subject_root.parents or subject_root in scratch.parents:
         raise _fail("ASEGS002", "The subject checkout and scratch directory must be disjoint.")
+    if (
+        diff_path == subject_root
+        or subject_root in diff_path.parents
+        or diff_path == scratch
+        or scratch in diff_path.parents
+    ):
+        raise _fail(
+            "ASEGS020", "The controller source diff must be outside the subject checkout and scratch directory."
+        )
 
     event = cancel_event if cancel_event is not None else threading.Event()
     host_gid = os.getegid()
@@ -1519,6 +1608,7 @@ def launch_subject(
                     image=image_digest,
                     owner_token=owner_token,
                     subject_root=subject_root,
+                    source_diff=diff_path,
                     scratch_mountpoint=scratch_mountpoint,
                     profile_arguments=profile_arguments,
                     limits=limits,
@@ -1544,6 +1634,7 @@ def launch_subject(
         _verify_container_configuration(
             inspect_result.stdout,
             subject_root=subject_root,
+            source_diff=diff_path,
             scratch_mountpoint=scratch_mountpoint,
             limits=limits,
             profile_arguments=profile_arguments,
@@ -1612,6 +1703,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--image-digest", required=True)
     parser.add_argument("--scratch-directory", required=True)
     parser.add_argument("--profile-id", required=True)
+    parser.add_argument("--source-diff", required=True)
+    parser.add_argument("--source-diff-sha256", required=True)
     parser.add_argument("--timeout-seconds", required=True, type=_positive_cli_integer)
     parser.add_argument("--memory-mib", required=True, type=_positive_cli_integer)
     parser.add_argument("--cpu-millis", required=True, type=_positive_cli_integer)
@@ -1624,6 +1717,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             image_digest=args.image_digest,
             scratch_directory=args.scratch_directory,
             profile_id=args.profile_id,
+            source_diff=args.source_diff,
+            source_diff_sha256=args.source_diff_sha256,
             limits=SubjectLimits(
                 timeout_seconds=args.timeout_seconds,
                 memory_mib=args.memory_mib,

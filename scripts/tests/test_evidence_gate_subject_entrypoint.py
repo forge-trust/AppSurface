@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import io
 import json
@@ -35,16 +36,19 @@ class FixedOfflineSubjectEntrypointTests(unittest.TestCase):
             entrypoint.SUBJECT_ROOT,
             entrypoint.SCRATCH_ROOT,
             entrypoint.DEPENDENCY_SOURCE,
+            entrypoint.PATCH_DIFF_PATH,
+            hashlib.sha256(b"captured unified diff\n").hexdigest(),
             True,
         )
 
     @staticmethod
-    def mountinfo(subject: Path, scratch: Path, dependencies: Path) -> str:
+    def mountinfo(subject: Path, scratch: Path, dependencies: Path, *, diff_options: str = "ro") -> str:
         return "\n".join(
             (
                 f"1 0 0:1 / {subject} ro - bind none ro",
                 f"2 0 0:2 / {scratch} rw - bind none rw",
                 f"3 0 0:3 / {dependencies} ro - bind none ro",
+                f"4 0 0:4 / {entrypoint.PATCH_DIFF_PATH} {diff_options} - bind none {diff_options}",
             )
         )
 
@@ -84,22 +88,18 @@ class FixedOfflineSubjectEntrypointTests(unittest.TestCase):
         (root / "example.package.1.0.0.nupkg").write_bytes(b"locked-package-payload")
 
     def patch_paths(self, subject: Path, scratch: Path, feed: Path) -> mock._patch:
-        patches = (
-            mock.patch.object(entrypoint, "SUBJECT_ROOT", subject),
-            mock.patch.object(entrypoint, "SCRATCH_ROOT", scratch),
-            mock.patch.object(entrypoint, "DEPENDENCY_SOURCE", feed),
-            mock.patch.object(entrypoint, "SUBJECT_ROOT", subject),
-        )
+        diff_path = subject.parent / "source.diff"
+        diff_path.write_bytes(b"captured unified diff\n")
         combined = mock.patch.multiple(
             entrypoint,
             SUBJECT_ROOT=subject,
             SCRATCH_ROOT=scratch,
             DEPENDENCY_SOURCE=feed,
+            PATCH_DIFF_PATH=diff_path,
             FIXED_SUBJECT_ARGUMENT=f"--subject-root={subject}",
             FIXED_SCRATCH_ARGUMENT=f"--scratch-root={scratch}",
             FIXED_DEPENDENCY_ARGUMENT=f"--dependency-source={feed}",
         )
-        del patches
         return combined
 
     def prepared_roots(self, parent: Path) -> tuple[Path, Path, Path]:
@@ -113,44 +113,128 @@ class FixedOfflineSubjectEntrypointTests(unittest.TestCase):
         return subject, scratch, feed
 
     def test_invocation_accepts_only_the_launcher_fixed_contract(self) -> None:
+        digest = hashlib.sha256(b"captured unified diff\n").hexdigest()
         invocation = entrypoint.parse_invocation(
             [
                 "--profile-id=code-coverage",
                 "--subject-root=/subject",
                 "--scratch-root=/scratch",
                 "--dependency-source=/opt/appsurface/locked-dependencies",
+                "--diff-file=/source.diff",
+                f"--diff-sha256={digest}",
                 "--offline",
             ]
         )
         self.assertEqual("code-coverage", invocation.profile_id)
+        self.assertEqual(digest, invocation.diff_sha256)
+        self.assertEqual(Path("/source.diff"), invocation.diff_file)
         self.assertTrue(invocation.offline)
+        with self.assertRaises(entrypoint.EntrypointError):
+            entrypoint.parse_invocation(
+                [
+                    "--profile-id=code-coverage", "--subject-root=/subject", "--scratch-root=/scratch",
+                    "--dependency-source=/opt/appsurface/locked-dependencies", "--diff-file=/source.diff",
+                    f"--diff-sha256={digest}\\Z", "--offline",
+                ]
+            )
         for invalid in (
-            ["--profile-id=code-coverage", "--subject-root=/tmp/subject", "--scratch-root=/scratch", "--dependency-source=/opt/appsurface/locked-dependencies", "--offline"],
-            ["--profile-id=code-coverage", "--subject-root=/subject", "--scratch-root=/scratch", "--dependency-source=/opt/appsurface/locked-dependencies"],
-            ["--profile-id=code-coverage", "--subject-root=/subject", "--scratch-root=/scratch", "--dependency-source=/opt/appsurface/locked-dependencies", "--offline", "dotnet", "restore"],
+            [
+                "--profile-id=code-coverage", "--subject-root=/tmp/subject", "--scratch-root=/scratch",
+                "--dependency-source=/opt/appsurface/locked-dependencies", "--diff-file=/source.diff",
+                f"--diff-sha256={digest}", "--offline",
+            ],
+            [
+                "--profile-id=code-coverage", "--subject-root=/subject", "--scratch-root=/scratch",
+                "--dependency-source=/opt/appsurface/locked-dependencies", "--diff-file=/source.diff",
+                f"--diff-sha256={digest}",
+            ],
+            [
+                "--profile-id=code-coverage", "--subject-root=/subject", "--scratch-root=/scratch",
+                "--dependency-source=/opt/appsurface/locked-dependencies", "--diff-file=/source.diff",
+                f"--diff-sha256={digest}", "--offline", "dotnet", "restore",
+            ],
         ):
             with self.subTest(argv=invalid), self.assertRaises(SystemExit):
                 entrypoint.parse_invocation(invalid)
+        with self.assertRaises(entrypoint.EntrypointError):
+            entrypoint.parse_invocation(
+                [
+                    "--profile-id=code-coverage", "--subject-root=/subject", "--scratch-root=/scratch",
+                    "--dependency-source=/opt/appsurface/locked-dependencies", "--diff-file=/source.diff",
+                    "--diff-sha256=" + "z" * 64, "--offline",
+                ]
+            )
 
     def test_mount_validation_rejects_writable_subject_and_public_scratch(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             subject, scratch, feed = self.prepared_roots(Path(temporary).resolve())
             self.make_subject(subject)
-            cases = (
-                (self.mountinfo(subject, scratch, feed).replace(f"{subject} ro", f"{subject} rw"), "read-only"),
-                (self.mountinfo(subject, scratch, feed), "private"),
-            )
-            scratch.chmod(0o755)
-            for mountinfo, message in cases:
-                with self.subTest(message=message), self.patch_paths(subject, scratch, feed):
-                    with self.assertRaises(entrypoint.EntrypointError):
+            with self.patch_paths(subject, scratch, feed):
+                invocation = self.invocation()
+                cases = (
+                    (self.mountinfo(subject, scratch, feed).replace(f"{subject} ro", f"{subject} rw"), "read-only"),
+                    (self.mountinfo(subject, scratch, feed, diff_options="rw"), "source diff mount is not read-only"),
+                )
+                for mountinfo, message in cases:
+                    with self.subTest(message=message), self.assertRaisesRegex(entrypoint.EntrypointError, message):
                         entrypoint.validate_mounts(
                             subject,
                             scratch,
                             feed,
+                            invocation.diff_file,
+                            invocation.diff_sha256,
                             mountinfo_text=mountinfo,
                             effective_uid=os.geteuid(),
                         )
+                scratch.chmod(0o755)
+                with self.assertRaisesRegex(entrypoint.EntrypointError, "scratch directory is not private"):
+                    entrypoint.validate_mounts(
+                        subject,
+                        scratch,
+                        feed,
+                        invocation.diff_file,
+                        invocation.diff_sha256,
+                        mountinfo_text=self.mountinfo(subject, scratch, feed),
+                        effective_uid=os.geteuid(),
+                    )
+
+    def test_mount_validation_rejects_source_diff_digest_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            subject, scratch, feed = self.prepared_roots(Path(temporary).resolve())
+            self.make_subject(subject)
+            with self.patch_paths(subject, scratch, feed):
+                invocation = self.invocation()
+                invocation.diff_file.write_bytes(b"different captured diff\n")
+                with self.assertRaises(entrypoint.EntrypointError) as failure:
+                    entrypoint.validate_mounts(
+                        subject,
+                        scratch,
+                        feed,
+                        invocation.diff_file,
+                        invocation.diff_sha256,
+                        mountinfo_text=self.mountinfo(subject, scratch, feed),
+                        effective_uid=os.geteuid(),
+                    )
+            self.assertEqual("ASESE012", failure.exception.code)
+
+    def test_mount_validation_rejects_missing_source_diff(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            subject, scratch, feed = self.prepared_roots(Path(temporary).resolve())
+            self.make_subject(subject)
+            with self.patch_paths(subject, scratch, feed):
+                invocation = self.invocation()
+                invocation.diff_file.unlink()
+                with self.assertRaises(entrypoint.EntrypointError) as failure:
+                    entrypoint.validate_mounts(
+                        subject,
+                        scratch,
+                        feed,
+                        invocation.diff_file,
+                        invocation.diff_sha256,
+                        mountinfo_text=self.mountinfo(subject, scratch, feed),
+                        effective_uid=os.geteuid(),
+                    )
+            self.assertEqual("ASESE012", failure.exception.code)
 
     def test_missing_offline_package_feed_writes_bounded_failure_without_running_dotnet(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -354,9 +438,14 @@ class FixedOfflineSubjectEntrypointTests(unittest.TestCase):
             coverage_run, coverage_gate = entrypoint._coverage_commands(
                 scratch / entrypoint.STAGED_SUBJECT_RELATIVE_PATH,
                 scratch,
+                parent / "source.diff",
             )
             self.assertIn(coverage_run, commands)
             self.assertIn(coverage_gate, commands)
+            self.assertEqual("95", coverage_gate[coverage_gate.index("--min-patch-line") + 1])
+            self.assertEqual("85", coverage_gate[coverage_gate.index("--min-patch-branch") + 1])
+            self.assertEqual("codecov", coverage_gate[coverage_gate.index("--patch-line-mode") + 1])
+            self.assertEqual(str(parent / "source.diff"), coverage_gate[coverage_gate.index("--diff-file") + 1])
             self.assertEqual("--exclusive-test-project", coverage_run[coverage_run.index("--exclusive-test-project")])
             self.assertNotIn("--build", coverage_run)
             result_bytes = (scratch / entrypoint.RESULT_RELATIVE_PATH).read_bytes()
@@ -493,6 +582,8 @@ class FixedOfflineSubjectEntrypointTests(unittest.TestCase):
                     entrypoint.SUBJECT_ROOT,
                     scratch,
                     entrypoint.DEPENDENCY_SOURCE,
+                    entrypoint.PATCH_DIFF_PATH,
+                    hashlib.sha256(b"captured unified diff\n").hexdigest(),
                     True,
                 )
                 expected = entrypoint._make_result(status, [], diagnostic=diagnostic)

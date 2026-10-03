@@ -248,9 +248,17 @@ class SubjectLimits:
     def __init__(self, **values):
         self.values = values
 
-def launch_subject(*, subject_checkout, image_digest, scratch_directory, profile_id, limits, _environment):
+def launch_subject(
+    *, subject_checkout, image_digest, scratch_directory, profile_id,
+    source_diff, source_diff_sha256, limits, _environment
+):
     with open(_environment['TEST_PROFILE_LOG'], 'w', encoding='utf-8') as log:
         log.write(profile_id)
+    if 'TEST_DIFF_LOG' in _environment:
+        with open(source_diff, 'rb') as diff_file:
+            diff_hex = diff_file.read().hex()
+        with open(_environment['TEST_DIFF_LOG'], 'w', encoding='ascii') as log:
+            log.write(source_diff_sha256 + ':' + diff_hex)
     execution_record = {execution_record!r}
     if {step_mutation!r} == 'omit-last':
         execution_record['steps'].pop()
@@ -432,6 +440,7 @@ def launch_subject(*, subject_checkout, image_digest, scratch_directory, profile
             output = output_parent / "handoff"
             self._create(capture, scripts, plan_file, output)
             profile_log = root / "selected-profile.txt"
+            diff_log = root / "selected-diff.txt"
 
             exit_code, result_path = self._execute(
                 output,
@@ -442,10 +451,16 @@ def launch_subject(*, subject_checkout, image_digest, scratch_directory, profile
                     "GITHUB_RUN_ATTEMPT": "1",
                     "GITHUB_REPOSITORY_ID": "123",
                     "TEST_PROFILE_LOG": str(profile_log),
+                    "TEST_DIFF_LOG": str(diff_log),
                 },
             )
 
             self.assertEqual("code-coverage", profile_log.read_text(encoding="utf-8"))
+            captured_diff = (capture / "source.diff").read_bytes()
+            self.assertEqual(
+                f"{hashlib.sha256(captured_diff).hexdigest()}:{captured_diff.hex()}",
+                diff_log.read_text(encoding="ascii"),
+            )
             self.assertEqual(0, exit_code)
             result = json.loads(result_path.read_text(encoding="utf-8"))
             self.assertFalse(result["claimEligible"])
