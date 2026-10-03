@@ -835,10 +835,13 @@ public sealed class EvidenceHostRunnerTests
         using (new FileStream(fixture.PolicyPath, FileMode.Open, FileAccess.Write, FileShare.Read))
         {
             cancellation.Cancel();
-            var exitCode = await execution.WaitAsync(TimeSpan.FromSeconds(10));
-
-            Assert.Equal(130, exitCode);
         }
+
+        // Closing the FIFO writer releases a pending read even when the runtime
+        // cannot interrupt that read directly; cancellation must still win at EOF.
+        var exitCode = await execution.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(130, exitCode);
 
         Assert.Contains("ASEGH130", stderr.ToString(), StringComparison.Ordinal);
         Assert.Empty(stdout.ToString());

@@ -368,6 +368,7 @@ internal static class EvidenceHostRunner
                 var read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
                 if (read == 0)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     break;
                 }
 
