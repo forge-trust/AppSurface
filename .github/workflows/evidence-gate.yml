@@ -334,7 +334,7 @@ jobs:
       - credentialless-subject
     if: ${{ always() }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       actions: read
       contents: read
@@ -406,6 +406,51 @@ jobs:
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.401
+
+      - name: Replay the downloaded coverage against the freshly captured diff (non-claiming)
+        if: ${{ needs.controller-capture.result == 'success' && needs.credentialless-subject.result == 'success' && needs.controller-capture.outputs.profile_id == 'code-coverage' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          capture="$RUNNER_TEMP/evidence-gate-verifier-capture"
+          artifacts="$RUNNER_TEMP/evidence-gate-verifier-inputs/evidence-gate-artifacts-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          project="$GITHUB_WORKSPACE/trusted/Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"
+
+          python3 - "$RUNNER_TEMP/evidence-gate-verified-plan.json" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as plan_file:
+              profile = json.load(plan_file)["Profile"]
+          producers = [producer for producer in profile["Producers"] if producer["Id"] == "coverage"]
+          expected = {
+              "MinLinePercent": 95,
+              "MinBranchPercent": 85,
+              "MinPatchLinePercent": 95,
+              "MinPatchBranchPercent": 85,
+              "PatchLineMode": "codecov",
+              "TolerancePercent": 0.5,
+          }
+          if profile["Id"] != "code-coverage" or len(producers) != 1 or producers[0]["CoverageGate"] != expected:
+              raise SystemExit("The trusted coverage replay no longer matches the selected base-owned policy.")
+          PY
+
+          # Cobertura paths from the fixed subject entrypoint are rooted at /subject.
+          # The verifier needs only an existing normalization root; it does not
+          # execute or trust any file from the subject's checkout here.
+          test ! -e /subject && test ! -L /subject
+          sudo -n install -d -m 0755 /subject
+          dotnet restore "$project" --locked-mode --verbosity quiet
+          dotnet run --no-restore --configuration Release --project "$project" -- coverage gate \
+            --coverage "$artifacts/cobertura.xml" \
+            --repository-root /subject \
+            --diff-file "$capture/source.diff" \
+            --diff-label captured-source-diff \
+            --min-line 95 --min-branch 85 \
+            --min-patch-line 95 --min-patch-branch 85 \
+            --patch-line-mode codecov --tolerance 0.5 \
+            --output "$RUNNER_TEMP/evidence-gate-trusted-coverage-replay" \
+            --no-github-summary
 
       - name: Recompute the host manifest and independently verify the gate
         id: gate_verifier
