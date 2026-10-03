@@ -352,7 +352,7 @@ public sealed class PostgreSqlDurableHeartbeatMaintenanceTests : IDisposable
 
         await using var maintenance = new PostgreSqlDurableHeartbeatMaintenance(registration, TimeProvider.System);
         maintenance.SignalAdmittedPass();
-        await WaitUntilAsync(async () => !await TryAcquirePruneLockAsync(database.DataSource));
+        await WaitUntilAsync(() => IsPruneBlockedAsync(database.DataSource));
         await maintenance.StopAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
         await blockerTransaction.RollbackAsync();
 
@@ -395,6 +395,29 @@ public sealed class PostgreSqlDurableHeartbeatMaintenanceTests : IDisposable
         }
 
         Assert.True(await predicate(), "The expected PostgreSQL advisory lock state was not reached.");
+    }
+
+    private static async Task<bool> IsPruneBlockedAsync(NpgsqlDataSource dataSource)
+    {
+        // Observe without acquiring the advisory lock: a competing probe can make pruning skip the pass.
+        await using var command = dataSource.CreateCommand(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_locks AS prune
+                JOIN pg_catalog.pg_locks AS waiting
+                  ON waiting.pid = prune.pid AND waiting.database = prune.database
+                WHERE prune.locktype = 'advisory' AND prune.granted
+                  AND prune.database = (SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database())
+                  AND prune.classid = @namespace_one::oid AND prune.objid = @namespace_two::oid
+                  AND prune.objsubid = 2
+                  AND waiting.locktype = 'relation' AND NOT waiting.granted
+                  AND waiting.relation = 'appsurface_durable.runtime_heartbeat'::regclass
+            );
+            """);
+        command.Parameters.AddWithValue("namespace_one", unchecked((int)0x41534455));
+        command.Parameters.AddWithValue("namespace_two", unchecked((int)0x52484252));
+        return (bool)(await command.ExecuteScalarAsync() ?? false);
     }
 
     private static async Task<bool> TryAcquirePruneLockAsync(NpgsqlDataSource dataSource)

@@ -503,6 +503,7 @@ type public static class ForgeTrust.AppSurface.Durable.DurableProblemCodes
   field public const System.String AmbiguousExternalOutcome = "ASDUR106"
   field public const System.String ClaimLost = "ASDUR104"
   field public const System.String CommandConflict = "ASDUR102"
+  field public const System.String ExternalActivationFailed = "ASDUR407"
   field public const System.String FlowAccessDenied = "ASDUR205"
   field public const System.String FlowCommandConflict = "ASDUR207"
   field public const System.String FlowDefinitionUnavailable = "ASDUR200"
