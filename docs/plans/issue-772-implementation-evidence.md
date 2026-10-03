@@ -4,6 +4,8 @@ This records execution of the [approved plan](issue-772-persona-scoped-fixture-a
 
 Branch: `codex/make-it-so-772-fixture-activation`.
 
+The tables below retain the original acceptance baseline and ship history. Publication and later verification are recorded under [published verification](#published-verification); their results supersede the earlier pending-publication labels without certifying subsequent local edits.
+
 | Facet | Acceptance baseline evidence | Status |
 | --- | --- | --- |
 | Optional scoped selection hook | Interface and endpoint complete; captured token checked before and after one await; package suite 156/156 passed | Passed |
@@ -57,3 +59,16 @@ The table above records the passing acceptance baseline on `16aee8e1`, rather th
 The ship security review reproduced HTTP 200 from the sample control page with an unapproved Host header. The sample now installs ASP.NET Core host filtering before identity and fixture mutations, with explicit `localhost`, `127.0.0.1`, and `[::1]` authorities and empty hosts disabled. Nine HTTP regression cases first produced three failures and six passes before the fix, then all nine passed. They cover ports, matching Origin on an unapproved authority, both empty and existing fixture state, and rejected control/status/selection/clear/candidate requests without a cookie or state change. The [sample admission guidance](../../examples/auth-aspnetcore-dev-auth/README.md#persona-fixture-activation) describes configuration and middleware ordering. The reusable package contract is unchanged.
 
 The final draft PR's verification section will supply fresh results for the exact full coverage command, generated documentation and final host behavior. Ship reviews, the ship-owned documentation audit and frozen-candidate verification must complete before publication.
+
+## Verification fixture isolation
+
+The approved [verification checklist](issue-772-persona-scoped-fixture-activation.md#6-verification-before-pushing-implementation) requires solution coverage and package proof under the [repository verification policy](../../CONTRIBUTING.md#local-verification). Those runs exposed two fixture issues outside the DevAuth implementation. The following narrow repairs make that required evidence reproducible; they introduce no activation API, dependency or product behavior.
+
+- The [Coverage CLI consumer proof](../../tools/ForgeTrust.AppSurface.PackageIndex/README.md#change-workflow) creates synthetic source, Cobertura and patch paths in an isolated consumer directory. Automatic Git-root detection selected the enclosing checkout instead, so the proof could not match its own consumer-relative targets. Passing that fixture directory as the existing `coverage gate --repository-root` argument restores the required package proof. The command-contract regression asserts that the argument equals the command's working directory; see the [CLI patch-target reference](../../Cli/ForgeTrust.AppSurface.Cli/README.md#agent-actionable-patch-targets) for path semantics.
+- The [AdoptionMetrics tests](https://github.com/forge-trust/AppSurface/blob/main/tools/ForgeTrust.AppSurface.Durable.AdoptionMetrics.Tests/AdoptionMeasurementTests.cs) create synthetic Git commits to verify revision behavior during the required full solution run. They must not depend on the developer's signing credentials or signer. Their test-owned Git commands override `commit.gpgsign=false`; the regression deliberately configures signing with a missing signer and still verifies the revision contract. This change affects only temporary test repositories and leaves developer Git configuration untouched.
+
+## Published verification
+
+[PR #849](https://github.com/forge-trust/AppSurface/pull/849) contains the feature and feedback repairs at `4421bf6e`, including integration with `main` at `ec5d927e`. The fresh Release run on that published source completed all 54 projects with 15,507 tests passed, four skipped and zero failures, warnings or build errors. Aggregate coverage was 96.10% lines and 88.65% branches; patch coverage was 100% lines and branches. The command was `BUILD_CONFIGURATION=Release BUILD_NO_RESTORE=true COVERAGE_PARALLELISM=2 COVERAGE_GATE_DIFF_BASE=origin/main ./scripts/coverage-solution.sh`, with the existing aggregate and patch thresholds of 95% lines / 85% branches, Codecov patch-line mode and 0.5 percentage point tolerance.
+
+The published-source [build and coverage job](https://github.com/forge-trust/AppSurface/actions/runs/37052259475/job/110988274865) and [strict docs-export job](https://github.com/forge-trust/AppSurface/actions/runs/37052259475/job/110997569887) passed. Local strict export, formatting, catalog verification and gate, and both visual-baseline tests also passed. These results belong to that source revision; later documentation feedback edits receive their own local verification before another push.

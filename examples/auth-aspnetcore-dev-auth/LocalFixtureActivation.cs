@@ -41,7 +41,11 @@ internal sealed class LocalFixtureActivation(
     /// <param name="cancellationToken">Captured selection request token.</param>
     /// <param name="logger">The scoped handler's logger; no exception or request payload is logged.</param>
     /// <param name="prepare">Host composition that finishes readiness or throws. Never writes the response.</param>
+    /// <returns>A task that completes after preparation, the final cancellation check and success logging.</returns>
     /// <remarks>
+    /// Persona, context, logger and preparation are required caller-owned inputs; this internal seam does not
+    /// validate null arguments. Cancellation and preparation failures are logged with fixed outcomes and rethrown;
+    /// logging failures also propagate. A failure does not undo fixture writes already made by preparation.
     /// The intentionally internal composition boundary lets HTTP tests substitute deterministic partial failure or
     /// cancellation while exercising the same logging policy. There is no runtime fault flag, extra service or retry.
     /// </remarks>
@@ -97,6 +101,13 @@ internal sealed class LocalFixtureActivationFailureMiddleware(RequestDelegate ne
     internal const string FailureMessage = "Persona selection did not finish. Fixtures are not ready. Open /_appsurface/dev-auth/ and select the persona again.";
 
     /// <summary>Runs the next middleware and handles only a typed activation failure before response start.</summary>
+    /// <param name="context">The current request whose queued headers are preserved during recovery.</param>
+    /// <returns>A task that completes after the downstream pipeline or the handled failure response.</returns>
+    /// <remarks>
+    /// A handled failure returns HTTP 500 with the fixed text/plain message and retains queued headers.
+    /// The response write observes RequestAborted. Cancellation, other failures and typed failures after response
+    /// start propagate; response-write failures also propagate. This middleware neither retries nor rolls back data.
+    /// </remarks>
     public async Task InvokeAsync(HttpContext context)
     {
         try
