@@ -149,6 +149,9 @@ def retain_diagnostics(workspace, output, *, expected_owner_uid=0):
     Complete small collected files and bindings remain complete. Build logs retain
     at most their last 16 KiB, with original length/retained-byte SHA in the private index. Missing
     diagnostics never change an execution failure or grant a positive receipt.
+    launcher-owned-exit.json stays the same fixed 4096-byte opaque private file;
+    its v2 startup fields are not parsed here or promoted to authority. Historical
+    v1 bytes are never converted or used as a schema-v2 success substitute.
     """
     selected = [("build-binding.json", 1024*1024, False)]
     selected.extend((f"build-logs/build-{index:02d}.log", 16*1024, True) for index in range(1, 33))

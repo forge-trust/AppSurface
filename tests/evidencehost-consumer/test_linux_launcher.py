@@ -2543,4 +2543,55 @@ class OwnedExitDiagnosticControls(unittest.TestCase):
             finally: broker.close_artifact_handles()
 
 
+class StartupRecordControls(unittest.TestCase):
+    """Closed private record/FD and negative protocol controls only; no fabricated app lease."""
+    def test_startup_schema_exact_fields_bounds_canary_and_private_capture(self):
+        with tempfile.TemporaryDirectory() as root:
+            broker, _, _ = artifact_broker(root)
+            directory = Path(root)/"diagnostics"; directory.mkdir(mode=0o700)
+            fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                broker._latch_owned_exit_failure("deadline")
+                base = json.loads(broker.owned_exit_diagnostic)
+                self.assertEqual("issue779-owned-exit-diagnostic-v2", base["schema"])
+                state = launcher._application.OwnershipState()
+                state.startup_diagnostics.phase = "dotnet-validation"
+                state.startup_diagnostics.capture(PermissionError(13, "private-startup-canary"))
+                record = {**base, **state.startup_diagnostics.snapshot()}
+                self.assertEqual(record, launcher.validate_owned_exit_diagnostic(record))
+                data = json.dumps(record, sort_keys=True).encode(); self.assertLessEqual(len(data), 4096)
+                self.assertTrue(launcher._capture_owned_exit_diagnostic_fd(fd, data,
+                    expected_owner_uid=os.geteuid(), expected_owner_gid=os.getegid()))
+                self.assertEqual(data, (directory/launcher.OWNED_EXIT_DIAGNOSTIC_FILE).read_bytes())
+                self.assertNotIn("private-startup-canary", data.decode())
+                for changes in ({"startup_phase": ["canary"]}, {"startup_phase": "canary"},
+                        {"startup_error_class": "PermissionError-canary"}, {"startup_errno": True},
+                        {"startup_errno": 0}, {"startup_errno": 4096},
+                        {"schema": "issue779-owned-exit-diagnostic-v1"}):
+                    with self.subTest(changes=changes), self.assertRaises(ValueError):
+                        launcher.validate_owned_exit_diagnostic({**record, **changes})
+                missing = dict(record); del missing["startup_phase"]
+                with self.assertRaises(ValueError): launcher.validate_owned_exit_diagnostic(missing)
+            finally: os.close(fd); broker.close_artifact_handles()
+
+    def test_startup_observations_cannot_change_negative_ack_or_add_success_io(self):
+        with tempfile.TemporaryDirectory() as root:
+            broker, _, _ = artifact_broker(root)
+            try:
+                broker.application_work_failed = True
+                with patch.object(launcher, "_capture_owned_exit_diagnostic_fd") as capture:
+                    self.assertEqual({"ok": True, "owned_exit": False}, broker_request(broker, {"op": "wait"}))
+                    capture.assert_not_called()
+                self.assertFalse(broker.wait_completed)
+                record = json.loads(broker.owned_exit_diagnostic)
+                self.assertEqual("output-latched", record["category"])
+                self.assertEqual("not-started", record["startup_phase"])
+                self.assertIsNone(record["startup_errno"])
+                with patch.object(launcher, "_capture_owned_exit_diagnostic_fd") as capture:
+                    launcher.require_successful_worker({"Result": "success", "User": "worker",
+                        "KillMode": "control-group"}, "worker", broker, 123)
+                    capture.assert_not_called()
+            finally: broker.close_artifact_handles()
+
+
 if __name__ == "__main__": unittest.main()

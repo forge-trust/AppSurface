@@ -173,3 +173,55 @@ busy-lock skipping, real pumps, exclusive files, links and no-I/O success.
 
 These are prepared, unexecuted portable controls at source-ready. No root, systemd,
 native, qualification, coverage or Trusted acceptance is claimed by this fork.
+
+### Private startup observations (owned-exit schema v2)
+
+This incremental private fork retains the same filename and 4096-byte cap, but
+uses `issue779-owned-exit-diagnostic-v2`. Historical v1 records are not rewritten
+or accepted by the v2 validator. The public launcher failure JSON remains unchanged;
+the archive controller still copies only opaque fixed-name bytes and grants no origin.
+
+| New required field | Closed value/meaning |
+| --- | --- |
+| `startup_phase` | First captured failed `STARTUP_PHASES` operation; otherwise the current phase, initially `not-started`, or `unknown` for invalid internal metadata |
+| `startup_error_class` | `none`, `application`, `os`, `subprocess-timeout`, `subprocess`, `memory`, `value` or `unknown`; exact known Python classes only |
+| `startup_errno` | `null`, or an exact integer 1–4095 from a recognized direct `OSError` at capture time; Booleans reject |
+
+[`StartupDiagnostics`](../../../scripts/evidencehost_linux_application.py) is an
+internal data/procedure seam. `phase` receives only host-defined literals in the
+real start path; `observing()` preserves the existing return/exception while recording
+failure. `capture(error)` latches one immutable phase/class/errno tuple using a
+nonblocking lock. `snapshot()` returns a fresh closed field dictionary without locks,
+syscalls, process polling, callbacks or waits. `lock` is available only for portable
+contention controls. A busy capture lock skips that observation rather than delaying
+cleanup; missing diagnostics are never execution success or a replacement exception.
+
+The actual start path labels request validation and attempt claim, then workspace
+validation, selected bundle verification, protected probe audit, dotnet validation,
+pipe creation, watchdog process/owner construction, watchdog start/ACK, open check,
+armed-file creation, fixed command construction, pre-Popen check, Popen, attachment,
+pump construction/start and startup inspection. `running-ack` is an observation
+after the original identity/liveness guards, not a substitute ACK. Existing calls,
+guards, deadlines and ordering remain unchanged. The original inner catch captures
+its exception before replacing it with the existing fixed `ApplicationError`; the
+outer observer covers the existing pre-try guards without overriding the first tuple.
+
+No messages, paths, exception arguments, custom data, arbitrary type names or
+stack text enter the record. In particular, an `ApplicationError` from a helper
+that already discarded native errno yields `null`; this fork never samples a later
+ctypes/thread-local errno or guesses the lost value. A known direct `OSError` uses
+its current bounded numeric attribute only. An unknown subclass yields `unknown`
+and `null`, even if it carries a plausible errno. Memory/value categories remain
+diagnostic-only. No startup observation may select a registration, issue a lease,
+change stop/join failure, or authorize a passed manifest.
+
+Prepared `StartupDiagnosticControls` exercise actual missing-file FD failure,
+pinned-bundle mode rejection and managed-probe rejection through the existing
+read-only local-owner seams. They check failed procedure results, exact phases,
+original exceptions, unavailable errno, first-failure retention, busy-lock behavior
+and canary exclusion without constructing a protected lease. `StartupRecordControls`
+cover strict schema/types/bounds, an exclusive actual-FD private write, unchanged
+negative wait ACK and no new successful-worker I/O. `StartupArchiveControls` cover
+both fixed entry names, exact opaque v2 bytes, the unchanged archive index and cap.
+All earlier controls remain intact. These new controls are defined but unexecuted
+at this fork's source-ready; no native or qualification result is inferred.

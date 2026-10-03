@@ -335,5 +335,29 @@ class OwnedExitArchiveControls(unittest.TestCase):
                 self.reject_without_archive(workspace, output)
 
 
+class StartupArchiveControls(unittest.TestCase):
+    """Only opaque private schema bytes; the archive cannot establish startup or qualification."""
+    roots = DiagnosticDataControls.roots
+    write = DiagnosticDataControls.write
+    retain = DiagnosticDataControls.retain
+    archive = DiagnosticDataControls.archive
+    def test_startup_v2_private_bytes_preserved_for_both_entries_with_fixed_file_bound(self):
+        for entry in ("cli", "host"):
+            with self.subTest(entry=entry):
+                workspace, output = self.roots()
+                name = f"failure-{entry}/launcher-owned-exit.json"
+                data = json.dumps({"schema": "issue779-owned-exit-diagnostic-v2", "category": "app-join-fault",
+                    "startup_phase": "dotnet-validation", "startup_error_class": "os", "startup_errno": 13}).encode()
+                self.write(workspace, name, data)
+                console = io.StringIO()
+                with redirect_stdout(console), redirect_stderr(console): self.retain(workspace, output)
+                _, contents, index = self.archive(output)
+                self.assertEqual("", console.getvalue()); self.assertEqual(data, contents[name])
+                self.assertEqual(hashlib.sha256(data).hexdigest(), index[0]["retained_sha256"])
+                workspace, output = self.roots(); self.write(workspace, name, b"x"*4097)
+                self.retain(workspace, output); _, contents, index = self.archive(output)
+                self.assertEqual({"index.json"}, set(contents)); self.assertEqual("oversize", index[0]["state"])
+
+
 if __name__ == "__main__":
     unittest.main()

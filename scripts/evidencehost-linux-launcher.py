@@ -311,7 +311,7 @@ def _read_worker_journal(unit: str) -> tuple[str, bytes]:
 
 OWNED_EXIT_DIAGNOSTIC_FILE = "launcher-owned-exit.json"
 OWNED_EXIT_DIAGNOSTIC_LIMIT = 4096
-OWNED_EXIT_DIAGNOSTIC_SCHEMA = "issue779-owned-exit-diagnostic-v1"
+OWNED_EXIT_DIAGNOSTIC_SCHEMA = "issue779-owned-exit-diagnostic-v2"
 OWNED_EXIT_FAILURE_CATEGORIES = frozenset(("app-join-fault", "output-latched", "inspection", "deadline"))
 OWNED_EXIT_ERROR_CLASSES = frozenset(("none", "application", "launcher", "os", "subprocess-timeout", "subprocess", "unknown"))
 OWNED_EXIT_BOOLEANS = ("broker_subject_output_failed", "broker_application_work_failed")
@@ -328,20 +328,28 @@ def _owned_exit_error_class(error) -> str:
 
 
 def validate_owned_exit_diagnostic(record) -> dict:
-    """Private diagnostic schema only; nullable observations never establish owned exit."""
-    keys = {"schema", "category", "error_class", "join_phase", *OWNED_EXIT_BOOLEANS, *OWNED_EXIT_COUNTS,
+    """Private v2 schema, including first startup phase/class/direct errno; never owned-exit authority.
+
+    Historical v1 bytes remain historical and are not silently upgraded. Missing
+    startup exception metadata uses class none/errno None; no errno is recovered
+    from an ApplicationError or a later native thread-local error.
+    """
+    keys = {"schema", "category", "error_class", "join_phase", "startup_phase", "startup_error_class", "startup_errno",
+            *OWNED_EXIT_BOOLEANS, *OWNED_EXIT_COUNTS,
             *_application.JOIN_DIAGNOSTIC_BOOLEANS, *_application.JOIN_DIAGNOSTIC_INTEGERS}
     if (type(record) is not dict or set(record) != keys or type(record["schema"]) is not str
             or record["schema"] != OWNED_EXIT_DIAGNOSTIC_SCHEMA
             or type(record["category"]) is not str or record["category"] not in OWNED_EXIT_FAILURE_CATEGORIES
             or type(record["error_class"]) is not str or record["error_class"] not in OWNED_EXIT_ERROR_CLASSES
-            or type(record["join_phase"]) is not str or record["join_phase"] not in _application.JOIN_PHASES):
+            or type(record["join_phase"]) is not str or record["join_phase"] not in _application.JOIN_PHASES
+            or type(record["startup_phase"]) is not str or record["startup_phase"] not in _application.STARTUP_PHASES
+            or type(record["startup_error_class"]) is not str or record["startup_error_class"] not in _application.STARTUP_ERROR_CLASSES):
         raise ValueError("owned-exit-diagnostic-invalid")
     for key in (*OWNED_EXIT_BOOLEANS, *_application.JOIN_DIAGNOSTIC_BOOLEANS):
         if record[key] is not None and type(record[key]) is not bool:
             raise ValueError("owned-exit-diagnostic-invalid")
     for key, bounds in {**dict.fromkeys(OWNED_EXIT_COUNTS, (0, 1048576)),
-                        **_application.JOIN_DIAGNOSTIC_INTEGERS}.items():
+                        **_application.JOIN_DIAGNOSTIC_INTEGERS, "startup_errno": (1, 4095)}.items():
         value = record[key]
         if value is not None and (type(value) is not int or not bounds[0] <= value <= bounds[1]):
             raise ValueError("owned-exit-diagnostic-invalid")
