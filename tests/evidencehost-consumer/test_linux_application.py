@@ -547,4 +547,56 @@ class KernelAndReadinessParserControls(unittest.TestCase):
         with self.assertRaises(app.ApplicationError): app.classify_startup(absent, IDS, GROUP, loaded_seen=True)
 
 
+class JoinDiagnosticControls(unittest.TestCase):
+    """Metadata/procedure only; these observations cannot select or issue an app lease."""
+    def test_actual_pump_eof_and_state_snapshot_has_only_closed_bounded_values(self):
+        state = app.OwnershipState(); state.join_phase = "pump-join"
+        state.process = Mock(returncode=-6); state.observed_group = True
+        pumps = app.OutputPumps(1024, app.JobOutputCounter(), state, threading.Event())
+        pumps.start(Mock(stdout=io.BytesIO(b"private-canary"), stderr=io.BytesIO()))
+        self.assertEqual((14, 14, 0), pumps.join(time.monotonic()+2))
+        record = app.join_diagnostic_snapshot(state, pumps)
+        self.assertEqual("pump-join", record["join_phase"])
+        self.assertEqual(-6, record["application_process_code"])
+        self.assertTrue(record["application_stdout_eof"])
+        self.assertTrue(record["application_stderr_eof"])
+        self.assertTrue(record["application_pumps_error_free"])
+        self.assertNotIn("private-canary", json.dumps(record))
+        state.join_phase = ["private-canary"]; state.active = True
+        record = app.join_diagnostic_snapshot(state)
+        self.assertEqual("unknown", record["join_phase"])
+        self.assertIsNone(record["application_active_operations"])
+
+    def test_busy_state_and_pump_locks_are_skipped_without_waiting(self):
+        state = app.OwnershipState(); pumps = app.OutputPumps(10, app.JobOutputCounter(), state, threading.Event())
+        entered, release = threading.Event(), threading.Event()
+        def hold():
+            with state.condition:
+                entered.set(); release.wait(2)
+        thread = threading.Thread(target=hold); thread.start()
+        try:
+            self.assertTrue(entered.wait(1))
+            with pumps.lock:
+                record = app.join_diagnostic_snapshot(state, pumps)
+            self.assertIsNone(record["application_state_failed"])
+            self.assertIsNone(record["application_stdout_eof"])
+            self.assertEqual("not-started", record["join_phase"])
+        finally: release.set(); thread.join(2)
+        self.assertFalse(thread.is_alive())
+
+    def test_join_failure_phase_and_original_exception_stay_latched_on_retry(self):
+        state = app.OwnershipState(); abort = threading.Event()
+        original = app.ApplicationError(); procedures = []
+        with self.assertRaises(app.ApplicationError) as first:
+            with state.joining(abort):
+                state.join_phase = "bundle-recheck"
+                raise original
+        with self.assertRaises(app.ApplicationError) as retry:
+            with state.joining(abort): procedures.append("must-not-run")
+        self.assertIs(first.exception, original); self.assertIs(retry.exception, original)
+        self.assertEqual([], procedures); self.assertTrue(abort.is_set())
+        self.assertEqual("bundle-recheck", app.join_diagnostic_snapshot(state)["join_phase"])
+        self.assertTrue(app.join_diagnostic_snapshot(state)["application_state_failed"])
+
+
 if __name__ == "__main__": unittest.main()
