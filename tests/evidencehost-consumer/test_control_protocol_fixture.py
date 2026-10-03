@@ -245,6 +245,113 @@ class ReplacementOrderingControls(unittest.TestCase):
                 worker.stdin.write.assert_called_once_with("stop\n" if operation is None else "operate\n")
 
 
+class ReplacementDiagnosticControls(unittest.TestCase):
+    @staticmethod
+    def details(failure):
+        return json.loads(str(failure).split("safeHarnessFailure=", 1)[1])
+
+    def run_result(self, operation, stdout, stderr="", exit_code=20, *, timeout=False):
+        """Drive the real coordinator with process doubles; no native credential claim."""
+        with tempfile.TemporaryDirectory(prefix="evctl-", dir="/tmp") as temporary:
+            root = Path(temporary)
+            first = Mock(pid=1001)
+            first.poll.return_value = None
+            first.wait.side_effect = lambda *args, **kwargs: setattr(first.poll, "return_value", 0)
+            second = Mock(pid=1002, returncode=0)
+            second.poll.return_value = 0
+            worker = Mock(returncode=exit_code)
+            worker.poll.return_value = exit_code
+            worker.communicate.return_value = (stdout, stderr)
+            if timeout:
+                worker.poll.return_value = None
+                worker.communicate.side_effect = fixture.subprocess.TimeoutExpired("private-secret-path", 15,
+                                                                                  output=stdout, stderr=stderr)
+
+                def joined_worker():
+                    worker.returncode = -9
+                    worker.poll.return_value = -9
+
+                worker.wait.side_effect = joined_worker
+            connected = {"status": "connected", "armed": True} if operation is None else {
+                "status": "application-held", "start_ack": operation == "wait"}
+            failure = None
+            with patch.object(fixture.os, "chown"), \
+                    patch.object(fixture, "start_broker", side_effect=[first, second]), \
+                    patch.object(fixture, "start_worker", return_value=worker), \
+                    patch.object(fixture, "read_worker_line", return_value=json.dumps(connected)):
+                try:
+                    fixture.run_broker_replacement(root / "driver.py", root, root, root / "worker.dll",
+                                                   "/usr/bin/dotnet", "/usr/bin/setpriv", operation)
+                except fixture.HarnessFailure as error:
+                    failure = error
+            first.stdin.write.assert_called_once_with("release\n")
+            first.wait.assert_called_once()
+            if timeout:
+                worker.kill.assert_called_once()
+                worker.wait.assert_called_once()
+            return failure, second
+
+    def test_unknown_result_fields_and_values_never_enter_closed_diagnostic(self):
+        canary = "private-secret-path-protocol-canary"
+        for value in ({"status": canary, "code": canary, "exception": canary * 10000},
+                      {"status": [canary], "code": {"secret": canary}}, [canary], None):
+            with self.subTest(value_type=type(value).__name__):
+                failure = fixture.replacement_failure(canary, canary, True, value)
+                details = self.details(failure)
+                self.assertEqual({"category", "mode", "worker_exit", "worker_status", "worker_code"}, set(details))
+                self.assertEqual("replacement-control-failed", details["category"])
+                self.assertEqual("unrecognized", details["mode"])
+                self.assertIsNone(details["worker_exit"])
+                self.assertNotIn(canary, str(failure))
+                self.assertLessEqual(len(str(failure).encode("utf-8")), 512)
+
+    def test_wrong_code_or_exit_stays_failed_and_records_only_observed_closed_facts(self):
+        for operation in (None, "start", "wait"):
+            for code, exit_code in (("ASEVD410", 20), ("ASEVD402", 21)):
+                with self.subTest(operation=operation, code=code, exit=exit_code):
+                    failure, second = self.run_result(operation, json.dumps({"status": "rejected", "code": code}),
+                                                      exit_code=exit_code)
+                    self.assertIsNotNone(failure)
+                    self.assertEqual({"category": "worker-result-mismatch", "mode": operation or "stop",
+                                      "worker_exit": exit_code, "worker_status": "rejected", "worker_code": code},
+                                     self.details(failure))
+                    second.wait.assert_not_called()
+            with self.subTest(operation=operation, exact_rejection=True):
+                failure, second = self.run_result(operation, '{"status":"rejected","code":"ASEVD402"}\n')
+                self.assertIsNone(failure)
+                second.wait.assert_called_once_with(timeout=10)
+
+    def test_missing_malformed_or_canary_output_fails_without_raw_echo(self):
+        cases = (("", "", "worker-result-missing"),
+                 ("private-secret-path{", "", "worker-result-invalid"),
+                 ('["private-secret-path"]', "", "worker-result-shape"),
+                 ('{"status":"rejected","code":"ASEVD402"}', "protocol-canary-private-secret-path",
+                  "worker-echoed-protocol-canary"))
+        for stdout, stderr, category in cases:
+            with self.subTest(category=category):
+                failure, second = self.run_result("start", stdout, stderr, exit_code=21)
+                self.assertIsNotNone(failure)
+                details = self.details(failure)
+                self.assertEqual(category, details["category"])
+                self.assertEqual(21, details["worker_exit"])
+                self.assertEqual("start", details["mode"])
+                self.assertIsNone(details["worker_status"])
+                self.assertIsNone(details["worker_code"])
+                self.assertNotIn("private-secret-path", str(failure))
+                self.assertNotIn("protocol-canary", str(failure).replace("worker-echoed-protocol-canary", ""))
+                second.wait.assert_not_called()
+
+
+    def test_timeout_reports_joined_exit_without_timeout_output_or_exception(self):
+        failure, second = self.run_result("wait", "protocol-canary-private-secret-path", "private-secret-path",
+                                          exit_code=None, timeout=True)
+        self.assertEqual({"category": "worker-timeout", "mode": "wait", "worker_exit": -9,
+                          "worker_status": None, "worker_code": None}, self.details(failure))
+        self.assertNotIn("private-secret-path", str(failure))
+        self.assertNotIn("protocol-canary", str(failure))
+        second.wait.assert_not_called()
+
+
 class ApplicationDescriptorControls(unittest.TestCase):
     def test_v2_complete_declarations_nine_roles_and_eight_distinct_identities(self):
         with tempfile.TemporaryDirectory(prefix="evctl-") as temporary:
