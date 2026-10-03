@@ -448,9 +448,11 @@ public sealed class PostgreSqlSchemaIntegrationTests
             await acquire.ExecuteNonQueryAsync();
         }
 
+        var applicationName = $"schema-client-deadline-{Guid.NewGuid():N}";
         var connectionString = new NpgsqlConnectionStringBuilder(database.ConnectionString)
         {
-            CommandTimeout = 1,
+            ApplicationName = applicationName,
+            CommandTimeout = 3,
             Pooling = false,
         }.ConnectionString;
         await using var shortTimeoutDataSource = NpgsqlDataSource.Create(connectionString);
@@ -471,8 +473,10 @@ public sealed class PostgreSqlSchemaIntegrationTests
             shortTimeoutDataSource,
             [delayedMigration]);
 
+        var applyTask = manager.ApplyAsync().AsTask();
+        _ = await WaitForBackendAsync(database.DataSource, applicationName);
         var exception = await Assert.ThrowsAsync<NpgsqlException>(
-            async () => await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30)));
+            async () => await applyTask.WaitAsync(TimeSpan.FromSeconds(30)));
 
         Assert.IsType<TimeoutException>(exception.InnerException);
         Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, (await manager.GetStatusAsync()).Compatibility);
