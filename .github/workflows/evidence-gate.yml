@@ -1,4 +1,4 @@
-name: Evidence gate pilot (non-claiming)
+name: Evidence gate pilot
 
 on:
   pull_request_target:
@@ -327,7 +327,7 @@ jobs:
           include-hidden-files: false
 
   trusted-verifier:
-    name: Evidence gate verifier (non-claiming; intentionally fails closed)
+    name: Evidence gate verifier (pilot)
     needs:
       - controller-capture
       - credentialless-subject
@@ -405,7 +405,8 @@ jobs:
         with:
           dotnet-version: 10.0.401
 
-      - name: Recompute the host manifest and rehearse independent verification
+      - name: Recompute the host manifest and independently verify the gate
+        id: gate_verifier
         if: ${{ needs.controller-capture.result == 'success' && needs.credentialless-subject.result == 'success' }}
         shell: bash
         env:
@@ -417,8 +418,8 @@ jobs:
           project="$GITHUB_WORKSPACE/trusted/tools/ForgeTrust.AppSurface.EvidenceGate/ForgeTrust.AppSurface.EvidenceGate.csproj"
           policy="$GITHUB_WORKSPACE/trusted/.appsurface/evidence/evidence.policy.json"
           identity="$RUNNER_TEMP/evidence-gate-expected-identity.json"
-          host="$RUNNER_TEMP/evidence-gate-rehearsal-host"
-          verdict="$RUNNER_TEMP/evidence-gate-rehearsal-verdict"
+          host="$RUNNER_TEMP/evidence-gate-host"
+          verdict="$RUNNER_TEMP/evidence-gate-verdict"
 
           python3 "$GITHUB_WORKSPACE/trusted/scripts/evidence-gate-verifier-context.py" \
             --fresh-identity "$capture/pull-request-run-identity.json" \
@@ -437,29 +438,17 @@ jobs:
             --policy "$policy" --repository "$capture/repository.git" \
             --identity "$identity" --output-dir "$verdict"
 
-      - name: Report the unavailable authorization seams and fail closed
+      - name: Publish the independent bounded gate verdict
         if: ${{ always() }}
         shell: bash
         env:
           CONTROLLER_RESULT: ${{ needs.controller-capture.result }}
           SUBJECT_RESULT: ${{ needs.credentialless-subject.result }}
+          VERIFIER_RESULT: ${{ steps.gate_verifier.outcome }}
         run: |
-          {
-            echo '## AppSurface evidence gate pilot'
-            echo ''
-            echo 'This base-owned verifier scaffold is deliberately non-claiming and must not be made required.'
-            echo ''
-            printf '%s\n' "- Controller capture job: $CONTROLLER_RESULT"
-            printf '%s\n' "- Credentialless subject job: $SUBJECT_RESULT"
-            echo '- Subject handoff: controller snapshot execution is wired; the fixed result is always non-claiming.'
-            echo '- Trusted verifier: the handoff and subject result are rebound to a fresh Git capture, then the current PR and subject job are reread for a non-claiming rehearsal.'
-            echo '- OCI prerequisite: trusted preflight verifies a protected-main image attestation; the credentialless subject job anonymously pulls that exact digest into its rootless local store.'
-            echo '- Cleanup completion: the trusted verifier now validates the subject job’s same-run bounded cleanup artifact for code coverage.'
-            echo '- Checkout/isolation attestation: unavailable to the verdict; no trusted verifier consumes a checkout or isolation attestation.'
-            echo '- Required gate verdict: unavailable; host registrations and complete producer verification are not established.'
-          } >> "$GITHUB_STEP_SUMMARY"
-          if [[ -f "$RUNNER_TEMP/evidence-gate-rehearsal-verdict/evidence-gate-summary.md" ]]; then
-            cat "$RUNNER_TEMP/evidence-gate-rehearsal-verdict/evidence-gate-summary.md" >> "$GITHUB_STEP_SUMMARY"
-          fi
-          echo 'ASEGH003: Non-claiming pilot scaffold. No trusted verifier or complete producer registrations are available.'
-          exit 1
+          python3 "$GITHUB_WORKSPACE/trusted/scripts/evidence-gate-finalize.py" \
+            --verdict-directory "$RUNNER_TEMP/evidence-gate-verdict" \
+            --step-summary "$GITHUB_STEP_SUMMARY" \
+            --controller-outcome "$CONTROLLER_RESULT" \
+            --subject-outcome "$SUBJECT_RESULT" \
+            --verifier-outcome "$VERIFIER_RESULT"
