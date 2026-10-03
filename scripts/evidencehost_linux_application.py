@@ -47,6 +47,67 @@ JOIN_PHASES = frozenset(("unknown", "not-started", "receipt-check", "watchdog-li
 JOIN_DIAGNOSTIC_BOOLEANS = ("application_state_failed", "application_observed_group", "application_stdout_eof",
                            "application_stderr_eof", "application_pumps_error_free", "application_watchdog_disarmed")
 JOIN_DIAGNOSTIC_INTEGERS = {"application_active_operations": (0, 1048576), "application_process_code": (-255, 255)}
+STARTUP_PHASES = frozenset(("unknown", "not-started", "request-validation", "attempt-claim", "workspace-validation",
+                           "bundle-verification", "probe-audit", "dotnet-validation", "pipe-creation",
+                           "watchdog-process-construction", "watchdog-owner-construction", "watchdog-start",
+                           "watchdog-startup-ack", "open-check", "armed-creation", "command-construction",
+                           "pre-popen-check", "popen", "process-attachment", "pump-construction", "pump-start",
+                           "startup-inspection", "running-ack"))
+STARTUP_ERROR_CLASSES = frozenset(("none", "application", "os", "subprocess-timeout", "subprocess",
+                                  "memory", "value", "unknown"))
+
+
+class StartupDiagnostics:
+    """Internal data/procedure seam, with no registration, lease or ownership authority.
+
+    Only the first captured failure is retained as an immutable tuple. Capture uses
+    a nonblocking lock; snapshots read immutable data without locking or I/O. The
+    lock is exposed only for portable data/procedure contention controls. Missing
+    diagnostics cannot change the original exception, failure state or ACK.
+    """
+    def __init__(self):
+        self.phase = "not-started"
+        self._failure = None
+        self.lock = threading.Lock()
+
+    def capture(self, error):
+        """Classify the actual exception only; never inspect messages, args or ctypes errno."""
+        if not self.lock.acquire(blocking=False): return
+        try:
+            if self._failure is not None: return
+            direct_os = type(error) in (OSError, PermissionError, FileNotFoundError, NotADirectoryError,
+                                        IsADirectoryError, TimeoutError, BlockingIOError, InterruptedError,
+                                        ProcessLookupError, ChildProcessError, BrokenPipeError,
+                                        ConnectionRefusedError, ConnectionResetError, ConnectionAbortedError)
+            classes = {ApplicationError: "application", subprocess.TimeoutExpired: "subprocess-timeout",
+                       subprocess.SubprocessError: "subprocess", subprocess.CalledProcessError: "subprocess",
+                       MemoryError: "memory", ValueError: "value"}
+            error_class = "os" if direct_os else classes.get(type(error), "unknown")
+            number = error.errno if direct_os else None
+            if type(number) is not int or not 1 <= number <= 4095: number = None
+            phase = self.phase if type(self.phase) is str and self.phase in STARTUP_PHASES else "unknown"
+            self._failure = (phase, error_class, number)
+        except Exception:
+            pass
+        finally: self.lock.release()
+
+    @contextlib.contextmanager
+    def observing(self):
+        """Preserve an existing procedure's exact return/exception while observing failure."""
+        try: yield
+        except Exception as error:
+            self.capture(error)
+            raise
+
+    def snapshot(self):
+        """Closed copied fields; no polling, waits, syscalls or exception object is returned."""
+        failure = self._failure
+        if failure is not None:
+            phase, error_class, number = failure
+        else:
+            phase = self.phase if type(self.phase) is str and self.phase in STARTUP_PHASES else "unknown"
+            error_class, number = "none", None
+        return {"startup_phase": phase, "startup_error_class": error_class, "startup_errno": number}
 
 
 def join_diagnostic_snapshot(state=None, pumps=None, watchdog=None):
@@ -56,9 +117,12 @@ def join_diagnostic_snapshot(state=None, pumps=None, watchdog=None):
     extraction occurs, so diagnostics cannot extend a cleanup deadline.
     """
     result = {"join_phase": "not-started", **dict.fromkeys(JOIN_DIAGNOSTIC_BOOLEANS),
-              **dict.fromkeys(JOIN_DIAGNOSTIC_INTEGERS)}
+              **dict.fromkeys(JOIN_DIAGNOSTIC_INTEGERS), "startup_phase": "not-started",
+              "startup_error_class": "none", "startup_errno": None}
     try:
         if type(state) is OwnershipState:
+            if type(state.startup_diagnostics) is StartupDiagnostics:
+                result.update(state.startup_diagnostics.snapshot())
             phase = state.join_phase
             result["join_phase"] = phase if type(phase) is str and phase in JOIN_PHASES else "unknown"
             if state.condition.acquire(blocking=False):
@@ -692,6 +756,7 @@ class OwnershipState:
         self.claimed = False; self.active = 0; self.process = None; self.observed_group = False; self.loaded_seen = False
         self.first_join_failure = None
         self.join_phase = "not-started"
+        self.startup_diagnostics = StartupDiagnostics()
 
     def fail_join(self, error, abort):
         """Latch the first internal failure before abort; exception bytes are not diagnostics."""
@@ -979,64 +1044,87 @@ class RootApplicationLease:
 
     def start(self, application_id: str, entry_digest: str, deadline: float):
         """Exact seven-field ACK only after real exec/identity and watchdog ownership."""
-        audit = self.selected.audit
-        _require((application_id, entry_digest) == (audit.application_id, audit.entry_digest), "ASEVD410")
-        deadline = min(deadline, self.job_deadline, time.monotonic() + audit.capabilities.start_seconds)
-        self.state.begin_start()
-        try:
-            validate_workspace(self.workspace, self.bundle, self.ids, self.lease_id, audit.capabilities)
-            self.bundle.verify_candidate(audit, deadline=deadline)
-            self.probe_snapshot = audit_protected_probes(self.workspace, deadline=deadline)
-            info = self.dotnet.lstat()
-            _require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022
-                     and info.st_mode & 0o111, "ASEVD410")
-            parent_control, child_control = multiprocessing.Pipe(duplex=True)
-            self.monitor = multiprocessing.Process(target=_watchdog, args=(self.unit, self.job_deadline,
-                       self.abort, child_control, parent_control, os.getpid()), daemon=False)
-            self.watchdog = WatchdogOwnership(self.monitor, parent_control, self.abort)
-            self.monitor.start(); child_control.close()
-            self.watchdog.startup(deadline)
-            self._check_open(deadline)
-            scratch_fd = _open_directory(self.workspace.scratch)
+        with self.state.startup_diagnostics.observing():
+            audit = self.selected.audit
+            self.state.startup_diagnostics.phase = "request-validation"
+            _require((application_id, entry_digest) == (audit.application_id, audit.entry_digest), "ASEVD410")
+            deadline = min(deadline, self.job_deadline, time.monotonic() + audit.capabilities.start_seconds)
+            self.state.startup_diagnostics.phase = "attempt-claim"
+            self.state.begin_start()
             try:
-                fd = os.open("armed", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o444, dir_fd=scratch_fd)
-                try: _require(os.write(fd, b"root-watchdog-armed\n") == 20, "ASEVD410")
-                finally: os.close(fd)
-            finally: os.close(scratch_fd)
-            command = closed_command(audit, self.workspace, self.dotnet, self.ids, self.lease_id, self.job_deadline)
-            with self.state.condition:
+                self.state.startup_diagnostics.phase = "workspace-validation"
+                validate_workspace(self.workspace, self.bundle, self.ids, self.lease_id, audit.capabilities)
+                self.state.startup_diagnostics.phase = "bundle-verification"
+                self.bundle.verify_candidate(audit, deadline=deadline)
+                self.state.startup_diagnostics.phase = "probe-audit"
+                self.probe_snapshot = audit_protected_probes(self.workspace, deadline=deadline)
+                self.state.startup_diagnostics.phase = "dotnet-validation"
+                info = self.dotnet.lstat()
+                _require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022
+                         and info.st_mode & 0o111, "ASEVD410")
+                self.state.startup_diagnostics.phase = "pipe-creation"
+                parent_control, child_control = multiprocessing.Pipe(duplex=True)
+                self.state.startup_diagnostics.phase = "watchdog-process-construction"
+                self.monitor = multiprocessing.Process(target=_watchdog, args=(self.unit, self.job_deadline,
+                           self.abort, child_control, parent_control, os.getpid()), daemon=False)
+                self.state.startup_diagnostics.phase = "watchdog-owner-construction"
+                self.watchdog = WatchdogOwnership(self.monitor, parent_control, self.abort)
+                self.state.startup_diagnostics.phase = "watchdog-start"
+                self.monitor.start(); child_control.close()
+                self.state.startup_diagnostics.phase = "watchdog-startup-ack"
+                self.watchdog.startup(deadline)
+                self.state.startup_diagnostics.phase = "open-check"
                 self._check_open(deadline)
-                # Closed-check, process creation and retained ownership share the stop latch lock.
-                process = subprocess.Popen(command, env=_ENV, stdin=subprocess.DEVNULL,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
-                self.state.attach_process(process)
-            self.pumps = OutputPumps(audit.capabilities.maximum_output_bytes, self.job_counter, self.state, self.abort)
-            self.pumps.start(process)
-            while True:
-                self._check_open(deadline)
-                props = _properties(self.unit, deadline)
-                observation = classify_startup(props, self.ids, self.group, loaded_seen=self.state.loaded_seen)
-                self.state.loaded_seen |= props["LoadState"] == "loaded"
-                if props["LoadState"] == "loaded":
-                    _require(props["Type"] == "exec" and props["User"] == str(self.ids.application_uid)
-                             and props["Group"] == str(self.ids.application_gid) and props["KillMode"] == "control-group", "ASEVD410")
-                    if props["ControlGroup"]:
-                        _require(props["ControlGroup"] == self.group, "ASEVD410"); self.state.observed_group = True
-                    if observation == "running":
-                        _require(props["ControlGroup"] == self.group, "ASEVD410")
-                        _require(props["MainPID"].isdigit(), "ASEVD410"); pid = int(props["MainPID"])
-                        _process_identity(pid, self.ids, self.group); self.pid = pid
-                        self._check_open(deadline)
-                        _require(self.monitor.is_alive(), "ASEVD410")
-                        return {"ok": True, "lease_id": self.lease_id, "apphost_pid": pid,
-                                "application_uid": self.ids.application_uid, "application_gid": self.ids.application_gid,
-                                "cgroup": self.group, "owned": True}
-                _require(process.poll() is None, "ASEVD410")
-                with self.state.condition: self.state.condition.wait(timeout=min(0.03, _remaining(deadline)))
-        except Exception:
-            self.state.close(True); self.abort.set()
-            raise ApplicationError("ASEVD410") from None
-        finally: self.state.end_operation()
+                self.state.startup_diagnostics.phase = "armed-creation"
+                scratch_fd = _open_directory(self.workspace.scratch)
+                try:
+                    fd = os.open("armed", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o444, dir_fd=scratch_fd)
+                    try: _require(os.write(fd, b"root-watchdog-armed\n") == 20, "ASEVD410")
+                    finally: os.close(fd)
+                finally: os.close(scratch_fd)
+                self.state.startup_diagnostics.phase = "command-construction"
+                command = closed_command(audit, self.workspace, self.dotnet, self.ids, self.lease_id, self.job_deadline)
+                with self.state.condition:
+                    self.state.startup_diagnostics.phase = "pre-popen-check"
+                    self._check_open(deadline)
+                    # Closed-check, process creation and retained ownership share the stop latch lock.
+                    self.state.startup_diagnostics.phase = "popen"
+                    process = subprocess.Popen(command, env=_ENV, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
+                    self.state.startup_diagnostics.phase = "process-attachment"
+                    self.state.attach_process(process)
+                self.state.startup_diagnostics.phase = "pump-construction"
+                self.pumps = OutputPumps(audit.capabilities.maximum_output_bytes, self.job_counter, self.state, self.abort)
+                self.state.startup_diagnostics.phase = "pump-start"
+                self.pumps.start(process)
+                while True:
+                    self.state.startup_diagnostics.phase = "startup-inspection"
+                    self._check_open(deadline)
+                    props = _properties(self.unit, deadline)
+                    observation = classify_startup(props, self.ids, self.group, loaded_seen=self.state.loaded_seen)
+                    self.state.loaded_seen |= props["LoadState"] == "loaded"
+                    if props["LoadState"] == "loaded":
+                        _require(props["Type"] == "exec" and props["User"] == str(self.ids.application_uid)
+                                 and props["Group"] == str(self.ids.application_gid) and props["KillMode"] == "control-group", "ASEVD410")
+                        if props["ControlGroup"]:
+                            _require(props["ControlGroup"] == self.group, "ASEVD410"); self.state.observed_group = True
+                        if observation == "running":
+                            _require(props["ControlGroup"] == self.group, "ASEVD410")
+                            _require(props["MainPID"].isdigit(), "ASEVD410"); pid = int(props["MainPID"])
+                            _process_identity(pid, self.ids, self.group); self.pid = pid
+                            self._check_open(deadline)
+                            _require(self.monitor.is_alive(), "ASEVD410")
+                            self.state.startup_diagnostics.phase = "running-ack"
+                            return {"ok": True, "lease_id": self.lease_id, "apphost_pid": pid,
+                                    "application_uid": self.ids.application_uid, "application_gid": self.ids.application_gid,
+                                    "cgroup": self.group, "owned": True}
+                    _require(process.poll() is None, "ASEVD410")
+                    with self.state.condition: self.state.condition.wait(timeout=min(0.03, _remaining(deadline)))
+            except Exception as error:
+                self.state.startup_diagnostics.capture(error)
+                self.state.close(True); self.abort.set()
+                raise ApplicationError("ASEVD410") from None
+            finally: self.state.end_operation()
 
     def resource_wait(self, lease_id: str, resource_id: str, deadline: float):
         """Exact nine-field root ACK from a fixed authenticated UDS and <=4096 HTTP bytes."""

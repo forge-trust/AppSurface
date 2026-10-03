@@ -599,4 +599,84 @@ class JoinDiagnosticControls(unittest.TestCase):
         self.assertTrue(app.join_diagnostic_snapshot(state)["application_state_failed"])
 
 
+class StartupDiagnosticControls(unittest.TestCase):
+    """Actual local FD/audit and data/procedure failures; never a selected or positive lease."""
+    def test_real_fd_missing_file_retains_actual_direct_errno_and_original_failure(self):
+        state = app.OwnershipState(); result = False
+        with tempfile.TemporaryDirectory() as temp:
+            fd = os.open(temp, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                with self.assertRaises(FileNotFoundError) as caught:
+                    with state.startup_diagnostics.observing():
+                        state.startup_diagnostics.phase = "dotnet-validation"
+                        child = os.open("missing-private-canary", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
+                        os.close(child); result = True
+                snapshot = state.startup_diagnostics.snapshot()
+                self.assertEqual({"startup_phase": "dotnet-validation", "startup_error_class": "os",
+                    "startup_errno": caught.exception.errno}, snapshot)
+                self.assertFalse(result); self.assertNotIn("private-canary", json.dumps(snapshot))
+                self.assertEqual((), app._COMPILED_REGISTRATIONS)
+            finally: os.close(fd)
+
+    def test_actual_pinned_bundle_deliberate_mode_rejection_keeps_exact_phase(self):
+        fixture = BundleDescriptorControls(); fixture.setUp()
+        result = False; state = app.OwnershipState()
+        try:
+            with app.audit_bundle(fixture.root, fixture.audit, expected_owner_uid=os.getuid()) as bundle:
+                path = fixture.root/fixture.audit.files[0].relative_path; path.chmod(0o644)
+                with self.assertRaises(app.ApplicationError) as caught:
+                    with state.startup_diagnostics.observing():
+                        state.startup_diagnostics.phase = "bundle-verification"
+                        bundle.verify_candidate(fixture.audit, expected_owner_uid=os.getuid())
+                        result = True
+                snapshot = app.join_diagnostic_snapshot(state)
+                self.assertFalse(result); self.assertEqual("ASEVD404", caught.exception.code)
+                self.assertEqual("bundle-verification", snapshot["startup_phase"])
+                self.assertEqual("application", snapshot["startup_error_class"])
+                self.assertIsNone(snapshot["startup_errno"])
+                self.assertEqual((), app._COMPILED_REGISTRATIONS)
+        finally: fixture.tearDown()
+
+    def test_actual_probe_malformed_managed_file_fails_without_canary_or_invented_errno(self):
+        fixture = ProtectedProbeControls(); fixture.setUp()
+        diagnostic = app.StartupDiagnostics(); result = False
+        try:
+            fixture.tool.chmod(0o600); fixture.tool.write_bytes(b"private-startup-canary"); fixture.tool.chmod(0o444)
+            with self.assertRaises(app.ApplicationError):
+                with diagnostic.observing():
+                    diagnostic.phase = "probe-audit"
+                    fixture.audit(); result = True
+            record = diagnostic.snapshot()
+            self.assertFalse(result); self.assertEqual("probe-audit", record["startup_phase"])
+            self.assertEqual("application", record["startup_error_class"]); self.assertIsNone(record["startup_errno"])
+            self.assertNotIn("private-startup-canary", json.dumps(record))
+        finally: fixture.tearDown()
+
+    def test_first_failure_cannot_be_overwritten_and_unknown_errno_is_not_guessed(self):
+        diagnostic = app.StartupDiagnostics(); diagnostic.phase = "pipe-creation"
+        original = PermissionError(13, "private-startup-canary")
+        with self.assertRaises(PermissionError) as first:
+            with diagnostic.observing(): raise original
+        saved = diagnostic.snapshot(); diagnostic.phase = "popen"
+        with self.assertRaises(app.ApplicationError):
+            with diagnostic.observing(): raise app.ApplicationError()
+        self.assertIs(first.exception, original); self.assertEqual(saved, diagnostic.snapshot())
+        self.assertEqual(13, saved["startup_errno"])
+        class Unknown(OSError): pass
+        for error, expected, number in ((Unknown(13, "canary"), "unknown", None),
+                (OSError(4096, "canary"), "os", None), (OSError(True, "canary"), "os", None),
+                (MemoryError("canary"), "memory", None), (app.ApplicationError(), "application", None)):
+            fresh = app.StartupDiagnostics(); fresh.phase = "workspace-validation"; fresh.capture(error)
+            self.assertEqual(expected, fresh.snapshot()["startup_error_class"])
+            self.assertEqual(number, fresh.snapshot()["startup_errno"])
+            self.assertNotIn("canary", json.dumps(fresh.snapshot()))
+        # A busy diagnostic lock never waits or replaces a procedure's exception.
+        fresh = app.StartupDiagnostics()
+        with fresh.lock:
+            with self.assertRaises(PermissionError) as busy:
+                with fresh.observing(): raise original
+            self.assertEqual("none", fresh.snapshot()["startup_error_class"])
+        self.assertIs(busy.exception, original)
+
+
 if __name__ == "__main__": unittest.main()
