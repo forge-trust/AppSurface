@@ -127,6 +127,35 @@ class PrivateRootBindingsControls(unittest.TestCase):
         self.assertEqual(({}, {}), (self.accounts, self.groups))
         self.assertEqual(owned, (self.users_owned, self.groups_owned))
 
+    def test_reserved_worker_primary_gid_binds_emitted_unit_properties_without_other_policy_changes(self):
+        # This connects real creator argv/NSS metadata to the actual property
+        # helper, not a root process, authenticated peer or protected lease.
+        self.create_run()
+        worker_name = "evw012345abcdef"
+        worker = launcher.pwd.getpwnam(worker_name)
+        self.assertEqual((65010, 65011), (worker.pw_uid, worker.pw_gid))
+        self.assertEqual(worker_name + "g", launcher.grp.getgrgid(worker.pw_gid).gr_name)
+        self.assertNotIn(worker_name, self.groups)
+        self.assertIn(worker_name + "g", self.groups_owned)
+        before = list(self.commands)
+        args = (worker_name, Path("/protected-tools"), Path("/subject-source"),
+                Path("/private-results"), Path("/protected-output"), 900)
+        metadata_default = launcher.worker_unit_properties(*args)
+        properties = launcher.worker_unit_properties(*args, worker_gid=worker.pw_gid)
+        self.assertEqual({**metadata_default, "Group": "65011"}, properties)
+        self.assertEqual(worker_name, properties["User"])
+        self.assertEqual(worker.pw_gid, int(properties["Group"]))
+        self.assertEqual("--property=Group=65011", f"--property=Group={properties['Group']}")
+        self.assertNotEqual(worker_name, properties["Group"])
+        for wrong_gid in (65013, 0, True, "65011"):
+            with self.subTest(wrong_gid=wrong_gid):
+                with self.assertRaises(launcher.LauncherError) as failed:
+                    launcher.worker_unit_properties(*args, worker_gid=wrong_gid)
+                self.assertEqual("identity-separation-failed", str(failed.exception))
+        self.assertEqual(before, self.commands)
+        self.cleanup()
+        self.assertEqual(({}, {}), (self.accounts, self.groups))
+
     def test_each_selected_uid_occupied_rejects_before_any_utility_or_owned_reservation(self):
         for uid in (65010, 65012, 65014):
             with self.subTest(uid=uid):
