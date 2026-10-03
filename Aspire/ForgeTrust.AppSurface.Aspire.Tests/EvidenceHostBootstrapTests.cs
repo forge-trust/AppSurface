@@ -992,6 +992,64 @@ public sealed class EvidenceHostBootstrapTests
         Assert.Equal(1, run.Supervisor.CompletionAcknowledgements);
     }
 
+    [Fact]
+    public async Task RunSharedCore_ShouldRejectRegularFileOutputBeforeConfigurationAndJoinOwnedWork()
+    {
+        const string canary = "output-binding-private-canary";
+        var configureCount = 0;
+        var producer = new DisposablePassingProducer("inventory", "inventory/assertion@1");
+        await using var host = EvidenceHostBootstrap.Create(
+            EvidenceHostAdmissionTestRun.CreateObservationPlan(),
+            registration =>
+            {
+                configureCount++;
+                registration.AddProducer(producer);
+            });
+        using var run = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Observation, host.Plan);
+        var artifactFile = run.ArtifactDirectory + "-" + canary;
+        EvidenceManifest? returnedManifest = null;
+        await File.WriteAllTextAsync(artifactFile, canary);
+        try
+        {
+            Assert.True(File.Exists(artifactFile));
+            Assert.False(Directory.Exists(artifactFile));
+
+            var exception = await Assert.ThrowsAsync<EvidenceAdmissionException>(async () =>
+            {
+                returnedManifest = await host.RunSharedCoreForTestsAsync(
+                    run.Mode,
+                    run.Context,
+                    run.Supervisor,
+                    verifier: null,
+                    artifactDirectory: artifactFile,
+                    jobRemaining: run.Supervisor.JobRemaining,
+                    completeWorker: run.Supervisor.CompleteWorkerAsync);
+            });
+
+            Assert.Equal("ASEVD410", exception.Code);
+            Assert.Null(exception.InnerException);
+            Assert.DoesNotContain(canary, exception.ToString(), StringComparison.Ordinal);
+            Assert.Null(returnedManifest);
+            Assert.Equal(1, run.Supervisor.StopRequests);
+            Assert.Equal(1, run.Supervisor.ExitAcknowledgements);
+            Assert.Equal(0, run.Supervisor.CompletionAcknowledgements);
+            Assert.True(run.Supervisor.SawFreshStoppingToken);
+            Assert.Equal(0, configureCount);
+            Assert.Equal(0, producer.RunCount);
+            Assert.Equal(0, producer.DisposeCount);
+            Assert.NotEqual(EvidenceHostState.Completed, host.State);
+            Assert.Equal(canary, await File.ReadAllTextAsync(artifactFile));
+
+            // Output binding failed before registrations or their disposer were admitted.
+            await host.DisposeAsync();
+            Assert.Equal(0, producer.DisposeCount);
+        }
+        finally
+        {
+            File.Delete(artifactFile);
+        }
+    }
+
     private static EvidencePlan CreatePlan(
         int resourceDeadlineSeconds = 30,
         EvidenceProfileScope scope = EvidenceProfileScope.Targeted,

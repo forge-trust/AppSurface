@@ -40,6 +40,28 @@ public sealed class EvidenceLinuxApplicationProtocolTests
         Assert.Null(failure.InnerException);
     }
 
+    [Theory]
+    [InlineData("resources")]
+    [InlineData("producers")]
+    public void RequiredApplicationDeclarationsCannotBeEmpty(string name)
+    {
+        var json = DescriptorJson();
+        Assert.NotEmpty(Parse(json).Resources);
+        Assert.NotEmpty(Parse(json).Producers);
+        json[name] = new JsonArray();
+        RejectDescriptor(json);
+    }
+
+    [Fact]
+    public void BundleBelowMinimumRejectsBeforeItCanBindAnyApplication()
+    {
+        var json = DescriptorJson();
+        Assert.True(Parse(json).BundleFiles.Count >= 6);
+        var shortened = new JsonArray(json["bundle_files"]!.AsArray().Take(5).Select(static item => item!.DeepClone()).ToArray());
+        json["bundle_files"] = shortened;
+        RejectDescriptor(json);
+    }
+
     [Fact]
     public void CompleteDescriptorPreservesAllDeclarationsAndNineClosedBundleRolesAfterJsonDisposal()
     {
