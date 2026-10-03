@@ -142,6 +142,9 @@ TRUSTED_PROOF_DIGEST_ALLOWLIST: frozenset[str] = frozenset()
 MAX_REQUEST = 64 * 1024
 MAX_PREFIX = 1024 * 1024
 MAX_JOB_OUTPUT = 16 * 1024 * 1024
+SUBJECT_FAILURE_DIRECTORY = "subject-failure-output"
+SUBJECT_FAILURE_NAMES = ("stdout.prefix", "stderr.prefix")
+MAX_SUBJECT_FAILURE_PREFIX = (1024 * 1024 - 10240) // 2
 MAX_ARTIFACT_FILES = 64
 MAX_ARTIFACT_FILE_BYTES = 20 * 1024 * 1024
 MAX_ARTIFACT_TOTAL_BYTES = 256 * 1024 * 1024
@@ -444,6 +447,130 @@ def read_failure_diagnostic(directory: Path, *, expected_owner_uid: int = 0) -> 
         return validate_failure_diagnostic(json.loads(data))
     finally:
         os.close(directory_fd)
+
+
+def _capture_subject_failure_prefixes_fd(directory_fd: int, prefixes: tuple[bytes, bytes], *,
+                                        expected_owner_uid: int = 0, expected_owner_gid: int = 0) -> bool:
+    """Write two fixed diagnostic files through retained no-follow descriptors.
+
+    Production requires root/root. Owner overrides exercise real portable FDs only;
+    this procedure grants no execution or collection authority. Partial writes and
+    collisions fail without replacing existing files or the original host failure.
+    """
+    child_fd = -1
+    files = []
+    created = False
+    complete = False
+
+    def directory_identity(info):
+        return info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode
+
+    def file_identity(info):
+        return (directory_identity(info), info.st_nlink, info.st_size,
+                info.st_mtime_ns, info.st_ctime_ns)
+
+    try:
+        if (type(directory_fd) is not int or directory_fd < 0 or type(prefixes) is not tuple
+                or len(prefixes) != 2 or any(type(data) is not bytes or len(data) > MAX_SUBJECT_FAILURE_PREFIX
+                                           for data in prefixes)):
+            return False
+        parent = os.fstat(directory_fd)
+        if (not stat.S_ISDIR(parent.st_mode) or (parent.st_uid, parent.st_gid) != (expected_owner_uid, expected_owner_gid)
+                or parent.st_mode & 0o022):
+            return False
+        os.mkdir(SUBJECT_FAILURE_DIRECTORY, 0o700, dir_fd=directory_fd)
+        created = True
+        child_fd = os.open(SUBJECT_FAILURE_DIRECTORY, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                           dir_fd=directory_fd)
+        child = os.fstat(child_fd)
+        if (not stat.S_ISDIR(child.st_mode) or stat.S_IMODE(child.st_mode) != 0o700
+                or (child.st_uid, child.st_gid) != (expected_owner_uid, expected_owner_gid)
+                or directory_identity(child) != directory_identity(os.stat(SUBJECT_FAILURE_DIRECTORY,
+                                                                         dir_fd=directory_fd, follow_symlinks=False))):
+            return False
+        for name, data in zip(SUBJECT_FAILURE_NAMES, prefixes):
+            fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                         0o600, dir_fd=child_fd)
+            files.append((name, fd, os.fstat(fd)))
+            initial = files[-1][2]
+            if (not stat.S_ISREG(initial.st_mode) or stat.S_IMODE(initial.st_mode) != 0o600
+                    or initial.st_nlink != 1 or initial.st_size != 0
+                    or (initial.st_uid, initial.st_gid) != (expected_owner_uid, expected_owner_gid)
+                    or file_identity(initial) != file_identity(os.stat(name, dir_fd=child_fd, follow_symlinks=False))):
+                return False
+            position = 0
+            while position < len(data):
+                written = os.write(fd, data[position:position + 65536])
+                if type(written) is not int or not 0 < written <= min(65536, len(data) - position):
+                    return False
+                position += written
+            final = os.fstat(fd)
+            if (directory_identity(final) != directory_identity(initial) or final.st_nlink != 1
+                    or final.st_size != len(data)
+                    or file_identity(final) != file_identity(os.stat(name, dir_fd=child_fd, follow_symlinks=False))):
+                return False
+            files[-1] = (name, fd, final)
+        for name, fd, final in files:
+            if (file_identity(final) != file_identity(os.fstat(fd))
+                    or file_identity(final) != file_identity(os.stat(name, dir_fd=child_fd, follow_symlinks=False))):
+                return False
+        if (set(os.listdir(child_fd)) != set(SUBJECT_FAILURE_NAMES)
+                or directory_identity(child) != directory_identity(os.fstat(child_fd))
+                or directory_identity(child) != directory_identity(os.stat(SUBJECT_FAILURE_DIRECTORY,
+                                                                          dir_fd=directory_fd, follow_symlinks=False))
+                or directory_identity(parent) != directory_identity(os.fstat(directory_fd))):
+            return False
+        complete = True
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
+    finally:
+        # Remove only our still-pinned names; never traverse or delete a replacement.
+        if created and not complete and child_fd >= 0:
+            try:
+                if directory_identity(os.fstat(child_fd)) == directory_identity(os.stat(
+                        SUBJECT_FAILURE_DIRECTORY, dir_fd=directory_fd, follow_symlinks=False)):
+                    for name, fd, _info in files:
+                        if directory_identity(os.fstat(fd)) == directory_identity(os.stat(
+                                name, dir_fd=child_fd, follow_symlinks=False)):
+                            os.unlink(name, dir_fd=child_fd)
+                    os.rmdir(SUBJECT_FAILURE_DIRECTORY, dir_fd=directory_fd)
+            except (OSError, ValueError, TypeError):
+                pass
+        for fd in [item[1] for item in files] + ([child_fd] if child_fd >= 0 else []):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def capture_subject_failure_prefixes(broker: Broker, directory_fd: int | None,
+                                    owned_exit_confirmed: bool) -> bool:
+    """Best-effort private capture after failed-launch cleanup, never a completion claim.
+
+    The caller must have joined and closed launch resources after actual owned wait.
+    Closed checkpoints, idle operations and physical worker-group emptiness are
+    independently required here. Raw bytes and capture state never enter diagnostics.
+    """
+    try:
+        if owned_exit_confirmed is not True or type(broker) is not Broker or type(directory_fd) is not int:
+            return False
+        with broker.condition:
+            if (any(value is not True for value in (broker.ready_seen, broker.wait_completed,
+                                                    broker.exited, broker.work_closed))
+                    or any(type(value) is not int or value != 0 for value in (
+                        broker.active_handlers, broker.active_runs, broker.active_artifact_operations,
+                        broker.active_application_operations))
+                    or broker.subject_output_failed or broker.application_work_failed
+                    or broker.output_quota.exceeded.is_set()):
+                return False
+            prefixes = broker.failed_subject_prefixes
+        if prefixes is None or not broker._group_empty(broker.descriptor["cgroup"]):
+            return False
+        return _capture_subject_failure_prefixes_fd(directory_fd, prefixes)
+    except Exception:
+        # Diagnostic capture cannot replace the failure which brought us here.
+        return False
 
 
 class OpenHow(ctypes.Structure):
@@ -1193,6 +1320,8 @@ class Broker:
         self.allowed_results_roots: set[str] = set()
         self.subject_commands_started = 0
         self.command_output_receipts: list[tuple[int, int, int]] = []
+        # Diagnostic-only immutable bytes; never used by completion or admission.
+        self.failed_subject_prefixes: tuple[bytes, bytes] | None = None
         self.application_output_receipt: tuple[int, int, int] | None = None
         self.application_work_failed = False
         self.active_application_operations = 0
@@ -1630,6 +1759,9 @@ class Broker:
             raise LauncherError("subject-exit-unconfirmed") from None
         with self.lock:
             self.command_output_receipts.append((received_bytes, pump_states[0][1], pump_states[1][1]))
+            if proc.returncode != 0:
+                self.failed_subject_prefixes = (stdout[:MAX_SUBJECT_FAILURE_PREFIX],
+                                               stderr[:MAX_SUBJECT_FAILURE_PREFIX])
         if result_root is not None:
             with self.lock:
                 self.allowed_results_roots.add(result_root)
@@ -2512,11 +2644,13 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
             try:
                 if broker is not None:
                     broker.stop()
-                    broker._wait_for_owned_exit()
+                    owned_exit_confirmed = broker._wait_for_owned_exit()
                 if units:
                     subprocess.run(["systemctl", "stop", *reversed(units)], capture_output=True, env=ENV,
                                    timeout=5, check=False)
                 _close_launch_resources(listener, handlers, broker, test_output_fd)
+                if original_error is not None and broker is not None:
+                    capture_subject_failure_prefixes(broker, diagnostic_directory_fd, owned_exit_confirmed)
             except BaseException:
                 if original_error is None:
                     raise
