@@ -452,3 +452,42 @@ portable controls passed. Both changes require fresh native validation. Neither
 the portable controls nor the failed v11 runs satisfy protected/shared execution,
 the downstream gate, the unchanged solution coverage gate or all 57 acceptance
 groups.
+
+### Restricted Aspire mechanism and production failure diagnostics (2026-10-03)
+
+[Aspire mechanism run 37080727793](https://github.com/forge-trust/AppSurface/actions/runs/37080727793)
+tested immutable source `a9476ee70eeda3eaf114639fb6266ef54c7f3b36` under harness
+`e39a91356d0ab418d70b4c1e3b45293497f1ae09`. All **five controls passed**:
+normal, readiness failure, factory stall, cancellation and a stuck descendant.
+The parent verified both artifact digests, the submitted workflow and wrapper,
+all 2736 source Git blobs and modes, and each private controller receipt.
+Normal and cancellation observed healthy readiness and cooperative exit zero;
+the factory stall and stuck descendant required forced termination. Every case
+confirmed owned exit, cleanup, a joined watchdog with exit zero, two error-free
+EOF pumps with exact byte counts, and an empty owned cgroup.
+
+The [child fixture](../../tests/evidencehost-consumer/AspireChild/README.md)
+uses pinned Aspire/DCP 13.4.4, a finite 128-task limit and the existing 1 GiB
+memory limit. Its earlier 64-task run recorded kernel PID-limit events; this
+passing run verifies the selected 128-task mechanism. AppHost, DCP and resource
+still share one restricted application identity. This proves that fixture's
+mechanism and controls, without proving the production root application module,
+shared producer admission, protected consumer or downstream acceptance.
+
+[Production Observation run 37080725733](https://github.com/forge-trust/AppSurface/actions/runs/37080725733)
+tested source `3efba1d29ff929d63466d6f64cece24dd4213d07` and failed with
+`worker-unsuccessful`: main exit code/status were both one. The bounded root
+journal retained `ASEVD211`, meaning the production worker returned an incomplete
+manifest. The broker had confirmed exit and completed wait with no active
+handlers or runs. Artifact `11259205336` and its canonical private journal were
+digest verified. The journal did not identify the producer failure; retaining
+the bounded private failure artifacts is the next diagnosis. No passing
+Observation or exact Trusted-rejection result is credited to this run.
+
+The matching catalogue and application protocol now accept a declared task
+limit of 128 and reject 129. Scoped macOS source verification passed **209
+catalogue cases and 129 protocol cases**, with no failures, skips or compiler
+diagnostics. Those metadata controls do not establish Linux execution. The
+production compiled catalogue and accepted-consumer-proof registry remain empty;
+the unchanged solution coverage gate and all required consumer proofs remain
+required before Trusted support can be enabled.

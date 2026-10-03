@@ -122,7 +122,7 @@ def startup_execution_diagnostics(properties):
             "job_id": 0 if job == "" else diagnostic_integer(job, 1, 0xffffffff)}
 
 
-def exec_startup_complete(properties, deadline, loaded_exec_seen=False):
+def exec_startup_complete(properties, deadline, loaded_exec_seen=False, startup_progress_seen=False):
     """Only Type=exec active/running permits subsequent exact identity checks."""
     if (time.monotonic() >= deadline or type(properties.get("_query_exit_status")) is not int or
             properties.get("_query_exit_status") != 0 or properties.get("_malformed") or
@@ -141,6 +141,11 @@ def exec_startup_complete(properties, deadline, loaded_exec_seen=False):
         raise StartupFailure(STARTUP_FAILURE)
     if properties["LoadState"] != "loaded" or properties["Type"] != "exec":
         raise StartupFailure(STARTUP_FAILURE)
+    # A freshly installed start job may not have reached unit_start() yet.
+    # This tuple grants no execution authority; expiry/launcher exit still fails.
+    # Once activation is observed, returning here is terminal, not a new grace.
+    if state == ("inactive", "dead") and pid == 0 and not startup_progress_seen:
+        return False
     if state == ("active", "running"):
         if pid == 0 or not properties.get("ControlGroup"):
             raise StartupFailure(STARTUP_FAILURE)
@@ -180,12 +185,12 @@ def record_startup_failure(receipt, control, properties, started):
         pass
 
 
-def query_exec_startup(unit, deadline, loaded_exec_seen, receipt, control, started):
-    """Only a successful not-found query before loaded exec is pending."""
+def query_exec_startup(unit, deadline, loaded_exec_seen, receipt, control, started, startup_progress_seen=False):
+    """Only recognized initial/activating tuples are pending within one deadline."""
     properties = {}
     try:
         properties = unit_properties(unit, timeout=max(0.001, min(5, deadline - time.monotonic())))
-        complete = exec_startup_complete(properties, deadline, loaded_exec_seen)
+        complete = exec_startup_complete(properties, deadline, loaded_exec_seen, startup_progress_seen)
         group = properties.get("ControlGroup", "")
         if group and group != selected_group(unit):
             raise StartupFailure(STARTUP_FAILURE)
@@ -648,7 +653,7 @@ def service_command(unit, payload, scratch, dotnet, uid, gid, tools, output, con
                   f"RuntimeMaxSec={JOB_SECONDS}s", "SendSIGKILL=yes", "NoNewPrivileges=yes",
                   "CapabilityBoundingSet=", "AmbientCapabilities=", "ProtectControlGroups=yes",
                   "ProtectSystem=strict", "ProtectHome=yes", "PrivateNetwork=yes", "RestrictSUIDSGID=yes",
-                  "TasksMax=64", "MemoryMax=1G", "UMask=0077", f"WorkingDirectory={scratch}",
+                  "TasksMax=128", "MemoryMax=1G", "UMask=0077", f"WorkingDirectory={scratch}",
                   f"ReadWritePaths={scratch}", f"ReadOnlyPaths={payload} {dotnet.parent} {allowed_input}",
                   f"InaccessiblePaths={tools} {output} {control}"]
     argv = ["systemd-run", "--quiet", "--wait", "--pipe", f"--unit={unit}"]
@@ -751,11 +756,13 @@ def prove(args):
         observed = {}
         startup_confirmed = False
         loaded_exec_seen = False
+        startup_progress_seen = False
         while time.monotonic() < ready_deadline and process.poll() is None and not budget.exceeded.is_set():
             require_watchdog_alive(monitor)
             properties, complete = query_exec_startup(unit, ready_deadline, loaded_exec_seen, receipt, control,
-                                                       deadline - JOB_SECONDS)
+                                                       deadline - JOB_SECONDS, startup_progress_seen)
             loaded_exec_seen = loaded_exec_seen or (properties["LoadState"] == "loaded" and properties["Type"] == "exec")
+            startup_progress_seen = startup_progress_seen or properties["ActiveState"] in ("activating", "active")
             group = properties.get("ControlGroup", "") or group
             if not complete:
                 time.sleep(0.05)

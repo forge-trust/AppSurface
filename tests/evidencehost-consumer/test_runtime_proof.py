@@ -30,6 +30,103 @@ def portable_runtime_workspace():
             yield str(child)
 
 
+class SourceInventoryProofTests(unittest.TestCase):
+    SHARED_EXECUTION_SOURCES = (
+        "Evidence/ForgeTrust.AppSurface.Evidence.Coverage/EvidenceRestrictedCoverageProducer.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Coverage/EvidenceRestrictedCoverageTransport.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Coverage/EvidenceRestrictedCoverageProducerFactory.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceRestrictedProducerLease.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceWorkerExecution.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceLinuxApplicationProtocol.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Planner/EvidenceClosedApplicationCatalogue.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceHostBootstrap.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Aspire/EvidenceRestrictedAspireApplication.cs",
+    )
+    PREVIOUS_SOURCES = (
+        "Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceRestrictedCoverageProducer.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceRestrictedCoverageTransport.cs",
+    )
+
+    @contextmanager
+    def inventory(self):
+        """Exercise real required files in a disposable checkout without runtime execution."""
+        with tempfile.TemporaryDirectory() as directory, patch.object(proof, "ROOT", Path(directory)):
+            contents = {}
+            for path in proof.source_paths():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                relative = path.relative_to(proof.ROOT).as_posix()
+                contents[relative] = ("fixture source: " + relative + "\n").encode("utf-8")
+                path.write_bytes(contents[relative])
+            yield proof.ROOT, contents
+
+    def test_shared_single_copy_and_dependency_inputs_bind_exact_file_bytes(self):
+        with self.inventory() as (root, contents):
+            relative_paths = [path.relative_to(root).as_posix() for path in proof.source_paths()]
+            self.assertEqual(len(relative_paths), len(set(relative_paths)))
+            self.assertTrue(set(self.SHARED_EXECUTION_SOURCES).issubset(relative_paths))
+            for package in ("Contracts", "Planner", "Coverage", "Cli", "Aspire"):
+                directory = "Evidence/ForgeTrust.AppSurface.Evidence." + package
+                self.assertIn(directory + "/ForgeTrust.AppSurface.Evidence." + package + ".csproj", relative_paths)
+                self.assertIn(directory + "/packages.lock.json", relative_paths)
+            for relative in self.PREVIOUS_SOURCES:
+                self.assertNotIn(relative, relative_paths)
+                self.assertFalse((root / relative).exists())
+            hashes, digest = proof.hash_sources()
+            expected = {relative: hashlib.sha256(data).hexdigest() for relative, data in contents.items()}
+            self.assertEqual(hashes, expected)
+            canonical = json.dumps(expected, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            self.assertEqual(digest, hashlib.sha256(canonical).hexdigest())
+
+    def test_previous_copy_directory_or_dangling_link_rejects_inventory(self):
+        for relative in self.PREVIOUS_SOURCES:
+            for kind in ("file", "directory", "dangling-link"):
+                with self.subTest(relative=relative, kind=kind), self.inventory() as (root, _):
+                    previous = root / relative
+                    if kind == "file":
+                        previous.write_bytes(b"stale implementation")
+                    elif kind == "directory":
+                        previous.mkdir()
+                    else:
+                        previous.symlink_to("missing-implementation.cs")
+                    with self.assertRaisesRegex(proof.ProofFailure, "previous location"):
+                        proof.hash_sources()
+
+    def test_each_missing_shared_execution_source_rejects_inventory(self):
+        for relative in self.SHARED_EXECUTION_SOURCES:
+            with self.subTest(relative=relative), self.inventory() as (root, _):
+                (root / relative).unlink()
+                with self.assertRaisesRegex(proof.ProofFailure, "missing or unsafe"):
+                    proof.hash_sources()
+
+    def test_linked_or_nonregular_shared_sources_cannot_replace_required_bytes(self):
+        for relative in self.SHARED_EXECUTION_SOURCES:
+            for kind in ("link", "dangling-link", "directory"):
+                with self.subTest(relative=relative, kind=kind), self.inventory() as (root, _):
+                    target = root / relative
+                    target.unlink()
+                    if kind == "directory":
+                        target.mkdir()
+                    elif kind == "link":
+                        replacement = root / "replacement.cs"
+                        replacement.write_bytes(b"different bytes")
+                        target.symlink_to(replacement)
+                    else:
+                        target.symlink_to("missing-implementation.cs")
+                    with self.assertRaisesRegex(proof.ProofFailure, "missing or unsafe"):
+                        proof.hash_sources()
+
+    def test_shared_source_mutation_changes_only_its_binding_and_canonical_digest(self):
+        for relative in self.SHARED_EXECUTION_SOURCES:
+            with self.subTest(relative=relative), self.inventory() as (root, _):
+                before, before_digest = proof.hash_sources()
+                changed = b"changed shared execution source\n"
+                (root / relative).write_bytes(changed)
+                after, after_digest = proof.hash_sources()
+                self.assertEqual(after[relative], hashlib.sha256(changed).hexdigest())
+                self.assertEqual([name for name in before if before[name] != after[name]], [relative])
+                self.assertNotEqual(after_digest, before_digest)
+
+
 class TrustedRejectionProofTests(unittest.TestCase):
     def test_only_the_exact_missing_proof_rejection_counts(self):
         cases = (
@@ -348,6 +445,84 @@ class StructuralVerificationProofTests(unittest.TestCase):
                     command.assert_not_called()
 
 
+class WorkerExitDiagnosticValidationTests(unittest.TestCase):
+    """Pure controls for the actual launcher validator used by the runtime driver."""
+    @classmethod
+    def setUpClass(cls):
+        cls.launcher = proof.load_launcher_contract()
+
+    @staticmethod
+    def record(cause):
+        return {"schema": "evidence-launcher-failure-v1", "error_class": "LauncherError",
+                "cause": cause, "operation": "worker-exit", "worker_main_code": 1, "worker_main_status": 1,
+                "broker_ready_seen": True, "broker_wait_completed": False, "broker_exited": False,
+                "broker_work_closed": True, "broker_active_handlers": 0, "broker_active_runs": 0,
+                "worker_journal_state": "collected", "worker_journal_written": True,
+                "worker_journal_bytes": 4096, "worker_journal_codes": ["ASEVD402", "ASEVD410"]}
+
+    def test_both_worker_exit_causes_accept_the_same_closed_checkpoint_and_journal_fields(self):
+        for cause in ("worker-protocol-incomplete", "worker-unsuccessful"):
+            with self.subTest(cause=cause):
+                record = self.record(cause)
+                validated = self.launcher.validate_failure_diagnostic(record)
+                self.assertEqual(record, validated)
+                self.assertIsNot(record, validated)
+                self.assertEqual(cause, validated["cause"])
+                self.assertNotIn("status", validated)
+                self.assertNotIn("trusted", validated)
+
+    def test_both_causes_serialize_closed_fields_before_runtime_validation_without_canary_echo(self):
+        for cause in ("worker-protocol-incomplete", "worker-unsuccessful"):
+            with self.subTest(cause=cause):
+                expected = {**self.record(cause), "exit_code": 1}
+                error = self.launcher.LauncherError(cause, operation="worker-exit", exit_code=1)
+                error.worker_main_code = 1
+                error.worker_main_status = 1
+                error.broker_checkpoints = {name: value for name, value in expected.items() if name.startswith("broker_")}
+                error.broker_checkpoints["raw_subject_output"] = "secret-779"
+                error.worker_journal = {name: value for name, value in expected.items() if name.startswith("worker_journal_")}
+                error.worker_journal["raw_exception"] = "secret-779"
+                error.worker_result = "secret-779"
+                serialized = self.launcher.failure_diagnostic(error)
+                self.assertEqual(expected, serialized)
+                self.assertNotIn("secret-779", json.dumps(serialized))
+                self.assertEqual(expected, self.launcher.validate_failure_diagnostic(serialized))
+
+    def test_checkpoint_or_journal_metadata_requires_a_permitted_cause_and_worker_exit(self):
+        for cause, operation in (("worker-start-unit-failed", "worker-exit"),
+                                 ("unclassified-host-failure", "worker-exit"),
+                                 ("secret-779", "worker-exit"),
+                                 ("worker-unsuccessful", "worker-start"),
+                                 ("worker-protocol-incomplete", "worker-start"),
+                                 ("worker-unsuccessful", None)):
+            with self.subTest(cause=cause, operation=operation):
+                record = self.record(cause)
+                if operation is None:
+                    del record["operation"]
+                else:
+                    record["operation"] = operation
+                with self.assertRaisesRegex(self.launcher.LauncherError, "^invalid-private-diagnostic$") as failure:
+                    self.launcher.validate_failure_diagnostic(record)
+                self.assertNotIn("secret-779", str(failure.exception))
+
+    def test_both_causes_reject_wrong_types_bounds_unknown_fields_and_journal_canaries(self):
+        mutations = ({"broker_ready_seen": "secret-779"}, {"broker_active_handlers": True},
+                     {"broker_active_handlers": 4097}, {"broker_active_runs": 2},
+                     {"worker_journal_written": 1}, {"worker_journal_bytes": True},
+                     {"worker_journal_bytes": -1}, {"worker_journal_bytes": 4097},
+                     {"worker_journal_state": "secret-779"}, {"worker_journal_codes": ["ASEVD402", "secret-779"]},
+                     {"worker_journal_codes": [1]}, {"worker_journal_codes": ["ASEVD402"] * 15},
+                     {"stdout": "secret-779"}, {"exception": "secret-779"}, {"path": "secret-779"},
+                     {"status": "completed"}, {"trusted": True})
+        for cause in ("worker-protocol-incomplete", "worker-unsuccessful"):
+            for mutation in mutations:
+                with self.subTest(cause=cause, fields=list(mutation)):
+                    record = {**self.record(cause), **mutation}
+                    with self.assertRaisesRegex(self.launcher.LauncherError, "^invalid-private-diagnostic$") as failure:
+                        self.launcher.validate_failure_diagnostic(record)
+                    self.assertNotIn("secret-779", str(failure.exception))
+
+
 class ObservationFailureDiagnosticTests(unittest.TestCase):
     def test_startup_status_is_published_only_after_closed_schema_validation(self):
         safe = {"schema": "evidence-launcher-failure-v1", "error_class": "LauncherError",
@@ -580,6 +755,211 @@ class PrivateWorkerJournalRetentionTests(unittest.TestCase):
                 self.assertNotIn("secret-779", (public / "launcher-failure.json").read_text())
                 private = public / "private-diagnostics/worker-journal.tar"
                 self.assertEqual(private.exists(), kind == "retained")
+
+
+class PrivateFailureOutputRetentionTests(unittest.TestCase):
+    """Actual portable FD copies and private failure preservation; no root admission."""
+
+    @staticmethod
+    def helper():
+        namespace = {"__name__": "private_failure_output_portable_control"}
+        exec(compile(proof.PRIVATE_FAILURE_OUTPUT_ROOT_SCRIPT, "<private failure output helper>", "exec"), namespace)
+        return namespace["archive_from_output"]
+
+    @contextmanager
+    def output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            outer = Path(directory)
+            outer.chmod(0o755)
+            anchor = outer / ("run-" + "a" * 12)
+            anchor.mkdir(mode=0o700)
+            slot = anchor / "observation-123"
+            slot.mkdir(mode=0o700)
+            for name in proof.PRIVATE_FAILURE_OUTPUT_NAMES:
+                path = slot / name
+                path.write_bytes(("private-canary-779 " + name).encode())
+                path.chmod(0o600)
+            fd = os.open(outer, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                yield outer, anchor, slot, fd
+            finally:
+                os.close(fd)
+
+    def capture(self, fd, slot="observation-123"):
+        return self.helper()(fd, slot, expected_root_uid=os.geteuid(), expected_root_gid=os.getegid())
+
+    def test_fixed_files_real_fds_maximum_bounds_and_canary_are_private_canonical_ustar(self):
+        with self.output() as (_, _, slot, fd):
+            (slot / "unselected.json").write_bytes(b"not selected")
+            for name in proof.PRIVATE_FAILURE_OUTPUT_NAMES:
+                (slot / name).write_bytes(b"private-canary-779" + b"x" * (131072 - 18))
+            data = self.capture(fd)
+            contents = proof._private_failure_output_contents(data)
+            self.assertEqual(tuple(contents), proof.PRIVATE_FAILURE_OUTPUT_NAMES)
+            self.assertEqual(sum(map(len, contents.values())), proof.MAX_PRIVATE_FAILURE_OUTPUT_BYTES)
+            self.assertLessEqual(len(data), proof.MAX_PRIVATE_FAILURE_ARCHIVE_BYTES)
+            self.assertTrue(all(value.startswith(b"private-canary-779") for value in contents.values()))
+            with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as archive:
+                self.assertTrue(all((m.uid, m.gid, m.mode) == (0, 0, 0o600) for m in archive.getmembers()))
+
+    def test_missing_files_retain_available_subset_but_no_files_and_wrong_slot_fail(self):
+        with self.output() as (_, _, slot, fd):
+            for name in proof.PRIVATE_FAILURE_OUTPUT_NAMES[1:]:
+                (slot / name).unlink()
+            self.assertEqual(list(proof._private_failure_output_contents(self.capture(fd))), [proof.PRIVATE_FAILURE_OUTPUT_NAMES[0]])
+            (slot / proof.PRIVATE_FAILURE_OUTPUT_NAMES[0]).unlink()
+            for selected in (slot.name, "missing", "../observation-123"):
+                with self.subTest(selected=selected), self.assertRaises((ValueError, OSError)):
+                    self.capture(fd, selected)
+
+    def test_unsafe_source_links_owners_modes_nonregular_and_oversize_reject(self):
+        for kind in ("symlink", "hardlink", "directory", "fifo", "mode", "owner", "oversize", "outer-mode", "anchor-mode", "slot-mode", "extra-anchor"):
+            with self.subTest(kind=kind), self.output() as (outer, anchor, slot, fd):
+                target = slot / proof.PRIVATE_FAILURE_OUTPUT_NAMES[0]
+                if kind in ("symlink", "directory", "fifo"):
+                    target.unlink()
+                    if kind == "symlink": target.symlink_to(slot / proof.PRIVATE_FAILURE_OUTPUT_NAMES[1])
+                    elif kind == "directory": target.mkdir(mode=0o600)
+                    else: os.mkfifo(target, 0o600)
+                if kind == "hardlink": os.link(target, slot / "alias")
+                if kind == "mode": target.chmod(0o644)
+                if kind == "oversize": target.write_bytes(b"x" * 131073)
+                if kind == "outer-mode": outer.chmod(0o777)
+                if kind == "anchor-mode": anchor.chmod(0o755)
+                if kind == "slot-mode": slot.chmod(0o755)
+                if kind == "extra-anchor": (outer / ("run-" + "b" * 12)).mkdir()
+                original = os.fstat
+                def inspect(opened):
+                    info = original(opened)
+                    if kind == "owner" and stat.S_ISREG(info.st_mode):
+                        values = {n: getattr(info, n) for n in ("st_dev", "st_ino", "st_uid", "st_gid", "st_mode", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")}
+                        return SimpleNamespace(**{**values, "st_uid": info.st_uid + 1})
+                    return info
+                with patch.object(proof.os, "fstat", side_effect=inspect), self.assertRaises((ValueError, OSError)):
+                    self.capture(fd)
+
+    def test_retained_file_and_directory_substitution_or_same_inode_mutation_reject(self):
+        for kind in ("file", "directory", "mutation", "read-error"):
+            with self.subTest(kind=kind), self.output() as (_, anchor, slot, fd):
+                original = os.read
+                changed = False
+                def read(opened, limit):
+                    nonlocal changed
+                    if kind == "read-error": raise OSError(5, "private-canary-779")
+                    data = original(opened, limit)
+                    if not changed:
+                        changed = True
+                        target = slot / proof.PRIVATE_FAILURE_OUTPUT_NAMES[0]
+                        if kind == "file":
+                            target.rename(slot / "replaced")
+                            target.write_bytes(data); target.chmod(0o600)
+                        elif kind == "mutation": target.write_bytes(b"changed")
+                        else:
+                            slot.rename(anchor / "replaced-slot")
+                            slot.mkdir(mode=0o700)
+                    return data
+                with patch.object(proof.os, "read", side_effect=read), self.assertRaises((ValueError, OSError)):
+                    self.capture(fd)
+
+    @staticmethod
+    def checkpoint():
+        return {"schema": "evidence-launcher-failure-v1", "error_class": "LauncherError",
+                "cause": "worker-unsuccessful", "operation": "worker-exit", "worker_main_code": 1,
+                "worker_main_status": 1, "broker_ready_seen": True, "broker_wait_completed": True,
+                "broker_exited": True, "broker_work_closed": True, "broker_active_handlers": 0, "broker_active_runs": 0}
+
+    def test_archive_validator_rejects_trailing_canary_and_hostile_member_metadata(self):
+        with self.output() as (_, _, _, fd):
+            data = self.capture(fd)
+        self.assertIsNone(proof._private_failure_output_contents(data + b"private-canary-779"))
+        self.assertIsNone(proof._private_failure_output_contents(b"x" * 409601))
+        for change in ({"mode": 0o644}, {"uid": 1}, {"name": "../outside"}, {"type": tarfile.SYMTYPE, "linkname": "canary"}):
+            result = io.BytesIO()
+            with tarfile.open(fileobj=result, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+                member = tarfile.TarInfo(proof.PRIVATE_FAILURE_OUTPUT_NAMES[0]);member.mode=0o600
+                for name, value in change.items(): setattr(member, name, value)
+                archive.addfile(member)
+            self.assertIsNone(proof._private_failure_output_contents(result.getvalue()))
+
+    def test_driver_private_files_exclusive_collision_and_original_failure_preserved(self):
+        with self.output() as (_, _, _, fd): data = self.capture(fd)
+        for kind in ("retained", "collision", "missing", "capture-error"):
+            with self.subTest(kind=kind), portable_runtime_workspace() as directory:
+                work = Path(directory); work.chmod(0o755)
+                output = work / "output-parent"; output.mkdir(mode=0o755)
+                public = work / "proof"; public.mkdir(mode=0o755)
+                original_lstat = Path.lstat
+                def protected(path):
+                    info = original_lstat(path)
+                    if path in (work, output):
+                        fields = list(info); fields[4] = fields[5] = 0
+                        return os.stat_result(fields)
+                    return info
+                if kind == "collision":
+                    private = public / "private-diagnostics"; private.mkdir(mode=0o700)
+                    capture = private / "failure-output"; capture.mkdir(mode=0o700)
+                    (capture / "sentinel").write_bytes(b"unchanged")
+                safe = self.checkpoint()
+                capture_result = (0, data, b"private-canary-779") if kind in ("retained", "collision") else (1, b"", b"canary")
+                if kind == "capture-error": capture_result = proof.ProofFailure("private-canary-779")
+                with patch.object(Path, "lstat", protected), patch.object(proof, "retain_private_worker_journal", return_value=False), \
+                     patch.object(proof, "root_command", side_effect=[(1, b"private-canary-779", b"private-canary-779"),
+                        (0, json.dumps(safe).encode(), b""), capture_result]):
+                    with self.assertRaises(proof.ProofFailure) as failure:
+                        proof.run_observation_launcher(["launcher"], work, public, output_parent=output, slot="observation-123")
+                self.assertIn("Production Observation launcher exited 1.", str(failure.exception))
+                self.assertNotIn("private-canary-779", str(failure.exception))
+                self.assertEqual(json.loads((public / "launcher-failure.json").read_text()), safe)
+                archive = public / "private-diagnostics/failure-output" / proof.PRIVATE_FAILURE_OUTPUT_ARCHIVE
+                self.assertEqual(archive.exists(), kind == "retained")
+                if kind == "retained":
+                    self.assertEqual(archive.read_bytes(), data)
+                    for path in archive.parent.iterdir(): self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                if kind == "collision": self.assertEqual((archive.parent / "sentinel").read_bytes(), b"unchanged")
+
+    def test_unconfirmed_exit_or_unselected_path_cannot_invoke_capture(self):
+        safe = self.checkpoint()
+        with self.output() as (_, _, _, fd):
+            data = self.capture(fd)
+        with portable_runtime_workspace() as directory:
+            work = Path(directory)
+            work.chmod(0o755)
+            output = work / "output-parent"
+            output.mkdir(mode=0o755)
+            public = work / "proof"
+            public.mkdir(mode=0o755)
+            original_lstat = Path.lstat
+
+            def protected_lstat_rootstats(path):
+                info = original_lstat(path)
+                if path in (work, output):
+                    fields = list(info)
+                    fields[4] = fields[5] = 0
+                    return os.stat_result(fields)
+                return info
+
+            with patch.object(Path, "lstat", protected_lstat_rootstats):
+                with self.subTest(case="valid-checkpoint"), \
+                     patch.object(proof, "root_command", return_value=(0, data, b"")) as command:
+                    self.assertTrue(proof.retain_private_failure_output(work, output, "observation-123", public, safe))
+                    command.assert_called_once()
+                    self.assertEqual(command.call_args.args[0][-1], "observation-123")
+                for name, value in (("cause", "worker-protocol-incomplete"), ("operation", "worker-start"),
+                                    ("worker_main_code", 2), ("worker_main_status", 0),
+                                    ("broker_ready_seen", False), ("broker_wait_completed", False),
+                                    ("broker_exited", False), ("broker_work_closed", False),
+                                    ("broker_active_handlers", 1), ("broker_active_runs", 1)):
+                    with self.subTest(field=name, value=value), patch.object(proof, "root_command") as command:
+                        self.assertFalse(proof.retain_private_failure_output(
+                            work, output, "observation-123", public, {**safe, name: value}))
+                        command.assert_not_called()
+                for selected_output, selected_slot in ((work / "unselected-output", "observation-123"),
+                                                       (output, "../observation-123")):
+                    with self.subTest(output=selected_output.name, slot=selected_slot), \
+                         patch.object(proof, "root_command") as command:
+                        self.assertFalse(proof.retain_private_failure_output(
+                            work, selected_output, selected_slot, public, safe))
+                        command.assert_not_called()
 
 
 class LauncherWorkspaceProofTests(unittest.TestCase):

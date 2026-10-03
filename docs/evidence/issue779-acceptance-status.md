@@ -96,6 +96,19 @@ closed by this recovery batch.
 
 ## Group map
 
+### Latest bounded verification (2026-10-03)
+
+The [latest consumer record](issue779-consumer-acceptance.md#restricted-aspire-mechanism-and-production-failure-diagnostics-2026-10-03)
+records **5/5 native restricted Aspire mechanism controls passed** on their exact
+2736-file candidate. It also records the separate production Observation failure
+with `ASEVD211` and incomplete execution; the producer cause remains unknown.
+Scoped macOS source tests passed **209 catalogue and 129 application-protocol
+cases**, including the selected 128-task bound and rejected 129-task neighbor.
+The new root application module and integrated CLI/Aspire shared path still
+require native consumer execution. These results do not close all 57 groups or
+enable a Trusted provider/platform entry. The complete current-source solution
+and patch coverage gate remains required.
+
 | Group | Current test / fixture anchors | Current verification scope | Remaining gap |
 | --- | --- | --- | --- |
 | A01 | [CLI mode](../../Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceCommandModeTests.cs): `MissingUnknownOrConflictingModeRejectsWithoutEcho`, `ExplicitModeOrLegacyTrueHasOnlyItsDeclaredMeaning`; [CLI entry](../../Cli/ForgeTrust.AppSurface.Cli.Tests/ProgramEntryPointTests.cs): `EntryPoint_EvidenceRunModeBindingRejectsImplicitAndConflictingModesBeforeSideEffects`; [Aspire caller](../../Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidenceAdmissionCallerTests.cs): legacy run cases | Partial: CLI and Aspire rejection fixtures exist; current tree unverified. | No paired caller matrix proving every rejected mode precedes all CLI and Aspire callbacks. |
