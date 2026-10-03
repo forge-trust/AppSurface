@@ -1148,14 +1148,18 @@ def capture_job_deadline(job_seconds: int) -> tuple[str, float]:
 
 def worker_unit_properties(worker_name: str, tool_root: Path, subject_root: Path,
                            test_output_root: Path, output_parent: Path,
-                           job_seconds: int) -> dict[str, str]:
+                           job_seconds: int, *, worker_gid: int | None = None) -> dict[str, str]:
     """Expose tooling and the source map read-only without granting raw artifact access.
 
     Disable worker RestrictSUIDSGID because systemd 255 blocks mandatory openat2
     under that filter. Subject units retain it; all other isolation remains here.
+    Private launch supplies the actual reserved worker primary GID, exactly 65011.
+    None preserves the old metadata helper shape; actual launch never uses it.
     """
+    if worker_gid is not None and (type(worker_gid) is not int or worker_gid != 65011):
+        raise LauncherError("identity-separation-failed")
     return {
-        "User": worker_name, "Group": worker_name, "Type": "exec",
+        "User": worker_name, "Group": worker_name if worker_gid is None else str(worker_gid), "Type": "exec",
         "KillMode": "control-group", "RuntimeMaxSec": str(job_seconds), "TimeoutStopSec": "2",
         "SendSIGKILL": "yes", "NoNewPrivileges": "yes", "CapabilityBoundingSet": "",
         "AmbientCapabilities": "", "ProtectControlGroups": "yes", "RestrictSUIDSGID": "no",
@@ -2617,7 +2621,7 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
         worker_argv = ["systemd-run", "--quiet", "--unit="+worker_unit, "--expand-environment=no",
                        *[f"--property={k}={v}" for k,v in worker_unit_properties(
                            worker_name, tool, subject, scratch / "test-output", output_parent,
-                           args.job_seconds).items()], *worker_command]
+                           args.job_seconds, worker_gid=wu.pw_gid).items()], *worker_command]
         _start_worker_unit(worker_argv, worker_unit)
         props = {}
         deadline = job_deadline_monotonic
