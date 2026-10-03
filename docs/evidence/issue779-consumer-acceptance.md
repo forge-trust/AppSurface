@@ -491,3 +491,74 @@ diagnostics. Those metadata controls do not establish Linux execution. The
 production compiled catalogue and accepted-consumer-proof registry remain empty;
 the unchanged solution coverage gate and all required consumer proofs remain
 required before Trusted support can be enabled.
+
+## Frozen v13 actual results and pending corrections (2026-10-03)
+
+[Aspire mechanism-v9 run 37083994959](https://github.com/forge-trust/AppSurface/actions/runs/37083994959)
+tested source `6518b17e1bd587143314cfa2ea1a73e8113ab9cf` under harness
+`ada7aac782f331734024e6330e4589ba6a9f90b5`. The parent verified both artifact
+digests, the complete 2740-file source binding, and the five private control
+receipts. **All five controls passed**, with owned exit and cleanup confirmed:
+normal, readiness failure, factory stall, cancellation and stuck descendant.
+Normal, readiness failure and cancellation stopped cooperatively with process
+exit zero; factory stall and stuck descendant required forced termination.
+All controls joined their watchdogs and error-free EOF pumps and confirmed the
+protected output probe was absent.
+
+This is evidence for the [restricted Aspire child mechanism](../../tests/evidencehost-consumer/AspireChild/README.md)
+with pinned Aspire/DCP 13.4.4 and the selected finite 128-task limit. It does
+not complete positive acceptance for the [shared CLI caller](../../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md),
+[shared Aspire caller](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md),
+[production root application module](../../tests/evidencehost-consumer/LinuxApplication-README.md)
+or Trusted execution. The production compiled catalogue and accepted-proof
+registry remain closed.
+
+[Native-v11 run 37083997761](https://github.com/forge-trust/AppSurface/actions/runs/37083997761),
+harness `34ff9f3b31c777c00724c39aa670d9236ff1e52f`, tested the same source.
+The launcher, proof and broker portable suites passed **91, 46 and 4 controls**,
+respectively. The root portable watchdog-oversize control then failed on a Linux
+connection reset. Focused C# verification and the
+[unchanged solution coverage gate](../../scripts/coverage-solution.sh) were not
+reached; this run supplies no result for those gates.
+
+[Runtime-v15 run 37083999238](https://github.com/forge-trust/AppSurface/actions/runs/37083999238),
+harness `14047384137c380675a140253b57e0e40c3c58a4`, also tested that source and
+failed closed with `worker-unsuccessful`. Its retained manifest reported
+`ProducerOutcome.Failed` after approximately 10 ms with
+`EvidenceAdmissionException`, `ClaimKind.None`, `Eligibility.None` and
+`ExecutionVerdict.Incomplete`; cleanup was confirmed. A fresh-results directory
+ownership defect was separately confirmed from source inspection. The native
+inner cause was not measured, so this manifest does not establish that defect
+as the cause of this failure. No passing shared coverage procedure or
+[protected downstream gate](../../tests/evidencehost-consumer/ProtectedGateConsumer/README.md)
+is credited to this run.
+
+### Native-v12 and Runtime-v16 outcomes
+
+Correction source `9894c62c525724b0d62c9f4859faa20b464ac737` contains the Linux
+connection-reset test correction and the fresh-results ownership fix with tests
+and documentation. [Native-v12 run 37087508180](https://github.com/forge-trust/AppSurface/actions/runs/37087508180)
+passed all **310 controls in eight preceding Python suites**, including all 39
+root-module controls, and recorded seven builds with zero warnings and errors.
+The CLI selection passed **914 of 915** tests. Its sole failure expected the
+root-peer diagnostic but received the generic descriptor diagnostic. The
+solution coverage gate was not reached; source verification passed again after
+the failed selection.
+
+[Runtime-v16 run 37087509927](https://github.com/forge-trust/AppSurface/actions/runs/37087509927)
+tested the same source. Its artifact digest and canonical private failure
+archive matched. The retained producer result reported exit code **1** after
+**95,410 ms**, with no report artifact. Cleanup remained confirmed and the
+manifest remained None/None/Incomplete. This establishes a completed nonzero
+restricted-process result; its subprocess output was not retained and its inner
+cause remains unmeasured. It does not establish a successful coverage procedure.
+
+The [handshake failure normalizer](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md#authenticated-outer-worker-descriptor)
+preserves host-selected `ASEVD402` errors before the general exception family.
+Two scoped formatters and a macOS source build passed **124/124** selected cases
+with zero compiler diagnostics. Linux peer branches were not executed by that
+local run; the existing real-socket control still requires zero request bytes
+after root-peer rejection. A private latest-main source includes this fix and
+verified upstream revision `416b30919e6c4d03b634d9d3fe558884b02f0b91`.
+Its unchanged coverage gate is pending. The [acceptance map](issue779-acceptance-status.md)
+and protected consumer requirements remain open.

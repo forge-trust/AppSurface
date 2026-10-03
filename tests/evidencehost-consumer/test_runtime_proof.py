@@ -962,6 +962,279 @@ class PrivateFailureOutputRetentionTests(unittest.TestCase):
                         command.assert_not_called()
 
 
+class PrivateSubjectPrefixRetentionTests(unittest.TestCase):
+    """Real portable FD/archive controls and mocked privilege dispatch; no root admission."""
+
+    @staticmethod
+    def helper():
+        namespace = {"__name__": "private_subject_prefix_portable_control"}
+        exec(compile(proof.PRIVATE_SUBJECT_PREFIX_ROOT_SCRIPT, "<subject-prefix helper>", "exec"), namespace)
+        return namespace["archive_subject_prefixes"]
+
+    @contextmanager
+    def workspace(self):
+        with portable_runtime_workspace() as directory:
+            work = Path(directory); work.chmod(0o755)
+            child = work / proof.PRIVATE_SUBJECT_PREFIX_DIRECTORY; child.mkdir(mode=0o700)
+            for name in proof.PRIVATE_SUBJECT_PREFIX_NAMES:
+                path = child / name; path.write_bytes(b"private-prefix-canary\x00\xff"); path.chmod(0o600)
+            fd = os.open(work, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                yield work, child, fd
+            finally:
+                os.close(fd)
+
+    def capture(self, fd, **kwargs):
+        return self.helper()(fd, expected_root_uid=os.geteuid(), expected_root_gid=os.getegid(), **kwargs)
+
+    @staticmethod
+    def archive(contents=(b"private-prefix-canary\x00\xff", b""), *, order=None, change=None):
+        output = io.BytesIO()
+        names = proof.PRIVATE_SUBJECT_PREFIX_NAMES if order is None else order
+        with tarfile.open(fileobj=output, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+            for index, name in enumerate(names):
+                content = contents[index % len(contents)]
+                item = tarfile.TarInfo(name); item.mode = 0o600; item.size = len(content)
+                if change:
+                    for key, value in change.items(): setattr(item, key, value)
+                archive.addfile(item, io.BytesIO(content) if item.isreg() else None)
+        return output.getvalue()
+
+    @staticmethod
+    def checkpoint():
+        return PrivateFailureOutputRetentionTests.checkpoint()
+
+    @contextmanager
+    def rootstats(self, work, **changes):
+        original = Path.lstat
+        def selected(path):
+            info = original(path)
+            if path == work:
+                fields = list(info); fields[4] = fields[5] = 0
+                info = os.stat_result(fields)
+                if changes:
+                    values = {name: getattr(info, name) for name in
+                              ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid")}
+                    info = SimpleNamespace(**{**values, **changes})
+            return info
+        with patch.object(Path, "lstat", selected): yield
+
+    def test_real_binary_prefixes_maximum_and_empty_have_exact_canonical_metadata(self):
+        for sizes in ((519168, 519168), (0, 0)):
+            with self.subTest(sizes=sizes), self.workspace() as (_, child, fd):
+                contents = []
+                for name, size in zip(proof.PRIVATE_SUBJECT_PREFIX_NAMES, sizes):
+                    data = (b"private-prefix-canary\x00\xff" + b"x" * size)[:size]
+                    (child / name).write_bytes(data); contents.append(data)
+                archive = self.capture(fd)
+                self.assertTrue(proof._valid_private_subject_prefix_archive(archive))
+                self.assertLessEqual(len(archive), 1024 * 1024)
+                self.assertEqual(archive, self.archive(tuple(contents)))
+                with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as opened:
+                    self.assertEqual(list(proof.PRIVATE_SUBJECT_PREFIX_NAMES), opened.getnames())
+                    for member, data in zip(opened.getmembers(), contents):
+                        self.assertEqual((0, 0, 0, 0o600, len(data)),
+                                         (member.uid, member.gid, member.mtime, member.mode, member.size))
+                        self.assertEqual(data, opened.extractfile(member).read())
+
+    def test_one_unsafe_file_or_directory_field_rejects_after_valid_fd_control(self):
+        for kind in ("missing", "file-link", "directory-link", "hardlink", "file-mode", "child-mode",
+                     "work-mode", "oversize", "extra", "nonregular", "owner", "group"):
+            with self.subTest(kind=kind), self.workspace() as (work, child, fd):
+                self.assertTrue(proof._valid_private_subject_prefix_archive(self.capture(fd)))
+                target = child / proof.PRIVATE_SUBJECT_PREFIX_NAMES[0]
+                if kind == "missing": target.unlink()
+                elif kind == "file-link": target.unlink(); target.symlink_to(child / proof.PRIVATE_SUBJECT_PREFIX_NAMES[1])
+                elif kind == "directory-link": child.rename(work / "original"); child.symlink_to(work / "original")
+                elif kind == "hardlink": os.link(target, work / "linked")
+                elif kind == "file-mode": target.chmod(0o644)
+                elif kind == "child-mode": child.chmod(0o755)
+                elif kind == "work-mode": work.chmod(0o775)
+                elif kind == "oversize": target.write_bytes(b"x" * 519169)
+                elif kind == "extra": (child / "extra").write_bytes(b"private-prefix-canary")
+                elif kind == "nonregular": target.unlink(); target.mkdir()
+                original = os.fstat
+                def inspected(opened):
+                    info = original(opened)
+                    if kind in ("owner", "group") and stat.S_ISREG(info.st_mode):
+                        fields = {name: getattr(info, name) for name in
+                                  ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")}
+                        fields["st_uid" if kind == "owner" else "st_gid"] += 1
+                        return SimpleNamespace(**fields)
+                    return info
+                with patch.object(proof.os, "fstat", side_effect=inspected), self.assertRaises((OSError, ValueError)):
+                    self.capture(fd)
+
+    def test_substitution_growth_same_inode_mutation_and_read_failure_reject(self):
+        for kind in ("file", "directory", "growth", "same-inode", "read-error", "extra-after-read"):
+            with self.subTest(kind=kind), self.workspace() as (work, child, fd):
+                self.assertTrue(proof._valid_private_subject_prefix_archive(self.capture(fd)))
+                original = os.read; changed = False
+                def reading(opened, bound):
+                    nonlocal changed
+                    if kind == "read-error": raise OSError(5, "private-prefix-canary")
+                    data = original(opened, bound)
+                    if not changed:
+                        changed = True; target = child / proof.PRIVATE_SUBJECT_PREFIX_NAMES[0]
+                        if kind == "file": target.rename(work / "old"); target.write_bytes(data); target.chmod(0o600)
+                        elif kind == "directory": child.rename(work / "old"); child.mkdir(mode=0o700)
+                        elif kind == "growth":
+                            with target.open("ab") as output: output.write(b"growth")
+                        elif kind == "same-inode": target.write_bytes(b"z" * target.stat().st_size)
+                        else: (child / "extra").write_bytes(b"extra")
+                    return data
+                with patch.object(proof.os, "read", side_effect=reading) as read, self.assertRaises((OSError, ValueError)):
+                    self.capture(fd)
+                self.assertTrue(read.called)
+
+    def test_expired_or_mid_read_deadline_cannot_export_archive(self):
+        with self.workspace() as (_, _, fd), patch.object(proof.os, "read") as read:
+            with self.assertRaises(ValueError): self.capture(fd, deadline=0)
+            read.assert_not_called()
+        with self.workspace() as (_, _, fd):
+            original = os.read
+            with patch.object(proof.time, "monotonic", return_value=1) as clock:
+                def reading(opened, bound):
+                    data = original(opened, bound); clock.return_value = 10; return data
+                with patch.object(proof.os, "read", side_effect=reading) as read, self.assertRaises(ValueError):
+                    self.capture(fd, deadline=5)
+                self.assertTrue(read.called)
+
+    def test_archive_extra_reordered_missing_noncanonical_or_unsafe_member_rejects(self):
+        valid = self.archive(); self.assertTrue(proof._valid_private_subject_prefix_archive(valid))
+        malformed = [valid + b"private-prefix-canary", valid + b"\x00" * 10240, b"x" * 1048577,
+                     self.archive(order=("stdout.prefix",)), self.archive(order=("stderr.prefix", "stdout.prefix")),
+                     self.archive(order=("stdout.prefix", "stderr.prefix", "extra")),
+                     self.archive(order=("stdout.prefix", "stdout.prefix")),
+                     self.archive(contents=(b"x" * 519169, b""))]
+        for change in ({"uid": 1}, {"gid": 1}, {"mtime": 1}, {"mode": 0o644}, {"uname": "canary"},
+                       {"type": tarfile.SYMTYPE, "linkname": "canary"}):
+            malformed.append(self.archive(change=change))
+        for data in malformed:
+            with self.subTest(size=len(data)): self.assertFalse(proof._valid_private_subject_prefix_archive(data))
+
+    def test_valid_selected_root_dispatch_and_exclusive_private_archive(self):
+        with self.workspace() as (work, _, fd):
+            public = work / "proof"; public.mkdir(mode=0o755)
+            data = self.capture(fd); info = work.lstat()
+            with self.rootstats(work), patch.object(proof, "root_command", return_value=(0, data, b"private-prefix-canary")) as command:
+                self.assertTrue(proof.retain_private_subject_prefixes(work, public, self.checkpoint()))
+                command.assert_called_once()
+                self.assertEqual(command.call_args.args[0], ["/usr/bin/python3", "-I", "-c", proof.PRIVATE_SUBJECT_PREFIX_ROOT_SCRIPT,
+                    work.name[len(proof.RUNTIME_WORKSPACE_PREFIX):], str(info.st_dev), str(info.st_ino)])
+                self.assertEqual(command.call_args.kwargs["timeout"], 5)
+                self.assertTrue(command.call_args.kwargs["binary_output"])
+                self.assertFalse(proof.retain_private_subject_prefixes(work, public, self.checkpoint()))
+            private = public / "private-diagnostics"; archive = private / proof.PRIVATE_SUBJECT_PREFIX_ARCHIVE
+            self.assertEqual(data, archive.read_bytes()); self.assertEqual(0o700, stat.S_IMODE(private.stat().st_mode))
+            self.assertEqual(0o600, stat.S_IMODE(archive.stat().st_mode)); self.assertEqual(1, archive.stat().st_nlink)
+
+    def test_each_bad_checkpoint_or_workspace_field_blocks_root_io_with_valid_positive_foundation(self):
+        with self.workspace() as (work, _, fd):
+            public = work / "proof"; public.mkdir(mode=0o755); data = self.capture(fd)
+            with self.rootstats(work):
+                with patch.object(proof, "root_command", return_value=(0, data, b"")) as command:
+                    self.assertTrue(proof.retain_private_subject_prefixes(work, public, self.checkpoint()))
+                    command.assert_called_once()
+                for name, value in (("cause", "worker-protocol-incomplete"), ("operation", "worker-start"),
+                                    ("worker_main_code", 2), ("worker_main_code", True), ("worker_main_status", 0),
+                                    ("worker_main_status", True), ("broker_ready_seen", False), ("broker_wait_completed", False),
+                                    ("broker_exited", False), ("broker_work_closed", False), ("broker_active_handlers", 1),
+                                    ("broker_active_runs", 1), ("broker_active_runs", False), ("schema", "canary")):
+                    with self.subTest(field=name, value=value), patch.object(proof, "root_command") as command:
+                        self.assertFalse(proof.retain_private_subject_prefixes(work, public, {**self.checkpoint(), name: value}))
+                        command.assert_not_called()
+            for name, value in (("st_uid", 1), ("st_gid", 1), ("st_mode", stat.S_IFDIR | 0o775),
+                                ("st_mode", stat.S_IFREG | 0o755)):
+                with self.subTest(field=name), self.rootstats(work, **{name: value}), patch.object(proof, "root_command") as command:
+                    self.assertFalse(proof.retain_private_subject_prefixes(work, public, self.checkpoint()))
+                    command.assert_not_called()
+            with patch.object(proof, "root_command") as command:
+                self.assertFalse(proof.retain_private_subject_prefixes(work.parent / "not-selected", public, self.checkpoint()))
+                command.assert_not_called()
+
+    def test_copy_rejects_existing_symlink_unprotected_destination_invalid_archive_or_capture_failure(self):
+        for kind in ("collision", "file-link", "directory-link", "mode", "proof-mode", "malformed", "exit", "capture-error"):
+            with self.subTest(kind=kind), self.workspace() as (work, _, fd):
+                data = self.capture(fd); public = work / "proof"; public.mkdir(mode=0o755)
+                private = public / "private-diagnostics"
+                if kind == "directory-link": private.symlink_to(public, target_is_directory=True)
+                elif kind in ("collision", "file-link", "mode"):
+                    private.mkdir(mode=0o755 if kind == "mode" else 0o700)
+                    if kind == "collision": (private / proof.PRIVATE_SUBJECT_PREFIX_ARCHIVE).write_bytes(b"unchanged")
+                    if kind == "file-link": (private / proof.PRIVATE_SUBJECT_PREFIX_ARCHIVE).symlink_to(public / "outside")
+                elif kind == "proof-mode": public.chmod(0o777)
+                result = (1 if kind == "exit" else 0, b"bad" if kind == "malformed" else data, b"private-prefix-canary")
+                side = proof.ProofFailure("private-prefix-canary") if kind == "capture-error" else [result]
+                with self.rootstats(work), patch.object(proof, "root_command", side_effect=side) as command:
+                    self.assertFalse(proof.retain_private_subject_prefixes(work, public, self.checkpoint()))
+                    command.assert_called_once()
+                if kind == "collision": self.assertEqual(b"unchanged", (private / proof.PRIVATE_SUBJECT_PREFIX_ARCHIVE).read_bytes())
+
+    def test_failure_always_preserves_original_safe_record_and_canary_never_becomes_public(self):
+        for kind in ("retained", "missing", "capture-error"):
+            with self.subTest(kind=kind), self.workspace() as (work, _, fd):
+                public = work / "proof"; public.mkdir(mode=0o755); data = self.capture(fd); calls = []
+                final = (0, data, b"private-prefix-canary") if kind == "retained" else (1, b"", b"private-prefix-canary")
+                if kind == "capture-error": final = proof.ProofFailure("private-prefix-canary")
+                with self.rootstats(work), patch.object(proof, "retain_private_worker_journal", side_effect=lambda *args: calls.append("journal")), \
+                     patch.object(proof, "retain_private_failure_output", side_effect=lambda *args: calls.append("manifest")), \
+                     patch.object(proof, "root_command", side_effect=[(1, b"private-prefix-canary", b"private-prefix-canary"),
+                         (0, json.dumps(self.checkpoint()).encode(), b""), final]) as command:
+                    with self.assertRaises(proof.ProofFailure) as failure:
+                        proof.run_observation_launcher(["launcher"], work, public, output_parent=work / "output-parent", slot="slot")
+                    self.assertEqual(3, command.call_count)
+                self.assertEqual(["journal", "manifest"], calls)
+                self.assertIn("Production Observation launcher exited 1.", str(failure.exception))
+                self.assertNotIn("private-prefix-canary", str(failure.exception))
+                self.assertEqual(self.checkpoint(), json.loads((public / "launcher-failure.json").read_text()))
+                self.assertNotIn("private-prefix-canary", (public / "launcher-failure.json").read_text())
+                archive = public / "private-diagnostics" / proof.PRIVATE_SUBJECT_PREFIX_ARCHIVE
+                self.assertEqual(kind == "retained", archive.exists())
+                if archive.exists(): self.assertEqual(data, archive.read_bytes())
+
+    def test_root_entry_pins_uuid_device_inode_before_actual_fd_capture(self):
+        for mismatch in (False, True):
+            with self.subTest(mismatched_inode=mismatch), self.workspace() as (work, _, _):
+                namespace = {"__name__": "root_prefix_entry_portable_control"}
+                exec(compile(proof.PRIVATE_SUBJECT_PREFIX_ROOT_SCRIPT, "<subject-prefix helper>", "exec"), namespace)
+                capture = Mock(wraps=namespace["archive_subject_prefixes"])
+                namespace["archive_subject_prefixes"] = capture
+                actual = work.lstat(); output = io.BytesIO()
+                original_open, original_fstat, original_stat = os.open, os.fstat, os.stat
+                def opened(path, flags, *args, **kwargs):
+                    return original_open(work.parent if path == "/run" else path, flags, *args, **kwargs)
+                def root_owned(info):
+                    fields = {name: getattr(info, name) for name in
+                              ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")}
+                    return SimpleNamespace(**{**fields, "st_uid": 0, "st_gid": 0})
+                argv = ["-c", work.name[len(proof.RUNTIME_WORKSPACE_PREFIX):], str(actual.st_dev),
+                        str(actual.st_ino + int(mismatch))]
+                with patch.object(proof.os, "geteuid", return_value=0), patch.object(proof.sys, "argv", argv), \
+                     patch.object(proof.sys, "stdout", SimpleNamespace(buffer=output)), \
+                     patch.object(proof.os, "open", side_effect=opened) as open_call, \
+                     patch.object(proof.os, "fstat", side_effect=lambda fd: root_owned(original_fstat(fd))), \
+                     patch.object(proof.os, "stat", side_effect=lambda *args, **kwargs: root_owned(original_stat(*args, **kwargs))):
+                    if mismatch:
+                        with self.assertRaises(ValueError): namespace["main"]()
+                    else:
+                        namespace["main"]()
+                self.assertEqual("/run", open_call.call_args_list[0].args[0])
+                if mismatch:
+                    capture.assert_not_called(); self.assertEqual(b"", output.getvalue())
+                else:
+                    capture.assert_called_once(); self.assertTrue(proof._valid_private_subject_prefix_archive(output.getvalue()))
+
+    def test_success_returns_before_all_new_diagnostic_io(self):
+        with self.workspace() as (work, _, _):
+            public = work / "proof"; public.mkdir(mode=0o755)
+            with patch.object(proof, "root_command", return_value=(0, b"success", b"")) as command, \
+                 patch.object(proof, "retain_private_subject_prefixes") as retained:
+                self.assertEqual((b"success", b""), proof.run_observation_launcher(["launcher"], work, public))
+                command.assert_called_once(); retained.assert_not_called()
+            self.assertFalse((public / "private-diagnostics").exists())
+
+
 class LauncherWorkspaceProofTests(unittest.TestCase):
     def test_protected_parent_is_traversable_without_changing_private_children(self):
         with portable_runtime_workspace() as directory:
@@ -1105,6 +1378,168 @@ class RootWorkspaceOperationTests(unittest.TestCase):
                 chown.assert_not_called()
                 chmod.assert_not_called()
 
+
+
+class CanonicalObservationMetadataTests(unittest.TestCase):
+    """Observed Pascal metadata with synthetic Passed data only, never native proof."""
+    OBSERVED_PLAN_JSON = '{"ChangedPaths":[{"Kind":"modified","Path":"tests/evidencehost-consumer/RuntimeSubject/Program.cs","PreviousPath":null},{"Kind":"modified","Path":"tests/evidencehost-consumer/RuntimeSubject/RuntimeSubject.csproj","PreviousPath":null}],"ContractVersion":"1.0","DiffDigest":"7bb96a385e2b8110ee4f9e8b9107b7ee5f93d321845c1ab0b21f16c9423351a7","MatchedRuleIds":["conservative:runtime-observation"],"PlanDigest":"c8d3dfe89f0868ed4611c8f65f2db4651a36609a6c6f898ac2f33c6bff656542","PolicyDigest":"0e6b0ef9a1dafd3bb2d62617be38a5a3926e5b47b6a68591731d1ef9e1874366","PolicyId":"evidencehost-runtime-proof","PolicySnapshot":{"ConservativeProfileId":"runtime-observation","Id":"evidencehost-runtime-proof","Profiles":[{"Id":"runtime-observation","Obligations":[{"Id":"runtime-coverage-report-required","Rationale":"The consumer fixture must execute and return a real Cobertura coverage report.","RequiredAssertionId":"appsurface/coverage/behavioral-patch@1","RequiredProducerIds":["runtime-coverage"],"RiskClass":"runtime-boundary-proof"}],"Producers":[{"ArtifactSlots":[{"LogicalName":"coverage-report","MaximumBytes":20971520,"MediaType":"application/xml","RelativeRoot":"merged","Required":true}],"AssertionIds":["appsurface/coverage/behavioral-patch@1"],"CoverageGate":{"MinBranchPercent":0,"MinLinePercent":0,"MinPatchBranchPercent":null,"MinPatchLinePercent":null,"PatchLineMode":"measurable","TolerancePercent":0},"Id":"runtime-coverage","Kind":"coverage","RequiredResources":[],"TimeoutSeconds":120,"Version":"1.0.0"}],"Resources":[],"Scope":"Targeted"}],"Rules":[],"Version":"1"},"Profile":{"Id":"runtime-observation","Obligations":[{"Id":"runtime-coverage-report-required","Rationale":"The consumer fixture must execute and return a real Cobertura coverage report.","RequiredAssertionId":"appsurface/coverage/behavioral-patch@1","RequiredProducerIds":["runtime-coverage"],"RiskClass":"runtime-boundary-proof"}],"Producers":[{"ArtifactSlots":[{"LogicalName":"coverage-report","MaximumBytes":20971520,"MediaType":"application/xml","RelativeRoot":"merged","Required":true}],"AssertionIds":["appsurface/coverage/behavioral-patch@1"],"CoverageGate":{"MinBranchPercent":0,"MinLinePercent":0,"MinPatchBranchPercent":null,"MinPatchLinePercent":null,"PatchLineMode":"measurable","TolerancePercent":0},"Id":"runtime-coverage","Kind":"coverage","RequiredResources":[],"TimeoutSeconds":120,"Version":"1.0.0"}],"Resources":[],"Scope":"Targeted"}}'
+
+    def fixture(self):
+        plan = json.loads(self.OBSERVED_PLAN_JSON)
+        report = b'<coverage line-rate="1" branch-rate="1"><packages /></coverage>'
+        obligation = "runtime-coverage-report-required"
+        manifest = {
+            "ContractVersion": "1.0", "PlanDigest": plan["PlanDigest"],
+            "ManifestDigest": "e" * 64, "ExecutionVerdict": "Passed",
+            "Mode": "Observation", "ClaimKind": "ObservationOnly", "Eligibility": "Informational",
+            "EnvelopeStatus": "NotRequired", "ResourceResults": [],
+            "SelectedObligationIds": [obligation], "ClosedObligationIds": [obligation],
+            "UnmediatedObligationIds": [],
+            "Metrics": {"CleanupCompleted": True, "CleanupDiagnostic": None},
+            "ProducerResults": [{
+                "ProducerId": proof.PRODUCER_ID, "Outcome": "Passed", "SatisfiedAssertionIds": [proof.ASSERTION_ID],
+                "Diagnostic": None, "ElapsedMilliseconds": 1, "Artifacts": [{
+                    "LogicalName": "coverage-report", "RelativePath": "merged/coverage.cobertura.xml",
+                    "MediaType": "application/xml", "LengthBytes": len(report),
+                    "Sha256": hashlib.sha256(report).hexdigest(),
+                }],
+            }],
+        }
+        summary = {name: manifest[name] for name in
+                   ("Mode", "ClaimKind", "Eligibility", "ExecutionVerdict", "EnvelopeStatus")}
+        summary.update(Procedure="registered-protected-producer", SandboxAttestation=False)
+        return plan, manifest, summary, report
+
+    def artifacts(self, plan, manifest, summary, report):
+        return {"evidence-plan.json": json.dumps(plan).encode(),
+                "evidence-manifest.json": json.dumps(manifest).encode(),
+                "evidence-summary.json": json.dumps(summary).encode(), "coverage-report": report}
+
+    def test_observed_canonical_plan_and_synthetic_passed_metadata_are_parseable_only(self):
+        plan, manifest, summary, report = self.fixture()
+        verification = proof.verify_observation_output(self.artifacts(plan, manifest, summary, report), proof.create_policy())
+        self.assertEqual(plan["PolicySnapshot"], proof.expected_runtime_policy_snapshot(proof.create_policy()))
+        gate = plan["PolicySnapshot"]["Profiles"][0]["Producers"][0]["CoverageGate"]
+        self.assertEqual({"MinLinePercent": 0, "MinBranchPercent": 0, "MinPatchLinePercent": None,
+                          "MinPatchBranchPercent": None, "PatchLineMode": "measurable", "TolerancePercent": 0}, gate)
+        self.assertEqual(manifest, verification["manifest"])
+        self.assertEqual(hashlib.sha256(report).hexdigest(), verification["coverageReportSha256"])
+
+    def test_wrong_key_casing_is_rejected_at_each_consumed_boundary(self):
+        cases = (("plan", "PolicySnapshot"), ("plan", "Profile"), ("plan", "PlanDigest"),
+                 ("manifest", "Mode"), ("manifest", "Eligibility"), ("manifest", "EnvelopeStatus"),
+                 ("manifest", "ProducerResults"), ("manifest", "ManifestDigest"),
+                 ("summary", "Procedure"), ("summary", "Mode"), ("summary", "ExecutionVerdict"),
+                 ("metrics", "CleanupCompleted"), ("producer", "Outcome"), ("artifact", "Sha256"))
+        for container, name in cases:
+            with self.subTest(container=container, name=name):
+                plan, manifest, summary, report = self.fixture()
+                target = {"plan": plan, "manifest": manifest, "summary": summary,
+                          "metrics": manifest["Metrics"], "producer": manifest["ProducerResults"][0],
+                          "artifact": manifest["ProducerResults"][0]["Artifacts"][0]}[container]
+                target[name[0].lower() + name[1:]] = target.pop(name)
+                with self.assertRaises(proof.ProofFailure):
+                    proof.verify_observation_output(self.artifacts(plan, manifest, summary, report), proof.create_policy())
+
+    def test_full_snapshot_defaults_and_policy_content_must_match(self):
+        for field, value in (("MinPatchLinePercent", 1), ("MinPatchBranchPercent", 1),
+                             ("PatchLineMode", "codecov"), ("TolerancePercent", 0.5),
+                             ("MinLinePercent", 95), ("MinBranchPercent", 85)):
+            with self.subTest(field=field):
+                plan, manifest, summary, report = self.fixture()
+                plan["PolicySnapshot"]["Profiles"][0]["Producers"][0]["CoverageGate"][field] = value
+                with self.assertRaises(proof.ProofFailure):
+                    proof.verify_observation_output(self.artifacts(plan, manifest, summary, report), proof.create_policy())
+        for field in ("MinPatchLinePercent", "MinPatchBranchPercent", "PatchLineMode"):
+            with self.subTest(missing=field):
+                plan, manifest, summary, report = self.fixture()
+                del plan["PolicySnapshot"]["Profiles"][0]["Producers"][0]["CoverageGate"][field]
+                with self.assertRaises(proof.ProofFailure):
+                    proof.verify_observation_output(self.artifacts(plan, manifest, summary, report), proof.create_policy())
+        plan, manifest, summary, report = self.fixture()
+        policy = proof.create_policy(); policy["profiles"][0]["producers"][0]["timeoutSeconds"] += 1
+        with self.assertRaises(proof.ProofFailure):
+            proof.verify_observation_output(self.artifacts(plan, manifest, summary, report), policy)
+
+    def test_profile_resource_and_snapshot_identity_mismatches_reject(self):
+        for target, field, value in (("profile", "Id", "different"), ("profile", "Resources", [{"Id": "external"}]),
+                                    ("profile", "Scope", "Release"), ("snapshot", "Id", "different"),
+                                    ("manifest", "ResourceResults", [{"ResourceId": "external", "Outcome": "Ready"}])):
+            with self.subTest(target=target, field=field):
+                plan, manifest, summary, report = self.fixture()
+                {"profile": plan["Profile"], "snapshot": plan["PolicySnapshot"], "manifest": manifest}[target][field] = value
+                with self.assertRaises(proof.ProofFailure):
+                    proof.verify_observation_output(self.artifacts(plan, manifest, summary, report), proof.create_policy())
+
+    def test_wrong_mode_eligibility_envelope_cleanup_verdict_or_outcome_reject(self):
+        cases = (("manifest", "Mode", "Trusted"), ("manifest", "ClaimKind", "TargetedComplete"),
+                 ("manifest", "Eligibility", "PullRequestGate"), ("manifest", "EnvelopeAssertion", {"synthetic": True}),
+                 ("manifest", "envelopeAssertion", {"synthetic": True}), ("manifest", "EnvelopeStatus", "ValidatedNotAttested"),
+                 ("manifest", "ExecutionVerdict", "Incomplete"), ("metrics", "CleanupCompleted", False),
+                 ("producer", "Outcome", "Failed"), ("producer", "ProducerId", "different"),
+                 ("summary", "Eligibility", "None"), ("summary", "SandboxAttestation", True))
+        for target, field, value in cases:
+            with self.subTest(target=target, field=field):
+                plan, manifest, summary, report = self.fixture()
+                {"manifest": manifest, "metrics": manifest["Metrics"], "producer": manifest["ProducerResults"][0],
+                 "summary": summary}[target][field] = value
+                with self.assertRaises(proof.ProofFailure):
+                    proof.verify_observation_output(self.artifacts(plan, manifest, summary, report), proof.create_policy())
+
+    def test_digest_and_artifact_metadata_or_bytes_mismatches_reject(self):
+        cases = (("manifest", "PlanDigest", "a" * 64), ("manifest", "ManifestDigest", ""),
+                 ("artifact", "RelativePath", "outside/report.xml"), ("artifact", "LengthBytes", 0),
+                 ("artifact", "Sha256", "a" * 64), ("artifact", "LogicalName", "wrong"))
+        for target, field, value in cases:
+            with self.subTest(target=target, field=field):
+                plan, manifest, summary, report = self.fixture()
+                {"manifest": manifest, "artifact": manifest["ProducerResults"][0]["Artifacts"][0]}[target][field] = value
+                with self.assertRaises(proof.ProofFailure):
+                    proof.verify_observation_output(self.artifacts(plan, manifest, summary, report), proof.create_policy())
+        plan, manifest, summary, report = self.fixture()
+        with self.assertRaises(proof.ProofFailure):
+            proof.verify_observation_output(self.artifacts(plan, manifest, summary, report + b"changed"), proof.create_policy())
+        for invalid in (b"<coverage", b"<other />"):
+            with self.subTest(xml=invalid):
+                plan, manifest, summary, _ = self.fixture()
+                metadata = manifest["ProducerResults"][0]["Artifacts"][0]
+                metadata.update(LengthBytes=len(invalid), Sha256=hashlib.sha256(invalid).hexdigest())
+                with self.assertRaises(proof.ProofFailure):
+                    proof.verify_observation_output(self.artifacts(plan, manifest, summary, invalid), proof.create_policy())
+
+    def publish(self, directory, artifacts, verification):
+        proof.write_public_artifacts(
+            directory, artifacts, {"EVIDENCE_RUN_ID": "123/1", "EVIDENCE_BASE_REVISION": "a" * 40,
+            "EVIDENCE_SUBJECT_REVISION": "b" * 40, "EVIDENCE_WORKFLOW_IDENTITY": "synthetic-data-only"},
+            "b" * 40, {}, "c" * 64, json.dumps(proof.create_policy()).encode(), "d" * 64,
+            "e" * 64, "synthetic/reporter", "f" * 64, verification, "fixture", {}, {})
+
+    def test_public_record_extracts_canonical_digests_without_changing_source_bytes(self):
+        plan, manifest, summary, report = self.fixture()
+        artifacts = self.artifacts(plan, manifest, summary, report)
+        verification = proof.verify_observation_output(artifacts, proof.create_policy())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); self.publish(root, artifacts, verification)
+            record = json.loads((root / "runtime-proof.json").read_bytes())
+            self.assertEqual(plan["PlanDigest"], record["planDigest"])
+            self.assertEqual(manifest["ManifestDigest"], record["manifestDigest"])
+            self.assertFalse(record["gateEligible"])
+            self.assertEqual("none", record["admission"])
+            self.assertEqual(artifacts["evidence-plan.json"], (root / "evidence-plan.json").read_bytes())
+
+    def test_public_digest_missing_wrong_case_or_mismatch_rejects_before_writes(self):
+        for target, field, value in (("plan", "PlanDigest", None), ("manifest", "ManifestDigest", None),
+                                    ("manifest", "PlanDigest", "a" * 64)):
+            with self.subTest(target=target, field=field), tempfile.TemporaryDirectory() as directory:
+                plan, manifest, summary, report = self.fixture()
+                artifacts = self.artifacts(plan, manifest, summary, report)
+                verification = proof.verify_observation_output(artifacts, proof.create_policy())
+                document = verification[target]
+                if value is None: document[field[0].lower() + field[1:]] = document.pop(field)
+                else: document[field] = value
+                with self.assertRaises(proof.ProofFailure):
+                    self.publish(Path(directory), artifacts, verification)
+                self.assertEqual([], os.listdir(directory))
 
 if __name__ == "__main__":
     unittest.main()

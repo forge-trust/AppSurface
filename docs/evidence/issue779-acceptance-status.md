@@ -201,3 +201,34 @@ All 57 groups and the protected CLI/Aspire positive remain required.
 3. **Current systemd lifecycle integration:** exercise the current worker under the actual systemd/cgroup supervisor for stuck callback/write/pump, child acknowledgement, stop/join, and no-finalization behavior (A04, L03, L06, L07, P03). The five passing POSIX process-group fixture cases and older nine-case Ubuntu mechanism record are distinct evidence.
 4. **Trusted allowlist acceptance:** add immutable matching provider/platform/build/proof records before registering Trusted (R06). Linux mechanism evidence alone is insufficient; Windows and macOS remain unproved, and production allowlists are intentionally empty.
 5. **Consumer usability proof:** run exact-version packed CLI/SDK migration checks and the fresh-user/manual plus docs/snippet/starter trace (U02, U06, U07, U08). No matching current acceptance result was found.
+
+## Frozen v13 result update (2026-10-03)
+
+These observations use immutable source
+`6518b17e1bd587143314cfa2ea1a73e8113ab9cf`; they supplement the history above
+without marking additional acceptance groups complete. See the
+[full result and scope record](issue779-consumer-acceptance.md#frozen-v13-actual-results-and-pending-corrections-2026-10-03).
+
+| Actual run | Observed result | Acceptance limit |
+| --- | --- | --- |
+| [Aspire mechanism-v9](https://github.com/forge-trust/AppSurface/actions/runs/37083994959) | **5/5 controls passed**; parent verified artifact digests, all 2740 source bindings, per-case owned exit and cleanup. Factory stall and stuck descendant required forced termination. | Proves the [restricted child fixture mechanism](../../tests/evidencehost-consumer/AspireChild/README.md). Shared CLI/Aspire, the [root application module](../../tests/evidencehost-consumer/LinuxApplication-README.md), protected downstream acceptance and Trusted positive remain unproved. |
+| [Native-v11](https://github.com/forge-trust/AppSurface/actions/runs/37083997761) | Launcher/proof/broker suites passed **91/46/4** controls; root portable watchdog-oversize control failed on a Linux connection reset. | Focused C# verification and the [unchanged coverage gate](../../scripts/coverage-solution.sh) were not reached. |
+| [Runtime-v15](https://github.com/forge-trust/AppSurface/actions/runs/37083999238) | `worker-unsuccessful`; retained manifest: failed producer, approximately 10 ms, `EvidenceAdmissionException`, None/None/Incomplete, cleanup confirmed. | No successful production Observation or [shared producer](../../Evidence/ForgeTrust.AppSurface.Evidence.Coverage/README.md) result. Fresh-results directory ownership is a source-confirmed defect; the native inner cause remains unmeasured. |
+
+### Subsequent correction results
+
+[Native-v12](https://github.com/forge-trust/AppSurface/actions/runs/37087508180)
+tested correction source `9894c62c525724b0d62c9f4859faa20b464ac737`:
+all **310 preceding Python controls** passed, followed by **914/915 CLI tests**.
+The root-peer diagnostic assertion failed; the solution coverage gate was not
+reached. [Runtime-v16](https://github.com/forge-trust/AppSurface/actions/runs/37087509927)
+retained a completed restricted process exit **1** after **95,410 ms**, with no
+report artifact and confirmed cleanup. Its underlying subprocess cause remains
+unmeasured. Both artifact digests and post-run source checks were verified.
+
+The [handshake diagnostic correction](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md#authenticated-outer-worker-descriptor)
+preserves the root-peer `ASEVD402` before broader exception normalization.
+Its scoped macOS source build passed **124/124** tests without compiler
+diagnostics; the real Linux peer path still requires native execution.
+A private latest-main gate is pending. The production catalogue and accepted-proof
+registry remain closed; no Trusted support is enabled by this update.
