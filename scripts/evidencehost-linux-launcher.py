@@ -1253,20 +1253,37 @@ class Broker:
         return events.get("populated") == "0"
 
     def _validate_results_root(self, arguments: list[str]) -> str:
-        """Require a single existing results directory, securely opened below test-output."""
+        """Pin a results directory and hand fresh creator ownership to the subject.
+
+        A fresh directory initially belongs to this root broker. Existing directories
+        still require worker/subject ownership. Named identity is checked before and
+        after the retained-FD ownership transfer; neither branch trusts caller paths.
+        """
         relative_root = validate_test_results_path(self.scratch, dotnet_test_results_argument(arguments))
+        created = False
         try:
-            os.mkdir(relative_root, 0o2770, dir_fd=self.test_output_fd)
+            os.mkdir(relative_root, 0o700, dir_fd=self.test_output_fd)
+            created = True
         except FileExistsError:
             pass
         root_fd = openat2(self.test_output_fd, relative_root, os.O_RDONLY | os.O_DIRECTORY)
         try:
             root_stat = os.fstat(root_fd)
-            if (not stat.S_ISDIR(root_stat.st_mode) or root_stat.st_uid not in (self.worker_uid, self.subject_uid)
-                    or root_stat.st_gid != self.results_gid):
+            expected_owners = (os.geteuid(),) if created else (self.worker_uid, self.subject_uid)
+            named = os.stat(relative_root, dir_fd=self.test_output_fd, follow_symlinks=False)
+            if (not stat.S_ISDIR(root_stat.st_mode) or root_stat.st_uid not in expected_owners
+                    or root_stat.st_gid != self.results_gid
+                    or _filesystem_identity(root_stat) != _filesystem_identity(named)):
                 raise LauncherError("test-results-root-invalid")
             os.fchown(root_fd, self.subject_uid, self.results_gid)
             os.fchmod(root_fd, 0o2770)
+            handed = os.fstat(root_fd)
+            named = os.stat(relative_root, dir_fd=self.test_output_fd, follow_symlinks=False)
+            if (not stat.S_ISDIR(handed.st_mode) or handed.st_uid != self.subject_uid
+                    or handed.st_gid != self.results_gid or stat.S_IMODE(handed.st_mode) != 0o2770
+                    or _filesystem_identity(handed) != _filesystem_identity(named)
+                    or (handed.st_dev, handed.st_ino) != (root_stat.st_dev, root_stat.st_ino)):
+                raise LauncherError("test-results-root-invalid")
         finally:
             os.close(root_fd)
         return relative_root
