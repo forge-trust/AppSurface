@@ -249,8 +249,20 @@ jobs:
             --handoff-directory "$RUNNER_TEMP/evidence-gate-controller-handoff" \
             --subject-checkout "$RUNNER_TEMP/evidence-gate-subject-checkout" \
             --scratch-directory "$RUNNER_TEMP/evidence-gate-subject-scratch" \
+            --artifact-export-directory "$RUNNER_TEMP/evidence-gate-subject-artifacts" \
             --result "$RUNNER_TEMP/evidence-gate-subject-result.json" \
             --image-digest "$EVIDENCE_GATE_SUBJECT_IMAGE"
+
+      - name: Upload bounded non-claiming coverage artifacts
+        if: ${{ needs.controller-capture.outputs.profile_id == 'code-coverage' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: evidence-gate-artifacts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence-gate-subject-artifacts/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          include-hidden-files: false
 
       - name: Require independent subject cleanup to attest completion
         if: ${{ always() && needs.controller-capture.outputs.profile_id == 'code-coverage' }}
@@ -359,14 +371,22 @@ jobs:
       - name: Bind the downloaded handoff to the fresh Git tree
         if: ${{ needs.controller-capture.result == 'success' && needs.credentialless-subject.result == 'success' }}
         shell: bash
+        env:
+          EVIDENCE_PROFILE_ID: ${{ needs.controller-capture.outputs.profile_id }}
         run: |
           set -euo pipefail
           handoff="$RUNNER_TEMP/evidence-gate-verifier-inputs/evidence-gate-controller-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           subject="$RUNNER_TEMP/evidence-gate-verifier-inputs/evidence-gate-subject-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/evidence-gate-subject-result.json"
+          artifacts="$RUNNER_TEMP/evidence-gate-verifier-inputs/evidence-gate-artifacts-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          artifact_args=()
+          if [[ "$EVIDENCE_PROFILE_ID" == code-coverage ]]; then
+            artifact_args=(--subject-artifacts "$artifacts")
+          fi
           python3 "$GITHUB_WORKSPACE/trusted/scripts/evidence-gate-handoff.py" verify \
             --handoff-directory "$handoff" \
             --fresh-capture-directory "$RUNNER_TEMP/evidence-gate-verifier-capture" \
             --subject-result "$subject" \
+            "${artifact_args[@]}" \
             --output-plan "$RUNNER_TEMP/evidence-gate-verified-plan.json"
 
       - name: Require the subject's independent cleanup completion record

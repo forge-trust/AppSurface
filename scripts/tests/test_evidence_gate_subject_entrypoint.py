@@ -371,43 +371,44 @@ class FixedOfflineSubjectEntrypointTests(unittest.TestCase):
                 entrypoint._validate_solution_locks(staged)
 
     def test_container_dependent_solution_fails_before_coverage(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            parent = Path(temporary).resolve()
-            subject, scratch, feed = self.prepared_roots(parent)
-            self.make_subject(subject)
-            unsupported_project = subject / entrypoint.OFFLINE_UNSUPPORTED_TEST_PROJECTS[0]
-            unsupported_project.parent.mkdir(parents=True)
-            unsupported_project.write_text("<Project />", encoding="utf-8")
-            calls: list[list[str]] = []
+        for relative_project in entrypoint.OFFLINE_UNSUPPORTED_TEST_PROJECTS:
+            with self.subTest(project=relative_project), tempfile.TemporaryDirectory() as temporary:
+                parent = Path(temporary).resolve()
+                subject, scratch, feed = self.prepared_roots(parent)
+                self.make_subject(subject)
+                unsupported_project = subject / relative_project
+                unsupported_project.parent.mkdir(parents=True)
+                unsupported_project.write_text("<Project />", encoding="utf-8")
+                calls: list[list[str]] = []
 
-            def runner(arguments: list[str], **_options: object) -> entrypoint.ProcessResult:
-                calls.append(arguments)
-                if arguments == ["dotnet", "--version"]:
-                    return process_result(stdout=b"10.0.100\n")
-                if arguments == ["dotnet", "--list-runtimes"]:
-                    return process_result(stdout=b"Microsoft.NETCore.App 10.0.2 [/dotnet]\n")
-                if len(arguments) > 1 and arguments[1] == "restore":
-                    return process_result()
-                self.fail(f"Coverage must not run for an unsupported offline profile: {arguments!r}")
+                def runner(arguments: list[str], **_options: object) -> entrypoint.ProcessResult:
+                    calls.append(arguments)
+                    if arguments == ["dotnet", "--version"]:
+                        return process_result(stdout=b"10.0.100\n")
+                    if arguments == ["dotnet", "--list-runtimes"]:
+                        return process_result(stdout=b"Microsoft.NETCore.App 10.0.2 [/dotnet]\n")
+                    if len(arguments) > 1 and arguments[1] == "restore":
+                        return process_result()
+                    self.fail(f"Coverage must not run for an unsupported offline profile: {arguments!r}")
 
-            with self.patch_paths(subject, scratch, feed):
-                code = entrypoint.execute(
-                    self.invocation(),
-                    mountinfo_text=self.mountinfo(subject, scratch, feed),
-                    effective_uid=os.geteuid(),
-                    runner=runner,
+                with self.patch_paths(subject, scratch, feed):
+                    code = entrypoint.execute(
+                        self.invocation(),
+                        mountinfo_text=self.mountinfo(subject, scratch, feed),
+                        effective_uid=os.geteuid(),
+                        runner=runner,
+                    )
+
+                self.assertEqual(2, code)
+                self.assertEqual(3, len(calls))
+                result = json.loads((scratch / entrypoint.RESULT_RELATIVE_PATH).read_text(encoding="ascii"))
+                self.assertFalse(result["claimEligible"])
+                self.assertEqual("failed", result["status"])
+                self.assertEqual("ASESE010", result["diagnostic"]["code"])
+                self.assertEqual(
+                    ["dotnet-sdk-version", "dotnet-runtime-list", "offline-locked-restore"],
+                    [step["name"] for step in result["steps"]],
                 )
-
-            self.assertEqual(2, code)
-            self.assertEqual(3, len(calls))
-            result = json.loads((scratch / entrypoint.RESULT_RELATIVE_PATH).read_text(encoding="ascii"))
-            self.assertFalse(result["claimEligible"])
-            self.assertEqual("failed", result["status"])
-            self.assertEqual("ASESE010", result["diagnostic"]["code"])
-            self.assertEqual(
-                ["dotnet-sdk-version", "dotnet-runtime-list", "offline-locked-restore"],
-                [step["name"] for step in result["steps"]],
-            )
 
     def test_mocked_fixed_command_flow_restores_offline_and_keeps_result_nonclaiming(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

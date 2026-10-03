@@ -8,12 +8,14 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import stat
 import sys
 import tempfile
 import threading
 from types import SimpleNamespace
+from typing import Callable
 import unittest
 from contextlib import redirect_stdout
 from unittest import mock
@@ -28,6 +30,11 @@ SPEC.loader.exec_module(subject)
 
 
 IMAGE = "ghcr.io/forge-trust/appsurface-subject@sha256:" + "a" * 64
+ARTIFACT_CONTENTS = (
+    b"cobertura artifact\n",
+    b"coverage gate report\n",
+    b"coverage diagnostics\n",
+)
 
 
 class FakeExecutor:
@@ -52,6 +59,12 @@ class FakeExecutor:
         self.scratch_mount_override: dict[str, object] | None = None
         self.labels_override: dict[str, str] | None = None
         self.partial_mount_present = False
+        self.stopped_state: dict[str, object] = {"Running": False, "Status": "exited"}
+        self.artifact_mutation: Callable[[Path], None] | None = None
+        self.lifecycle: list[str] = []
+        self.scratch_mountpoint: Path | None = None
+        self.container_started = False
+        self.inspect_count = 0
 
     def __call__(self, arguments: list[str], **options: object) -> subject.CommandResult:
         self.calls.append((list(arguments), dict(options)))
@@ -83,6 +96,8 @@ class FakeExecutor:
             self.container_name = name_value.partition("=")[2]
             return subject.CommandResult(0, b"", b"")
         if command[1:3] == ["inspect", "--format=json"]:
+            self.lifecycle.append("inspect")
+            self.inspect_count += 1
             return self.container_inspect()
         if arguments[0] == subject.SUDO_PATH:
             privileged_command = arguments[1:]
@@ -98,9 +113,13 @@ class FakeExecutor:
         if command[1] == "start":
             if self.fail_start is not None:
                 raise self.fail_start
+            self.lifecycle.append("start")
+            self._write_scratch_artifacts()
+            self.container_started = True
             return subject.CommandResult(self.start_exit_code, self.result_export or b"", self.start_stderr)
         if command[1:3] == ["rm", "--force"]:
             self.cleanup_order.append("container-remove")
+            self.lifecycle.append("container-remove")
             return subject.CommandResult(1 if self.fail_cleanup else 0, b"", b"")
         raise AssertionError(f"unexpected fixed engine argv: {arguments!r}")
 
@@ -138,10 +157,12 @@ class FakeExecutor:
                 {
                     "logicalName": logical_name,
                     "relativePath": relative_path,
-                    "byteCount": 1,
-                    "sha256": "0" * 64,
+                    "byteCount": len(content),
+                    "sha256": hashlib.sha256(content).hexdigest(),
                 }
-                for logical_name, relative_path, _maximum_bytes in subject.SUBJECT_ARTIFACTS
+                for (logical_name, relative_path, _maximum_bytes), content in zip(
+                    subject.SUBJECT_ARTIFACTS, ARTIFACT_CONTENTS, strict=True
+                )
             ],
             "claimEligible": False,
             "profileId": "code-coverage",
@@ -165,6 +186,7 @@ class FakeExecutor:
         scratch_source = next(
             value.partition("=")[2] for value in scratch_mount.split(",") if value.startswith("src=")
         )
+        self.scratch_mountpoint = Path(scratch_source)
         create_arguments = create_call
         labels = {
             key: value
@@ -232,6 +254,34 @@ class FakeExecutor:
                         "Propagation": "rprivate",
                     },
                 ],
+                "State": (
+                    {
+                        "Running": False,
+                        "Status": "created",
+                        "Paused": False,
+                        "Restarting": False,
+                        "OOMKilled": False,
+                        "Dead": False,
+                        "Pid": 0,
+                        "ExitCode": 0,
+                        "Error": "",
+                    }
+                    if not self.container_started
+                    else dict(
+                        {
+                            "Running": False,
+                            "Status": "exited",
+                            "Paused": False,
+                            "Restarting": False,
+                            "OOMKilled": False,
+                            "Dead": False,
+                            "Pid": 0,
+                            "ExitCode": self.start_exit_code,
+                            "Error": "",
+                        }
+                        | self.stopped_state
+                    )
+                ),
             }
         ]
         if self.config_override:
@@ -242,6 +292,18 @@ class FakeExecutor:
             )
             scratch_mount_document.update(self.scratch_mount_override)
         return self.result(document)
+
+    def _write_scratch_artifacts(self) -> None:
+        assert self.scratch_mountpoint is not None
+        root = self.scratch_mountpoint
+        for (_logical_name, relative_path, _maximum_bytes), content in zip(
+            subject.SUBJECT_ARTIFACTS, ARTIFACT_CONTENTS, strict=True
+        ):
+            source = root / relative_path
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_bytes(content)
+        if self.artifact_mutation is not None:
+            self.artifact_mutation(root)
 
 
 class FakeCleanupSupervisor:
@@ -267,6 +329,9 @@ class FakeCleanupSupervisor:
         self.started = False
         self.requested = False
         self.request_observed_export = False
+        self.artifact_export_directory: Path | None = None
+        self.request_observed_artifact_directory = False
+        self.request_observed_artifact_names: tuple[str, ...] = ()
         self.lifecycle: list[str] = []
 
     def start(self, **arguments: object) -> subject.SupervisorSession:
@@ -307,6 +372,13 @@ class FakeCleanupSupervisor:
     def request_and_wait(self, session: subject.SupervisorSession) -> dict[str, object]:
         self.requested = True
         self.lifecycle.append("request")
+        self.executor.lifecycle.append("supervisor-request")
+        if self.artifact_export_directory is not None:
+            self.request_observed_artifact_directory = self.artifact_export_directory.is_dir()
+            if self.request_observed_artifact_directory:
+                self.request_observed_artifact_names = tuple(
+                    sorted(path.name for path in self.artifact_export_directory.iterdir())
+                )
         if session is not self.session:
             raise subject.SubjectLauncherError("ASEGS017", "fake supervisor session mismatch")
         mount_call = next(
@@ -337,11 +409,11 @@ class FakeCleanupSupervisor:
                 )
                 mount_status = "unmounted" if result.returncode == 0 else "failed"
                 if result.returncode == 0:
-                    Path(str(self.executor.mount_target)).rmdir()
+                    shutil.rmtree(Path(str(self.executor.mount_target)))
             else:
                 mount_status = "unverified"
         elif mount_call is not None:
-            Path(str(self.executor.mount_target)).rmdir()
+            shutil.rmtree(Path(str(self.executor.mount_target)))
         scratch_status = (
             "removed"
             if container_status in {"removed", "absent"} and mount_status in {"unmounted", "absent"}
@@ -391,6 +463,7 @@ class EvidenceGateSubjectTests(unittest.TestCase):
             self.skipTest("host context validation requires a non-root test process")
         self.temporary_directory = tempfile.TemporaryDirectory(prefix="evidence-gate-subject-tests-")
         self.root = Path(self.temporary_directory.name).resolve()
+        self.launch_count = 0
         self.subject_root = self.root / "trusted-subject-snapshot"
         self.subject_root.mkdir()
         self.source_diff = self.root / "source.diff"
@@ -441,7 +514,7 @@ class EvidenceGateSubjectTests(unittest.TestCase):
                 content = (json.dumps(result, separators=(",", ":"), sort_keys=True) + "\n").encode("ascii")
                 with self.assertRaises(subject.SubjectLauncherError) as caught:
                     subject._validate_subject_result_content(content, expected_status="completed")
-                self.assertEqual("ASEGS018", caught.exception.code)
+                self.assertEqual("ASEGS021", caught.exception.code)
 
     def test_failed_subject_result_cannot_carry_artifact_index(self) -> None:
         result = json.loads(FakeExecutor.successful_subject_record())
@@ -452,7 +525,27 @@ class EvidenceGateSubjectTests(unittest.TestCase):
             subject._validate_subject_result_content(content, expected_status="failed")
         self.assertEqual("ASEGS018", caught.exception.code)
 
+    def test_stopped_container_verification_requires_exited_state(self) -> None:
+        invalid_states = (
+            {"Running": True, "Status": "running"},
+            {"Running": False, "Status": "created"},
+            {"Running": 0, "Status": "exited"},
+            None,
+        )
+        for state in invalid_states:
+            with self.subTest(state=state), self.assertRaises(subject.SubjectLauncherError) as caught:
+                subject._verify_container_stopped(
+                    FakeExecutor.result([{"State": state}]).stdout
+                )
+            self.assertEqual("ASEGS012", caught.exception.code)
+
     def launch(self, **overrides: object) -> subject.SubjectRunResult:
+        self.launch_count += 1
+        export_directory = self.runner_temp / (
+            "subject-artifact-export"
+            if self.launch_count == 1
+            else f"subject-artifact-export-{self.launch_count}"
+        )
         arguments: dict[str, object] = {
             "subject_checkout": self.subject_root,
             "image_digest": IMAGE,
@@ -460,6 +553,7 @@ class EvidenceGateSubjectTests(unittest.TestCase):
             "profile_id": "code-coverage",
             "source_diff": self.source_diff,
             "source_diff_sha256": self.source_diff_sha256,
+            "artifact_export_directory": export_directory,
             "limits": self.limits,
             "_environment": self.environment,
             "_system_name": "Linux",
@@ -492,6 +586,21 @@ class EvidenceGateSubjectTests(unittest.TestCase):
         self.assertEqual(0, result.exit_code)
         self.assertEqual(b"", result.stdout)
         self.assertFalse(result.claim_eligible)
+        self.assertEqual(self.runner_temp / "subject-artifact-export", result.artifact_export_directory)
+        export = result.artifact_export_directory
+        assert export is not None
+        self.assertEqual(0o700, stat.S_IMODE(export.stat().st_mode))
+        self.assertEqual(
+            tuple(sorted(subject.SUBJECT_ARTIFACT_EXPORT_NAMES)),
+            tuple(sorted(path.name for path in export.iterdir())),
+        )
+        for export_name, content in zip(subject.SUBJECT_ARTIFACT_EXPORT_NAMES, ARTIFACT_CONTENTS, strict=True):
+            exported = export / export_name
+            self.assertEqual(content, exported.read_bytes())
+            self.assertEqual(0o600, stat.S_IMODE(exported.stat().st_mode))
+        self.assertEqual(2, self.executor.inspect_count)
+        self.assertLess(self.executor.lifecycle.index("start"), self.executor.lifecycle.index("inspect", 2))
+        self.assertLess(self.executor.lifecycle.index("inspect", 2), self.executor.lifecycle.index("container-remove"))
         self.assertEqual(0o700, stat.S_IMODE(result.scratch_directory.stat().st_mode))
         exported_result = result.scratch_directory / subject.SUBJECT_RESULT_RELATIVE_PATH
         self.assertTrue(exported_result.is_file())
@@ -763,6 +872,47 @@ class EvidenceGateSubjectTests(unittest.TestCase):
             (self.runner_temp / "scratch-export-missing" / subject.SUBJECT_RESULT_RELATIVE_PATH).exists()
         )
         self.assertTrue(any(call[2:4] == ["rm", "--force"] for call, _ in executor.calls))
+
+    def test_artifact_export_rejects_unsafe_or_changed_source_and_removes_partial_copy(self) -> None:
+        def mutate_missing(root: Path) -> None:
+            (root / subject.SUBJECT_ARTIFACTS[0][1]).unlink()
+
+        def mutate_symlink(root: Path) -> None:
+            artifact = root / subject.SUBJECT_ARTIFACTS[0][1]
+            saved = artifact.with_name("original.xml")
+            artifact.rename(saved)
+            artifact.symlink_to(saved.name)
+
+        def mutate_hardlink(root: Path) -> None:
+            artifact = root / subject.SUBJECT_ARTIFACTS[0][1]
+            os.link(artifact, artifact.with_name("second-link.xml"))
+
+        def mutate_digest(root: Path) -> None:
+            artifact = root / subject.SUBJECT_ARTIFACTS[1][1]
+            artifact.write_bytes(b"x" * len(ARTIFACT_CONTENTS[1]))
+
+        def mutate_oversized(root: Path) -> None:
+            artifact = root / subject.SUBJECT_ARTIFACTS[2][1]
+            with artifact.open("r+b") as output:
+                output.truncate(subject.MAX_GATE_JSON_ARTIFACT_BYTES + 1)
+
+        for index, mutation in enumerate(
+            (mutate_missing, mutate_symlink, mutate_hardlink, mutate_digest, mutate_oversized)
+        ):
+            with self.subTest(mutation=mutation.__name__):
+                executor = FakeExecutor(self.root)
+                executor.artifact_mutation = mutation
+                exported = self.runner_temp / f"unsafe-export-{index}"
+                with self.assertRaises(subject.SubjectLauncherError) as caught:
+                    self.launch(
+                        scratch_directory=self.runner_temp / f"unsafe-scratch-{index}",
+                        artifact_export_directory=exported,
+                        _command_executor=executor,
+                    )
+                self.assertEqual("ASEGS021", caught.exception.code)
+                self.assertFalse(exported.exists())
+                self.assertTrue(self.supervisor.requested)
+                self.assertTrue(any(call[2:4] == ["rm", "--force"] for call, _ in executor.calls))
 
     def test_successful_subject_requires_every_fixed_zero_exit_step(self) -> None:
         valid = json.loads(FakeExecutor.successful_subject_record())
@@ -1070,6 +1220,7 @@ class EvidenceGateSubjectTests(unittest.TestCase):
                         "--profile-id", "code-coverage",
                         "--source-diff", str(self.source_diff),
                         "--source-diff-sha256", self.source_diff_sha256,
+                        "--artifact-export-directory", str(self.runner_temp / "cli-artifact-export"),
                         "--timeout-seconds", "60",
                         "--memory-mib", "512",
                         "--cpu-millis", "1000",

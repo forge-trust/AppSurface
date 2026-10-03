@@ -6,9 +6,9 @@ only controller-owned paths, a digest-pinned image, a policy profile ID, and
 validated resource limits. The writable container scratch is a fixed-size,
 fixed-inode host tmpfs bind mount; the trusted entrypoint streams its small
 fixed result record over the attached process output, where this launcher
-validates it and writes it outside the mount to private host scratch. Other
-container scratch artifacts are discarded. The
-image must contain the trusted fixed entrypoint
+validates it and writes it outside the mount to private host scratch. Only the
+three indexed coverage artifacts may be copied out; all other container
+scratch artifacts are discarded. The image must contain the trusted fixed entrypoint
 ``/usr/local/libexec/appsurface-subject-runner`` and its locked offline inputs.
 The entrypoint receives a fixed profile contract; this program never reads a
 command from the subject checkout.  Only ``code-coverage`` is enabled, with
@@ -80,6 +80,9 @@ MAX_SOURCE_DIFF_BYTES = 20 * 1024 * 1024
 MAX_COBERTURA_ARTIFACT_BYTES = 20 * 1024 * 1024
 MAX_GATE_MARKDOWN_ARTIFACT_BYTES = 1 * 1024 * 1024
 MAX_GATE_JSON_ARTIFACT_BYTES = 4 * 1024 * 1024
+MAX_EXPORTED_ARTIFACT_BYTES = 25 * 1024 * 1024
+ARTIFACT_EXPORT_TIMEOUT_SECONDS = 2 * 60
+ARTIFACT_EXPORT_READ_BYTES = 64 * 1024
 MIN_OUTPUT_BYTES = 4096
 SOURCE_DIFF_CONTAINER_PATH = "/source.diff"
 SOURCE_DIFF_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
@@ -88,6 +91,7 @@ SUBJECT_ARTIFACTS = (
     ("gate-report", "coverage/coverage-gate/coverage-gate.md", MAX_GATE_MARKDOWN_ARTIFACT_BYTES),
     ("diagnostics", "coverage/coverage-gate/coverage-gate.json", MAX_GATE_JSON_ARTIFACT_BYTES),
 )
+SUBJECT_ARTIFACT_EXPORT_NAMES = ("cobertura.xml", "gate-report.md", "diagnostics.json")
 IMAGE_REFERENCE_PATTERN = re.compile(r"[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}\Z")
 RUN_ID_PATTERN = re.compile(r"[1-9][0-9]{0,18}\Z")
 RUN_ATTEMPT_PATTERN = re.compile(r"[1-9][0-9]{0,8}\Z")
@@ -186,13 +190,14 @@ class CommandResult:
 
 @dataclass(frozen=True)
 class SubjectRunResult:
-    """Untrusted output and one bounded result record; profile artifacts are not exported and this is never gate-eligible."""
+    """Untrusted output, a bounded record, and optional copied artifacts; never gate-eligible."""
 
     exit_code: int
     stdout: bytes
     stderr: bytes
     scratch_directory: Path
     execution_record: Mapping[str, Any] | None = None
+    artifact_export_directory: Path | None = None
 
     @property
     def claim_eligible(self) -> bool:
@@ -737,6 +742,33 @@ def _validate_scratch_path(value: str | os.PathLike[str], runner_temp: Path) -> 
     except OSError:
         raise _fail("ASEGS002", "The scratch destination cannot be inspected safely.") from None
     raise _fail("ASEGS002", "The scratch directory must be new and must not already exist.")
+
+
+def _paths_overlap(first: Path, second: Path) -> bool:
+    return first == second or first in second.parents or second in first.parents
+
+
+def _validate_artifact_export_path(value: str | os.PathLike[str], runner_temp: Path) -> Path:
+    """Validate a new direct-child path for the private, non-claiming artifact export."""
+    raw = os.fspath(value)
+    if not isinstance(raw, str) or not raw or "\x00" in raw or not Path(raw).is_absolute():
+        raise _fail("ASEGS021", "The artifact export path must be an absolute new path under RUNNER_TEMP.")
+    path = Path(raw)
+    if (
+        str(path) != raw
+        or any(part in {".", ".."} for part in path.parts)
+        or any(char in raw for char in ",\r\n")
+        or path.parent != runner_temp
+        or path.name in {"", ".", ".."}
+    ):
+        raise _fail("ASEGS021", "The artifact export directory must be a direct child of RUNNER_TEMP.")
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return path
+    except OSError:
+        raise _fail("ASEGS021", "The artifact export destination cannot be inspected safely.") from None
+    raise _fail("ASEGS021", "The artifact export directory must be new and must not already exist.")
 
 
 def _validate_image_reference(image: str) -> None:
@@ -1309,6 +1341,19 @@ def _verify_container_configuration(
         )
 
 
+def _verify_container_stopped(data: bytes) -> None:
+    """Require Podman to report the attached subject container as exited."""
+    container = _one_inspect_object(data)
+    state = container.get("State")
+    if (
+        not isinstance(state, dict)
+        or type(state.get("Running")) is not bool
+        or state.get("Running") is not False
+        or state.get("Status") != "exited"
+    ):
+        raise _fail("ASEGS012", "The subject container was not verified stopped before artifact export.")
+
+
 def _validate_subject_result_content(content: bytes, *, expected_status: str) -> Mapping[str, Any]:
     if not content or len(content) > MAX_SUBJECT_RESULT_BYTES:
         raise _fail("ASEGS018", "The exported subject result is not bounded; no claim may be issued.")
@@ -1324,8 +1369,11 @@ def _validate_subject_result_content(content: bytes, *, expected_status: str) ->
         expected_keys.add("diagnostic")
     elif status == "completed":
         expected_keys.add("artifacts")
+    actual_keys_match = set(value) == expected_keys
+    if status == "completed" and "artifacts" not in value:
+        actual_keys_match = set(value) == expected_keys - {"artifacts"}
     if (
-        set(value) != expected_keys
+        not actual_keys_match
         or value.get("claimEligible") is not False
         or value.get("profileId") != "code-coverage"
         or type(value.get("schemaVersion")) is not int
@@ -1387,7 +1435,7 @@ def _validate_subject_result_content(content: bytes, *, expected_status: str) ->
 
 def _validate_subject_artifacts(value: Any) -> None:
     if not isinstance(value, list) or len(value) != len(SUBJECT_ARTIFACTS):
-        raise _fail("ASEGS018", "The completed subject result omitted its fixed coverage artifact index.")
+        raise _fail("ASEGS021", "The completed subject result omitted its fixed coverage artifact index.")
     for artifact, (logical_name, relative_path, maximum_bytes) in zip(value, SUBJECT_ARTIFACTS, strict=True):
         if (
             not isinstance(artifact, dict)
@@ -1399,7 +1447,265 @@ def _validate_subject_artifacts(value: Any) -> None:
             or not isinstance(artifact.get("sha256"), str)
             or SUBJECT_STEP_DIGEST_PATTERN.fullmatch(artifact["sha256"]) is None
         ):
-            raise _fail("ASEGS018", "The completed subject result contains an unsafe or malformed coverage artifact index.")
+            raise _fail("ASEGS021", "The completed subject result contains an unsafe or malformed coverage artifact index.")
+
+
+def _open_directory_without_symlinks(path: Path) -> int:
+    """Open every path component as a directory descriptor without following links."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    descriptor = os.open(path.anchor, flags)
+    try:
+        for component in path.parts[1:]:
+            child = os.open(component, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _check_artifact_export_deadline(deadline: float) -> None:
+    if time.monotonic() > deadline:
+        raise _fail("ASEGS021", "A fixed coverage artifact export exceeded its two-minute bound.")
+
+
+def _artifact_stat_identity(value: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_mode,
+        value.st_nlink,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
+
+
+def _export_subject_artifacts(
+    scratch_mountpoint: Path,
+    destination: Path,
+    artifact_index: Any,
+    *,
+    effective_uid: int,
+) -> None:
+    """Copy only the indexed fixed artifacts into an exclusive private host directory.
+
+    Source and destination paths are walked through directory descriptors with
+    no-follow flags. Each source must remain a single-link regular file whose
+    exact length and digest match the already validated completed result index.
+    This private export is diagnostic input for a later handoff and never makes
+    a run claim-eligible.
+    """
+    try:
+        _validate_subject_artifacts(artifact_index)
+    except SubjectLauncherError:
+        raise _fail("ASEGS021", "The completed result has a missing or unsafe fixed coverage artifact index.") from None
+    artifacts = artifact_index
+    if sum(artifact["byteCount"] for artifact in artifacts) > MAX_EXPORTED_ARTIFACT_BYTES:
+        raise _fail("ASEGS021", "The fixed coverage artifacts exceed their aggregate export budget.")
+
+    source_root_fd = -1
+    destination_fd = -1
+    source_directory_fds: list[int] = []
+    source_file_fd = -1
+    destination_file_fd = -1
+    created_names: list[str] = []
+    try:
+        source_root_fd = _open_directory_without_symlinks(scratch_mountpoint)
+        destination_fd = _open_directory_without_symlinks(destination)
+        destination_stat = os.fstat(destination_fd)
+        if (
+            not stat.S_ISDIR(destination_stat.st_mode)
+            or stat.S_IMODE(destination_stat.st_mode) != 0o700
+            or destination_stat.st_uid != effective_uid
+        ):
+            raise _fail("ASEGS021", "The artifact export directory is not a private mode-0700 directory.")
+
+        aggregate_bytes = 0
+        for (_logical_name, relative_path, maximum_bytes), artifact, export_name in zip(
+            SUBJECT_ARTIFACTS, artifacts, SUBJECT_ARTIFACT_EXPORT_NAMES, strict=True
+        ):
+            deadline = time.monotonic() + ARTIFACT_EXPORT_TIMEOUT_SECONDS
+            source_directory_fd = source_root_fd
+            source_directory_fds = []
+            components = relative_path.split("/")
+            for component in components[:-1]:
+                _check_artifact_export_deadline(deadline)
+                child_directory_fd = os.open(
+                    component,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                    dir_fd=source_directory_fd,
+                )
+                source_directory_fds.append(child_directory_fd)
+                source_directory_fd = child_directory_fd
+                _check_artifact_export_deadline(deadline)
+            _check_artifact_export_deadline(deadline)
+            source_file_fd = os.open(
+                components[-1],
+                os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
+                dir_fd=source_directory_fd,
+            )
+            _check_artifact_export_deadline(deadline)
+            before = os.fstat(source_file_fd)
+            declared_bytes = artifact["byteCount"]
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or before.st_nlink != 1
+                or before.st_size <= 0
+                or before.st_size > maximum_bytes
+                or before.st_size != declared_bytes
+            ):
+                raise _fail("ASEGS021", "A fixed coverage artifact has an unsafe file type or length.")
+
+            destination_file_fd = os.open(
+                export_name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                0o600,
+                dir_fd=destination_fd,
+            )
+            created_names.append(export_name)
+            os.fchmod(destination_file_fd, 0o600)
+            digest = hashlib.sha256()
+            copied_bytes = 0
+            while True:
+                _check_artifact_export_deadline(deadline)
+                chunk = os.read(source_file_fd, min(ARTIFACT_EXPORT_READ_BYTES, declared_bytes + 1 - copied_bytes))
+                _check_artifact_export_deadline(deadline)
+                if not chunk:
+                    break
+                copied_bytes += len(chunk)
+                aggregate_bytes += len(chunk)
+                if copied_bytes > declared_bytes or copied_bytes > maximum_bytes:
+                    raise _fail("ASEGS021", "A fixed coverage artifact grew beyond its indexed length.")
+                if aggregate_bytes > MAX_EXPORTED_ARTIFACT_BYTES:
+                    raise _fail("ASEGS021", "The fixed coverage artifacts exceed their aggregate export budget.")
+                digest.update(chunk)
+                chunk_offset = 0
+                while chunk_offset < len(chunk):
+                    _check_artifact_export_deadline(deadline)
+                    written = os.write(destination_file_fd, chunk[chunk_offset:])
+                    _check_artifact_export_deadline(deadline)
+                    if written <= 0:
+                        raise _fail("ASEGS021", "A fixed coverage artifact could not be written completely.")
+                    chunk_offset += written
+
+            after = os.fstat(source_file_fd)
+            if (
+                _artifact_stat_identity(before) != _artifact_stat_identity(after)
+                or copied_bytes != declared_bytes
+                or digest.hexdigest() != artifact["sha256"]
+            ):
+                raise _fail("ASEGS021", "A fixed coverage artifact changed or disagreed with its indexed digest.")
+            _check_artifact_export_deadline(deadline)
+            os.fsync(destination_file_fd)
+            _check_artifact_export_deadline(deadline)
+            destination_stat = os.fstat(destination_file_fd)
+            if (
+                not stat.S_ISREG(destination_stat.st_mode)
+                or destination_stat.st_nlink != 1
+                or stat.S_IMODE(destination_stat.st_mode) != 0o600
+                or destination_stat.st_size != declared_bytes
+            ):
+                raise _fail("ASEGS021", "A fixed coverage artifact export has unsafe destination metadata.")
+            os.close(destination_file_fd)
+            destination_file_fd = -1
+            os.close(source_file_fd)
+            source_file_fd = -1
+            for descriptor in reversed(source_directory_fds):
+                os.close(descriptor)
+            source_directory_fds = []
+
+        os.fsync(destination_fd)
+    except SubjectLauncherError:
+        for descriptor_name in ("destination_file_fd", "source_file_fd"):
+            descriptor = locals()[descriptor_name]
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+                if descriptor_name == "destination_file_fd":
+                    destination_file_fd = -1
+                else:
+                    source_file_fd = -1
+        for name in reversed(created_names):
+            if destination_fd >= 0:
+                try:
+                    os.unlink(name, dir_fd=destination_fd)
+                except OSError:
+                    pass
+        raise
+    except OSError:
+        for descriptor_name in ("destination_file_fd", "source_file_fd"):
+            descriptor = locals()[descriptor_name]
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+                if descriptor_name == "destination_file_fd":
+                    destination_file_fd = -1
+                else:
+                    source_file_fd = -1
+        for name in reversed(created_names):
+            if destination_fd >= 0:
+                try:
+                    os.unlink(name, dir_fd=destination_fd)
+                except OSError:
+                    pass
+        raise _fail("ASEGS021", "The fixed coverage artifacts could not be exported safely.") from None
+    finally:
+        for descriptor in (destination_file_fd, source_file_fd, *reversed(source_directory_fds), destination_fd, source_root_fd):
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+
+
+def _remove_artifact_export_directory(path: Path, runner_temp: Path, *, effective_uid: int) -> None:
+    """Remove this run's fixed export files and empty private directory without following links."""
+    parent_fd = -1
+    directory_fd = -1
+    try:
+        parent_fd = _open_directory_without_symlinks(runner_temp)
+        try:
+            entry_stat = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        if not stat.S_ISDIR(entry_stat.st_mode):
+            raise _fail("ASEGS017", "The private artifact export directory changed type during cleanup.")
+        directory_fd = os.open(
+            path.name,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=parent_fd,
+        )
+        directory_stat = os.fstat(directory_fd)
+        if (
+            directory_stat.st_uid != effective_uid
+            or stat.S_IMODE(directory_stat.st_mode) != 0o700
+        ):
+            raise _fail("ASEGS017", "The private artifact export directory changed permissions during cleanup.")
+        for name in SUBJECT_ARTIFACT_EXPORT_NAMES:
+            try:
+                os.unlink(name, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+        os.close(directory_fd)
+        directory_fd = -1
+        os.rmdir(path.name, dir_fd=parent_fd)
+    except SubjectLauncherError:
+        raise
+    except OSError:
+        raise _fail("ASEGS017", "The private artifact export directory could not be removed safely.") from None
+    finally:
+        for descriptor in (directory_fd, parent_fd):
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
 
 
 def _write_subject_result_export(scratch: Path, content: bytes) -> None:
@@ -1465,6 +1771,7 @@ def launch_subject(
     profile_id: str,
     source_diff: str | os.PathLike[str],
     source_diff_sha256: str,
+    artifact_export_directory: str | os.PathLike[str],
     limits: SubjectLimits,
     cancel_event: threading.Event | None = None,
     _environment: Mapping[str, str] | None = None,
@@ -1475,7 +1782,15 @@ def launch_subject(
     _command_executor: CommandExecutor = _run_command,
     supervisor_client: CleanupSupervisorClient | None = None,
 ) -> SubjectRunResult:
-    """Run a fixed profile with host-mounted quota-limited scratch and export its result record."""
+    """Run the private fixed profile and optionally export its indexed artifacts.
+
+    ``artifact_export_directory`` is a required, fresh direct child of
+    ``RUNNER_TEMP``. For ``code-coverage`` it receives only three fixed
+    basenames after a zero-exit attached run, a completed validated artifact
+    index, and an independent stopped-container inspection. Each file is
+    bounded and checked against that index. This private export is diagnostic
+    material only; ``claim_eligible`` remains false for every result.
+    """
     _validate_limits(limits)
     profile_arguments = _validate_profile(profile_id)
     diff_path = _validate_source_diff(source_diff, source_diff_sha256)
@@ -1491,8 +1806,11 @@ def launch_subject(
         effective_uid=effective_uid,
     )
     scratch = _validate_scratch_path(scratch_directory, runner_temp)
-    if scratch == subject_root or scratch in subject_root.parents or subject_root in scratch.parents:
+    artifact_export = _validate_artifact_export_path(artifact_export_directory, runner_temp)
+    if _paths_overlap(scratch, subject_root):
         raise _fail("ASEGS002", "The subject checkout and scratch directory must be disjoint.")
+    if _paths_overlap(artifact_export, subject_root):
+        raise _fail("ASEGS021", "The artifact export directory must be disjoint from the subject checkout.")
     if (
         diff_path == subject_root
         or subject_root in diff_path.parents
@@ -1502,6 +1820,8 @@ def launch_subject(
         raise _fail(
             "ASEGS020", "The controller source diff must be outside the subject checkout and scratch directory."
         )
+    if _paths_overlap(artifact_export, diff_path) or _paths_overlap(artifact_export, scratch):
+        raise _fail("ASEGS021", "The artifact export directory must be disjoint from the source diff and scratch.")
 
     event = cancel_event if cancel_event is not None else threading.Event()
     host_gid = os.getegid()
@@ -1597,9 +1917,12 @@ def launch_subject(
         raise _fail("ASEGS017", "The cleanup supervisor failed before subject setup.") from None
     primary_error: BaseException | None = None
     result: SubjectRunResult | None = None
+    artifact_export_created = False
     try:
         _check_cancel(event)
         supervisor.assert_alive(supervisor_session)
+        if _paths_overlap(artifact_export, supervisor_session.state_directory):
+            raise _fail("ASEGS021", "The artifact export directory and supervisor state must be disjoint.")
         mount_options = (
             "rw,nosuid,nodev,"
             f"size={MAX_PROFILE_SCRATCH_BYTES},"
@@ -1688,23 +2011,63 @@ def launch_subject(
             )
         elif started.returncode == 0:
             raise _fail("ASEGS018", "The completed subject omitted its bounded non-claiming result record.")
+        artifact_export_result: Path | None = None
+        if started.returncode == 0:
+            if execution_record is None or execution_record.get("status") != "completed":
+                raise _fail("ASEGS018", "The completed subject omitted its validated coverage artifact index.")
+            stopped_result = _expect_success(
+                _command_executor(
+                    [engine, "--remote=false", "inspect", "--format=json", container_name],
+                    timeout_seconds=ENGINE_PHASE_TIMEOUT_SECONDS,
+                    maximum_output_bytes=MAX_ENGINE_OUTPUT_BYTES,
+                    environment=engine_environment,
+                    cancel_event=event,
+                ),
+                "stopped-container verification",
+            )
+            _verify_container_stopped(stopped_result.stdout)
+            try:
+                os.mkdir(artifact_export, 0o700)
+            except OSError:
+                raise _fail("ASEGS021", "The new private artifact export directory could not be created safely.") from None
+            artifact_export_created = True
+            try:
+                os.chmod(artifact_export, 0o700)
+                _export_subject_artifacts(
+                    scratch_mountpoint,
+                    artifact_export,
+                    execution_record.get("artifacts"),
+                    effective_uid=effective_uid,
+                )
+            except SubjectLauncherError:
+                raise
+            except BaseException:
+                raise _fail("ASEGS021", "The fixed coverage artifacts could not be exported safely.") from None
+            artifact_export_result = artifact_export
         result = SubjectRunResult(
             exit_code=started.returncode,
             stdout=b"",
             stderr=started.stderr,
             scratch_directory=scratch,
             execution_record=execution_record,
+            artifact_export_directory=artifact_export_result,
         )
     except BaseException as exc:
         primary_error = exc
+    cleanup_error: SubjectLauncherError | None = None
     try:
         supervisor_record = supervisor.request_and_wait(supervisor_session)
         SubjectCleanupSupervisorClient._validate_attestation(supervisor_record)
-    except SubjectLauncherError:
-        raise
+    except SubjectLauncherError as exc:
+        cleanup_error = exc
     except Exception:
-        raise _fail("ASEGS017", "The cleanup supervisor did not attest complete cleanup.") from None
+        cleanup_error = _fail("ASEGS017", "The cleanup supervisor did not attest complete cleanup.")
     if primary_error is not None:
+        if artifact_export_created:
+            try:
+                _remove_artifact_export_directory(artifact_export, runner_temp, effective_uid=effective_uid)
+            except SubjectLauncherError:
+                pass
         if isinstance(primary_error, SubjectLauncherError):
             raise primary_error
         if isinstance(primary_error, (_ProcessCancelled, _ProcessTimedOut, _ProcessOutputExceeded, _ProcessStartFailed, _ProcessCouldNotStop)):
@@ -1712,7 +2075,13 @@ def launch_subject(
         if isinstance(primary_error, KeyboardInterrupt):
             raise primary_error
         raise _fail("ASEGS008", "The trusted OCI execution phase failed.") from None
+    if cleanup_error is not None:
+        if artifact_export_created:
+            _remove_artifact_export_directory(artifact_export, runner_temp, effective_uid=effective_uid)
+        raise cleanup_error
     if result is None:
+        if artifact_export_created:
+            _remove_artifact_export_directory(artifact_export, runner_temp, effective_uid=effective_uid)
         raise _fail("ASEGS008", "The trusted OCI execution phase returned no process result.")
     return result
 
@@ -1734,6 +2103,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--profile-id", required=True)
     parser.add_argument("--source-diff", required=True)
     parser.add_argument("--source-diff-sha256", required=True)
+    parser.add_argument("--artifact-export-directory", required=True)
     parser.add_argument("--timeout-seconds", required=True, type=_positive_cli_integer)
     parser.add_argument("--memory-mib", required=True, type=_positive_cli_integer)
     parser.add_argument("--cpu-millis", required=True, type=_positive_cli_integer)
@@ -1748,6 +2118,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             profile_id=args.profile_id,
             source_diff=args.source_diff,
             source_diff_sha256=args.source_diff_sha256,
+            artifact_export_directory=args.artifact_export_directory,
             limits=SubjectLimits(
                 timeout_seconds=args.timeout_seconds,
                 memory_mib=args.memory_mib,

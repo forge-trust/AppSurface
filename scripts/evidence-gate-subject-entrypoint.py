@@ -75,6 +75,8 @@ FIXED_OFFLINE_ARGUMENT = "--offline"
 OFFLINE_UNSUPPORTED_TEST_PROJECTS = (
     "Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj",
     "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/ForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj",
+    "examples/durable-external-activation.tests/ForgeTrust.AppSurface.DurableExternalActivationExample.Tests.csproj",
+    "examples/durable-postgresql.tests/DurablePostgreSqlLocalExample.Tests.csproj",
 )
 
 

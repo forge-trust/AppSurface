@@ -7,6 +7,7 @@ import importlib.util
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -14,6 +15,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "evidence-gate-handoff.py"
@@ -57,6 +59,16 @@ class HandoffPathTests(unittest.TestCase):
             self.assertFalse(output.exists())
             output.mkdir(mode=0o700)
             self.assertTrue(output.is_dir())
+
+    def test_descriptor_walk_reports_identity_mismatch_without_masking_it(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="evidence-gate-artifact-walk-") as temporary:
+            directory = Path(temporary).resolve()
+            with patch.object(handoff, "_same_file_identity", return_value=False):
+                with self.assertRaises(handoff.HandoffError) as failure:
+                    handoff._open_directory_nofollow(directory, "ASEHB012")
+
+            self.assertEqual("ASEHB012", failure.exception.code)
+            self.assertIn("changed during its descriptor walk", failure.exception.message)
 
 
 class HandoffArchiveTests(unittest.TestCase):
@@ -185,12 +197,21 @@ class HandoffArchiveTests(unittest.TestCase):
         plan_file = self._write_plan(root, capture)
         return capture, scripts, plan_file
 
-    def _execute(self, output: Path, root: Path, *, image_digest: str | None = None, environment: dict[str, str] | None = None) -> tuple[int, Path]:
+    def _execute(
+        self,
+        output: Path,
+        root: Path,
+        *,
+        image_digest: str | None = None,
+        environment: dict[str, str] | None = None,
+        artifact_export_directory: Path | None = None,
+    ) -> tuple[int, Path]:
         result_path = root / "subject-result.json"
         exit_code = handoff.execute_handoff(
             handoff_directory=output,
             subject_checkout=root / "subject-checkout",
             scratch_directory=root / "subject-scratch",
+            artifact_export_directory=artifact_export_directory or root / "subject-artifacts",
             result_path=result_path,
             image_digest=image_digest,
             environment=environment
@@ -217,6 +238,7 @@ class HandoffArchiveTests(unittest.TestCase):
         exit_code: int = 0,
         include_record: bool = True,
         step_mutation: str | None = None,
+        artifact_mutation: str | None = None,
     ) -> None:
         step_names = (
             "dotnet-sdk-version",
@@ -225,15 +247,24 @@ class HandoffArchiveTests(unittest.TestCase):
             "coverage-run",
             "coverage-gate",
         )
+        export_payloads = {
+            "cobertura.xml": b"coverage",
+            "gate-report.md": b"report",
+            "diagnostics.json": b"{}",
+        }
         execution_record = {
             "artifacts": [
                 {
                     "logicalName": logical_name,
                     "relativePath": relative_path,
-                    "byteCount": 1,
-                    "sha256": "0" * 64,
+                    "byteCount": len(export_payloads[basename]),
+                    "sha256": hashlib.sha256(export_payloads[basename]).hexdigest(),
                 }
-                for logical_name, relative_path, _maximum_bytes in handoff.SUBJECT_ARTIFACTS
+                for (logical_name, relative_path, _maximum_bytes), basename in zip(
+                    handoff.SUBJECT_ARTIFACTS,
+                    handoff.SUBJECT_ARTIFACT_EXPORT_BASENAMES,
+                    strict=True,
+                )
             ],
             "claimEligible": False,
             "profileId": "code-coverage",
@@ -251,7 +282,8 @@ class HandoffArchiveTests(unittest.TestCase):
             ],
         }
         (scripts / "evidence-gate-subject.py").write_text(
-            f"""from types import SimpleNamespace
+            f"""import os
+from types import SimpleNamespace
 
 class SubjectLimits:
     def __init__(self, **values):
@@ -259,7 +291,7 @@ class SubjectLimits:
 
 def launch_subject(
     *, subject_checkout, image_digest, scratch_directory, profile_id,
-    source_diff, source_diff_sha256, limits, _environment
+    artifact_export_directory, source_diff, source_diff_sha256, limits, _environment
 ):
     with open(_environment['TEST_PROFILE_LOG'], 'w', encoding='utf-8') as log:
         log.write(profile_id)
@@ -269,6 +301,23 @@ def launch_subject(
         with open(_environment['TEST_DIFF_LOG'], 'w', encoding='ascii') as log:
             log.write(source_diff_sha256 + ':' + diff_hex)
     execution_record = {execution_record!r}
+    artifact_payloads = {export_payloads!r}
+    if {exit_code} == 0:
+        artifact_export_directory.mkdir(mode=0o700)
+        for basename, payload in artifact_payloads.items():
+            if {artifact_mutation!r} == 'missing' and basename == 'cobertura.xml':
+                continue
+            if {artifact_mutation!r} == 'digest-mismatch' and basename == 'cobertura.xml':
+                payload = b'X' * len(payload)
+            with open(artifact_export_directory / basename, 'wb') as artifact:
+                artifact.write(payload)
+        if {artifact_mutation!r} == 'extra':
+            (artifact_export_directory / 'unexpected.txt').write_bytes(b'unexpected')
+        elif {artifact_mutation!r} == 'symlink':
+            outside = artifact_export_directory.parent / 'outside-artifact.txt'
+            outside.write_bytes(b'coverage')
+            (artifact_export_directory / 'cobertura.xml').unlink()
+            os.symlink(outside, artifact_export_directory / 'cobertura.xml')
     if {step_mutation!r} == 'omit-last':
         execution_record['steps'].pop()
     elif {step_mutation!r} == 'rename-first':
@@ -350,13 +399,131 @@ def launch_subject(
                 )
 
             self.assertEqual(plan_file.read_bytes(), verified_plan.read_bytes())
-            with self.assertRaises(handoff.HandoffError):
+
+    def test_code_coverage_verifier_rejects_invalid_downloaded_artifact_exports(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="evidence-gate-downloaded-artifacts-") as temporary:
+            root = Path(temporary).resolve()
+            capture, scripts, plan_file = self._capture(root)
+            self._write_test_launcher(scripts)
+            output = root / "handoff"
+            self._create(capture, scripts, plan_file, output)
+            exit_code, result_path = self._execute(
+                output,
+                root,
+                image_digest="sha256:" + "f" * 64,
+                environment={
+                    "GITHUB_RUN_ID": "456",
+                    "GITHUB_RUN_ATTEMPT": "1",
+                    "GITHUB_REPOSITORY_ID": "123",
+                    "TEST_PROFILE_LOG": str(root / "selected-profile.txt"),
+                },
+            )
+            self.assertEqual(0, exit_code)
+            exported = root / "subject-artifacts"
+            scenarios = ("missing-directory", "missing-file", "extra-file", "symlink", "mutation", "oversize")
+            for scenario in scenarios:
+                with self.subTest(scenario=scenario):
+                    candidate = root / f"downloaded-{scenario}"
+                    shutil.copytree(exported, candidate)
+                    if scenario == "missing-directory":
+                        shutil.rmtree(candidate)
+                    elif scenario == "missing-file":
+                        (candidate / "cobertura.xml").unlink()
+                    elif scenario == "extra-file":
+                        (candidate / "unexpected.txt").write_bytes(b"extra")
+                    elif scenario == "symlink":
+                        (candidate / "cobertura.xml").unlink()
+                        outside = root / "outside-artifact"
+                        outside.write_bytes(b"coverage")
+                        os.symlink(outside, candidate / "cobertura.xml")
+                    elif scenario == "mutation":
+                        (candidate / "cobertura.xml").write_bytes(b"tampered")
+                    elif scenario == "oversize":
+                        with (candidate / "cobertura.xml").open("wb") as stream:
+                            stream.truncate(handoff.MAX_COBERTURA_ARTIFACT_BYTES + 1)
+
+                    verified = root / f"verified-{scenario}.json"
+                    with self.assertRaises(handoff.HandoffError) as failure:
+                        handoff.verify_handoff(
+                            handoff_directory=output,
+                            fresh_capture_directory=capture,
+                            subject_result_file=result_path,
+                            output_plan=verified,
+                            subject_artifacts_directory=candidate,
+                        )
+                    self.assertEqual("ASEHB012", failure.exception.code)
+                    self.assertFalse(verified.exists())
+
+            with self.assertRaises(handoff.HandoffError) as missing_flag:
                 handoff.verify_handoff(
                     handoff_directory=output,
                     fresh_capture_directory=capture,
-                    subject_result_file=subject_result,
-                    output_plan=verified_plan,
+                    subject_result_file=result_path,
+                    output_plan=root / "verified-missing-flag.json",
                 )
+            self.assertEqual("ASEHB012", missing_flag.exception.code)
+            self.assertFalse((root / "verified-missing-flag.json").exists())
+
+            missing_component = root / "symlink-parent" / "downloaded"
+            (root / "outside-artifacts").mkdir()
+            (root / "symlink-parent").symlink_to(root / "outside-artifacts", target_is_directory=True)
+            with self.assertRaises(handoff.HandoffError) as unsafe_path:
+                handoff.verify_handoff(
+                    handoff_directory=output,
+                    fresh_capture_directory=capture,
+                    subject_result_file=result_path,
+                    output_plan=root / "verified-unsafe-path.json",
+                    subject_artifacts_directory=missing_component,
+                )
+            self.assertEqual("ASEHB012", unsafe_path.exception.code)
+            self.assertFalse((root / "verified-unsafe-path.json").exists())
+
+            valid_result = json.loads(result_path.read_bytes())
+            receipt = valid_result["executionReceipt"]
+            receipt["record"]["artifacts"][0]["sha256"] = "0" * 64
+            self._resign_execution_receipt(valid_result)
+            result_path.write_bytes(handoff._canonical_json(valid_result) + b"\n")
+            with self.assertRaises(handoff.HandoffError) as index_mismatch:
+                handoff.verify_handoff(
+                    handoff_directory=output,
+                    fresh_capture_directory=capture,
+                    subject_result_file=result_path,
+                    output_plan=root / "verified-index-mismatch.json",
+                    subject_artifacts_directory=exported,
+                )
+            self.assertEqual("ASEHB012", index_mismatch.exception.code)
+            self.assertFalse((root / "verified-index-mismatch.json").exists())
+
+    def test_successful_subject_export_failure_is_cleaned_and_remains_non_claiming(self) -> None:
+        for mutation in ("missing", "extra", "symlink", "digest-mismatch"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory(
+                prefix="evidence-gate-invalid-export-"
+            ) as temporary:
+                root = Path(temporary).resolve()
+                capture, scripts, plan_file = self._capture(root)
+                self._write_test_launcher(scripts, artifact_mutation=mutation)
+                output = root / "handoff"
+                self._create(capture, scripts, plan_file, output)
+
+                exit_code, result_path = self._execute(
+                    output,
+                    root,
+                    image_digest="sha256:" + "f" * 64,
+                    environment={
+                        "GITHUB_RUN_ID": "456",
+                        "GITHUB_RUN_ATTEMPT": "1",
+                        "GITHUB_REPOSITORY_ID": "123",
+                        "TEST_PROFILE_LOG": str(root / "selected-profile.txt"),
+                    },
+                )
+
+                self.assertEqual(2, exit_code)
+                result = json.loads(result_path.read_bytes())
+                self.assertFalse(result["claimEligible"])
+                self.assertEqual("failed", result["execution"])
+                self.assertEqual("ASEHB009", result["diagnostic"]["code"])
+                self.assertNotIn("executionReceipt", result)
+                self.assertFalse((root / "subject-artifacts").exists())
 
     def test_trusted_verifier_rejects_stale_identity_or_changed_diff(self) -> None:
         for mismatch in ("identity", "diff"):
@@ -438,6 +605,7 @@ def launch_subject(
             self.assertEqual("ASEHB010", result["diagnostic"]["code"])
             self.assertFalse((root / "subject-checkout").exists())
             self.assertFalse((root / "subject-scratch").exists())
+            self.assertFalse((root / "subject-artifacts").exists())
 
     def test_code_coverage_profile_is_passed_to_the_bounded_launcher(self) -> None:
         with tempfile.TemporaryDirectory(prefix="evidence-gate-code-coverage-") as temporary:
@@ -481,13 +649,23 @@ def launch_subject(
                 tuple(step["name"] for step in result["executionReceipt"]["record"]["steps"]),
             )
             self.assertRegex(result["executionReceipt"]["sha256"], r"^[0-9a-f]{64}$")
+            downloaded_artifacts = root / "downloaded-subject-artifacts"
+            shutil.copytree(root / "subject-artifacts", downloaded_artifacts)
             verified_plan = root / "verified-plan.json"
-            handoff.verify_handoff(
-                handoff_directory=output,
-                fresh_capture_directory=capture,
-                subject_result_file=result_path,
-                output_plan=verified_plan,
-            )
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    0,
+                    handoff.main(
+                        [
+                            "verify",
+                            "--handoff-directory", str(output),
+                            "--fresh-capture-directory", str(capture),
+                            "--subject-result", str(result_path),
+                            "--subject-artifacts", str(downloaded_artifacts),
+                            "--output-plan", str(verified_plan),
+                        ]
+                    ),
+                )
             self.assertEqual(plan_file.read_bytes(), verified_plan.read_bytes())
 
     def test_code_coverage_verifier_rejects_missing_or_tampered_execution_receipts(self) -> None:
@@ -559,6 +737,7 @@ def launch_subject(
                             fresh_capture_directory=capture,
                             subject_result_file=result_path,
                             output_plan=root / f"verified-{name}.json",
+                            subject_artifacts_directory=root / "subject-artifacts",
                         )
                     self.assertFalse((root / f"verified-{name}.json").exists())
 
@@ -571,6 +750,7 @@ def launch_subject(
                     fresh_capture_directory=capture,
                     subject_result_file=result_path,
                     output_plan=root / "verified-digest-tampered.json",
+                    subject_artifacts_directory=root / "subject-artifacts",
                 )
             self.assertFalse((root / "verified-digest-tampered.json").exists())
 

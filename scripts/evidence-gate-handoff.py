@@ -57,6 +57,7 @@ SUBJECT_ARTIFACTS = (
     ("gate-report", "coverage/coverage-gate/coverage-gate.md", MAX_GATE_MARKDOWN_ARTIFACT_BYTES),
     ("diagnostics", "coverage/coverage-gate/coverage-gate.json", MAX_GATE_JSON_ARTIFACT_BYTES),
 )
+SUBJECT_ARTIFACT_EXPORT_BASENAMES = ("cobertura.xml", "gate-report.md", "diagnostics.json")
 POSITIVE_DECIMAL_PATTERN = re.compile(r"[1-9][0-9]{0,18}\Z")
 SUBJECT_RESULT_STEP_NAMES = (
     "dotnet-sdk-version",
@@ -873,6 +874,281 @@ def _safe_regular_children(root: Path) -> dict[str, Path]:
     return result
 
 
+def _paths_disjoint(*paths: Path) -> bool:
+    for index, path in enumerate(paths):
+        if any(path == other or path in other.parents or other in path.parents for other in paths[index + 1 :]):
+            return False
+    return True
+
+
+def _same_file_identity(left: os.stat_result, right: os.stat_result) -> bool:
+    return (
+        left.st_dev,
+        left.st_ino,
+        left.st_mode,
+        left.st_nlink,
+        left.st_size,
+        left.st_mtime_ns,
+        left.st_ctime_ns,
+    ) == (
+        right.st_dev,
+        right.st_ino,
+        right.st_mode,
+        right.st_nlink,
+        right.st_size,
+        right.st_mtime_ns,
+        right.st_ctime_ns,
+    )
+
+
+def _same_inode(left: os.stat_result, right: os.stat_result) -> bool:
+    return left.st_dev == right.st_dev and left.st_ino == right.st_ino and stat.S_IFMT(left.st_mode) == stat.S_IFMT(right.st_mode)
+
+
+def _remove_export_entries(directory_fd: int, *, depth: int = 0, budget: list[int]) -> None:
+    if depth > 64:
+        raise OSError("export cleanup depth exceeded")
+    for name in os.listdir(directory_fd):
+        budget[0] -= 1
+        if budget[0] < 0:
+            raise OSError("export cleanup entry budget exceeded")
+        before = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if stat.S_ISDIR(before.st_mode):
+            child_fd = os.open(
+                name,
+                os.O_RDONLY
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=directory_fd,
+            )
+            try:
+                opened = os.fstat(child_fd)
+                current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                if not _same_inode(before, opened) or not _same_inode(opened, current):
+                    raise OSError("export cleanup directory changed")
+                _remove_export_entries(child_fd, depth=depth + 1, budget=budget)
+            finally:
+                os.close(child_fd)
+            current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            if not _same_inode(before, current):
+                raise OSError("export cleanup directory changed")
+            os.rmdir(name, dir_fd=directory_fd)
+        else:
+            # unlinkat removes a symbolic link itself; it never follows it.
+            os.unlink(name, dir_fd=directory_fd)
+
+
+def _remove_subject_artifact_export(path: Path) -> None:
+    """Remove the one fresh export tree without following any entry links."""
+    parent_fd: int | None = None
+    root_fd: int | None = None
+    parent_parent_fd: int | None = None
+    try:
+        parent_fd, parent_parent_fd, parent_name = _open_directory_nofollow(path.parent, "ASEHB009")
+        parent_info = os.fstat(parent_fd)
+        if parent_parent_fd is not None and parent_name is not None:
+            if not _same_file_identity(parent_info, os.stat(parent_name, dir_fd=parent_parent_fd, follow_symlinks=False)):
+                return
+        try:
+            before = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        if stat.S_ISDIR(before.st_mode):
+            root_fd = os.open(
+                path.name,
+                os.O_RDONLY
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=parent_fd,
+            )
+            opened = os.fstat(root_fd)
+            current = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+            if (
+                opened.st_uid != os.geteuid()
+                or stat.S_IMODE(opened.st_mode) != 0o700
+                or not _same_inode(before, opened)
+                or not _same_inode(opened, current)
+            ):
+                raise OSError("subject artifact export is no longer the private directory created for this run")
+            _remove_export_entries(root_fd, budget=[MAX_SNAPSHOT_FILES])
+            current = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+            if not _same_inode(opened, current):
+                raise OSError("subject artifact export changed during cleanup")
+            os.close(root_fd)
+            root_fd = None
+            os.rmdir(path.name, dir_fd=parent_fd)
+        else:
+            os.unlink(path.name, dir_fd=parent_fd)
+    except FileNotFoundError:
+        return
+    except OSError:
+        # Cleanup is best effort after a failed handoff. Never widen its target
+        # or follow a path that changed while cleanup was in progress.
+        return
+    finally:
+        if root_fd is not None:
+            os.close(root_fd)
+        if parent_fd is not None:
+            os.close(parent_fd)
+        if parent_parent_fd is not None:
+            os.close(parent_parent_fd)
+
+
+def _open_directory_nofollow(path: Path, code: str) -> tuple[int, int | None, str | None]:
+    """Descriptor-walk an absolute directory path and retain its named parent."""
+    if not path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts[1:]):
+        raise HandoffError(code, "The fixed subject artifact export path is malformed.")
+    directory_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    try:
+        current_fd = os.open(path.anchor, directory_flags)
+    except OSError:
+        raise HandoffError(code, "The fixed subject artifact export path is unavailable or unsafe.") from None
+    parent_fd: int | None = None
+    name: str | None = None
+    try:
+        components = path.parts[1:]
+        for index, component in enumerate(components):
+            child_fd: int | None = None
+            try:
+                before = os.stat(component, dir_fd=current_fd, follow_symlinks=False)
+                if not stat.S_ISDIR(before.st_mode):
+                    raise HandoffError(code, "The fixed subject artifact export path contains a non-directory component.")
+                child_fd = os.open(component, directory_flags, dir_fd=current_fd)
+                opened = os.fstat(child_fd)
+                after = os.stat(component, dir_fd=current_fd, follow_symlinks=False)
+                if (
+                    not stat.S_ISDIR(opened.st_mode)
+                    or not _same_file_identity(before, opened)
+                    or not _same_file_identity(opened, after)
+                ):
+                    os.close(child_fd)
+                    child_fd = None
+                    raise HandoffError(code, "The fixed subject artifact export path changed during its descriptor walk.")
+            except HandoffError:
+                if child_fd is not None:
+                    os.close(child_fd)
+                raise
+            except OSError:
+                if child_fd is not None:
+                    os.close(child_fd)
+                raise HandoffError(code, "The fixed subject artifact export path is unavailable or unsafe.") from None
+            if index == len(components) - 1:
+                parent_fd = current_fd
+                current_fd = child_fd
+                name = component
+                return current_fd, parent_fd, name
+            os.close(current_fd)
+            current_fd = child_fd
+        return current_fd, None, None
+    except HandoffError:
+        os.close(current_fd)
+        if parent_fd is not None:
+            os.close(parent_fd)
+        raise
+
+
+def _verify_subject_artifact_export(
+    directory: Path,
+    artifacts: Any,
+    *,
+    code: str,
+    require_private: bool,
+) -> None:
+    """Verify the fixed export with bounded reads relative to one no-follow directory descriptor."""
+    _validate_subject_artifacts(artifacts)
+    root_fd, parent_fd, root_name = _open_directory_nofollow(directory, code)
+    try:
+        root_info = os.fstat(root_fd)
+        if not stat.S_ISDIR(root_info.st_mode) or (
+            require_private
+            and (root_info.st_uid != os.geteuid() or stat.S_IMODE(root_info.st_mode) != 0o700)
+        ):
+            raise HandoffError(code, "The fixed subject artifact export directory has unsafe permissions or type.")
+        if parent_fd is not None and root_name is not None:
+            try:
+                if not _same_file_identity(root_info, os.stat(root_name, dir_fd=parent_fd, follow_symlinks=False)):
+                    raise HandoffError(code, "The fixed subject artifact export directory changed during verification.")
+            except OSError:
+                raise HandoffError(code, "The fixed subject artifact export directory changed during verification.") from None
+        try:
+            if set(os.listdir(root_fd)) != set(SUBJECT_ARTIFACT_EXPORT_BASENAMES):
+                raise HandoffError(code, "The fixed subject artifact export has missing or unexpected files.")
+        except OSError:
+            raise HandoffError(code, "The fixed subject artifact export could not be inventoried safely.") from None
+
+        for artifact, basename, (_logical_name, _relative_path, maximum_bytes) in zip(
+            artifacts, SUBJECT_ARTIFACT_EXPORT_BASENAMES, SUBJECT_ARTIFACTS, strict=True
+        ):
+            artifact_fd: int | None = None
+            try:
+                named_before = os.stat(basename, dir_fd=root_fd, follow_symlinks=False)
+                if not stat.S_ISREG(named_before.st_mode):
+                    raise HandoffError(code, "A fixed subject artifact is not a regular file.")
+                artifact_fd = os.open(
+                    basename,
+                    os.O_RDONLY
+                    | getattr(os, "O_CLOEXEC", 0)
+                    | getattr(os, "O_NOFOLLOW", 0)
+                    | getattr(os, "O_NONBLOCK", 0),
+                    dir_fd=root_fd,
+                )
+                metadata = os.fstat(artifact_fd)
+                expected_bytes = artifact["byteCount"]
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or metadata.st_nlink != 1
+                    or metadata.st_size != expected_bytes
+                    or metadata.st_size > maximum_bytes
+                    or not _same_file_identity(named_before, metadata)
+                ):
+                    raise HandoffError(code, "A fixed subject artifact has an unsafe type or byte count.")
+                digest = hashlib.sha256()
+                total = 0
+                while total <= maximum_bytes:
+                    chunk = os.read(artifact_fd, min(1024 * 1024, maximum_bytes + 1 - total))
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > maximum_bytes:
+                        raise HandoffError(code, "A fixed subject artifact exceeds its byte limit.")
+                    digest.update(chunk)
+                if total != expected_bytes or digest.hexdigest() != artifact["sha256"]:
+                    raise HandoffError(code, "A fixed subject artifact differs from its receipt index.")
+                after_read = os.fstat(artifact_fd)
+                named_after = os.stat(basename, dir_fd=root_fd, follow_symlinks=False)
+                if not _same_file_identity(metadata, after_read) or not _same_file_identity(after_read, named_after):
+                    raise HandoffError(code, "A fixed subject artifact changed during verification.")
+            except HandoffError:
+                raise
+            except OSError:
+                raise HandoffError(code, "A fixed subject artifact is unavailable or unsafe.") from None
+            finally:
+                if artifact_fd is not None:
+                    os.close(artifact_fd)
+        try:
+            if set(os.listdir(root_fd)) != set(SUBJECT_ARTIFACT_EXPORT_BASENAMES):
+                raise HandoffError(code, "The fixed subject artifact export changed during verification.")
+        except OSError:
+            raise HandoffError(code, "The fixed subject artifact export changed during verification.") from None
+        if parent_fd is not None and root_name is not None:
+            try:
+                if not _same_file_identity(root_info, os.stat(root_name, dir_fd=parent_fd, follow_symlinks=False)):
+                    raise HandoffError(code, "The fixed subject artifact export directory changed during verification.")
+            except OSError:
+                raise HandoffError(code, "The fixed subject artifact export directory changed during verification.") from None
+    finally:
+        os.close(root_fd)
+        if parent_fd is not None:
+            os.close(parent_fd)
+
+
 def create_handoff(
     *,
     capture_directory: str | os.PathLike[str],
@@ -1195,6 +1471,7 @@ def verify_handoff(
     fresh_capture_directory: str | os.PathLike[str],
     subject_result_file: str | os.PathLike[str],
     output_plan: str | os.PathLike[str],
+    subject_artifacts_directory: str | os.PathLike[str] | None = None,
 ) -> None:
     """Copy a downloaded plan only after binding its bundle to fresh trusted Git state.
 
@@ -1202,7 +1479,10 @@ def verify_handoff(
     validates the entire bounded handoff, compares the captured identity and
     diff with an independent current-PR recapture, and checks every archive
     blob and mode against that fresh Git tree. The copied plan is still
-    independently resolved by the .NET gate verifier before any claim.
+    independently resolved by the .NET gate verifier before any claim. For a
+    code-coverage result, the separately downloaded fixed artifact payload is
+    read and compared with the receipt index only after the fresh recapture
+    has matched. That comparison remains non-claiming.
     """
     handoff = _new_path(handoff_directory, "downloaded handoff")
     capture = _new_path(fresh_capture_directory, "fresh verifier capture")
@@ -1262,10 +1542,27 @@ def verify_handoff(
     ):
         raise HandoffError("ASEHB001", "The credentialless subject result does not match this successful handoff.")
     if plan["Profile"]["Id"] == "code-coverage":
+        receipt = subject_result.get("executionReceipt")
         _validate_execution_receipt(
-            subject_result.get("executionReceipt"),
+            receipt,
             expected_binding=_execution_receipt_binding(identity, manifest, plan["Profile"]["Id"]),
         )
+        if subject_artifacts_directory is None:
+            raise HandoffError("ASEHB012", "The downloaded fixed subject artifact payload is required for code-coverage.")
+        try:
+            subject_artifacts = _new_path(subject_artifacts_directory, "downloaded subject artifact export")
+        except HandoffError:
+            raise HandoffError("ASEHB012", "The downloaded fixed subject artifact directory is unavailable or unsafe.") from None
+        if not isinstance(receipt, dict):
+            raise HandoffError("ASEHB001", "The completed execution receipt is malformed.")
+        _verify_subject_artifact_export(
+            subject_artifacts,
+            receipt["record"]["artifacts"],
+            code="ASEHB012",
+            require_private=False,
+        )
+    elif subject_artifacts_directory is not None:
+        raise HandoffError("ASEHB012", "A documentation-only result cannot include a subject artifact payload.")
 
     plan_bytes = _read_regular_file(entries["evidence-plan.json"], MAX_EVIDENCE_PLAN_BYTES, "The verified EvidencePlan")
     _write_regular_file(output, plan_bytes)
@@ -1276,16 +1573,33 @@ def execute_handoff(
     handoff_directory: str | os.PathLike[str],
     subject_checkout: str | os.PathLike[str],
     scratch_directory: str | os.PathLike[str],
+    artifact_export_directory: str | os.PathLike[str] | None,
     result_path: str | os.PathLike[str],
     image_digest: str | None,
     environment: Mapping[str, str] | None = None,
 ) -> int:
+    """Execute the bounded subject handoff and write its non-claiming result.
+
+    ``artifact_export_directory`` is required for ``code-coverage`` and must
+    name a new path disjoint from the downloaded handoff, checkout, and
+    scratch. The trusted launcher creates this private directory only after a
+    completed run, then exports the three fixed coverage files. This function
+    accepts that export only when the completed execution record's fixed
+    artifact index matches the bounded files exactly; any missing, extra,
+    linked, changed, oversized, or digest-mismatched file fails the handoff
+    closed and the export is removed without following links. A failed subject
+    run does not retain an export. ``documentation-only`` completes without
+    requiring, creating, or accepting an artifact export. Every result remains
+    ``claimEligible: false``; this seam does not produce a Passed result.
+    """
     result_destination = Path(result_path).absolute()
     result: dict[str, Any] = {
         "claimEligible": False,
         "execution": "not-run",
         "schemaVersion": 1,
     }
+    artifact_export: Path | None = None
+    retain_artifact_export = False
     try:
         handoff = _new_path(handoff_directory, "downloaded handoff")
         entries = _safe_regular_children(handoff)
@@ -1331,9 +1645,14 @@ def execute_handoff(
             raise HandoffError("ASEHB008", "The selected EvidencePlan profile is unsupported by the bounded subject handoff.")
         if not isinstance(image_digest, str) or not image_digest:
             raise HandoffError("ASEHB008", "The digest-pinned offline subject image is not configured.")
+        if artifact_export_directory is None:
+            raise HandoffError("ASEHB002", "A new private artifact export directory is required for code-coverage.")
 
         checkout = _new_output_directory(subject_checkout, "subject checkout")
         scratch = _new_output_directory(scratch_directory, "subject scratch")
+        artifact_export = _new_output_directory(artifact_export_directory, "subject artifact export")
+        if not _paths_disjoint(handoff, checkout, scratch, artifact_export):
+            raise HandoffError("ASEHB002", "The subject checkout, scratch, artifact export, and handoff paths must be disjoint.")
         file_count, tree_bytes = _extract_snapshot(archive_path, checkout)
         result["snapshotFileCount"] = file_count
         result["snapshotExpandedBytes"] = tree_bytes
@@ -1357,6 +1676,7 @@ def execute_handoff(
             subject_checkout=checkout,
             image_digest=image_digest,
             scratch_directory=scratch,
+            artifact_export_directory=artifact_export,
             profile_id=profile_id,
             source_diff=entries["source.diff"],
             source_diff_sha256=manifest["SourceDiffSha256"],
@@ -1368,16 +1688,32 @@ def execute_handoff(
             raise HandoffError("ASEHB009", "The bounded subject launcher returned a malformed exit code.")
         if subject_result.exit_code == 0 and not isinstance(execution_record, Mapping):
             raise HandoffError("ASEHB009", "A successful subject run omitted its fixed execution record.")
+        execution_receipt: dict[str, Any] | None = None
         if execution_record is not None:
             if not isinstance(execution_record, Mapping):
                 raise HandoffError("ASEHB009", "The bounded subject launcher returned a malformed execution record.")
+            if (subject_result.exit_code == 0 and execution_record.get("status") != "completed") or (
+                subject_result.exit_code != 0 and execution_record.get("status") == "completed"
+            ):
+                raise HandoffError("ASEHB009", "The bounded subject launcher returned a completion record inconsistent with its exit code.")
             try:
-                result["executionReceipt"] = _make_execution_receipt(
+                validated_record = _validate_subject_execution_record(
+                    execution_record,
+                    require_complete=subject_result.exit_code == 0,
+                )
+                execution_receipt = _make_execution_receipt(
                     execution_record,
                     _execution_receipt_binding(identity, manifest, profile_id),
                 )
             except HandoffError:
                 raise HandoffError("ASEHB009", "The bounded subject launcher returned invalid step proof.") from None
+            if subject_result.exit_code == 0:
+                _verify_subject_artifact_export(
+                    artifact_export,
+                    validated_record["artifacts"],
+                    code="ASEHB009",
+                    require_private=True,
+                )
         result.update(
             {
                 "execution": "completed" if subject_result.exit_code == 0 else "failed",
@@ -1390,20 +1726,33 @@ def execute_handoff(
             }
         )
         if subject_result.exit_code != 0:
+            if execution_receipt is not None:
+                result["executionReceipt"] = execution_receipt
             result["diagnostic"] = {"code": "ASEHB009", "message": "The credentialless subject profile exited unsuccessfully."}
         else:
+            assert execution_receipt is not None
+            result["executionReceipt"] = execution_receipt
             result["diagnostic"] = {"code": "ASEHB010", "message": "Subject execution completed without a trusted evidence verifier."}
+            retain_artifact_export = True
     except HandoffError as failure:
+        if artifact_export is not None:
+            _remove_subject_artifact_export(artifact_export)
         result["execution"] = "failed"
         result["diagnostic"] = {"code": failure.code, "message": failure.message}
     except Exception:
+        if artifact_export is not None:
+            _remove_subject_artifact_export(artifact_export)
         result["execution"] = "failed"
         result["diagnostic"] = {"code": "ASEHB011", "message": "The credentialless subject handoff failed closed."}
     try:
         _write_subject_result(result_destination, result)
     except HandoffError as failure:
+        if artifact_export is not None:
+            _remove_subject_artifact_export(artifact_export)
         print(f"{failure.code}: {failure.message}", file=sys.stderr)
         return 2
+    if not retain_artifact_export and artifact_export is not None:
+        _remove_subject_artifact_export(artifact_export)
     return 0 if result.get("execution") == "completed" else 2
 
 
@@ -1419,12 +1768,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     execute.add_argument("--handoff-directory", required=True)
     execute.add_argument("--subject-checkout", required=True)
     execute.add_argument("--scratch-directory", required=True)
+    execute.add_argument(
+        "--artifact-export-directory",
+        default=None,
+        help="New private output directory; required for the code-coverage profile.",
+    )
     execute.add_argument("--result", required=True)
     execute.add_argument("--image-digest", default=None)
     verify = subparsers.add_parser("verify", help="Bind the downloaded handoff to a fresh trusted PR recapture.")
     verify.add_argument("--handoff-directory", required=True)
     verify.add_argument("--fresh-capture-directory", required=True)
     verify.add_argument("--subject-result", required=True)
+    verify.add_argument(
+        "--subject-artifacts",
+        default=None,
+        help="Downloaded fixed coverage artifacts; required for code-coverage verification.",
+    )
     verify.add_argument("--output-plan", required=True)
     arguments = parser.parse_args(argv)
     try:
@@ -1443,6 +1802,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 fresh_capture_directory=arguments.fresh_capture_directory,
                 subject_result_file=arguments.subject_result,
                 output_plan=arguments.output_plan,
+                subject_artifacts_directory=arguments.subject_artifacts,
             )
             print("evidence-gate-handoff: current-revision handoff verified for trusted planning.")
             return 0
@@ -1453,6 +1813,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             handoff_directory=arguments.handoff_directory,
             subject_checkout=arguments.subject_checkout,
             scratch_directory=arguments.scratch_directory,
+            artifact_export_directory=arguments.artifact_export_directory,
             result_path=arguments.result,
             image_digest=arguments.image_digest,
             environment=environment,
