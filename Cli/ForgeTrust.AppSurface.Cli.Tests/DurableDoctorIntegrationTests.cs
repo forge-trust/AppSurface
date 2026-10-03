@@ -149,6 +149,31 @@ public sealed class DurableDoctorIntegrationTests
         Assert.Null(outcome.Observation);
     }
 
+    [Theory]
+    [InlineData("UPDATE appsurface_durable.schema_migration SET name = repeat('x', 100000) WHERE version = 1;")]
+    [InlineData("ALTER TABLE appsurface_durable.schema_migration DROP CONSTRAINT schema_migration_sha256_check; ALTER TABLE appsurface_durable.schema_migration ALTER COLUMN sha256 TYPE text; UPDATE appsurface_durable.schema_migration SET sha256 = repeat('a', 100000) WHERE version = 1;")]
+    public async Task Oversized_schema_catalog_values_produce_a_terminal_diagnosis_without_partial_facts(string mutation)
+    {
+        await using var fixture = await DurableDoctorFixture.CreateAsync();
+        await fixture.TrapPruneFunctionBodyAsync();
+        await fixture.MutateAsync(mutation);
+
+        // Exercise service classification and both CLI formats against the same corrupted store.
+        // The bounded reader must discard earlier credential/schema observations before emission.
+        var outcome = await AssertLiveRowAsync(fixture, MatrixRow("D27"));
+
+        Assert.Null(outcome.Observation);
+        Assert.Equal("ASDUR415", outcome.Result.Findings.Single().Code);
+        Assert.Equal(["catalog-contract"], outcome.Result.Findings.Single().FailedChecks);
+        Assert.Null(outcome.Result.Credential);
+        Assert.Null(outcome.Result.Schema);
+        Assert.Null(outcome.Result.Retention);
+        Assert.Null(outcome.Result.Worker);
+        Assert.Null(outcome.Result.StoreId);
+        Assert.Null(outcome.Result.ActiveRuntimeEpoch);
+        Assert.Null(outcome.Result.ObservedAtUtc);
+    }
+
     [Fact]
     public async Task Operator_workflow_probe_records_real_cli_timings_with_the_selected_connection_environment()
     {
@@ -485,6 +510,13 @@ public sealed class DurableDoctorIntegrationTests
         Assert.Equal(row.WorkerPair, root.GetProperty("requestedChecks").EnumerateArray().Last().GetProperty("requested").GetBoolean());
         AssertJsonAge(root);
         AssertJsonAction(row, root.GetProperty("nextAction"), staleAfter, format);
+        if (row.Id == "D27")
+        {
+            foreach (var property in new[] { "credential", "schema", "retention", "worker", "storeId", "activeRuntimeEpoch", "observedAtUtc" })
+            {
+                Assert.Equal(JsonValueKind.Null, root.GetProperty(property).ValueKind);
+            }
+        }
         if (row.TerminalCategories.Count > 0)
         {
             var categories = root.GetProperty("findings")[0].GetProperty("failedChecks").EnumerateArray()

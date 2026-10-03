@@ -65,6 +65,24 @@ public sealed class DurableDoctorCatalogTests
     }
 
     [Fact]
+    public async Task Catalog_readers_reject_null_connections_and_transactions_before_querying()
+    {
+        await using var fixture = await DurableDoctorFixture.CreateAsync();
+        await using var connection = new NpgsqlConnection(fixture.RuntimeConnectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead);
+
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await DurableDoctorCatalog.ReadCredentialAsync(null!, transaction, CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await DurableDoctorCatalog.ReadCredentialAsync(connection, null!, CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await DurableDoctorCatalog.ReadRetentionAsync(null!, transaction, CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await DurableDoctorCatalog.ReadRetentionAsync(connection, null!, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Canonical_runtime_credential_and_schema_eleven_retention_catalog_pass()
     {
         await using var fixture = await DurableDoctorFixture.CreateAsync();
@@ -138,6 +156,46 @@ public sealed class DurableDoctorCatalogTests
         await fixture.MutateAsync($"GRANT {grantedRole} TO {memberRole}");
 
         Assert.Equal(["role-membership"], await ReadCredentialAsync(fixture));
+    }
+
+    [Fact]
+    public async Task Inherited_execute_does_not_replace_the_explicit_runtime_acl_and_short_circuits_doctor()
+    {
+        await using var fixture = await DurableDoctorFixture.CreateAsync();
+        var runtime = QuoteIdentifier(fixture.RuntimeRole);
+        var inherited = QuoteIdentifier(fixture.DispatcherRole);
+        await fixture.MutateAsync($"""
+            REVOKE EXECUTE ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval,integer,text,uuid) FROM {runtime};
+            GRANT EXECUTE ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval,integer,text,uuid) TO {inherited};
+            GRANT {inherited} TO {runtime}
+            """);
+
+        await using (var connection = new NpgsqlConnection(fixture.RuntimeConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var privilege = new NpgsqlCommand("""
+                SELECT pg_catalog.has_function_privilege(current_user,
+                    'appsurface_durable.prune_runtime_heartbeats(interval,integer,text,uuid)', 'EXECUTE')
+                """, connection);
+            Assert.True((bool?)await privilege.ExecuteScalarAsync());
+        }
+        Assert.Equal(["function-execute"], await ReadRetentionAsync(fixture));
+        Assert.Equal(["role-membership"], await ReadCredentialAsync(fixture));
+
+        var request = fixture.CreateRequest();
+        var before = await fixture.ReadDurableStateFingerprintAsync();
+        var observation = await fixture.InspectAsync(request);
+        var result = DurableDoctorClassifier.Classify(request, observation);
+        Assert.Equal(["role-membership"], observation.CredentialFailures);
+        Assert.Null(observation.Schema);
+        Assert.Null(observation.RetentionFailures);
+        Assert.Equal("ASDUR408", result.Findings.Single().Code);
+        Assert.Equal(2, result.ExitCode);
+        Assert.Equal(before, await fixture.ReadDurableStateFingerprintAsync());
+
+        await fixture.MutateAsync($"REVOKE {inherited} FROM {runtime}; GRANT EXECUTE ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval,integer,text,uuid) TO {runtime}");
+        Assert.Empty(await ReadCredentialAsync(fixture));
+        Assert.Empty(await ReadRetentionAsync(fixture));
     }
 
     [Fact]

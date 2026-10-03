@@ -461,6 +461,50 @@ public sealed class DurableDoctorRendererTests
         Assert.Contains("Failed checks: role-ownership", text, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("json")]
+    [InlineData("text")]
+    public void Renderer_rejects_missing_prerequisites_and_actions_for_short_circuit_results(string format)
+    {
+        var request = DurableDoctorClassificationTests.CreateRequest(workerPair: false);
+        var clean = CreateCompatibleResult(request, ConfiguredEpoch, heartbeat: null);
+        var unsafeCredential = DurableDoctorClassifier.Classify(request, new DurableDoctorObservation(["role-ownership"]));
+        var schemaFailure = DurableDoctorClassifier.Classify(request, new DurableDoctorObservation([], new DurableRuntimeSchemaStatus(
+            DurableRuntimeSchemaCompatibility.UpgradeRequired, StoreId, ConfiguredEpoch,
+            10, 11, 1, 10, 1, 10, [.. Enumerable.Range(1, 10)], [11], null)));
+        var finding = schemaFailure.Findings.Single();
+        var malformed = new[]
+        {
+            Copy(clean, credential: null, replaceCredential: true),
+            Copy(clean, credential: clean.Credential! with { FailedChecks = ["role-ownership"] }),
+            Copy(clean, schema: null, replaceSchema: true),
+            Copy(clean, requestedChecks: ReplaceCheck(clean, 1, check => check with { Status = "finding" })),
+            Copy(clean, requestedChecks: ReplaceCheck(clean, 4, check => check with { Status = "not-checked" })),
+            Copy(unsafeCredential, credential: unsafeCredential.Credential! with { FailedChecks = [] }),
+            Copy(unsafeCredential, retention: clean.Retention, replaceRetention: true),
+            Copy(unsafeCredential, schema: clean.Schema, replaceSchema: true),
+            Copy(schemaFailure, requestedChecks: ReplaceCheck(schemaFailure, 1, check => check with { Status = "passed" })),
+            Copy(schemaFailure, storeId: null, replaceStoreId: true),
+            Copy(schemaFailure, findings: [finding with { FailedChecks = ["active-epoch"] }]),
+            Copy(schemaFailure, nextAction: finding.NextAction with { Command = null }),
+            Copy(schemaFailure, findings: [finding with { NextAction = finding.NextAction with { Command = null } }]),
+            Copy(clean, nextAction: clean.NextAction with
+            {
+                Command = new DurableDoctorCommandAction("appsurface", ["durable", "doctor", "--help"]),
+            }),
+        };
+
+        foreach (var candidate in malformed)
+        {
+            var exception = Assert.Throws<InvalidOperationException>(() => DurableDoctorRenderer.Render(candidate, request, format));
+            Assert.Equal("Durable doctor result does not satisfy the v1 rendering contract.", exception.Message);
+        }
+        using var document = JsonDocument.Parse(DurableDoctorRenderer.Render(clean, request, "json"));
+        Assert.Equal(0, document.RootElement.GetProperty("exitCode").GetInt32());
+        Assert.Contains("ASDUR408", DurableDoctorRenderer.Render(unsafeCredential, request, "text"), StringComparison.Ordinal);
+        Assert.Contains("ASDUR401", DurableDoctorRenderer.Render(schemaFailure, request, "text"), StringComparison.Ordinal);
+    }
+
     private static DurableDoctorResult Copy(
         DurableDoctorResult value,
         string? status = null,

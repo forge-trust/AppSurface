@@ -159,6 +159,21 @@ public sealed class DurableDoctorInstalledToolTests
             AssertDoctorProcessOutput(invalidRun, invalidRow, fixture.RuntimeConnectionString, "json", customConnectionName, customEpochName, null);
             Assert.Equal(invalidBefore, await fixture.ReadDurableStateFingerprintAsync(testDeadline.Token));
 
+            var invalidTextRun = await RunDoctorAsync(
+                installedExecutable, toolPath, processEnvironment,
+                customConnectionName, customEpochName, fixture.RuntimeConnectionString, fixture.RuntimeEpoch,
+                workerId: null, json: false, extraArguments: ["--unknown-issue801-sentinel"], testDeadline.Token);
+            Assert.False(invalidTextRun.TimedOut);
+            Assert.Equal(invalidRow.ExitCode, invalidTextRun.ExitCode);
+            AssertOutputDoesNotExposeSecrets(invalidTextRun, fixture.RuntimeConnectionString);
+            Assert.Empty(invalidTextRun.StandardError);
+            Assert.StartsWith("Diagnosis: invalid-input (exit 3)\n", invalidTextRun.StandardOutput, StringComparison.Ordinal);
+            Assert.EndsWith("\n", invalidTextRun.StandardOutput, StringComparison.Ordinal);
+            Assert.Contains("ASDUR413", invalidTextRun.StandardOutput, StringComparison.Ordinal);
+            Assert.Contains("'appsurface' 'durable' 'doctor' '--help'", invalidTextRun.StandardOutput, StringComparison.Ordinal);
+            Assert.DoesNotContain("--unknown-issue801-sentinel", invalidTextRun.StandardOutput, StringComparison.Ordinal);
+            Assert.Equal(invalidBefore, await fixture.ReadDurableStateFingerprintAsync(testDeadline.Token));
+
             var contractRow = Assert.Single(matrixRows, static row => row.Id == "D27");
             await fixture.MutateAsync(
                 "ALTER TABLE appsurface_durable.store_metadata RENAME COLUMN minimum_reader_version TO issue801_reader_contract_break",

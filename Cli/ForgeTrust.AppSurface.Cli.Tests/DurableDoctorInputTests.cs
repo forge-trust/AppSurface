@@ -380,6 +380,36 @@ public sealed class DurableDoctorInputTests
         Assert.Equal(4, document.RootElement.GetProperty("exitCode").GetInt32());
     }
 
+    [Theory]
+    [InlineData("unexpected doctor backend failure", false)]
+    [InlineData("unexpected doctor cancellation", true)]
+    public async Task Real_entrypoint_sanitizes_nonfatal_service_failures(string message, bool isCancellation)
+    {
+        using var connectionEnvironment = new EnvironmentVariableScope(
+            DurableDoctorInput.DefaultConnectionEnvironmentName,
+            DefaultConnection);
+        using var epochEnvironment = new EnvironmentVariableScope(
+            DurableDoctorInput.DefaultEpochEnvironmentName,
+            RuntimeEpoch.ToString("D"));
+        using var console = new FakeInMemoryConsole();
+        Exception failure = isCancellation
+            ? new OperationCanceledException(message)
+            : new InvalidOperationException(message);
+        var service = new SpyDoctorService(failure);
+
+        var run = await RunEntryPointAsync(["durable", "doctor", "--format=json"], console, service);
+
+        Assert.Equal(1, service.CallCount);
+        Assert.Equal(1, run.ExitCode);
+        Assert.Equal(string.Empty, run.Error);
+        Assert.Equal(string.Empty, run.RawError);
+        Assert.DoesNotContain(message, run.Output + run.Error + run.RawOutput + run.RawError, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(run.Output);
+        Assert.Equal("failed", document.RootElement.GetProperty("status").GetString());
+        Assert.Equal("catalog-contract", Assert.Single(document.RootElement.GetProperty("findings")[0]
+            .GetProperty("failedChecks").EnumerateArray()).GetString());
+    }
+
     [Fact]
     public async Task Real_entrypoint_help_discovers_doctor_without_resolving_environment_or_inspecting_store()
     {
