@@ -1,0 +1,84 @@
+name: Issue 779 private resource-backed qualification
+
+on:
+  push:
+    branches: [codex/issue779-private-qualification-20261003]
+
+permissions:
+  contents: read
+
+jobs:
+  qualification:
+    name: Real protected CLI and public Host, no claim
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - name: Checkout exact private harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.x
+      - name: Setup pnpm 11.1.3
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 11.1.3
+          run_install: false
+      - name: Setup Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+      - name: Freeze selected source under root ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          task_source="$RUNNER_TEMP/issue779-private-qualification-source"
+          git clone --quiet --no-hardlinks "$GITHUB_WORKSPACE" "$task_source"
+          git -C "$task_source" checkout --quiet --detach 383274c32fbaa36c46c170f5da310bd735df2ae6
+          test "$(git -C "$task_source" rev-parse HEAD)" = 383274c32fbaa36c46c170f5da310bd735df2ae6
+          test -z "$(git -C "$task_source" status --porcelain)"
+          sudo chown -R root:root "$task_source"
+      - name: Verify private data and process ownership controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/issue779-private-qualification-source"
+          timeout --signal=TERM --kill-after=5s 60s python3 -B -m unittest discover \
+            -s tests/evidencehost-consumer/PrivateQualification -p 'test_*.py' -v
+      - name: Execute one compiled qualification variant through both actual entries
+        shell: bash
+        run: |
+          set -euo pipefail
+          task_source="$RUNNER_TEMP/issue779-private-qualification-source"
+          sudo env "PATH=$PATH" python3 -B "$task_source/tests/evidencehost-consumer/PrivateQualification/run-qualification.py" \
+            --source-commit 383274c32fbaa36c46c170f5da310bd735df2ae6 \
+            --workflow-head "$GITHUB_SHA" \
+            --run-id "$GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT" \
+            --workflow-file .github/workflows/issue779-private-qualification.yml \
+            --output "$RUNNER_TEMP/issue779-private-qualification-root-output"
+      - name: Retain safe terminal receipt
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_receipt="$RUNNER_TEMP/issue779-private-qualification-root-output/qualification-receipt.json"
+          task_receipts="$RUNNER_TEMP/issue779-private-qualification-receipts"
+          mkdir -m 700 "$task_receipts"
+          if sudo test -f "$source_receipt"; then
+            sudo install -m 600 -o "$(id -u)" -g "$(id -g)" "$source_receipt" "$task_receipts/qualification-receipt.json"
+          fi
+          source_archive="$RUNNER_TEMP/issue779-private-qualification-root-output/private-diagnostics.tar"
+          if sudo test -f "$source_archive"; then
+            sudo install -m 600 -o "$(id -u)" -g "$(id -g)" "$source_archive" "$task_receipts/private-diagnostics.tar"
+          fi
+      - name: Upload terminal receipt
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: issue779-private-qualification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/issue779-private-qualification-receipts/
+          if-no-files-found: warn
+          retention-days: 7
