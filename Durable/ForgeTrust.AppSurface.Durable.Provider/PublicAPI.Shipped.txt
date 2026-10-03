@@ -45,6 +45,43 @@ type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWo
   property public System.String RuntimeEpoch { get: public; }
   property public System.String WorkName { get: public; }
   property public System.String WorkVersion { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationOutcomeKind : System.Int32
+  enum-member ActivationFailed = 7
+  enum-member Busy = 3
+  enum-member CanceledBeforeAdmission = 4
+  enum-member Completed = 6
+  enum-member Draining = 2
+  enum-member Incompatible = 1
+  enum-member PumpCanceled = 8
+  enum-member PumpFailed = 9
+  enum-member RequestBudgetExceeded = 5
+  enum-member Unavailable = 0
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationRequest : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationRequest>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationRequest(ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest pumpRequest, System.TimeSpan requestBudget)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationRequest <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationRequest? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationRequest? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationRequest? left, ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationRequest? right)
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpRequest PumpRequest { get: public; }
+  property public System.TimeSpan RequestBudget { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationResult : System.IEquatable<ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationResult>
+  constructor public ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationResult(ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationOutcomeKind kind, System.Nullable<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthState> observedHealthState, System.String? problemCode, ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpResult? pumpResult)
+  method public ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationResult <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationResult? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationResult? left, ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationResult? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationResult? left, ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationResult? right)
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationOutcomeKind Kind { get: public; }
+  property public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimePumpResult? PumpResult { get: public; }
+  property public System.Nullable<ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthState> ObservedHealthState { get: public; }
+  property public System.String? ProblemCode { get: public; }
+type public static class ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationServiceCollectionExtensions
+  method public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddDurableExternalActivation(this Microsoft.Extensions.DependencyInjection.IServiceCollection services)
 type public enum ForgeTrust.AppSurface.Durable.Provider.DurableFlowRepairAction : System.Int32
   enum-member AssertChildEffectCompleted = 0
   enum-member AssertChildEffectNotApplied = 1
@@ -701,6 +738,8 @@ type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableWorkSnaps
   property public System.String WorkName { get: public; }
   property public System.String WorkVersion { get: public; }
   property public System.String? TerminalCode { get: public; }
+type public interface ForgeTrust.AppSurface.Durable.Provider.IDurableExternalActivationService
+  method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationResult> ActivateAsync(ForgeTrust.AppSurface.Durable.Provider.DurableExternalActivationRequest request, System.Threading.CancellationToken callerCancellation = default)
 type public interface ForgeTrust.AppSurface.Durable.Provider.IDurableFlowRetentionClient
   method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableArchivePackageV1>> BuildArchivePackageAsync(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.Provider.DurableRetentionManifestId manifestId, System.Threading.CancellationToken cancellationToken = default)
   method public abstract System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableOperationResult<ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessment>> AssessAsync(ForgeTrust.AppSurface.Durable.Provider.DurableRetentionAssessmentRequest request, System.Threading.CancellationToken cancellationToken = default)

@@ -25,6 +25,11 @@ PostgreSQL-enforced row isolation by lane.
 | Custom pump implementer | [custom composition](#custom-composition) | The four-kind public algebra | One shared singleton under both pump interfaces |
 | Rollback operator | [rollback](#rollback-to-v020-preview8) | Reader/writer compatibility range | Stop/disable activation and deploy the selected binary |
 
+For an external wake endpoint that needs a separate cooperative request deadline and common outcome/telemetry mapping,
+use the canonical [external activation reference](external-activation-v1.md) and its
+[authenticated reference host](../examples/durable-external-activation/README.md). The direct-admission recipe below
+remains useful when a caller intentionally owns the provider's four-kind attempt contract.
+
 This case is provider-first. Apply only migrations embedded in the exact package you are deploying, and verify
 `PostgreSqlDurableRuntimeSchemaManager.RequiredVersion` before rollout. The #794 package embeds
 `0010_runtime_health_observation.sql`; registration remains passive and never applies it.
@@ -54,6 +59,13 @@ Console.WriteLine(
 heartbeat. `Draining` may remain activation-compatible while refusing a new pass. `Unavailable` fails closed for
 activation because compatibility was not established. `Healthy` with either compatibility flag false is also not
 activatable; synthetic snapshots must fail closed through the computed predicates.
+
+Before the first heartbeat, the PostgreSQL provider can return `State=NotStarted` with `ProblemCode=ASDUR404` because
+worker identity, heartbeat time, or active heartbeat epoch has not yet been observed. That is a valid initial health
+assessment, not a reason to rewrite provider state: `CanEnableActivation` may be true while `IsReady` remains false.
+Host-owned assessment responses preserve the observed state and code. External activation results retain `ASDUR404` or
+`ASDUR405` only for `Stale`; a successful `NotStarted` precheck omits the initial `ASDUR404` from the activation result.
+See the canonical [result validation matrix](external-activation-v1.md#closed-outcomes-and-host-status-mapping).
 
 `ObservedAtUtc` is a timestamp for the assessment: database statement time for an observed store, process time for an
 `Unavailable` assessment. Use `WasStoreObserved` as the provenance signal.
@@ -144,7 +156,9 @@ item-level external effects. Caller cancellation, exceptions escaping applicatio
 state, and finalization failures propagate. `Try` does not mean “never throws.”
 
 Existing hosts may continue using `IDurableRuntimePump.RunOnceAsync`; its source and binary shape remain supported.
-External activators should adopt `IDurableRuntimePumpAdmission` when they need execution certainty.
+External activators may keep direct `IDurableRuntimePumpAdmission` calls when they intentionally own the four-kind
+result mapping. A host adopting the standard health/deadline/outcome/telemetry lifecycle should use
+[`IDurableExternalActivationService`](external-activation-v1.md#existing-host-migration).
 
 Expected output is one and only one attempt classification:
 
