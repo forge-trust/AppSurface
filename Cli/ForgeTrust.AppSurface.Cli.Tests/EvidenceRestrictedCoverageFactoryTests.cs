@@ -91,6 +91,20 @@ public sealed class EvidenceRestrictedCoverageFactoryTests
         Assert.Equal("declaration", Assert.Throws<ArgumentNullException>(() => EvidenceRestrictedCoverageProducerFactory.Create(null!)).ParamName);
     }
 
+    [Fact]
+    public void ThrowingDeclarationCollectionBecomesSafeMetadataFailureWithoutIssuingALease()
+    {
+        var declaration = Declaration();
+        var plan = Plan(declaration);
+        var admission = new EvidenceAdmissionResult(plan, EvidenceExecutionMode.Observation, "fixture/1", null);
+        admission.Activate("metadata-only-not-a-real-output");
+        EvidenceRestrictedProducerLease.ValidateMetadata(admission, plan, declaration, "fixture/1");
+        var malformed = declaration with { RequiredResources = new ThrowingMetadataList() };
+        Assert.Contains(Canary, Assert.Throws<ArgumentException>(() => EvidenceCanonicalJson.Serialize(malformed)).Message);
+        AssertSafe(Assert.Throws<EvidenceAdmissionException>(() => EvidenceRestrictedProducerLease.ValidateMetadata(
+            admission, plan, malformed, "fixture/1")), "ASEVD410");
+    }
+
     [Theory]
     [InlineData("inactive")]
     [InlineData("latched")]
@@ -230,6 +244,14 @@ public sealed class EvidenceRestrictedCoverageFactoryTests
     {
         Assert.Equal(code, error.Code); Assert.DoesNotContain(Canary, error.Message); Assert.Null(error.InnerException);
     }
+    private sealed class ThrowingMetadataList : IReadOnlyList<string>
+    {
+        public int Count => 1;
+        public string this[int index] => throw new ArgumentException(Canary);
+        public IEnumerator<string> GetEnumerator() => throw new ArgumentException(Canary);
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
     private sealed class MetadataSupervisor : IEvidenceExecutionSupervisor
     {
         public bool IsArmed => true;
