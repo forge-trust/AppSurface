@@ -347,6 +347,27 @@ assert_body_contains() {
   fi
 }
 
+# Extract only one bounded synthetic ID into a private variable. Never print
+# arbitrary page values or persist raw HTTP bodies in failure evidence.
+read_candidate_id() {
+  local name="$1"
+  local matches
+  matches="$(grep -oE 'data-candidate-id="[a-zA-Z0-9_-]{1,64}"' "$work_dir/$name.body" || true)"
+  if [[ -z "$matches" || "$matches" == *$'\n'* ]]; then
+    fail "HTTP_PROOF" "HTTP_CONTRACT_FAILED" 5 "The candidate identity assertion failed." "The page did not expose exactly one bounded synthetic ID." "Inspect the candidate page contract without printing its payload."
+  fi
+  matches="${matches#data-candidate-id=\"}"
+  printf '%s' "${matches%\"}"
+}
+
+assert_same_candidate() {
+  local actual
+  actual="$(read_candidate_id "$1")"
+  if [[ "$actual" != "$candidate_id" ]]; then
+    fail "HTTP_PROOF" "HTTP_CONTRACT_FAILED" 5 "The shared candidate assertion failed." "Persona activation changed the synthetic candidate identity." "Inspect the host scenario ensure operation without printing page values."
+  fi
+}
+
 assert_body_order() {
   local name="$1"
   shift
@@ -479,6 +500,49 @@ request "viewer-proof" "GET" "/api/auth-proof"
 assert_status "viewer-proof" "403"
 assert_body_contains "viewer-proof" '"appsurfaceAuthOutcome":"Forbid"'
 echo "[stage=HTTP_PROOF] Viewer landing and operator forbid passed"
+
+request "select-labeler" "POST" "/_appsurface/dev-auth/select/labeler"
+assert_status "select-labeler" "302"
+assert_header_equals "select-labeler" "Location: /candidate/label"
+request "label-ready" "GET" "/candidate/label"
+assert_status "label-ready" "200"
+assert_body_contains "label-ready" "Fixtures ready"
+assert_body_contains "label-ready" "Labeling: pending"
+assert_body_contains "label-ready" "Review: pending"
+candidate_id="$(read_candidate_id "label-ready")"
+request "label-complete" "POST" "/candidate/label/complete"
+assert_status "label-complete" "303"
+assert_header_equals "label-complete" "Location: /candidate/label"
+
+request "select-reviewer" "POST" "/_appsurface/dev-auth/select/reviewer"
+assert_status "select-reviewer" "302"
+assert_header_equals "select-reviewer" "Location: /candidate/review"
+request "review-ready" "GET" "/candidate/review"
+assert_status "review-ready" "200"
+assert_body_contains "review-ready" "Fixtures ready"
+assert_body_contains "review-ready" "Labeling: completed"
+assert_body_contains "review-ready" "Review: pending"
+assert_same_candidate "review-ready"
+request "review-complete" "POST" "/candidate/review/complete"
+assert_status "review-complete" "303"
+assert_header_equals "review-complete" "Location: /candidate/review"
+
+for round in 1 2; do
+  for role in labeler reviewer; do
+    if [[ "$role" == "labeler" ]]; then page=label; else page=review; fi
+    name="repeat-$role-$round"
+    request "$name-select" "POST" "/_appsurface/dev-auth/select/$role"
+    assert_status "$name-select" "302"
+    assert_header_equals "$name-select" "Location: /candidate/$page"
+    request "$name" "GET" "/candidate/$page"
+    assert_status "$name" "200"
+    assert_body_contains "$name" "Fixtures ready"
+    assert_body_contains "$name" "Labeling: completed"
+    assert_body_contains "$name" "Review: completed"
+    assert_same_candidate "$name"
+  done
+done
+echo "[stage=HTTP_PROOF] Shared candidate, independent work, and repeated persona switches passed"
 
 request "clear" "POST" "/_appsurface/dev-auth/clear"
 assert_status "clear" "200"
