@@ -136,6 +136,13 @@ public sealed class DurableDoctorInputTests
         Assert.Throws<DurableDoctorInputException>(() =>
             DurableDoctorInput.ParseDuration(token, TimeSpan.Zero, TimeSpan.MaxValue));
 
+    [Theory]
+    [InlineData(".5s")]
+    [InlineData("1.s")]
+    public void ParseDuration_requires_digits_on_both_sides_of_a_decimal_point(string token) =>
+        Assert.Throws<DurableDoctorInputException>(() =>
+            DurableDoctorInput.ParseDuration(token, TimeSpan.Zero, TimeSpan.MaxValue));
+
     [Fact]
     public void ParseDuration_rejects_oversized_and_overflowing_tokens()
     {
@@ -143,6 +150,10 @@ public sealed class DurableDoctorInputTests
             DurableDoctorInput.ParseDuration(new string('9', 64) + "h", TimeSpan.Zero, TimeSpan.MaxValue));
         Assert.Throws<DurableDoctorInputException>(() =>
             DurableDoctorInput.ParseDuration(new string('1', 65) + "s", TimeSpan.Zero, TimeSpan.MaxValue));
+        Assert.Throws<DurableDoctorInputException>(() =>
+            DurableDoctorInput.ParseDuration("1s", TimeSpan.FromTicks(-1), TimeSpan.FromSeconds(1)));
+        Assert.Throws<DurableDoctorInputException>(() =>
+            DurableDoctorInput.ParseDuration("1s", TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(1)));
     }
 
     [Fact]
@@ -182,6 +193,7 @@ public sealed class DurableDoctorInputTests
         }
 
         Assert.Equal(new string('a', 200), CreateInput(workerId: new string('a', 200), staleAfter: "1s").Request.WorkerId);
+        Assert.Equal("AZaz09-_.:", CreateInput(workerId: "AZaz09-_.:", staleAfter: "1s").Request.WorkerId);
         foreach (var worker in new[] { "", " worker", "worker ", "worker/name", "wörker", new string('a', 201) })
         {
             Assert.Throws<DurableDoctorInputException>(() => CreateInput(workerId: worker, staleAfter: "1s"));
@@ -222,6 +234,12 @@ public sealed class DurableDoctorInputTests
             Assert.False(result.IsMalformed);
         }
         Assert.False(DurableDoctorArgumentAdmission.Inspect(["durable", "schema"]).IsDoctor);
+
+        var nonDoctorArguments = new[] { "durable", "schema", "--format=json" };
+        Assert.Same(nonDoctorArguments, DurableDoctorArgumentAdmission.NormalizeJoinedValueOptions(nonDoctorArguments));
+        Assert.Equal(
+            ["durable doctor", "--timeout", "1.5s"],
+            DurableDoctorArgumentAdmission.NormalizeJoinedValueOptions(["durable doctor", "--timeout=1.5s"]));
     }
 
     [Fact]
@@ -239,6 +257,8 @@ public sealed class DurableDoctorInputTests
             ["--", "--format", "json"],
             ["unexpected"],
             ["--timeout=1s", "--timeout=2s"],
+            ["--format="],
+            ["--format"],
         };
 
         foreach (var tail in malformedArguments)
@@ -283,6 +303,24 @@ public sealed class DurableDoctorInputTests
         using var document = JsonDocument.Parse(run.Output);
         Assert.Equal("invalid-input", document.RootElement.GetProperty("status").GetString());
         Assert.Equal(3, document.RootElement.GetProperty("exitCode").GetInt32());
+    }
+
+    [Fact]
+    public async Task Real_entrypoint_converts_a_failing_configured_admission_sink_to_exit_one()
+    {
+        using var output = new ThrowingWriteStream();
+        using var console = new FakeConsole(Stream.Null, output, Stream.Null);
+        var run = await RunEntryPointAsync(
+            ["durable", "doctor", "--unknown=" + MalformedArgumentSecret],
+            console,
+            readStreams: static () => (string.Empty, string.Empty));
+
+        Assert.Equal(1, run.ExitCode);
+        Assert.Equal(1, output.WriteCount);
+        Assert.Equal(string.Empty, run.Output);
+        Assert.Equal(string.Empty, run.Error);
+        Assert.Equal(string.Empty, run.RawOutput);
+        Assert.Equal(string.Empty, run.RawError);
     }
 
     [Fact]
@@ -617,6 +655,44 @@ public sealed class DurableDoctorInputTests
         {
             WriteCount++;
             return Task.FromException(new IOException("private sink failure"));
+        }
+    }
+
+    private sealed class ThrowingWriteStream : Stream
+    {
+        private int _writeCount;
+
+        internal int WriteCount => Volatile.Read(ref _writeCount);
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            Interlocked.Increment(ref _writeCount);
+            throw new IOException("private sink failure");
+        }
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _writeCount);
+            return ValueTask.FromException(new IOException("private sink failure"));
         }
     }
 }

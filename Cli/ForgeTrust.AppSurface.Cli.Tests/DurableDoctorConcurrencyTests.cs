@@ -74,9 +74,13 @@ public sealed class DurableDoctorConcurrencyTests
         var accepted = listener.AcceptTcpClientAsync(testDeadline.Token);
         var settings = new NpgsqlConnectionStringBuilder
         {
-            Host = "127.0.0.1", Port = ((IPEndPoint)listener.LocalEndpoint).Port,
-            Database = "doctor", Username = "doctor", Password = "private-password-sentinel",
-            SslMode = SslMode.Disable, Timeout = 5
+            Host = "127.0.0.1",
+            Port = ((IPEndPoint)listener.LocalEndpoint).Port,
+            Database = "doctor",
+            Username = "doctor",
+            Password = "private-password-sentinel",
+            SslMode = SslMode.Disable,
+            Timeout = 5
         };
         var request = new DurableDoctorRequest(Guid.Parse("88164257-2a2f-42b4-9832-18a649888801"),
             DurableDoctorFixture.ConnectionEnvironmentName, DurableDoctorFixture.EpochEnvironmentName,
@@ -282,6 +286,7 @@ public sealed class DurableDoctorConcurrencyTests
     [Theory]
     [InlineData((int)DurableDoctorStage.Unlock)]
     [InlineData((int)DurableDoctorStage.Close)]
+    [InlineData((int)DurableDoctorStage.Closed)]
     public async Task Successful_reads_with_uncertain_cleanup_cannot_return_success(int stageValue)
     {
         var brokenStage = (DurableDoctorStage)stageValue;

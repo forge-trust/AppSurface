@@ -194,6 +194,20 @@ public sealed class DurableDiagnosticCatalogTests
         }
     }
 
+    // Value: protects=canonical diagnostic links require absolute HTTPS; fails_when=unsafe documentation destinations enter the catalog; why_new=existing cases verify only the catalog's valid entries; seam=DurableDiagnosticDescriptor
+    [Theory]
+    [InlineData(null)]
+    [InlineData("relative-guide")]
+    [InlineData("http://example.test/guide")]
+    [InlineData("ftp://example.test/guide")]
+    public void Descriptor_rejects_missing_relative_or_non_https_documentation(string? destination)
+    {
+        var uri = destination is null ? null : new Uri(destination, UriKind.RelativeOrAbsolute);
+        var exception = Assert.ThrowsAny<ArgumentException>(() =>
+            new DurableDiagnosticDescriptor("ASDUR801", "Problem", "Cause", "Fix", uri!));
+        Assert.Equal("documentationUrl", exception.ParamName);
+    }
+
     private static DurableDiagnosticDescriptor GetDescriptor(string code)
     {
         Assert.True(DurableDiagnosticCatalog.TryGet(code, out var descriptor));

@@ -258,6 +258,44 @@ public sealed class PostgreSqlStatusTransactionTests
         await transaction.RollbackAsync();
     }
 
+    // Value: protects=doctor rejects a malformed executing catalog before database reads; fails_when=empty or noncanonical names are accepted; why_new=the existing bound test covers only catalog length; seam=PostgreSqlDurableRuntimeSchemaManager
+    [Theory]
+    [InlineData("")]
+    [InlineData("not-canonical")]
+    [InlineData("UPPERCASE")]
+    [InlineData("migratiön")]
+    public async Task ReadDoctorStatusInTransactionAsync_RejectsNoncanonicalExecutingCatalog(string name)
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await using var connection = await database.DataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var catalog = CreateMigrations(1);
+        var original = catalog[0];
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource,
+            [original with { Name = name }]);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await manager.ReadDoctorStatusInTransactionAsync(connection, transaction, CancellationToken.None));
+        Assert.Equal("The durable doctor schema status exceeded its bounded contract.", exception.Message);
+        Assert.Same(connection, transaction.Connection);
+        await transaction.RollbackAsync();
+    }
+
+    [Fact]
+    public async Task ReadDoctorStatusInTransactionAsync_RejectsEmptyExecutingCatalog()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await using var connection = await database.DataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource, []);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await manager.ReadDoctorStatusInTransactionAsync(connection, transaction, CancellationToken.None));
+        Assert.Equal("The durable doctor schema status exceeded its bounded contract.", exception.Message);
+        Assert.Same(connection, transaction.Connection);
+        await transaction.RollbackAsync();
+    }
+
     [Fact]
     public async Task ReadDoctorStatusInTransactionAsync_RejectsTheSixtyFifthRowBeforeRetainingIt()
     {

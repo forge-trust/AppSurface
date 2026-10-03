@@ -185,6 +185,18 @@ public sealed class PostgreSqlDurableFailureClassifierTests
         Assert.Same(Diagnostic(expectedProblemCode), classification.Diagnostic);
     }
 
+    // Value: protects=schema problem adapter preserves canonical diagnostic codes; fails_when=health consumers lose the exact incompatibility; why_new=classification tests do not call this adapter; seam=ProblemForSchema
+    [Theory]
+    [InlineData(DurableRuntimeSchemaCompatibility.Missing, DurableProblemCodes.SchemaMissing)]
+    [InlineData(DurableRuntimeSchemaCompatibility.UpgradeRequired, DurableProblemCodes.SchemaUpgradeRequired)]
+    [InlineData(DurableRuntimeSchemaCompatibility.StoreTooNew, DurableProblemCodes.SchemaVersionUnsupported)]
+    [InlineData(DurableRuntimeSchemaCompatibility.Inconsistent, DurableProblemCodes.SchemaInconsistent)]
+    public void Schema_problem_adapter_preserves_the_canonical_descriptor_code(
+        DurableRuntimeSchemaCompatibility compatibility, string expectedCode)
+    {
+        Assert.Equal(expectedCode, PostgreSqlDurableFailureClassifier.ProblemForSchema(compatibility));
+    }
+
     [Theory]
     [InlineData(DurableProblemCodes.RecoveryEpochRequired)]
     [InlineData(DurableProblemCodes.SchemaMissing)]
