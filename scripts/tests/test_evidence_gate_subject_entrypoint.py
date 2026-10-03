@@ -112,6 +112,15 @@ class FixedOfflineSubjectEntrypointTests(unittest.TestCase):
         self.make_feed(feed)
         return subject, scratch, feed
 
+    @staticmethod
+    def make_coverage_artifacts(scratch: Path, *, omit: str | None = None) -> None:
+        for logical_name, relative_path, _maximum_bytes in entrypoint.REQUIRED_ARTIFACTS:
+            if logical_name == omit:
+                continue
+            path = scratch / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(f"artifact:{logical_name}\n".encode("ascii"))
+
     def test_invocation_accepts_only_the_launcher_fixed_contract(self) -> None:
         digest = hashlib.sha256(b"captured unified diff\n").hexdigest()
         invocation = entrypoint.parse_invocation(
@@ -413,6 +422,8 @@ class FixedOfflineSubjectEntrypointTests(unittest.TestCase):
                     return process_result(stdout=b"10.0.100\n")
                 if arguments == ["dotnet", "--list-runtimes"]:
                     return process_result(stdout=b"Microsoft.NETCore.App 10.0.2 [/usr/share/dotnet/shared/Microsoft.NETCore.App]\n")
+                if "coverage" in arguments and "gate" in arguments:
+                    self.make_coverage_artifacts(scratch)
                 return process_result()
 
             with self.patch_paths(subject, scratch, feed):
@@ -456,7 +467,88 @@ class FixedOfflineSubjectEntrypointTests(unittest.TestCase):
                 ["dotnet-sdk-version", "dotnet-runtime-list", "offline-locked-restore", "coverage-run", "coverage-gate"],
                 [step["name"] for step in result["steps"]],
             )
+            self.assertEqual(
+                [
+                    {
+                        "logicalName": logical_name,
+                        "relativePath": relative_path,
+                        "byteCount": len(f"artifact:{logical_name}\n".encode("ascii")),
+                        "sha256": hashlib.sha256(f"artifact:{logical_name}\n".encode("ascii")).hexdigest(),
+                    }
+                    for logical_name, relative_path, _maximum_bytes in entrypoint.REQUIRED_ARTIFACTS
+                ],
+                result["artifacts"],
+            )
             self.assertLessEqual(len(result_bytes), entrypoint.MAX_RESULT_BYTES)
+
+    def test_missing_required_coverage_artifact_fails_without_artifact_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary).resolve()
+            subject, scratch, feed = self.prepared_roots(parent)
+            self.make_subject(subject)
+
+            def runner(arguments: list[str], **_options: object) -> entrypoint.ProcessResult:
+                if arguments == ["dotnet", "--version"]:
+                    return process_result(stdout=b"10.0.100\n")
+                if arguments == ["dotnet", "--list-runtimes"]:
+                    return process_result(stdout=b"Microsoft.NETCore.App 10.0.2 [/dotnet]\n")
+                if "coverage" in arguments and "gate" in arguments:
+                    self.make_coverage_artifacts(scratch, omit="diagnostics")
+                return process_result()
+
+            with self.patch_paths(subject, scratch, feed):
+                code = entrypoint.execute(
+                    self.invocation(),
+                    mountinfo_text=self.mountinfo(subject, scratch, feed),
+                    effective_uid=os.geteuid(),
+                    runner=runner,
+                )
+            result = json.loads((scratch / entrypoint.RESULT_RELATIVE_PATH).read_text(encoding="ascii"))
+            self.assertEqual(2, code)
+            self.assertEqual("failed", result["status"])
+            self.assertFalse(result["claimEligible"])
+            self.assertNotIn("artifacts", result)
+            self.assertEqual("ASESE013", result["diagnostic"]["code"])
+
+    def test_artifact_index_rejects_symlink_oversize_and_concurrent_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            scratch = Path(temporary).resolve()
+            self.make_coverage_artifacts(scratch)
+
+            symlink_name, symlink_relative, _ = entrypoint.REQUIRED_ARTIFACTS[0]
+            symlink_path = scratch / symlink_relative
+            target = scratch / "trusted-target.xml"
+            target.write_bytes(b"target\n")
+            symlink_path.unlink()
+            symlink_path.symlink_to(target)
+            with self.assertRaises(entrypoint.EntrypointError) as symlink_failure:
+                entrypoint._build_artifact_index(scratch, deadline=time.monotonic() + 5)
+            self.assertEqual("ASESE013", symlink_failure.exception.code)
+
+            symlink_path.unlink()
+            symlink_path.write_bytes(b"x" * (entrypoint.MAX_COBERTURA_ARTIFACT_BYTES + 1))
+            with self.assertRaises(entrypoint.EntrypointError) as oversized_failure:
+                entrypoint._build_artifact_index(scratch, deadline=time.monotonic() + 5)
+            self.assertEqual("ASESE013", oversized_failure.exception.code)
+
+            symlink_path.write_bytes(b"stable content\n")
+            original_read = entrypoint.os.read
+            changed = False
+
+            def mutate_during_read(descriptor: int, count: int) -> bytes:
+                nonlocal changed
+                data = original_read(descriptor, count)
+                info = os.fstat(descriptor)
+                if not changed and (info.st_dev, info.st_ino) == (symlink_path.stat().st_dev, symlink_path.stat().st_ino):
+                    changed = True
+                    symlink_path.write_bytes(b"mutant content\n")
+                return data
+
+            with mock.patch.object(entrypoint.os, "read", side_effect=mutate_during_read):
+                with self.assertRaises(entrypoint.EntrypointError) as mutation_failure:
+                    entrypoint._build_artifact_index(scratch, deadline=time.monotonic() + 5)
+            self.assertTrue(changed)
+            self.assertEqual("ASESE013", mutation_failure.exception.code)
 
     def test_restore_failure_does_not_claim_coverage_or_run_coverage_commands(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -586,7 +678,16 @@ class FixedOfflineSubjectEntrypointTests(unittest.TestCase):
                     hashlib.sha256(b"captured unified diff\n").hexdigest(),
                     True,
                 )
-                expected = entrypoint._make_result(status, [], diagnostic=diagnostic)
+                artifacts = [
+                    {
+                        "logicalName": logical_name,
+                        "relativePath": relative_path,
+                        "byteCount": 1,
+                        "sha256": "a" * 64,
+                    }
+                    for logical_name, relative_path, _maximum_bytes in entrypoint.REQUIRED_ARTIFACTS
+                ] if status == "completed" else None
+                expected = entrypoint._make_result(status, [], artifacts=artifacts, diagnostic=diagnostic)
                 captured = CapturedStdout()
 
                 def write_record(_invocation: entrypoint.Invocation) -> int:

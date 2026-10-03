@@ -77,9 +77,17 @@ MAX_PROFILE_SCRATCH_BYTES = 4 * 1024 * 1024 * 1024
 MAX_PROFILE_SCRATCH_INODES = 262_144
 MAX_SUBJECT_RESULT_BYTES = 16 * 1024
 MAX_SOURCE_DIFF_BYTES = 20 * 1024 * 1024
+MAX_COBERTURA_ARTIFACT_BYTES = 20 * 1024 * 1024
+MAX_GATE_MARKDOWN_ARTIFACT_BYTES = 1 * 1024 * 1024
+MAX_GATE_JSON_ARTIFACT_BYTES = 4 * 1024 * 1024
 MIN_OUTPUT_BYTES = 4096
 SOURCE_DIFF_CONTAINER_PATH = "/source.diff"
 SOURCE_DIFF_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
+SUBJECT_ARTIFACTS = (
+    ("cobertura", "coverage/coverage-merged/coverage.cobertura.xml", MAX_COBERTURA_ARTIFACT_BYTES),
+    ("gate-report", "coverage/coverage-gate/coverage-gate.md", MAX_GATE_MARKDOWN_ARTIFACT_BYTES),
+    ("diagnostics", "coverage/coverage-gate/coverage-gate.json", MAX_GATE_JSON_ARTIFACT_BYTES),
+)
 IMAGE_REFERENCE_PATTERN = re.compile(r"[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}\Z")
 RUN_ID_PATTERN = re.compile(r"[1-9][0-9]{0,18}\Z")
 RUN_ATTEMPT_PATTERN = re.compile(r"[1-9][0-9]{0,8}\Z")
@@ -1314,6 +1322,8 @@ def _validate_subject_result_content(content: bytes, *, expected_status: str) ->
     expected_keys = {"claimEligible", "profileId", "schemaVersion", "status", "steps"}
     if status == "failed":
         expected_keys.add("diagnostic")
+    elif status == "completed":
+        expected_keys.add("artifacts")
     if (
         set(value) != expected_keys
         or value.get("claimEligible") is not False
@@ -1364,6 +1374,8 @@ def _validate_subject_result_content(content: bytes, *, expected_status: str) ->
             or not isinstance(diagnostic.get("message"), str)
         ):
             raise _fail("ASEGS018", "The failed subject result omitted its typed diagnostic.")
+    else:
+        _validate_subject_artifacts(value.get("artifacts"))
     try:
         canonical = (json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True) + "\n").encode("ascii")
     except (TypeError, ValueError, RecursionError):
@@ -1371,6 +1383,23 @@ def _validate_subject_result_content(content: bytes, *, expected_status: str) ->
     if content != canonical:
         raise _fail("ASEGS018", "The exported subject result is not canonical; no claim may be issued.")
     return value
+
+
+def _validate_subject_artifacts(value: Any) -> None:
+    if not isinstance(value, list) or len(value) != len(SUBJECT_ARTIFACTS):
+        raise _fail("ASEGS018", "The completed subject result omitted its fixed coverage artifact index.")
+    for artifact, (logical_name, relative_path, maximum_bytes) in zip(value, SUBJECT_ARTIFACTS, strict=True):
+        if (
+            not isinstance(artifact, dict)
+            or set(artifact) != {"logicalName", "relativePath", "byteCount", "sha256"}
+            or artifact.get("logicalName") != logical_name
+            or artifact.get("relativePath") != relative_path
+            or type(artifact.get("byteCount")) is not int
+            or not 0 < artifact["byteCount"] <= maximum_bytes
+            or not isinstance(artifact.get("sha256"), str)
+            or SUBJECT_STEP_DIGEST_PATTERN.fullmatch(artifact["sha256"]) is None
+        ):
+            raise _fail("ASEGS018", "The completed subject result contains an unsafe or malformed coverage artifact index.")
 
 
 def _write_subject_result_export(scratch: Path, content: bytes) -> None:

@@ -134,6 +134,15 @@ class FakeExecutor:
             for name in subject.SUBJECT_RESULT_STEP_NAMES
         ]
         value = {
+            "artifacts": [
+                {
+                    "logicalName": logical_name,
+                    "relativePath": relative_path,
+                    "byteCount": 1,
+                    "sha256": "0" * 64,
+                }
+                for logical_name, relative_path, _maximum_bytes in subject.SUBJECT_ARTIFACTS
+            ],
             "claimEligible": False,
             "profileId": "code-coverage",
             "schemaVersion": 1,
@@ -414,6 +423,34 @@ class EvidenceGateSubjectTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
+
+    def test_completed_subject_result_requires_exact_bounded_artifact_index(self) -> None:
+        valid = json.loads(FakeExecutor.successful_subject_record())
+        mutations = (
+            lambda value: value.pop("artifacts"),
+            lambda value: value["artifacts"].__setitem__(1, dict(value["artifacts"][0])),
+            lambda value: value["artifacts"].reverse(),
+            lambda value: value["artifacts"][0].update(relativePath="../coverage.cobertura.xml"),
+            lambda value: value["artifacts"][2].update(byteCount=subject.MAX_GATE_JSON_ARTIFACT_BYTES + 1),
+            lambda value: value["artifacts"][1].update(sha256="A" * 64),
+        )
+        for index, mutate in enumerate(mutations):
+            with self.subTest(mutation=index):
+                result = json.loads(json.dumps(valid))
+                mutate(result)
+                content = (json.dumps(result, separators=(",", ":"), sort_keys=True) + "\n").encode("ascii")
+                with self.assertRaises(subject.SubjectLauncherError) as caught:
+                    subject._validate_subject_result_content(content, expected_status="completed")
+                self.assertEqual("ASEGS018", caught.exception.code)
+
+    def test_failed_subject_result_cannot_carry_artifact_index(self) -> None:
+        result = json.loads(FakeExecutor.successful_subject_record())
+        result["status"] = "failed"
+        result["diagnostic"] = {"code": "ASESE013", "message": "artifact missing"}
+        content = (json.dumps(result, separators=(",", ":"), sort_keys=True) + "\n").encode("ascii")
+        with self.assertRaises(subject.SubjectLauncherError) as caught:
+            subject._validate_subject_result_content(content, expected_status="failed")
+        self.assertEqual("ASEGS018", caught.exception.code)
 
     def launch(self, **overrides: object) -> subject.SubjectRunResult:
         arguments: dict[str, object] = {

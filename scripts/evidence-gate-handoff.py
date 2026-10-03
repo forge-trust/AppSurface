@@ -36,6 +36,9 @@ from typing import Any, Mapping, Sequence
 
 
 MAX_SOURCE_DIFF_BYTES = 20 * 1024 * 1024
+MAX_COBERTURA_ARTIFACT_BYTES = 20 * 1024 * 1024
+MAX_GATE_MARKDOWN_ARTIFACT_BYTES = 1 * 1024 * 1024
+MAX_GATE_JSON_ARTIFACT_BYTES = 4 * 1024 * 1024
 MAX_EVIDENCE_PLAN_BYTES = 4 * 1024 * 1024
 MAX_SNAPSHOT_ARCHIVE_BYTES = 256 * 1024 * 1024
 MAX_SNAPSHOT_EXPANDED_BYTES = 256 * 1024 * 1024
@@ -49,6 +52,11 @@ MAX_TOTAL_HANDOFF_BYTES = MAX_SOURCE_DIFF_BYTES + MAX_EVIDENCE_PLAN_BYTES + MAX_
 MAX_GIT_STDERR_BYTES = 4096
 SHA_PATTERN = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
+SUBJECT_ARTIFACTS = (
+    ("cobertura", "coverage/coverage-merged/coverage.cobertura.xml", MAX_COBERTURA_ARTIFACT_BYTES),
+    ("gate-report", "coverage/coverage-gate/coverage-gate.md", MAX_GATE_MARKDOWN_ARTIFACT_BYTES),
+    ("diagnostics", "coverage/coverage-gate/coverage-gate.json", MAX_GATE_JSON_ARTIFACT_BYTES),
+)
 POSITIVE_DECIMAL_PATTERN = re.compile(r"[1-9][0-9]{0,18}\Z")
 SUBJECT_RESULT_STEP_NAMES = (
     "dotnet-sdk-version",
@@ -98,6 +106,8 @@ def _validate_subject_execution_record(
     expected_keys = {"claimEligible", "profileId", "schemaVersion", "status", "steps"}
     if status == "failed":
         expected_keys.add("diagnostic")
+    elif status == "completed":
+        expected_keys.add("artifacts")
     if (
         set(value) != expected_keys
         or value.get("claimEligible") is not False
@@ -150,7 +160,26 @@ def _validate_subject_execution_record(
             or not isinstance(diagnostic.get("message"), str)
         ):
             raise HandoffError("ASEHB001", "The failed subject execution omitted its typed diagnostic.")
+    else:
+        _validate_subject_artifacts(value.get("artifacts"))
     return value
+
+
+def _validate_subject_artifacts(value: Any) -> None:
+    if not isinstance(value, list) or len(value) != len(SUBJECT_ARTIFACTS):
+        raise HandoffError("ASEHB001", "The completed subject execution omitted its fixed coverage artifact index.")
+    for artifact, (logical_name, relative_path, maximum_bytes) in zip(value, SUBJECT_ARTIFACTS, strict=True):
+        if (
+            not isinstance(artifact, dict)
+            or set(artifact) != {"logicalName", "relativePath", "byteCount", "sha256"}
+            or artifact.get("logicalName") != logical_name
+            or artifact.get("relativePath") != relative_path
+            or type(artifact.get("byteCount")) is not int
+            or not 0 < artifact["byteCount"] <= maximum_bytes
+            or not isinstance(artifact.get("sha256"), str)
+            or SHA256_PATTERN.fullmatch(artifact["sha256"]) is None
+        ):
+            raise HandoffError("ASEHB001", "The completed subject execution has an unsafe or malformed coverage artifact index.")
 
 
 def _make_execution_receipt(record: Mapping[str, Any], binding: Mapping[str, str]) -> dict[str, Any]:

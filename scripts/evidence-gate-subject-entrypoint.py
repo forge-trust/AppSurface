@@ -50,12 +50,21 @@ MAX_RESULT_BYTES = 16 * 1024
 MAX_SUBJECT_FILES = 250_000
 MAX_SUBJECT_BYTES = 2 * 1024 * 1024 * 1024
 MAX_SOURCE_DIFF_BYTES = 20 * 1024 * 1024
+MAX_COBERTURA_ARTIFACT_BYTES = 20 * 1024 * 1024
+MAX_GATE_MARKDOWN_ARTIFACT_BYTES = 1 * 1024 * 1024
+MAX_GATE_JSON_ARTIFACT_BYTES = 4 * 1024 * 1024
 COPY_CHUNK_BYTES = 1024 * 1024
 DOTNET_PATH = "/usr/local/bin:/usr/bin:/bin"
 DOTNET_MAJOR_VERSION = 10
 SDK_RUNTIME_IDENTIFIER = "linux-x64"
 SDK_RUNTIME_IDENTIFIER_PROPERTY = "$(NETCoreSdkRuntimeIdentifier)"
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
+REQUIRED_ARTIFACTS = (
+    ("cobertura", "coverage/coverage-merged/coverage.cobertura.xml", MAX_COBERTURA_ARTIFACT_BYTES),
+    ("gate-report", "coverage/coverage-gate/coverage-gate.md", MAX_GATE_MARKDOWN_ARTIFACT_BYTES),
+    # Policy marks diagnostics optional. This fixed profile requires its gate JSON report as a conservative extra check.
+    ("diagnostics", "coverage/coverage-gate/coverage-gate.json", MAX_GATE_JSON_ARTIFACT_BYTES),
+)
 
 FIXED_PROFILE_ID = "code-coverage"
 FIXED_SUBJECT_ARGUMENT = "--subject-root=/subject"
@@ -737,6 +746,7 @@ def _make_result(
     status: str,
     steps: Sequence[StepResult],
     *,
+    artifacts: Sequence[Mapping[str, object]] | None = None,
     diagnostic: tuple[str, str] | None = None,
 ) -> bytes:
     value: dict[str, object] = {
@@ -755,12 +765,142 @@ def _make_result(
             for step in steps
         ],
     }
+    if status == "completed":
+        value["artifacts"] = _validate_artifact_index(artifacts)
+    elif artifacts is not None:
+        raise EntrypointError("ASESE013", "A failed subject result cannot claim successful coverage artifacts.")
     if diagnostic is not None:
         value["diagnostic"] = {"code": diagnostic[0], "message": diagnostic[1]}
     encoded = (json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True) + "\n").encode("ascii")
     if len(encoded) > MAX_RESULT_BYTES:
         raise EntrypointError("ASESE009", "The canonical subject result exceeds its fixed byte limit.")
     return encoded
+
+
+def _validate_artifact_index(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, (list, tuple)) or len(value) != len(REQUIRED_ARTIFACTS):
+        raise EntrypointError("ASESE013", "The completed coverage run omitted its fixed artifact index.")
+    normalized: list[dict[str, object]] = []
+    for item, (logical_name, relative_path, maximum_bytes) in zip(value, REQUIRED_ARTIFACTS, strict=True):
+        if (
+            not isinstance(item, Mapping)
+            or set(item) != {"logicalName", "relativePath", "byteCount", "sha256"}
+            or item.get("logicalName") != logical_name
+            or item.get("relativePath") != relative_path
+            or type(item.get("byteCount")) is not int
+            or not 0 < item["byteCount"] <= maximum_bytes
+            or not isinstance(item.get("sha256"), str)
+            or SHA256_PATTERN.fullmatch(item["sha256"]) is None
+        ):
+            raise EntrypointError("ASESE013", "The completed coverage run has an invalid fixed artifact index.")
+        normalized.append(
+            {
+                "logicalName": logical_name,
+                "relativePath": relative_path,
+                "byteCount": item["byteCount"],
+                "sha256": item["sha256"],
+            }
+        )
+    return normalized
+
+
+def _hash_required_artifact(
+    scratch_root: Path,
+    relative_path: str,
+    maximum_bytes: int,
+    *,
+    deadline: float,
+) -> tuple[int, str]:
+    parts = PurePosixPath(relative_path).parts
+    if not parts or PurePosixPath(relative_path).is_absolute() or any(part in {".", ".."} for part in parts):
+        raise EntrypointError("ASESE013", "A required coverage artifact path is unsafe.")
+    directory_descriptor = -1
+    file_descriptor = -1
+    try:
+        directory_descriptor = os.open(
+            scratch_root,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        for part in parts[:-1]:
+            child = os.open(
+                part,
+                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=directory_descriptor,
+            )
+            os.close(directory_descriptor)
+            directory_descriptor = child
+        name = parts[-1]
+        before = os.stat(name, dir_fd=directory_descriptor, follow_symlinks=False)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or not 0 < before.st_size <= maximum_bytes:
+            raise EntrypointError("ASESE013", "A required coverage artifact is not a bounded single-link regular file.")
+        file_descriptor = os.open(
+            name,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=directory_descriptor,
+        )
+        opened = os.fstat(file_descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
+            or not 0 < opened.st_size <= maximum_bytes
+        ):
+            raise EntrypointError("ASESE013", "A required coverage artifact changed or exceeds its byte limit.")
+        digest = hashlib.sha256()
+        total = 0
+        while True:
+            _check_deadline(deadline)
+            chunk = os.read(file_descriptor, min(COPY_CHUNK_BYTES, maximum_bytes + 1 - total))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > maximum_bytes:
+                raise EntrypointError("ASESE013", "A required coverage artifact exceeds its byte limit.")
+            digest.update(chunk)
+        after = os.fstat(file_descriptor)
+        named_after = os.stat(name, dir_fd=directory_descriptor, follow_symlinks=False)
+        opened_identity = (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns)
+        if (
+            total != opened.st_size
+            or (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns) != opened_identity
+            or (named_after.st_dev, named_after.st_ino, named_after.st_size, named_after.st_mtime_ns, named_after.st_ctime_ns)
+            != opened_identity
+            or not stat.S_ISREG(named_after.st_mode)
+            or named_after.st_nlink != 1
+        ):
+            raise EntrypointError("ASESE013", "A required coverage artifact changed while it was being hashed.")
+        return total, digest.hexdigest()
+    except EntrypointError:
+        raise
+    except (OSError, RuntimeError, ValueError):
+        raise EntrypointError("ASESE013", "A required coverage artifact is unavailable or unsafe.") from None
+    finally:
+        for descriptor in (file_descriptor, directory_descriptor):
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+
+
+def _build_artifact_index(scratch_root: Path, *, deadline: float) -> list[dict[str, object]]:
+    artifacts: list[dict[str, object]] = []
+    for logical_name, relative_path, maximum_bytes in REQUIRED_ARTIFACTS:
+        byte_count, digest = _hash_required_artifact(
+            scratch_root,
+            relative_path,
+            maximum_bytes,
+            deadline=deadline,
+        )
+        artifacts.append(
+            {
+                "logicalName": logical_name,
+                "relativePath": relative_path,
+                "byteCount": byte_count,
+                "sha256": digest,
+            }
+        )
+    return _validate_artifact_index(artifacts)
 
 
 def _write_result(scratch_root: Path, content: bytes) -> None:
@@ -908,7 +1048,8 @@ def execute(
         )
         steps.append(_require_success("coverage-gate", gate_result))
         _check_deadline(deadline)
-        _write_result(scratch, _make_result("completed", steps))
+        artifacts = _build_artifact_index(scratch, deadline=deadline)
+        _write_result(scratch, _make_result("completed", steps, artifacts=artifacts))
         return 0
     except StepFailure as exc:
         steps.append(exc.step)

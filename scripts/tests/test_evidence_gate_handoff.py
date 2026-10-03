@@ -226,6 +226,15 @@ class HandoffArchiveTests(unittest.TestCase):
             "coverage-gate",
         )
         execution_record = {
+            "artifacts": [
+                {
+                    "logicalName": logical_name,
+                    "relativePath": relative_path,
+                    "byteCount": 1,
+                    "sha256": "0" * 64,
+                }
+                for logical_name, relative_path, _maximum_bytes in handoff.SUBJECT_ARTIFACTS
+            ],
             "claimEligible": False,
             "profileId": "code-coverage",
             "schemaVersion": 1,
@@ -521,6 +530,21 @@ def launch_subject(
                 "wrong-snapshot": lambda value: value["executionReceipt"]["binding"].update(snapshotSha256="0" * 64),
                 "wrong-receipt-schema": lambda value: value["executionReceipt"].update(schemaVersion=2),
                 "claimable-record": lambda value: value["executionReceipt"]["record"].update(claimEligible=True),
+                "omitted-artifacts": lambda value: value["executionReceipt"]["record"].pop("artifacts"),
+                "duplicate-artifact": lambda value: value["executionReceipt"]["record"]["artifacts"][1].update(
+                    logicalName=value["executionReceipt"]["record"]["artifacts"][0]["logicalName"],
+                    relativePath=value["executionReceipt"]["record"]["artifacts"][0]["relativePath"],
+                ),
+                "reordered-artifacts": lambda value: value["executionReceipt"]["record"]["artifacts"].reverse(),
+                "unsafe-artifact-path": lambda value: value["executionReceipt"]["record"]["artifacts"][0].update(
+                    relativePath="../coverage.cobertura.xml"
+                ),
+                "oversized-artifact": lambda value: value["executionReceipt"]["record"]["artifacts"][2].update(
+                    byteCount=handoff.MAX_GATE_JSON_ARTIFACT_BYTES + 1
+                ),
+                "malformed-artifact-digest": lambda value: value["executionReceipt"]["record"]["artifacts"][1].update(
+                    sha256="not-a-digest"
+                ),
             }
             for name, mutate in receipt_mutations.items():
                 with self.subTest(mutation=name):
