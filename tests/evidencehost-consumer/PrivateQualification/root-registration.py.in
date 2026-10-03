@@ -1,0 +1,14 @@
+# PRIVATE SOURCE TEMPLATE ONLY. Not a runtime loader, module, or enrollment API.
+# The protected build generator substitutes each marker exactly once, validates
+# bytes/digests, then replaces exactly the adjacent application's empty tuple.
+# Do not execute/import this template or accept marker values from runtime JSON/env.
+import base64 as _private_registration_base64
+
+_COMPILED_REGISTRATIONS: tuple[_CompiledRegistration, ...] = (
+    _CompiledRegistration(
+        canonical_entry=_private_registration_base64.b64decode("{{canonicalEntryB64}}", validate=True),
+        entry_digest="{{entryDigest}}",
+        catalogue_digest="{{catalogueDigest}}",
+        policy_sha256="{{policyByteSHA}}",
+    ),
+)

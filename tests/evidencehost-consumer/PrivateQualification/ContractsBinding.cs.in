@@ -1,0 +1,70 @@
+namespace ForgeTrust.AppSurface.Evidence.Contracts;
+
+/// <summary>Exact compiled private qualification identity; this file is absent from production builds.</summary>
+/// <remarks>
+/// The reviewed root workflow renders these constants before compilation and pins the complete generated
+/// source and finished tool binaries before arming. No environment, JSON, local writer, supplied verifier
+/// or factory can select this branch. A metadata comparison never creates a supervisor or capability.
+/// </remarks>
+internal static class EvidencePrivateQualificationBinding
+{
+    private const string ExpectedRunId = "__QUALIFICATION_RUN_ID__";
+    private const string ExpectedWorkflowIdentity = "__QUALIFICATION_WORKFLOW_IDENTITY__";
+    private const string ExpectedSourceCommit = "__QUALIFICATION_SOURCE_COMMIT__";
+    private const string ExpectedSubjectRevision = "__QUALIFICATION_SUBJECT_REVISION__";
+    private const string ExpectedPolicySha256 = "__QUALIFICATION_POLICY_SHA256__";
+    private const string ExpectedPlanDigest = "__QUALIFICATION_PLAN_DIGEST__";
+    private const string ExpectedCanonicalPlanBase64 = "__QUALIFICATION_CANONICAL_PLAN_BASE64__";
+    private const string ExpectedEntryDigest = "__QUALIFICATION_ENTRY_DIGEST__";
+    private const string ExpectedCatalogueDigest = "__QUALIFICATION_CATALOGUE_DIGEST__";
+    private static readonly byte[] ExpectedPlanBytes = Convert.FromBase64String(ExpectedCanonicalPlanBase64);
+
+    /// <summary>Returns immutable compiled plan data; a caller must still use real protected admission.</summary>
+    internal static EvidencePlan CopyExpectedPlan() => EvidenceCanonicalJson.Deserialize<EvidencePlan>(ExpectedPlanBytes);
+
+    /// <summary>Checks a completed private result without granting claim or execution authority.</summary>
+    internal static bool IsCompletedResult(EvidenceManifest manifest) => manifest is not null
+        && manifest.Mode == EvidenceExecutionMode.Observation && manifest.ExecutionVerdict == EvidenceExecutionVerdict.Passed
+        && manifest.ClaimKind == EvidenceClaimKind.None && manifest.Eligibility == EvidenceClaimEligibility.None
+        && manifest.EnvelopeAssertion is null && manifest.Metrics.CleanupCompleted && manifest.Metrics.TerminalFailureCode is null
+        && manifest.PlanDigest == ExpectedPlanDigest && EvidenceManifestBuilder.Verify(CopyExpectedPlan(), manifest);
+
+    /// <summary>Checks exact plan bytes for private structural verification; supplies no authority.</summary>
+    internal static bool MatchesPlanData(EvidencePlan plan) => plan is not null
+        && plan.Profile.Scope == EvidenceProfileScope.Targeted && plan.Profile.Resources.Count == 1
+        && plan.PlanDigest == ExpectedPlanDigest
+        && EvidenceCanonicalJson.Serialize(plan).AsSpan().SequenceEqual(ExpectedPlanBytes);
+
+    /// <summary>Allows only the actual armed, root-authenticated supervisor and exact compiled bindings.</summary>
+    internal static bool MatchesActual(IEvidenceArmedWorker candidate, EvidenceAdmissionContext context, EvidencePlan plan)
+    {
+        if (candidate is not EvidenceLinuxWorkerSupervisor worker || !worker.IsArmed || context is null
+            || context.ConsumerAcceptanceMatches || context.ProtectedSecretsPresent || context.SensitiveProjectionKeys.Count != 0
+            || !MatchesPlanData(plan)) return false;
+        var descriptor = worker.Descriptor;
+        var application = descriptor.Application;
+        return OperatingSystem.IsLinux() && descriptor.Mode == "observation"
+            && descriptor.Schema == "evidence-worker-linux-v2" && application is not null
+            && descriptor.Provider == "github-actions" && descriptor.Platform == "linux-x64"
+            && descriptor.RunId == ExpectedRunId && context.RunId == ExpectedRunId
+            && descriptor.WorkflowIdentity == ExpectedWorkflowIdentity
+            && descriptor.BaseRevision == ExpectedSourceCommit && descriptor.SubjectRevision == ExpectedSubjectRevision
+            && descriptor.PolicySha256 == ExpectedPolicySha256 && descriptor.ProofDigest.Length == 0
+            && descriptor.DiffFile is null && descriptor.DiffSha256 is null
+            && descriptor.Paths.SequenceEqual(new[] { "tests/QualificationSubjectTests.cs" }, StringComparer.Ordinal)
+            && descriptor.OutputSlot == "qualification"
+            && descriptor.WorkerUid == 65010 && descriptor.WorkerGid == 65011
+            && descriptor.SubjectUid == 65012 && descriptor.SubjectGid == 65013
+            && application.ApplicationUid == 65014 && application.ApplicationGid == 65015
+            && application.ResultsGid == 65016 && application.ResourceAccessGid == 65017
+            && application.ApplicationId == "issue779-qualified-native-http"
+            && application.ApplicationVersion == "1.0.0" && application.BuildId == "issue779-private-qualification-1"
+            && application.AspireSdkVersion == "13.4.4" && application.EntryDigest == ExpectedEntryDigest
+            && application.CatalogueDigest == ExpectedCatalogueDigest
+            && application.Capabilities.ScratchBytes == 512L * 1024 * 1024
+            && application.Capabilities.MemoryBytes == 1024L * 1024 * 1024
+            && application.Capabilities.MaximumTasks == 128 && application.Capabilities.MaximumOutputBytes == 1024L * 1024
+            && application.Capabilities.StartSeconds == 120 && application.Capabilities.StoppingSeconds == 5
+            && application.Capabilities.ReadOnlyInputs.SequenceEqual(new[] { "proof-input/declared.txt" }, StringComparer.Ordinal);
+    }
+}

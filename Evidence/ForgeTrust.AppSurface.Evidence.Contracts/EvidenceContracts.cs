@@ -1352,7 +1352,7 @@ public static class EvidenceManifestBuilder
 
         var manifest = BuildStructural(plan, producerResults, admission.Mode == EvidenceExecutionMode.Observation,
             admission.Mode == EvidenceExecutionMode.Trusted ? EvidenceEnvelopeStatus.ValidatedNotAttested : EvidenceEnvelopeStatus.NotRequired,
-            resourceResults, metrics, admission.Mode, admission.Assertion);
+            resourceResults, metrics, admission.Mode, admission.Assertion, admission.IsPrivateQualification);
         if (!completed)
         {
             manifest = manifest with
@@ -1377,7 +1377,8 @@ public static class EvidenceManifestBuilder
         IReadOnlyList<EvidenceResourceResult>? resourceResults,
         EvidenceExecutionMetrics? metrics,
         EvidenceExecutionMode? mode = null,
-        EvidenceEnvelopeAssertion? assertion = null)
+        EvidenceEnvelopeAssertion? assertion = null,
+        bool privateQualification = false)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(producerResults);
@@ -1446,7 +1447,7 @@ public static class EvidenceManifestBuilder
         var releaseEnvelopeAccepted = mode is null
             ? plan.Profile.Scope != EvidenceProfileScope.Release || envelopeStatus == EvidenceEnvelopeStatus.ValidatedNotAttested
             : mode == EvidenceExecutionMode.Observation
-                ? plan.Profile.Scope == EvidenceProfileScope.Targeted && plan.Profile.Resources.Count == 0
+                ? plan.Profile.Scope == EvidenceProfileScope.Targeted && (plan.Profile.Resources.Count == 0 || privateQualification)
                 : mode == EvidenceExecutionMode.Trusted && envelopeStatus == EvidenceEnvelopeStatus.ValidatedNotAttested
                     && EvidenceAdmission.ValidAssertion(assertion, assertion?.RunId ?? string.Empty)
                     && !string.IsNullOrWhiteSpace(assertion?.OutputIdentity);
@@ -1455,7 +1456,7 @@ public static class EvidenceManifestBuilder
             : everyResourceReady && everyProducerPassed && unmediated.Count == 0 && releaseEnvelopeAccepted && metrics.CleanupCompleted && metrics.TerminalFailureCode is null
                 ? EvidenceExecutionVerdict.Passed
                 : EvidenceExecutionVerdict.Incomplete;
-        var claim = verdict == EvidenceExecutionVerdict.Invalid
+        var claim = privateQualification || verdict == EvidenceExecutionVerdict.Invalid
             ? EvidenceClaimKind.None
             : observationOnly && (mode is null || verdict == EvidenceExecutionVerdict.Passed)
                 ? EvidenceClaimKind.ObservationOnly
@@ -1531,7 +1532,10 @@ public static class EvidenceManifestBuilder
             manifest.ResourceResults,
             manifest.Metrics,
             manifest.Mode,
-            manifest.EnvelopeAssertion);
+            manifest.EnvelopeAssertion,
+            privateQualification: manifest.Mode == EvidenceExecutionMode.Observation
+                && manifest.ClaimKind == EvidenceClaimKind.None && manifest.Eligibility == EvidenceClaimEligibility.None
+                && manifest.EnvelopeAssertion is null && EvidencePrivateQualificationBinding.MatchesPlanData(plan));
         return string.Equals(manifest.ManifestDigest, expected.ManifestDigest, StringComparison.Ordinal);
     }
 }

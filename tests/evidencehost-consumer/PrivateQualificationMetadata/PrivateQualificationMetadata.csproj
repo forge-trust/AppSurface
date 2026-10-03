@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+    <AssemblyName>ForgeTrust.AppSurface.Cli.Tests</AssemblyName>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode>true</RestoreLockedMode>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <!-- Build-time metadata dependencies only; the parent verifies the pristine 5d325bb archive. -->
+  <ItemGroup Condition="'$(QualificationBaselineRoot)' != ''">
+    <ProjectReference Include="$(QualificationBaselineRoot)/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/ForgeTrust.AppSurface.Evidence.Contracts.csproj" />
+    <ProjectReference Include="$(QualificationBaselineRoot)/Evidence/ForgeTrust.AppSurface.Evidence.Planner/ForgeTrust.AppSurface.Evidence.Planner.csproj" />
+  </ItemGroup>
+
+  <Target Name="RequireQualificationBaselineRoot"
+          BeforeTargets="_GenerateRestoreGraphProjectEntry;CollectPackageReferences;PrepareForBuild">
+    <Error Condition="'$(QualificationBaselineRoot)' == ''"
+           Text="QualificationBaselineRoot must identify the verified pristine qualification metadata baseline." />
+    <Error Condition="!$([System.IO.Path]::IsPathFullyQualified('$(QualificationBaselineRoot)'))"
+           Text="QualificationBaselineRoot must be an absolute path." />
+    <Error Condition="!Exists('$(QualificationBaselineRoot)/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/ForgeTrust.AppSurface.Evidence.Contracts.csproj') Or !Exists('$(QualificationBaselineRoot)/Evidence/ForgeTrust.AppSurface.Evidence.Planner/ForgeTrust.AppSurface.Evidence.Planner.csproj')"
+           Text="QualificationBaselineRoot must contain the required Contracts and Planner projects." />
+  </Target>
+
+</Project>

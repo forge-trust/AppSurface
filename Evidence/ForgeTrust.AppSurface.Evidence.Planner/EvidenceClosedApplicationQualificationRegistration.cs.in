@@ -1,0 +1,57 @@
+using ForgeTrust.AppSurface.Evidence.Contracts;
+
+namespace ForgeTrust.AppSurface.Evidence.Planner;
+
+/// <summary>Compile-owned literal registration for one separately built private qualification variant.</summary>
+/// <remarks>
+/// This template is not a compiled source file. Only the reviewed parent build may expand its one
+/// canonical literal and include the resulting source in this assembly. No request, file, environment,
+/// callback, application factory or accepted-consumer proof can supply this data at runtime.
+/// Registration is metadata selection only; real protected admission and forced None claims remain separate.
+/// </remarks>
+internal static partial class EvidenceClosedApplicationCatalogue
+{
+    private const string QualificationCanonicalEntryBase64 = "__QUALIFICATION_CANONICAL_ENTRY_BASE64__";
+    private const int QualificationCanonicalMaximumBytes = 1024 * 1024;
+
+    /// <summary>Adds exactly one reviewed canonical definition; never loads runtime registration data.</summary>
+    /// <param name="entries">The existing catalogue's private construction list.</param>
+    /// <exception cref="EvidenceAdmissionException">Fixed ASEVD404 when the compiled literal is invalid.</exception>
+    static partial void RegisterCompiledEntries(List<EvidenceClosedApplicationDefinition> entries)
+    {
+        try
+        {
+            if (entries.Count != 0 || QualificationCanonicalEntryBase64.Length > 1_398_104)
+            {
+                throw InvalidQualificationLiteral();
+            }
+
+            var bytes = Convert.FromBase64String(QualificationCanonicalEntryBase64);
+            var definition = EvidenceCanonicalJson.Deserialize<EvidenceClosedApplicationDefinition>(
+                bytes, QualificationCanonicalMaximumBytes);
+            var snapshot = Snapshot(definition);
+            var capabilities = snapshot.Capabilities;
+            if (snapshot.Id != "issue779-qualified-native-http" || snapshot.Version != "1.0.0"
+                || snapshot.BuildId != "issue779-private-qualification-1" || snapshot.AspireSdkVersion != "13.4.4"
+                || snapshot.ProfileId != "qualification-http"
+                || capabilities.ReadOnlyInputs.Count != 1 || capabilities.ReadOnlyInputs[0] != "proof-input/declared.txt"
+                || capabilities.ScratchBytes != 512L * 1024 * 1024 || capabilities.MemoryBytes != 1024L * 1024 * 1024
+                || capabilities.MaximumTasks != 128 || capabilities.MaximumOutputBytes != 1024 * 1024
+                || capabilities.StartSeconds != 120 || capabilities.StoppingSeconds != 5
+                || !bytes.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(snapshot)))
+            {
+                throw InvalidQualificationLiteral();
+            }
+
+            entries.Add(snapshot);
+        }
+        catch (Exception)
+        {
+            throw InvalidQualificationLiteral();
+        }
+    }
+
+    /// <summary>Returns one fixed metadata rejection without literal bytes or an inner exception.</summary>
+    private static EvidenceAdmissionException InvalidQualificationLiteral() =>
+        new("ASEVD404", "Private qualification registration metadata is invalid.");
+}

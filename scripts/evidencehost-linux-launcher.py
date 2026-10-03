@@ -1987,23 +1987,100 @@ def _systemd(argv: list[str], timeout: int = 8, *, check: bool = True) -> subpro
 
 def _create_run_accounts(worker_name: str, subject_name: str, results_group: str,
                          users: list[str], groups: list[str]) -> None:
-    """Use trusted absolute utilities and track each account only after successful creation."""
-    for name in (worker_name, subject_name):
-        _systemd(["/usr/sbin/useradd", "--system", "--user-group", "--no-create-home",
-                  "--shell", "/usr/sbin/nologin", name])
+    """Private qualification only: reserve fixed identities under fresh generated names.
+
+    Check all eight selected numeric identities before the first mutation. Explicit
+    exclusive group/user creation has no non-unique or reuse option. Append each
+    prechecked pending name before utility I/O, since creation may precede a
+    nonzero result or timeout. Existing retained completion/quarantine
+    owns these ledgers; this helper neither starts work nor authenticates a lease.
+    """
+    worker_group, subject_group = worker_name + "g", subject_name + "g"
+    for lookup, identifiers in ((pwd.getpwuid, (65010, 65012, 65014)),
+                                (grp.getgrgid, (65011, 65013, 65015, 65016, 65017))):
+        for identifier in identifiers:
+            try:
+                lookup(identifier)
+            except KeyError:
+                continue
+            raise LauncherError("identity-separation-failed")
+    for lookup, names in ((pwd.getpwnam, (worker_name, subject_name)),
+                          (grp.getgrnam, (worker_name, subject_name, worker_group, subject_group, results_group))):
+        for name in names:
+            try:
+                lookup(name)
+            except KeyError:
+                continue
+            raise LauncherError("identity-separation-failed")
+    if len({worker_name, subject_name, worker_group, subject_group, results_group}) != 5:
+        raise LauncherError("identity-separation-failed")
+    for name, gid in ((worker_group, 65011), (subject_group, 65013), (results_group, 65016)):
+        groups.append(name)
+        _systemd(["/usr/sbin/groupadd", "--system", "--gid", str(gid), name])
+        try:
+            actual_gid, actual_name = grp.getgrnam(name).gr_gid, grp.getgrgid(gid).gr_name
+        except KeyError:
+            raise LauncherError("identity-separation-failed") from None
+        if actual_gid != gid or actual_name != name:
+            raise LauncherError("identity-separation-failed")
+    for name, uid, gid in ((worker_name, 65010, 65011), (subject_name, 65012, 65013)):
         users.append(name)
-    _systemd(["/usr/sbin/groupadd", "--system", results_group])
-    groups.append(results_group)
+        _systemd(["/usr/sbin/useradd", "--system", "--uid", str(uid), "--gid", str(gid),
+                  "--no-user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", name])
+        try:
+            actual, actual_name = pwd.getpwnam(name), pwd.getpwuid(uid).pw_name
+        except KeyError:
+            raise LauncherError("identity-separation-failed") from None
+        if (actual.pw_uid, actual.pw_gid) != (uid, gid) or actual_name != name:
+            raise LauncherError("identity-separation-failed")
 
 
 def _create_application_accounts(application_name: str, resource_group: str,
                                  users: list[str], groups: list[str]) -> None:
-    """Reserve the third UID and fifth GID until retained completion closes all accounts."""
-    _systemd(["/usr/sbin/useradd", "--system", "--user-group", "--no-create-home",
-              "--shell", "/usr/sbin/nologin", application_name])
+    """Private qualification: add fixed application/resource identities to retained ownership.
+
+    The run accounts already occupy their own selected IDs. Check only these new
+    reservations here, reject occupied IDs/names, and record each prechecked
+    pending name before utility I/O and actual identity validation. Missing pending
+    names may fail strict cleanup and remain quarantined. No allocation fallback.
+    """
+    application_group = application_name + "g"
+    for lookup, identifiers in ((pwd.getpwuid, (65014,)), (grp.getgrgid, (65015, 65017))):
+        for identifier in identifiers:
+            try:
+                lookup(identifier)
+            except KeyError:
+                continue
+            raise LauncherError("identity-separation-failed")
+    for lookup, names in ((pwd.getpwnam, (application_name,)),
+                          (grp.getgrnam, (application_name, application_group, resource_group))):
+        for name in names:
+            try:
+                lookup(name)
+            except KeyError:
+                continue
+            raise LauncherError("identity-separation-failed")
+    if len({application_name, application_group, resource_group}) != 3 or any(name in users or name in groups
+                                                 for name in (application_name, application_group, resource_group)):
+        raise LauncherError("identity-separation-failed")
+    for name, gid in ((application_group, 65015), (resource_group, 65017)):
+        groups.append(name)
+        _systemd(["/usr/sbin/groupadd", "--system", "--gid", str(gid), name])
+        try:
+            actual_gid, actual_name = grp.getgrnam(name).gr_gid, grp.getgrgid(gid).gr_name
+        except KeyError:
+            raise LauncherError("identity-separation-failed") from None
+        if actual_gid != gid or actual_name != name:
+            raise LauncherError("identity-separation-failed")
     users.append(application_name)
-    _systemd(["/usr/sbin/groupadd", "--system", resource_group])
-    groups.append(resource_group)
+    _systemd(["/usr/sbin/useradd", "--system", "--uid", "65014", "--gid", "65015",
+              "--no-user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", application_name])
+    try:
+        actual, actual_name = pwd.getpwnam(application_name), pwd.getpwuid(65014).pw_name
+    except KeyError:
+        raise LauncherError("identity-separation-failed") from None
+    if (actual.pw_uid, actual.pw_gid) != (65014, 65015) or actual_name != application_name:
+        raise LauncherError("identity-separation-failed")
 
 
 def select_root_application(args: argparse.Namespace, policy: Path):

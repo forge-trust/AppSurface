@@ -24,9 +24,13 @@ internal sealed partial class EvidenceWorkerCommand : ICommand
         {
             if (string.IsNullOrWhiteSpace(ControlChannel))
                 throw new EvidenceAdmissionException("ASEVD402", "An authenticated independent worker control channel is required.");
+#if EVIDENCE_PRIVATE_QUALIFICATION_HOST
+            var manifest = await EvidencePrivateQualificationHostEntry.RunAsync(ControlChannel, console.RegisterCancellationHandler()).ConfigureAwait(false);
+#else
             var manifest = await EvidenceProtectedCliExecution.RunAsync(ControlChannel, console.RegisterCancellationHandler(),
                 diagnostic => WriteAllocationDiagnostic(console, diagnostic)).ConfigureAwait(false);
-            if (manifest.ClaimKind == EvidenceClaimKind.None)
+#endif
+            if (manifest.ClaimKind == EvidenceClaimKind.None && !EvidencePrivateQualificationBinding.IsCompletedResult(manifest))
                 throw new CommandException("ASEVD211: Evidence execution was incomplete. Inspect the protected failure manifest and use a fresh supervised run after owned exit.");
         }
         catch (EvidenceAdmissionException exception) { throw new CommandException(exception.Message); }

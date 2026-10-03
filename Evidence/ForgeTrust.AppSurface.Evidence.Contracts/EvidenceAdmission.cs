@@ -66,13 +66,17 @@ public sealed class EvidenceAdmissionResult
     private bool _terminalFailure;
 
     /// <summary>Creates an admitted capability only from the shared internal admission boundary.</summary>
-    internal EvidenceAdmissionResult(EvidencePlan snapshot, EvidenceExecutionMode mode, string runId, EvidenceEnvelopeAssertion? assertion)
+    internal EvidenceAdmissionResult(EvidencePlan snapshot, EvidenceExecutionMode mode, string runId, EvidenceEnvelopeAssertion? assertion, bool privateQualification = false)
     {
         _snapshot = snapshot;
         Mode = mode;
         RunId = runId;
         Assertion = assertion;
+        IsPrivateQualification = privateQualification;
     }
+
+    /// <summary>Records only the private compiled qualification issuer; never serialized or caller-selected.</summary>
+    internal bool IsPrivateQualification { get; }
 
     /// <summary>Gets the explicit mode selected before execution.</summary>
     public EvidenceExecutionMode Mode { get; }
@@ -264,6 +268,11 @@ internal static class EvidenceAdmission
 
         if (mode == EvidenceExecutionMode.Observation)
         {
+            if (EvidencePrivateQualificationBinding.MatchesActual(worker, context, snapshot))
+            {
+                return new EvidenceAdmissionResult(snapshot, mode, context.RunId, null, privateQualification: true);
+            }
+
             if (snapshot.Profile.Scope != EvidenceProfileScope.Targeted
                 || snapshot.Profile.Resources.Count != 0
                 || !context.ObservationProfiles.Contains(snapshot.Profile.Id, StringComparer.Ordinal)
