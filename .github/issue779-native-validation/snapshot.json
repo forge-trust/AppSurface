@@ -3106,7 +3106,7 @@
       "Cli/ForgeTrust.AppSurface.Cli.Tests/CoverageRunHangWorkflowCoverageTests.cs": "08d2c9fefa9ab2975b4b5ece24752a9039c94ad003b662dc7723e5ced096c3ce",
       "Cli/ForgeTrust.AppSurface.Cli.Tests/CoverageRunOutputGuardSecurityTests.cs": "9a50ca89b9ae52b0db32ef227e33b013b4dd5485fcd66e8175bc9a0b13969c03",
       "Cli/ForgeTrust.AppSurface.Cli.Tests/CoverageRunTests.cs": "2efc4381baa36b43dd29cb08a9f0f96253cea6da2fa9a5ec0b3c580df87e31ff",
-      "Cli/ForgeTrust.AppSurface.Cli.Tests/CoverageRunWatchdogTests.cs": "4a1f4e250f35511c3bf9ec3f3d0020811d82185d36c9c2a4f68f00b34bdea404",
+      "Cli/ForgeTrust.AppSurface.Cli.Tests/CoverageRunWatchdogTests.cs": "9b0bb26d916c925273076f4b056371f3e45e3ab43d2f571ac6f48f66ea2ebfde",
       "Cli/ForgeTrust.AppSurface.Cli.Tests/CoverageSolutionScriptTests.cs": "56dc9b4b6ed761d0cd24a84abf770e8daf1a3a81c11b75f622048fb1ad5c2f68",
       "Cli/ForgeTrust.AppSurface.Cli.Tests/DocsExportWorkflowContractTests.cs": "06fe6c7a3d9056c5d09ab960cf7ba62ce52f9426a16ba4efc326ab899aac748a",
       "Cli/ForgeTrust.AppSurface.Cli.Tests/DocsVerifyArchiveCommandTests.cs": "b9daccf267223164d632ce77181acd68f59df11b8eb949d477cc62f3a573494b",
@@ -3122,14 +3122,14 @@
       "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceDoctorTrustTests.cs": "3e8d43012e4fa87e55743f756da8769a828b689b9bdc6f0b381c6fc86a35883a",
       "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceJsonInputTests.cs": "d36d5b3abb33d99d0a37184fcc9589ecc1478a2b92c07b9cb53c54599fa1df58",
       "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceJsonShapeTests.cs": "5ce5823ddc99b88e7f5bb69561877ff758fd9466c027a69c2f94fe8359720ed6",
-      "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxApplicationProtocolTests.cs": "4ef132ae700900fc7a10c7ff7eaca446aa2729cb99013c73a7d63b75352538c5",
+      "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxApplicationProtocolTests.cs": "ed8d4c166f245af9d9ae29408d11b0b15e0b3c74c1d0d8e86dc330cff24fe5ce",
       "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxArtifactRootTests.cs": "3eb6716b7c1480e821c85c061a862e4c66ea3b04d44dcb7af8ece6cebd776a82",
       "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxControlProtocolTests.cs": "54b289e22bb042f394a18b63e7b10c627cac11d3f9cc71f3bd54476d2cedc33e",
-      "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxWorkerDescriptorTests.cs": "3f1b3c79073211e9ccc8c9bae5412bf881d879e222d14032ba9cff773344f83b",
+      "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxWorkerDescriptorTests.cs": "056ffc428ecd357061228e5de4f3654b6ba89cdd581f50208f76928dff0d879d",
       "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidencePlannerTests.cs": "20cb79c3eaa6445830e9127de4b401971c870218358e69d4a96852978b8666fc",
       "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProcessOutputQuotaTests.cs": "a5b6de4003f158ec4ba8128a6e6703e24fe56d0e145eaee43cef92ad21eebd7b",
       "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProtectedCliApplicationStagesTests.cs": "2104d3401be13abe344cb3ffa8c543d07729f375f8267e0610b66a28df51353c",
-      "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProtectedCliExecutionTests.cs": "154a7ef2d80d29b26f64353b20705fcc6cf9192ef7201fee4926e5a454f65ad7",
+      "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProtectedCliExecutionTests.cs": "121db021655be9e02f1afbfcea4f8d71540ff820e13a83fef15188c62b8af855",
       "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProtectedGateTests.cs": "2b25391cd692782597bdbdfbeedd2d40d43485a1c9da97e5074656efac8d8a5b",
       "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProtectedWorkerInputsTests.cs": "44482dd7d49a8292806b078a70e7bbe61383954795ab4a1ef7c584e839790148",
       "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceRestrictedCoverageFactoryTests.cs": "6b00584bb35de15340754740d66dc548abdd53740435c2cf69512f6a484b131c",
@@ -16644,19 +16644,19 @@
   "historical_previous_native_preparation": {
     "owner_coverage": {
       "all_claims_match_current_SHA_and_mode": true,
-      "fork_owner_aggregate_sha256": "df40c9881e7fde714e327280ede2977395f9a517228ff72a70de75b431d79ccb",
-      "inherited_files": 2811,
-      "overlay_files": 3,
+      "fork_owner_aggregate_sha256": "28ecc9e311f37e901f3e420bc15e54e33b0814a1dde8f271c40e5b6bb2fe9eb3",
+      "inherited_files": 2810,
+      "overlay_files": 4,
       "source_files": 2814
     },
     "owner_freeze_receipts": [
       {
-        "fork_owner_aggregate_sha256": "df40c9881e7fde714e327280ede2977395f9a517228ff72a70de75b431d79ccb"
+        "fork_owner_aggregate_sha256": "28ecc9e311f37e901f3e420bc15e54e33b0814a1dde8f271c40e5b6bb2fe9eb3"
       }
     ],
-    "previous_validation_commit": "11a3602ab84a3cedf37b232afa0406d8f5b94f0b",
-    "snapshot_sha256": "1ee3ee2bec814eb85ea76d2cef0b7c4614c6c61437479b39a3eebd46567b026c",
-    "validation_commit": "5d325bb8c0f857eb37f0a736f39a0342b03e5c38"
+    "previous_validation_commit": "5d325bb8c0f857eb37f0a736f39a0342b03e5c38",
+    "snapshot_sha256": "8fd2dabc4add5259c0c5f3a286ef47be197c5b8b548b4d56c42e01841e34ef9f",
+    "validation_commit": "610489dbd1165ea7980faced55969cfe32c06b69"
   },
   "historical_snapshot_sha256": "ee89a6f94f9be1600f3f10d66a87a3be90b9b4b0b750992568d3b6646a446800",
   "intentional_new_source_files": [
@@ -16755,21 +16755,21 @@
   "native_execution": false,
   "owner_coverage": {
     "all_claims_match_current_SHA_and_mode": true,
-    "fork_owner_aggregate_sha256": "28ecc9e311f37e901f3e420bc15e54e33b0814a1dde8f271c40e5b6bb2fe9eb3",
+    "fork_owner_aggregate_sha256": "620699c666bb2e2ef8bfaf00e50351ee2fd18186ca4a99376c246908397bbb3a",
     "inherited_files": 2810,
     "overlay_files": 4,
     "source_files": 2814
   },
   "owner_freeze_receipts": [
     {
-      "fork_owner_aggregate_sha256": "28ecc9e311f37e901f3e420bc15e54e33b0814a1dde8f271c40e5b6bb2fe9eb3"
+      "fork_owner_aggregate_sha256": "620699c666bb2e2ef8bfaf00e50351ee2fd18186ca4a99376c246908397bbb3a"
     }
   ],
-  "previous_validation_commit": "5d325bb8c0f857eb37f0a736f39a0342b03e5c38",
-  "private_commit_purpose": "Reviewed four test-only lifecycle and producer coverage regressions; unchanged native gate preparation only.",
+  "previous_validation_commit": "cc1bf68fb573045919527fa3ed923612eeb22209",
+  "private_commit_purpose": "Reviewed canonical protocol/allocation controls plus synchronized console writer control; unchanged native gate preparation only.",
   "qualification_authorization": false,
   "snapshot_kind": "latest-main-private-source-not-primary-capture",
-  "source_commit": "610489dbd1165ea7980faced55969cfe32c06b69",
+  "source_commit": "085b302fedc37c30932122be27b3efc20ff9f5b0",
   "source_modes": {
     ".agent/rules.md": "0644",
     ".agent/workflows/pr_feedback_review.md": "0644",
@@ -19870,7 +19870,7 @@
     "Cli/ForgeTrust.AppSurface.Cli.Tests/CoverageRunHangWorkflowCoverageTests.cs": "08d2c9fefa9ab2975b4b5ece24752a9039c94ad003b662dc7723e5ced096c3ce",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/CoverageRunOutputGuardSecurityTests.cs": "9a50ca89b9ae52b0db32ef227e33b013b4dd5485fcd66e8175bc9a0b13969c03",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/CoverageRunTests.cs": "2efc4381baa36b43dd29cb08a9f0f96253cea6da2fa9a5ec0b3c580df87e31ff",
-    "Cli/ForgeTrust.AppSurface.Cli.Tests/CoverageRunWatchdogTests.cs": "4a1f4e250f35511c3bf9ec3f3d0020811d82185d36c9c2a4f68f00b34bdea404",
+    "Cli/ForgeTrust.AppSurface.Cli.Tests/CoverageRunWatchdogTests.cs": "9b0bb26d916c925273076f4b056371f3e45e3ab43d2f571ac6f48f66ea2ebfde",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/CoverageSolutionScriptTests.cs": "56dc9b4b6ed761d0cd24a84abf770e8daf1a3a81c11b75f622048fb1ad5c2f68",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/DocsExportWorkflowContractTests.cs": "06fe6c7a3d9056c5d09ab960cf7ba62ce52f9426a16ba4efc326ab899aac748a",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/DocsVerifyArchiveCommandTests.cs": "b9daccf267223164d632ce77181acd68f59df11b8eb949d477cc62f3a573494b",
@@ -19886,14 +19886,14 @@
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceDoctorTrustTests.cs": "3e8d43012e4fa87e55743f756da8769a828b689b9bdc6f0b381c6fc86a35883a",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceJsonInputTests.cs": "d36d5b3abb33d99d0a37184fcc9589ecc1478a2b92c07b9cb53c54599fa1df58",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceJsonShapeTests.cs": "5ce5823ddc99b88e7f5bb69561877ff758fd9466c027a69c2f94fe8359720ed6",
-    "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxApplicationProtocolTests.cs": "4ef132ae700900fc7a10c7ff7eaca446aa2729cb99013c73a7d63b75352538c5",
+    "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxApplicationProtocolTests.cs": "ed8d4c166f245af9d9ae29408d11b0b15e0b3c74c1d0d8e86dc330cff24fe5ce",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxArtifactRootTests.cs": "3eb6716b7c1480e821c85c061a862e4c66ea3b04d44dcb7af8ece6cebd776a82",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxControlProtocolTests.cs": "54b289e22bb042f394a18b63e7b10c627cac11d3f9cc71f3bd54476d2cedc33e",
-    "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxWorkerDescriptorTests.cs": "3f1b3c79073211e9ccc8c9bae5412bf881d879e222d14032ba9cff773344f83b",
+    "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxWorkerDescriptorTests.cs": "056ffc428ecd357061228e5de4f3654b6ba89cdd581f50208f76928dff0d879d",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidencePlannerTests.cs": "20cb79c3eaa6445830e9127de4b401971c870218358e69d4a96852978b8666fc",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProcessOutputQuotaTests.cs": "a5b6de4003f158ec4ba8128a6e6703e24fe56d0e145eaee43cef92ad21eebd7b",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProtectedCliApplicationStagesTests.cs": "2104d3401be13abe344cb3ffa8c543d07729f375f8267e0610b66a28df51353c",
-    "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProtectedCliExecutionTests.cs": "154a7ef2d80d29b26f64353b20705fcc6cf9192ef7201fee4926e5a454f65ad7",
+    "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProtectedCliExecutionTests.cs": "121db021655be9e02f1afbfcea4f8d71540ff820e13a83fef15188c62b8af855",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProtectedGateTests.cs": "2b25391cd692782597bdbdfbeedd2d40d43485a1c9da97e5074656efac8d8a5b",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProtectedWorkerInputsTests.cs": "44482dd7d49a8292806b078a70e7bbe61383954795ab4a1ef7c584e839790148",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceRestrictedCoverageFactoryTests.cs": "6b00584bb35de15340754740d66dc548abdd53740435c2cf69512f6a484b131c",
@@ -22403,6 +22403,6 @@
     "troubleshooting/startup-and-modules.md.yml": "8d74ab38ca0d2a61b8184173fd8413dbfefa056c05e2e9acd582bcfb4d1a1277"
   },
   "trust_claim": false,
-  "validation_commit": "610489dbd1165ea7980faced55969cfe32c06b69",
+  "validation_commit": "085b302fedc37c30932122be27b3efc20ff9f5b0",
   "verified_official_main": "416b30919e6c4d03b634d9d3fe558884b02f0b91"
 }
