@@ -229,6 +229,123 @@ public sealed class EvidenceRestrictedCoverageFactoryTests
         Assert.Equal(1, supervisor.WaitCount);
     }
 
+    /// <summary>Exercises each early metadata guard; the labelled admission authenticates no runtime lease.</summary>
+    [Theory]
+    [InlineData("admission-null")]
+    [InlineData("plan-null")]
+    [InlineData("profile-null")]
+    [InlineData("producers-null")]
+    [InlineData("declaration-null")]
+    [InlineData("run-empty")]
+    public void PureLeaseMetadataRejectsEachMissingInputBeforeAnyRuntimeProcedure(string change)
+    {
+        var declaration = Declaration();
+        var plan = Plan(declaration);
+        var admission = new EvidenceAdmissionResult(plan, EvidenceExecutionMode.Observation, "fixture/1", null);
+        admission.Activate("metadata-only-not-a-real-output");
+        EvidenceRestrictedProducerLease.ValidateMetadata(admission, plan, declaration, "fixture/1");
+
+        var suppliedPlan = change switch
+        {
+            "plan-null" => null!,
+            "profile-null" => plan with { Profile = null! },
+            "producers-null" => plan with { Profile = plan.Profile with { Producers = null! } },
+            _ => plan
+        };
+        AssertSafe(Assert.Throws<EvidenceAdmissionException>(() => EvidenceRestrictedProducerLease.ValidateMetadata(
+            change == "admission-null" ? null! : admission,
+            suppliedPlan,
+            change == "declaration-null" ? null! : declaration,
+            change == "run-empty" ? string.Empty : "fixture/1")), "ASEVD410");
+        Assert.Equal(EvidenceExecutionMode.Observation, admission.Mode);
+        Assert.Null(admission.Assertion);
+    }
+
+    /// <summary>Tests only selection over caller-held metadata, never protected parsing or lease issuance.</summary>
+    [Fact]
+    public void PureMetadataSelectionSkipsALaterNullProducerWithoutIssuingALease()
+    {
+        var declaration = Declaration();
+        var resolved = Plan(declaration);
+        var plan = resolved with { Profile = resolved.Profile with { Producers = [declaration, null!] } };
+        var admission = new EvidenceAdmissionResult(plan, EvidenceExecutionMode.Observation, "fixture/1", null);
+        admission.Activate("metadata-only-not-a-real-output");
+
+        Assert.Same(declaration, plan.Profile.Producers[0]);
+        Assert.Null(plan.Profile.Producers[1]);
+        EvidenceRestrictedProducerLease.ValidateMetadata(admission, plan, declaration, "fixture/1");
+        Assert.Equal(EvidenceExecutionMode.Observation, admission.Mode);
+        Assert.Null(admission.Assertion);
+    }
+
+    /// <summary>Valid cancellable tokens isolate argument rejection from the existing unbound-token control.</summary>
+    [Theory]
+    [InlineData("execution-null")]
+    [InlineData("procedure-null")]
+    public void ProcedureOnlyTrackingRejectsEachNullArgumentSynchronouslyWithoutDispatch(string change)
+    {
+        var supervisor = new MetadataSupervisor();
+        var execution = Execution(supervisor);
+        using var stage = new CancellationTokenSource();
+        var procedureCount = 0;
+        Func<CancellationToken, Task<int>> procedure = _ =>
+        {
+            Interlocked.Increment(ref procedureCount);
+            return Task.FromResult(17);
+        };
+        Task<int>? returned = null;
+        Assert.True(stage.Token.CanBeCanceled);
+        Assert.False(stage.IsCancellationRequested);
+
+        AssertSafe(Assert.Throws<EvidenceAdmissionException>(() =>
+        {
+            returned = EvidenceRestrictedProducerLease.TrackProcedureAsync<int>(
+                change == "execution-null" ? null! : execution,
+                stage.Token,
+                CancellationToken.None,
+                change == "procedure-null" ? null! : procedure);
+        }), "ASEVD410");
+        Assert.Null(returned);
+        Assert.Equal(0, Volatile.Read(ref procedureCount));
+        Assert.Equal(0, supervisor.WaitCount);
+        Assert.False(execution.IsAdmissionClosed);
+        Assert.Equal(EvidenceWorkerTerminalCode.None, execution.TerminalCode);
+    }
+
+    /// <summary>Uses only the existing metadata lifecycle; no process or protected producer is fabricated.</summary>
+    [Fact]
+    public async Task ProcedureOnlyTrackingAfterJoinedCleanupRejectsSynchronouslyWithoutReopeningWork()
+    {
+        var supervisor = new MetadataSupervisor();
+        var execution = Execution(supervisor);
+        using var stage = new CancellationTokenSource();
+        Assert.True(await execution.StopAndDisposeAsync());
+        Assert.True(execution.OwnWorkStopped);
+        Assert.True(execution.IsAdmissionClosed);
+        Assert.Equal(1, supervisor.WaitCount);
+        Assert.True(stage.Token.CanBeCanceled);
+        Assert.False(stage.IsCancellationRequested);
+        var procedureCount = 0;
+        Task<int>? returned = null;
+
+        AssertSafe(Assert.Throws<EvidenceAdmissionException>(() =>
+        {
+            returned = EvidenceRestrictedProducerLease.TrackProcedureAsync(
+                execution, stage.Token, CancellationToken.None,
+                _ =>
+                {
+                    Interlocked.Increment(ref procedureCount);
+                    return Task.FromResult(17);
+                });
+        }), "ASEVD410");
+        Assert.Null(returned);
+        Assert.Equal(0, Volatile.Read(ref procedureCount));
+        Assert.Equal(1, supervisor.WaitCount);
+        Assert.True(execution.OwnWorkStopped);
+        Assert.True(execution.IsAdmissionClosed);
+        Assert.Equal(EvidenceWorkerTerminalCode.None, execution.TerminalCode);
+    }
+
     private static EvidenceProducerDeclaration Declaration() => new("coverage", "coverage", "1.0.0", [],
         ["appsurface/coverage/behavioral-patch@1"], [], 20, new EvidenceCoverageGateRequirements(95, 85));
     private static EvidencePlan Plan(EvidenceProducerDeclaration declaration)

@@ -377,6 +377,35 @@ public sealed class EvidenceRestrictedCoverageProducerTests
         Assert.Empty(writer.WrittenArtifacts);
     }
 
+
+    [Fact]
+    public void Constructor_ShouldRejectNullRestrictedTransportBeforeInvokingTheMerger()
+    {
+        var reporter = new CopyingReportGenerator();
+        var merger = new CoverageMergeWorkflow(reporter, TimeProvider.System);
+
+        var exception = Assert.Throws<ArgumentNullException>(
+            () => new EvidenceRestrictedCoverageProducer(null!, merger));
+
+        Assert.Equal("restrictedRun", exception.ParamName);
+        Assert.Equal(0, reporter.MergeCount);
+        Assert.Empty(reporter.InputFiles);
+    }
+
+    [Fact]
+    public void Constructor_ShouldRejectNullMergerBeforeInvokingTheRestrictedTransport()
+    {
+        var transport = new FakeRestrictedRun([Report(PassingCobertura)]);
+
+        var exception = Assert.Throws<ArgumentNullException>(
+            () => new EvidenceRestrictedCoverageProducer(transport, null!));
+
+        Assert.Equal("mergeWorkflow", exception.ParamName);
+        Assert.Equal(0, transport.RunCount);
+        Assert.Equal(0, transport.CollectCount);
+        Assert.Empty(transport.ResultsToken);
+    }
+
     private static async Task<EvidenceProducerResult> RunWithReportsAsync(
         EvidenceProducerDeclaration declaration,
         string root,
