@@ -562,3 +562,57 @@ after root-peer rejection. A private latest-main source includes this fix and
 verified upstream revision `416b30919e6c4d03b634d9d3fe558884b02f0b91`.
 Its unchanged coverage gate is pending. The [acceptance map](issue779-acceptance-status.md)
 and protected consumer requirements remain open.
+
+## Current validation checkpoint (2026-10-03 19:58 UTC)
+
+[Native-v16 run 37143380879](https://github.com/forge-trust/AppSurface/actions/runs/37143380879)
+tested frozen source `610489dbd1165ea7980faced55969cfe32c06b69` against base
+`416b30919e6c4d03b634d9d3fe558884b02f0b91`. The unchanged wrapper exited
+**1 / ASCOV120** after an existing console-sink test observed zero writes where
+its timing-dependent assertion expected one. Raw merged coverage was
+**94.930930% line / 88.841319% branch**. Numerical and patch gates were not
+reached; see the [coverage audit](issue779-coverage-gate.md#current-frozen-source-coverage-checkpoint-2026-10-03).
+
+The subsequent test-only console correction passed its **one selected test**.
+Seven new pure-protocol rows passed across bounded selections: two IOException
+controls in the initial run and five parser rows after correcting their message
+assertions. Two new worker lifecycle facts passed their focused source build.
+Final selected commands exited zero with no compiler diagnostic records. These
+results establish the selected controls; a full-suite rerun and measured coverage
+gain remain pending. Earlier failed attempts remain recorded. The five tested
+files are mirrored in the primary worktree, whose recorded HEAD remains
+`4dd992ec1bc2df8220c73149115c5b478edb0085`; [preliminary PR #850](https://github.com/forge-trust/AppSurface/pull/850)
+has not received a product push.
+
+[Private qualification V4 run 37145635575](https://github.com/forge-trust/AppSurface/actions/runs/37145635575)
+tested source `7d94e66bf47ecf8c39e17046bc7e6d40eeb1b7c8` and failed with
+**Claim None / Eligibility None**, no completed CLI/Host entry, and worker main
+code **3**, status **6**. The broker reported ready and work closed, but wait
+completion and exit were false. Its 4,096-byte journal was truncated without a
+closed diagnostic frame. A private diagnostic-only correction increased the
+raw journal limit to 16 KiB and passed **14 targeted portable controls**;
+functional lifecycle and controller AST comparisons remained unchanged.
+
+[Private qualification V5 run 37148541526](https://github.com/forge-trust/AppSurface/actions/runs/37148541526)
+tested correction source `a9d9ec2a35932f671f697ccfd184b8df83cb9e76` and again
+failed with no completed entry and **Claim None / Eligibility None**. Its
+verified 11,946-byte journal remained below the byte cap and contained the fixed
+fatal message for a faulted owned-exit acknowledgement task. The initial marker
+scan missed that message. Its stack is consistent with a negative `owned_exit`
+acknowledgement; response bytes were not retained. The root application-join or
+ownership check that rejected exit remains unknown. The numeric exit signal
+alone does not identify that cause.
+
+[Native-v17 run 37147414478](https://github.com/forge-trust/AppSurface/actions/runs/37147414478)
+completed with **16,737 .NET tests passed, zero failed and two existing skips**,
+plus **345 Python controls passed**. Eight build summaries reported zero warnings
+and errors. It reached the unchanged gate: aggregate **94.94% line / 88.85%
+branch** passed, and patch branch **86.07%** passed. Patch line **87.44%** failed
+the effective **94.5%** requirement, producing exit **1 / ASCOV020**. These are
+the rounded job-log measurements; artifact numerator verification remains
+pending. The run binds source
+`085b302fedc37c30932122be27b3efc20ff9f5b0`; the later two-worker-fact capture
+`ef1a6b9ec4141a96f0af8f2fd583cd05cff65ea5` is separate. The complete
+[57-group acceptance set](issue779-acceptance-status.md) remains unfinished.
+The production support catalogue and accepted-proof registry remain closed;
+these observations enable no Trusted support.

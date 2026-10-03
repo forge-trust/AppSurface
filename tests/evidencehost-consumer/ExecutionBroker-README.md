@@ -33,6 +33,67 @@ The C# suites always run a small guard proving that unsupported platforms and ab
 
 The scenario operation logs and `*.peer.json` files are useful for diagnosing test failures. The socket peer record must match the selected non-root worker UID/GID, and the C# tests compare its PID with the active testhost process. Each descriptor uses a scenario-specific run ID, and its policy digest is computed from the fixture policy bytes; the all-zero proof digest intentionally cannot admit Trusted execution. A successful report remains informational in Observation; Trusted remains rejected with ASEVD407 because the consumer proof allowlist is empty. A separate systemd-backed CI run is still required for actual launcher, cgroup, process-isolation, and published-gate acceptance.
 
+## Direct authenticated protocol rejection controls
+
+The existing [C# control tests](../../Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxControlProtocolTests.cs)
+add four direct supervisor controls under this root fixture: a negative declared artifact length
+(`ASEVD420`, no artifact request), a valid two-byte chunk against a one-byte declaration
+(`ASEVD420`, one chunk and no result), a valid 174,768-character base64 chunk above the 174,764-character
+allowance but below the 1 MiB wire cap (`ASEVD420`, rejected before decoding), and an acknowledged
+`stop` followed by `owned_exit=false` (`ASEVD410`, no terminal `exit` request or acknowledgement).
+The operation arrays assert exact counts and order, including absence of subject `run` calls.
+The false-exit scenario also rejects any subsequent `exit` request rather than upgrading its receipt.
+
+These four cases require root broker UID 0 and the owner's selected non-root worker and subject
+UID/GID pairs, distinct by both UID and GID. The root-written scenario metadata carries those selected
+identities. Tests compare the actual test-host UID/GID and authenticated descriptor against that metadata,
+and require the descriptor's subject identities to match the selected disjoint pair. Actual test-host
+PID and socket peer PID/UID/GID checks remain mandatory; metadata cannot replace root `SO_PEERCRED`
+authentication. Each case uses its own scenario socket with the peer pinned at first connection,
+a captured 600-second descriptor deadline, and a 15-second local cancellation bound.
+Artifact cases request stop and wait in `finally` with a fresh five-second cleanup bound.
+The supervisor retains metadata and opens/closes a socket per request; it owns no persistent socket
+or disposable process. The false-exit test calls the supervisor directly without invoking a
+process-fatal shared cleanup path. The root controller independently owns the real test process
+in a fresh process group, uses a finite owner-selected command budget, reaps its leader, and
+polls physical group absence within one eight-second cleanup deadline after TERM/KILL.
+Leader reap alone cannot establish whole-group absence. It explicitly joins all retained daemon
+accept loops and handlers before returning. Handler socket I/O is bounded to five seconds and
+thread joins share a six-second allowance. Unknown or surviving work rejects fixture cleanup;
+daemon status only permits the failing root process to terminate without waiting indefinitely for
+a surviving Python thread. A synthetic `owned_exit` value cannot establish physical cleanup.
+
+`--command-timeout-seconds` accepts integer seconds from 1 through 4,200 and defaults to 4,200.
+Owners may select 600 for focused cases; the default preserves the existing native runner's
+4,200-second full-lane wrapper allowance. The [official solution coverage job](../../.github/workflows/build.yml)
+has a 45-minute job cap; the issue-specific private native runner separately uses a 90-minute job cap,
+600 seconds for focused broker checks and 4,200 seconds for the unchanged full coverage wrapper.
+Command budgets are separate from the per-scenario captured descriptor allowance. There is no
+ambient timeout override, unlimited value, renewed cleanup deadline or change to the coverage command.
+
+For focused Linux execution, the invocation above can select
+`--worker-uid 65534 --worker-gid 65532 --subject-uid 65533 --subject-gid 65531`
+and filter `FullyQualifiedName~EvidenceLinuxControlProtocolTests`. The existing native runner's
+actual runner UID/GID with subject 65533:65533 is also supported when both identities are non-root
+and disjoint as required by the fixture. A full test wrapper may run the same assembly under the
+fixture's existing environment; account selection is not a fixed-account authority or native proof. The production calls execute inside that
+C# test host; actual instrumentation and resulting coverage must be reviewed and measured separately.
+No extra collector setting, synthetic report, or external worker execution is evidence of improved
+Cobertura coverage for these controls. Missing Linux fixture metadata fails; other platforms only
+assert unsupported connection behavior.
+
+The [portable fixture controls](test_execution_broker_fixture.py) inspect the exact hostile response
+shapes, valid base64 and frame sizes, false-exit rejection, and bounded join procedure.
+Additional real unprivileged process/thread controls check command timeout cleanup, delayed group
+absence after leader reap, and failure-process exit with a surviving daemon handler; they do not
+create an authenticated root supervisor. Budget parsing and neighbor rejection also have portable controls. These controls grant no
+authentication authority and establish no actual root execution. The blocked-handler control uses
+the actual fixture socket server with a portable blocking peer-pin gate and mocked privileged
+ownership assignment. This is
+mechanical authenticated root protocol coverage with synthetic cgroup metadata, no systemd unit,
+no application admission or consumer qualification, and no Trusted acceptance. The original scenarios,
+policy, report, root/platform checks and supplementary-group restrictions are retained.
+
 ## Production worker syscall compatibility
 
 The [production launcher's worker unit](../../scripts/evidencehost-linux-launcher.py) explicitly uses `RestrictSUIDSGID=no`; its subject units retain `RestrictSUIDSGID=yes`. In pinned [systemd v255 `seccomp_restrict_sxid`](https://github.com/systemd/systemd/blob/v255/src/shared/seccomp-util.c#L2148-L2164), the filter blocks `openat2` with `ENOSYS` because the syscall's flags are passed indirectly; [`RestrictSUIDSGID` installs that filter](https://github.com/systemd/systemd/blob/v255/src/shared/seccomp-util.c#L2179-L2205). The protected artifact allocator requires `openat2` and has no syscall fallback, so the worker must permit that syscall to allocate its retained output handles.
