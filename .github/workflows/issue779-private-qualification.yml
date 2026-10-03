@@ -37,8 +37,8 @@ jobs:
           set -euo pipefail
           task_source="$RUNNER_TEMP/issue779-private-qualification-source"
           git clone --quiet --no-hardlinks "$GITHUB_WORKSPACE" "$task_source"
-          git -C "$task_source" checkout --quiet --detach a9d9ec2a35932f671f697ccfd184b8df83cb9e76
-          test "$(git -C "$task_source" rev-parse HEAD)" = a9d9ec2a35932f671f697ccfd184b8df83cb9e76
+          git -C "$task_source" checkout --quiet --detach 821699b7716e39255025c591b16f1ad85dbfe1c3
+          test "$(git -C "$task_source" rev-parse HEAD)" = 821699b7716e39255025c591b16f1ad85dbfe1c3
           test -z "$(git -C "$task_source" status --porcelain)"
           sudo chown -R root:root "$task_source"
       - name: Verify private data and process ownership controls
@@ -54,7 +54,7 @@ jobs:
           set -euo pipefail
           task_source="$RUNNER_TEMP/issue779-private-qualification-source"
           sudo env "PATH=$PATH" python3 -B "$task_source/tests/evidencehost-consumer/PrivateQualification/run-qualification.py" \
-            --source-commit a9d9ec2a35932f671f697ccfd184b8df83cb9e76 \
+            --source-commit 821699b7716e39255025c591b16f1ad85dbfe1c3 \
             --workflow-head "$GITHUB_SHA" \
             --run-id "$GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT" \
             --workflow-file .github/workflows/issue779-private-qualification.yml \
