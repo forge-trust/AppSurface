@@ -20,6 +20,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Narrative release note: [v0.2.0-preview.12](./releases/v0.2.0-preview.12.md)
 - Release manifest: `releases/v0.2.0-preview.12.release.json`
 - Release evidence bundle: `releases/v0.2.0-preview.12.evidence.json`
+- Migration: `appsurface durable schema preflight` now requires `--role-pairs-file` and `--migration-owner-role`, including for single-pair stores; update existing invocations. See the [CLI contract](./Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands).
 
 ## 0.2.0-preview.11 - 2026-09-29
 
