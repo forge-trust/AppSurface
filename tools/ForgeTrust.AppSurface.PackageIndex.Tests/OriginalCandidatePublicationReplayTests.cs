@@ -21,13 +21,13 @@ public sealed class OriginalCandidatePublicationReplayTests
         var preparedDirectory = Required("TAILWIND_REHEARSAL_PREPARED_DIRECTORY");
         var manifestPath = Path.Combine(producerDirectory, "package-artifact-manifest.json");
         var manifest = await new PackageArtifactManifestReader().ReadAsync(manifestPath, CancellationToken.None);
-        Assert.Contains(manifest.Entries, entry => entry.PackageId == PackageId);
+        var tailwindArtifact = Assert.Single(manifest.Entries, entry => entry.PackageId == PackageId);
 
         var scratch = TestPathUtils.PathUnder(Path.GetTempPath(), "tailwind-real-replay", Guid.NewGuid().ToString("N"));
         try
         {
             var credentials = new TestCredentialProvider();
-            var publisher = new RealEvidenceRecordingPublisher();
+            var publisher = new RealEvidenceRecordingPublisher(tailwindArtifact.ArtifactFileName);
             var workflow = new PackagePublishWorkflow(
                 new PackagePublishPlanResolver(new PackageProjectScanner(), new DotNetProjectMetadataProvider(), new PackageManifestLoader()),
                 new PackageArtifactManifestReader(), publisher, new PackagePublishLedgerRenderer(), credentials);
@@ -81,8 +81,9 @@ public sealed class OriginalCandidatePublicationReplayTests
             AssertIdentity(originalIdentity, replayed.TailwindIdentity);
             Assert.Equal(2, credentials.Reads);
 
+            // Runtime companion filenames share this package ID prefix, so bind to the frozen artifact name.
             var tailwindPushes = publisher.Requests
-                .Where(request => Path.GetFileName(request.Arguments[2]).StartsWith(PackageId + ".", StringComparison.OrdinalIgnoreCase))
+                .Where(request => string.Equals(Path.GetFileName(request.Arguments[2]), tailwindArtifact.ArtifactFileName, StringComparison.OrdinalIgnoreCase))
                 .ToArray();
             Assert.Equal(2, tailwindPushes.Length);
             Assert.All(tailwindPushes, request =>
@@ -97,13 +98,32 @@ public sealed class OriginalCandidatePublicationReplayTests
                 await File.ReadAllBytesAsync(tailwindPushes[0].Arguments[2]),
                 await File.ReadAllBytesAsync(tailwindPushes[1].Arguments[2]));
             Assert.Equal(
-                manifest.Entries.Single(entry => entry.PackageId == PackageId).Sha512,
+                tailwindArtifact.Sha512,
                 PackageHash.ComputeSha512(tailwindPushes[0].Arguments[2]));
         }
         finally
         {
             if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task RealEvidenceRecordingPublisher_InterruptsOnlyExactTailwindArtifact()
+    {
+        var mainArtifact = $"{PackageId}.{PackageVersion}.nupkg";
+        var publisher = new RealEvidenceRecordingPublisher(mainArtifact) { Attempt = 1 };
+
+        static ExternalCommandRequest Push(string artifactFileName) => new(
+            "dotnet", ["nuget", "push", artifactFileName], Directory.GetCurrentDirectory(),
+            "recorded push", "recording package push", 30_000);
+
+        var runtime = await publisher.RunAsync(
+            Push($"{PackageId}.Runtime.win-x64.{PackageVersion}.nupkg"), CancellationToken.None);
+        var main = await publisher.RunAsync(Push(mainArtifact), CancellationToken.None);
+
+        Assert.Equal(0, runtime.ExitCode);
+        Assert.Equal(1, main.ExitCode);
+        Assert.Equal(2, publisher.Requests.Count);
     }
 
     [Fact]
@@ -196,7 +216,7 @@ public sealed class OriginalCandidatePublicationReplayTests
         }
     }
 
-    private sealed class RealEvidenceRecordingPublisher : IExternalCommandRunner
+    private sealed class RealEvidenceRecordingPublisher(string tailwindArtifactFileName) : IExternalCommandRunner
     {
         public int Attempt { get; set; }
         public List<ExternalCommandRequest> Requests { get; } = [];
@@ -204,7 +224,8 @@ public sealed class OriginalCandidatePublicationReplayTests
         public Task<ExternalCommandResult> RunAsync(ExternalCommandRequest request, CancellationToken cancellationToken)
         {
             Requests.Add(request);
-            var isTailwind = Path.GetFileName(request.Arguments[2]).StartsWith(PackageId + ".", StringComparison.OrdinalIgnoreCase);
+            var isTailwind = string.Equals(
+                Path.GetFileName(request.Arguments[2]), tailwindArtifactFileName, StringComparison.OrdinalIgnoreCase);
             return Task.FromResult(isTailwind && Attempt == 1
                 ? new ExternalCommandResult(1, string.Empty, "simulated interruption after remote acceptance")
                 : new ExternalCommandResult(0, Attempt == 2 ? "package already exists" : "recorded push", string.Empty));

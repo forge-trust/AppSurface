@@ -20,6 +20,8 @@ public static class RazorWireServiceCollectionExtensions
     /// Optional action to configure <see cref="RazorWireOptions"/>; if null, default options are used.
     /// Stream subscriptions are denied by default because
     /// <see cref="RazorWireStreamAuthorizationMode.DenyAll"/> is the default authorization mode.
+    /// Configure <see cref="RazorWireFormOptions.Loading"/> here to change form feedback, fallback-bar, or
+    /// same-form duplicate-submission defaults. These settings are independent of failed-form UX.
     /// </param>
     /// <remarks>
     /// This method also calls <see cref="LoggingServiceCollectionExtensions.AddLogging(IServiceCollection)"/> and

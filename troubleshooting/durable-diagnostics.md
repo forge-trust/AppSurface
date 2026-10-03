@@ -1,6 +1,6 @@
 # Durable contract diagnostics
 
-For schema-11 runtime heartbeat maintenance, use the [retention operations guide](../Durable/heartbeat-retention-operations.md#recover-and-diagnose). A pending migration 0011 preflight means the downtime migration has not been applied; drain workers, apply it as migration owner, reconcile roles, then require a passing runtime-role preflight. A migration advisory-lock or index table-lock timeout means activation remains closed until the blocker is resolved and the same forward migration succeeds. Role drift means rerun the canonical role recipe and structural preflight. Repeated prune failures mean inspect database reachability and exact grants, then retry or pause via a new provider registration. Cleanup failures alone do not change Work readiness.
+For schema-11 runtime heartbeat maintenance, use the [retention operations guide](../Durable/heartbeat-retention-operations.md#recover-and-diagnose) and its [complete runtime-set receipt checklist](../Durable/heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist). A pending migration 0011 preflight means the downtime migration has not been applied; drain workers, apply it as migration owner, reconcile the complete reviewed manifest, then require one passing preflight under each distinct runtime credential. A migration advisory-lock, runtime-fence, or index table-lock timeout keeps activation closed until the blocker is resolved and the entire gate is rerun. The role recipe may refuse observed drift; follow the category-specific direction below and use a reviewed repair. Repeated prune failures mean inspect database reachability and exact grants, then retry or pause via a new provider registration. Cleanup failures alone do not change Work readiness.
 
 AppSurface Durable uses append-only `ASDURxxx` codes. Messages and operator history must contain safe Problem, Cause,
 Fix, and Docs guidance and must never include credentials, provider response bodies, tokenized URLs, email content, or
@@ -9,6 +9,39 @@ child-sensitive data.
 The Durable contract and PostgreSQL public-preview packages emit the codes below. Hosted-runtime diagnostics use only
 fixed, low-cardinality codes and never expose connection targets, notification payloads, scopes, aggregates, or trace
 context.
+
+## Schema-11 complete runtime preflight
+
+The CLI preflight requires `--role-pairs-file` and `--migration-owner-role` for one or many pairs. See the [CLI contract](../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands) for exact input limits and checked catalog predicates and the [canonical staged workflow](../Durable/heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist) for candidate, published, and deployment gates. The fixed categories below report only validated pair index/role identifiers. Unknown results use no raw server text. Never paste JSON, SQL, ACL text, connection values, provider exceptions, or secret values into an issue.
+
+| Category | Problem and likely cause | Safe action |
+| --- | --- | --- |
+| `manifest_input` | The file is unreadable or violates strict UTF-8/no-BOM, 64 KiB, depth-8, exact-shape, duplicate-property, type, pair-count, profile, or role-name limits. | Use the complete reviewed file (1–32 pairs), fix it through review, and pass the same exact file to the recipe and every runtime command. |
+| `connection_input` | The environment-variable name, secret value, or PostgreSQL connection configuration is invalid. | Correct the named environment variable without printing its value, then rerun with the unchanged reviewed manifest. |
+| `database_operation` | A read-only PostgreSQL operation failed. | Check server reachability, the reviewed role grants and session-affine package fence; verify owned resources released before repeating the complete gate. |
+| `role_resolution` | An expected dispatcher, runtime, or owner name does not resolve exactly once. | Check the reviewed spelling and database role provisioning; do not infer a substitute from catalogs. |
+| `role_alias` | Distinct manifest names or the owner resolve to an ambiguous or repeated identity. | Correct the reviewed role mapping so every expected name maps to a unique OID and the owner is disjoint. |
+| `runtime_role` | A runtime is not a restricted LOGIN leaf or has a prohibited role attribute. | Review role attributes and repair through the approved identity/role process; rerun every pair. |
+| `role_membership` | A runtime has an incoming or outgoing membership edge. | Review membership grants and remove only through an authorized reviewed change; rerun the full manifest. |
+| `runtime_ownership` | A runtime owns a database or package schema, relation, sequence, or function. | Review ownership and transfer it through the approved owner workflow; rerun all credentials. |
+| `caller_identity` | `session_user` and `current_user` cannot be resolved to the same identity. | Use a direct credential session without role switching; check the endpoint and connection configuration without exposing values. |
+| `caller_role` | The caller is outside the manifest runtimes and independent owner, or the runtime result does not match its expected pair. | Select the correct environment-variable name for this pass; owner diagnostics do not count as runtime evidence. |
+| `forced_rls` | Heartbeat row-level security is absent, disabled, or not forced. | Review schema/migration state and apply an authorized forward repair, then rerun complete preflight. |
+| `function_signature` | The pruning function's four-argument signature, integer/non-set result, or function kind differs. | Compare against the released migration/catalog contract and use a reviewed forward repair; do not edit migration history. |
+| `function_owner` | The schema, heartbeat table, retention function, due-health function, or owner policy does not match the independently reviewed owner. | Verify the owner input and perform only a reviewed ownership correction; do not accept a consistent but unexpected owner. |
+| `security_definer` | The retention function is not `SECURITY DEFINER` as required. | Review the function definition from the matching package/migration; repair forward and rerun all checks. |
+| `search_path` | The retention function has an unexpected search path. | Restore the exact reviewed function setting using the approved package procedure, then rerun. |
+| `heartbeat_policies` | Required heartbeat policies, owner policy, expressions, command, permissiveness, or exact count differ. | Inspect through an authorized catalog review; reconcile using the complete manifest only if the recipe accepts the observed state. |
+| `runtime_policy_set` | A managed runtime policy contains missing, extra, duplicate, PUBLIC, or unresolved targets, including on a noncurrent pair. | Compare raw targets with the reviewed complete manifest; never grant a wider set to make the check pass. |
+| `function_acl` | Pruning EXECUTE is missing for a runtime, has grant option, or includes an unexpected grantee. | Review the exact function ACL and default ACL; apply a reviewed narrow repair and rerun every pair. |
+| `due_health_acl` | Due-health EXECUTE does not match the expected owner-plus-runtime set. | Review the released role recipe and effective grants; do not infer authorization from one passing role. |
+| `runtime_table_privileges` | A runtime has effective heartbeat DELETE or TRUNCATE, including inherited/PUBLIC rights. | Trace direct and inherited grants, then remove excess rights only with review; rerun complete preflight. |
+| `retention_index` | The required index is absent, invalid/not ready, or differs in uniqueness, ordering, keys, opclass, predicate, or expression. | Verify migration 0011 and index state; use the downtime/forward-repair procedure and rerun. |
+| `catalog_result` | The query returned null, incomplete, contradictory, oversized, or otherwise unexpected catalog evidence. | Keep activation closed; inspect safe server health and supported schema state. Do not treat partial evidence as success. |
+| `cleanup` | Transaction rollback, explicit fence unlock, or physical connection disposal could not be confirmed. | Keep activation closed, allow owned resources to drain, inspect server/session health, then run every credential pass again. |
+| `timeout` | Connection, lock wait, query work, or cleanup exceeded the 30-second total (28-second work plus at most 2-second cleanup) or was canceled. | Resolve the direct endpoint/load/lock cause; do not increase connection timeouts or claim partial success. Rerun the entire combined gate under a fresh continuous guard. |
+
+The canonical recipe is idempotent for accepted state but can refuse drift it cannot safely reconcile. A recipe failure does not authorize ad-hoc grants or mean that rerunning it will repair every finding. The deployment owner must keep the full gate closed until a reviewed repair, all distinct runtime passes, both lane proofs, matching StoreId/nonempty epoch, and the continuous guard window are re-established.
 
 ## Available contract diagnostics
 
@@ -241,9 +274,12 @@ five-character SQLSTATE. Never log or serialize inner message text, detail, hint
 |---|---|---|---|
 | `ASDUR103` | Store unavailable | PostgreSQL transport or timeout blocks a bounded runtime pass | Retry after the configured bounded delay and inspect only safe infrastructure telemetry. |
 | `ASDUR406` | Wake listener retry | The advisory wake-listener connection disconnected or timed out | Polling remains authoritative; retry the listener after the configured bounded delay and alert separately from pass failures. |
-| `ASDUR404` | Activator stale | No current heartbeat or successful sweep inside `HeartbeatStaleAfter` | Check that exactly one compatible host or external activator is running, then inspect typed health and role/schema prerequisites. |
+| `ASDUR404` | Initial heartbeat not observed or activator stale | `NotStarted` may mean the first worker heartbeat is absent; `Stale` means the observed heartbeat/sweep exceeded `HeartbeatStaleAfter` | For `NotStarted`, treat it as a compatible initial assessment and follow the host's activation policy. For `Stale`, inspect the configured runtime and role/schema prerequisites. The health probe preserves the observed code; activation results retain it only for `Stale`. |
 | `ASDUR405` | Worker identity conflict | Another live process owns the configured `WorkerId`, an old generation updated after takeover, or the same runtime instance already has an active pass | Assign a unique worker ID per replica, wait for stale/drain takeover rules, avoid overlapping local activation, and never edit the heartbeat row manually. |
 | `ASDUR400`–`ASDUR403` | Incompatible runtime store | Missing, pending, unsupported, or inconsistent migration state | Apply reviewed migrations with the migration owner, rerun the role recipe, and deploy compatible code; startup intentionally performs no DDL. |
 | `ASDUR108` | Recovery epoch required | The configured runtime epoch differs from the active store epoch | Perform authorized epoch initialization/rotation before enabling the worker host. |
+| `ASDUR407` | External activation failed | Unexpected nonfatal setup/health failure before admission, or provider/execution/bookkeeping failure after admission | Use the activation phase to distinguish zero admission calls from an invoked pass; inspect persisted Work/effect state before any caller retry. Never use exception text as a result code. |
 
 The canonical activation path is the PostgreSQL package's [worker-host quickstart](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host). It is a public-preview package; real PostgreSQL reference workloads and runtime tests remain the operational proof surface.
+
+For the exact ten service outcomes and HTTP projection, see the canonical [external activation operator table](../Durable/external-activation-v1.md#operator-actions-and-recovery). A host probe's `ProbeFailed/ASDUR407` means no assessment was obtained; it does not synthesize an `Unavailable` assessment. `ProbeCanceled` records request/transport cancellation. Neither probe result establishes execution or effect truth.

@@ -16,8 +16,17 @@ const generatedOutputs = [
     output: path.join(outputRoot, 'razorwire.js'),
     label: 'razorwire.js',
     banner: 'Generated from assets/src/razorwire.ts. Do not edit wwwroot/razorwire/razorwire.js by hand.',
-    rawBytes: 35_000,
-    gzipBytes: 12_000
+    // #827 form loading plus #828 dialog ownership and ordered rendering.
+    rawBytes: 60_000,
+    gzipBytes: 16_000
+  },
+  {
+    entry: path.join(assetRoot, 'src', 'dialog-responses.css'),
+    output: path.join(outputRoot, 'razorwire-dialog.css'),
+    label: 'razorwire-dialog.css',
+    banner: 'Generated from assets/src/dialog-responses.css. Do not edit this output.',
+    rawBytes: 3_000,
+    gzipBytes: 1_200
   },
   {
     entry: path.join(assetRoot, 'src', 'razorwire.islands.ts'),
@@ -60,6 +69,16 @@ const generatedOutputs = [
     banner: 'Generated from assets/src/form-interactions.ts. Do not edit wwwroot/razorwire/form-interactions.js by hand.',
     rawBytes: 24_000,
     gzipBytes: 7_000
+  }
+];
+
+const authoredOutputs = [
+  {
+    entry: path.join(assetRoot, 'src', 'razorwire.loading.css'),
+    output: path.join(outputRoot, 'razorwire.loading.css'),
+    label: 'razorwire.loading.css',
+    rawBytes: 5_000,
+    gzipBytes: 1_500
   }
 ];
 
@@ -177,6 +196,26 @@ async function copyThirdPartyOutput(asset, operations = {}) {
   }
 }
 
+async function verifyAssetBudgets(assets) {
+  for (const budget of assets) {
+    const bytes = await readFile(budget.output);
+    const rawSize = (await stat(budget.output)).size;
+    const gzipSize = gzipSync(bytes).length;
+
+    if (rawSize > budget.rawBytes || gzipSize > budget.gzipBytes) {
+      throw new Error(
+        `RWASSET002 ${budget.label} exceeds asset budget. Problem: package output is larger than allowed. Cause: the browser payload changed or grew without an intentional budget update. Fix: verify the output provenance, then reduce the payload or update the budget in Web/ForgeTrust.RazorWire/assets/scripts/build.mjs with reviewer context. Docs: Web/ForgeTrust.RazorWire/Docs/runtime-contract-pipeline.md. Size: raw ${rawSize}/${budget.rawBytes}, gzip ${gzipSize}/${budget.gzipBytes}.`
+      );
+    }
+  }
+}
+
+async function copyAuthoredOutputs() {
+  for (const authored of authoredOutputs) {
+    await copyFile(authored.entry, authored.output);
+  }
+}
+
 async function buildAssets() {
   await mkdir(outputRoot, { recursive: true });
 
@@ -191,31 +230,23 @@ async function buildAssets() {
       target: ['es2022'],
       sourcemap: false,
       legalComments: 'none',
-      banner: {
-        js: `// ${generated.banner}`
-      }
+      banner: generated.entry.endsWith('.css')
+        ? { css: `/* ${generated.banner} */` }
+        : { js: `// ${generated.banner}` }
     });
   }
+
+  await copyAuthoredOutputs();
 
   for (const copied of copiedThirdPartyOutputs) {
     await copyThirdPartyOutput(copied);
   }
 
-  for (const budget of [...generatedOutputs, ...copiedThirdPartyOutputs]) {
-    const bytes = await readFile(budget.output);
-    const rawSize = (await stat(budget.output)).size;
-    const gzipSize = gzipSync(bytes).length;
-
-    if (rawSize > budget.rawBytes || gzipSize > budget.gzipBytes) {
-      throw new Error(
-        `RWASSET002 ${budget.label} exceeds asset budget. Problem: package output is larger than allowed. Cause: the browser payload changed or grew without an intentional budget update. Fix: verify the output provenance, then reduce the payload or update the budget in Web/ForgeTrust.RazorWire/assets/scripts/build.mjs with reviewer context. Docs: Web/ForgeTrust.RazorWire/Docs/runtime-contract-pipeline.md. Size: raw ${rawSize}/${budget.rawBytes}, gzip ${gzipSize}/${budget.gzipBytes}.`
-      );
-    }
-  }
+  await verifyAssetBudgets([...generatedOutputs, ...authoredOutputs, ...copiedThirdPartyOutputs]);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   await buildAssets();
 }
 
-export { buildAssets, copiedThirdPartyOutputs, copyThirdPartyOutput, generatedOutputs, outputRoot };
+export { authoredOutputs, buildAssets, copiedThirdPartyOutputs, copyThirdPartyOutput, generatedOutputs, outputRoot };

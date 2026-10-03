@@ -53,12 +53,21 @@ public class RazorWireScriptsTagHelperTests
         // Arrange
         A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
                 "/my-app",
+                "/_content/ForgeTrust.RazorWire/razorwire/razorwire-dialog.css"))
+            .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire-dialog.css?v=dialog");
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
+                "/my-app",
                 "/_content/ForgeTrust.RazorWire/razorwire/turbo.es2017-umd.js"))
             .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/turbo.es2017-umd.js?v=turbo");
         A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
                 "/my-app",
                 "/_content/ForgeTrust.RazorWire/razorwire/razorwire.js"))
             .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire.js?v=123");
+
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
+                "/my-app",
+                "/_content/ForgeTrust.RazorWire/razorwire/razorwire.loading.css"))
+            .Returns("/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire.loading.css?v=loading");
 
         A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
                 "/my-app",
@@ -92,6 +101,11 @@ public class RazorWireScriptsTagHelperTests
         Assert.Null(_output.TagName); // Should remove the wrapper tag
 
         var content = _output.Content.GetContent();
+        Assert.Contains("<link rel=\"stylesheet\" href=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire-dialog.css?v=dialog\" />", content);
+        Assert.Contains(
+            "<link rel=\"stylesheet\" href=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire.loading.css?v=loading\" />",
+            content);
+        Assert.DoesNotContain("<style", content);
         Assert.Contains(
             "src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/turbo.es2017-umd.js?v=turbo\"",
             content);
@@ -125,6 +139,40 @@ public class RazorWireScriptsTagHelperTests
         Assert.DoesNotContain("data-rw-behavior-kit-runtime", content);
         Assert.DoesNotContain("data-rw-behavior", content);
         Assert.Contains("turbo:frame-load", content);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Process_EmitsLoadingStylesheetOnlyWhenFormLoadingIsEnabled(bool enabled)
+    {
+        var options = new RazorWireOptions();
+        options.Forms.Loading.Enabled = enabled;
+        var helper = new RazorWireScriptsTagHelper(_fileVersionProvider, options) { ViewContext = _viewContext };
+        const string stylesheetPath = "/_content/ForgeTrust.RazorWire/razorwire/razorwire.loading.css";
+        const string versionedStylesheetPath = "/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire.loading.css?v=loading";
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(A<PathString>._, A<string>._))
+            .ReturnsLazily(call => call.GetArgument<string>(1)!);
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath("/my-app", stylesheetPath))
+            .Returns(versionedStylesheetPath);
+
+        helper.Process(_context, _output);
+
+        var content = _output.Content.GetContent();
+        var stylesheetCall = A.CallTo(() => _fileVersionProvider.AddFileVersionToPath("/my-app", stylesheetPath));
+        Assert.Equal(
+            enabled,
+            content.Contains($"<link rel=\"stylesheet\" href=\"{versionedStylesheetPath}\" />", StringComparison.Ordinal));
+        Assert.Contains($"data-rw-form-loading-enabled=\"{enabled.ToString().ToLowerInvariant()}\"", content);
+
+        if (enabled)
+        {
+            stylesheetCall.MustHaveHappenedOnceExactly();
+        }
+        else
+        {
+            stylesheetCall.MustNotHaveHappened();
+        }
     }
 
     [Fact]
@@ -165,6 +213,25 @@ public class RazorWireScriptsTagHelperTests
 
         var content = _output.Content.GetContent();
         Assert.Contains("src=\"/assets/turbo.js?value=&quot;&lt;&amp;\"", content);
+        Assert.DoesNotContain("value=\"<&", content);
+    }
+
+    [Fact]
+    public void Process_HtmlEncodesDialogStylesheetVersionProviderResult()
+    {
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(A<PathString>._, A<string>._))
+            .ReturnsLazily(call => call.GetArgument<string>(1)!);
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(
+                "/my-app",
+                "/_content/ForgeTrust.RazorWire/razorwire/razorwire-dialog.css"))
+            .Returns("/_content/ForgeTrust.RazorWire/razorwire/razorwire-dialog.css?value=\"<&");
+
+        _helper.Process(_context, _output);
+
+        var content = _output.Content.GetContent();
+        Assert.Contains(
+            "<link rel=\"stylesheet\" href=\"/_content/ForgeTrust.RazorWire/razorwire/razorwire-dialog.css?value=&quot;&lt;&amp;\" />",
+            content);
         Assert.DoesNotContain("value=\"<&", content);
     }
 
@@ -435,6 +502,26 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains("data-rw-form-failure-enabled=\"true\"", content);
         Assert.Contains("data-rw-form-failure-mode=\"auto\"", content);
         Assert.Contains("data-rw-default-failure-message=\"Custom &quot;failure&quot; &amp; retry\"", content);
+    }
+
+    [Fact]
+    public void Process_EmitsConfiguredFormLoadingRuntimeOptions()
+    {
+        var options = new RazorWireOptions();
+        options.Forms.Loading.Enabled = false;
+        options.Forms.Loading.ShowFallbackBar = false;
+        options.Forms.Loading.PreventDuplicateSubmissions = false;
+        var helper = new RazorWireScriptsTagHelper(_fileVersionProvider, options) { ViewContext = _viewContext };
+
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(A<PathString>._, A<string>._))
+            .ReturnsLazily(call => call.GetArgument<string>(1)!);
+
+        helper.Process(_context, _output);
+
+        var content = _output.Content.GetContent();
+        Assert.Contains("data-rw-form-loading-enabled=\"false\"", content);
+        Assert.Contains("data-rw-form-loading-show-fallback-bar=\"false\"", content);
+        Assert.Contains("data-rw-form-loading-prevent-duplicate-submissions=\"false\"", content);
     }
 
     [Fact]

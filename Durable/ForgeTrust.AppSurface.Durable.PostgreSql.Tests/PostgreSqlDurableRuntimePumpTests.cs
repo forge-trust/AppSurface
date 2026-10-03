@@ -6,12 +6,19 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Npgsql;
+using Xunit.Sdk;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 
 public sealed class PostgreSqlDurableRuntimePumpTests
 {
     private const string TypedExitWorkName = "tests.runtime-pump.typed-exit";
+
+    private enum ProviderEntry
+    {
+        LegacyPump,
+        ExternalActivation,
+    }
 
     [Fact]
     public async Task RunOnceAsync_ProcessesRegisteredWorkThroughTheProviderExecutionBoundary()
@@ -1064,10 +1071,13 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.Equal(registrationObservation.WorkVersion, snapshot.Value.WorkVersion);
     }
 
-    [Fact]
-    public async Task RunOnceAsync_RejectsAnOverlappingPassUntilTheActiveProviderCallCompletes()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunOnceAsync_RejectsAnOverlappingPassUntilTheActiveProviderCallCompletes(bool useExternalActivation)
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var entry = GetProviderEntry(useExternalActivation);
+        await using var database = await CreateDatabaseAsync(entry);
         var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
         await schema.ApplyAsync();
         var epoch = Guid.NewGuid();
@@ -1075,6 +1085,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         var registration = new BlockingWorkRegistration();
         var services = new ServiceCollection();
         services.AddSingleton<DurableWorkRegistration>(registration);
+        services.AddDurableExternalActivation();
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
             database.CreateDataSource(),
@@ -1098,7 +1109,13 @@ public sealed class PostgreSqlDurableRuntimePumpTests
 
         var pump = provider.GetRequiredService<IDurableRuntimePump>();
         var request = new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work);
-        var activePass = pump.RunOnceAsync(request).AsTask();
+        var activation = provider.GetRequiredService<IDurableExternalActivationService>();
+        var legacyActivePass = entry == ProviderEntry.LegacyPump
+            ? pump.RunOnceAsync(request).AsTask()
+            : null;
+        var activationActivePass = entry == ProviderEntry.ExternalActivation
+            ? activation.ActivateAsync(CreateActivationRequest(request)).AsTask()
+            : null;
         await registration.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         var overlap = await Assert.ThrowsAsync<InvalidOperationException>(async () => await pump.RunOnceAsync(request));
@@ -1106,13 +1123,30 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.Equal(
             "ASDUR405: This runtime instance already has an active Pass.",
             overlap.Message);
+        var activationOverlap = await activation.ActivateAsync(CreateActivationRequest(request))
+            .AsTask()
+            .WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(DurableExternalActivationOutcomeKind.Busy, activationOverlap.Kind);
+        Assert.Null(activationOverlap.ProblemCode);
+        Assert.Null(activationOverlap.PumpResult);
+        Assert.Equal(DurableRuntimeHealthState.Healthy, activationOverlap.ObservedHealthState);
         var admissionOverlap = await provider.GetRequiredService<IDurableRuntimePumpAdmission>()
             .TryRunOnceAsync(request);
         Assert.Equal(DurableRuntimePumpAttemptKind.Refused, admissionOverlap.Kind);
         Assert.Null(admissionOverlap.Result);
 
         registration.Complete.TrySetResult(registration.ResultCodec.EncodeObject(Encoding.UTF8.GetBytes("result")));
-        Assert.Equal(1, (await activePass).Processed);
+        if (legacyActivePass is not null)
+        {
+            Assert.Equal(1, (await legacyActivePass).Processed);
+        }
+
+        if (activationActivePass is not null)
+        {
+            var activeResult = await activationActivePass.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(DurableExternalActivationOutcomeKind.Completed, activeResult.Kind);
+            Assert.Equal(1, activeResult.PumpResult!.Processed);
+        }
     }
 
     [Fact]
@@ -1336,7 +1370,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         await schema.ApplyAsync();
         var epoch = Guid.NewGuid();
         await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "lease-renewal");
-        var registration = new SlowWorkRegistration();
+        var registration = new BlockingWorkRegistration();
         var services = new ServiceCollection();
         services.AddSingleton<DurableWorkRegistration>(registration);
         services.AddAppSurfaceDurablePostgreSql(
@@ -1349,7 +1383,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
                 options.WorkerId = "runtime-pump-lease-worker";
                 options.SendWakeNotifications = false;
                 options.IdlePollingInterval = TimeSpan.FromMilliseconds(20);
-                options.HeartbeatStaleAfter = TimeSpan.FromSeconds(1);
+                options.HeartbeatStaleAfter = TimeSpan.FromSeconds(3);
             });
         await using var provider = services.BuildServiceProvider();
         var scope = new DurableScopeId("runtime-pump-lease-scope");
@@ -1357,7 +1391,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             scope,
             new DurableCommandId("runtime-pump-lease-command"),
             "runtime-pump-lease-key",
-            SlowWorkRegistration.Name,
+            BlockingWorkRegistration.Name,
             "v1",
             registration.InputCodec.EncodeObject(Encoding.UTF8.GetBytes("input")),
             DurableProviderSafety.Idempotent,
@@ -1366,16 +1400,57 @@ public sealed class PostgreSqlDurableRuntimePumpTests
                 maximumElapsedTime: TimeSpan.FromMinutes(1),
                 initialRetryDelay: TimeSpan.FromMilliseconds(10),
                 maximumRetryDelay: TimeSpan.FromMilliseconds(10),
-                leaseDuration: TimeSpan.FromSeconds(2),
+                // Observe maintenance directly instead of making success depend on a two-second runner deadline.
+                leaseDuration: TimeSpan.FromSeconds(30),
                 renewalCadence: TimeSpan.FromMilliseconds(200),
                 maximumLeaseLifetime: TimeSpan.FromMinutes(1),
                 backoffAlgorithm: "exponential-v1")));
         Assert.True(accepted.IsSuccess);
 
-        var result = await provider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
-            new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work));
+        var store = new ObservedLeaseRenewalWorkStore(database.DataSource, epoch);
+        var pump = CreatePump(provider, store);
+        var health = provider.GetRequiredService<IDurableRuntimeHealth>();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var running = pump.RunOnceAsync(
+            new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work),
+            deadline.Token).AsTask();
+
+        try
+        {
+            await registration.Started.Task.WaitAsync(deadline.Token);
+            var initial = await health.GetAsync(deadline.Token);
+            Assert.NotNull(initial.LastHeartbeatAtUtc);
+
+            var renewal = await store.FirstRenewal.Task.WaitAsync(deadline.Token);
+            Assert.NotNull(renewal.Renewed);
+            Assert.True(renewal.Renewed.LeaseExpiresAtUtc > renewal.Original.LeaseExpiresAtUtc);
+
+            while (true)
+            {
+                Assert.False(running.IsCompleted);
+                var active = await health.GetAsync(deadline.Token);
+                Assert.NotNull(active.LastHeartbeatAtUtc);
+                if (active.LastHeartbeatAtUtc > initial.LastHeartbeatAtUtc)
+                {
+                    Assert.True(active.IsPassActive);
+                    Assert.Equal(DurableRuntimeHealthState.Healthy, active.State);
+                    break;
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(20), deadline.Token);
+            }
+        }
+        finally
+        {
+            registration.Complete.TrySetResult(registration.CompletionResult);
+            await running.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+
+        var result = await running;
 
         Assert.Equal(1, result.Processed);
+        Assert.Equal(0, result.Deferred);
+        Assert.Equal(0, result.Failed);
         var snapshot = await provider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
             new DurableWorkGetRequest(scope, accepted.Value!.WorkId));
         Assert.True(snapshot.IsSuccess);
@@ -1447,10 +1522,13 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.Equal(DurableWorkState.Suspended, snapshot.Value!.State);
     }
 
-    [Fact]
-    public async Task RunOnceAsync_FinalizesAmbiguousOutcomeWhenCallerCancelsBeforeProviderReturns()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunOnceAsync_FinalizesAmbiguousOutcomeWhenCallerCancelsBeforeProviderReturns(bool useExternalActivation)
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var entry = GetProviderEntry(useExternalActivation);
+        await using var database = await CreateDatabaseAsync(entry);
         var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
         await schema.ApplyAsync();
         var epoch = Guid.NewGuid();
@@ -1458,6 +1536,11 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         var registration = new BlockingWorkRegistration();
         var services = new ServiceCollection();
         services.AddSingleton<DurableWorkRegistration>(registration);
+        if (useExternalActivation)
+        {
+            services.AddDurableExternalActivation();
+        }
+
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
             database.CreateDataSource(),
@@ -1481,15 +1564,32 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.True(accepted.IsSuccess);
 
         using var cancellation = new CancellationTokenSource();
-        var running = provider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
-            new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work),
-            cancellation.Token).AsTask();
+        var request = new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work);
+        var legacyRunning = useExternalActivation
+            ? null
+            : provider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(request, cancellation.Token).AsTask();
+        var activationRunning = useExternalActivation
+            ? provider.GetRequiredService<IDurableExternalActivationService>()
+                .ActivateAsync(CreateActivationRequest(request), cancellation.Token).AsTask()
+            : null;
         await registration.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
         cancellation.Cancel();
 
-        var result = await running.WaitAsync(TimeSpan.FromSeconds(5));
+        if (legacyRunning is not null)
+        {
+            var result = await legacyRunning.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(1, result.Failed);
+        }
 
-        Assert.Equal(1, result.Failed);
+        if (activationRunning is not null)
+        {
+            var result = await activationRunning.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(DurableExternalActivationOutcomeKind.Completed, result.Kind);
+            Assert.Equal(1, result.PumpResult!.Failed);
+            Assert.Null(result.ProblemCode);
+        }
+
+        Assert.True(cancellation.IsCancellationRequested);
         var snapshot = await provider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
             new DurableWorkGetRequest(scope, accepted.Value!.WorkId));
         Assert.True(snapshot.IsSuccess);
@@ -1622,14 +1722,37 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             maximumItems: 1,
             surfaces: DurableRuntimeSurface.Work)).AsTask();
 
-        await registration.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await delayedStore.FirstRenewalCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await Task.Delay(TimeSpan.FromMilliseconds(50));
-        Assert.Equal(1, delayedStore.RenewalCount);
-        registration.Complete.TrySetResult(registration.CompletionResult);
+        try
+        {
+            await registration.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var first = await delayedStore.FirstRenewalCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.NotNull(first.Renewed);
+            Assert.True(first.Renewed.LeaseExpiresAtUtc > first.Original.LeaseExpiresAtUtc);
+            Assert.True(first.Renewed.Revision > first.Original.Revision);
+            Assert.True(System.Diagnostics.Stopwatch.GetElapsedTime(first.StartedAt, first.CompletedAt)
+                > first.Original.LeaseRenewalCadence);
 
-        var result = await running.WaitAsync(TimeSpan.FromSeconds(5));
+            var second = await delayedStore.SecondRenewalCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.NotNull(second.Renewed);
+            Assert.Same(first.Renewed, second.Original);
+            Assert.True(second.Renewed.LeaseExpiresAtUtc > second.Original.LeaseExpiresAtUtc);
+            Assert.True(second.Renewed.Revision > second.Original.Revision);
+            // Measure entry after the first committed renewal, rather than relying on a short sleep that can overshoot.
+            Assert.True(System.Diagnostics.Stopwatch.GetElapsedTime(first.CompletedAt, second.StartedAt)
+                >= first.Renewed.LeaseRenewalCadence);
+        }
+        finally
+        {
+            registration.Complete.TrySetResult(registration.CompletionResult);
+            await running.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        var result = await running;
         Assert.Equal(1, result.Processed);
+        var snapshot = await provider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
+            new DurableWorkGetRequest(scope, accepted.Value!.WorkId));
+        Assert.True(snapshot.IsSuccess);
+        Assert.Equal(DurableWorkState.Succeeded, snapshot.Value!.State);
     }
 
     [Fact]
@@ -2016,15 +2139,21 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.Equal(DurableFlowState.Suspended, snapshot.Value!.State);
     }
 
-    [Fact]
-    public async Task TryRunOnceAsync_PropagatesCancellationBeforeExecutionAndLeavesNoActivePass()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TryRunOnceAsync_PropagatesCancellationBeforeExecutionAndLeavesNoActivePass(bool useExternalActivation)
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var entry = GetProviderEntry(useExternalActivation);
+        await using var database = await CreateDatabaseAsync(entry);
         var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
         await schema.ApplyAsync();
         var epoch = Guid.NewGuid();
         await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "pre-execution-cancellation");
         var services = new ServiceCollection();
+        var activationPumpProxy = entry == ProviderEntry.ExternalActivation
+            ? RegisterExternalActivationServiceWithPumpProxy(services)
+            : null;
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
             database.CreateDataSource(),
@@ -2046,13 +2175,27 @@ public sealed class PostgreSqlDurableRuntimePumpTests
                 return ValueTask.FromResult(
                     new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
             });
+        activationPumpProxy?.SetTarget(pump);
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            async () => await pump.TryRunOnceAsync(
-                new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All),
-                cancellation.Token));
+        var request = new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All);
+        if (entry == ProviderEntry.LegacyPump)
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                async () => await pump.TryRunOnceAsync(request, cancellation.Token));
+        }
+        else
+        {
+            var result = await provider.GetRequiredService<IDurableExternalActivationService>()
+                .ActivateAsync(CreateActivationRequest(request), cancellation.Token);
+
+            Assert.Equal(DurableExternalActivationOutcomeKind.CanceledBeforeAdmission, result.Kind);
+            Assert.Null(result.ObservedHealthState);
+            Assert.Null(result.ProblemCode);
+            Assert.Null(result.PumpResult);
+            Assert.Equal(0, activationPumpProxy!.AdmissionCalls);
+        }
 
         Assert.Equal(0, executorCalls);
         var health = await provider.GetRequiredService<IDurableRuntimeHealth>().GetAsync();
@@ -2149,16 +2292,22 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.Equal(0, executorCalls);
     }
 
-    [Fact]
-    public async Task TryRunOnceAsync_RevalidatesSchemaInsideStoreAdmissionAfterPrecheckRace()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TryRunOnceAsync_RevalidatesSchemaInsideStoreAdmissionAfterPrecheckRace(bool useExternalActivation)
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var entry = GetProviderEntry(useExternalActivation);
+        await using var database = await CreateDatabaseAsync(entry);
         var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
         await schema.ApplyAsync();
         var epoch = Guid.NewGuid();
         await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "schema-admission-race");
         var status = await schema.GetStatusAsync();
         var services = new ServiceCollection();
+        var activationPumpProxy = entry == ProviderEntry.ExternalActivation
+            ? RegisterExternalActivationServiceWithPumpProxy(services)
+            : null;
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
             database.CreateDataSource(),
@@ -2192,27 +2341,49 @@ public sealed class PostgreSqlDurableRuntimePumpTests
                 return ValueTask.FromResult(
                     new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
             });
+        activationPumpProxy?.SetTarget(pump);
+        var request = new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All);
 
-        var attempt = await pump.TryRunOnceAsync(
-            new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All));
+        if (entry == ProviderEntry.LegacyPump)
+        {
+            var attempt = await pump.TryRunOnceAsync(request);
 
-        Assert.Equal(DurableRuntimePumpAttemptKind.Incompatible, attempt.Kind);
-        Assert.Equal(DurableProblemCodes.SchemaMissing, attempt.ProblemCode);
-        Assert.Null(attempt.Result);
+            Assert.Equal(DurableRuntimePumpAttemptKind.Incompatible, attempt.Kind);
+            Assert.Equal(DurableProblemCodes.SchemaMissing, attempt.ProblemCode);
+            Assert.Null(attempt.Result);
+        }
+        else
+        {
+            var result = await provider.GetRequiredService<IDurableExternalActivationService>()
+                .ActivateAsync(CreateActivationRequest(request));
+
+            Assert.Equal(DurableExternalActivationOutcomeKind.PumpFailed, result.Kind);
+            Assert.Equal(DurableRuntimeHealthState.NotStarted, result.ObservedHealthState);
+            Assert.Equal(DurableProblemCodes.SchemaMissing, result.ProblemCode);
+            Assert.Null(result.PumpResult);
+            Assert.Equal(1, activationPumpProxy!.AdmissionCalls);
+        }
+
         Assert.Equal(1, mutatedAfterPrecheck);
         Assert.Equal(0, executorCalls);
     }
 
-    [Fact]
-    public async Task PumpProjections_RefuseDrainingWorkerWithoutEnteringExecution()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PumpProjections_RefuseDrainingWorkerWithoutEnteringExecution(bool useExternalActivation)
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var entry = GetProviderEntry(useExternalActivation);
+        await using var database = await CreateDatabaseAsync(entry);
         var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
         await schema.ApplyAsync();
         var epoch = Guid.NewGuid();
         await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "draining-projections");
         await using var runtimeDataSource = database.CreateDataSource();
         var services = new ServiceCollection();
+        var activationPumpProxy = entry == ProviderEntry.ExternalActivation
+            ? RegisterExternalActivationServiceWithPumpProxy(services)
+            : null;
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
             runtimeDataSource,
@@ -2235,6 +2406,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
                 return ValueTask.FromResult(
                     new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
             });
+        activationPumpProxy?.SetTarget(pump);
         var request = new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All);
 
         var attempt = await pump.TryRunOnceAsync(request);
@@ -2252,6 +2424,18 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.Null(legacy.NextDueAtUtc);
         Assert.Equal(TimeSpan.Zero, legacy.Elapsed);
         Assert.Equal(0, executorCalls);
+
+        if (entry == ProviderEntry.ExternalActivation)
+        {
+            var result = await provider.GetRequiredService<IDurableExternalActivationService>()
+                .ActivateAsync(CreateActivationRequest(request));
+
+            Assert.Equal(DurableExternalActivationOutcomeKind.Draining, result.Kind);
+            Assert.Equal(DurableRuntimeHealthState.Draining, result.ObservedHealthState);
+            Assert.Null(result.ProblemCode);
+            Assert.Null(result.PumpResult);
+            Assert.Equal(0, activationPumpProxy!.AdmissionCalls);
+        }
     }
 
     [Fact]
@@ -2376,7 +2560,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
     [Fact]
     public async Task TryRunOnceAsync_ProjectsEpochAndWorkerGenerationBeforeEnteringExecution()
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await using var database = await CreateRequiredPostgreSqlDatabaseAsync();
         var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
         await schema.ApplyAsync();
         var activeEpoch = Guid.NewGuid();
@@ -2385,6 +2569,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         var executorCalls = 0;
 
         var epochServices = new ServiceCollection();
+        var epochActivationProxy = RegisterExternalActivationServiceWithPumpProxy(epochServices);
         epochServices.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
             database.CreateDataSource(),
@@ -2404,8 +2589,9 @@ public sealed class PostgreSqlDurableRuntimePumpTests
                 {
                     Interlocked.Increment(ref executorCalls);
                     return ValueTask.FromResult(
-                        new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
+                    new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
                 });
+            epochActivationProxy.SetTarget(epochPump);
             var request = new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All);
 
             var attempt = await epochPump.TryRunOnceAsync(request);
@@ -2417,9 +2603,17 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             Assert.Equal(
                 "ASDUR108: The configured runtime epoch is not active in PostgreSQL.",
                 legacy.Message);
+            var activation = await epochProvider.GetRequiredService<IDurableExternalActivationService>()
+                .ActivateAsync(CreateActivationRequest(request));
+            Assert.Equal(DurableExternalActivationOutcomeKind.Incompatible, activation.Kind);
+            Assert.Equal(DurableRuntimeHealthState.Incompatible, activation.ObservedHealthState);
+            Assert.Equal(DurableProblemCodes.RecoveryEpochRequired, activation.ProblemCode);
+            Assert.Null(activation.PumpResult);
+            Assert.Equal(0, epochActivationProxy.AdmissionCalls);
         }
 
         var workerServices = new ServiceCollection();
+        var workerActivationProxy = RegisterExternalActivationServiceWithPumpProxy(workerServices);
         workerServices.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
             database.CreateDataSource(),
@@ -2445,6 +2639,7 @@ public sealed class PostgreSqlDurableRuntimePumpTests
                 return ValueTask.FromResult(
                     new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero));
             });
+        workerActivationProxy.SetTarget(workerPump);
         var workerRequest = new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All);
 
         var workerAttempt = await workerPump.TryRunOnceAsync(workerRequest);
@@ -2458,6 +2653,94 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             "ASDUR405: This worker generation no longer owns the configured worker identity.",
             workerLegacy.Message);
         Assert.Equal(0, executorCalls);
+
+        var activationAfterGenerationTakeover = await workerProvider
+            .GetRequiredService<IDurableExternalActivationService>()
+            .ActivateAsync(CreateActivationRequest(workerRequest));
+        Assert.Equal(DurableExternalActivationOutcomeKind.Busy, activationAfterGenerationTakeover.Kind);
+        Assert.Equal(DurableRuntimeHealthState.Stale, activationAfterGenerationTakeover.ObservedHealthState);
+        Assert.Equal(DurableProblemCodes.WorkerIdentityConflict, activationAfterGenerationTakeover.ProblemCode);
+        Assert.Null(activationAfterGenerationTakeover.PumpResult);
+        Assert.Equal(1, workerActivationProxy.AdmissionCalls);
+
+        var emptyPass = new DurableRuntimePumpResult(0, 0, 0, 0, 0, false, null, TimeSpan.Zero);
+        await otherGeneration.RecordSuccessfulSweepAsync(emptyPass, CancellationToken.None);
+        await using (var markHeartbeatStale = database.DataSource.CreateCommand(
+            "UPDATE appsurface_durable.runtime_heartbeat SET last_heartbeat_at = clock_timestamp() - interval '1 hour';"))
+        {
+            Assert.Equal(1, await markHeartbeatStale.ExecuteNonQueryAsync());
+        }
+
+        var staleTakeover = new PostgreSqlDurableRuntimeHealth(
+            registration with { InstanceId = Guid.NewGuid() },
+            schema);
+        Assert.True(await staleTakeover.TryBeginPassAsync(CancellationToken.None));
+        await staleTakeover.RecordSuccessfulSweepAsync(emptyPass, CancellationToken.None);
+
+        var activationAfterTakeover = await workerProvider.GetRequiredService<IDurableExternalActivationService>()
+            .ActivateAsync(CreateActivationRequest(workerRequest));
+        Assert.Equal(DurableExternalActivationOutcomeKind.Busy, activationAfterTakeover.Kind);
+        Assert.Equal(DurableRuntimeHealthState.Stale, activationAfterTakeover.ObservedHealthState);
+        Assert.Equal(DurableProblemCodes.WorkerIdentityConflict, activationAfterTakeover.ProblemCode);
+        Assert.Null(activationAfterTakeover.PumpResult);
+        Assert.Equal(2, workerActivationProxy.AdmissionCalls);
+    }
+
+    [Fact]
+    public async Task ActivateAsync_UsesThePostgreSqlEpochFenceAfterACompatibleHealthObservation()
+    {
+        await using var database = await CreateRequiredPostgreSqlDatabaseAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "activation-epoch-race");
+        var status = await schema.GetStatusAsync();
+        var services = new ServiceCollection();
+        var activationPumpProxy = RegisterExternalActivationServiceWithPumpProxy(services);
+        services.AddAppSurfaceDurablePostgreSql(
+            database.DataSource,
+            database.CreateDataSource(),
+            new PostgreSqlDurableWorkOptions(epoch, status.StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options =>
+            {
+                options.WorkerId = "runtime-pump-activation-epoch-race-worker";
+                options.SendWakeNotifications = false;
+            });
+        await using var provider = services.BuildServiceProvider();
+        activationPumpProxy.SetTarget(provider.GetRequiredService<PostgreSqlDurableRuntimePump>());
+
+        var admissionReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseAdmission = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        activationPumpProxy.SetBeforeAdmission(async cancellationToken =>
+        {
+            admissionReached.TrySetResult();
+            await releaseAdmission.Task.WaitAsync(cancellationToken);
+        });
+
+        var request = new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All);
+        var activation = provider.GetRequiredService<IDurableExternalActivationService>()
+            .ActivateAsync(CreateActivationRequest(request)).AsTask();
+        try
+        {
+            await admissionReached.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await using var changeEpoch = database.DataSource.CreateCommand(
+                "UPDATE appsurface_durable.store_metadata SET active_runtime_epoch = @epoch WHERE singleton;");
+            changeEpoch.Parameters.AddWithValue("epoch", Guid.NewGuid());
+            Assert.Equal(1, await changeEpoch.ExecuteNonQueryAsync());
+        }
+        finally
+        {
+            releaseAdmission.TrySetResult();
+        }
+
+        var result = await activation.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(DurableExternalActivationOutcomeKind.PumpFailed, result.Kind);
+        Assert.Equal(DurableRuntimeHealthState.NotStarted, result.ObservedHealthState);
+        Assert.Equal(DurableProblemCodes.RecoveryEpochRequired, result.ProblemCode);
+        Assert.Null(result.PumpResult);
+        Assert.Equal(1, activationPumpProxy.AdmissionCalls);
+        Assert.False((await provider.GetRequiredService<IDurableRuntimeHealth>().GetAsync()).IsPassActive);
     }
 
     [Fact]
@@ -2501,15 +2784,21 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         Assert.False(snapshot.IsPassActive);
     }
 
-    [Fact]
-    public async Task TryRunOnceAsync_FinalizesWhenCallerCancelsAsTheProviderReturns()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TryRunOnceAsync_FinalizesWhenCallerCancelsAsTheProviderReturns(bool useExternalActivation)
     {
-        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var entry = GetProviderEntry(useExternalActivation);
+        await using var database = await CreateDatabaseAsync(entry);
         var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
         await schema.ApplyAsync();
         var epoch = Guid.NewGuid();
         await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "post-provider-cancellation");
         var services = new ServiceCollection();
+        var activationPumpProxy = useExternalActivation
+            ? RegisterExternalActivationServiceWithPumpProxy(services)
+            : null;
         services.AddAppSurfaceDurablePostgreSql(
             database.DataSource,
             database.CreateDataSource(),
@@ -2532,13 +2821,27 @@ public sealed class PostgreSqlDurableRuntimePumpTests
                 return ValueTask.FromResult(expected);
             });
 
-        var attempt = await pump.TryRunOnceAsync(
-            new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All),
-            callerCancellation.Token);
+        activationPumpProxy?.SetTarget(pump);
+        var request = new DurableRuntimePumpRequest(surfaces: DurableRuntimeSurface.All);
+        if (useExternalActivation)
+        {
+            var result = await provider.GetRequiredService<IDurableExternalActivationService>()
+                .ActivateAsync(CreateActivationRequest(request), callerCancellation.Token);
 
-        Assert.Equal(DurableRuntimePumpAttemptKind.Completed, attempt.Kind);
-        Assert.Same(expected, attempt.Result);
-        Assert.Null(attempt.ProblemCode);
+            Assert.Equal(DurableExternalActivationOutcomeKind.Completed, result.Kind);
+            Assert.Same(expected, result.PumpResult);
+            Assert.Null(result.ProblemCode);
+            Assert.Equal(1, activationPumpProxy!.AdmissionCalls);
+        }
+        else
+        {
+            var attempt = await pump.TryRunOnceAsync(request, callerCancellation.Token);
+
+            Assert.Equal(DurableRuntimePumpAttemptKind.Completed, attempt.Kind);
+            Assert.Same(expected, attempt.Result);
+            Assert.Null(attempt.ProblemCode);
+        }
+
         Assert.True(callerCancellation.IsCancellationRequested);
         var snapshot = await provider.GetRequiredService<IDurableRuntimeHealth>().GetAsync();
         Assert.False(snapshot.IsPassActive);
@@ -2696,6 +2999,124 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             provider.GetRequiredService<DurableRuntimeAdmissionGate>(),
             NullLogger<PostgreSqlDurableRuntimePump>.Instance,
             passExecutor);
+
+    private static ProviderEntry GetProviderEntry(bool useExternalActivation) =>
+        useExternalActivation ? ProviderEntry.ExternalActivation : ProviderEntry.LegacyPump;
+
+    /// <summary>
+    /// Uses the ordinary disposable-database fixture for legacy cases and requires a real PostgreSQL server for every
+    /// external-activation case, even when the local test process was configured to skip container prerequisites.
+    /// </summary>
+    private static ValueTask<PostgreSqlIntegrationTestDatabase> CreateDatabaseAsync(ProviderEntry entry) =>
+        entry == ProviderEntry.ExternalActivation
+            ? CreateRequiredPostgreSqlDatabaseAsync()
+            : PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+
+    private static async ValueTask<PostgreSqlIntegrationTestDatabase> CreateRequiredPostgreSqlDatabaseAsync()
+    {
+        var explicitConnection = Environment.GetEnvironmentVariable("APPSURFACE_POSTGRES_TEST_CONNECTION");
+        var skipRequested = string.Equals(
+            Environment.GetEnvironmentVariable("APPSURFACE_POSTGRES_TEST_ALLOW_SKIP"),
+            "true",
+            StringComparison.OrdinalIgnoreCase);
+        var runningInCi = string.Equals(
+            Environment.GetEnvironmentVariable("CI"),
+            "true",
+            StringComparison.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(explicitConnection) && skipRequested && !runningInCi)
+        {
+            throw new InvalidOperationException(
+                "External-activation PostgreSQL race proofs require a real server and do not honor the local skip opt-out.");
+        }
+
+        try
+        {
+            return await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        }
+        catch (SkipException exception)
+        {
+            throw new InvalidOperationException(
+                "External-activation PostgreSQL race proofs require a real server and cannot be skipped.",
+                exception);
+        }
+    }
+
+    /// <summary>
+    /// Registers the public activation service against a test-owned proxy under both pump contracts. Call this before
+    /// PostgreSQL registration, then assign the test-built provider pump after the service provider is built.
+    /// </summary>
+    private static ExternalActivationPumpProxy RegisterExternalActivationServiceWithPumpProxy(
+        IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        var proxy = new ExternalActivationPumpProxy();
+        services.AddSingleton<IDurableRuntimePump>(proxy);
+        services.AddSingleton<IDurableRuntimePumpAdmission>(proxy);
+        services.AddDurableExternalActivation();
+        return proxy;
+    }
+
+    /// <summary>
+    /// Creates a host-style activation request with an explicit cooperative deadline independent of the pump budget.
+    /// </summary>
+    private static DurableExternalActivationRequest CreateActivationRequest(DurableRuntimePumpRequest pumpRequest) =>
+        new(pumpRequest, TimeSpan.FromSeconds(30));
+
+    /// <summary>
+    /// Forwards activation and legacy pump calls to the exact PostgreSQL pump instance selected by a test. An optional
+    /// one-shot callback pauses an activation after its health precheck but before provider admission; the proxy records
+    /// attempts without adding an admission rule, queue, semaphore, or alternate result mapping.
+    /// </summary>
+    private sealed class ExternalActivationPumpProxy : IDurableRuntimePump, IDurableRuntimePumpAdmission
+    {
+        private PostgreSqlDurableRuntimePump? _target;
+        private Func<CancellationToken, ValueTask>? _beforeAdmission;
+        private int _admissionCalls;
+
+        internal int AdmissionCalls => Volatile.Read(ref _admissionCalls);
+
+        internal void SetTarget(PostgreSqlDurableRuntimePump target)
+        {
+            ArgumentNullException.ThrowIfNull(target);
+            if (Interlocked.CompareExchange(ref _target, target, null) is not null)
+            {
+                throw new InvalidOperationException("The PostgreSQL pump proxy target can be assigned only once.");
+            }
+        }
+
+        internal void SetBeforeAdmission(Func<CancellationToken, ValueTask> callback)
+        {
+            ArgumentNullException.ThrowIfNull(callback);
+            if (Interlocked.CompareExchange(ref _beforeAdmission, callback, null) is not null)
+            {
+                throw new InvalidOperationException("The PostgreSQL pump proxy callback can be assigned only once.");
+            }
+        }
+
+        /// <inheritdoc />
+        public ValueTask<DurableRuntimePumpResult> RunOnceAsync(
+            DurableRuntimePumpRequest request,
+            CancellationToken cancellationToken = default) =>
+            Target.RunOnceAsync(request, cancellationToken);
+
+        /// <inheritdoc />
+        public async ValueTask<DurableRuntimePumpAttempt> TryRunOnceAsync(
+            DurableRuntimePumpRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _admissionCalls);
+            var callback = Interlocked.Exchange(ref _beforeAdmission, null);
+            if (callback is not null)
+            {
+                await callback(cancellationToken).ConfigureAwait(false);
+            }
+
+            return await Target.TryRunOnceAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+
+        private PostgreSqlDurableRuntimePump Target => Volatile.Read(ref _target)
+            ?? throw new InvalidOperationException("The PostgreSQL pump proxy target has not been assigned.");
+    }
 
     private static DurableRuntimeSchemaStatus CreateSchemaStatus(
         DurableRuntimeSchemaCompatibility compatibility) =>
@@ -3212,40 +3633,27 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             throw new InvalidOperationException("Idempotent test Work does not reconcile.");
     }
 
-    private sealed class SlowWorkRegistration : DurableWorkRegistration
+    /// <summary>Observes a real PostgreSQL lease-renewal result without replacing the store's fencing behavior.</summary>
+    private sealed class ObservedLeaseRenewalWorkStore(NpgsqlDataSource dataSource, Guid runtimeEpoch)
+        : PostgreSqlDurableWorkStore(dataSource, runtimeEpoch)
     {
-        internal const string Name = "tests.runtime-pump.slow";
+        /// <summary>Completes after the first database renewal attempt, including a refused renewal.</summary>
+        internal TaskCompletionSource<(PostgreSqlDurableWorkClaim Original, PostgreSqlDurableWorkClaim? Renewed)>
+            FirstRenewal
+        { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        internal SlowWorkRegistration()
-            : base(
-                Name,
-                "v1",
-                DurableProviderSafety.Idempotent,
-                new PostgreSqlOpaqueTestCodec("tests.runtime-pump.slow.input", "v1"),
-                new PostgreSqlOpaqueTestCodec("tests.runtime-pump.slow.result", "v1"))
+        /// <inheritdoc />
+        internal override async ValueTask<PostgreSqlDurableWorkClaim?> RenewLeaseAsync(
+            PostgreSqlDurableWorkClaim claim,
+            CancellationToken cancellationToken = default)
         {
+            var renewed = await base.RenewLeaseAsync(claim, cancellationToken);
+            FirstRenewal.TrySetResult((claim, renewed));
+            return renewed;
         }
-
-        internal IDurablePayloadCodec InputCodec => WorkCodec;
-
-        public override bool CanReconcile => false;
-
-        public override DurablePreparedWork Prepare(IServiceProvider services, DurableWorkExecutionContext work) =>
-            new SlowPreparedWork(ResultCodec.EncodeObject(Encoding.UTF8.GetBytes("result")));
-
-        public override ValueTask<DurableEncodedPayload> InvokeAsync(
-            IServiceProvider services,
-            DurableWorkExecutionContext work,
-            CancellationToken cancellationToken = default) =>
-            Prepare(services, work).InvokeAsync(cancellationToken);
-
-        public override ValueTask<DurableEncodedEffectReconciliation> ReconcileAsync(
-            IServiceProvider services,
-            DurableWorkExecutionContext work,
-            CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException("Idempotent test Work does not reconcile.");
     }
 
+    /// <summary>Delays the first renewal while retaining PostgreSQL lease fencing and committed renewal observations.</summary>
     private sealed class DelayedLeaseRenewalWorkStore : PostgreSqlDurableWorkStore
     {
         private int _renewalCount;
@@ -3255,18 +3663,41 @@ public sealed class PostgreSqlDurableRuntimePumpTests
         {
         }
 
-        internal TaskCompletionSource FirstRenewalCompleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        /// <summary>Records the first real renewal, with monotonic timestamps surrounding its delay and database call.</summary>
+        internal TaskCompletionSource<(PostgreSqlDurableWorkClaim Original, PostgreSqlDurableWorkClaim? Renewed,
+            long StartedAt, long CompletedAt)> FirstRenewalCompleted
+        { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        internal int RenewalCount => Volatile.Read(ref _renewalCount);
+        /// <summary>Records the second real renewal so its entry can be compared with the first renewal's completion.</summary>
+        internal TaskCompletionSource<(PostgreSqlDurableWorkClaim Original, PostgreSqlDurableWorkClaim? Renewed,
+            long StartedAt, long CompletedAt)> SecondRenewalCompleted
+        { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        /// <inheritdoc />
         internal override async ValueTask<PostgreSqlDurableWorkClaim?> RenewLeaseAsync(
             PostgreSqlDurableWorkClaim claim,
             CancellationToken cancellationToken = default)
         {
-            _ = Interlocked.Increment(ref _renewalCount);
-            await Task.Delay(TimeSpan.FromMilliseconds(300), cancellationToken);
-            FirstRenewalCompleted.TrySetResult();
-            return claim with { LeaseExpiresAtUtc = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(1) };
+            var startedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+            var renewalNumber = Interlocked.Increment(ref _renewalCount);
+            if (renewalNumber == 1)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(300), cancellationToken);
+            }
+
+            // A fabricated expiry leaves the persisted lease unchanged and can make successful completion stale.
+            var renewed = await base.RenewLeaseAsync(claim, cancellationToken);
+            var completedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+            if (renewalNumber == 1)
+            {
+                FirstRenewalCompleted.TrySetResult((claim, renewed, startedAt, completedAt));
+            }
+            else if (renewalNumber == 2)
+            {
+                SecondRenewalCompleted.TrySetResult((claim, renewed, startedAt, completedAt));
+            }
+
+            return renewed;
         }
     }
 
@@ -3345,15 +3776,6 @@ public sealed class PostgreSqlDurableRuntimePumpTests
             fail.Wait(cancellationToken);
             return ValueTask.FromException<DurableEncodedPayload>(
                 new InvalidOperationException("Simulated provider failure after start."));
-        }
-    }
-
-    private sealed class SlowPreparedWork(DurableEncodedPayload result) : DurablePreparedWork
-    {
-        public override async ValueTask<DurableEncodedPayload> InvokeAsync(CancellationToken cancellationToken = default)
-        {
-            await Task.Delay(TimeSpan.FromMilliseconds(850), cancellationToken);
-            return result;
         }
     }
 

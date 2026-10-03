@@ -31,12 +31,14 @@ The root `assets:typecheck`, `assets:test`, `assets:build`, and `assets:verify` 
 ## Source And Output Ownership
 
 - `assets/src/razorwire.ts` is the authored source for the core runtime exposed at `/_content/ForgeTrust.RazorWire/razorwire/razorwire.js`.
+- `assets/src/dialog-responses.ts` is bundled into the core runtime for [dialog responses](dialog-responses.md). `assets/src/dialog-responses.css` produces the committed `wwwroot/razorwire/razorwire-dialog.css` stylesheet; `<rw:scripts />` emits its versioned same-origin link, and assembly-only hosts serve its embedded fallback. Rebuild the stylesheet with the same asset commands as the scripts.
 - `assets/src/razorwire.islands.ts` is the authored source for the island loader exposed at `/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js`.
 - `assets/src/page-navigation.ts` is the authored source for the lazy page-navigation runtime exposed at `/_content/ForgeTrust.RazorWire/razorwire/page-navigation.js`.
 - `assets/src/section-copy.ts` is the authored source for the lazy section-copy runtime exposed at `/_content/ForgeTrust.RazorWire/razorwire/section-copy.js`.
 - `assets/src/form-interactions.ts` is the authored source for the lazy form-interactions runtime exposed at `/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js`.
 - `assets/src/behavior-kit.ts` is the authored source for the eager native behavior-kit runtime exposed at `/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js`.
-- `wwwroot/razorwire/razorwire.js`, `wwwroot/razorwire/razorwire.islands.js`, `wwwroot/razorwire/page-navigation.js`, `wwwroot/razorwire/section-copy.js`, `wwwroot/razorwire/form-interactions.js`, and `wwwroot/razorwire/behavior-kit.js` are generated, minified, committed package outputs. Do not edit them by hand.
+- `assets/src/razorwire.loading.css` is the authored CSP-compatible form-loading stylesheet exposed at `/_content/ForgeTrust.RazorWire/razorwire/razorwire.loading.css`.
+- `wwwroot/razorwire/razorwire.js`, `wwwroot/razorwire/razorwire.islands.js`, `wwwroot/razorwire/page-navigation.js`, `wwwroot/razorwire/section-copy.js`, `wwwroot/razorwire/form-interactions.js`, `wwwroot/razorwire/behavior-kit.js`, and `wwwroot/razorwire/razorwire.loading.css` are generated, committed package outputs. Do not edit them by hand.
 - `node_modules/@hotwired/turbo/dist/turbo.es2017-umd.js` from the exact `@hotwired/turbo` 8.0.23 dependency is the upstream source for `wwwroot/razorwire/turbo.es2017-umd.js`. The build verifies the package name, version, `main` entry, and approved SHA-256 digest before making a byte-for-byte copy. It is a copied third-party output, not an esbuild-generated first-party bundle; do not edit or re-minify it. The [Turbo 8.0.23 upgrade review](turbo-8.0.23-upgrade-review.md) records the upstream change range, risk dispositions, and browser evidence.
 - `assets/contracts/razorwire-public-contracts.js` is a docs-only manifest for AppSurface Docs JavaScript API harvesting. It documents browser contracts without forcing the harvester to parse generated runtime bundles.
 - `wwwroot/razorwire/exampleJsInterop.js` remains hand-authored, demo-only JavaScript. It is not part of the generated runtime pipeline.
@@ -57,12 +59,15 @@ The TypeScript migration preserves the public browser surface:
   - `/_content/ForgeTrust.RazorWire/razorwire/section-copy.js`
   - `/_content/ForgeTrust.RazorWire/razorwire/form-interactions.js`
   - `/_content/ForgeTrust.RazorWire/razorwire/behavior-kit.js`
+- Stylesheet path: `/_content/ForgeTrust.RazorWire/razorwire/razorwire-dialog.css`. The package shell uses [documented dialog variables](dialog-responses.md#shell-and-accessibility) and contains no inline styles.
+- Stylesheet path: `/_content/ForgeTrust.RazorWire/razorwire/razorwire.loading.css`, emitted by `<rw:scripts />` for the form-loading fallback. The host Content Security Policy must allow the same-origin stylesheet under `style-src`.
 - Tag helper output: `<rw:scripts />`, `<rw:scripts behavior-kit="true" />`, the bundled or custom same-origin Turbo script selected by `RazorWireOptions.Turbo`, host-managed omission, and lazy/eager split-runtime detectors. Hosts that need a cross-origin URL, subresource integrity, or custom script attributes own the complete Turbo tag and its synchronous load order through `HostManaged` mode.
-- Global state: `window.RazorWire`, `window.RazorWire.config`, `connectionManager`, `localTimeFormatter`, `formFailureManager`, `pageNavigationManager`, `sectionCopyManager`, `formInteractionsManager`, and `behaviors`.
+- Global state: `window.RazorWire`, `window.RazorWire.config`, `connectionManager`, `localTimeFormatter`, `formFailureManager`, `pageNavigationManager`, `sectionCopyManager`, `formInteractionsManager`, and `behaviors`. Form loading remains form-scoped; this feature adds no generic navigation manager or loading-specific public event.
+- Form-loading configuration and markup: `RazorWireOptions.Forms.Loading` is serialized by `<rw:scripts />` as `data-rw-form-loading-enabled`, `data-rw-form-loading-show-fallback-bar`, and `data-rw-form-loading-prevent-duplicate-submissions`. The form Tag Helper emits `data-rw-loading="true"` for enabled `rw-active` forms unless opted out. See [Form Loading Feedback](form-loading.md) for defaults, precedence, ownership, CSS hooks, and no-JavaScript behavior.
 - Section copy: consumers use the singleton `window.RazorWire.sectionCopyManager`; they call `scan()` after out-of-band DOM changes, use `prune()` for disconnected roots, and use `getDiagnostics()`/`clearDiagnostics()` for recovery. Do not construct `SectionCopyManager`.
-- Form events: `razorwire:form:submit-start`, `razorwire:form:failure`, `razorwire:form:diagnostic`, and `razorwire:form:submit-end`.
-- DOM hooks: `data-rw-*` form, island, page-navigation, and section-copy attributes, including generated failure UI and section-copy fallback markers.
-- CSS hooks: RazorWire form failure variables, generated form error attributes, page-navigation state attributes, and section-copy state/fallback attributes.
+- Form events: `razorwire:form:submit-start`, `razorwire:form:failure`, `razorwire:form:diagnostic`, and `razorwire:form:submit-end`. Form loading adds no public event.
+- DOM hooks: `data-rw-*` form, form-loading, island, page-navigation, and section-copy attributes, including generated failure/loading UI and section-copy fallback markers.
+- CSS hooks: RazorWire form failure variables, form-loading fallback and pending-state attributes/properties, generated form error attributes, page-navigation state attributes, and section-copy state/fallback attributes.
 - Island strategies: `load`, `idle`, `visible`, and `only`. Use `only` for client-only islands; `immediate` is intentionally not a public strategy name.
 
 No consumer migration is required for hosts that use the first-party TypeScript asset pipeline through `<rw:scripts />` without a separate Turbo tag; the default now supplies the packaged same-origin runtime. Hosts retaining the former CDN tag must remove it or switch to `HostManaged` so Turbo is not loaded twice. See [Choose who supplies Turbo](../README.md#choose-who-supplies-turbo) before retaining a custom or host-owned script tag.
@@ -102,6 +107,7 @@ Treat that property as an incident escape hatch. Re-run the asset verifier and r
 - Do not change public strategy taxonomy from `only` to `immediate`; existing docs and generated UI use `only`.
 - Do not enable source maps by default. Package consumers should receive compact runtime assets without source-map sidecars.
 - Do not move AppSurface Docs harvesting back to minified runtime outputs. Update `assets/contracts/razorwire-public-contracts.js` when the public JavaScript contract changes.
+- Rebuild `assets/src/razorwire.loading.css` into `wwwroot/razorwire/razorwire.loading.css` with `pnpm --dir Web run assets:razorwire:build`; the verifier and pack guard reject stale generated CSS.
 - Keep singleton contracts and implementation anchors aligned: update the manifest, the marker-focused Node tests, and [Section Copy](section-copy.md) together when the section-copy manager contract changes.
 - Do not treat `exampleJsInterop.js` as a runtime source file. It exists for demos and examples only.
 - Do not add app-specific classes, icons, or layout assumptions to generated section-copy buttons or fallback UI. Hosts should decorate stable `data-rw-section-copy*` hooks outside the package runtime.

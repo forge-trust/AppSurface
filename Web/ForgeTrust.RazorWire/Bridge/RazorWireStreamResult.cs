@@ -60,18 +60,78 @@ public class RazorWireStreamResult : IActionResult
     /// </summary>
     /// <param name="context">The current action context used to build the view context and access the HTTP response.</param>
     /// <remarks>
-    /// Generates and stores antiforgery tokens before sending any response data, sets the response Content-Type to "text/vnd.turbo-stream.html", and streams each action's rendered HTML to the response using UTF-8 encoding. Rendering of actions is performed asynchronously in parallel.
+    /// A dialog-containing result validates request correlation and sequentially renders the complete action snapshot
+    /// before generating antiforgery tokens or setting response headers, so a later render failure cannot leave an
+    /// earlier action partially applied. It then writes the buffered markup and echoes the validated request UUID in
+    /// <c>X-RazorWire-Request</c>. A correlated page-only result attaches metadata to package-authored target actions
+    /// and echoes that request UUID while retaining the existing ordered streaming renderer. An uncorrelated page-only
+    /// result remains compatible with callers that do not send RazorWire correlation headers.
     /// </remarks>
     public async Task ExecuteResultAsync(ActionContext context)
     {
+        ArgumentNullException.ThrowIfNull(context);
+
+        var actions = _actions.ToArray();
+        var dialogIndex = RazorWireStreamRendering.FindDialogCommandIndex(actions);
+        var metadata = RazorWireRequestMetadata.Read(
+            context.HttpContext.Request,
+            required: dialogIndex >= 0);
+        var response = context.HttpContext.Response;
+
+        if (dialogIndex >= 0)
+        {
+            var dialogCommand = ((IRazorWireDialogCommandStreamAction)actions[dialogIndex]).Command;
+            var dialogViewContext = CreateViewContext(context);
+            var renderedActions = new string[actions.Length];
+            var cancellationToken = context.HttpContext.RequestAborted;
+
+            for (var index = 0; index < actions.Length; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var phase = RazorWireStreamRendering.GetPhase(index, dialogIndex, dialogCommand);
+                renderedActions[index] = await RazorWireStreamRendering.RenderActionAsync(
+                    actions[index],
+                    dialogViewContext,
+                    metadata,
+                    phase,
+                    cancellationToken);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            PrepareResponse(context, metadata);
+            await response.WriteAsync(
+                string.Concat(renderedActions),
+                Encoding.UTF8,
+                cancellationToken);
+            return;
+        }
+
+        PrepareResponse(context, metadata);
+
+        var viewContext = CreateViewContext(context);
+
+        await foreach (var html in actions.ParallelSelectAsyncEnumerable(
+                           (action, ct) => RazorWireStreamRendering.RenderActionAsync(
+                               action,
+                               viewContext,
+                               metadata,
+                               RazorWireDialogPhase.Origin,
+                               ct),
+                           maxDegreeOfParallelism: 64,
+                           cancellationToken: context.HttpContext.RequestAborted))
+        {
+            await response.WriteAsync(html, Encoding.UTF8, context.HttpContext.RequestAborted);
+        }
+    }
+
+    private void PrepareResponse(ActionContext context, RazorWireRequestMetadata? metadata)
+    {
         var services = context.HttpContext.RequestServices;
 
-        // CRITICAL: Generate antiforgery tokens BEFORE we start streaming
-        // This ensures any required cookies are set before headers are sent
+        // Generate antiforgery tokens before writing any response bytes so required cookies can still be set.
         var antiforgery = services.GetService<Microsoft.AspNetCore.Antiforgery.IAntiforgery>();
-        if (antiforgery != null)
+        if (antiforgery is not null)
         {
-            // This will generate and set the antiforgery cookie if needed
             _ = antiforgery.GetAndStoreTokens(context.HttpContext);
         }
 
@@ -86,17 +146,13 @@ public class RazorWireStreamResult : IActionResult
             response.Headers[RazorWireFormHeaders.FormHandled] = "true";
         }
 
-        response.ContentType = "text/vnd.turbo-stream.html";
-
-        var viewContext = CreateViewContext(context);
-
-        await foreach (var html in _actions.ParallelSelectAsyncEnumerable(
-                           async (action, ct) => await action.RenderAsync(viewContext, ct),
-                           maxDegreeOfParallelism: 64,
-                           cancellationToken: context.HttpContext.RequestAborted))
+        if (metadata is not null)
         {
-            await response.WriteAsync(html, Encoding.UTF8, context.HttpContext.RequestAborted);
+            response.Headers[RazorWireRequestMetadata.ResponseRequestHeaderName] =
+                metadata.RequestId.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
         }
+
+        response.ContentType = "text/vnd.turbo-stream.html";
     }
 
     /// <summary>

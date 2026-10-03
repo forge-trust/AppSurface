@@ -28,6 +28,33 @@ public sealed class DocsVerifyArchiveCommandTests : IDisposable
     }
 
     [Fact]
+    public void Execute_ShouldRequireExplicitLimitForOversizedSearchIndex()
+    {
+        var tree = CreateExactTree("large-search-index");
+        File.WriteAllText(Path.Join(tree, "search-index.json"), "{\"documents\":[]}" + new string(' ', 4_194_304));
+        var manifestDigest = WriteReleaseManifest(tree);
+        var catalogPath = WriteCatalog(tree, manifestDigest);
+        var defaultCommand = CreateCommand(catalogPath, "1.2.3");
+        var raisedLimitCommand = CreateCommand(catalogPath, "1.2.3", maxRewrittenFileSizeBytes: 16_777_216);
+
+        var exception = Assert.Throws<CommandException>(defaultCommand.Execute);
+        Assert.Contains("MaxRewrittenFileSizeBytes", exception.Message, StringComparison.Ordinal);
+        raisedLimitCommand.Execute();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(33_554_433)]
+    public void Execute_ShouldRejectUnsupportedRewriteLimit(long maxRewrittenFileSizeBytes)
+    {
+        var command = CreateCommand("catalog.json", "1.2.3", maxRewrittenFileSizeBytes: maxRewrittenFileSizeBytes);
+
+        var exception = Assert.Throws<CommandException>(command.Execute);
+
+        Assert.Contains("--max-rewritten-file-size-bytes", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Execute_ShouldFail_WhenCatalogEntryIsMissingReleaseManifestPin()
     {
         var tree = CreateExactTree("missing-pin");
@@ -117,7 +144,8 @@ public sealed class DocsVerifyArchiveCommandTests : IDisposable
     private static DocsVerifyArchiveCommand CreateCommand(
         string catalogPath,
         string version,
-        string? trustedReleaseRootPath = null)
+        string? trustedReleaseRootPath = null,
+        long? maxRewrittenFileSizeBytes = null)
     {
         return new DocsVerifyArchiveCommand(
             NullLogger<DocsVerifyArchiveCommand>.Instance,
@@ -125,7 +153,8 @@ public sealed class DocsVerifyArchiveCommandTests : IDisposable
         {
             CatalogPath = catalogPath,
             Version = version,
-            TrustedReleaseRootPath = trustedReleaseRootPath
+            TrustedReleaseRootPath = trustedReleaseRootPath,
+            MaxRewrittenFileSizeBytes = maxRewrittenFileSizeBytes
         };
     }
 

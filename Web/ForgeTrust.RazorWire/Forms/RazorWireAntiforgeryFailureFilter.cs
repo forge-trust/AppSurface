@@ -1,5 +1,6 @@
 using System.Net.Mime;
 using System.Text.Encodings.Web;
+using ForgeTrust.RazorWire.Bridge;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
@@ -13,7 +14,7 @@ using Microsoft.Extensions.Logging;
 namespace ForgeTrust.RazorWire.Forms;
 
 /// <summary>
-/// Converts RazorWire form anti-forgery validation failures into handled responses that Turbo can render in-place.
+/// Converts RazorWire form anti-forgery validation failures into negotiated responses and preserves local fallback.
 /// </summary>
 /// <remarks>
 /// The filter runs late in MVC result execution so it can see <see cref="IAntiforgeryValidationFailedResult"/> results
@@ -21,6 +22,9 @@ namespace ForgeTrust.RazorWire.Forms;
 /// <see cref="RazorWireFormHeaders.FormHandled"/>, and chooses Turbo Stream, HTML, or plain-text output from the
 /// request's <c>Accept</c> header. Turbo Stream responses prefer a form-local target when the posted marker can be read
 /// within the configured safety limit; otherwise they append one safe diagnostic block to <c>body</c>.
+/// Correlated Turbo responses echo request metadata so a delayed form-local failure cannot update a newer dialog flow.
+/// Invalid presentation metadata returns the same 400 diagnostic as plain text without applying stream actions,
+/// with <see cref="RazorWireFormHeaders.FormHandled"/> false so the current form can present local failure/retry UI.
 /// </remarks>
 internal sealed class RazorWireAntiforgeryFailureFilter : IAsyncAlwaysRunResultFilter, IOrderedFilter
 {
@@ -65,7 +69,8 @@ internal sealed class RazorWireAntiforgeryFailureFilter : IAsyncAlwaysRunResultF
     public int Order => int.MaxValue - 100;
 
     /// <summary>
-    /// Rewrites RazorWire anti-forgery validation failures into handled form responses, then continues result execution.
+    /// Rewrites RazorWire anti-forgery validation failures into form responses, then continues result execution.
+    /// Invalid presentation metadata uses an unhandled plaintext response so the current form can show local retry UI.
     /// </summary>
     /// <param name="context">The MVC result-executing context.</param>
     /// <param name="next">Delegate that continues MVC result execution.</param>
@@ -87,17 +92,44 @@ internal sealed class RazorWireAntiforgeryFailureFilter : IAsyncAlwaysRunResultF
         var request = context.HttpContext.Request;
         var useDiagnostics = _environment.IsDevelopment() && _options.Forms.EnableDevelopmentDiagnostics;
         var responseKind = SelectResponseKind(request);
+        var turboStreamRequested = responseKind == RazorWireAntiforgeryResponseKind.TurboStream;
         var message = BuildMessage(useDiagnostics);
         var turboStreamTarget = await ResolveTurboStreamTargetAsync(request, context.HttpContext.RequestAborted);
 
-        context.HttpContext.Response.Headers[RazorWireFormHeaders.FormHandled] = "true";
+        RazorWireRequestMetadata? metadata = null;
+        var invalidPresentationMetadata = false;
+        if (responseKind == RazorWireAntiforgeryResponseKind.TurboStream)
+        {
+            try
+            {
+                metadata = RazorWireRequestMetadata.Read(request, required: false);
+            }
+            catch (InvalidOperationException)
+            {
+                // Preserve the antiforgery rejection when presentation headers are
+                // invalid, without sending an unscoped action into a live dialog.
+                responseKind = RazorWireAntiforgeryResponseKind.PlainText;
+                invalidPresentationMetadata = true;
+            }
+        }
+
+        if (metadata is not null)
+        {
+            context.HttpContext.Response.Headers[RazorWireRequestMetadata.ResponseRequestHeaderName] =
+                metadata.RequestId.ToString("D");
+        }
+
+        // A plaintext diagnostic cannot present the error in an enhanced form.
+        // Leave this failure unhandled so the current form's local retry UI runs.
+        context.HttpContext.Response.Headers[RazorWireFormHeaders.FormHandled] =
+            invalidPresentationMetadata ? "false" : "true";
         context.Result = responseKind switch
         {
             RazorWireAntiforgeryResponseKind.TurboStream => new ContentResult
             {
                 StatusCode = StatusCodes.Status400BadRequest,
                 ContentType = TurboStreamContentType,
-                Content = BuildTurboStream(message, turboStreamTarget)
+                Content = BuildTurboStream(message, turboStreamTarget, metadata)
             },
             RazorWireAntiforgeryResponseKind.Html => new ContentResult
             {
@@ -118,7 +150,7 @@ internal sealed class RazorWireAntiforgeryFailureFilter : IAsyncAlwaysRunResultF
             "RazorWire form antiforgery validation failed. StatusCode: {StatusCode}. Environment: {Environment}. TurboStreamRequested: {TurboStreamRequested}.",
             StatusCodes.Status400BadRequest,
             _environment.EnvironmentName,
-            responseKind == RazorWireAntiforgeryResponseKind.TurboStream);
+            turboStreamRequested);
     }
 
     private static RazorWireAntiforgeryResponseKind SelectResponseKind(HttpRequest request)
@@ -232,21 +264,27 @@ internal sealed class RazorWireAntiforgeryFailureFilter : IAsyncAlwaysRunResultF
                && length <= MaxFailureTargetFormBytes;
     }
 
-    private static string BuildTurboStream(RazorWireFormFailureMessage message, RazorWireTurboStreamTarget target)
+    private static string BuildTurboStream(
+        RazorWireFormFailureMessage message,
+        RazorWireTurboStreamTarget target,
+        RazorWireRequestMetadata? metadata)
     {
         var html = BuildHtml(message);
+        var attributes = metadata?.ToHtmlAttributes(RazorWireDialogPhase.Origin) ?? string.Empty;
         if (target.AttributeName == "target")
         {
             return "<turbo-stream action=\"update\" "
                    + target.ToAttributeHtml()
+                   + attributes
                    + "><template>"
                    + html
                    + "</template></turbo-stream>";
         }
 
-        return "<turbo-stream action=\"remove\" targets=\"[data-rw-form-error-generated=true][data-rw-form-error-kind=antiforgery]\"></turbo-stream>"
+        return $"<turbo-stream action=\"remove\" targets=\"[data-rw-form-error-generated=true][data-rw-form-error-kind=antiforgery]\"{attributes}></turbo-stream>"
                + "<turbo-stream action=\"append\" "
                + target.ToAttributeHtml()
+               + attributes
                + "><template>"
                + html
                + "</template></turbo-stream>";

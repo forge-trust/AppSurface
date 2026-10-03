@@ -91,6 +91,27 @@ public sealed class ConfigAuditBudgetTests
     }
 
     [Fact]
+    public async Task SlotGrantedAsDeadlineCancels_IsReleasedAndRejected()
+    {
+        using var scope = new ConfigResolutionScope(auditOptions: new ConfigResourceOptions
+        {
+            AuditTimeout = TimeSpan.FromMilliseconds(10),
+            MaxAuditConcurrency = 1
+        });
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            Task.Delay(Timeout.InfiniteTimeSpan, scope.CancellationToken));
+
+        var granted = new CountingLease();
+        IDisposable? lease = granted;
+        Assert.False(scope.ConfirmRemoteLookupAdmission(ref lease, out var diagnostic));
+
+        Assert.Null(lease);
+        Assert.Equal(1, granted.DisposeCount);
+        Assert.Equal("config-audit-deadline", diagnostic!.Code);
+        Assert.Same(diagnostic, scope.IncompleteAuditDiagnostic);
+    }
+
+    [Fact]
     public void CallerCancellation_RemainsCancellation()
     {
         using var cancellation = new CancellationTokenSource();
@@ -113,5 +134,12 @@ public sealed class ConfigAuditBudgetTests
         })));
         Assert.Equal(8, results.Count(admitted => admitted));
         Assert.Equal("config-audit-remote-lookup-limit", scope.IncompleteAuditDiagnostic!.Code);
+    }
+
+    private sealed class CountingLease : IDisposable
+    {
+        internal int DisposeCount { get; private set; }
+
+        public void Dispose() => DisposeCount++;
     }
 }

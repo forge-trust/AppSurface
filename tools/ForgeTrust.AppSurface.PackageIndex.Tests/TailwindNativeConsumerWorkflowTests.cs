@@ -273,6 +273,8 @@ public sealed class TailwindNativeConsumerWorkflowTests : IDisposable
         Assert.True(result.Succeeded, await File.ReadAllTextAsync(TestPathUtils.PathUnder(report, "summary.md")));
         Assert.Equal("succeeded", result.Status);
         Assert.Equal(["sdk-version", "restore", "locked restore", "build"], runner.Requests.Select(request => request.FailureVerb));
+        Assert.Equal(["--version", "restore", "restore", "build"],
+            runner.Requests.Select(request => request.Arguments[0]));
         using var receipt = JsonDocument.Parse(await File.ReadAllBytesAsync(result.ReportPath));
         Assert.Equal("appsurface-tailwind-native-host-proof-v2", receipt.RootElement.GetProperty("schema").GetString());
         Assert.Equal("succeeded", receipt.RootElement.GetProperty("status").GetString());

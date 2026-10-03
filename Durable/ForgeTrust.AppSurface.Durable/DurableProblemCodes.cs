@@ -104,4 +104,6 @@ public static class DurableProblemCodes
     public const string ActivatorStale = "ASDUR404";
     /// <summary>A live process already owns the configured worker identity.</summary>
     public const string WorkerIdentityConflict = "ASDUR405";
+    /// <summary>An unexpected nonfatal external activation orchestration or pump failure occurred.</summary>
+    public const string ExternalActivationFailed = "ASDUR407";
 }

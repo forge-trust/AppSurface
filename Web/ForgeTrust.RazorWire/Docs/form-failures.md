@@ -109,7 +109,7 @@ document.addEventListener('razorwire:form:failure', event => {
 
 ## Development Diagnostics
 
-In `Development`, RazorWire rewrites anti-forgery validation failures for RazorWire form requests into a helpful `400` response. The diagnostic explains that the token is missing or stale, gives fixes, and links back to [Security & Anti-Forgery](./antiforgery.md). In production, the response remains safe for users and does not expose implementation details.
+In `Development`, RazorWire rewrites anti-forgery validation failures for RazorWire form requests into a helpful `400` response. The diagnostic explains that the token is missing or stale, gives fixes, and links back to [Security & Anti-Forgery](./antiforgery.md). In production, the response remains safe for users and does not expose implementation details. For [dialog responses](./dialog-responses.md), the handled stream echoes validated request/flow metadata so a delayed antiforgery failure cannot overwrite a newer dialog's reused local error target. Invalid presentation metadata keeps the 400 diagnostic in plain text and emits no stream actions; this response is unhandled so the current form can show local failure/retry UI.
 
 The adapter recognizes RazorWire form requests by:
 
@@ -158,6 +158,8 @@ The runtime dispatches:
 - `razorwire:form:failure`
 - `razorwire:form:diagnostic`
 - `razorwire:form:submit-end`
+
+For a [dialog submission](dialog-responses.md), a stale response still dispatches `razorwire:form:submit-end` after submission cleanup, with its own result details. It does not dispatch failure UI events or modify the replacement dialog. Listen on the submitted form itself when it may have been detached by replacement; an event on a detached form cannot bubble to the document.
 
 `razorwire:form:failure` is cancelable. Call `event.preventDefault()` to suppress the default fallback while still using `FailureMode.Auto`.
 

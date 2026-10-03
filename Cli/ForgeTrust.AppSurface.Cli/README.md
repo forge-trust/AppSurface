@@ -1,6 +1,6 @@
 # AppSurface CLI
 
-For `appsurface durable schema` rollout of migration 0011, follow the [canonical heartbeat retention deployment and recovery guide](../../Durable/heartbeat-retention-operations.md#deploy-schema-11). Pending preflight is an expected downtime finding; activation requires a passing post-migration runtime-role preflight.
+For `appsurface durable schema` rollout of migration 0011, follow the [canonical heartbeat retention deployment and recovery guide](../../Durable/heartbeat-retention-operations.md#deploy-schema-11). Pending preflight is an expected downtime finding; activation requires the complete reviewed-manifest gate and the [combined deployment receipt procedure](../../Durable/heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist).
 
 The **AppSurface CLI** is the command-line home for repository-level AppSurface workflows. It is packaged as a .NET tool with the command name `appsurface`.
 
@@ -54,7 +54,7 @@ The source-preview CLI ships the following explicit deployment command family:
 ```bash
 appsurface durable schema status
 appsurface durable schema script --from-version <reviewed-version>
-appsurface durable schema preflight
+appsurface durable schema preflight --role-pairs-file <reviewed-file> --migration-owner-role <reviewed-owner>
 appsurface durable schema apply --apply
 ```
 
@@ -69,11 +69,75 @@ publication protects readers from partial content, but it cannot make a director
 principal safe from path replacement. `apply --apply` has a 45-minute overall deadline for the current migration
 chain; migrations 0010 and 0011 each retain a 330-second command deadline. Plan the maintenance window with the
 [heartbeat retention operations guide](../../Durable/heartbeat-retention-operations.md).
-After migration 0011, `preflight` checks the pruning function's integer result and security settings, the
-ascending retention index, enabled and forced row level security, and the runtime role's isolation and lack of
-effective `DELETE`/`TRUNCATE` rights on the heartbeat table. Treat any named failed check as schema or role drift;
-repair it and rerun preflight before activating workers. The
-[operations guide](../../Durable/heartbeat-retention-operations.md#deploy-schema-11) describes the deployment order.
+Both `--role-pairs-file <path>` and `--migration-owner-role <name>` are required for every preflight, including a
+one-pair deployment. The file is the complete version-1 manifest also passed to the package role recipe; there is no
+default, partial input, inline JSON, or catalog-derived expected set. Credentials remain environment-variable-only
+through `--connection-env <NAME>`. Read the same unchanged file for each distinct runtime credential and retain its
+SHA-256 with the reviewed deployment record. The [canonical operations guide](../../Durable/heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist)
+documents the four proof stages, recipe ordering, owner review, deadlines, guard lifetime, receipt contents, and closed
+gates.
+
+Input is read once before database access, strict UTF-8 without BOM, at most 64 KiB and depth 8. It requires exactly
+`version: 1`, `pairs`, 1–32 pairs, and exactly `dispatcher`, `runtime`, and `dispatcher_profile` in each pair;
+profiles are explicit `full` or `work_only`. Duplicate decoded JSON properties, comments, trailing commas, unknown or
+missing fields, wrong types, empty/control-containing names, duplicate role names across role kinds, and names over
+63 UTF-8 bytes fail. Names are preserved exactly and resolved by exact database name to unique OIDs. The independently
+reviewed owner uses the same name constraints, must resolve exactly once, and cannot overlap a pair role. Do not trim,
+case-fold, normalize, truncate, interpolate, or infer the owner from catalog state.
+
+One preflight is one read-only snapshot and one bounded operation: a dedicated nonpooled connection acquires the
+package shared migration/recipe/epoch fence before RepeatableRead, verifies schema-history compatibility and structural
+facts, completes and unlocks, then disposes before success. The endpoint must be session-affine; transaction- and
+statement-pooling proxies are unsupported. Ambient enlistment and multiplexing are disabled. The 30-second total
+online deadline includes connection and fence waits; work is limited to 28 seconds and cleanup may consume at most
+the remaining 2 seconds. Timeout, cancellation, broken transport, uncertain unlock, cleanup failure, or unknown result
+is a nonzero result with no success output. A one-slot runtime pool must not cause a nested connection acquisition.
+
+The manifest authorizes the expected set; database policies and ACLs are evidence only. Checks require every expected
+role to resolve exactly once and be a restricted LOGIN leaf with no forbidden attributes, membership edges, or
+database/package-object ownership; exact raw runtime targets on all managed policies; exactly the heartbeat runtime
+and owner policies with required expressions and forced RLS; expected owner agreement across schema, table, functions,
+owner policy, and ACL; exact owner-plus-runtime function ACLs with EXECUTE for every runtime and no grant option or
+unexpected grantees; no effective runtime heartbeat DELETE/TRUNCATE; the pruning function's exact four-argument
+signature, integer/non-set return, SECURITY DEFINER and search path; the due-health function's integer-argument
+identity, reviewed owner and complete runtime ACL; and a valid, ready, nonunique ascending retention index with the
+required keys and no predicate/expression. Raw target and ACL sets are checked before joins; all runtimes must pass,
+not merely one. Related #823 policy targets are checked for exact set consistency. This is not a general database
+doctor, a full function-body audit, or PostgreSQL-enforced lane row isolation.
+
+The safe success output contains schema compatibility, caller evidence kind and validated caller/pair, the explicit
+owner role, runtime count, manifest SHA-256, StoreId, and nullable active epoch. It contains no connection value,
+password, raw manifest, SQL, provider exception, or ACL text. The result distinguishes a manifest `runtime` credential from an `owner-diagnostic` caller. `session_user` and
+`current_user` must resolve to the same OID. Owner diagnostics can aid repair but never count toward runtime coverage;
+each distinct pair needs its own successful runtime credential. Results preserve StoreId and nullable active epoch.
+Preflight does not bootstrap or rotate epoch; deployment activation requires a matching StoreId and nonempty reviewed
+epoch across every runtime and lane proof.
+
+The CLI's individual result does not itself authorize activation. The deployment coordinator must hold a separate
+dedicated owner guard session continuously across all runtime invocations, both lane proofs, and activation. Any
+loss, cancellation, failed/partial pass, repeated credential, deployment-identity mismatch, or incomplete cleanup
+invalidates the whole set and requires a fresh complete rerun. See the canonical guide for the four exact candidate
+and published package scenarios. Source/integration proof is not exact-package proof, and a candidate receipt cannot
+substitute for restoring and verifying public-feed artifacts.
+
+Internally, the CLI owns an immutable validated request containing ordered pairs, distinct expected role names, the
+independently validated owner name, and SHA-256 of the original manifest bytes. `IDurableSchemaCommandService` accepts
+that request for one bounded operation and returns schema compatibility, evidence kind (`runtime` or
+`owner-diagnostic`), validated caller identity and pair index when applicable, StoreId, nullable epoch, and stable
+failed-check categories with optional validated pair/role identifiers. It carries no raw JSON, connection string, SQL,
+provider message, or unvalidated server-controlled role text. Cancellation flows through the bounded online operation;
+the operation owns and releases its data source, physical connection, fence, and transaction before success. This is a
+CLI-owned internal contract, not a public PostgreSQL provider preflight API. Ordinary schema compatibility callers
+continue to use provider status; the documented internal `ReadStatusInTransactionAsync` seam exists only to reuse
+compatibility checks inside this operation's already-owned snapshot.
+
+`DurableRoleManifest.ReadAsync(path, cancellationToken)` owns the file stream and delegates its single bounded read to the internal `ReadStreamAsync(stream, cancellationToken)` boundary. The stream overload reads forward from the current position, accepts at most 65,536 bytes, hashes and parses only complete input, and never seeks, retains, or disposes the caller-owned stream. It preserves partial-read cancellation and maps read failures to a fixed secret-safe input error. Internal callers must dispose their stream even when reading or validation fails; the public CLI continues to require a manifest file path.
+
+`ReadCallerAsync(connection, transaction, request, cancellationToken)` classifies the credential inside that same
+snapshot. It neither opens a connection nor changes session identity or owns the transaction. It resolves
+`session_user` and `current_user` to catalog OIDs and rejects an assumed role or changed backend before returning
+the validated runtime pair or owner-diagnostic identity. Keep this internal seam on the already fenced session;
+calling it alone cannot establish schema, structural, cleanup, or combined activation evidence.
 
 The preferred production flow remains: generate and review the offline schema script, apply all pending numbered
 migrations (currently through `0011`) in order, apply the complete version-1 role-pair manifest with the matching
@@ -86,9 +150,9 @@ operations guidance. The provider package's packaged recipe is checked byte-iden
 matched to the migration and hash the exact reviewed manifest file used for certificate evidence. See the
 [role manifest, grant profiles, and rollout contract](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#role-recipe-contract)
 and the [operator migration/rollback sequence](../../Durable/operational-assessments.md#migration-and-role-reconciliation).
-For two pairs on schema 11, keep Source activation closed: the current preflight checks one runtime role, and
-[#795](https://github.com/forge-trust/AppSurface/issues/795) must prove the exact manifest runtime set before that
-preflight can certify the combined catalog.
+For one or multiple pairs, use the same complete reviewed manifest and explicit owner on every preflight. Missing,
+partial, mismatched, or failed evidence keeps activation closed; the role recipe may refuse drift and must not be
+described as an automatic repair for every failure. Follow [safe Durable diagnostics](../../troubleshooting/durable-diagnostics.md#schema-11-complete-runtime-preflight) and rerun the full reviewed set after repair.
 
 Future CLI authentication is design-only today. The [authenticated command design](docs/authenticated-command-design.md) keeps auth centered on protected command execution, uses `appsurface docs publish --archive ./dist/docs --site <site>` as the first protected command wedge, and requires browser/loopback PKCE, RFC 8628 device flow, CI no-prompt behavior, secure token-cache boundaries, `ASCLI1xx` diagnostics, and packed-tool readiness proof before auth commands ship.
 
@@ -1361,6 +1425,7 @@ Verify one exact release tree from a version catalog without starting the docs w
 ```bash
 appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3
 appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3 --trusted-release-root ./published-docs
+appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3 --max-rewritten-file-size-bytes 16777216
 ```
 
 Options:
@@ -1368,8 +1433,9 @@ Options:
 - `--catalog`: Path to the AppSurface Docs version catalog JSON file.
 - `--version`: Exact version identifier to verify.
 - `--trusted-release-root`: Trusted release root used to resolve `exactTreePath` entries. When omitted, paths resolve the same way as runtime defaults: relative to the catalog directory.
+- `--max-rewritten-file-size-bytes`: Maximum size for a rewritten HTML file or root `search-index.json` in the published tree. The default is 4,194,304 bytes (4 MiB); supported values are 1 through 33,554,432 bytes (32 MiB). Set this to the same [published tree rewrite limit](../../Web/ForgeTrust.AppSurface.Docs/README.md#published-tree-rewrite-limit) configured on a host that mounts a larger archive.
 
-The command loads the catalog, resolves the selected `exactTreePath`, and runs the same release archive verification used at runtime. Pass `--trusted-release-root` when the deployment sets `AppSurfaceDocs:Versioning:TrustedReleaseRootPath`; otherwise the local verifier may inspect a different relative tree than the host would mount. It exits nonzero when the version is missing, lacks a `releaseManifestSha256` pin, has a mismatched manifest digest, has missing or changed files, or contains handler-servable files not covered by the manifest. The catalog pin proves local archive integrity relative to trusted host configuration; it is not a signature or build provenance attestation. For stable AppSurface releases, run this verifier before `./eng/release check --docs-catalog ...` or `./eng/release publish --docs-catalog ...`; the release tool then confirms the same catalog entry is recorded in release evidence before stable publishing can continue.
+The command loads the catalog, resolves the selected `exactTreePath`, and runs the same release archive verification used at runtime. Pass `--trusted-release-root` when the deployment sets `AppSurfaceDocs:Versioning:TrustedReleaseRootPath`; otherwise the local verifier may inspect a different relative tree than the host would mount. The rewrite limit is a resource guard, not an archive integrity bypass: only raise it for a measured exported file and configure the same limit on any host that mounts that archive. A larger limit increases request-time memory exposure. It exits nonzero when the version is missing, lacks a `releaseManifestSha256` pin, has a mismatched manifest digest, has missing or changed files, or contains handler-servable files not covered by the manifest. The catalog pin proves local archive integrity relative to trusted host configuration; it is not a signature or build provenance attestation. For stable AppSurface releases, run this verifier before `./eng/release check --docs-catalog ...` or `./eng/release publish --docs-catalog ...`; the release tool then confirms the same catalog entry is recorded in release evidence before stable publishing can continue.
 
 Migration map for repo-owned AppSurface Docs export:
 
