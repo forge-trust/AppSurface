@@ -1971,4 +1971,114 @@ class ApplicationIntegrationControls(unittest.TestCase):
                 broker.close_artifact_handles()
 
 
+class FreshResultsOwnershipControls(unittest.TestCase):
+    def exercise(self, *, existing_owner=None, wrong_gid=False, replacement=None, chown_error=False):
+        with tempfile.TemporaryDirectory() as directory:
+            scratch = Path(directory)
+            output = scratch / "test-output"
+            output.mkdir(mode=0o2770)
+            output.chmod(0o2770)
+            selected = output / "coverage-fresh"
+            creator, worker, subject, gid = os.geteuid(), os.geteuid() + 1, os.geteuid() + 2, os.getegid()
+            owners = {}
+            modes = {}
+            if existing_owner is not None:
+                selected.mkdir(mode=0o700)
+                entry = selected.stat()
+                owners[(entry.st_dev, entry.st_ino)] = {"creator": creator, "worker": worker, "subject": subject}[existing_owner]
+            parent_fd = os.open(output, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+            broker = SimpleNamespace(scratch=scratch, test_output_fd=parent_fd,
+                                     worker_uid=worker, subject_uid=subject, results_gid=gid)
+            original_fstat, original_stat, original_fchmod = os.fstat, os.stat, os.fchmod
+            calls = []
+            named_calls = 0
+
+            def translated(info):
+                fields = {name: getattr(info, name) for name in
+                          ("st_dev", "st_ino", "st_mode", "st_nlink", "st_uid", "st_gid",
+                           "st_size", "st_mtime_ns", "st_ctime_ns")}
+                fields["st_uid"] = owners.get((info.st_dev, info.st_ino), info.st_uid)
+                if (info.st_dev, info.st_ino) in modes:
+                    fields["st_mode"] = stat.S_IFMT(info.st_mode) | modes[(info.st_dev, info.st_ino)]
+                if wrong_gid:
+                    fields["st_gid"] = gid + 1
+                return SimpleNamespace(**fields)
+
+            def retained(fd):
+                return translated(original_fstat(fd))
+
+            def named(path, *args, **kwargs):
+                nonlocal named_calls
+                info = translated(original_stat(path, *args, **kwargs))
+                if path == "coverage-fresh":
+                    named_calls += 1
+                    if named_calls == replacement:
+                        info.st_ino += 1
+                return info
+
+            def transfer(fd, uid, group):
+                calls.append((fd, uid, group))
+                if chown_error:
+                    raise PermissionError("test-ownership-transfer")
+                info = original_fstat(fd)
+                owners[(info.st_dev, info.st_ino)] = uid
+
+            def permissions(fd, mode):
+                self.assertEqual(0o2770, mode)
+                original_fchmod(fd, mode)
+                # The macOS sandbox strips setgid; record the privileged Linux mode call.
+                info = original_fstat(fd)
+                modes[(info.st_dev, info.st_ino)] = mode
+
+            failed = existing_owner == "creator" or wrong_gid or replacement is not None or chown_error
+            try:
+                with patch.object(launcher, "openat2", side_effect=portable_openat2), \
+                     patch.object(launcher.os, "fstat", side_effect=retained), \
+                     patch.object(launcher.os, "stat", side_effect=named), \
+                     patch.object(launcher.os, "fchown", side_effect=transfer), \
+                     patch.object(launcher.os, "fchmod", side_effect=permissions):
+                    if failed:
+                        with self.assertRaises((launcher.LauncherError, PermissionError)):
+                            launcher.Broker._validate_results_root(broker, ["test", "--results-directory", str(selected)])
+                    else:
+                        self.assertEqual("coverage-fresh", launcher.Broker._validate_results_root(
+                            broker, ["test", "--results-directory", str(selected)]))
+                self.assertEqual(len(calls), 1 if not failed or replacement == 2 or chown_error else 0)
+                for fd, uid, group in calls:
+                    self.assertEqual((subject, gid), (uid, group))
+                    with self.assertRaises(OSError):
+                        original_fstat(fd)
+                if not failed:
+                    self.assertEqual(0o770, stat.S_IMODE(selected.stat().st_mode) & 0o777)
+                    info = selected.stat()
+                    self.assertEqual(0o2770, modes[(info.st_dev, info.st_ino)])
+                return calls
+            finally:
+                os.close(parent_fd)
+
+    def test_fresh_creator_owned_directory_hands_off_distinct_subject(self):
+        self.exercise()
+
+    def test_existing_worker_and_subject_owners_remain_allowed(self):
+        for owner in ("worker", "subject"):
+            with self.subTest(owner=owner):
+                self.exercise(existing_owner=owner)
+
+    def test_existing_creator_owner_is_not_a_fresh_directory(self):
+        self.exercise(existing_owner="creator")
+
+    def test_wrong_group_rejects_fresh_and_existing_directories(self):
+        for owner in (None, "subject"):
+            with self.subTest(owner=owner):
+                self.exercise(existing_owner=owner, wrong_gid=True)
+
+    def test_named_replacement_before_or_after_transfer_rejects(self):
+        for query in (1, 2):
+            with self.subTest(query=query):
+                self.exercise(replacement=query)
+
+    def test_failed_privileged_transfer_closes_retained_fd(self):
+        self.exercise(chown_error=True)
+
+
 if __name__ == "__main__": unittest.main()

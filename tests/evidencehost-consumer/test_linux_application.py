@@ -501,7 +501,9 @@ class WatchdogHandshakeControls(unittest.TestCase):
                 ownership.startup(time.monotonic() + 2, expected_uid=os.geteuid())
                 control.send_bytes(b"x" * 65 if oversized else f"DISARM:{process.pid + 1}".encode("ascii"))
                 process.join(2); self.assertEqual(1, process.exitcode)
-                with self.assertRaises(EOFError): control.recv_bytes(64)
+                # Linux may reset the pipe when malformed request bytes remain unread.
+                with self.assertRaises((EOFError, ConnectionResetError)): control.recv_bytes(64)
+                self.assertFalse(ownership.disarmed)
 
     def test_zero_exit_without_matching_done_ack_is_not_clean_disarm(self):
         for response in (None, b"DONE:0"):
