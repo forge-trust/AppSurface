@@ -441,27 +441,46 @@ public sealed class PostgreSqlSchemaIntegrationTests
     public async Task Apply_PreservesTheConfiguredClientDeadlineBeforeMigrationTen()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        await using var blocker = await database.DataSource.OpenConnectionAsync();
+        await using var blockerTransaction = await blocker.BeginTransactionAsync();
+        await using (var acquire = new NpgsqlCommand("SELECT pg_advisory_xact_lock(441);", blocker, blockerTransaction))
+        {
+            await acquire.ExecuteNonQueryAsync();
+        }
+
         var connectionString = new NpgsqlConnectionStringBuilder(database.ConnectionString)
         {
             CommandTimeout = 1,
             Pooling = false,
         }.ConnectionString;
         await using var shortTimeoutDataSource = NpgsqlDataSource.Create(connectionString);
-        var delayedMigration = new DurablePostgreSqlMigration(
-            1,
-            "delayed_test_migration",
-            """
-            SET LOCAL statement_timeout = '5s';
-            SELECT pg_sleep(2);
-            """,
-            "delayed-test-sha256");
+        var embedded = DurablePostgreSqlMigrationCatalog.Load();
+        // Hold the migration until the client deadline fires instead of racing a short sleep against runner load.
+        // The server deadline bounds a broken client timeout, while the real migration keeps retry/history valid.
+        var delayedMigration = embedded[0] with
+        {
+            Sql =
+                """
+                SET LOCAL statement_timeout = '15s';
+                SELECT pg_advisory_xact_lock(441);
+
+                """ + embedded[0].Sql,
+            Sha256 = new string('0', 64),
+        };
         var manager = new PostgreSqlDurableRuntimeSchemaManager(
             shortTimeoutDataSource,
             [delayedMigration]);
 
-        var exception = await Assert.ThrowsAsync<NpgsqlException>(async () => await manager.ApplyAsync());
+        var exception = await Assert.ThrowsAsync<NpgsqlException>(
+            async () => await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30)));
 
         Assert.IsType<TimeoutException>(exception.InnerException);
+        Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, (await manager.GetStatusAsync()).Compatibility);
+
+        await blockerTransaction.RollbackAsync();
+        var retried = await manager.ApplyAsync();
+        Assert.Equal([1], retried.AppliedVersions);
+        Assert.True((await manager.GetStatusAsync()).IsCompatible);
     }
 
     [Fact]
