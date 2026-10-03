@@ -70,6 +70,106 @@ PRIVATE_WORKER_JOURNAL_NAME = "launcher-worker-journal.log"
 PRIVATE_WORKER_JOURNAL_ARCHIVE = "worker-journal.tar"
 MAX_PRIVATE_WORKER_JOURNAL_BYTES = 4096
 MAX_PRIVATE_WORKER_JOURNAL_ARCHIVE_BYTES = 10240
+PRIVATE_FAILURE_OUTPUT_NAMES = ("evidence-plan.json", "evidence-manifest.json", "evidence-summary.json")
+PRIVATE_FAILURE_OUTPUT_ARCHIVE = "failure-output.tar"
+MAX_PRIVATE_FAILURE_FILE_BYTES = 128 * 1024
+MAX_PRIVATE_FAILURE_OUTPUT_BYTES = 384 * 1024
+MAX_PRIVATE_FAILURE_ARCHIVE_BYTES = 400 * 1024
+PRIVATE_FAILURE_OUTPUT_ROOT_SCRIPT = '''import io,os,re,stat,sys,tarfile
+NAMES=("evidence-plan.json","evidence-manifest.json","evidence-summary.json")
+def identity(info):
+    return (info.st_dev,info.st_ino,info.st_uid,info.st_gid,info.st_mode,info.st_nlink,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+def archive_from_output(output_fd,slot,*,expected_root_uid=0,expected_root_gid=0):
+    # Overrides exercise actual portable FDs only; production always requires root.
+    if not isinstance(slot,str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}",slot):
+        raise ValueError()
+    outer=os.fstat(output_fd)
+    if not stat.S_ISDIR(outer.st_mode) or outer.st_uid!=expected_root_uid or outer.st_gid!=expected_root_gid or stat.S_IMODE(outer.st_mode)!=0o755:
+        raise ValueError()
+    entries=os.listdir(output_fd)
+    # The held launcher creates one root-selected 12-hex anchor, never a caller path.
+    if len(entries)!=1 or not re.fullmatch(r"run-[0-9a-f]{12}",entries[0]):
+        raise ValueError()
+    run_fd=slot_fd=-1
+    pinned=[]
+    try:
+        run_fd=os.open(entries[0],os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=output_fd)
+        run=os.fstat(run_fd)
+        if not stat.S_ISDIR(run.st_mode) or run.st_uid<=0 or run.st_gid<=0 or stat.S_IMODE(run.st_mode)!=0o700 or identity(run)!=identity(os.stat(entries[0],dir_fd=output_fd,follow_symlinks=False)):
+            raise ValueError()
+        slot_fd=os.open(slot,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=run_fd)
+        selected=os.fstat(slot_fd)
+        if not stat.S_ISDIR(selected.st_mode) or (selected.st_uid,selected.st_gid)!=(run.st_uid,run.st_gid) or stat.S_IMODE(selected.st_mode)!=0o700 or identity(selected)!=identity(os.stat(slot,dir_fd=run_fd,follow_symlinks=False)):
+            raise ValueError()
+        contents={}
+        for name in NAMES:
+            try:
+                fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC|os.O_NONBLOCK,dir_fd=slot_fd)
+            except FileNotFoundError:
+                continue
+            pinned.append((name,fd,None))
+            try:
+                before=os.fstat(fd)
+                pinned[-1]=(name,fd,before)
+                if not stat.S_ISREG(before.st_mode) or (before.st_uid,before.st_gid)!=(run.st_uid,run.st_gid) or stat.S_IMODE(before.st_mode)!=0o600 or before.st_nlink!=1 or not 0<=before.st_size<=131072 or identity(before)!=identity(os.stat(name,dir_fd=slot_fd,follow_symlinks=False)):
+                    raise ValueError()
+                data=bytearray()
+                while len(data)<before.st_size:
+                    part=os.read(fd,min(65536,before.st_size-len(data)))
+                    if not part: raise ValueError()
+                    data.extend(part)
+                if identity(before)!=identity(os.fstat(fd)) or identity(before)!=identity(os.stat(name,dir_fd=slot_fd,follow_symlinks=False)):
+                    raise ValueError()
+                contents[name]=bytes(data)
+            except BaseException:
+                raise
+        if not contents or sum(map(len,contents.values()))>393216:
+            raise ValueError()
+        for fd,before,parent,name in ((slot_fd,selected,run_fd,slot),(run_fd,run,output_fd,entries[0])):
+            if identity(before)!=identity(os.fstat(fd)) or identity(before)!=identity(os.stat(name,dir_fd=parent,follow_symlinks=False)):
+                raise ValueError()
+        if identity(outer)!=identity(os.fstat(output_fd)): raise ValueError()
+        output=io.BytesIO()
+        with tarfile.open(fileobj=output,mode="w",format=tarfile.USTAR_FORMAT) as archive:
+            for name in NAMES:
+                if name not in contents: continue
+                item=tarfile.TarInfo(name);item.mode=0o600;item.uid=item.gid=0;item.size=len(contents[name])
+                archive.addfile(item,io.BytesIO(contents[name]))
+        result=output.getvalue()
+        if len(result)>409600: raise ValueError()
+        for name,fd,before in pinned:
+            if identity(before)!=identity(os.fstat(fd)) or identity(before)!=identity(os.stat(name,dir_fd=slot_fd,follow_symlinks=False)):
+                raise ValueError()
+        return result
+    finally:
+        for name,fd,before in pinned: os.close(fd)
+        for fd in (slot_fd,run_fd):
+            if fd>=0: os.close(fd)
+def main():
+    if os.geteuid()!=0 or len(sys.argv)!=7 or not re.fullmatch(r"[0-9a-f]{32}",sys.argv[1]) or any(not re.fullmatch(r"[0-9]{1,20}",v) for v in sys.argv[2:6]):
+        raise ValueError()
+    descriptors=[]
+    try:
+        parent=os.open("/run",os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC);descriptors.append(parent)
+        info=os.fstat(parent)
+        if info.st_uid!=0 or info.st_gid!=0 or info.st_mode&0o022: raise ValueError()
+        work_name="appsurface-evidencehost-runtime-"+sys.argv[1]
+        work=os.open(work_name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=parent);descriptors.append(work)
+        info=os.fstat(work)
+        if (info.st_dev,info.st_ino)!=(int(sys.argv[2]),int(sys.argv[3])) or info.st_uid!=0 or info.st_gid!=0 or stat.S_IMODE(info.st_mode)!=0o755: raise ValueError()
+        output=os.open("output-parent",os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=work);descriptors.append(output)
+        outer=os.fstat(output)
+        if (outer.st_dev,outer.st_ino)!=(int(sys.argv[4]),int(sys.argv[5])): raise ValueError()
+        result=archive_from_output(output,sys.argv[6])
+        if identity(outer)!=identity(os.stat("output-parent",dir_fd=work,follow_symlinks=False)) or identity(info)!=identity(os.fstat(work)) or identity(info)!=identity(os.stat(work_name,dir_fd=parent,follow_symlinks=False)):
+            raise ValueError()
+        sys.stdout.buffer.write(result)
+    finally:
+        for fd in reversed(descriptors): os.close(fd)
+if __name__=="__main__":
+    try: main()
+    except Exception: sys.exit(1)
+'''
 PRIVATE_WORKER_JOURNAL_ROOT_SCRIPT = '''import io,os,re,stat,sys,tarfile
 def identity(info):
     return (info.st_dev,info.st_ino,info.st_uid,info.st_gid,info.st_mode,info.st_nlink,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
@@ -977,7 +1077,138 @@ def retain_private_worker_journal(work_root: Path, proof_directory: Path) -> boo
                     pass
 
 
-def run_observation_launcher(command: list[str], work_root: Path, proof_directory: Path) -> tuple[bytes, bytes]:
+def _private_failure_output_contents(data: bytes) -> dict[str, bytes] | None:
+    """Validate canonical private USTAR bytes; no artifact content is interpreted as authority."""
+    if not isinstance(data, bytes) or len(data) > MAX_PRIVATE_FAILURE_ARCHIVE_BYTES:
+        return None
+    try:
+        contents = {}
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as archive:
+            members = archive.getmembers()
+            if not 1 <= len(members) <= len(PRIVATE_FAILURE_OUTPUT_NAMES):
+                return None
+            for member in members:
+                if (member.name not in PRIVATE_FAILURE_OUTPUT_NAMES or member.name in contents
+                        or member.type != tarfile.REGTYPE or member.mode != 0o600 or member.uid or member.gid
+                        or not 0 <= member.size <= MAX_PRIVATE_FAILURE_FILE_BYTES or member.linkname
+                        or member.pax_headers or member.uname or member.gname or member.mtime):
+                    return None
+                stream = archive.extractfile(member)
+                if stream is None:
+                    return None
+                with stream:
+                    content = stream.read(MAX_PRIVATE_FAILURE_FILE_BYTES + 1)
+                if len(content) != member.size:
+                    return None
+                contents[member.name] = content
+        if sum(map(len, contents.values())) > MAX_PRIVATE_FAILURE_OUTPUT_BYTES:
+            return None
+        canonical = io.BytesIO()
+        with tarfile.open(fileobj=canonical, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+            for name in PRIVATE_FAILURE_OUTPUT_NAMES:
+                if name in contents:
+                    member = tarfile.TarInfo(name)
+                    member.mode, member.uid, member.gid, member.size = 0o600, 0, 0, len(contents[name])
+                    archive.addfile(member, io.BytesIO(contents[name]))
+        return contents if canonical.getvalue() == data else None
+    except (OSError, ValueError, tarfile.TarError):
+        return None
+
+
+def retain_private_failure_output(work_root: Path, output_parent: Path, slot: str,
+                                  proof_directory: Path, record: dict) -> bool:
+    """Retain fixed failed-worker files only after validated completed protocol/owned exit.
+
+    Paths come from this invocation, never uploaded JSON. Root pins the fixed workspace
+    and output parent; portable owner overrides exist only inside the FD procedure.
+    Missing, unsafe, changed, oversized or occupied capture returns false. Neither raw
+    bytes nor capture success can replace the original failed launcher verdict.
+    """
+    fds = []
+    try:
+        if (record.get("cause") != "worker-unsuccessful" or record.get("operation") != "worker-exit"
+                or record.get("worker_main_code") != 1 or type(record.get("worker_main_status")) is not int
+                or not 1 <= record["worker_main_status"] <= 255
+                or any(record.get(name) is not True for name in
+                       ("broker_ready_seen", "broker_wait_completed", "broker_exited", "broker_work_closed"))
+                or any(type(record.get(name)) is not int or record[name] != 0 for name in
+                       ("broker_active_handlers", "broker_active_runs"))
+                or not runtime_workspace_path(work_root) or output_parent != work_root / "output-parent"
+                or not isinstance(slot, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", slot)):
+            return False
+        work, outer = work_root.lstat(), output_parent.lstat()
+        if any(not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+               or stat.S_IMODE(info.st_mode) != 0o755 for info in (work, outer)):
+            return False
+        code, data, _stderr = root_command(
+            ["/usr/bin/python3", "-I", "-c", PRIVATE_FAILURE_OUTPUT_ROOT_SCRIPT,
+             work_root.name[len(RUNTIME_WORKSPACE_PREFIX):], str(work.st_dev), str(work.st_ino),
+             str(outer.st_dev), str(outer.st_ino), slot],
+            cwd=ROOT, timeout=10, label="retain private failed worker output", binary_output=True)
+        contents = _private_failure_output_contents(data) if code == 0 else None
+        if contents is None:
+            return False
+        parent_fd = os.open(proof_directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        fds.append(parent_fd)
+        parent = os.fstat(parent_fd)
+        if parent.st_uid != os.geteuid() or parent.st_gid != os.getegid() or parent.st_mode & 0o022:
+            return False
+        try:
+            os.mkdir("private-diagnostics", 0o700, dir_fd=parent_fd)
+        except FileExistsError:
+            pass
+        private_fd = os.open("private-diagnostics", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent_fd)
+        fds.append(private_fd)
+        private = os.fstat(private_fd)
+        if private.st_uid != os.geteuid() or private.st_gid != os.getegid() or stat.S_IMODE(private.st_mode) != 0o700:
+            return False
+        os.mkdir("failure-output", 0o700, dir_fd=private_fd)
+        capture_fd = os.open("failure-output", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=private_fd)
+        fds.append(capture_fd)
+        capture = os.fstat(capture_fd)
+        if capture.st_uid != os.geteuid() or capture.st_gid != os.getegid() or stat.S_IMODE(capture.st_mode) != 0o700:
+            return False
+        written = []
+        for name, content in {**contents, PRIVATE_FAILURE_OUTPUT_ARCHIVE: data}.items():
+            fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                         0o600, dir_fd=capture_fd)
+            fds.append(fd)
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "wb", closefd=False) as stream:
+                stream.write(content)
+                stream.flush()
+            info = os.fstat(fd)
+            written.append((name, fd, info, len(content)))
+        def identity(info):
+            return (info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode, info.st_nlink,
+                    info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        for name, fd, before, size in written:
+            if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.geteuid() or before.st_gid != os.getegid()
+                    or stat.S_IMODE(before.st_mode) != 0o600 or before.st_nlink != 1 or before.st_size != size
+                    or identity(before) != identity(os.fstat(fd))
+                    or identity(before) != identity(os.stat(name, dir_fd=capture_fd, follow_symlinks=False))):
+                return False
+        for fd, before, named in ((parent_fd, parent, proof_directory.lstat()),
+                                 (private_fd, private, os.stat("private-diagnostics", dir_fd=parent_fd, follow_symlinks=False)),
+                                 (capture_fd, capture, os.stat("failure-output", dir_fd=private_fd, follow_symlinks=False))):
+            current = os.fstat(fd)
+            if ((before.st_dev, before.st_ino, before.st_uid, before.st_gid, before.st_mode)
+                    != (current.st_dev, current.st_ino, current.st_uid, current.st_gid, current.st_mode)
+                    or identity(current) != identity(named)):
+                return False
+        return True
+    except (ProofFailure, OSError, ValueError, TypeError, subprocess.SubprocessError):
+        return False
+    finally:
+        for fd in reversed(fds):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def run_observation_launcher(command: list[str], work_root: Path, proof_directory: Path, *,
+                             output_parent: Path | None = None, slot: str | None = None) -> tuple[bytes, bytes]:
     """On failure publish only a validated host-category receipt, never launcher output tails.
 
     The root launcher owns the optional private 0600 record. The driver reads it through
@@ -1013,6 +1244,8 @@ def run_observation_launcher(command: list[str], work_root: Path, proof_director
     except ProofFailure:
         pass
     retain_private_worker_journal(work_root, proof_directory)
+    if safe_record is not None and output_parent is not None and slot is not None:
+        retain_private_failure_output(work_root, output_parent, slot, proof_directory, safe_record)
     if safe_record is None:
         fail(f"Production Observation launcher exited {code}; safe diagnostic unavailable.")
     encoded = json.dumps(safe_record, sort_keys=True, separators=(",", ":")) + "\n"
@@ -1435,7 +1668,8 @@ def main() -> int:
             slot=observation_slot,
             subject_root=subject_source,
         )
-        stdout, stderr = run_observation_launcher(observation, work_root, proof_directory)
+        stdout, stderr = run_observation_launcher(observation, work_root, proof_directory,
+                                                  output_parent=output_parent, slot=observation_slot)
         try:
             launcher_result = json.loads(stdout)
         except json.JSONDecodeError:

@@ -47,10 +47,11 @@ The run exchange remains owned through its bounded response after caller
 cancellation; cancellation uses a separate ``stop`` connection. ``wait`` closes
 the run gate and waits on ownership notifications, with bounded cgroup polling
 until the stopping grace, cleanup reserve or frozen job deadline expires. Every
-descriptor contains all five stage budgets. There is no Aspire start lane in this
-prototype, so the minimum overall job deadline is admission + collection + cleanup;
+descriptor contains all five stage budgets. An exact compile-owned selection adds
+the v2 application lane; its production registration table remains empty. The
+root's minimum overall job deadline is admission + collection + cleanup;
 stopping is reserved within cleanup and is not added again. ``start_seconds`` is
-still carried for the C# worker contract. Successful
+carried for the C# worker's complete application-stage schedule. Successful
 ``wait`` is exactly ``{"ok":true,"owned_exit":true}`` and requires
 empty child cgroups and joined output pumps. The broker PID is in the descriptor
 so the C# client can pin SO_PEERCRED across connections. No
@@ -74,6 +75,7 @@ import base64
 import ctypes
 import grp
 import hashlib
+import importlib.util
 import json
 import os
 import platform
@@ -92,7 +94,16 @@ import time
 import uuid
 from pathlib import Path
 
+# Load the single adjacent implementation, including when a protected parent imports
+# this hyphenated launcher by its exact file path. There is no search-path fallback.
+_application_spec = importlib.util.spec_from_file_location(
+    "evidencehost_root_application", Path(__file__).with_name("evidencehost_linux_application.py"))
+_application = importlib.util.module_from_spec(_application_spec)
+sys.modules[_application_spec.name] = _application
+_application_spec.loader.exec_module(_application)
+
 SCHEMA = "evidence-worker-linux-v1"
+APPLICATION_SCHEMA = "evidence-worker-linux-v2"
 FAILURE_DIAGNOSTIC_SCHEMA = "evidence-launcher-failure-v1"
 FAILURE_DIAGNOSTIC_FILE = "launcher-failure.json"
 FAILURE_DIAGNOSTIC_LIMIT = 4096
@@ -121,6 +132,7 @@ FAILURE_DIAGNOSTIC_CAUSES = frozenset({
     "worker-start-command-failed", "worker-start-status-unavailable",
     "completion-ownership-unconfirmed", "completion-output-unconfirmed",
     "completion-output-identity-changed",
+    "application-preparation-deadline", "application-workspace-changed",
 })
 FAILURE_DIAGNOSTIC_OPERATIONS = frozenset({"systemctl", "systemd-run", "useradd", "groupadd", "userdel", "groupdel", "worker-exit", "worker-start"})
 WORKER_LOAD_STATES = frozenset({"loaded", "not-found", "error", "bad-setting", "masked"})
@@ -343,7 +355,6 @@ def require_successful_worker(properties: dict[str, str], worker_name: str,
         failure = worker_exit_failure("worker-unsuccessful", properties)
         capture_worker_protocol_failure(failure, broker, directory_fd)
         raise failure
-
 
 
 def validate_failure_diagnostic(record: object) -> dict:
@@ -930,10 +941,20 @@ def validate_request(raw: bytes) -> dict:
     op = value["op"]
     fields = {"ready": {"op"}, "stop": {"op"}, "wait": {"op"}, "exit": {"op"},
               "run": {"op", "executable", "arguments", "working_directory"},
+              "application-start": {"op", "application_id", "entry_digest"},
+              "resource-wait": {"op", "lease_id", "resource_id"},
               "artifacts": {"op", "relative_root"},
               "artifact": {"op", "relative_root", "relative_path", "offset"}}
     if op not in fields or set(value) != fields[op]:
         raise LauncherError("invalid-request-fields")
+    if op == "application-start":
+        if (not isinstance(value["application_id"], str) or not SAFE_NAME.fullmatch(value["application_id"])
+                or not isinstance(value["entry_digest"], str) or not re.fullmatch(r"[0-9a-f]{64}", value["entry_digest"])):
+            raise LauncherError("invalid-application-request")
+    if op == "resource-wait":
+        if (not isinstance(value["lease_id"], str) or not re.fullmatch(r"[0-9a-f]{32}", value["lease_id"])
+                or not isinstance(value["resource_id"], str) or not SAFE_NAME.fullmatch(value["resource_id"])):
+            raise LauncherError("invalid-application-request")
     if op == "run":
         if (not isinstance(value["executable"], str) or "\0" in value["executable"]
                 or not isinstance(value["arguments"], list) or len(value["arguments"]) > 4096):
@@ -1046,22 +1067,8 @@ def encode_response(obj: dict) -> bytes:
     return data
 
 
-class OutputQuota:
-    """One received-byte quota shared by every subject command in a job."""
-    def __init__(self):
-        self.total = 0
-        self.exceeded = threading.Event()
-        self._lock = threading.Lock()
-
-    def count(self, size: int) -> None:
-        with self._lock:
-            self.total += size
-            if self.total > MAX_JOB_OUTPUT:
-                self.exceeded.set()
-
-    def received_bytes(self) -> int:
-        with self._lock:
-            return self.total
+OutputQuota = _application.JobOutputCounter
+"""The single received-byte counter shared by application and producer pumps."""
 
 
 class OutputBudget:
@@ -1143,7 +1150,7 @@ class Broker:
                  subject_gid: int, results_gid: int, subject_root: Path, protected_paths: tuple[Path, ...],
                  scratch: Path, dotnet: Path, unit_prefix: str, deadline: float,
                  job_seconds: int, stopping_seconds: int, cleanup_seconds: int,
-                 test_output_fd: int):
+                 test_output_fd: int, *, application=None):
         self.descriptor = descriptor
         self.worker_uid = worker_uid
         self.worker_pid = worker_pid
@@ -1162,7 +1169,10 @@ class Broker:
         self.cleanup_seconds = cleanup_seconds
         self.test_output_fd = test_output_fd
         self.units: list[tuple[str, str]] = []
-        self.output_quota = OutputQuota()
+        if application is not None and type(application) is not _application.RootApplicationLease:
+            raise LauncherError("application-owner-invalid")
+        self.application = application
+        self.output_quota = OutputQuota() if application is None else application.job_counter
         self.lock = threading.Lock()
         self.condition = threading.Condition(self.lock)
         self.exited = False
@@ -1183,6 +1193,43 @@ class Broker:
         self.allowed_results_roots: set[str] = set()
         self.subject_commands_started = 0
         self.command_output_receipts: list[tuple[int, int, int]] = []
+        self.application_output_receipt: tuple[int, int, int] | None = None
+        self.application_work_failed = False
+        self.active_application_operations = 0
+        self.owned_exit_deadline: float | None = None
+
+    def _close_work_gate(self) -> float:
+        """Freeze one aggregate stop/join deadline; repeated requests cannot extend it."""
+        with self.condition:
+            self.work_closed = True
+            if self.owned_exit_deadline is None:
+                self.owned_exit_deadline = min(self.deadline, time.monotonic()
+                                               + min(self.stopping_seconds, self.cleanup_seconds))
+            self.condition.notify_all()
+            return self.owned_exit_deadline
+
+    def _application_request(self, request: dict) -> dict:
+        """Use only the retained root owner after the exact worker authenticated ready."""
+        with self.condition:
+            if self.application is None or self.descriptor.get("schema") != APPLICATION_SCHEMA:
+                raise _application.ApplicationError("ASEVD407")
+            if (not self.ready_seen or self.work_closed or self.exited
+                    or self.application_work_failed or self.active_application_operations):
+                raise _application.ApplicationError("ASEVD410")
+            self.active_application_operations += 1
+        try:
+            if request["op"] == "application-start":
+                return self.application.start(request["application_id"], request["entry_digest"], self.deadline)
+            return self.application.resource_wait(request["lease_id"], request["resource_id"], self.deadline)
+        except Exception:
+            with self.condition:
+                self.application_work_failed = True
+            self.stop()
+            raise _application.ApplicationError("ASEVD410") from None
+        finally:
+            with self.condition:
+                self.active_application_operations -= 1
+                self.condition.notify_all()
 
     def _send(self, conn: socket.socket, obj: dict) -> None:
         conn.sendall(encode_response(obj))
@@ -1586,11 +1633,37 @@ class Broker:
             pass
 
     def stop(self) -> None:
-        with self.lock:
-            self.work_closed = True
+        deadline = self._close_work_gate()
+        application_error = None
+        try:
+            if self.application is not None:
+                self.application.stop(deadline)
+        except Exception:
+            with self.condition:
+                self.application_work_failed = True
+            application_error = _application.ApplicationError("ASEVD410")
+        with self.condition:
             units = [unit for unit, _ in self.units]
         if units:
-            subprocess.run(["systemctl", "stop", *units], capture_output=True, env=ENV, timeout=5, check=False)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise LauncherError("owned-exit-inspection-deadline")
+            subprocess.run(["systemctl", "stop", *units], capture_output=True, env=ENV,
+                           timeout=min(5, remaining), check=False)
+        if application_error is not None:
+            raise application_error
+
+    def _application_exit_confirmed(self) -> bool:
+        """A live app is separate from producer transfer, but cannot survive final wait."""
+        if self.application is None:
+            return self.application_output_receipt is None
+        with self.condition:
+            return (not self.application_work_failed and not self.active_application_operations
+                    and self.application_output_receipt is not None and not self.application.failed
+                    and self.application.receipt == self.application_output_receipt)
+
+    def _all_owned_work_stopped(self, inspection_deadline: float | None = None) -> bool:
+        return self._application_exit_confirmed() and self._all_subject_groups_empty(inspection_deadline)
 
     def _all_subject_groups_empty(self, inspection_deadline: float | None = None) -> bool:
         with self.lock:
@@ -1618,18 +1691,25 @@ class Broker:
 
     def _wait_for_owned_exit(self) -> bool:
         """Wait for run handlers and all owned cgroups within stopping, cleanup, and job reserves."""
-        started = time.monotonic()
-        grace = min(self.stopping_seconds, self.cleanup_seconds)
-        wait_deadline = min(self.deadline, started + grace)
+        wait_deadline = self._close_work_gate()
+        if self.application is not None:
+            try:
+                receipt = self.application.join(wait_deadline)
+                with self.condition:
+                    self.application_output_receipt = receipt
+            except Exception:
+                with self.condition:
+                    self.application_work_failed = True
+                return False
         while True:
             with self.condition:
-                if self.subject_output_failed:
+                if self.subject_output_failed or self.application_work_failed:
                     return False
                 generation = self.run_change_generation
                 active = self.active_runs
             if not active:
                 try:
-                    if (self._all_subject_groups_empty(inspection_deadline=wait_deadline)
+                    if (self._all_owned_work_stopped(inspection_deadline=wait_deadline)
                             and time.monotonic() <= wait_deadline):
                         return True
                 except (LauncherError, OSError, subprocess.SubprocessError):
@@ -1697,6 +1777,8 @@ class Broker:
                         self.active_runs -= 1
                         self.run_change_generation += 1
                         self.condition.notify_all()
+            elif op in ("application-start", "resource-wait"):
+                response = self._application_request(req)
             elif op == "stop":
                 with self.condition:
                     self.work_closed = True
@@ -1719,13 +1801,14 @@ class Broker:
                 with self.lock:
                     self.work_closed = True
                     wait_completed = self.wait_completed
-                if not wait_completed or not self._all_subject_groups_empty():
+                if not wait_completed or not self._all_owned_work_stopped():
                     raise LauncherError("subject-exit-unconfirmed")
                 self.exited = True
                 response = {"ok": True}
             self._send(conn, response)
-        except (LauncherError, OSError, subprocess.SubprocessError, ValueError) as error:
-            try: self._send(conn, {"ok": False, "code": "ASEVD420"} if str(error) == "ASEVD420"
+        except (LauncherError, _application.ApplicationError, OSError, subprocess.SubprocessError, ValueError) as error:
+            try: self._send(conn, {"ok": False, "code": error.code} if type(error) is _application.ApplicationError
+                            else {"ok": False, "code": "ASEVD420"} if str(error) == "ASEVD420"
                             else {"ok": False, "error": "broker-request-failed"})
             except OSError: pass
         finally:
@@ -1762,6 +1845,145 @@ def _create_run_accounts(worker_name: str, subject_name: str, results_group: str
         users.append(name)
     _systemd(["/usr/sbin/groupadd", "--system", results_group])
     groups.append(results_group)
+
+
+def _create_application_accounts(application_name: str, resource_group: str,
+                                 users: list[str], groups: list[str]) -> None:
+    """Reserve the third UID and fifth GID until retained completion closes all accounts."""
+    _systemd(["/usr/sbin/useradd", "--system", "--user-group", "--no-create-home",
+              "--shell", "/usr/sbin/nologin", application_name])
+    users.append(application_name)
+    _systemd(["/usr/sbin/groupadd", "--system", resource_group])
+    groups.append(resource_group)
+
+
+def select_root_application(args: argparse.Namespace, policy: Path):
+    """Resolve only an exact compile-owned identity and protected policy; return no caller-selected lease."""
+    values = tuple(getattr(args, key, None) for key in
+                   ("application_id", "application_entry_digest", "application_profile"))
+    if all(value is None for value in values):
+        return None
+    if (any(value is None for value in values) or not all(type(value) is str for value in values)
+            or not SAFE_NAME.fullmatch(values[0]) or not re.fullmatch(r"[0-9a-f]{64}", values[1])
+            or not SAFE_NAME.fullmatch(values[2])):
+        raise _application.ApplicationError("ASEVD404")
+    return _application.select_registration(values[0], values[1], policy_sha256=policy_sha256(policy),
+                                            profile_id=values[2])
+
+
+def application_preparation_remaining(deadline: float, maximum: float | None = None) -> float:
+    """Data-only remaining allowance from the captured aggregate job deadline."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise LauncherError("application-preparation-deadline")
+    return remaining if maximum is None else min(maximum, remaining)
+
+
+class _ApplicationWorkspaceOwner:
+    """Root-only workspace owner; only successful aggregate exit permits strict disposal.
+
+    Bundle inputs are pinned under the protected tool root, copied through retained
+    file descriptors, then independently pinned in a root-owned immutable /run tree.
+    The scratch bound is an actual host tmpfs mount, not a systemd path permission.
+    """
+    def _remaining(self, maximum: float | None = None) -> float:
+        """Consume the captured job deadline during preparation without renewing it."""
+        return application_preparation_remaining(self.deadline, maximum)
+
+    def __init__(self, selected, identities, tool: Path, output: Path, control: Path,
+                 producer_scratch: Path, source_subject: Path, deadline: float):
+        self.parent = Path("/run") / ("issue779-app-" + uuid.uuid4().hex)
+        self.bundle = None
+        self.mounted = False
+        self.closed = False
+        self.close_error = None
+        self.deadline = deadline
+        self._remaining()
+        audit = selected.audit
+        source = tool / "application-bundles" / audit.application_id / audit.descriptor(identities)["build_id"]
+        self.parent.mkdir(mode=0o711)
+        os.chown(self.parent, 0, 0)
+        os.chmod(self.parent, 0o711)
+        self.workspace = _application.Workspace(self.parent, self.parent / "scratch", self.parent / "control",
+                                               tool, output, control, producer_scratch, source_subject)
+        self.workspace.control.mkdir(mode=0o700)
+        os.chown(self.workspace.control, 0, 0)
+        os.chmod(self.workspace.control, 0o700)
+        target = self.parent / "bundle"
+        target.mkdir(mode=0o755)
+        # The deployment tree is inspected before prepare_tool_root changes its worker group modes.
+        with _application.audit_bundle(source, audit, deadline=self.deadline) as pinned:
+            for relative, fd, identity in pinned.files:
+                self._remaining()
+                item = next(item for item in audit.files if item.relative_path == relative)
+                path = target / relative
+                path.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+                destination = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+                try:
+                    position = 0
+                    digest = hashlib.sha256()
+                    while position < item.length_bytes:
+                        self._remaining()
+                        block = os.pread(fd, min(65536, item.length_bytes - position), position)
+                        self._remaining()
+                        if not block:
+                            raise _application.ApplicationError("ASEVD404")
+                        digest.update(block)
+                        view = memoryview(block)
+                        while view:
+                            self._remaining()
+                            written = os.write(destination, view)
+                            self._remaining()
+                            if written <= 0:
+                                raise _application.ApplicationError("ASEVD404")
+                            view = view[written:]
+                        position += len(block)
+                    if (_application._identity(os.fstat(fd)) != identity
+                            or digest.hexdigest() != item.sha256):
+                        raise _application.ApplicationError("ASEVD404")
+                    os.fchown(destination, 0, 0)
+                    os.fchmod(destination, item.mode)
+                finally:
+                    os.close(destination)
+            pinned.recheck()
+        self._remaining()
+        for directory, children, files in os.walk(target, topdown=False):
+            self._remaining()
+            os.chown(directory, 0, 0)
+            os.chmod(directory, 0o555)
+        self.bundle = _application.audit_bundle(target, audit, deadline=self.deadline)
+        self._remaining()
+        self.workspace.scratch.mkdir(mode=0o700)
+        _systemd(["/usr/bin/mount", "--types", "tmpfs", "--options",
+                  f"size={audit.capabilities.scratch_bytes},nosuid,nodev,noexec,mode=0700,uid={identities.application_uid},gid={identities.application_gid}",
+                  "tmpfs", str(self.workspace.scratch)], timeout=self._remaining(8))
+        self.mounted = True
+        os.chown(self.workspace.scratch, identities.application_uid, identities.application_gid)
+        os.chmod(self.workspace.scratch, 0o700)
+        _application.validate_workspace(self.workspace, self.bundle, identities,
+                                         self.parent.name.removeprefix("issue779-app-"), audit.capabilities)
+        self._remaining()
+        self.identity = _application._identity(self.parent.lstat())
+
+    def close_after_owned_exit(self) -> None:
+        """Dispose once after aggregate joins; failure retains quarantine and cannot become success."""
+        if not self.closed:
+            self.closed = True
+            try:
+                if _application._identity(self.parent.lstat()) != self.identity:
+                    raise LauncherError("application-workspace-changed")
+                self.bundle.close()
+                if self.mounted:
+                    remaining = self.deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise LauncherError("owned-exit-inspection-deadline")
+                    _systemd(["/usr/bin/umount", str(self.workspace.scratch)], timeout=min(5, remaining))
+                    self.mounted = False
+                shutil.rmtree(self.parent)
+            except BaseException as error:
+                self.close_error = error
+        if self.close_error is not None:
+            raise self.close_error
 
 
 def _start_worker_unit(argv: list[str], worker_unit: str) -> None:
@@ -1845,12 +2067,14 @@ class _LaunchCompletion:
     This internal object is transport for a protected parent, not an admission lease.
     """
     def __init__(self, output: Path, descriptor: dict, output_fd: int, parent_fd: int,
-                 output_identity: dict, parent_identity: dict, receipts: tuple[tuple[int, int, int], ...]):
+                 output_identity: dict, parent_identity: dict, receipts: tuple[tuple[int, int, int], ...],
+                 application_receipt: tuple[int, int, int] | None = None):
         self.output = output
         self._descriptor_bytes = json.dumps(descriptor, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
         self._output_identity = tuple(output_identity.items())
         self._parent_identity = tuple(parent_identity.items())
         self.subject_output_receipts = receipts
+        self.application_output_receipt = application_receipt
         self._output_fd, self._parent_fd = output_fd, parent_fd
         self._lock = threading.Lock()
         self._run_accounts = None
@@ -1930,6 +2154,27 @@ def _identity_from_stat(info) -> dict[str, int]:
             "inode": info.st_ino, "uid": info.st_uid, "gid": info.st_gid}
 
 
+def validate_completion_output(receipts, started: int, total: int, application_receipt,
+                               application_selected: bool) -> None:
+    """Reconcile separate immutable byte receipts against one shared counter; grant no authority."""
+    if (type(started) is not int or not 0 <= started <= MAX_SUBJECT_UNITS
+            or type(total) is not int or not 0 <= total <= MAX_JOB_OUTPUT
+            or type(application_selected) is not bool or type(receipts) is not tuple
+            or len(receipts) != started):
+        raise LauncherError("completion-output-unconfirmed")
+    if (application_selected and application_receipt is None
+            or not application_selected and application_receipt is not None):
+        raise LauncherError("completion-output-unconfirmed")
+    combined = receipts + (() if application_receipt is None else (application_receipt,))
+    for receipt in combined:
+        if (type(receipt) is not tuple or len(receipt) != 3
+                or any(type(value) is not int or value < 0 for value in receipt)
+                or receipt[0] != receipt[1] + receipt[2]):
+            raise LauncherError("completion-output-unconfirmed")
+    if sum(received for received, _, _ in combined) != total:
+        raise LauncherError("completion-output-unconfirmed")
+
+
 def _completion_after_owned_exit(broker: Broker, output: Path, worker_name: str,
                                  worker_properties: dict[str, str]) -> _LaunchCompletion:
     """Pin final output only after protocol, process, handler and exact pump acknowledgements.
@@ -1942,22 +2187,23 @@ def _completion_after_owned_exit(broker: Broker, output: Path, worker_name: str,
         if (time.monotonic() >= broker.deadline
                 or not broker.ready_seen or not broker.exited or not broker.wait_completed or not broker.work_closed
                 or broker.active_runs or broker.active_handlers or broker.active_artifact_operations
+                or broker.active_application_operations or broker.application_work_failed
                 or broker.subject_output_failed):
             raise LauncherError("completion-ownership-unconfirmed")
         receipts = tuple(broker.command_output_receipts)
         started = broker.subject_commands_started
+        application_receipt = broker.application_output_receipt
+    if not broker._application_exit_confirmed():
+        raise LauncherError("completion-ownership-unconfirmed")
     total = broker.output_quota.received_bytes()
-    if (len(receipts) != started or len(receipts) > MAX_SUBJECT_UNITS
-            or broker.output_quota.exceeded.is_set() or total > MAX_JOB_OUTPUT
-            or any(type(value) is not int or value < 0 for receipt in receipts for value in receipt)
-            or any(received != stdout + stderr for received, stdout, stderr in receipts)
-            or sum(received for received, _, _ in receipts) != total):
+    if broker.output_quota.exceeded.is_set():
         raise LauncherError("completion-output-unconfirmed")
+    validate_completion_output(receipts, started, total, application_receipt, broker.application is not None)
     if (worker_properties.get("Result") != "success" or worker_properties.get("User") != worker_name
             or worker_properties.get("KillMode") != "control-group"
             or worker_properties.get("ExecMainCode") != "1" or worker_properties.get("ExecMainStatus") != "0"
             or not broker._group_empty(worker_properties.get("ControlGroup", broker.descriptor["cgroup"]))
-            or not broker._all_subject_groups_empty(inspection_deadline=broker.deadline)
+            or not broker._all_owned_work_stopped(inspection_deadline=broker.deadline)
             or time.monotonic() >= broker.deadline):
         raise LauncherError("completion-ownership-unconfirmed")
     output_fd = parent_fd = -1
@@ -1981,7 +2227,7 @@ def _completion_after_owned_exit(broker: Broker, output: Path, worker_name: str,
                 or parent_identity != _identity_from_stat(output.parent.lstat())):
             raise LauncherError("completion-output-identity-changed")
         completion = _LaunchCompletion(output, broker.descriptor, output_fd, parent_fd,
-                                       output_identity, parent_identity, receipts)
+                                       output_identity, parent_identity, receipts, application_receipt)
         output_fd = parent_fd = -1
         return completion
     finally:
@@ -2001,7 +2247,8 @@ def _close_launch_resources(listener, handlers, broker, test_output_fd: int) -> 
 
 
 def _finish_launch_transfer(completion: _LaunchCompletion, users: list[str], groups: list[str],
-                            listener, handlers, broker, test_output_fd: int, root: Path, scratch: Path) -> _LaunchCompletion:
+                            listener, handlers, broker, test_output_fd: int, root: Path, scratch: Path,
+                            application_workspace=None) -> _LaunchCompletion:
     """Transfer only after cleanup; any exception closes both retained directories.
 
     Failed transfer retains run accounts and the output quarantine. The successful
@@ -2009,6 +2256,10 @@ def _finish_launch_transfer(completion: _LaunchCompletion, users: list[str], gro
     """
     try:
         _close_launch_resources(listener, handlers, broker, test_output_fd)
+        if application_workspace is not None:
+            if not broker._application_exit_confirmed():
+                raise LauncherError("completion-ownership-unconfirmed")
+            application_workspace.close_after_owned_exit()
         shutil.rmtree(root)
         shutil.rmtree(scratch)
         completion._retain_run_accounts(users, groups)
@@ -2062,6 +2313,7 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
     if any(not SAFE_NAME.fullmatch(value) for value in args.observation_profile + args.observation_producer):
         raise LauncherError("invalid-observation-identifier")
     source_subject = subject
+    selected_application = select_root_application(args, policy)
     solution, declared_paths = declared_subject_inputs(source_subject, args.solution, args.path)
     solution_relative = Path(solution).relative_to(source_subject)
     tag = uuid.uuid4().hex[:12]
@@ -2089,10 +2341,21 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
     test_output_fd = -1
     handlers: list[threading.Thread] = []
     completion: _LaunchCompletion | None = None
+    application_workspace = None
+    application = None
     try:
         _create_run_accounts(worker_name, subject_name, results_group, users, groups)
         wu, su = pwd.getpwnam(worker_name), pwd.getpwnam(subject_name)
         rgid = grp.getgrnam(results_group).gr_gid
+        identities = None
+        if selected_application is not None:
+            application_name, resource_group = f"eva{tag}", f"evh{tag}"
+            _create_application_accounts(application_name, resource_group, users, groups)
+            au = pwd.getpwnam(application_name)
+            resource_gid = grp.getgrnam(resource_group).gr_gid
+            identities = _application.Identities(wu.pw_uid, wu.pw_gid, su.pw_uid, su.pw_gid,
+                                                 au.pw_uid, au.pw_gid, rgid, resource_gid)
+            identities.validate()
         if wu.pw_uid == su.pw_uid or not wu.pw_uid or not su.pw_uid: raise LauncherError("identity-separation-failed")
         os.chown(output_parent, wu.pw_uid, wu.pw_gid)
         os.chmod(output_parent, 0o700)
@@ -2107,17 +2370,24 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
         os.chown(root, 0, wu.pw_gid)
         os.chmod(root, 0o710)
         os.chown(worker_socket_dir, 0, wu.pw_gid)
+        job_deadline_utc, job_deadline_monotonic = capture_job_deadline(args.job_seconds)
+        if selected_application is not None:
+            application_workspace = _ApplicationWorkspaceOwner(selected_application, identities, tool,
+                parent, root, scratch, source_subject, job_deadline_monotonic)
         prepare_tool_root(tool, wu.pw_gid)
         sock_path = worker_socket_dir / "control.sock"
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         listener.bind(str(sock_path)); os.chown(sock_path, 0, wu.pw_gid); os.chmod(sock_path, 0o660); listener.listen(8); listener.settimeout(0.25)
         dotnet = Path(shutil.which("dotnet", path=ENV["PATH"] ) or "").resolve(strict=True)
+        if selected_application is not None:
+            application = _application.RootApplicationLease(selected_application, identities,
+                application_workspace.workspace, application_workspace.bundle, dotnet,
+                job_deadline_monotonic, OutputQuota())
         cli = tool / "ForgeTrust.AppSurface.Cli.dll"
         if not cli.is_file(): raise LauncherError("trusted-cli-missing")
         worker_command = ["/usr/bin/env", "-i", *[f"{key}={value}" for key, value in WORKER_ENV.items()],
                           str(dotnet), str(cli), "evidence", "worker", "--control", str(sock_path)]
         worker_unit = f"evidencehost-{tag}-worker.service"; units.append(worker_unit)
-        job_deadline_utc, job_deadline_monotonic = capture_job_deadline(args.job_seconds)
         worker_argv = ["systemd-run", "--quiet", "--unit="+worker_unit, "--expand-environment=no",
                        *[f"--property={k}={v}" for k,v in worker_unit_properties(
                            worker_name, tool, subject, scratch / "test-output", output_parent,
@@ -2150,6 +2420,9 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
                 "base_revision": args.base_revision, "subject_revision": args.subject_revision,
                 "workflow_identity": args.workflow_identity}
         desc.update(budgets)
+        if application is not None:
+            desc["schema"] = APPLICATION_SCHEMA
+            desc["application"] = application.descriptor()
         descriptor_path = root / "worker-control.json"
         descriptor_fd = os.open(descriptor_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o440)
         with os.fdopen(descriptor_fd, "w", encoding="utf-8") as descriptor_file:
@@ -2160,7 +2433,8 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
         broker = Broker(desc,wu.pw_uid,worker_pid,wu.pw_gid,su.pw_uid,su.pw_gid,rgid,subject,
                         (tool, output_parent, root, policy), scratch, dotnet,
                         f"evidencehost-{tag}", deadline, args.job_seconds,
-                        budgets["stopping_seconds"], budgets["cleanup_seconds"], test_output_fd)
+                        budgets["stopping_seconds"], budgets["cleanup_seconds"], test_output_fd,
+                        application=application)
         test_output_fd = -1  # Broker owns this pinned directory descriptor until all handlers have joined.
         # The socket exists before worker start; ready returns this complete root-created descriptor.
         while time.monotonic() < deadline:
@@ -2221,6 +2495,7 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
             try:
                 if broker is not None:
                     broker.stop()
+                    broker._wait_for_owned_exit()
                 if units:
                     subprocess.run(["systemctl", "stop", *reversed(units)], capture_output=True, env=ENV,
                                    timeout=5, check=False)
@@ -2236,7 +2511,7 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
                         if original_error is None:
                             raise
     return _finish_launch_transfer(completion, users, groups, listener, handlers, broker,
-                                   test_output_fd, root, scratch)
+                                   test_output_fd, root, scratch, application_workspace)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -2249,6 +2524,9 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--workflow-identity",required=True); p.add_argument("--run-id",required=True)
     p.add_argument("--solution",required=True); p.add_argument("--path",action="append",default=[])
     p.add_argument("--diff-file")
+    p.add_argument("--application-id", help="Internal: exact compile-owned application identity; no runtime enrollment.")
+    p.add_argument("--application-entry-digest", help="Internal: exact compile-owned canonical entry digest.")
+    p.add_argument("--application-profile", help="Internal: exact protected compiled profile identity.")
     p.add_argument("--diagnostic-directory", help="Internal: existing root-owned protected directory for one safe failure record.")
     p.add_argument("--observation-profile",action="append",default=[])
     p.add_argument("--observation-producer",action="append",default=[])
@@ -2272,13 +2550,14 @@ def main(argv: list[str] | None = None) -> int:
         output = launch(args) if diagnostic_fd is None else launch(args, diagnostic_directory_fd=diagnostic_fd)
         print(json.dumps({"status":"completed","output_slot":output.name},separators=(",",":")))
         return 0
-    except LauncherError as error:
+    except (LauncherError, _application.ApplicationError) as error:
         if diagnostic_fd is not None:
             try: write_failure_diagnostic(diagnostic_fd, error)
             except (OSError, ValueError): pass
         # Only this exact host-selected cause has a public admission diagnostic. Never echo
         # arbitrary exception text, paths, commands, or supplied descriptor values.
-        diagnostic = "ASEVD407" if str(error) == "trusted-proof-not-allowlisted" else "launcher-failed"
+        diagnostic = (error.code if type(error) is _application.ApplicationError else
+                      "ASEVD407" if str(error) == "trusted-proof-not-allowlisted" else "launcher-failed")
         print(json.dumps({"status":"failed","diagnostic":diagnostic},separators=(",",":")),file=sys.stderr)
         return 1
     except (OSError, subprocess.SubprocessError, ValueError) as error:

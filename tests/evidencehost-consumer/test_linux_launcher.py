@@ -1154,7 +1154,7 @@ class SubjectOutputPumpTests(unittest.TestCase):
             self.assertGreater(stops, 0)
 
     def test_normal_eof_after_quota_stop_preserves_budget_failure_and_does_not_register_results(self):
-        with patch.object(launcher, "MAX_JOB_OUTPUT", 3):
+        with patch.object(launcher, "MAX_JOB_OUTPUT", 3), patch.object(launcher._application, "MAX_JOB_OUTPUT", 3):
             response, registered, closed, failed, stops, received = self.exercise(
                 self.Reads(b"ab", b"cd", b""), io.BytesIO(b""))
         self.assertEqual(response, {"ok": False, "code": "ASEVD420"})
@@ -1833,6 +1833,142 @@ class WorkerTerminalDiagnosticControls(unittest.TestCase):
                     self.assertEqual("worker-unsuccessful", str(failed.exception))
             finally: broker.close_artifact_handles()
 
+
+class ApplicationPreparationDeadlineControls(unittest.TestCase):
+    """Preparation consumes the original job allowance before any workspace or account work."""
+    def test_remaining_allowance_shrinks_and_host_command_bound_never_renews_deadline(self):
+        with patch.object(launcher.time, "monotonic", return_value=10):
+            self.assertEqual(5, launcher.application_preparation_remaining(15))
+            self.assertEqual(5, launcher.application_preparation_remaining(15, 8))
+            self.assertEqual(2, launcher.application_preparation_remaining(15, 2))
+        with patch.object(launcher.time, "monotonic", return_value=14):
+            self.assertEqual(1, launcher.application_preparation_remaining(15, 8))
+        for now in (15, 16):
+            with self.subTest(now=now), patch.object(launcher.time, "monotonic", return_value=now), \
+                 self.assertRaisesRegex(launcher.LauncherError, "^application-preparation-deadline$"):
+                launcher.application_preparation_remaining(15, 8)
+
+    def test_expired_preparation_rejects_before_creating_a_workspace_or_opening_a_bundle(self):
+        with patch.object(launcher.time, "monotonic", return_value=15), \
+             patch.object(launcher.Path, "mkdir") as mkdir, \
+             patch.object(launcher._application, "audit_bundle") as audit:
+            with self.assertRaisesRegex(launcher.LauncherError, "^application-preparation-deadline$"):
+                launcher._ApplicationWorkspaceOwner(None, None, Path("/tool"), Path("/output"),
+                    Path("/control"), Path("/producer"), Path("/subject"), 15)
+        mkdir.assert_not_called(); audit.assert_not_called()
+
+
+class ApplicationIntegrationControls(unittest.TestCase):
+    """Data/procedure controls only; no compiled registration, application lease or native proof."""
+    def test_two_application_request_shapes_reject_extra_alias_missing_and_wrong_scalar_fields(self):
+        start = {"op": "application-start", "application_id": "native-app", "entry_digest": "a" * 64}
+        wait = {"op": "resource-wait", "lease_id": "b" * 32, "resource_id": "native-http"}
+        for request in (start, wait):
+            self.assertEqual(request, launcher.validate_request(json.dumps(request).encode() + b"\n"))
+            for key in tuple(request):
+                missing = dict(request); del missing[key]
+                with self.subTest(kind="missing", key=key), self.assertRaises(launcher.LauncherError):
+                    launcher.validate_request(json.dumps(missing).encode() + b"\n")
+                for value in (None, True, 1, [], {}):
+                    wrong = {**request, key: value}
+                    with self.subTest(kind="type", key=key, value=value), self.assertRaises(launcher.LauncherError):
+                        launcher.validate_request(json.dumps(wrong).encode() + b"\n")
+            with self.assertRaises(launcher.LauncherError):
+                launcher.validate_request(json.dumps({**request, "argv": []}).encode() + b"\n")
+            alias = json.dumps(request)[:-1] + ',"Op":"' + request["op"] + '"}'
+            with self.assertRaises(launcher.LauncherError):
+                launcher.validate_request(alias.encode() + b"\n")
+        for request in ({**start, "entry_digest": "A" * 64}, {**start, "application_id": "../canary"},
+                        {**wait, "lease_id": "b" * 31}, {**wait, "resource_id": "canary/path"}):
+            with self.assertRaises(launcher.LauncherError):
+                launcher.validate_request(json.dumps(request).encode() + b"\n")
+
+    def test_application_selection_requires_complete_identity_and_empty_table_remains_closed(self):
+        with tempfile.TemporaryDirectory() as root:
+            policy = Path(root) / "policy.json"; policy.write_bytes(b"{}")
+            self.assertIsNone(launcher.select_root_application(Namespace(), policy))
+            valid = {"application_id": "native-app", "application_entry_digest": "a" * 64,
+                     "application_profile": "native-profile"}
+            with self.assertRaisesRegex(launcher._application.ApplicationError, "^ASEVD407$"):
+                launcher.select_root_application(Namespace(**valid), policy)
+            for key in valid:
+                invalid = dict(valid); del invalid[key]
+                with self.subTest(key=key), self.assertRaisesRegex(launcher._application.ApplicationError, "^ASEVD404$"):
+                    launcher.select_root_application(Namespace(**invalid), policy)
+            self.assertEqual((), launcher._application._COMPILED_REGISTRATIONS)
+
+    def test_actual_app_pumps_and_producer_budget_use_one_counter_and_separate_receipts(self):
+        app = launcher._application
+        quota = launcher.OutputQuota()
+        producer = launcher.OutputBudget(quota)
+        producer.add("stdout", b"producer")
+        state = app.OwnershipState()
+        pumps = app.OutputPumps(1024, quota, state, threading.Event())
+        pumps.start(SimpleNamespace(stdout=io.BytesIO(b"app"), stderr=io.BytesIO(b"error")))
+        app_receipt = pumps.join(time.monotonic() + 2)
+        self.assertEqual((8, 3, 5), app_receipt)
+        self.assertEqual(16, quota.received_bytes())
+        self.assertIs(quota, producer.quota)
+        launcher.validate_completion_output(((8, 8, 0),), 1, quota.received_bytes(), app_receipt, True)
+
+    def test_job_quota_overflow_in_application_output_latches_actual_shared_counter(self):
+        app = launcher._application
+        quota = launcher.OutputQuota(); quota.count(launcher.MAX_JOB_OUTPUT)
+        state = app.OwnershipState(); abort = threading.Event()
+        pumps = app.OutputPumps(1024, quota, state, abort)
+        pumps.start(SimpleNamespace(stdout=io.BytesIO(b"x"), stderr=io.BytesIO()))
+        with self.assertRaises(app.ApplicationError): pumps.join(time.monotonic() + 2)
+        self.assertTrue(quota.exceeded.is_set()); self.assertTrue(state.failed); self.assertTrue(abort.is_set())
+
+    def test_aggregate_receipts_reject_missing_app_and_each_byte_or_type_mismatch(self):
+        launcher.validate_completion_output(((7, 4, 3),), 1, 12, (5, 2, 3), True)
+        launcher.validate_completion_output(((7, 4, 3),), 1, 7, None, False)
+        cases = ((((7, 4, 3),), 1, 7, None, True), (((7, 4, 3),), 1, 12, (5, 2, 3), False),
+                 (((7, 4, 3),), 1, 11, (5, 2, 3), True), (((7, 4, 3),), 1, 12, (5, 2, 2), True),
+                 (((7, 4, 3),), 1, 12, (5, -1, 6), True), (((7, 4, 3),), 1, 12, [5, 2, 3], True),
+                 (((7, 4, 3),), 1, 12, (5, True, 4), True), (((7, 4, 3),), 2, 12, (5, 2, 3), True),
+                 (((7, 4, 3),), 1, launcher.MAX_JOB_OUTPUT + 1, (5, 2, 3), True))
+        for values in cases:
+            with self.subTest(values=values), self.assertRaisesRegex(launcher.LauncherError, "completion-output-unconfirmed"):
+                launcher.validate_completion_output(*values)
+
+    def test_stop_wait_deadline_cannot_reset_after_first_closure(self):
+        with tempfile.TemporaryDirectory() as root:
+            broker, _, _ = artifact_broker(root)
+            try:
+                with patch.object(launcher.time, "monotonic", return_value=10):
+                    first = broker._close_work_gate()
+                with patch.object(launcher.time, "monotonic", return_value=11):
+                    self.assertEqual(first, broker._close_work_gate())
+                self.assertEqual(12, first); self.assertTrue(broker.work_closed)
+            finally: broker.close_artifact_handles()
+
+    def test_v1_broker_rejects_application_request_without_running_any_application(self):
+        with tempfile.TemporaryDirectory() as root:
+            broker, _, _ = artifact_broker(root)
+            try:
+                broker.ready_seen = True
+                response = broker_request(broker, {"op": "application-start",
+                    "application_id": "native-app", "entry_digest": "a" * 64})
+                self.assertEqual({"ok": False, "code": "ASEVD407"}, response)
+                self.assertEqual(0, broker.active_application_operations)
+                self.assertIsNone(broker.application); self.assertIsNone(broker.application_output_receipt)
+            finally: broker.close_artifact_handles()
+
+    def test_producer_artifact_idle_interval_does_not_join_or_include_app_operations(self):
+        with tempfile.TemporaryDirectory() as root:
+            broker, _, _ = artifact_broker(root)
+            try:
+                broker.active_application_operations = 1  # Data-only lifecycle shape, not a lease.
+                with patch.object(broker, "_all_subject_groups_empty", return_value=True) as producer_guard:
+                    broker._begin_artifact_operation()
+                producer_guard.assert_called_once()
+                self.assertEqual(1, broker.active_artifact_operations)
+                broker._end_artifact_operation()
+                self.assertEqual(0, broker.active_artifact_operations)
+            finally:
+                broker.active_application_operations = 0
+                broker.close_artifact_handles()
 
 
 if __name__ == "__main__": unittest.main()
