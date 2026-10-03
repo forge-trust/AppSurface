@@ -78,6 +78,9 @@ internal sealed class ConfigResolutionScope : IDisposable
     /// Reserves one uncached remote lookup and a concurrency slot within the operation deadline.
     /// Dispose the lease after the caller stops waiting; this never cancels a shared fetch.
     /// Cached reads need no reservation. A rejected reservation must not start a remote operation.
+    /// Successful lease acquisition while the shared token is live is the admission boundary: a worker admitted before cancellation
+    /// may be queued or enter its synchronous client call after the deadline. A new request arriving
+    /// after cancellation cannot acquire a lease or start a worker.
     /// </summary>
     internal bool TryAcquireRemoteLookup(out IDisposable? lease, out ConfigProviderTerminalDiagnostic? diagnostic)
     {
@@ -114,13 +117,33 @@ internal sealed class ConfigResolutionScope : IDisposable
         {
             _remoteConcurrency!.Wait(CancellationToken);
             lease = new RemoteLookupLease(_remoteConcurrency);
-            return true;
+            return ConfirmRemoteLookupAdmission(ref lease, out diagnostic);
         }
         catch (OperationCanceledException) when (!_callerCancellation.IsCancellationRequested)
         {
             diagnostic = MarkAuditDeadline();
             return false;
         }
+    }
+
+    /// <summary>
+    /// Confirms a newly granted audit lease while the shared deadline is still live.
+    /// A grant racing with cancellation is disposed and reported as incomplete audit evidence.
+    /// This internal boundary is also used to verify that post-grant cancellation releases the slot.
+    /// </summary>
+    internal bool ConfirmRemoteLookupAdmission(ref IDisposable? lease, out ConfigProviderTerminalDiagnostic? diagnostic)
+    {
+        diagnostic = null;
+        // SemaphoreSlim may grant a queued waiter a slot just as its token is cancelled.
+        if (!CancellationToken.IsCancellationRequested)
+        {
+            return true;
+        }
+
+        lease!.Dispose();
+        lease = null;
+        diagnostic = MarkAuditDeadline();
+        return false;
     }
 
     /// <summary>Records a deadline without converting explicit caller cancellation to an audit failure.</summary>

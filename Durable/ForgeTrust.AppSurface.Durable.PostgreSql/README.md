@@ -48,8 +48,11 @@ local proof of these boundaries, not production operations guidance.
 
 The [operational-assessment adoption guide](../operational-assessments.md) is the complete existing-host and
 external-activator recipe. PostgreSQL health exposes the provider-neutral `WasStoreObserved`, `CanEnableActivation`,
-`CanAttemptPump`, and `IsReady` predicates. Use `CanAttemptPump` only as context; call
-`IDurableRuntimePumpAdmission.TryRunOnceAsync` directly so health and admission cannot become a check-then-act pair.
+`CanAttemptPump`, and `IsReady` predicates. Use `CanAttemptPump` only as context; authoritative admission cannot be
+replaced by a check-then-act gate. For a generic external wake endpoint, compose the Provider package's
+[`IDurableExternalActivationService`](../external-activation-v1.md) with this passive provider. Keep direct
+`IDurableRuntimePumpAdmission.TryRunOnceAsync` calls for integrations that intentionally own the lower-level attempt
+mapping.
 
 | Attempt | Public fields | Meaning and remedy |
 | --- | --- | --- |
@@ -57,6 +60,19 @@ external-activator recipe. PostgreSQL health exposes the provider-neutral `WasSt
 | `Refused` | No result, no problem code | Local overlap, closed process gate, drain, active store pass, or worker-generation refusal. Wait or reconcile as appropriate. |
 | `Unavailable` | No result, `ASDUR103` | The store was not observed. Transport/pool, provider-deadline, and permission (`42501`) causes have different remedies. |
 | `Incompatible` | No result, `ASDUR108` or `ASDUR400`–`ASDUR403` | The store was observed and rejected the runtime. Follow schema or authorized epoch recovery. |
+
+### External activation host
+
+The [external activation reference](../external-activation-v1.md) defines the provider-neutral request budget,
+cancellation precedence, all ten outcomes, recovery rules, and activity tags. The executable
+[external activation example](../../examples/durable-external-activation/README.md) demonstrates a passive authenticated
+host alongside the existing [`AddWorkerHost()` continuous path](#run-a-worker-host). Neither activation choice changes
+schema, grants, Work acceptance, or PostgreSQL terminal bookkeeping.
+
+The health reader reports `NotStarted` with `ASDUR404` before it has observed the first heartbeat. This is a valid
+initial compatibility assessment, with activation enabled and readiness false. A host-owned assessment probe preserves
+the observed state and code. The external activation service accepts it but omits `ASDUR404` from an activation result
+unless the observed state is `Stale`; provider health behavior remains unchanged.
 
 The returned non-completed outcomes certify that this invocation did not enter `RunPassAsync`; they do not certify
 the status of another process or a lost response. Exceptions before or after execution retain their original semantics.
@@ -140,6 +156,41 @@ Construct `PostgreSqlDurableRuntimeSchemaManager` with a migration-owner `Npgsql
   command timeout;
 - `InitializeRuntimeEpochAsync` activates the first epoch exactly once; and
 - `RotateRuntimeEpochAsync` compare-and-swaps the active epoch after restore or an authorized recovery event.
+
+The CLI's unified read-only [complete runtime-set preflight](../../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands)
+reuses migration-history compatibility through the provider's internal
+`ReadStatusInTransactionAsync(connection, transaction, cancellationToken)` seam. This method reads the same installed
+migration rows, verifies their names and SHA-256 checksums against the embedded catalog, and returns the same immutable
+status shape as `GetStatusAsync`. The caller must supply an open connection and its active transaction; the method
+rejects a closed connection or a transaction belonging to another connection, and Npgsql rejects a completed
+transaction when the status command is bound. Cancellation is passed to every status query and propagates to the caller.
+
+The preflight owns the connection, shared migration fence and read-only catalog transaction. The seam owns none of
+those resources: it never opens a connection, acquires a fence, selects an isolation level, or begins, commits,
+rolls back or disposes the transaction. This keeps compatibility and structural catalog checks in one caller-chosen
+snapshot. Call `GetStatusAsync` for ordinary status checks; use this internal seam only when a coordinated operation
+must combine the provider's compatibility result with other checks in its own transaction. A caller must set its
+transaction isolation and fence before this first status query, and must roll back or dispose the transaction if the
+read fails or is canceled. Do not call it with a transaction from a different connection or rely on it to provide
+snapshot consistency, migration exclusion, or cleanup by itself.
+
+For `durable schema preflight`, supply the complete reviewed version-1 pair file with required
+`--role-pairs-file` and the separately reviewed owner with required `--migration-owner-role`, even for one pair. The
+CLI reads strict UTF-8 without BOM once, up to 64 KiB/depth 8, validates 1–32 exact-shape pairs and explicit
+`full`/`work_only` profiles, rejects duplicate JSON properties and invalid or duplicate names, and resolves every
+original name exactly to a distinct OID. Owner and pair roles must be disjoint. The byte SHA-256 records file identity,
+not who reviewed or controls that file. See the [CLI input and result contract](../../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands)
+and [canonical deployment checklist](../heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist).
+
+Each CLI pass holds the shared package fence before one read-only RepeatableRead catalog snapshot on its own dedicated
+nonpooled, session-affine connection. Its total online deadline is 30 seconds, including connection and lock wait;
+catalog work is bounded to 28 seconds and cleanup gets up to 2 seconds. Transaction/statement poolers are unsupported.
+The result preserves StoreId and nullable runtime epoch but does not initialize or rotate either. It distinguishes the
+actual matching runtime credential from owner-only diagnostic evidence by requiring `session_user` and `current_user`
+to resolve to the same OID. A deployment requires a separate continuous owner guard across every runtime pass, lane
+proof, and activation; each distinct pair must pass under its own credential with matching reviewed StoreId and
+nonempty epoch. Guard loss invalidates all prior results. The command remains read-only and does not provide a public
+provider preflight API or authorize activation by itself.
 
 Runtime mutations take a shared, transaction-scoped advisory fence before validating the active epoch. Schema changes
 and epoch rotation take the exclusive package lock, so they wait for in-flight runtime transactions and prevent an old
@@ -363,11 +414,12 @@ Use a separate store or a separately designed PostgreSQL partition when independ
 separate failure domain is required. The three operational choices and their costs are summarized in the
 [adoption guide](../operational-assessments.md#shared-store-role-pair-choice).
 
-With schema 11, the recipe grants heartbeat pruning to every manifest runtime and no dispatcher. The current CLI
-structural preflight still checks one runtime role and rejects a two-pair catalog. Run it on the forwarding-only
-configuration before local enrollment; keep Source activation closed until [#795](https://github.com/forge-trust/AppSurface/issues/795)
-provides the exact runtime-set preflight and two-pair upgrade proof described in the
-[adoption guide](../operational-assessments.md#migration-and-role-reconciliation).
+With schema 11, the recipe grants heartbeat pruning to every manifest runtime and no dispatcher. Preflight consumes
+that complete reviewed set and checks every runtime, policy target, and function grantee; omission or an unexpected
+target fails closed. The [local walkthrough](../../examples/durable-postgresql/README.md#complete-manifest-preflight-walkthrough)
+illustrates one-pair and two-pair commands using disposable role names. Local source proof is not exact candidate or
+public package proof. Keep activation closed until the [four-stage evidence checklist](../heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist)
+is satisfied by actual matching artifacts and the deployment's continuous guard.
 
 Omitting an installed pair is an error, never retirement. The recipe preserves healthy policy OIDs, targets,
 expressions, ACLs, owners, and effective grants on an identical rerun; it rejects unexpected extra principals and broader
