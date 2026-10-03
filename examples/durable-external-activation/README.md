@@ -11,6 +11,8 @@ health validation, all ten service outcomes, cancellation and budget behavior, r
 [PostgreSQL example](../durable-postgresql/README.md) explains schema and role setup. The approved sample keeps typed
 Work acceptance out of the empty wake request and uses the same reviewed PostgreSQL boundaries.
 
+Use the [runtime doctor](../../Durable/runtime-doctor.md) after this reference's reviewed schema/role/epoch setup to diagnose the connected store. Its [automation consumer](consume-doctor-report.py) demonstrates version/exit/check validation. The reference keeps the provider's 15-second stale default without an override; deployed applications must supply their own effective host threshold. Doctor's clean result still hands off to this application's composition verification.
+
 ## HTTP contract
 
 The approved reference-host contract exposes four HTTP endpoints:

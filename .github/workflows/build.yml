@@ -467,6 +467,14 @@ jobs:
           pnpm --dir Web run assets:build
           pnpm --dir Web run assets:verify
 
+      - name: Verify the installed Durable doctor candidate
+        run: >-
+          dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj
+          --configuration Release
+          --no-restore
+          --filter "FullyQualifiedName~DurableDoctorInstalledToolTests"
+          --logger "console;verbosity=detailed"
+
       - name: Run solution coverage and gate
         env:
           BUILD_CONFIGURATION: Release

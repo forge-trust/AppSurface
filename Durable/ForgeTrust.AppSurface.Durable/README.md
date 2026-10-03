@@ -1,5 +1,7 @@
 # ForgeTrust.AppSurface.Durable
 
+The [runtime doctor reference](../runtime-doctor.md) explains how canonical diagnostic descriptors support connected-store diagnosis and preserve separate application verification.
+
 > **Public preview:** the [PostgreSQL provider](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md) supplies the
 > current conformance path. This package installs no runtime and starts no hosted service.
 
@@ -448,7 +450,7 @@ source families inherit the audience and compatibility policy shown here.
 
 | Audience | Public types | Contract role |
 |---|---|---|
-| All adopters | `DurableScopeId`, `DurableWorkId`, `DurableCommandId`, `DurableProblem`, `DurableOperationResult<T>`, `DurableProblemCodes` | Opaque identity and safe diagnostics |
+| All adopters | `DurableScopeId`, `DurableWorkId`, `DurableCommandId`, `DurableProblem`, `DurableOperationResult<T>`, `DurableProblemCodes`, `DurableDiagnosticCatalog`, `DurableDiagnosticDescriptor` | Opaque identity and safe diagnostics |
 | Serialization authors | `DurableDataClassification`, `DurableEncodedPayload`, `IDurablePayloadCodec`, `IDurablePayloadCodec<T>`, `SystemTextJsonDurablePayloadCodec<T>`, registry types | Explicit, versioned, policy-approved payload bytes |
 | Work authors | `DurableProviderSafety`, retry/state/request/acceptance types, `IDurableWorkClient`, execution/prepared-work/registration/registry types, `DurableWorkExitKind`, `DurableWorkExit<T>`, `DurableEncodedWorkExit`, `IDurableWorkExitExecutor<TWork,TResult>`, `DurableWorkExitCompatibilityException`, and `DurableServiceCollectionExtensions` | Declare, enqueue, and execute typed Work through a provider adapter |
 | Flow authors | Flow identifiers, state/request/result/snapshot/client types; evaluation, activity, event, registration, registry, and determinism-verifier types | Persist one explicit Flow transition at a time |
@@ -459,6 +461,31 @@ source families inherit the audience and compatibility policy shown here.
 
 The application surface intentionally excludes runtime pump, claim, health, drain, scope-control, and Work operator
 types. Those are Provider SPI.
+
+## Canonical diagnostic descriptors
+
+`DurableDiagnosticCatalog.TryGet(string code, out DurableDiagnosticDescriptor? descriptor)` returns `true` and the
+catalog-owned canonical descriptor for a known affected code. For an unknown code it returns `false` and sets
+`descriptor` to `null`; a null `code` throws `ArgumentNullException`. The [canonical runtime diagnostic reference](../../troubleshooting/durable-diagnostics.md#canonical-runtime-diagnostic-descriptors)
+defines each descriptor, and the [PostgreSQL hosted-runtime diagnostics table](../../troubleshooting/durable-diagnostics.md#postgresql-hosted-runtime-diagnostics)
+shows how those codes fit provider health and admission guidance.
+
+`DurableDiagnosticDescriptor` is sealed and immutable. Its get-only `Code`, `Problem`, `Cause`, `Fix`, and
+`DocumentationUrl` properties provide the stable code, privacy-safe explanation, likely cause, corrective guidance,
+and absolute HTTPS destination. Its constructor is not public: obtain descriptors through the catalog. The catalog
+covers `ASDUR103`, `ASDUR108`, `ASDUR400`–`ASDUR404`, and `ASDUR408`–`ASDUR415`; other Durable or
+application-owned codes retain their existing owners and meanings.
+
+Use the descriptor to render canonical wording for an existing health/admission code or a doctor finding. Provider
+health snapshots continue to carry their existing state and code; the catalog does not replace their source factories
+or classification rules. When creating a `DurableProblem`, pass descriptor fields to the existing constructor and
+supply the operation's caller-owned correlation identifier; the catalog does not generate or replace correlation. For
+doctor input, output, and exit behavior, follow the [runtime doctor reference](../runtime-doctor.md).
+
+Catalog membership describes shared diagnostic text. It does not add a health state or change activation/readiness
+predicates: in particular, `ASDUR414` and `ASDUR415` describe doctor terminal outcomes, and provider health/admission
+continues to accept only its existing closed code/state combinations. Do not interpret a descriptor or a clean doctor
+result as application readiness or deployment authorization.
 
 ## Command fingerprints
 
@@ -508,8 +535,10 @@ validation before persistence.
 | Provider SPI behavior | Requires provider conformance evidence before adoption |
 
 Diagnostics available now cover contract validation, semantic conflicts, and PostgreSQL Work storage, schema,
-activation, and restore failures. Heartbeat, drain, and hosted-runtime diagnostics are provider-owned. See the
-[`ASDURxxx` catalog](../../troubleshooting/durable-diagnostics.md).
+activation, and restore failures. Provider health and admission retain their existing state and drain predicates;
+doctor heartbeat and terminal findings describe its one-shot observation only. See the
+[canonical diagnostic entries and hosted-runtime table](../../troubleshooting/durable-diagnostics.md#canonical-runtime-diagnostic-descriptors)
+and the [runtime doctor reference](../runtime-doctor.md).
 
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
