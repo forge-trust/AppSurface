@@ -616,14 +616,34 @@ public sealed class CoverageRunWatchdogTests
     [Fact]
     public async Task ConsoleSink_ShouldBoundBlockedWritesAndKeepOnlyOneWriter()
     {
-        using var output = new BlockingWriteStream();
+        using var output = new GatedCaptureWriteStream();
         using var console = new FakeConsole(Stream.Null, output, Stream.Null);
         using var sink = new CoverageRunConsoleSink(CoverageTextWriters.Create(console.Output, console.Error), TimeSpan.FromMilliseconds(20));
 
-        await sink.WriteOutputAsync("first");
-        await sink.WriteOutputAsync("second");
+        try
+        {
+            var first = sink.WriteOutputAsync("first");
+            var second = sink.WriteOutputAsync("second");
+            await output.FirstWriteStarted.WaitAsync(TimeSpan.FromSeconds(2));
 
-        Assert.Equal(1, output.WriteCount);
+            await first.WaitAsync(TimeSpan.FromSeconds(1));
+            await second.WaitAsync(TimeSpan.FromSeconds(1));
+
+            Assert.Equal(1, output.WriteCount);
+        }
+        finally
+        {
+            output.ReleaseFirstWrite();
+            await output.SecondWriteCompleted.WaitAsync(TimeSpan.FromSeconds(1));
+        }
+
+        Assert.Equal(2, output.WriteCount);
+        var text = output.ReadString();
+        Assert.Contains("first", text, StringComparison.Ordinal);
+        Assert.Contains("second", text, StringComparison.Ordinal);
+        Assert.True(
+            text.IndexOf("first", StringComparison.Ordinal) < text.IndexOf("second", StringComparison.Ordinal),
+            $"Expected ordered writes, but received: {text}");
     }
 
     [Fact]
