@@ -1,6 +1,9 @@
 """Portable private account/template controls; no root, systemd, lease or qualification proof."""
 import importlib.util
+import os
 from pathlib import Path
+import stat
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -321,6 +324,74 @@ class PrivateRootBindingsControls(unittest.TestCase):
         for forbidden in ("os.environ", "getenv(", "open(", "json.loads", "setattr("):
             self.assertNotIn(forbidden, text)
         self.assertEqual([], self.commands)
+
+
+class PrivateOutputTraversalControls(unittest.TestCase):
+    """Actual portable mode/freshness data only; no root or worker-origin claim."""
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location(
+            "private_output_traversal_controller", Path(__file__).with_name("run-qualification.py"))
+        cls.controller = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.controller)
+
+    def test_cli_host_outer_search_mode_defeats_umask_and_keeps_private_children(self):
+        for entry in ("cli", "host"):
+            for mask in (0o000, 0o077, 0o777):
+                with self.subTest(entry=entry, umask=mask), tempfile.TemporaryDirectory() as temporary:
+                    workspace = Path(temporary)
+                    previous = os.umask(mask)
+                    try:
+                        output = self.controller.prepare_entry_output_parent(workspace, entry)
+                    finally:
+                        os.umask(previous)
+                    self.assertEqual(workspace / ("output-"+entry), output)
+                    self.assertEqual(0o711, stat.S_IMODE(output.stat().st_mode))
+                    self.assertEqual(os.geteuid(), output.stat().st_uid)
+                    # Current-user private stand-ins, not a root/worker receipt.
+                    for private in (output / "run-tag", workspace / ("failure-"+entry),
+                                    workspace / ("collected-"+entry)):
+                        private.mkdir(mode=0o700)
+                        private.chmod(0o700)
+                        receipt = private / "receipt.json"
+                        receipt.write_bytes(b"private-mode-canary")
+                        receipt.chmod(0o600)
+                        self.assertEqual(0o700, stat.S_IMODE(private.stat().st_mode))
+                        self.assertEqual(0o600, stat.S_IMODE(receipt.stat().st_mode))
+                    self.assertEqual(0o711, stat.S_IMODE(output.stat().st_mode))
+
+    def test_existing_directory_file_or_symlink_is_not_reused_or_repermissioned(self):
+        for entry in ("cli", "host"):
+            for shape in ("directory", "file", "symlink"):
+                with self.subTest(entry=entry, shape=shape), tempfile.TemporaryDirectory() as temporary:
+                    workspace = Path(temporary)
+                    output = workspace / ("output-"+entry)
+                    target = workspace / "private-target"
+                    target.mkdir(mode=0o700)
+                    target.chmod(0o700)
+                    if shape == "directory":
+                        output.mkdir(mode=0o700)
+                        output.chmod(0o700)
+                    elif shape == "file":
+                        output.write_bytes(b"freshness-canary")
+                        output.chmod(0o600)
+                    else:
+                        output.symlink_to(target, target_is_directory=True)
+                    before, target_before = output.lstat(), target.stat()
+                    with self.assertRaises(FileExistsError):
+                        self.controller.prepare_entry_output_parent(workspace, entry)
+                    self.assertEqual(before, output.lstat())
+                    self.assertEqual(target_before, target.stat())
+                    if shape == "file":
+                        self.assertEqual(b"freshness-canary", output.read_bytes())
+
+    def test_only_closed_entry_names_can_create_an_outer_parent(self):
+        for entry in (None, True, "", "other", "../cli", "cli/child", "host\0"):
+            with self.subTest(entry=entry), tempfile.TemporaryDirectory() as temporary:
+                workspace = Path(temporary)
+                with self.assertRaises(self.controller.PreparationFailure):
+                    self.controller.prepare_entry_output_parent(workspace, entry)
+                self.assertEqual([], list(workspace.iterdir()))
 
 
 if __name__ == "__main__":
