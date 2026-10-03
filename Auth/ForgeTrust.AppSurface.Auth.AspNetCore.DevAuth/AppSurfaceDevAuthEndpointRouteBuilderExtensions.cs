@@ -163,7 +163,11 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
         return Results.Json(status);
     }
 
-    private static IResult SelectPersonaAsync(
+    /// <summary>
+    /// Validates selection, queues the protected cookie and awaits optional request-scoped host activation before
+    /// choosing the existing safe navigation target. Activation failures propagate to the host without rollback.
+    /// </summary>
+    private static async Task<IResult> SelectPersonaAsync(
         string personaId,
         HttpContext httpContext,
         IHostEnvironment environment,
@@ -199,6 +203,17 @@ public static partial class AppSurfaceDevAuthEndpointRouteBuilderExtensions
             devAuthOptions.CookieName,
             protector.Protect(normalized),
             CreatePersonaCookieOptions(httpContext.Request));
+
+        var handler = httpContext.RequestServices.GetService<IAppSurfaceDevAuthPersonaSelectionHandler>();
+        if (handler is not null)
+        {
+            // Validated persona -> queued cookie -> current request handler -> readiness -> safe target.
+            // Capture once: a handler must not replace RequestAborted to bypass the post-await check.
+            var cancellationToken = httpContext.RequestAborted;
+            cancellationToken.ThrowIfCancellationRequested();
+            await handler.ActivateAsync(persona, httpContext, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+        }
 
         var explicitReturnUrl = TryGetSafeReturnUrl(httpContext, out var safeReturnUrl)
             ? safeReturnUrl

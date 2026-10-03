@@ -1,5 +1,25 @@
 # Deferred work
 
+## DevAuth persona fixture activation (#772)
+
+### Host-owned durable or multi-process reference example
+
+**What:** Consider a durable or multi-process fixture example only after a concrete adopter demonstrates that the process-local [#772 design](docs/designs/issue-772-persona-scoped-fixture-activation.md) is insufficient.
+
+**Why:** A persistence example could explain transactional ensure, scenario-key uniqueness and cross-process consistency while preserving host ownership.
+
+**Pros:** Shows how a real host preserves one scenario and completed work across processes and restarts.
+
+**Cons:** Adds a persistence provider, credentials, cleanup, lifecycle and failure policy to maintain.
+
+**Context:** The planned delivery will prove one synthetic candidate with independent labeling/review progress in a single host process. It resets on restart and makes no durable or cross-process guarantee. Start with the [execution plan](docs/plans/issue-772-persona-scoped-fixture-activation.md) and the adopter's concrete failure before choosing storage. This follow-up adds no persistence work, telemetry or schedule to #772.
+
+**Effort:** L for a human team / M with agent assistance.
+
+**Priority:** P3.
+
+**Depends on / blocked by:** Concrete adopter evidence; a host-selected persistence engine; scenario-key uniqueness and transaction design; an independently reviewed failure/recovery policy.
+
 ## Server-pushed RazorWire dialogs (#828 follow-up)
 
 - **What:** Design explicit server-pushed dialog commands after request-scoped #828 dialogs are adopted. **Why:** A live stream has no initiating request or current form owner, so the request/flow token contract from [#828](docs/designs/issue-828-server-selected-dialogs.md) cannot be reused unchanged. **Pros:** Supports genuinely asynchronous attention when an application has a user need. **Cons:** Adds replay, authorization, interruption, and multi-tab lifecycle decisions. **Context:** #828 intentionally supports only response-owned dialogs; keep hub replay and automatic presentation outside its first release. **Effort:** L human team / M CC + gstack. **Priority:** P3. **Depends on / blocked by:** #828 adoption evidence and a concrete server-initiated use case.

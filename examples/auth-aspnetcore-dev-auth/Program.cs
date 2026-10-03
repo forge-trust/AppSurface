@@ -1,10 +1,20 @@
+// docs:snippet devauth-persona-activation-registration:start
 using System.Security.Claims;
+using AuthAspNetCoreDevAuthExample;
 using ForgeTrust.AppSurface.Auth.AspNetCore;
 using ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HostFiltering;
 using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Admit only local authorities before any identity or fixture mutation.
+builder.Services.AddHostFiltering(options =>
+{
+    options.AllowedHosts = ["localhost", "127.0.0.1", "[::1]"];
+    options.AllowEmptyHosts = false;
+});
 
 builder.Services.AddAuthorization(options =>
 {
@@ -20,6 +30,12 @@ builder.Services.AddAuthorization(options =>
             .AddAuthenticationSchemes(AppSurfaceDevAuthDefaults.AuthenticationScheme)
             .RequireAuthenticatedUser()
             .RequireClaim("role", "viewer"));
+    options.AddAppSurfacePolicy("LabelersOnly", policy => policy
+        .AddAuthenticationSchemes(AppSurfaceDevAuthDefaults.AuthenticationScheme)
+        .RequireAuthenticatedUser().RequireClaim("role", "labeler"));
+    options.AddAppSurfacePolicy("ReviewersOnly", policy => policy
+        .AddAuthenticationSchemes(AppSurfaceDevAuthDefaults.AuthenticationScheme)
+        .RequireAuthenticatedUser().RequireClaim("role", "reviewer"));
 });
 
 builder.Services.AddAppSurfaceAspNetCoreAuth(options => options.MapSubjectClaim("sub"));
@@ -41,12 +57,22 @@ builder.Services.AddAppSurfaceDevAuth(builder.Environment, dev =>
             .Claim("role", "viewer")
             .Claim("tenant", "local-demo")
             .LandingUrl("/viewer"));
+    dev.Users.Add("labeler", user => user.DisplayName("Local Labeler").Subject("labeler-1")
+        .Claim("role", "labeler").LandingUrl("/candidate/label"));
+    dev.Users.Add("reviewer", user => user.DisplayName("Local Reviewer").Subject("reviewer-1")
+        .Claim("role", "reviewer").LandingUrl("/candidate/review"));
 });
+
+builder.Services.AddSingleton<LocalCandidateFixtureStore>();
+builder.Services.AddScoped<IAppSurfaceDevAuthPersonaSelectionHandler, LocalFixtureActivation>();
 
 var app = builder.Build();
 
+app.UseHostFiltering();
+app.UseMiddleware<LocalFixtureActivationFailureMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
+// docs:snippet devauth-persona-activation-registration:end
 
 app.MapGet("/", (
     HttpContext httpContext,
@@ -145,6 +171,7 @@ app.MapGet(
     .RequireSurfacePolicy("OperatorsOnly");
 
 app.MapAppSurfaceDevAuth();
+app.MapLocalCandidatePages();
 
 await app.RunAsync();
 
