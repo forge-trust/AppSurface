@@ -506,7 +506,7 @@ internal sealed class CoverageCliConsumerProofWorkflow : ICoverageCliConsumerPro
         var patchGateDirectory = Path.Join(fixtureDirectory, "TestResults", "coverage-gate-patch-targets");
         if (!await RunRequiredAsync(ToolCommand(
             context,
-            ["coverage", "gate", "--coverage", mergedCoveragePath, "--output", patchGateDirectory, "--min-line", "1", "--min-branch", "0", "--diff-file", patchDiffPath, "--diff-label", "package consumer proof", "--no-github-summary"],
+            ["coverage", "gate", "--coverage", mergedCoveragePath, "--output", patchGateDirectory, "--min-line", "1", "--min-branch", "0", "--repository-root", fixtureDirectory, "--diff-file", patchDiffPath, "--diff-label", "package consumer proof", "--no-github-summary"],
             "appsurface coverage gate patch targets",
             "running packaged patch-target coverage gate")))
         {

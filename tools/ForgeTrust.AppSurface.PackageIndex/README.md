@@ -74,6 +74,11 @@ remains authored content; after that, retain the markers exactly.
    It verifies that the packed `README.md` has exactly one managed marker pair and exactly one canonical chooser and
    release-hub URL inside that region.
 
+   The [Coverage CLI consumer proof](../../Cli/ForgeTrust.AppSurface.Cli/README.md#agent-actionable-patch-targets)
+   also passes its consumer fixture directory as `coverage gate --repository-root` when comparing synthetic diff
+   paths with Cobertura paths. A fixture nested inside this checkout must use that explicit root: the CLI's
+   automatic Git-root detection otherwise selects the outer checkout and cannot match consumer-relative paths.
+
 ## Tailwind artifact provenance (#798)
 
 The approved [#798 design](../../docs/designs/issue-798-tailwind-artifact-provenance.md) and [implementation plan](../../docs/plans/issue-798-tailwind-artifact-provenance.md) define a release proof binding native Tailwind consumer tests to the exact package bundle passed to NuGet. See the canonical [API and operator reference](../../docs/tailwind-artifact-provenance.md) for the implemented CLI flags, evidence schemas, and release workflow.
