@@ -1179,6 +1179,7 @@ class PrivateSubjectPrefixRetentionTests(unittest.TestCase):
                 if kind == "capture-error": final = proof.ProofFailure("private-prefix-canary")
                 with self.rootstats(work), patch.object(proof, "retain_private_worker_journal", side_effect=lambda *args: calls.append("journal")), \
                      patch.object(proof, "retain_private_failure_output", side_effect=lambda *args: calls.append("manifest")), \
+                     patch.object(proof, "retain_private_vstest_traces", return_value=False), \
                      patch.object(proof, "root_command", side_effect=[(1, b"private-prefix-canary", b"private-prefix-canary"),
                          (0, json.dumps(self.checkpoint()).encode(), b""), final]) as command:
                     with self.assertRaises(proof.ProofFailure) as failure:
@@ -1230,6 +1231,280 @@ class PrivateSubjectPrefixRetentionTests(unittest.TestCase):
             public = work / "proof"; public.mkdir(mode=0o755)
             with patch.object(proof, "root_command", return_value=(0, b"success", b"")) as command, \
                  patch.object(proof, "retain_private_subject_prefixes") as retained:
+                self.assertEqual((b"success", b""), proof.run_observation_launcher(["launcher"], work, public))
+                command.assert_called_once(); retained.assert_not_called()
+            self.assertFalse((public / "private-diagnostics").exists())
+
+
+class PrivateVstestTraceRetentionTests(unittest.TestCase):
+    """Real portable FD/archive controls and mocked privilege dispatch; no root admission."""
+
+    @staticmethod
+    def helper():
+        namespace = {"__name__": "private_vstest_trace_portable_control"}
+        exec(compile(proof.PRIVATE_VSTEST_TRACE_ROOT_SCRIPT, "<vstest-trace helper>", "exec"), namespace)
+        return namespace["archive_vstest_traces"]
+
+    @contextmanager
+    def workspace(self):
+        with portable_runtime_workspace() as directory:
+            work = Path(directory); work.chmod(0o755)
+            child = work / proof.PRIVATE_VSTEST_TRACE_DIRECTORY; child.mkdir(mode=0o700)
+            for name in proof.PRIVATE_VSTEST_TRACE_NAMES:
+                path = child / name; path.write_bytes(b"private-prefix-canary\x00\xff"); path.chmod(0o600)
+            fd = os.open(work, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                yield work, child, fd
+            finally:
+                os.close(fd)
+
+    def capture(self, fd, **kwargs):
+        return self.helper()(fd, expected_root_uid=os.geteuid(), expected_root_gid=os.getegid(), **kwargs)
+
+    @staticmethod
+    def archive(contents=(b"private-prefix-canary\x00\xff", b""), *, order=None, change=None):
+        output = io.BytesIO()
+        names = proof.PRIVATE_VSTEST_TRACE_NAMES if order is None else order
+        with tarfile.open(fileobj=output, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+            for index, name in enumerate(names):
+                content = contents[index % len(contents)]
+                item = tarfile.TarInfo(name); item.mode = 0o600; item.size = len(content)
+                if change:
+                    for key, value in change.items(): setattr(item, key, value)
+                archive.addfile(item, io.BytesIO(content) if item.isreg() else None)
+        return output.getvalue()
+
+    @staticmethod
+    def checkpoint():
+        return PrivateFailureOutputRetentionTests.checkpoint()
+
+    @contextmanager
+    def rootstats(self, work, **changes):
+        original = Path.lstat
+        def selected(path):
+            info = original(path)
+            if path == work:
+                fields = list(info); fields[4] = fields[5] = 0
+                info = os.stat_result(fields)
+                if changes:
+                    values = {name: getattr(info, name) for name in
+                              ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid")}
+                    info = SimpleNamespace(**{**values, **changes})
+            return info
+        with patch.object(Path, "lstat", selected): yield
+
+    def test_real_binary_traces_maximum_and_empty_have_exact_canonical_metadata(self):
+        for sizes in ((262144, 262144), (0, 0)):
+            with self.subTest(sizes=sizes), self.workspace() as (_, child, fd):
+                contents = []
+                for name, size in zip(proof.PRIVATE_VSTEST_TRACE_NAMES, sizes):
+                    data = (b"private-prefix-canary\x00\xff" + b"x" * size)[:size]
+                    (child / name).write_bytes(data); contents.append(data)
+                archive = self.capture(fd)
+                self.assertTrue(proof._valid_private_vstest_trace_archive(archive))
+                self.assertLessEqual(len(archive), 768 * 1024)
+                self.assertEqual(archive, self.archive(tuple(contents)))
+                with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as opened:
+                    self.assertEqual(list(proof.PRIVATE_VSTEST_TRACE_NAMES), opened.getnames())
+                    for member, data in zip(opened.getmembers(), contents):
+                        self.assertEqual((0, 0, 0, 0o600, len(data)),
+                                         (member.uid, member.gid, member.mtime, member.mode, member.size))
+                        self.assertEqual(data, opened.extractfile(member).read())
+
+    def test_one_unsafe_file_or_directory_field_rejects_after_valid_fd_control(self):
+        for kind in ("missing", "file-link", "directory-link", "hardlink", "file-mode", "child-mode",
+                     "work-mode", "oversize", "extra", "nonregular", "owner", "group"):
+            with self.subTest(kind=kind), self.workspace() as (work, child, fd):
+                self.assertTrue(proof._valid_private_vstest_trace_archive(self.capture(fd)))
+                target = child / proof.PRIVATE_VSTEST_TRACE_NAMES[0]
+                if kind == "missing": target.unlink()
+                elif kind == "file-link": target.unlink(); target.symlink_to(child / proof.PRIVATE_VSTEST_TRACE_NAMES[1])
+                elif kind == "directory-link": child.rename(work / "original"); child.symlink_to(work / "original")
+                elif kind == "hardlink": os.link(target, work / "linked")
+                elif kind == "file-mode": target.chmod(0o644)
+                elif kind == "child-mode": child.chmod(0o755)
+                elif kind == "work-mode": work.chmod(0o775)
+                elif kind == "oversize": target.write_bytes(b"x" * 262145)
+                elif kind == "extra": (child / "extra").write_bytes(b"private-prefix-canary")
+                elif kind == "nonregular": target.unlink(); target.mkdir()
+                original = os.fstat
+                def inspected(opened):
+                    info = original(opened)
+                    if kind in ("owner", "group") and stat.S_ISREG(info.st_mode):
+                        fields = {name: getattr(info, name) for name in
+                                  ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")}
+                        fields["st_uid" if kind == "owner" else "st_gid"] += 1
+                        return SimpleNamespace(**fields)
+                    return info
+                with patch.object(proof.os, "fstat", side_effect=inspected), self.assertRaises((OSError, ValueError)):
+                    self.capture(fd)
+
+    def test_substitution_growth_same_inode_mutation_and_read_failure_reject(self):
+        for kind in ("file", "directory", "growth", "same-inode", "read-error", "extra-after-read"):
+            with self.subTest(kind=kind), self.workspace() as (work, child, fd):
+                self.assertTrue(proof._valid_private_vstest_trace_archive(self.capture(fd)))
+                original = os.read; changed = False
+                def reading(opened, bound):
+                    nonlocal changed
+                    if kind == "read-error": raise OSError(5, "private-prefix-canary")
+                    data = original(opened, bound)
+                    if not changed:
+                        changed = True; target = child / proof.PRIVATE_VSTEST_TRACE_NAMES[0]
+                        if kind == "file": target.rename(work / "old"); target.write_bytes(data); target.chmod(0o600)
+                        elif kind == "directory": child.rename(work / "old"); child.mkdir(mode=0o700)
+                        elif kind == "growth":
+                            with target.open("ab") as output: output.write(b"growth")
+                        elif kind == "same-inode": target.write_bytes(b"z" * target.stat().st_size)
+                        else: (child / "extra").write_bytes(b"extra")
+                    return data
+                with patch.object(proof.os, "read", side_effect=reading) as read, self.assertRaises((OSError, ValueError)):
+                    self.capture(fd)
+                self.assertTrue(read.called)
+
+    def test_expired_or_mid_read_deadline_cannot_export_archive(self):
+        with self.workspace() as (_, _, fd), patch.object(proof.os, "read") as read:
+            with self.assertRaises(ValueError): self.capture(fd, deadline=0)
+            read.assert_not_called()
+        with self.workspace() as (_, _, fd):
+            original = os.read
+            with patch.object(proof.time, "monotonic", return_value=1) as clock:
+                def reading(opened, bound):
+                    data = original(opened, bound); clock.return_value = 10; return data
+                with patch.object(proof.os, "read", side_effect=reading) as read, self.assertRaises(ValueError):
+                    self.capture(fd, deadline=5)
+                self.assertTrue(read.called)
+
+    def test_archive_extra_reordered_missing_noncanonical_or_unsafe_member_rejects(self):
+        valid = self.archive(); self.assertTrue(proof._valid_private_vstest_trace_archive(valid))
+        malformed = [valid + b"private-prefix-canary", valid + b"\x00" * 10240, b"x" * 786433,
+                     self.archive(order=("runner.log",)), self.archive(order=("collector.log", "runner.log")),
+                     self.archive(order=("runner.log", "collector.log", "extra")),
+                     self.archive(order=("runner.log", "runner.log")),
+                     self.archive(contents=(b"x" * 262145, b""))]
+        for change in ({"uid": 1}, {"gid": 1}, {"mtime": 1}, {"mode": 0o644}, {"uname": "canary"},
+                       {"type": tarfile.SYMTYPE, "linkname": "canary"}):
+            malformed.append(self.archive(change=change))
+        for data in malformed:
+            with self.subTest(size=len(data)): self.assertFalse(proof._valid_private_vstest_trace_archive(data))
+
+    def test_valid_selected_root_dispatch_and_exclusive_private_archive(self):
+        with self.workspace() as (work, _, fd):
+            public = work / "proof"; public.mkdir(mode=0o755)
+            data = self.capture(fd); info = work.lstat()
+            with self.rootstats(work), patch.object(proof, "root_command", return_value=(0, data, b"private-prefix-canary")) as command:
+                self.assertTrue(proof.retain_private_vstest_traces(work, public, self.checkpoint()))
+                command.assert_called_once()
+                self.assertEqual(command.call_args.args[0], ["/usr/bin/python3", "-I", "-c", proof.PRIVATE_VSTEST_TRACE_ROOT_SCRIPT,
+                    work.name[len(proof.RUNTIME_WORKSPACE_PREFIX):], str(info.st_dev), str(info.st_ino)])
+                self.assertEqual(command.call_args.kwargs["timeout"], 5)
+                self.assertTrue(command.call_args.kwargs["binary_output"])
+                self.assertFalse(proof.retain_private_vstest_traces(work, public, self.checkpoint()))
+            private = public / "private-diagnostics"; archive = private / proof.PRIVATE_VSTEST_TRACE_ARCHIVE
+            self.assertEqual(data, archive.read_bytes()); self.assertEqual(0o700, stat.S_IMODE(private.stat().st_mode))
+            self.assertEqual(0o600, stat.S_IMODE(archive.stat().st_mode)); self.assertEqual(1, archive.stat().st_nlink)
+
+    def test_each_bad_checkpoint_or_workspace_field_blocks_root_io_with_valid_positive_foundation(self):
+        with self.workspace() as (work, _, fd):
+            public = work / "proof"; public.mkdir(mode=0o755); data = self.capture(fd)
+            with self.rootstats(work):
+                with patch.object(proof, "root_command", return_value=(0, data, b"")) as command:
+                    self.assertTrue(proof.retain_private_vstest_traces(work, public, self.checkpoint()))
+                    command.assert_called_once()
+                for name, value in (("cause", "worker-protocol-incomplete"), ("operation", "worker-start"),
+                                    ("worker_main_code", 2), ("worker_main_code", True), ("worker_main_status", 0),
+                                    ("worker_main_status", True), ("broker_ready_seen", False), ("broker_wait_completed", False),
+                                    ("broker_exited", False), ("broker_work_closed", False), ("broker_active_handlers", 1),
+                                    ("broker_active_runs", 1), ("broker_active_runs", False), ("schema", "canary")):
+                    with self.subTest(field=name, value=value), patch.object(proof, "root_command") as command:
+                        self.assertFalse(proof.retain_private_vstest_traces(work, public, {**self.checkpoint(), name: value}))
+                        command.assert_not_called()
+            for name, value in (("st_uid", 1), ("st_gid", 1), ("st_mode", stat.S_IFDIR | 0o775),
+                                ("st_mode", stat.S_IFREG | 0o755)):
+                with self.subTest(field=name), self.rootstats(work, **{name: value}), patch.object(proof, "root_command") as command:
+                    self.assertFalse(proof.retain_private_vstest_traces(work, public, self.checkpoint()))
+                    command.assert_not_called()
+            with patch.object(proof, "root_command") as command:
+                self.assertFalse(proof.retain_private_vstest_traces(work.parent / "not-selected", public, self.checkpoint()))
+                command.assert_not_called()
+
+    def test_copy_rejects_existing_symlink_unprotected_destination_invalid_archive_or_capture_failure(self):
+        for kind in ("collision", "file-link", "directory-link", "mode", "proof-mode", "malformed", "exit", "capture-error"):
+            with self.subTest(kind=kind), self.workspace() as (work, _, fd):
+                data = self.capture(fd); public = work / "proof"; public.mkdir(mode=0o755)
+                private = public / "private-diagnostics"
+                if kind == "directory-link": private.symlink_to(public, target_is_directory=True)
+                elif kind in ("collision", "file-link", "mode"):
+                    private.mkdir(mode=0o755 if kind == "mode" else 0o700)
+                    if kind == "collision": (private / proof.PRIVATE_VSTEST_TRACE_ARCHIVE).write_bytes(b"unchanged")
+                    if kind == "file-link": (private / proof.PRIVATE_VSTEST_TRACE_ARCHIVE).symlink_to(public / "outside")
+                elif kind == "proof-mode": public.chmod(0o777)
+                result = (1 if kind == "exit" else 0, b"bad" if kind == "malformed" else data, b"private-prefix-canary")
+                side = proof.ProofFailure("private-prefix-canary") if kind == "capture-error" else [result]
+                with self.rootstats(work), patch.object(proof, "root_command", side_effect=side) as command:
+                    self.assertFalse(proof.retain_private_vstest_traces(work, public, self.checkpoint()))
+                    command.assert_called_once()
+                if kind == "collision": self.assertEqual(b"unchanged", (private / proof.PRIVATE_VSTEST_TRACE_ARCHIVE).read_bytes())
+
+    def test_failure_always_preserves_original_safe_record_and_canary_never_becomes_public(self):
+        for kind in ("retained", "missing", "capture-error"):
+            with self.subTest(kind=kind), self.workspace() as (work, _, fd):
+                public = work / "proof"; public.mkdir(mode=0o755); data = self.capture(fd); calls = []
+                final = (0, data, b"private-prefix-canary") if kind == "retained" else (1, b"", b"private-prefix-canary")
+                if kind == "capture-error": final = proof.ProofFailure("private-prefix-canary")
+                with self.rootstats(work), patch.object(proof, "retain_private_worker_journal", side_effect=lambda *args: calls.append("journal")), \
+                     patch.object(proof, "retain_private_failure_output", side_effect=lambda *args: calls.append("manifest")), \
+                     patch.object(proof, "retain_private_subject_prefixes", side_effect=lambda *args: calls.append("prefix")), \
+                     patch.object(proof, "root_command", side_effect=[(1, b"private-prefix-canary", b"private-prefix-canary"),
+                         (0, json.dumps(self.checkpoint()).encode(), b""), final]) as command:
+                    with self.assertRaises(proof.ProofFailure) as failure:
+                        proof.run_observation_launcher(["launcher"], work, public, output_parent=work / "output-parent", slot="slot")
+                    self.assertEqual(3, command.call_count)
+                self.assertEqual(["journal", "manifest", "prefix"], calls)
+                self.assertIn("Production Observation launcher exited 1.", str(failure.exception))
+                self.assertNotIn("private-prefix-canary", str(failure.exception))
+                self.assertEqual(self.checkpoint(), json.loads((public / "launcher-failure.json").read_text()))
+                self.assertNotIn("private-prefix-canary", (public / "launcher-failure.json").read_text())
+                archive = public / "private-diagnostics" / proof.PRIVATE_VSTEST_TRACE_ARCHIVE
+                self.assertEqual(kind == "retained", archive.exists())
+                if archive.exists(): self.assertEqual(data, archive.read_bytes())
+
+    def test_root_entry_pins_uuid_device_inode_before_actual_fd_capture(self):
+        for mismatch in (False, True):
+            with self.subTest(mismatched_inode=mismatch), self.workspace() as (work, _, _):
+                namespace = {"__name__": "root_prefix_entry_portable_control"}
+                exec(compile(proof.PRIVATE_VSTEST_TRACE_ROOT_SCRIPT, "<vstest-trace helper>", "exec"), namespace)
+                capture = Mock(wraps=namespace["archive_vstest_traces"])
+                namespace["archive_vstest_traces"] = capture
+                actual = work.lstat(); output = io.BytesIO()
+                original_open, original_fstat, original_stat = os.open, os.fstat, os.stat
+                def opened(path, flags, *args, **kwargs):
+                    return original_open(work.parent if path == "/run" else path, flags, *args, **kwargs)
+                def root_owned(info):
+                    fields = {name: getattr(info, name) for name in
+                              ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")}
+                    return SimpleNamespace(**{**fields, "st_uid": 0, "st_gid": 0})
+                argv = ["-c", work.name[len(proof.RUNTIME_WORKSPACE_PREFIX):], str(actual.st_dev),
+                        str(actual.st_ino + int(mismatch))]
+                with patch.object(proof.os, "geteuid", return_value=0), patch.object(proof.sys, "argv", argv), \
+                     patch.object(proof.sys, "stdout", SimpleNamespace(buffer=output)), \
+                     patch.object(proof.os, "open", side_effect=opened) as open_call, \
+                     patch.object(proof.os, "fstat", side_effect=lambda fd: root_owned(original_fstat(fd))), \
+                     patch.object(proof.os, "stat", side_effect=lambda *args, **kwargs: root_owned(original_stat(*args, **kwargs))):
+                    if mismatch:
+                        with self.assertRaises(ValueError): namespace["main"]()
+                    else:
+                        namespace["main"]()
+                self.assertEqual("/run", open_call.call_args_list[0].args[0])
+                if mismatch:
+                    capture.assert_not_called(); self.assertEqual(b"", output.getvalue())
+                else:
+                    capture.assert_called_once(); self.assertTrue(proof._valid_private_vstest_trace_archive(output.getvalue()))
+
+    def test_success_returns_before_all_new_diagnostic_io(self):
+        with self.workspace() as (work, _, _):
+            public = work / "proof"; public.mkdir(mode=0o755)
+            with patch.object(proof, "root_command", return_value=(0, b"success", b"")) as command, \
+                 patch.object(proof, "retain_private_vstest_traces") as retained:
                 self.assertEqual((b"success", b""), proof.run_observation_launcher(["launcher"], work, public))
                 command.assert_called_once(); retained.assert_not_called()
             self.assertFalse((public / "private-diagnostics").exists())

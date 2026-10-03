@@ -100,6 +100,92 @@ The matching [runtime collector](runtime-proof.py), `retain_private_subject_pref
 
 The collector reuses `validate_failure_diagnostic` and performs no capture I/O unless the record is `worker-unsuccessful` / `worker-exit`, with main code 1, nonzero status, completed ready/wait/exited/work-closed checkpoints and zero active handlers/runs. A successful launcher returns before capture calls; failed execution attempts this retention after the journal and failed-worker manifest collection and then unconditionally preserves the original failure. Prefixes can be truncated or absent and are diagnostic hostile bytes: no content or capture flag is added to public JSON, exceptions, producer artifacts, admission or completion eligibility. Source prefixes remain under root `0700` protection until the collector copies the archive into its own private `0700` destination. The [collector controls](test_runtime_proof.py) and [launcher controls](test_linux_launcher.py) do not identify the native failure cause or establish root/systemd execution or Trusted eligibility.
 
+## Private collector diagnostic candidate
+
+This private checkout contains a diagnostic probe, not a production default or
+qualified consumer. The [private broker](../../scripts/evidencehost-linux-launcher.py)
+appends exactly `--diag <scratch>/test-output/<validated-result-token>/vstest-diagnostic.log`
+to an already selected `dotnet test` request before `Popen`. Caller diagnostic options,
+including the short alias and forwarded `/Diag` forms, and an argument separator
+that would prevent the append from reaching the runner are rejected before results
+I/O. Functional arguments, sandbox properties, task/memory/output caps and the
+existing VSTest 90-second timeout are unchanged. There is no public switch, environment
+toggle, transport change, registry enrollment or Trusted authority. Other checkouts
+and their production defaults are unaffected.
+
+`private_vstest_arguments` returns a fresh argv list. The broker retains the actual
+selected results directory FD before execution. After a confirmed nonzero command,
+explicit stop, terminal launcher wait, both error-free EOF receipts, exact quota
+reconciliation and an empty generated subject group, `_read_vstest_collector_traces_fd`
+reads only the fixed runner basename and at most one direct collector companion.
+The collector grammar is `vstest-diagnostic.datacollector.yy-MM-dd_HH-mm-ss_fffff_<positive-thread-id>.log`,
+with five fractional digits and thread ID at most 2147483647, following the
+[official rel/18.5 naming method](https://github.com/microsoft/vstest/blob/rel/18.5/src/Microsoft.TestPlatform.CrossPlatEngine/DataCollection/ProxyDataCollectionManager.cs#L327-L336).
+Before spawn, bounded enumeration of the pinned results directory rejects an existing
+fixed runner name or any collector-prefixed entry, including links or directories.
+The root is rechecked after enumeration; preexisting logs cannot supply this diagnostic.
+Duplicate or unrecognized collector-prefixed companions make capture unavailable;
+there is no wildcard/recursive read or host-trace capture. Files in the injected
+root-level `vstest-diagnostic.` namespace are excluded from producer artifact transfer.
+The actual SDK-bundled runner version and inner collector startup cause remain unknown.
+
+Selected regular files require subject UID, exact results GID, one link, no executable
+or special permission bits, bounded size, and unchanged retained/named identity,
+length and timestamps. Only these already pinned files may be normalized to `0600`
+after physical exit; no recursive permission or ownership changes occur. Reads use
+no-follow, close-on-exec and nonblocking FDs, verify the pinned root and parent, and
+check cancellation/deadline per operation and chunk. `VSTEST_TRACE_LIMIT = 262144`
+bytes per file without truncation; `VSTEST_TRACE_SECONDS = 5`. Oversize, growth,
+substitution, links, ownership/mode mismatch, read error or expiry yields no cache.
+These limits bound retention; they do not establish a byte cap on the SDK trace writer.
+
+`Broker.failed_vstest_traces: tuple[bytes, bytes] | None` holds immutable diagnostic
+bytes from the last confirmed failed command. A non-test failure clears this cache;
+a successful command does not replace it. The tuple is `(runner_bytes, collector_bytes)`;
+an absent collector is `b""`, which proves no collector startup or successful handshake.
+`capture_vstest_collector_traces(broker, directory_fd, owned_exit_confirmed) -> bool`
+runs only on failed-launch cleanup after actual owned wait and closed launch resources.
+It independently requires ready/wait/exit/work-closed checkpoints, zero active
+handlers/runs/artifact/application operations, no output/application failure latch,
+an unexceeded quota and an empty worker group before root capture I/O.
+
+`_capture_vstest_collector_traces_fd` exclusively writes exactly
+`vstest-collector-trace/runner.log` and `collector.log` through the pinned diagnostic
+directory FD: root/root child `0700`, root/root regular single-link files `0600`.
+It verifies names, metadata, byte lengths and finite writes; existing destinations
+are never replaced. Portable owner overrides in this helper exercise real FDs only
+and grant no execution authority. The original failure always wins; raw bytes and
+capture state are absent from safe public diagnostics, completion and admission.
+
+The disjoint private [runtime collector](runtime-proof.py), `retain_private_vstest_traces`,
+selects the invocation's `/run` workspace UUID and pinned device/inode, requires the
+existing safe worker-unsuccessful/worker-exit code 1/status 1..255 plus completed
+checkpoints and zero handlers/runs before root I/O, and pins the root `0700` child
+and both root `0600` single-link fixed files. Its root helper has a five-second bound.
+It emits only the canonical two-member USTAR `runner.log`, then `collector.log`,
+with zero UID/GID/mtime and mode `0600`, capped at 786432 bytes. The runner exclusively
+retains `private-diagnostics/vstest-collector-trace.tar` as `0600` under its private
+`0700` directory. Failed execution attempts retention after journal, failed-worker
+manifest and subject prefixes, then preserves the original failure unconditionally;
+successful execution returns before all retention I/O. Neither archive nor missing
+companion authorizes a producer, proof or gate. Portable controls are source-stage
+metadata/procedure checks, not root/native acceptance. No sampler or new thread is
+introduced: five seconds from first subject-main could expire during restore/build
+before the collector launches.
+
+Validation status: this remains a private diagnostic candidate; no native execution
+has occurred. Before and after reading, the reader independently opens the literal
+current `scratch/test-output` path through mandatory `openat2` with no symlinks or
+magic links and compares its complete retained metadata to the pinned parent FD.
+It also checks the selected result child against that parent. Replaced ancestors,
+renamed parents and stale retained handles cannot provide a trace cache. The portable controls are now verified: the 17 new launcher controls passed with
+normal filesystem permissions (the managed macOS sandbox clears required setgid
+bits), and the disjoint runtime retention suite passed 22 controls. Both sandbox
+launcher attempts remain recorded as failures; the second confirmed the remaining
+setgid restriction. The 16 existing subject-prefix controls passed in the initial
+focused run. This is portable procedure/FD evidence only; no root/systemd collector
+trace capture, current Linux acceptance or qualification success is claimed.
+
 ## Validation record
 
 The [runtime proof driver](runtime-proof.py) binds the shared execution source inventory before build and repeats the exact file hashes and canonical aggregate digest after execution. The coverage producer and transport have one physical copy each in [Evidence.Coverage](../../Evidence/ForgeTrust.AppSurface.Evidence.Coverage/README.md); either old `Evidence.Cli/EvidenceRestrictedCoverageProducer.cs` or `Evidence.Cli/EvidenceRestrictedCoverageTransport.cs` location being present (including a dangling link) rejects the inventory. Required inputs also include the metadata factory, [protected producer lease and owned execution lifecycle](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md), application protocol, closed catalogue, [restricted Aspire host adapter](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md), and the five Evidence project files and package locks. Missing, linked, or nonregular required source files fail closed. The [portable inventory controls](test_runtime_proof.py) verify real file presence, stale-copy rejection, exact byte hashes, and mutation detection; they establish source binding behavior, not Linux execution or protected acceptance.

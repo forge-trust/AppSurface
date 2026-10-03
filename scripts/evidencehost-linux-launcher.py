@@ -145,6 +145,14 @@ MAX_JOB_OUTPUT = 16 * 1024 * 1024
 SUBJECT_FAILURE_DIRECTORY = "subject-failure-output"
 SUBJECT_FAILURE_NAMES = ("stdout.prefix", "stderr.prefix")
 MAX_SUBJECT_FAILURE_PREFIX = (1024 * 1024 - 10240) // 2
+# Private diagnostic candidate only: no production switch or registration authority.
+VSTEST_TRACE_DIRECTORY = "vstest-collector-trace"
+VSTEST_TRACE_RUNNER = "vstest-diagnostic.log"
+VSTEST_TRACE_LIMIT = 256 * 1024
+VSTEST_TRACE_SECONDS = 5
+VSTEST_COLLECTOR_PATTERN = re.compile(
+    r"vstest-diagnostic\.datacollector\.([0-9]{2}-[0-9]{2}-[0-9]{2}_"
+    r"[0-9]{2}-[0-9]{2}-[0-9]{2}_[0-9]{5})_([1-9][0-9]{0,9})\.log")
 MAX_ARTIFACT_FILES = 64
 MAX_ARTIFACT_FILE_BYTES = 20 * 1024 * 1024
 MAX_ARTIFACT_TOTAL_BYTES = 256 * 1024 * 1024
@@ -716,6 +724,254 @@ def declared_subject_inputs(subject: Path, solution: str, paths: list[str]) -> t
 def roots_overlap(first: Path, second: Path) -> bool:
     """Return whether either canonical directory contains the other."""
     return first == second or first in second.parents or second in first.parents
+
+
+def private_vstest_arguments(arguments: list[str], scratch: Path, token: str) -> list[str]:
+    """Private candidate only: one fixed selected diag path, never a caller diagnostic option."""
+    if (not arguments or arguments[0] != "test" or not SAFE_NAME.fullmatch(token)
+            or "--" in arguments
+            or any(re.match(r"(?i)^(?:--diag|/diag|-diag|-d)(?:$|[=:])", arg) for arg in arguments)):
+        raise LauncherError("private-vstest-diag-invalid")
+    return [*arguments, "--diag", str(scratch / "test-output" / token / VSTEST_TRACE_RUNNER)]
+
+
+def _vstest_directory_identity(info) -> tuple[int, ...]:
+    return info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode
+
+
+def _vstest_file_identity(info) -> tuple[int, ...]:
+    return (*_vstest_directory_identity(info), info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _read_vstest_collector_traces_fd(parent_fd: int, root_fd: int, token: str,
+                                    pinned_identity: tuple[int, ...], subject_uid: int, results_gid: int,
+                                    *, scratch: Path, deadline: float, cancelled) -> tuple[bytes, bytes] | None:
+    """Read selected direct traces after physical exit, never granting authority.
+
+    Owner inputs and cancellation are portable data/FD controls only. No traversal,
+    host trace, fallback or exception echo; expiry or any unsafe metadata returns None.
+    """
+    files = []
+    try:
+        def check():
+            if cancelled() or time.monotonic() >= deadline:
+                raise LauncherError("private-vstest-trace-unavailable")
+        def current_parent_identity():
+            check()
+            if not isinstance(scratch, Path) or not scratch.is_absolute() or ".." in scratch.parts:
+                raise LauncherError("private-vstest-trace-unavailable")
+            filesystem = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            selected = -1
+            try:
+                selected = openat2(filesystem, (scratch / "test-output").relative_to(Path("/")).as_posix(),
+                                   os.O_RDONLY | os.O_DIRECTORY,
+                                   RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS)
+                return _vstest_file_identity(os.fstat(selected))
+            finally:
+                if selected >= 0:
+                    os.close(selected)
+                os.close(filesystem)
+        check()
+        root, parent = os.fstat(root_fd), os.fstat(parent_fd)
+        if (not stat.S_ISDIR(parent.st_mode) or stat.S_IMODE(parent.st_mode) != 0o2770
+                or (parent.st_uid, parent.st_gid) != (subject_uid, results_gid)
+                or _vstest_file_identity(parent) != current_parent_identity()):
+            return None
+        if (not SAFE_NAME.fullmatch(token) or not stat.S_ISDIR(root.st_mode)
+                or (root.st_uid, root.st_gid) != (subject_uid, results_gid)
+                or stat.S_IMODE(root.st_mode) != 0o2770
+                or _vstest_directory_identity(root) != pinned_identity
+                or _vstest_file_identity(root) != _vstest_file_identity(os.stat(
+                    token, dir_fd=parent_fd, follow_symlinks=False))):
+            return None
+        def current_names():
+            names = []
+            with os.scandir(root_fd) as entries:
+                for entry in entries:
+                    check()
+                    if len(names) >= MAX_ARTIFACT_TREE_ENTRIES:
+                        raise LauncherError("private-vstest-trace-unavailable")
+                    names.append(entry.name)
+            return names
+        names = current_names()
+        if VSTEST_TRACE_RUNNER not in names:
+            return None
+        collectors = []
+        for name in names:
+            check()
+            if name.startswith("vstest-diagnostic.datacollector."):
+                match = VSTEST_COLLECTOR_PATTERN.fullmatch(name)
+                if match is None or int(match[2]) > 2_147_483_647:
+                    return None
+                collectors.append(name)
+        if len(collectors) > 1:
+            return None
+        selected = [(VSTEST_TRACE_RUNNER, "runner.log")]
+        if collectors:
+            selected.append((collectors[0], "collector.log"))
+        for name, output_name in selected:
+            check()
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, dir_fd=root_fd)
+            files.append((name, fd, None, output_name, b""))
+            info = os.fstat(fd)
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                    or (info.st_uid, info.st_gid) != (subject_uid, results_gid)
+                    or info.st_mode & 0o7111 or not 0 <= info.st_size <= VSTEST_TRACE_LIMIT
+                    or _vstest_file_identity(info) != _vstest_file_identity(os.stat(
+                        name, dir_fd=root_fd, follow_symlinks=False))):
+                return None
+            # Normalize only the selected pinned files after confirmed physical exit.
+            if stat.S_IMODE(info.st_mode) != 0o600:
+                os.fchmod(fd, 0o600)
+            before = os.fstat(fd)
+            if (stat.S_IMODE(before.st_mode) != 0o600
+                    or (before.st_dev, before.st_ino, before.st_uid, before.st_gid, before.st_nlink, before.st_size)
+                    != (info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_nlink, info.st_size)
+                    or _vstest_file_identity(before) != _vstest_file_identity(os.stat(
+                        name, dir_fd=root_fd, follow_symlinks=False))):
+                return None
+            chunks, remaining = [], before.st_size
+            while remaining:
+                check()
+                data = os.read(fd, min(65536, remaining))
+                if not data or len(data) > remaining:
+                    return None
+                chunks.append(data)
+                remaining -= len(data)
+            check()
+            if os.read(fd, 1):
+                return None
+            files[-1] = (name, fd, before, output_name, b"".join(chunks))
+        check()
+        for name, fd, before, _output_name, _data in files:
+            if (_vstest_file_identity(before) != _vstest_file_identity(os.fstat(fd))
+                    or _vstest_file_identity(before) != _vstest_file_identity(os.stat(
+                        name, dir_fd=root_fd, follow_symlinks=False))):
+                return None
+        if (set(names) != set(current_names())
+                or _vstest_file_identity(root) != _vstest_file_identity(os.fstat(root_fd))
+                or _vstest_file_identity(root) != _vstest_file_identity(os.stat(
+                    token, dir_fd=parent_fd, follow_symlinks=False))
+                or _vstest_file_identity(parent) != _vstest_file_identity(os.fstat(parent_fd))
+                or _vstest_file_identity(parent) != current_parent_identity()):
+            return None
+        check()
+        data = tuple(data for _name, _fd, _before, _output_name, data in files)
+        return (data[0], data[1] if len(data) == 2 else b"")
+    except (OSError, ValueError, TypeError, LauncherError):
+        return None
+    finally:
+        for _name, fd, _before, _output_name, _data in files:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def _capture_vstest_collector_traces_fd(directory_fd: int, traces: tuple[bytes, bytes], *,
+                                       expected_owner_uid: int = 0, expected_owner_gid: int = 0) -> bool:
+    """Exclusive fixed-name private output; portable owner overrides grant no launch authority."""
+    child_fd, files = -1, []
+    complete = False
+    deadline = time.monotonic() + VSTEST_TRACE_SECONDS
+    try:
+        if (type(traces) is not tuple or len(traces) != 2
+                or any(type(data) is not bytes or len(data) > VSTEST_TRACE_LIMIT for data in traces)):
+            return False
+        parent = os.fstat(directory_fd)
+        if (not stat.S_ISDIR(parent.st_mode) or parent.st_mode & 0o022
+                or (parent.st_uid, parent.st_gid) != (expected_owner_uid, expected_owner_gid)):
+            return False
+        os.mkdir(VSTEST_TRACE_DIRECTORY, 0o700, dir_fd=directory_fd)
+        child_fd = os.open(VSTEST_TRACE_DIRECTORY, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                           dir_fd=directory_fd)
+        child = os.fstat(child_fd)
+        if (not stat.S_ISDIR(child.st_mode) or stat.S_IMODE(child.st_mode) != 0o700
+                or (child.st_uid, child.st_gid) != (expected_owner_uid, expected_owner_gid)
+                or _vstest_directory_identity(child) != _vstest_directory_identity(os.stat(
+                    VSTEST_TRACE_DIRECTORY, dir_fd=directory_fd, follow_symlinks=False))):
+            return False
+        for name, data in zip(("runner.log", "collector.log"), traces):
+            if time.monotonic() >= deadline:
+                return False
+            fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                         0o600, dir_fd=child_fd)
+            files.append((name, fd, None))
+            initial = os.fstat(fd)
+            if (not stat.S_ISREG(initial.st_mode) or initial.st_nlink != 1 or initial.st_size != 0
+                    or stat.S_IMODE(initial.st_mode) != 0o600
+                    or (initial.st_uid, initial.st_gid) != (expected_owner_uid, expected_owner_gid)):
+                return False
+            position = 0
+            while position < len(data):
+                if time.monotonic() >= deadline:
+                    return False
+                written = os.write(fd, data[position:position + 65536])
+                if type(written) is not int or not 0 < written <= min(65536, len(data) - position):
+                    return False
+                position += written
+            final = os.fstat(fd)
+            if (_vstest_directory_identity(initial) != _vstest_directory_identity(final)
+                    or final.st_nlink != 1 or final.st_size != len(data)
+                    or _vstest_file_identity(final) != _vstest_file_identity(os.stat(
+                        name, dir_fd=child_fd, follow_symlinks=False))):
+                return False
+            files[-1] = (name, fd, final)
+        for name, fd, final in files:
+            if (_vstest_file_identity(final) != _vstest_file_identity(os.fstat(fd))
+                    or _vstest_file_identity(final) != _vstest_file_identity(os.stat(
+                        name, dir_fd=child_fd, follow_symlinks=False))):
+                return False
+        complete = (time.monotonic() < deadline and set(os.listdir(child_fd)) == {"runner.log", "collector.log"}
+                and _vstest_directory_identity(child) == _vstest_directory_identity(os.fstat(child_fd))
+                and _vstest_directory_identity(child) == _vstest_directory_identity(os.stat(
+                    VSTEST_TRACE_DIRECTORY, dir_fd=directory_fd, follow_symlinks=False))
+                and _vstest_directory_identity(parent) == _vstest_directory_identity(os.fstat(directory_fd)))
+        return complete
+    except (OSError, ValueError, TypeError):
+        return False
+    finally:
+        # Remove only our still-pinned names, never a replaced directory or file.
+        if child_fd >= 0 and not complete:
+            try:
+                if _vstest_directory_identity(os.fstat(child_fd)) == _vstest_directory_identity(os.stat(
+                        VSTEST_TRACE_DIRECTORY, dir_fd=directory_fd, follow_symlinks=False)):
+                    for name, fd, _info in files:
+                        if _vstest_directory_identity(os.fstat(fd)) == _vstest_directory_identity(os.stat(
+                                name, dir_fd=child_fd, follow_symlinks=False)):
+                            os.unlink(name, dir_fd=child_fd)
+                    os.rmdir(VSTEST_TRACE_DIRECTORY, dir_fd=directory_fd)
+            except (OSError, ValueError, TypeError):
+                pass
+        for fd in [item[1] for item in files] + ([child_fd] if child_fd >= 0 else []):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def capture_vstest_collector_traces(broker: Broker, directory_fd: int | None,
+                                   owned_exit_confirmed: bool) -> bool:
+    """Best-effort private failure export after actual owned wait and closed launch resources."""
+    try:
+        if owned_exit_confirmed is not True or type(broker) is not Broker or type(directory_fd) is not int:
+            return False
+        with broker.condition:
+            if (any(value is not True for value in (broker.ready_seen, broker.wait_completed,
+                                                    broker.exited, broker.work_closed))
+                    or any(type(value) is not int or value != 0 for value in (
+                        broker.active_handlers, broker.active_runs, broker.active_artifact_operations,
+                        broker.active_application_operations))
+                    or broker.subject_output_failed or broker.application_work_failed
+                    or broker.output_quota.exceeded.is_set() or broker.failed_subject_prefixes is None
+                    or broker.test_output_fd != -1 or broker.artifact_handles_closing is not True):
+                return False
+            traces = broker.failed_vstest_traces
+        if traces is None or not broker._group_empty(broker.descriptor["cgroup"]):
+            return False
+        return _capture_vstest_collector_traces_fd(directory_fd, traces)
+    except Exception:
+        return False
 
 
 def validate_test_results_path(scratch: Path, value: str) -> str:
@@ -1322,6 +1578,7 @@ class Broker:
         self.command_output_receipts: list[tuple[int, int, int]] = []
         # Diagnostic-only immutable bytes; never used by completion or admission.
         self.failed_subject_prefixes: tuple[bytes, bytes] | None = None
+        self.failed_vstest_traces: tuple[bytes, bytes] | None = None
         self.application_output_receipt: tuple[int, int, int] | None = None
         self.application_work_failed = False
         self.active_application_operations = 0
@@ -1451,6 +1708,9 @@ class Broker:
                 entries_seen += 1
                 if entries_seen > MAX_ARTIFACT_TREE_ENTRIES:
                     raise LauncherError("artifact-tree-entry-limit")
+                # Private injected trace namespace is diagnostic-only, never a producer artifact.
+                if not prefix and name.startswith("vstest-diagnostic."):
+                    continue
                 relative_path = f"{prefix}/{name}" if prefix else name
                 validate_artifact_relative_path(relative_path)
                 entry = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
@@ -1611,13 +1871,49 @@ class Broker:
                 os.close(test_output_fd)
 
     def _run(self, request: dict) -> dict:
+        """Private prototype: pin selected results before spawn and retain traces before handle closure."""
         executable = Path(request["executable"])
         if not executable.is_absolute() or executable.resolve() != self.dotnet:
             raise LauncherError("executable-not-approved")
         if request["arguments"][0] not in ALLOWED_VERBS:
             raise LauncherError("dotnet-verb-not-approved")
-        result_root = (self._validate_results_root(request["arguments"])
-                       if request["arguments"][0] == "test" else None)
+        arguments = request["arguments"]
+        result_root, trace_fd, trace_identity = None, -1, None
+        try:
+            if arguments[0] == "test":
+                # Reject caller diagnostics before results ownership transfer or process creation.
+                private_vstest_arguments(arguments, self.scratch, "validation-only")
+                result_root = self._validate_results_root(arguments)
+                trace_fd = openat2(self.test_output_fd, result_root, os.O_RDONLY | os.O_DIRECTORY)
+                info = os.fstat(trace_fd)
+                trace_identity = _vstest_directory_identity(info)
+                if (not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o2770
+                        or (info.st_uid, info.st_gid) != (self.subject_uid, self.results_gid)
+                        or _vstest_file_identity(info) != _vstest_file_identity(os.stat(
+                            result_root, dir_fd=self.test_output_fd, follow_symlinks=False))):
+                    raise LauncherError("test-results-root-invalid")
+                with os.scandir(trace_fd) as entries:
+                    for index, entry in enumerate(entries, 1):
+                        if (index > MAX_ARTIFACT_TREE_ENTRIES or entry.name == VSTEST_TRACE_RUNNER
+                                or entry.name.startswith("vstest-diagnostic.datacollector.")):
+                            raise LauncherError("private-vstest-diag-preexisting")
+                if (_vstest_file_identity(info) != _vstest_file_identity(os.fstat(trace_fd))
+                        or _vstest_file_identity(info) != _vstest_file_identity(os.stat(
+                            result_root, dir_fd=self.test_output_fd, follow_symlinks=False))):
+                    raise LauncherError("test-results-root-invalid")
+                request = {**request, "arguments": private_vstest_arguments(arguments, self.scratch, result_root)}
+            return self._run_selected(request, result_root, trace_fd, trace_identity)
+        finally:
+            if trace_fd >= 0:
+                os.close(trace_fd)
+
+    def _run_selected(self, request: dict, result_root: str | None, trace_fd: int,
+                      trace_identity: tuple[int, ...] | None) -> dict:
+        executable = Path(request["executable"])
+        if not executable.is_absolute() or executable.resolve() != self.dotnet:
+            raise LauncherError("executable-not-approved")
+        if request["arguments"][0] not in ALLOWED_VERBS:
+            raise LauncherError("dotnet-verb-not-approved")
         cwd = Path(request["working_directory"]).resolve(strict=True)
         if not cwd.is_dir() or not cwd.is_relative_to(self.subject_root):
             raise LauncherError("working-directory-outside-subject")
@@ -1757,11 +2053,18 @@ class Broker:
         except (LauncherError, OSError, ValueError):
             self._fail_subject_output()
             raise LauncherError("subject-exit-unconfirmed") from None
+        traces = None
+        if proc.returncode != 0 and result_root is not None:
+            traces = _read_vstest_collector_traces_fd(
+                self.test_output_fd, trace_fd, result_root, trace_identity, self.subject_uid, self.results_gid,
+                scratch=self.scratch, deadline=min(self.deadline, time.monotonic() + VSTEST_TRACE_SECONDS),
+                cancelled=lambda: self.work_closed or self.exited)
         with self.lock:
             self.command_output_receipts.append((received_bytes, pump_states[0][1], pump_states[1][1]))
             if proc.returncode != 0:
                 self.failed_subject_prefixes = (stdout[:MAX_SUBJECT_FAILURE_PREFIX],
                                                stderr[:MAX_SUBJECT_FAILURE_PREFIX])
+                self.failed_vstest_traces = traces
         if result_root is not None:
             with self.lock:
                 self.allowed_results_roots.add(result_root)
@@ -2651,6 +2954,7 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
                 _close_launch_resources(listener, handlers, broker, test_output_fd)
                 if original_error is not None and broker is not None:
                     capture_subject_failure_prefixes(broker, diagnostic_directory_fd, owned_exit_confirmed)
+                    capture_vstest_collector_traces(broker, diagnostic_directory_fd, owned_exit_confirmed)
             except BaseException:
                 if original_error is None:
                     raise
