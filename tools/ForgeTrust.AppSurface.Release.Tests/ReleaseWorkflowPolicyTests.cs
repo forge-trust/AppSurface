@@ -676,6 +676,94 @@ public sealed class ReleaseWorkflowPolicyTests
     }
 
     [Fact]
+    public async Task ReleasePublicationRequiresProtectedMainToolingBeforeTagInspection()
+    {
+        var workflow = await ReadRepositoryFileAsync(".github/workflows/release-publish.yml");
+        var validation = GetWorkflowJob(workflow, "validate-release", "publish-docs-archive");
+
+        Assert.Contains(
+            "if: ${{ github.repository == 'forge-trust/AppSurface' }}",
+            validation,
+            StringComparison.Ordinal);
+        Assert.Contains("ref: ${{ github.workflow_sha }}", validation, StringComparison.Ordinal);
+        Assert.Contains("persist-credentials: false", validation, StringComparison.Ordinal);
+        Assert.Contains("TRUSTED_WORKFLOW_REF: ${{ github.workflow_ref }}", validation, StringComparison.Ordinal);
+        Assert.Contains("TRUSTED_WORKFLOW_SHA: ${{ github.workflow_sha }}", validation, StringComparison.Ordinal);
+        Assert.Contains("actual_commit=\"$(git rev-parse HEAD^{commit})\"", validation, StringComparison.Ordinal);
+        Assert.Contains("\"$actual_commit\" != \"$TRUSTED_WORKFLOW_SHA\"", validation, StringComparison.Ordinal);
+        Assert.True(
+            validation.IndexOf("Require the protected workflow commit", StringComparison.Ordinal)
+            < validation.IndexOf("Validate tag-bound release evidence", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("workflow_dispatch", "refs/heads/main", "expected", "current", 0)]
+    [InlineData("push", "refs/heads/main", "expected", "current", 1)]
+    [InlineData("workflow_dispatch", "refs/heads/feature", "expected", "current", 1)]
+    [InlineData("workflow_dispatch", "refs/heads/main", "wrong", "current", 1)]
+    [InlineData("workflow_dispatch", "refs/heads/main", "expected", "changed", 1)]
+    [InlineData("workflow_dispatch", "refs/heads/main", "expected", "malformed", 1)]
+    public async Task ReleasePublicationCommitGuardRejectsUnprotectedOrMismatchedDispatch(
+        string eventName,
+        string dispatchRef,
+        string workflowRef,
+        string workflowCommit,
+        int expectedExitCode)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var root = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var workflow = await ReadRepositoryFileAsync(".github/workflows/release-publish.yml");
+        var validation = GetWorkflowJob(workflow, "validate-release", "publish-docs-archive");
+        var script = GetWorkflowStepRun(validation, "Require the protected workflow commit");
+
+        using var revisionProcess = Process.Start(new ProcessStartInfo("git")
+        {
+            WorkingDirectory = root,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            ArgumentList = { "rev-parse", "HEAD^{commit}" }
+        })!;
+        var revision = (await revisionProcess.StandardOutput.ReadToEndAsync()).Trim();
+        await revisionProcess.WaitForExitAsync();
+        Assert.Equal(0, revisionProcess.ExitCode);
+
+        var suppliedRevision = workflowCommit switch
+        {
+            "changed" => revision[..^1] + (revision[^1] == 'a' ? 'b' : 'a'),
+            "malformed" => "HEAD",
+            _ => revision
+        };
+        using var guardProcess = Process.Start(new ProcessStartInfo("/bin/bash")
+        {
+            WorkingDirectory = root,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            ArgumentList = { "-c", script },
+            Environment =
+            {
+                ["GITHUB_EVENT_NAME"] = eventName,
+                ["GITHUB_REF"] = dispatchRef,
+                ["TRUSTED_WORKFLOW_REF"] = workflowRef == "expected"
+                    ? "forge-trust/AppSurface/.github/workflows/release-publish.yml@refs/heads/main"
+                    : "forge-trust/AppSurface/.github/workflows/release-publish.yml@refs/heads/feature",
+                ["TRUSTED_WORKFLOW_SHA"] = suppliedRevision
+            }
+        })!;
+        var standardError = await guardProcess.StandardError.ReadToEndAsync();
+        await guardProcess.WaitForExitAsync();
+
+        Assert.Equal(expectedExitCode, guardProcess.ExitCode);
+        if (expectedExitCode != 0)
+        {
+            Assert.Contains("protected", standardError, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
     public async Task ReleasePrepPushScriptHandlesNewExistingAndFailureBranchStates()
     {
         if (OperatingSystem.IsWindows())

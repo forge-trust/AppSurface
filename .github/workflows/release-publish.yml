@@ -50,7 +50,29 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.workflow_sha }}
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require the protected workflow commit
+        shell: bash
+        env:
+          TRUSTED_WORKFLOW_REF: ${{ github.workflow_ref }}
+          TRUSTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" != workflow_dispatch \
+                || "$GITHUB_REF" != refs/heads/main \
+                || "$TRUSTED_WORKFLOW_REF" != 'forge-trust/AppSurface/.github/workflows/release-publish.yml@refs/heads/main' \
+                || ! "$TRUSTED_WORKFLOW_SHA" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+            echo 'Release publication must be dispatched from the protected main workflow revision.' >&2
+            exit 1
+          fi
+          actual_commit="$(git rev-parse HEAD^{commit})"
+          if [[ "$actual_commit" != "$TRUSTED_WORKFLOW_SHA" ]]; then
+            echo 'The release tool checkout differs from the protected workflow commit.' >&2
+            exit 1
+          fi
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
