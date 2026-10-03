@@ -1,3 +1,4 @@
+using System.Text;
 using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Durable.PostgreSql;
@@ -45,7 +46,7 @@ public sealed class DurableSchemaCommandTests
             Status = new DurableSchemaStatusView(compatibility, 2, 6, [3, 4, 5, 6]),
         };
         using var environment = new EnvironmentVariableScope("APPSURFACE_DURABLE_CONNECTION", "Host=localhost;Password=do-not-print");
-        var command = new DurableSchemaPreflightCommand(service);
+        var command = CreatePreflightCommand(service);
         using var console = new FakeInMemoryConsole();
 
         var error = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
@@ -65,7 +66,7 @@ public sealed class DurableSchemaCommandTests
             Status = new DurableSchemaStatusView(DurableRuntimeSchemaCompatibility.UpgradeRequired, 10, 11, [11]),
         };
         using var environment = new EnvironmentVariableScope("APPSURFACE_DURABLE_CONNECTION", "Host=localhost;Password=do-not-print");
-        var command = new DurableSchemaPreflightCommand(service);
+        var command = CreatePreflightCommand(service);
         using var console = new FakeInMemoryConsole();
 
         var error = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
@@ -90,7 +91,7 @@ public sealed class DurableSchemaCommandTests
         using var console = new FakeInMemoryConsole();
 
         var error = await Assert.ThrowsAsync<CommandException>(async () =>
-            await new DurableSchemaPreflightCommand(service).ExecuteAsync(console));
+            await CreatePreflightCommand(service).ExecuteAsync(console));
 
         Assert.Contains($"preflight is {compatibility}", error.Message, StringComparison.Ordinal);
         Assert.Contains("inspect status, generate a reviewed forward script", error.Message, StringComparison.Ordinal);
@@ -104,10 +105,10 @@ public sealed class DurableSchemaCommandTests
         var service = new FakeDurableSchemaCommandService
         {
             Status = new DurableSchemaStatusView(DurableRuntimeSchemaCompatibility.Compatible, 11, 11, []),
-            RetentionStructureFailures = ["function_acl", "retention_index"],
+            PreflightFailures = ["function_acl", "retention_index"],
         };
         using var environment = new EnvironmentVariableScope("APPSURFACE_DURABLE_CONNECTION", "Host=localhost;Password=do-not-print");
-        var command = new DurableSchemaPreflightCommand(service);
+        var command = CreatePreflightCommand(service);
         using var console = new FakeInMemoryConsole();
 
         var error = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
@@ -115,8 +116,155 @@ public sealed class DurableSchemaCommandTests
         Assert.Contains("structural preflight failed", error.Message, StringComparison.Ordinal);
         Assert.Contains("function, runtime grants, role membership, or index", error.Message, StringComparison.Ordinal);
         Assert.Contains("Failed checks: function_acl, retention_index", error.Message, StringComparison.Ordinal);
-        Assert.True(service.RetentionPreflightCalled);
+        Assert.Equal(1, service.PreflightCallCount);
         ValueSafeAssert.DoesNotExpose("do-not-print", error.Message);
+    }
+
+    [Fact]
+    public async Task Preflight_requires_manifest_and_independently_supplied_owner_before_provider_work()
+    {
+        using var environment = new EnvironmentVariableScope("APPSURFACE_DURABLE_CONNECTION", "Host=localhost;Password=do-not-print");
+        var service = new FakeDurableSchemaCommandService();
+        using var console = new FakeInMemoryConsole();
+        var command = new DurableSchemaPreflightCommand(service);
+
+        var error = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
+
+        Assert.Contains("--role-pairs-file", error.Message, StringComparison.Ordinal);
+        Assert.Contains("--migration-owner-role", error.Message, StringComparison.Ordinal);
+        Assert.False(service.OnlineOperationCalled);
+        Assert.Equal(0, service.PreflightCallCount);
+    }
+
+    [Fact]
+    public async Task Preflight_maps_invalid_environment_input_to_fixed_safe_category_before_provider_work()
+    {
+        var service = new FakeDurableSchemaCommandService();
+        var command = CreatePreflightCommand(service);
+        command.ConnectionEnvironmentVariable = "APPSURFACE-NOT-VALID";
+        using var console = new FakeInMemoryConsole();
+
+        var error = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
+
+        Assert.Contains("durable preflight connection_input failed", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("APPSURFACE-NOT-VALID", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, service.PreflightCallCount);
+        Assert.False(service.OnlineOperationCalled);
+    }
+
+    [Theory]
+    [InlineData("connection_input", typeof(ArgumentException))]
+    [InlineData("database_operation", typeof(NpgsqlException))]
+    [InlineData("catalog_result", typeof(InvalidDataException))]
+    [InlineData("catalog_result", typeof(InvalidOperationException))]
+    [InlineData("cleanup", typeof(DurablePreflightException))]
+    [InlineData("timeout", typeof(TimeoutException))]
+    public async Task Preflight_maps_configuration_database_and_timeout_failures_to_safe_categories(string category, Type exceptionType)
+    {
+        const string secretConnection = "Host=secret.example;Password=do-not-print";
+        using var environment = new EnvironmentVariableScope("APPSURFACE_DURABLE_CONNECTION", secretConnection);
+        Exception failure = exceptionType == typeof(ArgumentException)
+            ? new ArgumentException("configuration-sentinel-detail")
+            : exceptionType == typeof(NpgsqlException)
+                ? new NpgsqlException("server-sentinel-detail")
+                : exceptionType == typeof(InvalidDataException)
+                    ? new InvalidDataException("invalid-data-sentinel-detail")
+                    : exceptionType == typeof(InvalidOperationException)
+                        ? new InvalidOperationException("invalid-operation-sentinel-detail")
+                        : exceptionType == typeof(TimeoutException)
+                            ? new TimeoutException("timeout-sentinel-detail")
+                            : new DurablePreflightException("cleanup");
+        var service = new FakeDurableSchemaCommandService { PreflightException = failure };
+        using var console = new FakeInMemoryConsole();
+
+        var error = await Assert.ThrowsAsync<CommandException>(async () => await CreatePreflightCommand(service).ExecuteAsync(console));
+
+        Assert.Contains($"durable preflight {category} failed", error.Message, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose(secretConnection, error.Message);
+        ValueSafeAssert.DoesNotExpose("configuration-sentinel-detail", error.Message);
+        ValueSafeAssert.DoesNotExpose("server-sentinel-detail", error.Message);
+        ValueSafeAssert.DoesNotExpose("invalid-data-sentinel-detail", error.Message);
+        ValueSafeAssert.DoesNotExpose("invalid-operation-sentinel-detail", error.Message);
+        ValueSafeAssert.DoesNotExpose("timeout-sentinel-detail", error.Message);
+        Assert.Equal(1, service.PreflightCallCount);
+        Assert.True(service.OnlineOperationCalled);
+    }
+
+    [Fact]
+    public async Task Preflight_maps_deadline_cancellation_to_timeout_category_without_details()
+    {
+        const string secretConnection = "Host=secret.example;Password=do-not-print";
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var error = await Assert.ThrowsAsync<CommandException>(async () =>
+            await TestableDurableSchemaOnlineCommand.RunAsync(
+                secretConnection,
+                cancellation.Token,
+                static async (_, token) =>
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                    return true;
+                },
+                preflightDiagnostics: true));
+
+        Assert.Contains("durable preflight timeout failed", error.Message, StringComparison.Ordinal);
+        ValueSafeAssert.DoesNotExpose(secretConnection, error.Message);
+    }
+
+    [Fact]
+    public async Task Preflight_cancelled_before_manifest_read_never_opens_a_provider_or_prints_success()
+    {
+        var service = new FakeDurableSchemaCommandService();
+        var command = CreatePreflightCommand(service);
+        using var console = new FakeInMemoryConsole();
+        _ = console.RegisterCancellationHandler();
+        console.RequestCancellation();
+
+        var error = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(console));
+
+        Assert.Contains("durable preflight timeout failed", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, service.PreflightCallCount);
+        Assert.False(service.OnlineOperationCalled);
+        Assert.Empty(console.ReadOutputString());
+        Assert.DoesNotContain(command.RolePairsFile!, error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(DurableRuntimeSchemaCompatibility.Missing)]
+    [InlineData(DurableRuntimeSchemaCompatibility.UpgradeRequired)]
+    [InlineData(DurableRuntimeSchemaCompatibility.StoreTooNew)]
+    [InlineData(DurableRuntimeSchemaCompatibility.Inconsistent)]
+    public async Task Preflight_provider_schema_exception_preserves_safe_compatibility_diagnostic(
+        DurableRuntimeSchemaCompatibility compatibility)
+    {
+        const string secretConnection = "Host=secret.example;Password=do-not-print";
+        const string serverDetail = "schema-exception-sentinel-845";
+        var status = new DurableRuntimeSchemaStatus(
+            compatibility,
+            Guid.NewGuid(),
+            activeRuntimeEpoch: null,
+            installedVersion: 10,
+            requiredVersion: 11,
+            minimumReaderVersion: 10,
+            maximumReaderVersion: 10,
+            minimumWriterVersion: 10,
+            maximumWriterVersion: 10,
+            appliedVersions: [10],
+            pendingVersions: [11],
+            problem: serverDetail);
+        using var environment = new EnvironmentVariableScope("APPSURFACE_DURABLE_CONNECTION", secretConnection);
+        var service = new FakeDurableSchemaCommandService { PreflightException = new DurableRuntimeSchemaException(status) };
+        using var console = new FakeInMemoryConsole();
+
+        var error = await Assert.ThrowsAsync<CommandException>(async () => await CreatePreflightCommand(service).ExecuteAsync(console));
+
+        Assert.Contains($"preflight is {compatibility}", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(secretConnection, error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(serverDetail, error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("structural preflight failed", error.Message, StringComparison.Ordinal);
+        Assert.Empty(console.ReadOutputString());
+        Assert.Equal(1, service.PreflightCallCount);
     }
 
     [Fact]
@@ -157,7 +305,7 @@ public sealed class DurableSchemaCommandTests
         Assert.False(service.OnlineOperationCalled);
 
         using var directory = DurableTestDirectory.Create("appsurface-durable-schema-");
-        var path = Path.Join(directory.Path, "reviewed.sql");
+        var path = TestPathUtils.PathUnder(directory.Path, "reviewed.sql");
         await File.WriteAllTextAsync(path, "existing");
         command.OutputPath = path;
 
@@ -329,7 +477,7 @@ public sealed class DurableSchemaCommandTests
     {
         Assert.Equal(
             new[] { "catalog_result" },
-            DurableSchemaCommandService.MapRetentionPreflightResult(result));
+            DurableSchemaPreflightVerifier.MapCatalogResult(result, CreatePreflightRequest()));
     }
 
     [Fact]
@@ -337,7 +485,7 @@ public sealed class DurableSchemaCommandTests
     {
         var failures = new[] { "function_acl", "retention_index" };
 
-        Assert.Same(failures, DurableSchemaCommandService.MapRetentionPreflightResult(failures));
+        Assert.Equal(failures, DurableSchemaPreflightVerifier.MapCatalogResult(failures, CreatePreflightRequest()));
     }
 
     [Fact]
@@ -353,13 +501,17 @@ public sealed class DurableSchemaCommandTests
         using var preflightConsole = new FakeInMemoryConsole();
 
         await new DurableSchemaStatusCommand(service).ExecuteAsync(statusConsole);
-        await new DurableSchemaPreflightCommand(service).ExecuteAsync(preflightConsole);
+        await CreatePreflightCommand(service).ExecuteAsync(preflightConsole);
 
         Assert.Contains("Compatibility: Compatible", statusConsole.ReadOutputString(), StringComparison.Ordinal);
         Assert.Contains("Installed: 6", statusConsole.ReadOutputString(), StringComparison.Ordinal);
         Assert.Contains("Required: 6", statusConsole.ReadOutputString(), StringComparison.Ordinal);
         Assert.Contains("Pending: none", statusConsole.ReadOutputString(), StringComparison.Ordinal);
         Assert.Contains("Compatible: durable schema 6; runtime requires 6.", preflightConsole.ReadOutputString(), StringComparison.Ordinal);
+        Assert.Contains("caller=runtime; pair=1; role=\"appsurface_durable_runtime\"; owner=\"durable_migration_owner\"; runtimes=1;", preflightConsole.ReadOutputString(), StringComparison.Ordinal);
+        Assert.Contains("active_epoch=null", preflightConsole.ReadOutputString(), StringComparison.Ordinal);
+        Assert.Equal(1, service.PreflightCallCount);
+        Assert.Equal("durable_migration_owner", service.PreflightRequest?.MigrationOwnerRole);
         ValueSafeAssert.DoesNotExpose(secretConnection, statusConsole.ReadOutputString());
         ValueSafeAssert.DoesNotExpose(secretConnection, preflightConsole.ReadOutputString());
     }
@@ -436,7 +588,7 @@ public sealed class DurableSchemaCommandTests
     public async Task Script_output_cancellation_publishes_no_destination_or_temporary_file()
     {
         using var directory = DurableTestDirectory.Create("appsurface-durable-schema-canceled-");
-        var path = Path.Join(directory.Path, "canceled.sql");
+        var path = TestPathUtils.PathUnder(directory.Path, "canceled.sql");
         using var cancellationSource = new CancellationTokenSource();
         cancellationSource.Cancel();
 
@@ -452,8 +604,8 @@ public sealed class DurableSchemaCommandTests
     public async Task Script_output_pre_cancellation_does_not_create_a_missing_parent_directory()
     {
         using var directory = DurableTestDirectory.Create("appsurface-durable-schema-canceled-parent-");
-        var missingParent = Path.Join(directory.Path, "missing");
-        var path = Path.Join(missingParent, "canceled.sql");
+        var missingParent = TestPathUtils.PathUnder(directory.Path, "missing");
+        var path = TestPathUtils.PathUnder(missingParent, "canceled.sql");
         using var cancellationSource = new CancellationTokenSource();
         cancellationSource.Cancel();
 
@@ -468,7 +620,7 @@ public sealed class DurableSchemaCommandTests
     public async Task Script_output_force_publishes_only_complete_scripts_when_two_writers_race()
     {
         using var directory = DurableTestDirectory.Create("appsurface-durable-schema-race-");
-        var path = Path.Join(directory.Path, "reviewed.sql");
+        var path = TestPathUtils.PathUnder(directory.Path, "reviewed.sql");
         await File.WriteAllTextAsync(path, "original");
         const string firstScript = "SELECT 'first';\n";
         const string secondScript = "SELECT 'second';\n";
@@ -545,7 +697,7 @@ public sealed class DurableSchemaCommandTests
     public async Task Script_output_without_force_preserves_a_target_created_before_publication()
     {
         using var directory = DurableTestDirectory.Create("appsurface-durable-schema-target-race-");
-        var path = Path.Join(directory.Path, "reviewed.sql");
+        var path = TestPathUtils.PathUnder(directory.Path, "reviewed.sql");
         using var publishHook = DurableSchemaScriptOutput.UseTemporaryFileWrittenHookForTesting(
             () => File.WriteAllText(path, "concurrent target"));
 
@@ -561,7 +713,7 @@ public sealed class DurableSchemaCommandTests
     public async Task Script_output_cancellation_after_temporary_write_preserves_the_existing_target()
     {
         using var directory = DurableTestDirectory.Create("appsurface-durable-schema-post-write-cancel-");
-        var path = Path.Join(directory.Path, "reviewed.sql");
+        var path = TestPathUtils.PathUnder(directory.Path, "reviewed.sql");
         await File.WriteAllTextAsync(path, "existing");
         using var cancellationSource = new CancellationTokenSource();
         using var publishHook = DurableSchemaScriptOutput.UseTemporaryFileWrittenHookForTesting(cancellationSource.Cancel);
@@ -578,7 +730,7 @@ public sealed class DurableSchemaCommandTests
     public async Task Script_output_directory_destination_reports_a_safe_failure_without_orphaning_a_temporary_file()
     {
         using var directory = DurableTestDirectory.Create("appsurface-durable-schema-directory-");
-        var outputDirectory = Path.Join(directory.Path, "directory-output");
+        var outputDirectory = TestPathUtils.PathUnder(directory.Path, "directory-output");
         Directory.CreateDirectory(outputDirectory);
 
         var error = await Assert.ThrowsAsync<CommandException>(
@@ -604,7 +756,7 @@ public sealed class DurableSchemaCommandTests
         await Assert.ThrowsAsync<ArgumentNullException>(async () => await new DurableSchemaStatusCommand(service).ExecuteAsync(nullConsole));
         await Assert.ThrowsAsync<ArgumentNullException>(async () => await new DurableSchemaScriptCommand(service).ExecuteAsync(nullConsole));
         await Assert.ThrowsAsync<ArgumentNullException>(async () => await new DurableSchemaApplyCommand(service).ExecuteAsync(nullConsole));
-        await Assert.ThrowsAsync<ArgumentNullException>(async () => await new DurableSchemaPreflightCommand(service).ExecuteAsync(nullConsole));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await CreatePreflightCommand(service).ExecuteAsync(nullConsole));
     }
 
     [Fact]
@@ -742,147 +894,18 @@ public sealed class DurableSchemaCommandTests
         Assert.Equal(DurableRuntimeSchemaCompatibility.Compatible, compatible.Compatibility);
     }
 
-    [Fact]
-    public async Task Retention_structural_preflight_passes_for_migration_owner_and_runtime_credentials()
-    {
-        await using var container = new PostgreSqlBuilder(
-                "postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877")
-            .WithDatabase("appsurface_durable")
-            .WithUsername("appsurface")
-            .WithPassword("appsurface-test-password")
-            .Build();
-        await container.StartAsync();
-
-        await using var ownerDataSource = NpgsqlDataSource.Create(container.GetConnectionString());
-        await new PostgreSqlDurableRuntimeSchemaManager(ownerDataSource).ApplyAsync();
-        await using (var configure = ownerDataSource.CreateCommand(
-            """
-            CREATE ROLE durable_preflight_owner NOLOGIN;
-            CREATE ROLE durable_preflight_runtime LOGIN PASSWORD 'durable-preflight-test-password';
-            ALTER SCHEMA appsurface_durable OWNER TO durable_preflight_owner;
-            ALTER TABLE appsurface_durable.runtime_heartbeat OWNER TO durable_preflight_owner;
-            ALTER FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)
-                OWNER TO durable_preflight_owner;
-            ALTER POLICY runtime_heartbeat_runtime_role ON appsurface_durable.runtime_heartbeat
-                TO durable_preflight_runtime;
-            DROP POLICY runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat;
-            CREATE POLICY runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat
-                FOR ALL TO durable_preflight_owner USING (true) WITH CHECK (true);
-            REVOKE ALL ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)
-                FROM PUBLIC;
-            GRANT EXECUTE ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)
-                TO durable_preflight_runtime;
-            """))
-        {
-            await configure.ExecuteNonQueryAsync();
-        }
-
-        var runtimeConnection = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
-        {
-            Username = "durable_preflight_runtime",
-            Password = "durable-preflight-test-password",
-        };
-        var service = new DurableSchemaCommandService();
-
-        Assert.Empty(await service.VerifyRetentionPreflightAsync(container.GetConnectionString(), CancellationToken.None));
-        Assert.Empty(await service.VerifyRetentionPreflightAsync(runtimeConnection.ConnectionString, CancellationToken.None));
-    }
-
     [Theory]
-    [InlineData("DROP FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid); CREATE PROCEDURE appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) LANGUAGE sql AS 'SELECT 0;'; ALTER PROCEDURE appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) OWNER TO durable_preflight_owner; GRANT EXECUTE ON PROCEDURE appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) TO durable_preflight_runtime;", "function_signature")]
-    [InlineData("DROP FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid); CREATE FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) RETURNS bigint LANGUAGE sql AS 'SELECT 0::bigint;' SECURITY DEFINER SET search_path = pg_catalog, appsurface_durable, pg_temp; ALTER FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) OWNER TO durable_preflight_owner; GRANT EXECUTE ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) TO durable_preflight_runtime;", "function_signature")]
-    [InlineData("DROP FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid); CREATE FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) RETURNS SETOF integer LANGUAGE sql AS 'SELECT 0;' SECURITY DEFINER SET search_path = pg_catalog, appsurface_durable, pg_temp; ALTER FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) OWNER TO durable_preflight_owner; GRANT EXECUTE ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) TO durable_preflight_runtime;", "function_signature")]
-    public async Task Retention_preflight_rejects_prune_routine_signature_drift(string mutation, string expectedFailure)
-    {
-        await AssertRetentionPreflightRejectsAsync(mutation, expectedFailure);
-    }
-
-    [Theory]
-    [InlineData("last_heartbeat_at ASC, worker_id DESC")]
-    [InlineData("last_heartbeat_at DESC, worker_id ASC")]
-    public async Task Retention_preflight_rejects_descending_index_key(string keyOrder)
-    {
-        await AssertRetentionPreflightRejectsAsync(
-            $"DROP INDEX appsurface_durable.ix_runtime_heartbeat_retention; CREATE INDEX ix_runtime_heartbeat_retention ON appsurface_durable.runtime_heartbeat ({keyOrder});",
-            "retention_index");
-    }
-
-    [Fact]
-    public async Task Retention_preflight_rejects_rls_disabled_even_when_force_remains_enabled()
-    {
-        await AssertRetentionPreflightRejectsAsync(
-            "ALTER TABLE appsurface_durable.runtime_heartbeat DISABLE ROW LEVEL SECURITY;",
-            "forced_rls");
-    }
-
-    [Theory]
-    [InlineData("ALTER ROLE durable_preflight_runtime SUPERUSER;", "runtime_role")]
-    [InlineData("ALTER ROLE durable_preflight_runtime BYPASSRLS;", "runtime_role")]
-    public async Task Retention_preflight_rejects_elevated_runtime_role(string mutation, string expectedFailure)
-    {
-        await AssertRetentionPreflightRejectsAsync(mutation, expectedFailure);
-    }
-
-    [Theory]
-    [InlineData("GRANT DELETE ON appsurface_durable.runtime_heartbeat TO durable_preflight_runtime;", "runtime_table_privileges")]
-    [InlineData("GRANT TRUNCATE ON appsurface_durable.runtime_heartbeat TO durable_preflight_runtime;", "runtime_table_privileges")]
-    [InlineData("GRANT DELETE ON appsurface_durable.runtime_heartbeat TO PUBLIC;", "runtime_table_privileges")]
+    [InlineData("ALTER FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) RENAME TO wrong_prune;", "function_signature")]
+    [InlineData("DROP INDEX appsurface_durable.ix_runtime_heartbeat_retention;", "retention_index")]
+    [InlineData("ALTER TABLE appsurface_durable.runtime_heartbeat DISABLE ROW LEVEL SECURITY;", "forced_rls")]
+    [InlineData("ALTER ROLE preflight_runtime_a SUPERUSER;", "runtime_role")]
+    [InlineData("GRANT DELETE ON appsurface_durable.runtime_heartbeat TO preflight_runtime_a;", "runtime_table_privileges")]
     [InlineData("GRANT TRUNCATE ON appsurface_durable.runtime_heartbeat TO PUBLIC;", "runtime_table_privileges")]
-    public async Task Retention_preflight_rejects_effective_runtime_delete_or_truncate_privilege(string mutation, string expectedFailure)
+    public async Task Preflight_preserves_existing_signature_index_rls_role_and_delete_guards(string mutation, string expectedFailure)
     {
-        await AssertRetentionPreflightRejectsAsync(mutation, expectedFailure);
-    }
+        var result = await DurableSchemaPreflightIntegrationTests.RunSinglePairMutationAsync(mutation);
 
-    private static async Task AssertRetentionPreflightRejectsAsync(string mutation, string expectedFailure)
-    {
-        await using var container = new PostgreSqlBuilder(
-                "postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877")
-            .WithDatabase("appsurface_durable")
-            .WithUsername("appsurface")
-            .WithPassword("appsurface-test-password")
-            .Build();
-        await container.StartAsync();
-
-        await using var ownerDataSource = NpgsqlDataSource.Create(container.GetConnectionString());
-        await new PostgreSqlDurableRuntimeSchemaManager(ownerDataSource).ApplyAsync();
-        await using (var configure = ownerDataSource.CreateCommand(
-            """
-            CREATE ROLE durable_preflight_owner NOLOGIN;
-            CREATE ROLE durable_preflight_runtime LOGIN PASSWORD 'durable-preflight-test-password';
-            ALTER SCHEMA appsurface_durable OWNER TO durable_preflight_owner;
-            ALTER TABLE appsurface_durable.runtime_heartbeat OWNER TO durable_preflight_owner;
-            ALTER FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)
-                OWNER TO durable_preflight_owner;
-            ALTER POLICY runtime_heartbeat_runtime_role ON appsurface_durable.runtime_heartbeat
-                TO durable_preflight_runtime;
-            DROP POLICY runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat;
-            CREATE POLICY runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat
-                FOR ALL TO durable_preflight_owner USING (true) WITH CHECK (true);
-            REVOKE ALL ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)
-                FROM PUBLIC;
-            GRANT EXECUTE ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)
-                TO durable_preflight_runtime;
-            """))
-        {
-            await configure.ExecuteNonQueryAsync();
-        }
-
-        await using (var mutate = ownerDataSource.CreateCommand(mutation))
-        {
-            await mutate.ExecuteNonQueryAsync();
-        }
-
-        var service = new DurableSchemaCommandService();
-        var ownerFailures = await service.VerifyRetentionPreflightAsync(container.GetConnectionString(), CancellationToken.None);
-        var runtimeConnection = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
-        {
-            Username = "durable_preflight_runtime",
-            Password = "durable-preflight-test-password",
-        };
-        var runtimeFailures = await service.VerifyRetentionPreflightAsync(runtimeConnection.ConnectionString, CancellationToken.None);
-
-        Assert.Contains(expectedFailure, ownerFailures);
-        Assert.Contains(expectedFailure, runtimeFailures);
+        Assert.Contains(expectedFailure, result.FailedChecks.Select(DurableSchemaPreflightIntegrationTests.CategoryOf), StringComparer.Ordinal);
     }
 
     [Theory]
@@ -942,9 +965,13 @@ public sealed class DurableSchemaCommandTests
 
         internal Exception? ApplyException { get; set; }
 
-        internal IReadOnlyList<string> RetentionStructureFailures { get; set; } = [];
+        internal Exception? PreflightException { get; set; }
 
-        internal bool RetentionPreflightCalled { get; private set; }
+        internal IReadOnlyList<string> PreflightFailures { get; set; } = [];
+
+        internal int PreflightCallCount { get; private set; }
+
+        internal DurablePreflightRequest? PreflightRequest { get; private set; }
 
         internal string? ConnectionString { get; private set; }
 
@@ -970,12 +997,26 @@ public sealed class DurableSchemaCommandTests
             return Script;
         }
 
-        public ValueTask<IReadOnlyList<string>> VerifyRetentionPreflightAsync(string connectionString, CancellationToken cancellationToken)
+        public ValueTask<DurablePreflightResult> PreflightAsync(string connectionString, DurablePreflightRequest request, CancellationToken cancellationToken)
         {
             ConnectionString = connectionString;
             CancellationToken = cancellationToken;
-            RetentionPreflightCalled = true;
-            return ValueTask.FromResult(RetentionStructureFailures);
+            PreflightRequest = request;
+            PreflightCallCount++;
+            OnlineOperationCalled = true;
+            if (PreflightException is not null)
+            {
+                return ValueTask.FromException<DurablePreflightResult>(PreflightException);
+            }
+            var runtime = request.Manifest.Pairs[0].Runtime;
+            return ValueTask.FromResult(new DurablePreflightResult(
+                Status,
+                Guid.Parse("11111111-2222-3333-4444-555555555555"),
+                null,
+                "runtime",
+                runtime,
+                1,
+                PreflightFailures));
         }
 
         public ValueTask<DurableSchemaApplyView> ApplyAsync(string connectionString, CancellationToken cancellationToken)
@@ -989,6 +1030,22 @@ public sealed class DurableSchemaCommandTests
         }
     }
 
+    private static DurableSchemaPreflightCommand CreatePreflightCommand(IDurableSchemaCommandService service)
+    {
+        var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        return new DurableSchemaPreflightCommand(service)
+        {
+            RolePairsFile = TestPathUtils.PathUnder(repositoryRoot, "examples", "durable-postgresql", "role-pairs-full.example.json"),
+            MigrationOwnerRole = "durable_migration_owner",
+        };
+    }
+
+    private static DurablePreflightRequest CreatePreflightRequest()
+    {
+        const string json = "{\"version\":1,\"pairs\":[{\"dispatcher\":\"dispatcher\",\"runtime\":\"runtime\",\"dispatcher_profile\":\"full\"}]}";
+        return new DurablePreflightRequest(DurableRoleManifest.Parse(Encoding.UTF8.GetBytes(json)), "migration_owner");
+    }
+
     private sealed class TestableDurableSchemaOnlineCommand(IDurableSchemaCommandService service)
         : DurableSchemaOnlineCommandBase(service)
     {
@@ -998,8 +1055,9 @@ public sealed class DurableSchemaCommandTests
             string connectionString,
             CancellationToken cancellationToken,
             Func<string, CancellationToken, ValueTask<T>> operation,
-            TimeSpan? operationTimeout = null) =>
-            RunOnlineAsync(connectionString, cancellationToken, operation, operationTimeout);
+            TimeSpan? operationTimeout = null,
+            bool preflightDiagnostics = false) =>
+            RunOnlineAsync(connectionString, cancellationToken, operation, operationTimeout, preflightDiagnostics);
     }
 
     private sealed class DurableTestDirectory(string path) : IDisposable
