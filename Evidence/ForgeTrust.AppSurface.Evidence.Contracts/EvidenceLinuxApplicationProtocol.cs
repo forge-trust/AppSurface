@@ -41,7 +41,7 @@ internal sealed record EvidenceLinuxApplicationBundleFile(string RelativePath, E
 /// <param name="ReadOnlyInputs">Exactly one declared immutable bundle name.</param>
 /// <param name="ScratchBytes">Positive scratch allowance, at most 1 GiB.</param>
 /// <param name="MemoryBytes">Positive memory allowance, at most 1 GiB.</param>
-/// <param name="MaximumTasks">Positive task allowance, at most 64.</param>
+/// <param name="MaximumTasks">Positive process/thread allowance, at most 128.</param>
 /// <param name="MaximumOutputBytes">Positive received-output allowance, at most 1 MiB.</param>
 /// <param name="StartSeconds">Positive startup cap, at most 120 seconds.</param>
 /// <param name="StoppingSeconds">Positive stop cap, at most 30 seconds.</param>
@@ -234,10 +234,20 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor
     private async Task<JsonElement> RequestApplicationAsync<T>(T request, CancellationToken cancellationToken)
     {
         try { return await RequestAsync(request, cancellationToken).ConfigureAwait(false); }
-        catch (EvidenceAdmissionException error) when (error.Code == "ASEVD420") { throw ApplicationFailure("ASEVD410"); }
+        catch (EvidenceAdmissionException error) { throw NormalizeApplicationRequestFailure(error); }
         catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException
-            or FormatException or OverflowException or SocketException or IOException) { throw ApplicationFailure("ASEVD410"); }
+            or FormatException or OverflowException or SocketException or IOException) { throw NormalizeApplicationRequestFailure(error); }
     }
+
+    /// <summary>Preserves authenticated-channel diagnostics before normalizing application wire failures.</summary>
+    /// <param name="error">A failure already caught by the private application request path.</param>
+    /// <returns>The original admission exception, except for broker output rejection, or fixed ASEVD410.</returns>
+    /// <remarks>This data-only helper grants no channel, supervisor or execution authority. Admission exceptions
+    /// derive from InvalidOperationException and must be classified before that broader wire-error family.</remarks>
+    internal static EvidenceAdmissionException NormalizeApplicationRequestFailure(Exception error) =>
+        error is EvidenceAdmissionException admission && admission.Code != "ASEVD420"
+            ? admission
+            : ApplicationFailure("ASEVD410");
 
     private static EvidenceResourceDeclaration ParseApplicationResource(JsonElement value)
     {
@@ -330,7 +340,7 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor
         var inputs = ApplicationList(value.GetProperty("read_only_inputs"), 1, static item => ApplicationText(item, 256));
         ApplicationRequire(inputs.Count == 1 && inputs.All(ApplicationRelative));
         return new(inputs, ApplicationLong(value, "scratch_bytes", 1, 1024L * 1024 * 1024),
-            ApplicationLong(value, "memory_bytes", 1, 1024L * 1024 * 1024), (int)ApplicationLong(value, "maximum_tasks", 1, 64),
+            ApplicationLong(value, "memory_bytes", 1, 1024L * 1024 * 1024), (int)ApplicationLong(value, "maximum_tasks", 1, 128),
             ApplicationLong(value, "maximum_output_bytes", 1, 1024 * 1024), (int)ApplicationLong(value, "start_seconds", 1, 120),
             (int)ApplicationLong(value, "stopping_seconds", 1, 30));
     }

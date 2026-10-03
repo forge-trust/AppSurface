@@ -54,7 +54,7 @@ internal sealed record EvidenceClosedProducerRegistration(
 /// <param name="ReadOnlyInputs">Exact declared-input bundle names; no ambient or absolute path grant.</param>
 /// <param name="ScratchBytes">Positive writable-scratch allowance, at most 1 GiB.</param>
 /// <param name="MemoryBytes">Positive memory allowance, at most 1 GiB.</param>
-/// <param name="MaximumTasks">Positive process/thread allowance, at most 64.</param>
+/// <param name="MaximumTasks">Positive process/thread allowance, at most 128.</param>
 /// <param name="MaximumOutputBytes">Positive received-output allowance, at most 1 MiB.</param>
 /// <param name="StartSeconds">Positive application startup cap, at most 120 seconds.</param>
 /// <param name="StoppingSeconds">Positive fresh stop cap, at most 30 seconds.</param>
@@ -360,7 +360,7 @@ internal static partial class EvidenceClosedApplicationCatalogue
     {
         Require(value is not null && Count(value.ReadOnlyInputs, 1) && value.ReadOnlyInputs.Count == 1 && value.ReadOnlyInputs.All(Relative)
             && value.ScratchBytes is > 0 and <= 1024L * 1024 * 1024 && value.MemoryBytes is > 0 and <= 1024L * 1024 * 1024
-            && value.MaximumTasks is > 0 and <= 64 && value.MaximumOutputBytes is > 0 and <= 1024 * 1024
+            && value.MaximumTasks is > 0 and <= 128 && value.MaximumOutputBytes is > 0 and <= 1024 * 1024
             && value.StartSeconds is > 0 and <= 120 && value.StoppingSeconds is > 0 and <= 30);
     }
 

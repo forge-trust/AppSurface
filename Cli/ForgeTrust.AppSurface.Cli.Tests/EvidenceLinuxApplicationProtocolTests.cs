@@ -11,6 +11,35 @@ public sealed class EvidenceLinuxApplicationProtocolTests
     private const string Lease = "0123456789abcdef0123456789abcdef";
     private const long GiB = 1024L * 1024 * 1024;
 
+    [Theory]
+    [InlineData("ASEVD402")]
+    [InlineData("ASEVD410")]
+    public void ApplicationRequestPreservesAdmissionFailuresDespiteInvalidOperationInheritance(string code)
+    {
+        var failure = new EvidenceAdmissionException(code, "Protected channel failure.");
+        Assert.IsAssignableFrom<InvalidOperationException>(failure);
+        Assert.Same(failure, EvidenceLinuxWorkerSupervisor.NormalizeApplicationRequestFailure(failure));
+    }
+
+    [Fact]
+    public void ApplicationRequestNormalizesBrokerOutputRejectionWithoutRetainingSuppliedValues()
+    {
+        var failure = EvidenceLinuxWorkerSupervisor.NormalizeApplicationRequestFailure(
+            new EvidenceAdmissionException("ASEVD420", Canary));
+        Assert.Equal("ASEVD410", failure.Code);
+        Assert.DoesNotContain(Canary, failure.Message);
+        Assert.Null(failure.InnerException);
+    }
+
+    [Fact]
+    public void ApplicationRequestNormalizesUnclassifiedInvalidOperationWithoutAnAdmissionCode()
+    {
+        var failure = EvidenceLinuxWorkerSupervisor.NormalizeApplicationRequestFailure(new InvalidOperationException(Canary));
+        Assert.Equal("ASEVD410", failure.Code);
+        Assert.DoesNotContain(Canary, failure.Message);
+        Assert.Null(failure.InnerException);
+    }
+
     [Fact]
     public void CompleteDescriptorPreservesAllDeclarationsAndNineClosedBundleRolesAfterJsonDisposal()
     {
@@ -85,7 +114,7 @@ public sealed class EvidenceLinuxApplicationProtocolTests
         for (var i = 0; i < 3; i++) files[i]!["length_bytes"] = 128L * 1024 * 1024;
         files[3]!["length_bytes"] = 128L * 1024 * 1024 - 252;
         Put(json, "capabilities.scratch_bytes", GiB); Put(json, "capabilities.memory_bytes", GiB);
-        Put(json, "capabilities.maximum_tasks", 64); Put(json, "capabilities.maximum_output_bytes", 1024 * 1024);
+        Put(json, "capabilities.maximum_tasks", 128); Put(json, "capabilities.maximum_output_bytes", 1024 * 1024);
         Put(json, "capabilities.start_seconds", 120); Put(json, "capabilities.stopping_seconds", 30);
 
         var descriptor = Parse(json);
@@ -99,8 +128,29 @@ public sealed class EvidenceLinuxApplicationProtocolTests
         Assert.Equal(512L * 1024 * 1024, descriptor.BundleFiles.Sum(static item => item.LengthBytes));
         Assert.Equal(GiB, descriptor.Capabilities.MemoryBytes);
         Assert.Equal(GiB, descriptor.Capabilities.ScratchBytes);
+        Assert.Equal(128, descriptor.Capabilities.MaximumTasks);
         Assert.Equal(120, descriptor.Capabilities.StartSeconds);
         Assert.Equal(30, descriptor.Capabilities.StoppingSeconds);
+    }
+
+    [Fact]
+    public void ExactTaskCeilingIsAcceptedAndDefensivelyCaptured()
+    {
+        var json = DescriptorJson();
+        var descriptor = Parse(json);
+
+        Put(json, "capabilities.maximum_tasks", 129);
+
+        Assert.Equal(128, descriptor.Capabilities.MaximumTasks);
+    }
+
+    [Fact]
+    public void OneTaskAboveCeilingRejectsDescriptorWithFixedDiagnostic()
+    {
+        var json = DescriptorJson();
+        Put(json, "capabilities.maximum_tasks", 129);
+
+        RejectDescriptor(json);
     }
 
     [Theory]
@@ -173,7 +223,7 @@ public sealed class EvidenceLinuxApplicationProtocolTests
     [InlineData("capabilities.memory_bytes", 0)]
     [InlineData("capabilities.memory_bytes", GiB + 1)]
     [InlineData("capabilities.maximum_tasks", 0)]
-    [InlineData("capabilities.maximum_tasks", 65)]
+    [InlineData("capabilities.maximum_tasks", 129)]
     [InlineData("capabilities.maximum_output_bytes", 0)]
     [InlineData("capabilities.maximum_output_bytes", 1024 * 1024 + 1)]
     [InlineData("capabilities.start_seconds", 0)]
@@ -417,7 +467,7 @@ public sealed class EvidenceLinuxApplicationProtocolTests
                 File("dcp/dcp", "dcp", 365), File("dcp/ext/native-extension", "dcp_extension", 365), File("dependency/helper.dll", "dependency"),
                 File("proof-input/declared.txt", "declared_input"), File("apphost/AppHost.deps.json", "dependency_manifest")),
             ["capabilities"] = new JsonObject { ["read_only_inputs"] = new JsonArray("proof-input/declared.txt"), ["scratch_bytes"] = 1024 * 1024,
-                ["memory_bytes"] = 1024 * 1024, ["maximum_tasks"] = 64, ["maximum_output_bytes"] = 1024 * 1024, ["start_seconds"] = 30, ["stopping_seconds"] = 5 },
+                ["memory_bytes"] = 1024 * 1024, ["maximum_tasks"] = 128, ["maximum_output_bytes"] = 1024 * 1024, ["start_seconds"] = 30, ["stopping_seconds"] = 5 },
             ["application_uid"] = 1003, ["application_gid"] = 1003, ["results_gid"] = 2001, ["resource_access_gid"] = 2002,
         };
     }

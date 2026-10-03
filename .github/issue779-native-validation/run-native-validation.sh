@@ -37,6 +37,8 @@ export UseSharedCompilation=false MSBUILDDISABLENODEREUSE=1
 python3 -B tests/evidencehost-consumer/test_linux_launcher.py 2>&1 | tee "$task_receipts/launcher.log"
 python3 -B tests/evidencehost-consumer/test_runtime_proof.py 2>&1 | tee "$task_receipts/proof-driver.log"
 python3 -B tests/evidencehost-consumer/test_execution_broker_fixture.py 2>&1 | tee "$task_receipts/broker-descriptor.log"
+python3 -B tests/evidencehost-consumer/test_linux_application.py 2>&1 | tee "$task_receipts/application-module-portable.log"
+python3 -B tests/evidencehost-consumer/test_control_protocol_fixture.py 2>&1 | tee "$task_receipts/control-fixture-portable.log"
 dotnet restore ForgeTrust.AppSurface.slnx --locked-mode 2>&1 | tee "$task_receipts/restore.log"
 dotnet restore tests/evidencehost-consumer/LifecycleWorker/LifecycleWorker.csproj --locked-mode 2>&1 | tee "$task_receipts/lifecycle-restore.log"
 dotnet restore tests/evidencehost-consumer/ControlProtocolWorker/ControlProtocolWorker.csproj --locked-mode 2>&1 | tee "$task_receipts/control-restore.log"

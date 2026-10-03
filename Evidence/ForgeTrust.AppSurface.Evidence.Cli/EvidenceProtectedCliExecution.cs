@@ -72,12 +72,13 @@ internal static class EvidenceProtectedCliExecution
                     ?? new EvidenceAdmissionException("ASEVD403", "Protected input resolution failed.");
             var inputs = resolved.Value;
             var plan = inputs.Plan;
-            var stages = new List<EvidenceRunStageDeadline>
-            {
-                new(EvidenceRunStage.Admission, TimeSpan.FromSeconds(descriptor.AdmissionSeconds)),
-                new(EvidenceRunStage.Admission, TimeSpan.FromSeconds(descriptor.AdmissionSeconds)), // allocation/activation
-            };
-            stages.AddRange(plan.Profile.Producers.Select(static producer => new EvidenceRunStageDeadline(EvidenceRunStage.Producer, TimeSpan.FromSeconds(producer.TimeoutSeconds))));
+            // Parsing application metadata does not enroll a registration. Resolve the same
+            // compile-owned definition used by Aspire before admission or application I/O.
+            var application = descriptor.Application is null ? null
+                : EvidenceClosedApplicationCatalogue.Resolve(inputs.Policy, plan, descriptor);
+            int? applicationStartSeconds = application is null ? null
+                : Math.Min(descriptor.StartSeconds, application.Capabilities.StartSeconds);
+            var stages = CreateDeclaredStages(plan.Profile, descriptor.AdmissionSeconds, applicationStartSeconds);
             if (!EvidenceRunTimeBudget.TryCreateFromAllowance(clock, worker.JobRemaining, stages,
                 TimeSpan.FromSeconds(descriptor.CollectionSeconds), TimeSpan.FromSeconds(descriptor.CleanupSeconds),
                 TimeSpan.FromSeconds(descriptor.StoppingSeconds), out var budget))
@@ -119,6 +120,10 @@ internal static class EvidenceProtectedCliExecution
                 ReportAllocationFailure(execution, allocated.Outcome, phase, operation, diagnosticSink);
                 throw new EvidenceAdmissionException("ASEVD409", "Fresh output allocation or activation failed.");
             }
+
+            if (application is not null)
+                await RunApplicationStagesAsync(worker, admission, plan, execution, budget,
+                    application, callerCancellation).ConfigureAwait(false);
 
             var results = new List<EvidenceProducerResult>();
             var writers = new List<EvidenceArtifactWriter>();
@@ -214,6 +219,71 @@ internal static class EvidenceProtectedCliExecution
         {
             // Production FailFast never unwinds this finally; a live callback cannot race handle disposal.
             if (root is not null && execution.OwnWorkStopped) await root.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Lists serial CLI work before any allocation, startup or producer callback is admitted.</summary>
+    /// <param name="profile">Protected resolved resource and producer declarations.</param>
+    /// <param name="admissionSeconds">Admission and fresh allocation limits, charged separately.</param>
+    /// <param name="applicationStartSeconds">Resolved application startup limit; null retains the v1 producer-only schedule.</param>
+    /// <returns>A copied read-only schedule; this metadata grants no registration or execution authority.</returns>
+    /// <remarks>The existing run budget validates every bound and preserves collection/cleanup reserves.</remarks>
+    internal static IReadOnlyList<EvidenceRunStageDeadline> CreateDeclaredStages(EvidenceProfile profile,
+        int admissionSeconds, int? applicationStartSeconds)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        var stages = new List<EvidenceRunStageDeadline>
+        {
+            new(EvidenceRunStage.Admission, TimeSpan.FromSeconds(admissionSeconds)),
+            new(EvidenceRunStage.Admission, TimeSpan.FromSeconds(admissionSeconds)),
+        };
+        if (applicationStartSeconds is { } startSeconds)
+        {
+            stages.Add(new(EvidenceRunStage.Start, TimeSpan.FromSeconds(startSeconds)));
+            stages.AddRange(profile.Resources.Select(static resource =>
+                new EvidenceRunStageDeadline(EvidenceRunStage.Resource, TimeSpan.FromSeconds(resource.DeadlineSeconds))));
+        }
+        stages.AddRange(profile.Producers.Select(static producer =>
+            new EvidenceRunStageDeadline(EvidenceRunStage.Producer, TimeSpan.FromSeconds(producer.TimeoutSeconds))));
+        return Array.AsReadOnly(stages.ToArray());
+    }
+
+    private static async Task RunApplicationStagesAsync(EvidenceLinuxWorkerSupervisor worker,
+        EvidenceAdmissionResult admission, EvidencePlan plan, EvidenceWorkerExecution execution,
+        EvidenceRunTimeBudget budget, EvidenceClosedApplicationDefinition application,
+        CancellationToken callerCancellation)
+    {
+        if (!budget.TryBeginNextStage(callerCancellation, out var stage) || stage!.Stage != EvidenceRunStage.Start)
+            throw new EvidenceAdmissionException("ASEVD421", "The protected application startup reserve is exhausted.");
+        var started = await execution.ExecuteAsync(EvidenceRunStage.Start, stage.Duration, async token =>
+        {
+            admission.ValidateActive(plan);
+            // The supervisor claims and retains the pending attempt before root I/O.
+            // Existing stop/wait owns its physical exit even if this await fails.
+            var receipt = await worker.StartApplicationAsync(application.Id,
+                EvidenceClosedApplicationCatalogue.ComputeEntryDigest(application), token).ConfigureAwait(false);
+            admission.ValidateActive(plan);
+            return receipt;
+        }, callerCancellation).ConfigureAwait(false);
+        budget.CompleteCurrentStage();
+        if (started.Outcome != EvidenceWorkerStageOutcome.Passed || started.Value is null)
+            throw new EvidenceAdmissionException("ASEVD410", "Protected application startup did not complete.");
+
+        foreach (var resource in plan.Profile.Resources)
+        {
+            if (!budget.TryBeginNextStage(callerCancellation, out stage) || stage!.Stage != EvidenceRunStage.Resource)
+                throw new EvidenceAdmissionException("ASEVD421", "The protected resource readiness reserve is exhausted.");
+            var ready = await execution.ExecuteAsync(EvidenceRunStage.Resource, stage.Duration, async token =>
+            {
+                admission.ValidateActive(plan);
+                var receipt = await worker.WaitForApplicationResourceAsync(started.Value.LeaseId,
+                    resource.Id, token).ConfigureAwait(false);
+                admission.ValidateActive(plan);
+                return receipt;
+            }, callerCancellation).ConfigureAwait(false);
+            budget.CompleteCurrentStage();
+            if (ready.Outcome != EvidenceWorkerStageOutcome.Passed || ready.Value is null)
+                throw new EvidenceAdmissionException("ASEVD410", "Protected resource readiness did not complete.");
         }
     }
 

@@ -103,6 +103,46 @@ public sealed class EvidenceClosedApplicationCatalogueTests
     }
 
     [Fact]
+    public void ExactTaskCeilingMapsCompleteDescriptorAndParticipatesInCanonicalDigests()
+    {
+        var entry = EvidenceClosedApplicationCatalogue.Snapshot(Candidate());
+        var descriptor = Descriptor(entry);
+        var plan = Plan(entry.Policy);
+        var binding = EvidenceClosedApplicationCatalogue.CreateBinding(descriptor, entry.Policy, plan);
+
+        Assert.Equal(128, entry.Capabilities.MaximumTasks);
+        Assert.Equal(128, descriptor.Application!.Capabilities.MaximumTasks);
+        Assert.Equal(128, binding.Capabilities.MaximumTasks);
+        Assert.Equal(EvidenceCanonicalJson.Serialize(Binding(entry)), EvidenceCanonicalJson.Serialize(binding));
+        EvidenceClosedApplicationCatalogue.VerifyCandidateBinding(entry, binding.CatalogueDigest, entry.Policy, plan, binding);
+
+        var fewerTasks = entry with { Capabilities = entry.Capabilities with { MaximumTasks = 127 } };
+        Assert.NotEqual(EvidenceClosedApplicationCatalogue.ComputeEntryDigest(entry),
+            EvidenceClosedApplicationCatalogue.ComputeEntryDigest(fewerTasks));
+        Assert.NotEqual(EvidenceClosedApplicationCatalogue.ComputeCatalogueDigest([entry]),
+            EvidenceClosedApplicationCatalogue.ComputeCatalogueDigest([fewerTasks]));
+    }
+
+    [Fact]
+    public void OneTaskAboveCeilingRejectsBothCandidateAndDescriptorMetadata()
+    {
+        var entry = Candidate();
+        var excess = entry with { Capabilities = entry.Capabilities with { MaximumTasks = 129 } };
+        RejectAudit(() => EvidenceClosedApplicationCatalogue.Snapshot(excess));
+
+        var descriptor = Descriptor(entry);
+        var application = descriptor.Application!;
+        descriptor = descriptor with
+        {
+            Application = application with
+            {
+                Capabilities = application.Capabilities with { MaximumTasks = 129 },
+            },
+        };
+        RejectAudit(() => EvidenceClosedApplicationCatalogue.CreateBinding(descriptor, entry.Policy, Plan(entry.Policy)));
+    }
+
+    [Fact]
     public void ProductionResolveRemainsClosedForACompletelyMatchingCandidate()
     {
         var entry = Candidate();
@@ -311,7 +351,7 @@ public sealed class EvidenceClosedApplicationCatalogueTests
             "missing-dcp" => entry with { BundleFiles = entry.BundleFiles.Where(static file => file.Role != EvidenceClosedBundleRole.Dcp).ToArray() },
             "excess-files" => entry with { BundleFiles = Enumerable.Repeat(entry.BundleFiles[0], 257).ToArray() },
             "zero-memory" => entry with { Capabilities = entry.Capabilities with { MemoryBytes = 0 } },
-            "excess-tasks" => entry with { Capabilities = entry.Capabilities with { MaximumTasks = 65 } },
+            "excess-tasks" => entry with { Capabilities = entry.Capabilities with { MaximumTasks = 129 } },
             "undeclared-input" => entry with { Capabilities = entry.Capabilities with { ReadOnlyInputs = [canary] } },
             "resource-class" => entry with { Resources = [entry.Resources[0] with { CapabilityClass = canary }] },
             _ => entry with { Producers = [entry.Producers[0] with { ImplementationId = canary }, entry.Producers[1]] },
@@ -913,6 +953,6 @@ public sealed class EvidenceClosedApplicationCatalogueTests
         return new(id, "1.0.0", "controlled-candidate-source-build", "13.4.4", policy, profile.Id,
             [new(resource, "native-http-uds", "1.0.0", "native-http")],
             [new(producer, "coverage", "1.0.0"), new(second, "coverage", "1.0.0")], files,
-            new(new[] { "proof-input/declared.txt" }, 1024 * 1024, 1024 * 1024, 64, 1024 * 1024, 30, 5));
+            new(new[] { "proof-input/declared.txt" }, 1024 * 1024, 1024 * 1024, 128, 1024 * 1024, 30, 5));
     }
 }

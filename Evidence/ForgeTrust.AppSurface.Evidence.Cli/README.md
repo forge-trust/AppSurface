@@ -42,6 +42,32 @@ The protected CLI binds the [fixed restricted coverage registration](../ForgeTru
 
 Each producer callback binds its activated protected writer to the actual supervisor, full plan/declaration, copied protected diff, shared process-output quota and current stage token. The [internal callback lease](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#restricted-producer-callback-binding) permits one attempt and closes in the callback's finally block. The factory registers the whole asynchronous procedure as lifecycle-owned work before returning; an ignored task cannot escape stop/join. No new consumer friend, public transport or execution authority is introduced by this shared registration.
 
+### Restricted application stages
+
+For a v2 descriptor, the internal CLI entry resolves the complete application through the
+[compiled application catalogue](../ForgeTrust.AppSurface.Evidence.Planner/README.md#internal-closed-application-catalogue-prerequisite)
+before admission or startup. It admits both admission stages, the smaller of the descriptor
+and application startup limits, every declared resource deadline, and every producer
+deadline together with the existing collection and cleanup reserves. The internal
+`CreateDeclaredStages(profile, admissionSeconds, applicationStartSeconds)` helper returns
+copied read-only budget metadata; a null startup limit preserves the producer-only v1
+schedule. It grants no registration, lease or execution capability.
+
+After fresh output allocation and activation, the CLI invokes the authenticated
+[`application-start` and `resource-wait` protocol](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#internal-restricted-application-protocol-v2-prerequisite)
+under the actual tracked Start and Resource stage tokens. Only typed root receipts for
+the selected entry, prior lease and exact resource let producers run. The supervisor
+records the pending single-use start before I/O and the existing stop/wait path owns
+physical application exit, including failed or cancelled startup; no extra stop timer
+or public health callback is introduced. Artifact transfer during production requires
+stopped producer work; final completion also requires application teardown.
+
+The production catalogue is empty, and Trusted consumer proof is still unregistered.
+The stage preparation therefore establishes no supported application run. A dependency
+profile cannot use Observation to bypass its admission rule, and parsed v2 metadata
+cannot substitute for a compiled registration. See the
+[consumer acceptance record](../../docs/evidence/issue779-consumer-acceptance.md) for native prerequisites.
+
 The protected merger loads `ReportGenerator.dll` from `reportgenerator/net10.0/` under the authenticated tool root, with no package-cache fallback. The AppSurface CLI tool-pack path includes the ReportGenerator payload; a plain `dotnet publish` output does not include it by default. If the protected tool root lacks the payload, the run fails with `ASEVD404`. Subject and reporter output share the run-wide process-output quota, while reports and emitted artifacts remain bounded by the artifact quota. See the [migration reference](../../docs/evidence/evidencehost-migration.md#restricted-coverage-path-and-packaging) for limits and recovery.
 
 Implementation is not equivalent to an admitted supported gate. Linux x86_64 systemd/cgroup mechanism behavior was observed in CI on October 2, 2026, but the updated production broker and complete consumer integration have not been validated in CI. Windows and macOS have no accepted mechanism. Keep Trusted gate proof closed until the complete protected consumer and platform proof is accepted.
