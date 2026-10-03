@@ -357,6 +357,24 @@ public sealed class EvidenceLinuxWorkerDescriptorTests
         using var document = JsonDocument.Parse(raw); Reject(() => EvidenceLinuxWorkerSupervisor.ParseWorkerRemainingAllowance(document.RootElement));
     }
 
+    /// <summary>Rejects noncanonical data before any runtime peer binding or supervisor is created.</summary>
+    [Theory]
+    [InlineData("observation_profile_ids.0", "-coverage")]
+    [InlineData("paths.0", "src/./Feature.cs")]
+    public void ProfileIdentifiersAndChangedPathsRejectNoncanonicalSegments(string path, string value)
+    {
+        var json = DescriptorJson();
+        _ = Parse(json);
+        Put(json, path, value);
+
+        var error = Assert.Throws<EvidenceAdmissionException>(() => Parse(json));
+
+        Assert.Equal("ASEVD402", error.Code);
+        Assert.StartsWith("ASEVD402: The protected worker descriptor or acknowledgement is invalid.", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(value, error.Message, StringComparison.Ordinal);
+        Assert.Null(error.InnerException);
+    }
+
     private static void Reject(JsonObject json) => Reject(() => Parse(json));
     private static void Reject(Action action)
     {

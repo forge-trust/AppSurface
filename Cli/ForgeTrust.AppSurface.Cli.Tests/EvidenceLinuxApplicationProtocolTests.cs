@@ -430,6 +430,25 @@ public sealed class EvidenceLinuxApplicationProtocolTests
         SafeError("ASEVD410", () => EvidenceLinuxWorkerSupervisor.ParseApplicationStartReceipt(document.RootElement, descriptor));
     }
 
+    /// <summary>Validates only closed metadata; no application, broker, admission or resource readiness is issued.</summary>
+    [Theory]
+    [InlineData("producers.0.required_resources.0", "http/native")]
+    [InlineData("bundle_files.6.relative_path", "dependency/./helper.dll")]
+    [InlineData("bundle_files.6.relative_path", "dependency//helper.dll")]
+    public void RequiredResourceIdsAndBundlePathsRejectNoncanonicalSegments(string path, string value)
+    {
+        var json = DescriptorJson();
+        _ = Parse(json);
+        Put(json, path, value);
+
+        var error = Assert.Throws<EvidenceAdmissionException>(() => Parse(json));
+
+        Assert.Equal("ASEVD402", error.Code);
+        Assert.StartsWith("ASEVD402: The protected application descriptor or request is invalid.", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(value, error.Message, StringComparison.Ordinal);
+        Assert.Null(error.InnerException);
+    }
+
     private static JsonNode? AckChange(string change, string field) => change switch
     {
         "null" => null, "false" => JsonValue.Create(false), "string" => JsonValue.Create("true"),

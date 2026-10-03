@@ -16,6 +16,38 @@ public sealed class EvidenceProtectedCliExecutionTests(ITestOutputHelper output)
 {
     private const string BrokerEnvironmentVariable = "EVIDENCEHOST_TEST_BROKER_SOCKET";
 
+    /// <summary>Arbitrary IOException content cannot supply a native allocation errno.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AllocationDiagnostic_omits_errno_without_a_direct_Win32_inner_exception(bool wrongInner)
+    {
+        const string canary = "allocation-io-inner-secret-canary-779";
+        Exception? inner = wrongInner ? new InvalidOperationException(canary) : null;
+        var error = new IOException(canary, inner);
+        error.Data[canary] = canary;
+        var diagnostic = EvidenceProtectedCliExecution.CreateAllocationFailureDiagnostic(EvidenceAllocationPhase.Allocation,
+            EvidenceLinuxArtifactAllocationOperation.CreateSlot, EvidenceWorkerStageOutcome.Failed,
+            EvidenceWorkerTerminalCode.StageFailed, error);
+
+        Assert.Equal(EvidenceAllocationErrorClass.Io, diagnostic.ErrorClass);
+        Assert.Null(diagnostic.NativeErrno);
+        using var console = new FakeInMemoryConsole();
+        EvidenceWorkerCommand.WriteAllocationDiagnostic(console, diagnostic);
+        var line = console.ReadErrorString();
+        Assert.True(Encoding.UTF8.GetByteCount(line) <= 1024);
+        Assert.DoesNotContain(canary, line, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, console.ReadOutputString());
+        using var document = JsonDocument.Parse(line);
+        var json = document.RootElement;
+        Assert.Equal("evidence-allocation-failure-v1", json.GetProperty("schema").GetString());
+        Assert.Equal("Allocation", json.GetProperty("phase").GetString());
+        Assert.Equal("CreateSlot", json.GetProperty("operation").GetString());
+        Assert.Equal("Io", json.GetProperty("errorClass").GetString());
+        Assert.Equal(JsonValueKind.Null, json.GetProperty("nativeErrno").ValueKind);
+        Assert.Equal(7, json.EnumerateObject().Count());
+    }
+
     [Theory]
     [InlineData(-1, null)]
     [InlineData(0, null)]
