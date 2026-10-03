@@ -41,6 +41,17 @@ The [native two-control compatibility probe](https://github.com/forge-trust/AppS
 
 ## Production subject command completion
 
+Before launching `dotnet test`, the [production broker](../../scripts/evidencehost-linux-launcher.py)
+pins the selected results directory beneath its retained `test-output` descriptor. A fresh directory is
+created with owner-only permissions and initially belongs to the root broker; its retained FD must match
+the named directory and expected results group before ownership transfers to the subject UID/results GID
+and mode `2770`. An existing directory must already belong to the worker or subject with that results GID;
+existing root-owned or foreign directories are rejected. Both branches recheck the retained and named
+identities after transfer. The subject supplies report bytes, so this ownership handoff grants no report
+authenticity or admission. The [portable results-ownership controls](test_linux_launcher.py) use real
+directories/FDs, distinct creator/worker/subject identities and recorded privileged ownership calls;
+they do not establish a native root handoff or passed coverage procedure.
+
 The [production broker](../../scripts/evidencehost-linux-launcher.py) keeps subject services with
 `RemainAfterExit=yes` and launches them with `systemd-run --wait --pipe`. Pinned
 [systemd v255](https://github.com/systemd/systemd/blob/v255/man/systemd-run.xml#L195-L200) retains a finished
