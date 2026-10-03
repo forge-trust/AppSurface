@@ -40,6 +40,50 @@ _ROLES = {"AppHost": "apphost", "AppHostRuntimeConfiguration": "apphost_runtime_
           "Dcp": "dcp", "DcpExtension": "dcp_extension", "Dependency": "dependency",
           "DeclaredInput": "declared_input", "DependencyManifest": "dependency_manifest"}
 _ENV = {"PATH": "/usr/bin:/bin", "HOME": "/nonexistent", "LANG": "C.UTF-8"}
+JOIN_PHASES = frozenset(("unknown", "not-started", "receipt-check", "watchdog-live", "active-operations",
+                        "no-process", "terminate-main", "process-group-wait", "force-stop", "process-wait",
+                        "group-check", "pump-join", "exit-check", "watchdog-disarm", "bundle-recheck",
+                        "probe-recheck", "final-check", "complete"))
+JOIN_DIAGNOSTIC_BOOLEANS = ("application_state_failed", "application_observed_group", "application_stdout_eof",
+                           "application_stderr_eof", "application_pumps_error_free", "application_watchdog_disarmed")
+JOIN_DIAGNOSTIC_INTEGERS = {"application_active_operations": (0, 1048576), "application_process_code": (-255, 255)}
+
+
+def join_diagnostic_snapshot(state=None, pumps=None, watchdog=None):
+    """Nonblocking, data-only observations; unknown is None, never an ownership ACK.
+
+    Busy state/pump locks are skipped. No polling, syscall, callback, wait or text
+    extraction occurs, so diagnostics cannot extend a cleanup deadline.
+    """
+    result = {"join_phase": "not-started", **dict.fromkeys(JOIN_DIAGNOSTIC_BOOLEANS),
+              **dict.fromkeys(JOIN_DIAGNOSTIC_INTEGERS)}
+    try:
+        if type(state) is OwnershipState:
+            phase = state.join_phase
+            result["join_phase"] = phase if type(phase) is str and phase in JOIN_PHASES else "unknown"
+            if state.condition.acquire(blocking=False):
+                try:
+                    values = {"application_state_failed": state.failed,
+                              "application_observed_group": state.observed_group,
+                              "application_active_operations": state.active,
+                              "application_process_code": None if state.process is None else state.process.returncode}
+                    for key, value in values.items():
+                        bounds = JOIN_DIAGNOSTIC_INTEGERS.get(key)
+                        if (bounds and type(value) is int and bounds[0] <= value <= bounds[1]) or (
+                                not bounds and type(value) is bool): result[key] = value
+                finally: state.condition.release()
+        if type(pumps) is OutputPumps and pumps.lock.acquire(blocking=False):
+            try:
+                if len(pumps.eof) == 2 and all(type(x) is bool for x in pumps.eof):
+                    result["application_stdout_eof"], result["application_stderr_eof"] = pumps.eof
+                if len(pumps.errors) == 2 and all(type(x) is bool for x in pumps.errors):
+                    result["application_pumps_error_free"] = not any(pumps.errors)
+            finally: pumps.lock.release()
+        if type(watchdog) is WatchdogOwnership and type(watchdog.disarmed) is bool:
+            result["application_watchdog_disarmed"] = watchdog.disarmed
+    except Exception:
+        pass  # A diagnostic observation cannot replace the original failure.
+    return result
 
 
 class ApplicationError(RuntimeError):
@@ -647,6 +691,7 @@ class OwnershipState:
         self.condition = threading.Condition(); self.closed = False; self.failed = False
         self.claimed = False; self.active = 0; self.process = None; self.observed_group = False; self.loaded_seen = False
         self.first_join_failure = None
+        self.join_phase = "not-started"
 
     def fail_join(self, error, abort):
         """Latch the first internal failure before abort; exception bytes are not diagnostics."""
@@ -1049,42 +1094,61 @@ class RootApplicationLease:
         """Return separate app byte receipt only after physical group/pump/watchdog exit."""
         with self.join_lock, self.state.joining(self.abort):
             deadline = min(deadline, self.job_deadline)
+            self.state.join_phase = "receipt-check"
             if self.receipt is not None: return self.receipt
             self.state.close()
+            self.state.join_phase = "watchdog-live"
             if self.watchdog is not None: self.watchdog.require_live()
+            self.state.join_phase = "active-operations"
             with self.state.condition:
                 while self.state.active:
                     if self.watchdog is not None: self.watchdog.require_live()
                     self.state.condition.wait(timeout=min(0.03, _remaining(deadline)))
             process = self.state.process
             if process is None:
+                self.state.join_phase = "no-process"
                 _require(not self.state.failed, "ASEVD410")
+                self.state.join_phase = "watchdog-disarm"
                 if self.watchdog is not None: self.watchdog.disarm(deadline)
                 _require(self.monitor is None or (self.watchdog is not None and self.watchdog.disarmed), "ASEVD410")
+                self.state.join_phase = "final-check"
                 self.state.require_final(deadline, self.abort)
                 self.receipt = (0, 0, 0); return self.receipt
             grace = min(deadline, time.monotonic() + self.selected.audit.capabilities.stopping_seconds)
+            self.state.join_phase = "terminate-main"
             _systemctl(self.unit, ["kill", "--kill-whom=main", "--signal=TERM"], deadline)
+            self.state.join_phase = "process-group-wait"
             while time.monotonic() < grace:
                 self.watchdog.require_live()
                 if process.poll() is not None and self.state.observed_group and _group_empty(self.group): break
                 with self.state.condition: self.state.condition.wait(timeout=min(0.03, _remaining(grace)))
             if process.poll() is None or not self.state.observed_group or not _group_empty(self.group):
+                self.state.join_phase = "force-stop"
                 _systemctl(self.unit, ["stop", "--no-block"], deadline)
                 _systemctl(self.unit, ["kill", "--kill-whom=all", "--signal=KILL"], deadline)
+            self.state.join_phase = "process-wait"
             try: process.wait(timeout=_remaining(deadline))
             except subprocess.TimeoutExpired as error:
                 self.state.fail_join(error, self.abort)
                 try: process.kill(); process.wait(timeout=_remaining(deadline))
                 except Exception: pass
                 raise error
+            self.state.join_phase = "group-check"
             _require(self.state.observed_group and _group_empty(self.group), "ASEVD410")
+            self.state.join_phase = "pump-join"
             receipt = self.pumps.join(deadline)
+            self.state.join_phase = "watchdog-live"
             self.watchdog.require_live()
+            self.state.join_phase = "exit-check"
             _require(not self.state.failed and process.returncode == 0, "ASEVD410")
+            self.state.join_phase = "watchdog-disarm"
             self.watchdog.disarm(deadline)
+            self.state.join_phase = "bundle-recheck"
             self.bundle.recheck(deadline=deadline)
+            self.state.join_phase = "probe-recheck"
             _require(audit_protected_probes(self.workspace, deadline=deadline) == self.probe_snapshot, "ASEVD410")
+            self.state.join_phase = "final-check"
             self.state.require_final(deadline, self.abort)
             self.receipt = receipt
+            self.state.join_phase = "complete"
             return receipt

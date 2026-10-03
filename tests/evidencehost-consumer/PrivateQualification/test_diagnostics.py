@@ -306,5 +306,34 @@ class DiagnosticDataControls(unittest.TestCase):
                 self.assertEqual("", console.getvalue())
 
 
+class OwnedExitArchiveControls(unittest.TestCase):
+    """Only fixed private file data and archive metadata, never a qualified run."""
+    roots = DiagnosticDataControls.roots
+    write = DiagnosticDataControls.write
+    retain = DiagnosticDataControls.retain
+    archive = DiagnosticDataControls.archive
+    reject_without_archive = DiagnosticDataControls.reject_without_archive
+    def test_owned_exit_fixed_private_record_retains_exact_bytes_and_oversize_is_unavailable(self):
+        for entry in ("cli", "host"):
+            with self.subTest(entry=entry):
+                workspace, output = self.roots()
+                name = f"failure-{entry}/launcher-owned-exit.json"
+                data = b'{"schema":"issue779-owned-exit-diagnostic-v1","category":"app-join-fault"}'
+                self.write(workspace, name, data)
+                self.retain(workspace, output)
+                _, contents, index = self.archive(output)
+                self.assertEqual(data, contents[name])
+                self.assertEqual(hashlib.sha256(data).hexdigest(), next(x for x in index if x["name"] == name)["retained_sha256"])
+                workspace, output = self.roots()
+                self.write(workspace, name, b"x"*4097)
+                self.retain(workspace, output)
+                _, contents, index = self.archive(output)
+                self.assertEqual({"index.json"}, set(contents))
+                self.assertEqual("oversize", index[0]["state"])
+                workspace, output = self.roots()
+                self.write(workspace, name, data).chmod(0o644)
+                self.reject_without_archive(workspace, output)
+
+
 if __name__ == "__main__":
     unittest.main()

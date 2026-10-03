@@ -127,3 +127,49 @@ private modes and link rejection. These changes are private diagnostic preparati
 no new tests or native execution have run for this fork at source-ready. They do not
 change the original failure/status, execution caps, lifecycle or accepted proof.
 Qualification outputs remain `None`/`None`; production registries stay empty.
+
+## Private owned-exit failure observations
+
+This private diagnostic fork adds `launcher-owned-exit.json` alongside the existing
+failed-worker files. It is collected only from a negative root owned-exit path;
+an ordinary successful worker does not perform this new file I/O. The public
+failure schema and exact `wait` ACK remain unchanged. The record cannot repair a
+failed ACK, authenticate an uploaded result, or establish qualification.
+
+The [application module](../../../scripts/evidencehost_linux_application.py)
+sets closed `JOIN_PHASES` immediately before its existing checks. Its
+`join_diagnostic_snapshot(state, pumps, watchdog)` is a diagnostic-only data seam:
+it performs no process poll, syscall, callback or wait. Busy state/pump locks are
+skipped with unknown (`null`) observations. The phase defaults to `not-started`,
+or `unknown` for an invalid internal value. Snapshots include only exact bounded
+integers and Booleans for failure/active/group/process-code, pump EOF/error-free,
+and disarmed watchdog state. They are observations, not joined-exit receipts.
+
+The [broker](../../../scripts/evidencehost-linux-launcher.py) caches the first
+`app-join-fault`, `output-latched`, `inspection` or `deadline` failure observation
+as immutable bytes. Later diagnostics cannot replace it, even if a later inspection
+recovers. Error classes are a fixed exact-type map, with `unknown` for any other
+class; messages, exception args, errno, custom data, paths and child bytes are
+never copied. The diagnostic lock and ownership snapshots use nonblocking acquisition
+so this mechanism cannot wait beyond the caller's cleanup deadline. All original
+calls, guards, deadlines and cleanup ordering remain in place.
+
+`_capture_owned_exit_diagnostic_fd` accepts only the cached closed schema, at most
+4096 bytes, and writes the fixed filename exclusively through the retained root
+directory FD. It checks root UID/GID, a nonwritable parent, no-follow creation,
+regular single-link `0600` file identity and named/retained parent/file rechecks
+within a five-second capture bound. Capture absence/error cannot replace the
+original launcher failure. Owner overrides exist only for portable real-FD metadata
+controls and are never supplied by the real launcher.
+
+The private controller adds only `failure-cli/launcher-owned-exit.json` and
+`failure-host/launcher-owned-exit.json` to its fixed whitelist, with a 4096-byte
+per-file bound and unchanged canonical USTAR/index/total limits. Unknown files are
+not discovered. A missing record means diagnostics were unavailable, not that
+owned exit succeeded. Existing [archive controls](test_diagnostics.py) are extended
+with fixed-name exact-byte, mode and oversize controls; launcher/application controls
+cover first-failure latching, negative ACK preservation, canaries, closed value bounds,
+busy-lock skipping, real pumps, exclusive files, links and no-I/O success.
+
+These are prepared, unexecuted portable controls at source-ready. No root, systemd,
+native, qualification, coverage or Trusted acceptance is claimed by this fork.

@@ -309,6 +309,100 @@ def _read_worker_journal(unit: str) -> tuple[str, bytes]:
     return state, bytes(data)
 
 
+OWNED_EXIT_DIAGNOSTIC_FILE = "launcher-owned-exit.json"
+OWNED_EXIT_DIAGNOSTIC_LIMIT = 4096
+OWNED_EXIT_DIAGNOSTIC_SCHEMA = "issue779-owned-exit-diagnostic-v1"
+OWNED_EXIT_FAILURE_CATEGORIES = frozenset(("app-join-fault", "output-latched", "inspection", "deadline"))
+OWNED_EXIT_ERROR_CLASSES = frozenset(("none", "application", "launcher", "os", "subprocess-timeout", "subprocess", "unknown"))
+OWNED_EXIT_BOOLEANS = ("broker_subject_output_failed", "broker_application_work_failed")
+OWNED_EXIT_COUNTS = ("broker_active_runs", "broker_active_application_operations")
+
+
+def _owned_exit_error_class(error) -> str:
+    """Closed exact-class mapping; messages, args, errno and custom types are ignored."""
+    classes = {type(None): "none", _application.ApplicationError: "application", LauncherError: "launcher",
+               OSError: "os", PermissionError: "os", FileNotFoundError: "os", TimeoutError: "os",
+               subprocess.TimeoutExpired: "subprocess-timeout", subprocess.SubprocessError: "subprocess",
+               subprocess.CalledProcessError: "subprocess"}
+    return classes.get(type(error), "unknown")
+
+
+def validate_owned_exit_diagnostic(record) -> dict:
+    """Private diagnostic schema only; nullable observations never establish owned exit."""
+    keys = {"schema", "category", "error_class", "join_phase", *OWNED_EXIT_BOOLEANS, *OWNED_EXIT_COUNTS,
+            *_application.JOIN_DIAGNOSTIC_BOOLEANS, *_application.JOIN_DIAGNOSTIC_INTEGERS}
+    if (type(record) is not dict or set(record) != keys or type(record["schema"]) is not str
+            or record["schema"] != OWNED_EXIT_DIAGNOSTIC_SCHEMA
+            or type(record["category"]) is not str or record["category"] not in OWNED_EXIT_FAILURE_CATEGORIES
+            or type(record["error_class"]) is not str or record["error_class"] not in OWNED_EXIT_ERROR_CLASSES
+            or type(record["join_phase"]) is not str or record["join_phase"] not in _application.JOIN_PHASES):
+        raise ValueError("owned-exit-diagnostic-invalid")
+    for key in (*OWNED_EXIT_BOOLEANS, *_application.JOIN_DIAGNOSTIC_BOOLEANS):
+        if record[key] is not None and type(record[key]) is not bool:
+            raise ValueError("owned-exit-diagnostic-invalid")
+    for key, bounds in {**dict.fromkeys(OWNED_EXIT_COUNTS, (0, 1048576)),
+                        **_application.JOIN_DIAGNOSTIC_INTEGERS}.items():
+        value = record[key]
+        if value is not None and (type(value) is not int or not bounds[0] <= value <= bounds[1]):
+            raise ValueError("owned-exit-diagnostic-invalid")
+    return dict(record)
+
+
+def _capture_owned_exit_diagnostic_fd(directory_fd, data, *, expected_owner_uid=0, expected_owner_gid=0) -> bool:
+    """Exclusive pinned-FD private write, bounded to 4 KiB/five seconds; no public output.
+
+    Owner overrides are a read/write metadata test seam, never root/admission authority.
+    Absence and every capture error preserve the original launcher failure.
+    """
+    if directory_fd is None or data is None:
+        return False
+    fd = -1
+    try:
+        if (type(expected_owner_uid) is not int or type(expected_owner_gid) is not int
+                or not 0 <= expected_owner_uid <= 2**32-1 or not 0 <= expected_owner_gid <= 2**32-1): return False
+        if type(data) is not bytes or not 0 < len(data) <= OWNED_EXIT_DIAGNOSTIC_LIMIT:
+            return False
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result: raise ValueError("owned-exit-diagnostic-invalid")
+                result[key] = value
+            return result
+        validate_owned_exit_diagnostic(json.loads(data, object_pairs_hook=unique))
+        deadline = time.monotonic() + 5
+        parent = os.fstat(directory_fd)
+        if (not stat.S_ISDIR(parent.st_mode) or (parent.st_uid, parent.st_gid) != (expected_owner_uid, expected_owner_gid)
+                or parent.st_mode & 0o022): return False
+        fd = os.open(OWNED_EXIT_DIAGNOSTIC_FILE,
+                     os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+                     0o600, dir_fd=directory_fd)
+        os.fchmod(fd, 0o600)
+        before = os.fstat(fd)
+        if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+                or (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode)) !=
+                (expected_owner_uid, expected_owner_gid, 0o600)): return False
+        offset = 0
+        while offset < len(data):
+            if time.monotonic() >= deadline: return False
+            size = os.write(fd, data[offset:])
+            if size <= 0: return False
+            offset += size
+        after = os.fstat(fd)
+        named = os.stat(OWNED_EXIT_DIAGNOSTIC_FILE, dir_fd=directory_fd, follow_symlinks=False)
+        identity = lambda x: (x.st_dev, x.st_ino, x.st_mode, x.st_uid, x.st_gid, x.st_nlink,
+                              x.st_size, x.st_mtime_ns, x.st_ctime_ns)
+        stable_parent = lambda x: (x.st_dev, x.st_ino, x.st_mode, x.st_uid, x.st_gid)
+        return (time.monotonic() < deadline and identity(after) == identity(named)
+                and after.st_size == len(data) and (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
+                and stable_parent(parent) == stable_parent(os.fstat(directory_fd)))
+    except Exception:
+        return False
+    finally:
+        if fd >= 0:
+            try: os.close(fd)
+            except OSError: pass
+
+
 def capture_worker_protocol_failure(error: LauncherError, broker: Broker, directory_fd: int | None) -> None:
     """Attach diagnostic-only locked checkpoints; raw journal stays in one private file.
 
@@ -321,6 +415,7 @@ def capture_worker_protocol_failure(error: LauncherError, broker: Broker, direct
             "broker_ready_seen": broker.ready_seen, "broker_wait_completed": broker.wait_completed,
             "broker_exited": broker.exited, "broker_work_closed": broker.work_closed,
             "broker_active_handlers": broker.active_handlers, "broker_active_runs": broker.active_runs}
+    _capture_owned_exit_diagnostic_fd(directory_fd, broker.owned_exit_diagnostic)
     if directory_fd is None:
         return
     error.worker_journal = {"worker_journal_state": "unavailable", "worker_journal_written": False,
@@ -1307,6 +1402,8 @@ class Broker:
         self.output_quota = OutputQuota() if application is None else application.job_counter
         self.lock = threading.Lock()
         self.condition = threading.Condition(self.lock)
+        self.owned_exit_diagnostic_lock = threading.Lock()
+        self.owned_exit_diagnostic = None
         self.exited = False
         self.ready_seen = False
         self.active_runs = 0
@@ -1843,6 +1940,36 @@ class Broker:
                 return False
         return True
 
+    def _latch_owned_exit_failure(self, category, error=None, *, condition_held=False) -> None:
+        """First diagnostic failure only, with nonblocking observations and no ACK authority."""
+        if not self.owned_exit_diagnostic_lock.acquire(blocking=False): return
+        try:
+            if self.owned_exit_diagnostic is not None: return
+            snapshot = _application.join_diagnostic_snapshot()
+            if type(self.application) is _application.RootApplicationLease:
+                snapshot = _application.join_diagnostic_snapshot(
+                    self.application.state, self.application.pumps, self.application.watchdog)
+            record = {"schema": OWNED_EXIT_DIAGNOSTIC_SCHEMA, "category": category,
+                      "error_class": _owned_exit_error_class(error), **snapshot,
+                      **dict.fromkeys(OWNED_EXIT_BOOLEANS), **dict.fromkeys(OWNED_EXIT_COUNTS)}
+            acquired = False if condition_held else self.condition.acquire(blocking=False)
+            try:
+                if condition_held or acquired:
+                    for key, value in (("broker_subject_output_failed", self.subject_output_failed),
+                                       ("broker_application_work_failed", self.application_work_failed),
+                                       ("broker_active_runs", self.active_runs),
+                                       ("broker_active_application_operations", self.active_application_operations)):
+                        if (key in OWNED_EXIT_BOOLEANS and type(value) is bool) or (
+                                key in OWNED_EXIT_COUNTS and type(value) is int and 0 <= value <= 1048576):
+                            record[key] = value
+            finally:
+                if acquired: self.condition.release()
+            data = json.dumps(validate_owned_exit_diagnostic(record), sort_keys=True, separators=(",", ":")).encode()
+            if len(data) <= OWNED_EXIT_DIAGNOSTIC_LIMIT: self.owned_exit_diagnostic = data
+        except Exception:
+            pass
+        finally: self.owned_exit_diagnostic_lock.release()
+
     def _wait_for_owned_exit(self) -> bool:
         """Wait for run handlers and all owned cgroups within stopping, cleanup, and job reserves."""
         wait_deadline = self._close_work_gate()
@@ -1851,13 +1978,15 @@ class Broker:
                 receipt = self.application.join(wait_deadline)
                 with self.condition:
                     self.application_output_receipt = receipt
-            except Exception:
+            except Exception as error:
                 with self.condition:
                     self.application_work_failed = True
+                    self._latch_owned_exit_failure("app-join-fault", error, condition_held=True)
                 return False
         while True:
             with self.condition:
                 if self.subject_output_failed or self.application_work_failed:
+                    self._latch_owned_exit_failure("output-latched", condition_held=True)
                     return False
                 generation = self.run_change_generation
                 active = self.active_runs
@@ -1866,11 +1995,12 @@ class Broker:
                     if (self._all_owned_work_stopped(inspection_deadline=wait_deadline)
                             and time.monotonic() <= wait_deadline):
                         return True
-                except (LauncherError, OSError, subprocess.SubprocessError):
+                except (LauncherError, OSError, subprocess.SubprocessError) as error:
                     # Inspection failures consume the same finite ownership grace.
-                    pass
+                    self._latch_owned_exit_failure("inspection", error)
             remaining = wait_deadline - time.monotonic()
             if remaining <= 0:
+                self._latch_owned_exit_failure("deadline")
                 return False
             with self.condition:
                 if self.run_change_generation != generation:

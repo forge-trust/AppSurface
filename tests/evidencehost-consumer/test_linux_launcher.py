@@ -2424,4 +2424,123 @@ class SubjectFailurePrefixControls(unittest.TestCase):
         self.assertNotIn("secret-canary", json.dumps(before))
 
 
+class OwnedExitDiagnosticControls(unittest.TestCase):
+    """Closed negative/procedure and real-FD data controls; no positive protected app lease."""
+    def test_negative_wait_ack_latches_first_failure_without_public_schema_change(self):
+        with tempfile.TemporaryDirectory() as root:
+            broker, _, _ = artifact_broker(root)
+            try:
+                broker.subject_output_failed = True
+                response = broker_request(broker, {"op": "wait"})
+                self.assertEqual({"ok": True, "owned_exit": False}, response)
+                first = broker.owned_exit_diagnostic
+                record = launcher.validate_owned_exit_diagnostic(json.loads(first))
+                self.assertEqual("output-latched", record["category"])
+                self.assertTrue(record["broker_subject_output_failed"])
+                broker._latch_owned_exit_failure("deadline", OSError("private-canary"))
+                self.assertEqual(first, broker.owned_exit_diagnostic)
+                self.assertFalse(broker.wait_completed)
+                self.assertNotIn("private-canary", first.decode())
+                error = launcher.LauncherError("worker-protocol-incomplete")
+                self.assertNotIn("join_phase", launcher.failure_diagnostic(error))
+            finally: broker.close_artifact_handles()
+
+    def test_app_join_fault_inspection_and_deadline_preserve_negative_decisions(self):
+        for category in ("app-join-fault", "inspection", "deadline"):
+            with self.subTest(category=category), tempfile.TemporaryDirectory() as root:
+                broker, _, _ = artifact_broker(root)
+                try:
+                    broker.deadline = 10
+                    if category == "app-join-fault":
+                        class FailedJoinProcedure:
+                            def join(self, deadline): raise OSError("private-canary")
+                        broker.application = FailedJoinProcedure()  # Negative procedure only; no lease.
+                    failure = OSError("private-canary") if category == "inspection" else None
+                    with patch.object(launcher.time, "monotonic", return_value=10), patch.object(
+                            broker, "_all_owned_work_stopped", side_effect=failure, return_value=False):
+                        self.assertFalse(broker._wait_for_owned_exit())
+                    record = json.loads(broker.owned_exit_diagnostic)
+                    self.assertEqual(category, record["category"])
+                    self.assertEqual("none" if category == "deadline" else "os", record["error_class"])
+                    self.assertNotIn("private-canary", broker.owned_exit_diagnostic.decode())
+                finally: broker.application = None; broker.close_artifact_handles()
+
+    def test_error_class_and_schema_never_copy_exception_args_or_unknown_types(self):
+        class Unknown(OSError): pass
+        for error, expected in ((Unknown("private-canary"), "unknown"),
+                (launcher._application.ApplicationError(), "application"),
+                (launcher.subprocess.TimeoutExpired("private-canary", 1), "subprocess-timeout"),
+                (launcher.LauncherError("private-canary"), "launcher")):
+            self.assertEqual(expected, launcher._owned_exit_error_class(error))
+        with tempfile.TemporaryDirectory() as root:
+            broker, _, _ = artifact_broker(root)
+            try:
+                broker._latch_owned_exit_failure("deadline")
+                good = json.loads(broker.owned_exit_diagnostic)
+                for change in ({"join_phase": ["private-canary"]}, {"category": "private-canary"},
+                               {"application_process_code": True}, {"application_process_code": 256},
+                               {"broker_active_runs": -1}, {"application_stdout_eof": 1}, {"extra": "canary"}):
+                    with self.subTest(change=change), self.assertRaises(ValueError):
+                        launcher.validate_owned_exit_diagnostic({**good, **change})
+            finally: broker.close_artifact_handles()
+
+    def test_private_exclusive_fd_capture_and_existing_symlink_do_not_change_failure(self):
+        with tempfile.TemporaryDirectory() as root:
+            broker, _, _ = artifact_broker(root)
+            directory = Path(root)/"diagnostics"; directory.mkdir(mode=0o700)
+            fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                broker._latch_owned_exit_failure("deadline")
+                kwargs = dict(expected_owner_uid=os.geteuid(), expected_owner_gid=os.getegid())
+                capture = launcher._capture_owned_exit_diagnostic_fd
+                self.assertTrue(capture(fd, broker.owned_exit_diagnostic, **kwargs))
+                path = directory/launcher.OWNED_EXIT_DIAGNOSTIC_FILE
+                self.assertEqual(broker.owned_exit_diagnostic, path.read_bytes())
+                self.assertEqual(0o600, stat.S_IMODE(path.stat().st_mode))
+                self.assertEqual(1, path.stat().st_nlink)
+                self.assertFalse(capture(fd, broker.owned_exit_diagnostic, **kwargs))
+                path.unlink(); outside = Path(root)/"outside"; outside.write_bytes(b"private-canary")
+                path.symlink_to(outside)
+                self.assertFalse(capture(fd, broker.owned_exit_diagnostic, **kwargs))
+                self.assertEqual(b"private-canary", outside.read_bytes())
+                path.unlink()
+                for bad in (b"x"*4097, b"{}", b'{"schema":1,"schema":1}'):
+                    self.assertFalse(capture(fd, bad, **kwargs))
+                    self.assertFalse(path.exists())
+                directory.chmod(0o777)
+                self.assertFalse(capture(fd, broker.owned_exit_diagnostic, **kwargs))
+                directory.chmod(0o700)
+                self.assertFalse(capture(fd, broker.owned_exit_diagnostic,
+                    expected_owner_uid=os.geteuid()+1, expected_owner_gid=os.getegid()))
+                with patch.object(launcher.os, "write", side_effect=OSError("private-canary")):
+                    self.assertFalse(capture(fd, broker.owned_exit_diagnostic, **kwargs))
+            finally: os.close(fd); broker.close_artifact_handles()
+
+    def test_capture_absence_and_successful_worker_do_no_new_io(self):
+        with patch.object(launcher.os, "fstat") as inspect, patch.object(launcher.os, "open") as opened:
+            self.assertFalse(launcher._capture_owned_exit_diagnostic_fd(None, b"{}"))
+            self.assertFalse(launcher._capture_owned_exit_diagnostic_fd(123, None))
+            inspect.assert_not_called(); opened.assert_not_called()
+        with tempfile.TemporaryDirectory() as root:
+            broker, _, _ = artifact_broker(root)
+            try:
+                with patch.object(launcher, "_capture_owned_exit_diagnostic_fd") as capture:
+                    launcher.require_successful_worker({"Result": "success", "User": "worker",
+                        "KillMode": "control-group"}, "worker", broker, 123)
+                capture.assert_not_called()
+                self.assertIsNone(broker.owned_exit_diagnostic)
+                with patch.object(broker, "_all_owned_work_stopped", return_value=True):
+                    self.assertEqual({"ok": True, "owned_exit": True}, broker_request(broker, {"op": "wait"}))
+                self.assertIsNone(broker.owned_exit_diagnostic)
+                broker._latch_owned_exit_failure("app-join-fault", OSError("private-canary"))
+                with patch.object(launcher, "_capture_owned_exit_diagnostic_fd", return_value=False) as capture:
+                    with self.assertRaises(launcher.LauncherError) as caught:
+                        launcher.require_successful_worker({"Result": "exit-code", "User": "worker",
+                            "KillMode": "control-group"}, "worker", broker, None)
+                capture.assert_called_once_with(None, broker.owned_exit_diagnostic)
+                self.assertEqual("worker-unsuccessful", launcher.failure_diagnostic(caught.exception)["cause"])
+                self.assertNotIn("private-canary", json.dumps(launcher.failure_diagnostic(caught.exception)))
+            finally: broker.close_artifact_handles()
+
+
 if __name__ == "__main__": unittest.main()
