@@ -2377,4 +2377,319 @@ class SubjectFailurePrefixControls(unittest.TestCase):
         self.assertNotIn("secret-canary", json.dumps(before))
 
 
+class PrivateVstestTraceControls(unittest.TestCase):
+    """Private candidate metadata/state/real-FD controls; no root or native execution claim."""
+    collector = "vstest-diagnostic.datacollector.26-10-03_04-00-00_12345_7.log"
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(dir="/private/tmp")
+        self.addCleanup(self.temp.cleanup)
+        # /private/tmp inherits wheel on macOS; make the real fixture match its declared results GID.
+        os.chown(self.temp.name, -1, os.getegid())
+        self.broker, self.root, _artifact = artifact_broker(self.temp.name)
+        self.addCleanup(self.broker.close_artifact_handles)
+        self.root.chmod(0o2770)
+        self.root.parent.chmod(0o2770)
+        self.runner = self.root / launcher.VSTEST_TRACE_RUNNER
+        self.runner.write_bytes(b"private-canary\x00\xff")
+        self.runner.chmod(0o600)
+        self.fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        self.addCleanup(os.close, self.fd)
+        self.identity = launcher._vstest_directory_identity(os.fstat(self.fd))
+
+    def read(self, **changes):
+        values = dict(parent_fd=self.broker.test_output_fd, root_fd=self.fd, token="run-1",
+                      pinned_identity=self.identity, subject_uid=os.geteuid(), results_gid=os.getegid(),
+                      scratch=self.broker.scratch, deadline=time.monotonic() + 5, cancelled=lambda: False)
+        values.update(changes)
+        with patch.object(launcher, "openat2", side_effect=portable_openat2):
+            return launcher._read_vstest_collector_traces_fd(**values)
+
+    def test_selected_argv_is_copied_and_duplicate_or_caller_diag_is_rejected(self):
+        args = ["test", "fixture.csproj", "--results-directory", str(self.root)]
+        actual = launcher.private_vstest_arguments(args, self.broker.scratch, "run-1")
+        self.assertEqual(args, actual[:-2])
+        self.assertEqual(["--diag", str(self.runner)], actual[-2:])
+        self.assertEqual(4, len(args))
+        for diag in ("--diag", "--diag=/caller", "/Diag:canary", "-diag", "--DIAG:canary", "-d", "--"):
+            with self.subTest(diag=diag), self.assertRaises(launcher.LauncherError):
+                launcher.private_vstest_arguments([*args, diag, "canary"], self.broker.scratch, "run-1")
+
+    def test_real_fd_binary_and_missing_collector_normalization_is_private(self):
+        self.runner.chmod(0o644)
+        self.assertEqual((b"private-canary\x00\xff", b""), self.read())
+        self.assertEqual(0o600, stat.S_IMODE(self.runner.stat().st_mode))
+        companion = self.root / self.collector
+        companion.write_bytes(b"collector\xfe"); companion.chmod(0o600)
+        self.assertEqual((b"private-canary\x00\xff", b"collector\xfe"), self.read())
+        self.assertNotIn("private-canary", json.dumps(launcher.failure_diagnostic(
+            launcher.LauncherError("worker-unsuccessful"))))
+
+    def test_valid_foundation_then_one_bad_owner_or_selected_identity(self):
+        self.assertIsNotNone(self.read())
+        for changes in ({"subject_uid": os.geteuid() + 1}, {"results_gid": os.getegid() + 1},
+                        {"pinned_identity": (0,) * 5}, {"token": "../run-1"}):
+            with self.subTest(changes=changes):
+                self.assertIsNone(self.read(**changes))
+        self.root.chmod(0o777)
+        self.assertIsNone(self.read())
+
+    def test_cancel_expiry_and_read_error_do_not_return_bytes(self):
+        self.assertIsNotNone(self.read())
+        self.assertIsNone(self.read(cancelled=lambda: True))
+        self.assertIsNone(self.read(deadline=time.monotonic() - 1))
+        with patch.object(launcher.os, "read", side_effect=OSError("private-canary")):
+            self.assertIsNone(self.read())
+        with patch.object(launcher.time, "monotonic", side_effect=[0, 0, 0, 0, 6]):
+            self.assertIsNone(self.read(deadline=5))
+
+    def test_missing_symlink_hardlink_special_and_oversize_are_unavailable(self):
+        for shape in ("missing", "symlink", "hardlink", "directory", "oversize", "executable"):
+            with self.subTest(shape=shape):
+                self.runner.unlink(missing_ok=True)
+                target = self.root / "target"
+                target.write_bytes(b"target"); target.chmod(0o600)
+                if shape == "symlink": self.runner.symlink_to(target)
+                elif shape == "hardlink": os.link(target, self.runner)
+                elif shape == "directory": self.runner.mkdir()
+                elif shape != "missing":
+                    self.runner.write_bytes(b"x" * (launcher.VSTEST_TRACE_LIMIT + 1) if shape == "oversize" else b"x")
+                    self.runner.chmod(0o700 if shape == "executable" else 0o600)
+                self.assertIsNone(self.read())
+                if self.runner.is_dir(): self.runner.rmdir()
+                else: self.runner.unlink(missing_ok=True)
+
+    def test_exact_five_fraction_digits_positive_thread_bound_and_duplicate(self):
+        path = self.root / self.collector
+        path.write_bytes(b""); path.chmod(0o600)
+        self.assertIsNotNone(self.read())
+        path.unlink()
+        for name in (self.collector.replace("12345", "123"), self.collector.replace("_7.log", "_0.log"),
+                     self.collector.replace("_7.log", "_2147483648.log"),
+                     "vstest-diagnostic.datacollector.unknown.log"):
+            with self.subTest(name=name):
+                bad = self.root / name
+                bad.write_bytes(b""); bad.chmod(0o600)
+                self.assertIsNone(self.read()); bad.unlink()
+        path.write_bytes(b""); path.chmod(0o600)
+        second = self.root / self.collector.replace("_7.log", "_8.log")
+        second.write_bytes(b""); second.chmod(0o600)
+        self.assertIsNone(self.read())
+
+    def test_growth_and_named_substitution_during_read_are_unavailable(self):
+        original = os.read
+        for mutate in ("growth", "replace"):
+            with self.subTest(mutate=mutate):
+                self.runner.write_bytes(b"original"); self.runner.chmod(0o600)
+                changed = False
+                def read(fd, size):
+                    nonlocal changed
+                    data = original(fd, size)
+                    if not changed:
+                        changed = True
+                        if mutate == "growth":
+                            with self.runner.open("ab") as output: output.write(b"growth")
+                        else:
+                            self.runner.unlink(); self.runner.write_bytes(b"replacement"); self.runner.chmod(0o600)
+                    return data
+                with patch.object(launcher.os, "read", side_effect=read):
+                    self.assertIsNone(self.read())
+
+    def test_root_writer_fixed_two_files_modes_collision_and_bounds(self):
+        directory = Path(self.temp.name) / "private"
+        directory.mkdir(mode=0o700)
+        fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            writer = lambda data: launcher._capture_vstest_collector_traces_fd(
+                fd, data, expected_owner_uid=os.geteuid(), expected_owner_gid=os.getegid())
+            self.assertFalse(writer((b"x" * (launcher.VSTEST_TRACE_LIMIT + 1), b"")))
+            self.assertTrue(writer((b"private-canary\x00\xff", b"")))
+            child = directory / launcher.VSTEST_TRACE_DIRECTORY
+            self.assertEqual(0o700, stat.S_IMODE(child.stat().st_mode))
+            self.assertEqual({"runner.log", "collector.log"}, set(os.listdir(child)))
+            for name, content in (("runner.log", b"private-canary\x00\xff"), ("collector.log", b"")):
+                info = (child / name).stat()
+                self.assertEqual((os.geteuid(), os.getegid(), 0o600, 1),
+                                 (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode), info.st_nlink))
+                self.assertEqual(content, (child / name).read_bytes())
+            self.assertFalse(writer((b"replacement", b"")))
+            self.assertEqual(b"private-canary\x00\xff", (child / "runner.log").read_bytes())
+        finally:
+            os.close(fd)
+
+    def test_cache_gate_valid_foundation_then_each_bad_checkpoint_makes_zero_root_calls(self):
+        broker = self.broker
+        broker.descriptor = {"cgroup": "/system.slice/selected.service"}
+        broker.ready_seen = broker.wait_completed = broker.exited = broker.work_closed = True
+        broker.failed_subject_prefixes = (b"failure", b"")
+        broker.failed_vstest_traces = (b"trace", b"")
+        broker.close_artifact_handles()
+        with patch.object(broker, "_group_empty", return_value=True), \
+             patch.object(launcher, "_capture_vstest_collector_traces_fd", return_value=True) as root_call:
+            self.assertTrue(launcher.capture_vstest_collector_traces(broker, self.fd, True))
+            self.assertEqual(1, root_call.call_count)
+            for field, value in (("ready_seen", False), ("wait_completed", False), ("exited", False),
+                                 ("work_closed", False), ("active_handlers", 1), ("active_runs", 1),
+                                 ("active_artifact_operations", 1), ("active_application_operations", 1),
+                                 ("subject_output_failed", True), ("application_work_failed", True),
+                                 ("failed_subject_prefixes", None), ("failed_vstest_traces", None),
+                                 ("test_output_fd", 123), ("artifact_handles_closing", False)):
+                original = getattr(broker, field)
+                root_call.reset_mock()
+                setattr(broker, field, value)
+                self.assertFalse(launcher.capture_vstest_collector_traces(broker, self.fd, True))
+                root_call.assert_not_called()
+                setattr(broker, field, original)
+            root_call.reset_mock()
+            self.assertFalse(launcher.capture_vstest_collector_traces(broker, self.fd, False))
+            root_call.assert_not_called()
+            broker.output_quota.exceeded.set()
+            self.assertFalse(launcher.capture_vstest_collector_traces(broker, self.fd, True))
+            root_call.assert_not_called()
+
+    def test_capture_exception_and_nonempty_worker_preserve_original_safe_failure(self):
+        broker = self.broker
+        broker.descriptor = {"cgroup": "/system.slice/selected.service"}
+        broker.ready_seen = broker.wait_completed = broker.exited = broker.work_closed = True
+        broker.failed_subject_prefixes, broker.failed_vstest_traces = (b"failure", b""), (b"trace", b"")
+        broker.close_artifact_handles()
+        error = launcher.LauncherError("worker-unsuccessful")
+        before = launcher.failure_diagnostic(error)
+        with patch.object(broker, "_group_empty", return_value=False), \
+             patch.object(launcher, "_capture_vstest_collector_traces_fd") as root_call:
+            self.assertFalse(launcher.capture_vstest_collector_traces(broker, self.fd, True))
+            root_call.assert_not_called()
+        with patch.object(broker, "_group_empty", return_value=True), \
+             patch.object(launcher, "_capture_vstest_collector_traces_fd", side_effect=OSError("private-canary")):
+            self.assertFalse(launcher.capture_vstest_collector_traces(broker, self.fd, True))
+        self.assertEqual(before, launcher.failure_diagnostic(error))
+
+    def test_selected_request_pins_real_root_before_inner_spawn_and_rejects_diag_before_io(self):
+        self.runner.unlink()
+        request = {"executable": str(self.broker.dotnet), "arguments": ["test", "fixture.csproj",
+                   "--results-directory", str(self.root)], "working_directory": str(self.broker.subject_root)}
+        def selected(req, token, fd, identity):
+            self.assertEqual("run-1", token)
+            self.assertEqual(identity, launcher._vstest_directory_identity(os.fstat(fd)))
+            self.assertEqual(["--diag", str(self.runner)], req["arguments"][-2:])
+            self.assertEqual(request["arguments"], req["arguments"][:-2])
+            return {"exit_code": 17}
+        with patch.object(launcher, "openat2", side_effect=portable_openat2), \
+             patch.object(self.broker, "_run_selected", side_effect=selected) as inner:
+            self.assertEqual({"exit_code": 17}, self.broker._run(request))
+            self.assertEqual(1, inner.call_count)
+        with patch.object(self.broker, "_validate_results_root") as result_io, \
+             patch.object(launcher.subprocess, "Popen") as spawn:
+            with self.assertRaises(launcher.LauncherError):
+                self.broker._run({**request, "arguments": [*request["arguments"], "--diag", "/caller"]})
+            result_io.assert_not_called(); spawn.assert_not_called()
+
+    def test_trace_namespace_is_not_a_public_artifact_and_host_trace_is_not_read(self):
+        host = self.root / "vstest-diagnostic.host.unqualified.log"
+        host.write_bytes(b"host-canary"); host.chmod(0o600)
+        self.assertEqual((b"private-canary\x00\xff", b""), self.read())
+        with patch.object(launcher, "openat2", side_effect=portable_openat2):
+            handles = self.broker._enumerate_artifacts(self.fd, "run-1", os.fstat(self.fd))
+        try:
+            self.assertEqual(["report.bin"], [handle.relative_path for handle in handles])
+        finally:
+            for handle in handles: os.close(handle.fd)
+
+
+    def test_current_results_parent_replacement_rejects_before_trace_read(self):
+        self.assertIsNotNone(self.read())
+        self.root.parent.rename(self.broker.scratch / "retired")
+        self.root.parent.mkdir(mode=0o2770)
+        with patch.object(launcher.os, "read") as read:
+            self.assertIsNone(self.read())
+            read.assert_not_called()
+
+    def test_current_results_parent_replacement_during_trace_read_rejects(self):
+        self.assertIsNotNone(self.read())
+        original = os.read
+        changed = False
+        def reading(fd, size):
+            nonlocal changed
+            data = original(fd, size)
+            if not changed:
+                changed = True
+                self.root.parent.rename(self.broker.scratch / "retired")
+                self.root.parent.mkdir(mode=0o2770)
+            return data
+        with patch.object(launcher.os, "read", side_effect=reading) as read:
+            self.assertIsNone(self.read())
+            self.assertTrue(read.called)
+
+
+    def test_preexisting_fixed_or_collector_namespace_blocks_inner_spawn(self):
+        request = {"executable": str(self.broker.dotnet), "arguments": ["test", "fixture.csproj",
+                   "--results-directory", str(self.root)], "working_directory": str(self.broker.subject_root)}
+        self.runner.unlink()
+        for shape in ("runner", "collector", "unknown-collector", "runner-link", "collector-directory"):
+            name = launcher.VSTEST_TRACE_RUNNER if shape.startswith("runner") else (
+                "vstest-diagnostic.datacollector.unknown.log" if shape == "unknown-collector" else self.collector)
+            target = self.root / name
+            if shape == "runner-link": target.symlink_to(self.root / "absent")
+            elif shape == "collector-directory": target.mkdir()
+            else: target.write_bytes(b"prior-run-canary")
+            with self.subTest(shape=shape), patch.object(launcher, "openat2", side_effect=portable_openat2), \
+                 patch.object(self.broker, "_run_selected") as inner:
+                with self.assertRaises(launcher.LauncherError): self.broker._run(request)
+                inner.assert_not_called()
+            if target.is_dir(): target.rmdir()
+            else: target.unlink()
+
+    def test_failed_test_procedure_caches_fresh_traces_only_after_stop_join_and_empty_group(self):
+        self.runner.unlink()
+        events = []
+        request = {"executable": str(self.broker.dotnet), "arguments": ["test", "fixture.csproj",
+                   "--results-directory", str(self.root)], "working_directory": str(self.broker.subject_root)}
+        process = SimpleNamespace(stdout=io.BytesIO(b"functional-out"), stderr=io.BytesIO(b"functional-error"), returncode=None)
+        def wait(timeout=None):
+            self.assertIn("stop", events); events.append("wait"); process.returncode = 17; return 17
+        process.wait = wait
+        process.poll = lambda: process.returncode
+        process.kill = lambda: setattr(process, "returncode", -9)
+        def spawn(argv, **kwargs):
+            self.assertFalse(self.runner.exists())
+            self.assertEqual(["--diag", str(self.runner)], argv[-2:])
+            self.runner.write_bytes(b"fresh-runner-canary"); self.runner.chmod(0o644)
+            companion = self.root / self.collector
+            companion.write_bytes(b"fresh-collector-canary"); companion.chmod(0o644)
+            events.append("spawn")
+            return process
+        def stop(argv, **kwargs):
+            events.append("stop"); return launcher.subprocess.CompletedProcess([], 0, b"", b"")
+        def empty(group):
+            self.assertIn("wait", events); events.append("physical-empty"); return True
+        reader = launcher._read_vstest_collector_traces_fd
+        def traces(*args, **kwargs):
+            self.assertIn("physical-empty", events); events.append("read-traces")
+            return reader(*args, **kwargs)
+        props = {"LoadState": "loaded", "ActiveState": "failed", "SubState": "failed", "MainPID": "0",
+                 "User": str(self.broker.subject_uid), "Group": str(self.broker.subject_gid),
+                 "KillMode": "control-group", "ControlGroup": "", "Result": "exit-code", "ExecMainCode": "1", "ExecMainStatus": "17"}
+        with patch.object(launcher, "openat2", side_effect=portable_openat2), \
+             patch.object(launcher.subprocess, "Popen", side_effect=spawn), \
+             patch.object(launcher.subprocess, "run", side_effect=stop), \
+             patch.object(self.broker, "_unit_properties", return_value=props), \
+             patch.object(self.broker, "_group_empty", side_effect=empty), \
+             patch.object(launcher, "_read_vstest_collector_traces_fd", side_effect=traces):
+            response = self.broker._run(request)
+        self.assertEqual(17, response["exit_code"])
+        self.assertEqual((b"fresh-runner-canary", b"fresh-collector-canary"), self.broker.failed_vstest_traces)
+        self.assertEqual(["spawn", "stop", "wait", "physical-empty", "read-traces"], events)
+        self.assertEqual(len(b"functional-outfunctional-error"), response["received_bytes"])
+        self.assertNotIn("fresh-runner-canary", json.dumps(response))
+
+
+    def test_result_name_enumeration_stops_at_fixed_limit_before_trace_bytes(self):
+        self.assertIsNotNone(self.read())
+        for index in range(launcher.MAX_ARTIFACT_TREE_ENTRIES):
+            (self.root / f"unselected-{index}").touch()
+        with patch.object(launcher.os, "read") as read:
+            self.assertIsNone(self.read())
+            read.assert_not_called()
+
+
 if __name__ == "__main__": unittest.main()

@@ -580,6 +580,7 @@ packages:
       - ForgeTrust.AppSurface.Evidence.Contracts
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Evidence.Contracts
+      - ForgeTrust.AppSurface.Evidence.Coverage
       - ForgeTrust.AppSurface.Evidence.Planner
   - project: Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj
     release_guidance_variant: apphost
