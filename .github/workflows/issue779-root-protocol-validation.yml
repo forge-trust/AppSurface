@@ -1,0 +1,55 @@
+name: Issue 779 root protocol focused validation
+on:
+  push:
+    branches: [codex/issue779-root-protocol-validation-20261003]
+permissions:
+  contents: read
+jobs:
+  root-protocol:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout private focused harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.x
+      - name: Setup pnpm 11.1.3
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 11.1.3
+          run_install: false
+      - name: Setup Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+      - name: Prepare and verify exact frozen source
+        shell: bash
+        env:
+          FROZEN_SOURCE: 3a3522314c30ff3462c71745d9b0692d77f3b24a
+        run: |
+          set -euo pipefail
+          [[ "$FROZEN_SOURCE" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          task_root="$RUNNER_TEMP/issue779-root-protocol-validation"
+          mkdir -m 700 "$task_root"
+          cp .github/issue779-root-protocol-validation/{run-focused.sh,snapshot.json} "$task_root/"
+          cp .github/issue779-native-validation/verify-snapshot.py "$task_root/"
+          git clone --quiet --no-hardlinks "$GITHUB_WORKSPACE" "$task_root/repo"
+          git -C "$task_root/repo" checkout --quiet --detach "$FROZEN_SOURCE"
+          git -C "$task_root/repo" update-ref refs/remotes/origin/main 416b30919e6c4d03b634d9d3fe558884b02f0b91
+          python3 -B "$task_root/verify-snapshot.py"
+      - name: Focused real root peer controls and portable ownership controls
+        shell: bash
+        run: timeout --signal=TERM --kill-after=20s 1500s bash "$RUNNER_TEMP/issue779-root-protocol-validation/run-focused.sh"
+      - name: Retain focused receipts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: issue779-root-protocol-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/issue779-root-protocol-validation/receipts/
+          if-no-files-found: warn
+          retention-days: 7
