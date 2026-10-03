@@ -369,6 +369,16 @@ jobs:
             --subject-result "$subject" \
             --output-plan "$RUNNER_TEMP/evidence-gate-verified-plan.json"
 
+      - name: Require the subject's independent cleanup completion record
+        if: ${{ needs.controller-capture.result == 'success' && needs.credentialless-subject.result == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup="$RUNNER_TEMP/evidence-gate-verifier-inputs/evidence-gate-cleanup-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/evidence-gate-cleanup-attestation.json"
+          python3 "$GITHUB_WORKSPACE/trusted/scripts/evidence-gate-verify-cleanup.py" \
+            --plan "$RUNNER_TEMP/evidence-gate-verified-plan.json" \
+            --attestation "$cleanup"
+
       - name: Set up the trusted verifier
         if: ${{ needs.controller-capture.result == 'success' && needs.credentialless-subject.result == 'success' }}
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -424,7 +434,8 @@ jobs:
             echo '- Subject handoff: controller snapshot execution is wired; the fixed result is always non-claiming.'
             echo '- Trusted verifier: the handoff and subject result are rebound to a fresh Git capture, then the current PR and subject job are reread for a non-claiming rehearsal.'
             echo '- OCI prerequisite: trusted preflight verifies a protected-main image attestation; the credentialless subject job anonymously pulls that exact digest into its rootless local store.'
-            echo '- Checkout/isolation attestation: unavailable to the verdict; no trusted verifier consumes an attestation.'
+            echo '- Cleanup completion: the trusted verifier now validates the subject job’s same-run bounded cleanup artifact for code coverage.'
+            echo '- Checkout/isolation attestation: unavailable to the verdict; no trusted verifier consumes a checkout or isolation attestation.'
             echo '- Required gate verdict: unavailable; host registrations and complete producer verification are not established.'
           } >> "$GITHUB_STEP_SUMMARY"
           if [[ -f "$RUNNER_TEMP/evidence-gate-rehearsal-verdict/evidence-gate-summary.md" ]]; then
