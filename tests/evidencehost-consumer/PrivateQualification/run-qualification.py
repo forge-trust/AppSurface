@@ -217,13 +217,27 @@ def retain_diagnostics(workspace, output, *, expected_owner_uid=0):
     return sha(path.read_bytes())
 
 
+def prepare_entry_output_parent(workspace, entry):
+    """Create a fresh cli/host outer output parent with search-only access.
+
+    The controller's root-only main owns this directory. Mode 0711 permits the
+    worker to traverse it to the launcher's worker-owned 0700 run anchor, without
+    granting outer-directory listing or writes. Explicit chmod defeats umask;
+    an existing path, including a symlink, is never reused. This helper does not
+    create an artifact slot, change private children, or establish admission.
+    """
+    require(type(entry) is str and entry in ("cli", "host"))
+    output = workspace / ("output-"+entry)
+    output.mkdir(mode=0o711)
+    os.chmod(output, 0o711)
+    return output
+
+
 def one_entry(binding, workspace, entry):
     """Launch, pin output, collect bytes, close accounts, then evaluate structural data."""
     build = Path(binding["build_root"])
     launcher, collector, tool, subject = entry_preflight(binding, workspace, entry)
-    output = workspace / ("output-"+entry)
-    output.mkdir(mode=0o700)
-    os.chmod(output, 0o700)
+    output = prepare_entry_output_parent(workspace, entry)
     diagnostics = workspace / ("failure-"+entry)
     diagnostics.mkdir(mode=0o700)
     diag_fd = launcher.open_diagnostic_directory(diagnostics)

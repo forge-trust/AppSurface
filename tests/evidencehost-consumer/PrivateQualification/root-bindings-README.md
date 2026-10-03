@@ -85,6 +85,31 @@ the underlying NSS lookup or credential-setting error was not measured.
 Do not rename the group to work around it: the distinct group name preserves the
 strict cleanup ordering and `USERGROUPS_ENAB` protection described above.
 
+## Fresh outer output traversal
+
+[`prepare_entry_output_parent(workspace, entry)`](run-qualification.py) accepts
+only the closed `cli` and `host` entries and exclusively creates `output-cli` or
+`output-host`. The controller still requires real root before calling either
+entry. It explicitly sets the fresh root-owned outer directory to **0711** after
+creation, regardless of umask: group/other receive search permission, without
+directory read or write permission. Existing directories, files and symlinks
+reject rather than being reused or repermissioned.
+
+The [launcher](../../../scripts/evidencehost-linux-launcher.py) still creates its
+nested `run-<tag>` anchor owned by worker UID/GID 65010/65011 with mode **0700**.
+The worker must search the root-owned outer ancestor when mandatory `openat2`
+opens that nested absolute output parent. The preceding private attempt retained
+`Allocation/OpenParent/Io` with numeric errno 13 (`EACCES`); the source's outer
+0700 directory is a concrete traversal blocker consistent with that frame.
+Native ancestor stat values were not independently measured, and this source
+correction is not a successful native reproduction or qualification.
+
+Tool, subject, control, failure and collected-data permissions are unchanged.
+Private child directories remain 0700 and receipt files remain 0600. Portable
+actual chmod/stat controls cover both entries under umasks 000, 077 and 777,
+fresh-path rejection and closed entry names. They use the current test user's
+ownership, and establish no root, worker identity, admission or artifact origin.
+
 ## Source-compiled registration template
 
 [`root-registration.py.in`](root-registration.py.in) is a source fragment for the
