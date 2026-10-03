@@ -692,6 +692,8 @@ def _coverage_commands(staged_root: Path, scratch_root: Path, diff_file: Path) -
         "--exclusive-test-project",
         "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj",
         "--exclusive-test-project",
+        "ForgeTrust.AppSurface.DurableExternalActivationExample.Tests.csproj",
+        "--exclusive-test-project",
         "ForgeTrust.RazorWire.Cli.Tests.csproj",
         "--exclusive-test-project",
         "ForgeTrust.AppSurface.Web.Tailwind.Tests.csproj",
