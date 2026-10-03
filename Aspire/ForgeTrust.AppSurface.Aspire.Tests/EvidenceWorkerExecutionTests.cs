@@ -7,6 +7,7 @@ public sealed class EvidenceWorkerExecutionTests
     private static readonly TimeSpan Cleanup = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan Grace = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan Job = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan BarrierTimeout = TimeSpan.FromSeconds(10);
 
     [Theory]
     [InlineData(99_999_999L, false, true)]
@@ -927,6 +928,207 @@ public sealed class EvidenceWorkerExecutionTests
         {
             release.TrySetResult();
             await settled.Task;
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DeadlineExpiresBetweenPreliminaryAndLockedAcceptance()
+    {
+        var innerClock = new ManualTimeProvider();
+        var clock = new TimestampGateTimeProvider(innerClock);
+        var supervisor = new TestSupervisor();
+        var execution = new EvidenceWorkerExecution(supervisor, clock, Job, Cleanup, Grace,
+            message => new EvidenceWorkerTestInterruptionException(message));
+        var started = NewSignal();
+        var releaseCallback = NewSignal();
+        TimestampReadGate? gate = null;
+        var run = Task.Run(async () => await execution.ExecuteAsync(EvidenceRunStage.Producer,
+            TimeSpan.FromSeconds(10), async _ =>
+            {
+                started.TrySetResult();
+                await releaseCallback.Task;
+                return "completed callback value";
+            }));
+        try
+        {
+            await started.Task.WaitAsync(BarrierTimeout);
+            await innerClock.WaitForTimerCreationsAsync(1).WaitAsync(BarrierTimeout);
+            // Capture the preliminary stage and job samples before moving time. The next
+            // sample belongs to acceptance under the execution lock and must reject the value.
+            gate = clock.GateAfterTimestampReads(1);
+            releaseCallback.TrySetResult();
+            await gate.Reached.WaitAsync(BarrierTimeout);
+            innerClock.Advance(TimeSpan.FromSeconds(10), fireTimers: false);
+            gate.Release();
+
+            var result = await run.WaitAsync(BarrierTimeout);
+            Assert.Equal(EvidenceWorkerStageOutcome.TimedOut, result.Outcome);
+            Assert.Null(result.Value);
+            Assert.Equal(EvidenceWorkerTerminalCode.DeadlineExceeded, execution.TerminalCode);
+            Assert.IsType<TimeoutException>(execution.TerminalException);
+            Assert.True(execution.OwnWorkStopped);
+            Assert.True(supervisor.ExitAcknowledged);
+            Assert.Equal(1, supervisor.StopRequests);
+            Assert.Null(execution.TrackOwnedWork(_ => ValueTask.CompletedTask));
+        }
+        finally
+        {
+            gate?.Release();
+            releaseCallback.TrySetResult();
+            await run.WaitAsync(BarrierTimeout);
+        }
+    }
+
+    [Fact]
+    public async Task CollectAsync_DeadlineExpiresBetweenPreliminaryAndLockedAcceptance()
+    {
+        var innerClock = new ManualTimeProvider();
+        var clock = new TimestampGateTimeProvider(innerClock);
+        var execution = new EvidenceWorkerExecution(new TestSupervisor(), clock, Job, Cleanup, Grace,
+            message => new EvidenceWorkerTestInterruptionException(message));
+        Assert.True(await execution.StopAndDisposeAsync());
+        var baselineTimers = innerClock.TimerCreations;
+        var started = NewSignal();
+        var releaseCollector = NewSignal();
+        TimestampReadGate? gate = null;
+        var run = Task.Run(async () => await execution.CollectAsync(TimeSpan.FromSeconds(1), async _ =>
+        {
+            started.TrySetResult();
+            await releaseCollector.Task;
+            return "completed collector value";
+        }));
+        try
+        {
+            await started.Task.WaitAsync(BarrierTimeout);
+            await innerClock.WaitForTimerCreationsAsync(baselineTimers + 1).WaitAsync(BarrierTimeout);
+            gate = clock.GateAfterTimestampReads(1);
+            releaseCollector.TrySetResult();
+            await gate.Reached.WaitAsync(BarrierTimeout);
+            innerClock.Advance(TimeSpan.FromSeconds(1), fireTimers: false);
+            gate.Release();
+
+            var result = await run.WaitAsync(BarrierTimeout);
+            Assert.Equal(EvidenceWorkerStageOutcome.TimedOut, result.Outcome);
+            Assert.Null(result.Value);
+            Assert.Equal(EvidenceWorkerTerminalCode.DeadlineExceeded, execution.TerminalCode);
+            Assert.True(execution.CleanupCompleted);
+            Assert.True(execution.OwnWorkStopped);
+            Assert.False(execution.CollectionCompleted);
+        }
+        finally
+        {
+            gate?.Release();
+            releaseCollector.TrySetResult();
+            await run.WaitAsync(BarrierTimeout);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TestInterruptionEscapesWithoutBecomingAStageFailure()
+    {
+        var supervisor = new TestSupervisor();
+        var execution = Create(supervisor, new ManualTimeProvider());
+        var interruption = new EvidenceWorkerTestInterruptionException("deliberate callback interruption");
+
+        var observed = await Assert.ThrowsAsync<EvidenceWorkerTestInterruptionException>(() =>
+            execution.ExecuteAsync<string>(EvidenceRunStage.Producer, TimeSpan.FromSeconds(1),
+                _ => ValueTask.FromException<string>(interruption)).AsTask());
+
+        Assert.Same(interruption, observed);
+        Assert.Equal(EvidenceWorkerTerminalCode.None, execution.TerminalCode);
+        Assert.Equal(0, supervisor.StopRequests);
+        Assert.False(execution.CleanupCompleted);
+        Assert.False(execution.CollectionCompleted);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_FailureRevokesOrdinaryObservationAdmissionAndKeepsFirstCause()
+    {
+        var plan = EvidenceHostAdmissionTestRun.CreateObservationPlan();
+        using var admissionRun = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Observation, plan,
+            consumerAcceptanceMatches: false);
+        var supervisor = new TestSupervisor { RunIdentifier = admissionRun.Context.RunId };
+        var admission = await EvidenceAdmission.AdmitAsync(EvidenceExecutionMode.Observation, plan,
+            admissionRun.Context, supervisor, verifier: null, CancellationToken.None);
+        // This is the existing internal Observation lifecycle seam. No verifier assertion,
+        // protected worker, native output handle or consumer acceptance is fabricated.
+        Assert.Equal(EvidenceExecutionMode.Observation, admission.Mode);
+        Assert.Null(admission.Assertion);
+        admission.Activate("ordinary-observation-test-output");
+        admission.ValidateActive(plan);
+        var execution = new EvidenceWorkerExecution(supervisor, new ManualTimeProvider(), Job, Cleanup, Grace,
+            message => new EvidenceWorkerTestInterruptionException(message), admission);
+        var fault = new InvalidOperationException("ordinary observation callback failure");
+
+        var result = await execution.ExecuteAsync<string>(EvidenceRunStage.Producer, TimeSpan.FromSeconds(1),
+            _ => ValueTask.FromException<string>(fault));
+        Assert.Equal(EvidenceWorkerStageOutcome.Failed, result.Outcome);
+        Assert.Null(result.Value);
+        Assert.Equal("ASEVD410", Assert.Throws<EvidenceAdmissionException>(() => admission.ValidateActive(plan)).Code);
+        Assert.False(await execution.StopAndDisposeAsync());
+        await execution.RequestTerminalStopAsync(EvidenceWorkerTerminalCode.CleanupFailed);
+        Assert.Equal(EvidenceWorkerTerminalCode.StageFailed, execution.TerminalCode);
+        Assert.Same(fault, execution.TerminalException);
+        Assert.True(execution.CleanupCompleted);
+        Assert.True(execution.OwnWorkStopped);
+        Assert.Null(admission.Assertion);
+        Assert.Equal("ASEVD410", Assert.Throws<EvidenceAdmissionException>(() => admission.ValidateActive(plan)).Code);
+    }
+
+    /// <summary>Gates one captured clock sample while the underlying monotonic clock advances.</summary>
+    /// <remarks>Timer notifications remain under the existing ManualTimeProvider's independent control.</remarks>
+    private sealed class TimestampGateTimeProvider(ManualTimeProvider inner) : TimeProvider
+    {
+        private readonly object _gate = new();
+        private TimestampReadGate? _pending;
+        private int _remainingReads;
+
+        public override long TimestampFrequency => inner.TimestampFrequency;
+        public override DateTimeOffset GetUtcNow() => inner.GetUtcNow();
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) =>
+            inner.CreateTimer(callback, state, dueTime, period);
+
+        internal TimestampReadGate GateAfterTimestampReads(int precedingReads)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(precedingReads);
+            lock (_gate)
+            {
+                if (_pending is not null) throw new InvalidOperationException("A timestamp gate is already pending.");
+                _remainingReads = checked(precedingReads + 1);
+                return _pending = new TimestampReadGate();
+            }
+        }
+
+        public override long GetTimestamp()
+        {
+            var captured = inner.GetTimestamp();
+            TimestampReadGate? pending = null;
+            lock (_gate)
+            {
+                if (_pending is not null && --_remainingReads == 0)
+                {
+                    pending = _pending;
+                    _pending = null;
+                }
+            }
+            pending?.Pause();
+            return captured;
+        }
+    }
+
+    /// <summary>Owns a finite test barrier; callers release it and join their lifecycle task in finally.</summary>
+    private sealed class TimestampReadGate
+    {
+        private readonly TaskCompletionSource _reached = NewSignal();
+        private readonly TaskCompletionSource _released = NewSignal();
+
+        internal Task Reached => _reached.Task;
+        internal void Release() => _released.TrySetResult();
+
+        internal void Pause()
+        {
+            _reached.TrySetResult();
+            _released.Task.WaitAsync(BarrierTimeout).GetAwaiter().GetResult();
         }
     }
 
