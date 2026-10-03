@@ -48,8 +48,11 @@ local proof of these boundaries, not production operations guidance.
 
 The [operational-assessment adoption guide](../operational-assessments.md) is the complete existing-host and
 external-activator recipe. PostgreSQL health exposes the provider-neutral `WasStoreObserved`, `CanEnableActivation`,
-`CanAttemptPump`, and `IsReady` predicates. Use `CanAttemptPump` only as context; call
-`IDurableRuntimePumpAdmission.TryRunOnceAsync` directly so health and admission cannot become a check-then-act pair.
+`CanAttemptPump`, and `IsReady` predicates. Use `CanAttemptPump` only as context; authoritative admission cannot be
+replaced by a check-then-act gate. For a generic external wake endpoint, compose the Provider package's
+[`IDurableExternalActivationService`](../external-activation-v1.md) with this passive provider. Keep direct
+`IDurableRuntimePumpAdmission.TryRunOnceAsync` calls for integrations that intentionally own the lower-level attempt
+mapping.
 
 | Attempt | Public fields | Meaning and remedy |
 | --- | --- | --- |
@@ -57,6 +60,19 @@ external-activator recipe. PostgreSQL health exposes the provider-neutral `WasSt
 | `Refused` | No result, no problem code | Local overlap, closed process gate, drain, active store pass, or worker-generation refusal. Wait or reconcile as appropriate. |
 | `Unavailable` | No result, `ASDUR103` | The store was not observed. Transport/pool, provider-deadline, and permission (`42501`) causes have different remedies. |
 | `Incompatible` | No result, `ASDUR108` or `ASDUR400`–`ASDUR403` | The store was observed and rejected the runtime. Follow schema or authorized epoch recovery. |
+
+### External activation host
+
+The [external activation reference](../external-activation-v1.md) defines the provider-neutral request budget,
+cancellation precedence, all ten outcomes, recovery rules, and activity tags. The executable
+[external activation example](../../examples/durable-external-activation/README.md) demonstrates a passive authenticated
+host alongside the existing [`AddWorkerHost()` continuous path](#run-a-worker-host). Neither activation choice changes
+schema, grants, Work acceptance, or PostgreSQL terminal bookkeeping.
+
+The health reader reports `NotStarted` with `ASDUR404` before it has observed the first heartbeat. This is a valid
+initial compatibility assessment, with activation enabled and readiness false. A host-owned assessment probe preserves
+the observed state and code. The external activation service accepts it but omits `ASDUR404` from an activation result
+unless the observed state is `Stale`; provider health behavior remains unchanged.
 
 The returned non-completed outcomes certify that this invocation did not enter `RunPassAsync`; they do not certify
 the status of another process or a lost response. Exceptions before or after execution retain their original semantics.
