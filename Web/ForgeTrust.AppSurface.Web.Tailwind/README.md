@@ -106,7 +106,7 @@ appsurface-tailwind-4.1.18-linux-x64. Release validation records native-host evi
 for all five supported mappings; a cross-RID executable simulation is not a substitute
 for native execution proof.
 
-Repository builds of the optional [runtime companion packages](./runtimes/Tailwind.Runtime.Common.targets)
+Repository builds of the optional [runtime companion packages](./runtimes/README.md)
 store their native payloads under `TailwindDownloadCacheRoot/runtime-packages/tailwind-<version>/<rid>/`.
 These package downloads do not use the app resolver's lock protocol, so they must remain separate
 from the app build and watch cache, even when a solution builds both at once. The configured root
