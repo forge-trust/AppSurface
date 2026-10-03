@@ -16,7 +16,76 @@ finish() {
   verify_code="$?"
   printf '%s\n' "$verify_code" > "$task_receipts/source-after-exit.txt"
   git status --porcelain=v1 > "$task_receipts/status-after.txt"
-  if [[ "$verify_code" != 0 ]]; then code=1; fi
+  if [[ "$verify_code" != 0 ]]; then
+    code=1
+    # Bounded observation only: never repair source or override the verifier failure.
+    timeout --signal=TERM --kill-after=1s 6s python3 -B - "$task_root/snapshot.json" "$task_repo" > "$task_receipts/source-drift.json" <<'PYDRIFT'
+import hashlib,json,os,stat,sys,time
+result={"expected_files":0,"inspected_files":0,"changed_files":0,"content_drift":0,"mode_drift":0,
+        "unavailable_files":0,"scan_complete":False,"records_truncated":False,"records":[],"scan_error":None}
+started=time.monotonic(); total_bytes=0; root_fd=None
+try:
+    with open(sys.argv[1],"rb") as stream: raw=stream.read(8*1024*1024+1)
+    if len(raw)>8*1024*1024: raise ValueError()
+    record=json.loads(raw); expected=record["source_sha256"]; modes=record["source_modes"]
+    if len(expected)>10000 or set(expected)!=set(modes): raise ValueError()
+    result["expected_files"]=len(expected)
+    root_fd=os.open(sys.argv[2],os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    for name in sorted(expected):
+        if time.monotonic()-started>=4: result["scan_error"]="deadline"; break
+        parts=name.split("/")
+        if len(name)>512 or any(part in ("",".","..") for part in parts): raise ValueError()
+        item={"path":name,"expected_sha256":expected[name],"expected_mode":modes[name],
+              "actual_sha256":None,"actual_mode":None,"state":"unavailable"}
+        directory=os.dup(root_fd); fd=None
+        try:
+            for part in parts[:-1]:
+                next_fd=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=directory)
+                os.close(directory); directory=next_fd
+            before=os.stat(parts[-1],dir_fd=directory,follow_symlinks=False)
+            item["actual_mode"]=format(stat.S_IMODE(before.st_mode),"04o")
+            if not stat.S_ISREG(before.st_mode) or before.st_size>16*1024*1024: raise ValueError()
+            fd=os.open(parts[-1],os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=directory)
+            opened=os.fstat(fd)
+            if (before.st_dev,before.st_ino)!= (opened.st_dev,opened.st_ino) or not stat.S_ISREG(opened.st_mode): raise ValueError()
+            digest=hashlib.sha256(); count=0
+            while True:
+                if time.monotonic()-started>=4: raise TimeoutError()
+                chunk=os.read(fd,65536)
+                if not chunk: break
+                count+=len(chunk); total_bytes+=len(chunk)
+                if count>16*1024*1024 or total_bytes>128*1024*1024: raise ValueError()
+                digest.update(chunk)
+            after=os.fstat(fd); named=os.stat(parts[-1],dir_fd=directory,follow_symlinks=False)
+            identity=lambda value:(value.st_dev,value.st_ino,value.st_mode,value.st_size,value.st_mtime_ns,value.st_ctime_ns)
+            if identity(before)!=identity(after) or identity(after)!=identity(named): raise ValueError()
+            item["actual_sha256"]=digest.hexdigest(); item["state"]="observed"
+        except (OSError,ValueError,TimeoutError):
+            result["unavailable_files"]+=1
+        finally:
+            if fd is not None: os.close(fd)
+            os.close(directory)
+        result["inspected_files"]+=1
+        content=item["actual_sha256"] is not None and item["actual_sha256"]!=expected[name]
+        mode=item["actual_mode"] is not None and item["actual_mode"]!=modes[name]
+        result["content_drift"]+=int(content); result["mode_drift"]+=int(mode)
+        if content or mode or item["state"]!="observed":
+            result["changed_files"]+=1
+            if len(result["records"])<16: result["records"].append(item)
+            else: result["records_truncated"]=True
+    result["scan_complete"]=result["inspected_files"]==result["expected_files"]
+except (OSError,ValueError,TypeError,KeyError):
+    result["scan_error"]="snapshot-or-read-unavailable"
+finally:
+    if root_fd is not None: os.close(root_fd)
+encoded=json.dumps(result,sort_keys=True,separators=(",",":"))
+if len(encoded.encode())>16384:
+    result["records"]=[]; result["records_truncated"]=True
+    encoded=json.dumps(result,sort_keys=True,separators=(",",":"))
+print(encoded)
+PYDRIFT
+    printf '%s\n' "$?" > "$task_receipts/source-drift-exit.txt"
+  fi
   printf '%s\n' "$code" > "$task_receipts/exit-status.txt"
   exit "$code"
 }
@@ -29,12 +98,14 @@ python3 -B "$task_root/verify-snapshot.py" > "$task_receipts/source-before.json"
 git rev-parse HEAD origin/main > "$task_receipts/revisions.txt"
 git status --porcelain=v1 > "$task_receipts/status-before.txt"
 [[ ! -s "$task_receipts/status-before.txt" ]] || exit 2
-export UseSharedCompilation=false MSBUILDDISABLENODEREUSE=1
+export UseSharedCompilation=false MSBUILDDISABLENODEREUSE=1 PYTHONDONTWRITEBYTECODE=1
 # Same SDK/assets prerequisites as native17, narrowed to this test project.
-timeout --signal=TERM --kill-after=10s 180s dotnet restore Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --locked-mode > "$task_receipts/restore.log" 2>&1
-timeout --signal=TERM --kill-after=10s 120s pnpm --dir Web install --frozen-lockfile > "$task_receipts/pnpm-install.log" 2>&1
-timeout --signal=TERM --kill-after=10s 120s pnpm --dir Web run assets:build > "$task_receipts/assets-build.log" 2>&1
-timeout --signal=TERM --kill-after=10s 180s dotnet build Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --no-restore > "$task_receipts/cli-build.log" 2>&1
+( umask 022; timeout --signal=TERM --kill-after=10s 180s dotnet restore Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --locked-mode ) > "$task_receipts/restore.log" 2>&1
+( umask 022; timeout --signal=TERM --kill-after=10s 120s pnpm --dir Web install --frozen-lockfile ) > "$task_receipts/pnpm-install.log" 2>&1
+( umask 022; timeout --signal=TERM --kill-after=10s 120s pnpm --dir Web run assets:build ) > "$task_receipts/assets-build.log" 2>&1
+( umask 022; timeout --signal=TERM --kill-after=10s 180s dotnet build Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --no-restore ) > "$task_receipts/cli-build.log" 2>&1
+# Trusted prerequisites must preserve the pinned source before either test lane.
+python3 -B "$task_root/verify-snapshot.py" > "$task_receipts/source-after-prerequisites.json"
 # Run all 13 portable fixture controls exactly once on Linux, without root.
 timeout --signal=TERM --kill-after=5s 45s python3 -B tests/evidencehost-consumer/test_execution_broker_fixture.py -v > "$task_receipts/portable.log" 2>&1
 python3 - "$task_receipts/portable.log" <<'PY'
