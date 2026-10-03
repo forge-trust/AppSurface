@@ -280,6 +280,7 @@ public sealed class DurableDoctorClassificationTests
         {
             CreateSchema(storeId: Guid.Empty),
             CreateSchema(minimumReaderVersion: 5, maximumReaderVersion: 4),
+            CreateSchema(minimumWriterVersion: 5, maximumWriterVersion: 4),
             CreateSchema(appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12]),
             CreateSchema(pendingVersions: [RequiredSchemaVersion]),
             CreateSchema(appliedVersions: [1, 1]),
@@ -289,6 +290,10 @@ public sealed class DurableDoctorClassificationTests
                 pendingVersions: [RequiredSchemaVersion]),
             CreateSchema(compatibility: DurableRuntimeSchemaCompatibility.UpgradeRequired),
             CreateSchema(compatibility: DurableRuntimeSchemaCompatibility.StoreTooNew),
+            CreateSchema(compatibility: DurableRuntimeSchemaCompatibility.StoreTooNew,
+                installedVersion: RequiredSchemaVersion - 1,
+                appliedVersions: Enumerable.Range(1, RequiredSchemaVersion - 1).ToArray(),
+                pendingVersions: [RequiredSchemaVersion]),
         };
 
         foreach (var schema in invalidSchemas)
@@ -300,6 +305,31 @@ public sealed class DurableDoctorClassificationTests
             Assert.Null(result.Schema);
             Assert.Null(result.StoreId);
         }
+    }
+
+    // Value: protects=runtime evidence must agree with the captured schema identity; fails_when=mixed store or epoch facts are exposed as a clean result; why_new=existing corrupt heartbeat tests use matching schema and runtime identity; seam=none
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Runtime_identity_mismatch_discards_every_database_fact(bool mismatchEpoch)
+    {
+        var request = CreateRequest(workerPair: false);
+        var observation = new DurableDoctorObservation(
+            [], CompatibleSchema(ConfiguredEpoch), [], ObservedAt,
+            mismatchEpoch ? StoreId : Guid.NewGuid(),
+            mismatchEpoch ? OtherEpoch : ConfiguredEpoch);
+
+        var result = DurableDoctorClassifier.Classify(request, observation);
+
+        Assert.Equal("failed", result.Status);
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal(DurableProblemCodes.DoctorContractFailed, result.Findings.Single().Code);
+        Assert.Null(result.Schema);
+        Assert.Null(result.StoreId);
+        Assert.Null(result.ObservedAtUtc);
+        Assert.Null(result.ActiveRuntimeEpoch);
+        Assert.Null(result.Credential);
+        Assert.Null(result.Retention);
     }
 
     [Fact]

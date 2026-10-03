@@ -55,7 +55,7 @@ Every finding contains canonical problem/cause/fix/documentation and its applica
 
 ## Version-one JSON contract
 
-JSON is one envelope on stdout followed by one newline, with no progress or provider logger text. Consumers must require `schemaVersion == 1`, validate status/exit consistency and check requested-check statuses before interpreting nullable facts. Preserve nonzero process exit alongside the report. Unsupported versions require an explicit consumer upgrade; field shapes are versioned.
+JSON is one envelope on stdout followed by one newline, with no progress or provider logger text. Consumers must require `schemaVersion == 1`, validate status/exit consistency and check requested-check statuses before interpreting nullable facts. A clean result requires credential, schema, epoch and retention to be requested and passed; worker may be unrequested, or requested and passed. Preserve nonzero process exit alongside the report. Unsupported versions require an explicit consumer upgrade; field shapes are versioned.
 
 The [minimal automation consumer](../examples/durable-external-activation/consume-doctor-report.py) validates those rules and preserves the captured command exit. Save JSON and exit together even when doctor finds a problem:
 

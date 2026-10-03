@@ -126,12 +126,15 @@ public sealed class DurableDoctorInputTests
     [InlineData("+1s")]
     [InlineData("1e1s")]
     [InlineData("NaNs")]
+    [InlineData("1d")]
+    [InlineData("1z")]
     [InlineData("1S")]
     [InlineData("1 ms")]
     [InlineData("1.0.0s")]
     [InlineData("0.00009ms")]
     [InlineData("0.00000009s")]
     [InlineData("1.00000000000000000000000000001s")]
+    [InlineData("0.0s")]
     public void ParseDuration_rejects_invalid_or_subtick_values(string token) =>
         Assert.Throws<DurableDoctorInputException>(() =>
             DurableDoctorInput.ParseDuration(token, TimeSpan.Zero, TimeSpan.MaxValue));

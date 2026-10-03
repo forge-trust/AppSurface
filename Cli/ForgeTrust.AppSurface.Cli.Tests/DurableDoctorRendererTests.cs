@@ -483,6 +483,10 @@ public sealed class DurableDoctorRendererTests
             Copy(unsafeCredential, credential: unsafeCredential.Credential! with { FailedChecks = [] }),
             Copy(unsafeCredential, retention: clean.Retention, replaceRetention: true),
             Copy(unsafeCredential, schema: clean.Schema, replaceSchema: true),
+            Copy(unsafeCredential, findings: [unsafeCredential.Findings.Single() with
+            {
+                FailedChecks = ["role-ownership", "caller-role"],
+            }]),
             Copy(schemaFailure, requestedChecks: ReplaceCheck(schemaFailure, 1, check => check with { Status = "passed" })),
             Copy(schemaFailure, storeId: null, replaceStoreId: true),
             Copy(schemaFailure, findings: [finding with { FailedChecks = ["active-epoch"] }]),
@@ -503,6 +507,53 @@ public sealed class DurableDoctorRendererTests
         Assert.Equal(0, document.RootElement.GetProperty("exitCode").GetInt32());
         Assert.Contains("ASDUR408", DurableDoctorRenderer.Render(unsafeCredential, request, "text"), StringComparison.Ordinal);
         Assert.Contains("ASDUR401", DurableDoctorRenderer.Render(schemaFailure, request, "text"), StringComparison.Ordinal);
+    }
+
+    // Value: protects=the v1 renderer rejects incomplete found-worker and ordered schema evidence; fails_when=corrupt projections escape into operator JSON or text; why_new=existing malformed-worker rows start from an absent heartbeat; seam=none
+    [Theory]
+    [InlineData("json")]
+    [InlineData("text")]
+    public void Renderer_rejects_corrupt_found_worker_and_schema_sequences(string format)
+    {
+        var request = DurableDoctorClassificationTests.CreateRequest(workerPair: true);
+        var valid = CreateCompatibleResult(request, ConfiguredEpoch,
+            new DurableDoctorHeartbeat(true, ConfiguredEpoch, ObservedAt - TimeSpan.FromSeconds(1), false));
+        var worker = valid.Worker!;
+        var schema = valid.Schema!;
+        var malformed = new[]
+        {
+            Copy(valid, worker: worker with { RuntimeEpoch = null }),
+            Copy(valid, worker: worker with { RuntimeEpoch = Guid.Empty }),
+            Copy(valid, worker: worker with { LastHeartbeatAtUtc = null }),
+            Copy(valid, worker: worker with { LastHeartbeatAtUtc = DateTimeOffset.MaxValue }),
+            Copy(valid, worker: worker with { IsDraining = null }),
+            Copy(valid, worker: worker with { AgeTicks = null }),
+            Copy(valid, worker: worker with { AgeTicks = -1 }),
+            Copy(valid, worker: worker with { AgeTicks = worker.AgeTicks + 1 }),
+            Copy(valid, schema: schema with { AppliedVersions = [0] }),
+            Copy(valid, schema: schema with { AppliedVersions = [1, 1] }),
+            Copy(valid, schema: schema with { AppliedVersions = [2, 1] }),
+            Copy(valid, schema: schema with { PendingVersions = [12, 12] }),
+            Copy(valid, schema: schema with { MinimumWriterVersion = -1 }),
+            Copy(valid, schema: schema with { MaximumWriterVersion = 0 }),
+        };
+
+        foreach (var candidate in malformed)
+        {
+            var exception = Assert.Throws<InvalidOperationException>(() => DurableDoctorRenderer.Render(candidate, request, format));
+            Assert.Equal("Durable doctor result does not satisfy the v1 rendering contract.", exception.Message);
+        }
+
+        var rendered = DurableDoctorRenderer.Render(valid, request, format);
+        if (format == "json")
+        {
+            using var document = JsonDocument.Parse(rendered);
+            Assert.Equal("passed", document.RootElement.GetProperty("status").GetString());
+        }
+        else
+        {
+            Assert.Contains("Store/runtime checks passed", rendered, StringComparison.Ordinal);
+        }
     }
 
     private static DurableDoctorResult Copy(

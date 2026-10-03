@@ -37,6 +37,8 @@ def consume(report, process_exit):
             raise ValueError("Unknown doctor check status.")
         if check["requested"] != (check["status"] != "not-requested"):
             raise ValueError("Doctor check intent contradicts its status.")
+        if status == "passed" and name != "worker" and not check["requested"]:
+            raise ValueError("Clean doctor envelope omits a required store/runtime check.")
         if status == "passed" and check["requested"] and check["status"] != "passed":
             raise ValueError("Clean doctor envelope has an incomplete requested check.")
     findings = report.get("findings")
