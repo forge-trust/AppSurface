@@ -185,7 +185,19 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("NPM_CONFIG_STORE_DIR=$RUNNER_TEMP/coverage-efficiency-pnpm-store", workflow, StringComparison.Ordinal);
         Assert.Contains("package-manager-cache: false", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("cache: pnpm", workflow, StringComparison.Ordinal);
-        Assert.Contains("actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684", workflow, StringComparison.Ordinal);
+        var steps = (YamlSequenceNode)captureEvidence.Children[new YamlScalarNode("steps")];
+        foreach (var stepName in new[]
+        {
+            "Restore NuGet packages for declared comparison state",
+            "Restore pnpm store for declared comparison state",
+        })
+        {
+            var restoreStep = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
+                ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == stepName);
+            Assert.Matches(
+                "^actions/cache/restore@[0-9a-f]{40}$",
+                ((YamlScalarNode)restoreStep.Children[new YamlScalarNode("uses")]).Value!);
+        }
         Assert.Contains("Compute pnpm cache key", workflow, StringComparison.Ordinal);
         Assert.Contains("PNPM_LOCK_HASH: ${{ hashFiles('Web/pnpm-lock.yaml') }}", workflow, StringComparison.Ordinal);
         Assert.Contains("node-cache-${RUNNER_OS}-$(node -p 'process.arch')-pnpm-${PNPM_LOCK_HASH}", workflow, StringComparison.Ordinal);

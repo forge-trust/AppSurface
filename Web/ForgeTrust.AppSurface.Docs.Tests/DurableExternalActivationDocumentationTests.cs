@@ -23,6 +23,9 @@ public sealed class DurableExternalActivationDocumentationTests
         const string guide = "Durable/external-activation-v1.md";
         const string example = "examples/durable-external-activation/README.md";
         const string entry = "releases/unreleased.entries/2026-10-01-durable-external-activation.md";
+        var entryIsUnreleased = File.Exists(TestPathUtils.PathUnder(repository, entry));
+        var releaseNote = entryIsUnreleased ? "releases/unreleased.md" : "releases/v0.2.0-preview.12.md";
+        var releaseRoute = entryIsUnreleased ? "/docs/releases/unreleased" : "/docs/releases/v0.2.0-preview.12";
         using var settings = JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(repository,
             "Web/ForgeTrust.AppSurface.Docs.Standalone/appsettings.json")));
         var includeGlobs = settings.RootElement.GetProperty("AppSurfaceDocs").GetProperty("Harvest")
@@ -46,7 +49,8 @@ public sealed class DurableExternalActivationDocumentationTests
         var fixture = Path.Join(Path.GetTempPath(), "AppSurfaceExternalActivationDocs", Guid.NewGuid().ToString("N"));
         try
         {
-            foreach (var path in new[] { "README.md", guide, example, "releases/unreleased.md", entry })
+            foreach (var path in new[] { "README.md", guide, example, releaseNote }
+                         .Concat(entryIsUnreleased ? [entry] : Array.Empty<string>()))
             {
                 var destination = TestPathUtils.PathUnder(fixture, path);
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
@@ -73,7 +77,7 @@ public sealed class DurableExternalActivationDocumentationTests
                     BaseAddress = new Uri(Assert.Single(addresses!.Addresses)),
                     Timeout = TimeSpan.FromSeconds(10),
                 };
-                using var release = await client.GetAsync("/docs/releases/unreleased");
+                using var release = await client.GetAsync(releaseRoute);
                 using var reference = await client.GetAsync("/docs/durable/external-activation-v1");
                 using var examplePage = await client.GetAsync("/docs/examples/durable-external-activation");
                 Assert.Equal(HttpStatusCode.OK, release.StatusCode);
