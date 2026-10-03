@@ -190,7 +190,7 @@ class CommandResult:
 
 @dataclass(frozen=True)
 class SubjectRunResult:
-    """Untrusted output, a bounded record, and optional copied artifacts; never gate-eligible."""
+    """Bounded subject data and host OCI observation; neither is gate-eligible alone."""
 
     exit_code: int
     stdout: bytes
@@ -198,6 +198,7 @@ class SubjectRunResult:
     scratch_directory: Path
     execution_record: Mapping[str, Any] | None = None
     artifact_export_directory: Path | None = None
+    envelope_observation: Mapping[str, Any] | None = None
 
     @property
     def claim_eligible(self) -> bool:
@@ -1789,7 +1790,9 @@ def launch_subject(
     basenames after a zero-exit attached run, a completed validated artifact
     index, and an independent stopped-container inspection. Each file is
     bounded and checked against that index. This private export is diagnostic
-    material only; ``claim_eligible`` remains false for every result.
+    material only; ``claim_eligible`` remains false for every result. The fixed
+    host-side envelope observation is returned only after live OCI inspection
+    and supervisor cleanup. It does not independently attest the checkout.
     """
     _validate_limits(limits)
     profile_arguments = _validate_profile(profile_id)
@@ -1918,6 +1921,7 @@ def launch_subject(
     primary_error: BaseException | None = None
     result: SubjectRunResult | None = None
     artifact_export_created = False
+    envelope_observation: Mapping[str, Any] | None = None
     try:
         _check_cancel(event)
         supervisor.assert_alive(supervisor_session)
@@ -1992,6 +1996,24 @@ def launch_subject(
             profile_arguments=profile_arguments,
             owner_token=owner_token,
         )
+        # This record is produced by the base-owned host launcher only after
+        # checking the live mount, image, and OCI configuration. It is an
+        # observation for the separate verifier, not a claim from subject code.
+        envelope_observation = {
+            "schemaVersion": 1,
+            "imageDigest": image_digest,
+            "profileId": profile_id,
+            "runnerEnvironment": "github-hosted",
+            "runtime": "rootless-podman",
+            "networkMode": "none",
+            "rootfsReadOnlyConfigured": True,
+            "subjectAndDiffReadOnlyConfigured": True,
+            "scratchTmpfsQuotaVerified": True,
+            "capabilityDropConfigured": True,
+            "noNewPrivilegesConfigured": True,
+            "pidIpcUtsUserNamespacesConfiguredPrivate": True,
+            "resourceLimitsConfigured": True,
+        }
         _check_cancel(event)
         started = _command_executor(
             [engine, "--remote=false", "start", "--attach", container_name],
@@ -2051,6 +2073,7 @@ def launch_subject(
             scratch_directory=scratch,
             execution_record=execution_record,
             artifact_export_directory=artifact_export_result,
+            envelope_observation=envelope_observation,
         )
     except BaseException as exc:
         primary_error = exc

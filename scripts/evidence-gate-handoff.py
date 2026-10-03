@@ -52,6 +52,9 @@ MAX_TOTAL_HANDOFF_BYTES = MAX_SOURCE_DIFF_BYTES + MAX_EVIDENCE_PLAN_BYTES + MAX_
 MAX_GIT_STDERR_BYTES = 4096
 SHA_PATTERN = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
+SUBJECT_IMAGE_PATTERN = re.compile(
+    r"ghcr\.io/forge-trust/appsurface-subject-native-validation@sha256:[0-9a-f]{64}\Z"
+)
 SUBJECT_ARTIFACTS = (
     ("cobertura", "coverage/coverage-merged/coverage.cobertura.xml", MAX_COBERTURA_ARTIFACT_BYTES),
     ("gate-report", "coverage/coverage-gate/coverage-gate.md", MAX_GATE_MARKDOWN_ARTIFACT_BYTES),
@@ -231,6 +234,69 @@ def _validate_execution_receipt(
         raise HandoffError("ASEHB001", "The bounded execution receipt could not be canonicalized.") from None
     if value["sha256"] != digest:
         raise HandoffError("ASEHB001", "The bounded execution receipt digest does not match its contents.")
+
+
+def _validate_envelope_observation(value: Any, *, expected_image_digest: str) -> Mapping[str, Any]:
+    """Require the fixed host-side OCI observations, without treating them as a claim."""
+    if (
+        not isinstance(expected_image_digest, str)
+        or SUBJECT_IMAGE_PATTERN.fullmatch(expected_image_digest) is None
+        or not isinstance(value, dict)
+        or set(value) != {
+            "schemaVersion", "imageDigest", "profileId", "runnerEnvironment", "runtime",
+            "networkMode", "rootfsReadOnlyConfigured", "subjectAndDiffReadOnlyConfigured",
+            "scratchTmpfsQuotaVerified", "capabilityDropConfigured", "noNewPrivilegesConfigured",
+            "pidIpcUtsUserNamespacesConfiguredPrivate", "resourceLimitsConfigured",
+        }
+        or type(value.get("schemaVersion")) is not int
+        or value["schemaVersion"] != 1
+        or value.get("imageDigest") != expected_image_digest
+        or value.get("profileId") != "code-coverage"
+        or value.get("runnerEnvironment") != "github-hosted"
+        or value.get("runtime") != "rootless-podman"
+        or value.get("networkMode") != "none"
+        or any(value.get(key) is not True for key in (
+            "rootfsReadOnlyConfigured", "subjectAndDiffReadOnlyConfigured", "scratchTmpfsQuotaVerified",
+            "capabilityDropConfigured", "noNewPrivilegesConfigured",
+            "pidIpcUtsUserNamespacesConfiguredPrivate", "resourceLimitsConfigured",
+        ))
+    ):
+        raise HandoffError("ASEHB013", "The host-side subject envelope observation is missing or inconsistent.")
+    return value
+
+
+def _make_envelope_receipt(
+    observation: Mapping[str, Any], binding: Mapping[str, str], *, expected_image_digest: str
+) -> dict[str, Any]:
+    record = _validate_envelope_observation(observation, expected_image_digest=expected_image_digest)
+    payload = {"binding": dict(binding), "observation": dict(record), "schemaVersion": 1}
+    return {**payload, "sha256": hashlib.sha256(_canonical_json(payload)).hexdigest()}
+
+
+def _validate_envelope_receipt(
+    value: Any, *, expected_binding: Mapping[str, str], expected_image_digest: str
+) -> None:
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"binding", "observation", "schemaVersion", "sha256"}
+        or type(value.get("schemaVersion")) is not int
+        or value["schemaVersion"] != 1
+        or value.get("binding") != dict(expected_binding)
+        or not isinstance(value.get("sha256"), str)
+        or SHA256_PATTERN.fullmatch(value["sha256"]) is None
+    ):
+        raise HandoffError("ASEHB013", "The subject envelope receipt is malformed or bound to another run.")
+    observation = _validate_envelope_observation(
+        value.get("observation"), expected_image_digest=expected_image_digest
+    )
+    try:
+        digest = hashlib.sha256(_canonical_json({
+            "binding": value["binding"], "observation": observation, "schemaVersion": 1,
+        })).hexdigest()
+    except (TypeError, ValueError, RecursionError):
+        raise HandoffError("ASEHB013", "The subject envelope receipt could not be canonicalized.") from None
+    if digest != value["sha256"]:
+        raise HandoffError("ASEHB013", "The subject envelope receipt digest does not match its contents.")
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -1472,6 +1538,7 @@ def verify_handoff(
     subject_result_file: str | os.PathLike[str],
     output_plan: str | os.PathLike[str],
     subject_artifacts_directory: str | os.PathLike[str] | None = None,
+    expected_image_digest: str | None = None,
 ) -> None:
     """Copy a downloaded plan only after binding its bundle to fresh trusted Git state.
 
@@ -1542,6 +1609,13 @@ def verify_handoff(
     ):
         raise HandoffError("ASEHB001", "The credentialless subject result does not match this successful handoff.")
     if plan["Profile"]["Id"] == "code-coverage":
+        if expected_image_digest is None:
+            raise HandoffError("ASEHB013", "The trusted subject image digest is required for envelope verification.")
+        _validate_envelope_receipt(
+            subject_result.get("envelopeReceipt"),
+            expected_binding=_execution_receipt_binding(identity, manifest, plan["Profile"]["Id"]),
+            expected_image_digest=expected_image_digest,
+        )
         receipt = subject_result.get("executionReceipt")
         _validate_execution_receipt(
             receipt,
@@ -1563,6 +1637,8 @@ def verify_handoff(
         )
     elif subject_artifacts_directory is not None:
         raise HandoffError("ASEHB012", "A documentation-only result cannot include a subject artifact payload.")
+    elif expected_image_digest is not None or "envelopeReceipt" in subject_result:
+        raise HandoffError("ASEHB013", "A documentation-only result cannot include a subject envelope.")
 
     plan_bytes = _read_regular_file(entries["evidence-plan.json"], MAX_EVIDENCE_PLAN_BYTES, "The verified EvidencePlan")
     _write_regular_file(output, plan_bytes)
@@ -1689,6 +1765,7 @@ def execute_handoff(
         if subject_result.exit_code == 0 and not isinstance(execution_record, Mapping):
             raise HandoffError("ASEHB009", "A successful subject run omitted its fixed execution record.")
         execution_receipt: dict[str, Any] | None = None
+        envelope_receipt: dict[str, Any] | None = None
         if execution_record is not None:
             if not isinstance(execution_record, Mapping):
                 raise HandoffError("ASEHB009", "The bounded subject launcher returned a malformed execution record.")
@@ -1708,6 +1785,11 @@ def execute_handoff(
             except HandoffError:
                 raise HandoffError("ASEHB009", "The bounded subject launcher returned invalid step proof.") from None
             if subject_result.exit_code == 0:
+                envelope_receipt = _make_envelope_receipt(
+                    getattr(subject_result, "envelope_observation", None),
+                    _execution_receipt_binding(identity, manifest, profile_id),
+                    expected_image_digest=image_digest,
+                )
                 _verify_subject_artifact_export(
                     artifact_export,
                     validated_record["artifacts"],
@@ -1731,7 +1813,9 @@ def execute_handoff(
             result["diagnostic"] = {"code": "ASEHB009", "message": "The credentialless subject profile exited unsuccessfully."}
         else:
             assert execution_receipt is not None
+            assert envelope_receipt is not None
             result["executionReceipt"] = execution_receipt
+            result["envelopeReceipt"] = envelope_receipt
             result["diagnostic"] = {"code": "ASEHB010", "message": "Subject execution completed without a trusted evidence verifier."}
             retain_artifact_export = True
     except HandoffError as failure:
@@ -1784,6 +1868,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=None,
         help="Downloaded fixed coverage artifacts; required for code-coverage verification.",
     )
+    verify.add_argument(
+        "--expected-image-digest",
+        default=None,
+        help="Trusted preflight image digest; required for a code-coverage envelope observation.",
+    )
     verify.add_argument("--output-plan", required=True)
     arguments = parser.parse_args(argv)
     try:
@@ -1803,6 +1892,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 subject_result_file=arguments.subject_result,
                 output_plan=arguments.output_plan,
                 subject_artifacts_directory=arguments.subject_artifacts,
+                expected_image_digest=arguments.expected_image_digest,
             )
             print("evidence-gate-handoff: current-revision handoff verified for trusted planning.")
             return 0

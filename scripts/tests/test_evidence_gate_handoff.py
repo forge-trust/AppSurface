@@ -24,6 +24,7 @@ assert SPEC is not None and SPEC.loader is not None
 handoff = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = handoff
 SPEC.loader.exec_module(handoff)
+IMAGE = "ghcr.io/forge-trust/appsurface-subject-native-validation@sha256:" + "f" * 64
 
 
 class HandoffPathTests(unittest.TestCase):
@@ -237,6 +238,7 @@ class HandoffArchiveTests(unittest.TestCase):
         *,
         exit_code: int = 0,
         include_record: bool = True,
+        include_envelope: bool = True,
         step_mutation: str | None = None,
         artifact_mutation: str | None = None,
     ) -> None:
@@ -327,6 +329,21 @@ def launch_subject(
         stdout=b'completed',
         stderr=b'',
         execution_record=execution_record if {exit_code} == 0 and {include_record} else None,
+        envelope_observation={{
+            'schemaVersion': 1,
+            'imageDigest': image_digest,
+            'profileId': profile_id,
+            'runnerEnvironment': 'github-hosted',
+            'runtime': 'rootless-podman',
+            'networkMode': 'none',
+            'rootfsReadOnlyConfigured': True,
+            'subjectAndDiffReadOnlyConfigured': True,
+            'scratchTmpfsQuotaVerified': True,
+            'capabilityDropConfigured': True,
+            'noNewPrivilegesConfigured': True,
+            'pidIpcUtsUserNamespacesConfiguredPrivate': True,
+            'resourceLimitsConfigured': True,
+        }} if {exit_code} == 0 and {include_envelope} else None,
     )
 """,
             encoding="utf-8",
@@ -339,6 +356,17 @@ def launch_subject(
         payload = {
             "binding": receipt["binding"],
             "record": receipt["record"],
+            "schemaVersion": receipt["schemaVersion"],
+        }
+        receipt["sha256"] = hashlib.sha256(handoff._canonical_json(payload)).hexdigest()
+
+    @staticmethod
+    def _resign_envelope_receipt(result: dict[str, object]) -> None:
+        receipt = result["envelopeReceipt"]
+        assert isinstance(receipt, dict)
+        payload = {
+            "binding": receipt["binding"],
+            "observation": receipt["observation"],
             "schemaVersion": receipt["schemaVersion"],
         }
         receipt["sha256"] = hashlib.sha256(handoff._canonical_json(payload)).hexdigest()
@@ -400,6 +428,42 @@ def launch_subject(
 
             self.assertEqual(plan_file.read_bytes(), verified_plan.read_bytes())
 
+    def test_documentation_only_verifier_rejects_subject_envelope_inputs(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="evidence-gate-docs-envelope-") as temporary:
+            root = Path(temporary).resolve()
+            capture, scripts, _ = self._capture(root)
+            plan_file = self._write_plan(root, capture, profile_id="documentation-only")
+            output = root / "handoff"
+            self._create(capture, scripts, plan_file, output)
+            subject_exit, subject_result = self._execute(output, root)
+            self.assertEqual(0, subject_exit)
+            original_result = subject_result.read_bytes()
+
+            for name, subject_artifacts, expected_image, add_receipt, expected_code in (
+                ("artifact-payload", root / "unexpected-artifacts", None, False, "ASEHB012"),
+                ("image-argument", None, IMAGE, False, "ASEHB013"),
+                ("envelope-receipt", None, None, True, "ASEHB013"),
+            ):
+                with self.subTest(name=name):
+                    if add_receipt:
+                        result = json.loads(original_result)
+                        result["envelopeReceipt"] = {}
+                        subject_result.write_bytes(handoff._canonical_json(result) + b"\n")
+                    else:
+                        subject_result.write_bytes(original_result)
+                    verified = root / f"verified-{name}.json"
+                    with self.assertRaises(handoff.HandoffError) as failure:
+                        handoff.verify_handoff(
+                            handoff_directory=output,
+                            fresh_capture_directory=capture,
+                            subject_result_file=subject_result,
+                            output_plan=verified,
+                            subject_artifacts_directory=subject_artifacts,
+                            expected_image_digest=expected_image,
+                        )
+                    self.assertEqual(expected_code, failure.exception.code)
+                    self.assertFalse(verified.exists())
+
     def test_code_coverage_verifier_rejects_invalid_downloaded_artifact_exports(self) -> None:
         with tempfile.TemporaryDirectory(prefix="evidence-gate-downloaded-artifacts-") as temporary:
             root = Path(temporary).resolve()
@@ -410,7 +474,7 @@ def launch_subject(
             exit_code, result_path = self._execute(
                 output,
                 root,
-                image_digest="sha256:" + "f" * 64,
+                image_digest=IMAGE,
                 environment={
                     "GITHUB_RUN_ID": "456",
                     "GITHUB_RUN_ATTEMPT": "1",
@@ -450,6 +514,7 @@ def launch_subject(
                             subject_result_file=result_path,
                             output_plan=verified,
                             subject_artifacts_directory=candidate,
+                            expected_image_digest=IMAGE,
                         )
                     self.assertEqual("ASEHB012", failure.exception.code)
                     self.assertFalse(verified.exists())
@@ -460,6 +525,7 @@ def launch_subject(
                     fresh_capture_directory=capture,
                     subject_result_file=result_path,
                     output_plan=root / "verified-missing-flag.json",
+                    expected_image_digest=IMAGE,
                 )
             self.assertEqual("ASEHB012", missing_flag.exception.code)
             self.assertFalse((root / "verified-missing-flag.json").exists())
@@ -474,6 +540,7 @@ def launch_subject(
                     subject_result_file=result_path,
                     output_plan=root / "verified-unsafe-path.json",
                     subject_artifacts_directory=missing_component,
+                    expected_image_digest=IMAGE,
                 )
             self.assertEqual("ASEHB012", unsafe_path.exception.code)
             self.assertFalse((root / "verified-unsafe-path.json").exists())
@@ -490,6 +557,7 @@ def launch_subject(
                     subject_result_file=result_path,
                     output_plan=root / "verified-index-mismatch.json",
                     subject_artifacts_directory=exported,
+                    expected_image_digest=IMAGE,
                 )
             self.assertEqual("ASEHB012", index_mismatch.exception.code)
             self.assertFalse((root / "verified-index-mismatch.json").exists())
@@ -508,7 +576,7 @@ def launch_subject(
                 exit_code, result_path = self._execute(
                     output,
                     root,
-                    image_digest="sha256:" + "f" * 64,
+                    image_digest=IMAGE,
                     environment={
                         "GITHUB_RUN_ID": "456",
                         "GITHUB_RUN_ATTEMPT": "1",
@@ -622,7 +690,7 @@ def launch_subject(
             exit_code, result_path = self._execute(
                 output,
                 root,
-                image_digest="sha256:" + "f" * 64,
+                image_digest=IMAGE,
                 environment={
                     "GITHUB_RUN_ID": "456",
                     "GITHUB_RUN_ATTEMPT": "1",
@@ -662,6 +730,7 @@ def launch_subject(
                             "--fresh-capture-directory", str(capture),
                             "--subject-result", str(result_path),
                             "--subject-artifacts", str(downloaded_artifacts),
+                            "--expected-image-digest", IMAGE,
                             "--output-plan", str(verified_plan),
                         ]
                     ),
@@ -679,7 +748,7 @@ def launch_subject(
             exit_code, result_path = self._execute(
                 output,
                 root,
-                image_digest="sha256:" + "f" * 64,
+                image_digest=IMAGE,
                 environment={
                     "GITHUB_RUN_ID": "456",
                     "GITHUB_RUN_ATTEMPT": "1",
@@ -738,6 +807,7 @@ def launch_subject(
                             subject_result_file=result_path,
                             output_plan=root / f"verified-{name}.json",
                             subject_artifacts_directory=root / "subject-artifacts",
+                            expected_image_digest=IMAGE,
                         )
                     self.assertFalse((root / f"verified-{name}.json").exists())
 
@@ -751,8 +821,119 @@ def launch_subject(
                     subject_result_file=result_path,
                     output_plan=root / "verified-digest-tampered.json",
                     subject_artifacts_directory=root / "subject-artifacts",
+                    expected_image_digest=IMAGE,
                 )
             self.assertFalse((root / "verified-digest-tampered.json").exists())
+
+    def test_code_coverage_host_envelope_must_match_trusted_image_and_run(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="evidence-gate-envelope-") as temporary:
+            root = Path(temporary).resolve()
+            capture, scripts, plan_file = self._capture(root)
+            self._write_test_launcher(scripts)
+            output = root / "handoff"
+            self._create(capture, scripts, plan_file, output)
+            exit_code, result_path = self._execute(
+                output,
+                root,
+                image_digest=IMAGE,
+                environment={
+                    "GITHUB_RUN_ID": "456",
+                    "GITHUB_RUN_ATTEMPT": "1",
+                    "GITHUB_REPOSITORY_ID": "123",
+                    "TEST_PROFILE_LOG": str(root / "selected-profile.txt"),
+                },
+            )
+            self.assertEqual(0, exit_code)
+            valid_result = json.loads(result_path.read_bytes())
+            self.assertEqual(IMAGE, valid_result["envelopeReceipt"]["observation"]["imageDigest"])
+            exported = root / "subject-artifacts"
+
+            def missing(value: dict[str, object]) -> None:
+                value.pop("envelopeReceipt")
+
+            def wrong_image(value: dict[str, object]) -> None:
+                value["envelopeReceipt"]["observation"]["imageDigest"] = IMAGE[:-1] + "0"
+
+            def weakened_network(value: dict[str, object]) -> None:
+                value["envelopeReceipt"]["observation"]["networkMode"] = "bridge"
+
+            def false_isolation(value: dict[str, object]) -> None:
+                value["envelopeReceipt"]["observation"]["capabilityDropConfigured"] = False
+
+            def wrong_head(value: dict[str, object]) -> None:
+                value["envelopeReceipt"]["binding"]["headRevision"] = "0" * 40
+
+            def extra_field(value: dict[str, object]) -> None:
+                value["envelopeReceipt"]["observation"]["extra"] = True
+
+            def stale_digest(value: dict[str, object]) -> None:
+                value["envelopeReceipt"]["sha256"] = "0" * 64
+
+            for name, mutate in (
+                ("missing", missing),
+                ("wrong-image", wrong_image),
+                ("weakened-network", weakened_network),
+                ("false-isolation", false_isolation),
+                ("wrong-head", wrong_head),
+                ("extra-field", extra_field),
+                ("stale-digest", stale_digest),
+            ):
+                with self.subTest(mutation=name):
+                    altered = json.loads(json.dumps(valid_result))
+                    mutate(altered)
+                    if name not in {"missing", "stale-digest"}:
+                        self._resign_envelope_receipt(altered)
+                    result_path.write_bytes(handoff._canonical_json(altered) + b"\n")
+                    verified = root / f"verified-{name}.json"
+                    with self.assertRaises(handoff.HandoffError) as failure:
+                        handoff.verify_handoff(
+                            handoff_directory=output,
+                            fresh_capture_directory=capture,
+                            subject_result_file=result_path,
+                            output_plan=verified,
+                            subject_artifacts_directory=exported,
+                            expected_image_digest=IMAGE,
+                        )
+                    self.assertEqual("ASEHB013", failure.exception.code)
+                    self.assertFalse(verified.exists())
+
+            result_path.write_bytes(handoff._canonical_json(valid_result) + b"\n")
+            for supplied_image in (None, IMAGE[:-1] + "0", "sha256:" + "f" * 64):
+                with self.subTest(supplied_image=supplied_image):
+                    with self.assertRaises(handoff.HandoffError) as failure:
+                        handoff.verify_handoff(
+                            handoff_directory=output,
+                            fresh_capture_directory=capture,
+                            subject_result_file=result_path,
+                            output_plan=root / "verified-wrong-preflight.json",
+                            subject_artifacts_directory=exported,
+                            expected_image_digest=supplied_image,
+                        )
+                    self.assertEqual("ASEHB013", failure.exception.code)
+
+    def test_code_coverage_handoff_fails_when_launcher_omits_host_envelope(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="evidence-gate-missing-envelope-") as temporary:
+            root = Path(temporary).resolve()
+            capture, scripts, plan_file = self._capture(root)
+            self._write_test_launcher(scripts, include_envelope=False)
+            output = root / "handoff"
+            self._create(capture, scripts, plan_file, output)
+            exit_code, result_path = self._execute(
+                output,
+                root,
+                image_digest=IMAGE,
+                environment={
+                    "GITHUB_RUN_ID": "456",
+                    "GITHUB_RUN_ATTEMPT": "1",
+                    "GITHUB_REPOSITORY_ID": "123",
+                    "TEST_PROFILE_LOG": str(root / "selected-profile.txt"),
+                },
+            )
+            self.assertEqual(2, exit_code)
+            result = json.loads(result_path.read_bytes())
+            self.assertEqual("ASEHB013", result["diagnostic"]["code"])
+            self.assertNotIn("envelopeReceipt", result)
+            self.assertFalse((root / "subject-artifacts").exists())
 
     def test_code_coverage_handoff_fails_without_or_with_invalid_step_proof(self) -> None:
         scenarios = (
@@ -771,7 +952,7 @@ def launch_subject(
                 exit_code, result_path = self._execute(
                     output,
                     root,
-                    image_digest="sha256:" + "f" * 64,
+                    image_digest=IMAGE,
                     environment={
                         "GITHUB_RUN_ID": "456",
                         "GITHUB_RUN_ATTEMPT": "1",
@@ -800,7 +981,7 @@ def launch_subject(
             exit_code, result_path = self._execute(
                 output,
                 root,
-                image_digest="sha256:" + "f" * 64,
+                image_digest=IMAGE,
                 environment={
                     "GITHUB_RUN_ID": "456",
                     "GITHUB_RUN_ATTEMPT": "1",

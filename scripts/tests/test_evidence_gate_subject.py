@@ -586,6 +586,9 @@ class EvidenceGateSubjectTests(unittest.TestCase):
         self.assertEqual(0, result.exit_code)
         self.assertEqual(b"", result.stdout)
         self.assertFalse(result.claim_eligible)
+        self.assertEqual(IMAGE, result.envelope_observation["imageDigest"])
+        self.assertEqual("none", result.envelope_observation["networkMode"])
+        self.assertIs(True, result.envelope_observation["subjectAndDiffReadOnlyConfigured"])
         self.assertEqual(self.runner_temp / "subject-artifact-export", result.artifact_export_directory)
         export = result.artifact_export_directory
         assert export is not None

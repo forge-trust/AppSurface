@@ -330,6 +330,7 @@ jobs:
     name: Evidence gate verifier (pilot)
     needs:
       - controller-capture
+      - subject-image-preflight
       - credentialless-subject
     if: ${{ always() }}
     runs-on: ubuntu-24.04
@@ -373,6 +374,7 @@ jobs:
         shell: bash
         env:
           EVIDENCE_PROFILE_ID: ${{ needs.controller-capture.outputs.profile_id }}
+          EXPECTED_SUBJECT_IMAGE: ${{ needs.subject-image-preflight.outputs.image }}
         run: |
           set -euo pipefail
           handoff="$RUNNER_TEMP/evidence-gate-verifier-inputs/evidence-gate-controller-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -380,7 +382,7 @@ jobs:
           artifacts="$RUNNER_TEMP/evidence-gate-verifier-inputs/evidence-gate-artifacts-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           artifact_args=()
           if [[ "$EVIDENCE_PROFILE_ID" == code-coverage ]]; then
-            artifact_args=(--subject-artifacts "$artifacts")
+            artifact_args=(--subject-artifacts "$artifacts" --expected-image-digest "$EXPECTED_SUBJECT_IMAGE")
           fi
           python3 "$GITHUB_WORKSPACE/trusted/scripts/evidence-gate-handoff.py" verify \
             --handoff-directory "$handoff" \

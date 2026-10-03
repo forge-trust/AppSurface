@@ -84,6 +84,7 @@ These codes come from the `create`, `execute`, and `verify` modes of [`evidence-
 | `ASEHB010` | The selected subject execution completed, but no trusted verifier has authorized a claim. | Continue to the base-owned verifier; do not use this result as a required-check verdict. |
 | `ASEHB011` | An unexpected handoff failure or missing result triggered the fixed fallback. | Keep the run failed and inspect the trusted controller/subject job logs without exposing raw subject output. |
 | `ASEHB012` | The fixed coverage artifact export is missing, linked, changed, oversized, contains unexpected files, or differs from the completed receipt index. | Keep the run non-claiming; recreate the same-run artifact export and verify its three fixed files against a fresh receipt. |
+| `ASEHB013` | The host-side OCI envelope observation is absent, malformed, replayed from another run, or names a different image than the trusted preflight selected. | Keep the run non-claiming; inspect the base-owned launcher and preflight output, then rerun the exact head with a new attempt. Do not edit or re-sign the downloaded receipt. |
 
 ## `ASEGH`: host and pilot workflow
 
