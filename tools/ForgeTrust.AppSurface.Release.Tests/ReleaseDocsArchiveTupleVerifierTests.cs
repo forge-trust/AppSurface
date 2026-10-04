@@ -321,7 +321,7 @@ public sealed class ReleaseDocsArchiveTupleVerifierTests
             RootPath = Directory.CreateTempSubdirectory("appsurface-docs-tuple-").FullName;
             Version = SemVer.Parse("1.2.3-preview.1");
             AssetName = $"appsurface-docs-v{Version}.tar.gz";
-            ArchivePath = Path.Join(RootPath, archiveFileName ?? AssetName);
+            ArchivePath = TestPathUtils.PathUnder(RootPath, archiveFileName ?? AssetName);
             PlanPath = Path.Join(RootPath, "docs-publication-plan.json");
             SidecarPath = ArchivePath + ".sha256";
             ArchiveBytes = DefaultArchiveBytes;
