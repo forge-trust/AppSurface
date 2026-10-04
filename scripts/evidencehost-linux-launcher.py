@@ -1775,6 +1775,7 @@ class Broker:
                     "NUGET_PACKAGES": str(self.scratch / "nuget"),
                     "DOTNET_PROCESSOR_COUNT": "1",
                     "DOTNET_EnableDiagnostics_IPC": "0",
+                             "DOTNET_EnableDiagnostics_Debugger": "0",
                     "EVIDENCE_TEST_OUTPUT_ROOT": str(self.scratch / "test-output")}.items()],
                 str(self.dotnet), *request["arguments"]]
         collector_sampler = None
