@@ -2594,6 +2594,158 @@ class StartupRecordControls(unittest.TestCase):
             finally: broker.close_artifact_handles()
 
 
+class PrivateCollectorSamplingOrchestrationControls(unittest.TestCase):
+    """Procedure and real-FD controls; all root/kernel/sampler facts are doubles.
+
+    These controls create no protected supervisor, admission or positive proof.
+    """
+    exercise = SubjectUnitCompletionTests.exercise
+
+    def test_pending_sampler_precedes_launch_and_only_observes_validated_running_unit(self):
+        calls = []
+        sampler = unittest.mock.Mock()
+        sampler.finish.return_value = None
+
+        def pending(*args):
+            self.assertFalse(launcher.subprocess.Popen.called)
+            calls.append('pending')
+            return sampler
+
+        def observe():
+            self.assertTrue(launcher.subprocess.Popen.called)
+            calls.append('observe')
+
+        sampler.observe.side_effect = observe
+        sampler.finish.side_effect = lambda: calls.append('finish')
+        with patch.object(launcher._collector, 'CollectorStartupSampler', side_effect=pending):
+            response, _, registered, receipts = self.exercise(change='running-first')
+        self.assertEqual(['pending', 'observe', 'finish'], calls)
+        self.assertTrue(response['ok'])
+        self.assertEqual(0, response['exit_code'])
+        self.assertTrue(registered)
+        self.assertEqual([(6, 3, 3)], receipts)
+
+    def test_unvalidated_unit_never_reaches_observer(self):
+        for change in ({'User': '0'}, {'Group': '0'}, {'ControlGroup': '/system.slice/foreign.service'}):
+            with self.subTest(change=change):
+                sampler = unittest.mock.Mock()
+                sampler.finish.return_value = None
+                with patch.object(launcher._collector, 'CollectorStartupSampler', return_value=sampler):
+                    response, _, registered, receipts = self.exercise(change=change)
+                sampler.observe.assert_not_called()
+                self.assertFalse(response['ok'])
+                self.assertFalse(registered)
+                self.assertEqual([], receipts)
+
+    def test_sampler_creation_observation_or_finish_error_cannot_replace_command_result(self):
+        for stage in ('create', 'observe', 'finish'):
+            with self.subTest(stage=stage):
+                sampler = unittest.mock.Mock()
+                sampler.finish.return_value = None
+                if stage != 'create':
+                    getattr(sampler, stage).side_effect = OSError('diagnostic-canary')
+                with patch.object(launcher._collector, 'CollectorStartupSampler',
+                                  side_effect=OSError('diagnostic-canary') if stage == 'create' else None,
+                                  return_value=sampler):
+                    response, _, registered, receipts = self.exercise(status=17, change='running-first')
+                self.assertTrue(response['ok'])
+                self.assertEqual(17, response['exit_code'])
+                self.assertTrue(registered)
+                self.assertEqual([(6, 3, 3)], receipts)
+                self.assertNotIn('diagnostic-canary', json.dumps(response))
+
+    def prepare_capture(self):
+        temporary = tempfile.TemporaryDirectory(prefix='collector-capture-')
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        broker, _, _ = artifact_broker(root)
+        self.addCleanup(broker.close_artifact_handles)
+        broker.descriptor = {'cgroup': '/system.slice/worker-fixture.service'}
+        for field in ('ready_seen', 'wait_completed', 'exited', 'work_closed'):
+            setattr(broker, field, True)
+        broker.units = [('test-evidence-s-0.service', '/system.slice/test-evidence-s-0.service')]
+        broker.private_collector_snapshot = json.dumps({
+            'unit': broker.units[0][0], 'cgroup': broker.units[0][1],
+            'subject_uid': broker.subject_uid, 'subject_gid': broker.subject_gid}).encode()
+        destination = root / 'private-diagnostics'
+        destination.mkdir(mode=0o700)
+        fd = os.open(destination, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        self.addCleanup(os.close, fd)
+        return broker, destination, fd
+
+    def test_private_snapshot_write_occurs_only_after_real_resource_close(self):
+        broker, directory, fd = self.prepare_capture()
+        source_fd = broker.test_output_fd
+        actual_fstat = os.fstat
+
+        def root_stat(descriptor):
+            info = actual_fstat(descriptor)
+            fields = list(info)
+            fields[4] = 0
+            return os.stat_result(fields)
+
+        def traces(*args, **kwargs):
+            with self.assertRaises(OSError):
+                actual_fstat(source_fd)
+            path = directory / 'subject-collector-startup.json'
+            self.assertEqual(broker.private_collector_snapshot, path.read_bytes())
+            self.assertEqual(0o600, stat.S_IMODE(path.stat().st_mode))
+            return True
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(launcher.os, 'geteuid', return_value=0))
+            stack.enter_context(patch.object(launcher.os, 'fstat', side_effect=root_stat))
+            stack.enter_context(patch.object(broker, '_group_empty', return_value=True))
+            stack.enter_context(patch.object(broker, '_all_owned_work_stopped', return_value=True))
+            stack.enter_context(patch.object(launcher._collector, 'validate_snapshot', return_value=True))
+            trace_writer = stack.enter_context(patch.object(launcher._vstest, 'capture_traces', side_effect=traces))
+            launcher._close_failed_launch_resources(None, [], broker, -1, fd, True, RuntimeError('original'))
+        trace_writer.assert_called_once()
+        self.assertEqual(-1, broker.test_output_fd)
+        os.fstat(fd)
+
+    def test_invalid_checkpoint_identity_payload_or_deadline_prevents_snapshot_open(self):
+        broker, _, fd = self.prepare_capture()
+        original = broker.private_collector_snapshot
+        checkpoint = launcher._vstest_failure_checkpoint(broker, True)
+        changes = [('ready_seen', False), ('wait_completed', False), ('exited', False),
+                   ('work_closed', False), ('active_runs', 1), ('active_handlers', 1),
+                   ('subject_output_failed', True), ('application_work_failed', True)]
+        for field, value in changes:
+            with self.subTest(field=field), ExitStack() as stack:
+                old = getattr(broker, field)
+                stack.callback(setattr, broker, field, old)
+                setattr(broker, field, value)
+                stack.enter_context(patch.object(launcher.os, 'geteuid', return_value=0))
+                opened = stack.enter_context(patch.object(launcher.os, 'open'))
+                self.assertFalse(launcher._capture_private_collector_snapshot(
+                    broker, fd, True, (-1, checkpoint, time.monotonic()+1)))
+                opened.assert_not_called()
+        for kind in ('unowned', 'null-checkpoint', 'expired', 'foreign-unit', 'wrong-uid', 'bad-json', 'invalid-schema'):
+            with self.subTest(kind=kind), ExitStack() as stack:
+                stack.callback(setattr, broker, 'private_collector_snapshot', original)
+                identity = json.loads(original)
+                if kind == 'foreign-unit': identity['unit'] = 'foreign.service'
+                if kind == 'wrong-uid': identity['subject_uid'] = broker.subject_uid + 1
+                broker.private_collector_snapshot = b'canary' if kind == 'bad-json' else json.dumps(identity).encode()
+                stack.enter_context(patch.object(launcher.os, 'geteuid', return_value=0))
+                stack.enter_context(patch.object(launcher._collector, 'validate_snapshot', return_value=kind != 'invalid-schema'))
+                stack.enter_context(patch.object(broker, '_group_empty', return_value=True))
+                stack.enter_context(patch.object(broker, '_all_owned_work_stopped', return_value=True))
+                opened = stack.enter_context(patch.object(launcher.os, 'open'))
+                self.assertFalse(launcher._capture_private_collector_snapshot(
+                    broker, fd, kind != 'unowned',
+                    (-1, None if kind == 'null-checkpoint' else checkpoint,
+                     time.monotonic()-1 if kind == 'expired' else time.monotonic()+1)))
+                opened.assert_not_called()
+
+    def test_ordinary_success_never_opens_private_snapshot_destination(self):
+        broker, _, fd = self.prepare_capture()
+        with patch.object(launcher, '_capture_private_collector_snapshot') as capture:
+            launcher._close_failed_launch_resources(None, [], broker, -1, fd, True, None)
+        capture.assert_not_called()
+
+
 class PrivateVstestDiagnosticOrchestrationControls(unittest.TestCase):
     """Portable real-FD procedure controls, no actual root/systemd/exit proof.
 

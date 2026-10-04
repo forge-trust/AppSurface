@@ -109,6 +109,12 @@ _vstest = importlib.util.module_from_spec(_vstest_spec)
 sys.modules[_vstest_spec.name] = _vstest
 _vstest_spec.loader.exec_module(_vstest)
 
+_collector_spec = importlib.util.spec_from_file_location(
+    "evidencehost_private_collector_sample", Path(__file__).with_name("evidencehost_private_collector_sample.py"))
+_collector = importlib.util.module_from_spec(_collector_spec)
+sys.modules[_collector_spec.name] = _collector
+_collector_spec.loader.exec_module(_collector)
+
 SCHEMA = "evidence-worker-linux-v1"
 APPLICATION_SCHEMA = "evidence-worker-linux-v2"
 FAILURE_DIAGNOSTIC_SCHEMA = "evidence-launcher-failure-v1"
@@ -1439,6 +1445,8 @@ class Broker:
         self.command_output_receipts: list[tuple[int, int, int]] = []
         # Diagnostic-only immutable bytes; never used by completion or admission.
         self.failed_subject_prefixes: tuple[bytes, bytes] | None = None
+        # Private diagnostic bytes never participate in admission, output quota or completion.
+        self.private_collector_snapshot: bytes | None = None
         self.application_output_receipt: tuple[int, int, int] | None = None
         self.application_work_failed = False
         self.active_application_operations = 0
@@ -1767,6 +1775,15 @@ class Broker:
                     "NUGET_PACKAGES": str(self.scratch / "nuget"),
                     "EVIDENCE_TEST_OUTPUT_ROOT": str(self.scratch / "test-output")}.items()],
                 str(self.dotnet), *request["arguments"]]
+        collector_sampler = None
+        if result_root is not None:
+            try:
+                collector_sampler = _collector.CollectorStartupSampler(
+                    unit, group, self.subject_uid, self.subject_gid,
+                    str(self.dotnet), str(self.dotnet.parent), self.deadline)
+            except Exception:
+                # Diagnostic preparation cannot change the subject command or its result.
+                pass
         with self.lock:
             if self.work_closed:
                 raise LauncherError("job-not-active")
@@ -1807,6 +1824,11 @@ class Broker:
                         raise LauncherError("subject-exit-unconfirmed")
                     if int(pid) > 0 and props.get("ControlGroup") != group:
                         raise LauncherError("subject-exit-unconfirmed")
+                    if int(pid) > 0 and collector_sampler is not None:
+                        try:
+                            collector_sampler.observe()
+                        except Exception:
+                            pass
                     if (pid == "0" and code in ("1", "2", "3")
                             and props.get("ActiveState") in ("active", "failed", "inactive")
                             and props.get("SubState") in ("exited", "failed", "dead")):
@@ -1829,6 +1851,19 @@ class Broker:
 
         # One cumulative stop/join allowance; normal per-command stop keeps this lease open.
         stop_deadline = time.monotonic() + min(self.stopping_seconds, self.cleanup_seconds)
+        if collector_sampler is not None:
+            try:
+                payload = collector_sampler.finish()
+                if (type(payload) is bytes and len(payload) <= 64 * 1024
+                        and _collector.validate_snapshot(payload) is True):
+                    identity = json.loads(payload)
+                    if (identity['unit'] == unit and identity['cgroup'] == group
+                            and identity['subject_uid'] == self.subject_uid
+                            and identity['subject_gid'] == self.subject_gid):
+                        with self.lock:
+                            self.private_collector_snapshot = payload
+            except Exception:
+                pass
         try:
             _systemd(["/usr/bin/systemctl", "stop", unit], timeout=max(0, stop_deadline - time.monotonic()))
         except (LauncherError, OSError, subprocess.SubprocessError):
@@ -2690,12 +2725,68 @@ def _close_failed_launch_resources(listener, handlers, broker, test_output_fd,
         if original_error is not None and broker is not None:
             capture_subject_failure_prefixes(broker, directory_fd, owned_exit_confirmed)
             if retained is not None:
+                _capture_private_collector_snapshot(broker, directory_fd, owned_exit_confirmed, retained)
                 _capture_retained_vstest_failure(broker, directory_fd, owned_exit_confirmed, retained)
     finally:
         if retained is not None:
             try: os.close(retained[0])
             except BaseException:
                 if original_error is None: raise
+
+
+def _capture_private_collector_snapshot(broker, directory_fd, owned_exit_confirmed, retained):
+    """Save closed sampler data after actual owned wait and resource closure.
+
+    The existing five-second trace-capture allowance also bounds this private write.
+    It grants no readiness, completion or admission authority and cannot replace
+    the original failure. Unknown counters remain null in the sampler schema.
+    """
+    fd = -1
+    try:
+        if (owned_exit_confirmed is not True or os.geteuid() != 0 or type(broker) is not Broker
+                or type(directory_fd) is not int or directory_fd < 0):
+            return False
+        _, checkpoint, deadline = retained
+        if checkpoint is None:
+            return False
+        with broker.condition:
+            if _vstest_failure_checkpoint(broker, owned_exit_confirmed) != checkpoint:
+                return False
+            payload = broker.private_collector_snapshot
+            units = tuple(broker.units)
+        if (type(payload) is not bytes or len(payload) > 64 * 1024
+                or _collector.validate_snapshot(payload) is not True
+                or time.monotonic() >= deadline):
+            return False
+        identity = json.loads(payload)
+        if ((identity['unit'], identity['cgroup']) not in units
+                or identity['subject_uid'] != broker.subject_uid
+                or identity['subject_gid'] != broker.subject_gid
+                or not broker._group_empty(broker.descriptor['cgroup'])
+                or not broker._all_owned_work_stopped(inspection_deadline=deadline)):
+            return False
+        directory = os.fstat(directory_fd)
+        if (not stat.S_ISDIR(directory.st_mode) or directory.st_uid != 0
+                or stat.S_IMODE(directory.st_mode) != 0o700 or time.monotonic() >= deadline):
+            return False
+        fd = os.open('subject-collector-startup.json',
+                     os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                     0o600, dir_fd=directory_fd)
+        with os.fdopen(fd, 'wb') as stream:
+            fd = -1
+            stream.write(payload)
+            stream.flush()
+            info = os.fstat(stream.fileno())
+            if (info.st_uid != 0 or not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                    or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size != len(payload)):
+                return False
+        return time.monotonic() < deadline
+    except Exception:
+        return False
+    finally:
+        if fd >= 0:
+            try: os.close(fd)
+            except Exception: pass
 
 
 def _close_launch_resources(listener, handlers, broker, test_output_fd: int) -> None:
