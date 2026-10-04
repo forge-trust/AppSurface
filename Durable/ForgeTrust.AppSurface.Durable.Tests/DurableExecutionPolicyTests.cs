@@ -140,6 +140,18 @@ public sealed class DurableExecutionPolicyTests
     }
 
     [Fact]
+    public void Admission_cutoff_reports_checked_tick_addition_overflow()
+    {
+        var policy = DurableWorkExecutionPolicy.FromRetryPolicy(Retry(maximumElapsed: TimeSpan.MaxValue));
+
+        var failure = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            DurableWorkTimingEvaluator.GetAdmissionCutoff(policy, Accepted, null));
+
+        Assert.Equal("acceptedAtUtc", failure.ParamName);
+        Assert.Contains("supported UTC timestamp range", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Execution_snapshot_requires_an_open_window_after_acceptance()
     {
         var policy = DurableWorkExecutionPolicy.FromRetryPolicy(Retry());
@@ -232,6 +244,7 @@ public sealed class DurableExecutionPolicyTests
         var policy = DurableWorkExecutionPolicy.ForAttemptPlan(Retry(attempts: 2), plan);
         var samePolicy = DurableWorkExecutionPolicy.ForAttemptPlan(Retry(attempts: 2), samePlan);
         Assert.True(policy.Equals((object)samePolicy));
+        Assert.Equal(policy.GetHashCode(), samePolicy.GetHashCode());
         Assert.False(policy.Equals((DurableWorkExecutionPolicy?)null));
         Assert.False(policy.Equals(new object()));
         Assert.False(policy.Equals(DurableWorkExecutionPolicy.FromRetryPolicy(Retry(attempts: 2))));

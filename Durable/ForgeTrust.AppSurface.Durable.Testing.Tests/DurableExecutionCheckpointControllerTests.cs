@@ -80,6 +80,37 @@ public sealed class DurableExecutionCheckpointControllerTests
     }
 
     [Fact]
+    public async Task Observation_wait_timeout_remains_bounded_after_eviction_and_latest_stage_is_still_waitable()
+    {
+        var waiterWoke = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resumeWaiter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var controller = new DurableExecutionCheckpointController(
+            maximumWait: TimeSpan.FromMilliseconds(300),
+            maximumObservations: 1,
+            timeProvider: null,
+            afterObservationWaitWake: async () =>
+            {
+                waiterWoke.TrySetResult();
+                await resumeWaiter.Task.ConfigureAwait(false);
+            });
+
+        var pending = controller.WaitForObservationAsync(DurableExecutionCheckpointName.BeforePermit).AsTask();
+        await controller.ReachAsync(DurableExecutionCheckpointName.BeforePermit, 6);
+        await waiterWoke.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await controller.ReachAsync(DurableExecutionCheckpointName.AfterPermitCommit, 7);
+        Assert.Equal(DurableExecutionCheckpointName.AfterPermitCommit, Assert.Single(controller.Observations).Name);
+
+        var timeout = await Assert.ThrowsAsync<TimeoutException>(async () => await pending);
+        resumeWaiter.TrySetResult();
+        Assert.Contains(nameof(DurableExecutionCheckpointName.BeforePermit), timeout.Message, StringComparison.Ordinal);
+
+        var latest = await controller.WaitForObservationAsync(DurableExecutionCheckpointName.BeforePermit);
+        Assert.Equal(DurableExecutionCheckpointName.BeforePermit, latest.Name);
+        Assert.Equal(6, latest.AttemptNumber);
+        Assert.Single(controller.Observations);
+    }
+
+    [Fact]
     public async Task Pause_once_waits_for_release_and_a_second_arm_uses_a_fresh_gate()
     {
         using var controller = new DurableExecutionCheckpointController(maximumWait: TimeSpan.FromSeconds(2));

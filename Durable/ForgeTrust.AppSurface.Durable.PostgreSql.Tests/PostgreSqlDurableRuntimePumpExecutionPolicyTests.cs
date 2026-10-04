@@ -161,6 +161,66 @@ public sealed class PostgreSqlDurableRuntimePumpExecutionPolicyTests
     }
 
     [Fact]
+    public async Task Advisory_deadline_after_committed_admission_refuses_executor_but_retains_effect_uncertainty()
+    {
+        var registration = new PumpPolicyRegistration();
+        var time = new FakeTimeProvider(Anchor);
+        await using var lab = await PumpLab.CreateAsync(registration);
+        var deadline = Anchor.AddMinutes(1);
+        var hook = new PostgreSqlDurableExecutionCheckpointHook(async (observation, _) =>
+        {
+            if (observation.Name == PostgreSqlDurableExecutionCheckpointName.AfterInvocationAdmission)
+            {
+                await lab.Database.SetExecutionTimeAsync(deadline);
+                time.Advance(deadline - Anchor);
+            }
+        });
+        var accepted = await lab.EnqueueAsync("advisory-admission-cutoff", deadline);
+
+        var result = await lab.CreatePump(hook, time).RunOnceAsync(
+            new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work));
+
+        Assert.Equal(0, registration.Execution.InvocationCount);
+        Assert.Equal(1, result.Failed);
+        var snapshot = await lab.GetAsync(accepted.WorkId);
+        Assert.Equal(DurableWorkState.Suspended, snapshot.State);
+        Assert.Equal(DurableProblemCodes.AmbiguousExternalOutcome, snapshot.TerminalCode);
+        var permit = await lab.ReadPermitAsync(accepted.WorkId);
+        Assert.Equal("ambiguous", permit.Status);
+        Assert.NotNull(permit.InvocationAdmittedAtUtc);
+    }
+
+    [Fact]
+    public async Task Deadline_elapsed_during_maintenance_wait_cancels_admitted_executor_without_waiting_for_renewal()
+    {
+        var registration = new PumpPolicyRegistration(InvocationMode.WaitForCancellation);
+        var time = new MaintenanceWaitTimeProvider(Anchor);
+        await using var lab = await PumpLab.CreateAsync(registration);
+        var deadline = Anchor.AddSeconds(10);
+        var hook = new PostgreSqlDurableExecutionCheckpointHook(async (observation, _) =>
+        {
+            if (observation.Name == PostgreSqlDurableExecutionCheckpointName.BeforeCompletion)
+                await lab.Database.SetExecutionTimeAsync(deadline);
+        });
+        var accepted = await lab.EnqueueAsync("deadline-maintenance-wait", deadline);
+        var running = lab.CreatePump(hook, time).RunOnceAsync(
+            new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work)).AsTask();
+
+        await time.TimerCreated.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(registration.Execution.CancellationObserved.Task.IsCompleted);
+        time.Advance(deadline - Anchor);
+        await registration.Execution.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var result = await running.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(1, registration.Execution.InvocationCount);
+        Assert.Equal(1, result.Failed);
+        var snapshot = await lab.GetAsync(accepted.WorkId);
+        Assert.Equal(DurableWorkState.Suspended, snapshot.State);
+        Assert.Equal(DurableProblemCodes.AmbiguousExternalOutcome, snapshot.TerminalCode);
+        Assert.Equal("ambiguous", (await lab.ReadPermitAsync(accepted.WorkId)).Status);
+    }
+
+    [Fact]
     public async Task Oversized_renewal_cadence_remains_deadline_bounded_without_abandoning_admitted_invocation()
     {
         var registration = new PumpPolicyRegistration(InvocationMode.WaitForCancellation);
@@ -595,6 +655,28 @@ public sealed class PostgreSqlDurableRuntimePumpExecutionPolicyTests
 
         public override ValueTask<DurableEncodedPayload> InvokeAsync(CancellationToken cancellationToken = default) =>
             execution.InvokeAsync(mode, _result, cancellationToken);
+    }
+
+    private sealed class MaintenanceWaitTimeProvider(DateTimeOffset start) : TimeProvider
+    {
+        private readonly FakeTimeProvider _clock = new(start);
+
+        internal TaskCompletionSource TimerCreated { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override DateTimeOffset GetUtcNow() => _clock.GetUtcNow();
+
+        public override long GetTimestamp() => _clock.GetTimestamp();
+
+        public override long TimestampFrequency => _clock.TimestampFrequency;
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = _clock.CreateTimer(callback, state, dueTime, period);
+            TimerCreated.TrySetResult();
+            return timer;
+        }
+
+        internal void Advance(TimeSpan elapsed) => _clock.Advance(elapsed);
     }
 
     private sealed class MissingPumpDependency

@@ -9,7 +9,7 @@ using Xunit;
 
 namespace DurablePackedExecutionPolicyConsumer;
 
-public sealed class PlannedRetryPostgreSqlConsumerTests
+public sealed partial class PlannedRetryPostgreSqlConsumerTests
 {
     private static readonly DateTimeOffset AcceptanceAnchor =
         new(2030, 1, 2, 3, 4, 5, TimeSpan.Zero);
@@ -223,7 +223,7 @@ public sealed class PlannedRetryPostgreSqlConsumerTests
         var policy = DurableWorkExecutionPolicy.ForAttemptPlan(
             retryPolicy,
             new DurableAttemptPlan(
-            "attempt-plan-v1",
+                "attempt-plan-v1",
                 [TimeSpan.Zero, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(20), TimeSpan.FromMinutes(60), TimeSpan.FromMinutes(180)],
                 TimeSpan.FromHours(6)));
 

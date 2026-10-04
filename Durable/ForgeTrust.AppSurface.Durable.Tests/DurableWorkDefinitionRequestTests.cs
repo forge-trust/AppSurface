@@ -300,6 +300,53 @@ public sealed class DurableWorkDefinitionRequestTests
         Assert.Equal(1, codec.EncodeCalls);
     }
 
+    [Fact]
+    public void Direct_execution_request_rejects_undefined_safety_and_a_planned_due_time()
+    {
+        var payload = new DurableEncodedPayload("tests.request", "v1",
+            DurableDataClassification.Operational, new byte[] { 1 });
+        var legacyPolicy = DurableWorkExecutionPolicy.FromRetryPolicy(CreatePolicy("legacy"));
+
+        var invalidSafety = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            DurableWorkRequest.CreateWithExecutionPolicy(new("scope"), new("invalid-safety"), "key",
+                "work", "v2", payload, (DurableProviderSafety)99, legacyPolicy));
+        Assert.Equal("providerSafety", invalidSafety.ParamName);
+
+        var plannedPolicy = DurableWorkExecutionPolicy.ForAttemptPlan(
+            CreatePolicy("planned"),
+            new DurableAttemptPlan(DurableAttemptPlan.SupportedVersion,
+                [TimeSpan.Zero, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(2)], TimeSpan.FromMinutes(3)));
+        var plannedDue = Assert.Throws<ArgumentException>(() =>
+            DurableWorkRequest.CreateWithExecutionPolicy(new("scope"), new("planned-due"), "key",
+                "work", "v2", payload, DurableProviderSafety.Idempotent, plannedPolicy,
+                dueAtUtc: new DateTimeOffset(2026, 10, 4, 12, 0, 0, TimeSpan.Zero)));
+        Assert.Equal("dueAtUtc", plannedDue.ParamName);
+    }
+
+    [Fact]
+    public void Direct_deadline_only_request_allows_no_due_and_rejects_submicrosecond_due()
+    {
+        var payload = new DurableEncodedPayload("tests.request", "v1",
+            DurableDataClassification.Operational, new byte[] { 1 });
+        var policy = DurableWorkExecutionPolicy.FromRetryPolicy(CreatePolicy("deadline-only"));
+        var deadline = new DurableExecutionDeadline(new DateTimeOffset(2026, 10, 4, 16, 0, 0, TimeSpan.Zero));
+
+        var request = DurableWorkRequest.CreateWithExecutionPolicy(new("scope"), new("no-due"), "key",
+            "work", "v2", payload, DurableProviderSafety.ReconcileBeforeRetry, policy,
+            executionDeadline: deadline);
+
+        Assert.Same(policy, request.ExecutionPolicy);
+        Assert.Equal(deadline, request.ExecutionDeadline);
+        Assert.Null(request.DueAtUtc);
+        Assert.Equal("appsurface.durable.work.enqueue.v2", request.Fingerprint.SchemaId);
+
+        var invalidDue = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            DurableWorkRequest.CreateWithExecutionPolicy(new("scope"), new("submicro-due"), "key",
+                "work", "v2", payload, DurableProviderSafety.ReconcileBeforeRetry, policy,
+                executionDeadline: deadline, dueAtUtc: deadline.NotAfterUtc.AddTicks(1)));
+        Assert.Equal("dueAtUtc", invalidDue.ParamName);
+    }
+
     private static DurableWorkRetryPolicy CreatePolicy(string algorithm) => new(
         3, TimeSpan.FromHours(2), TimeSpan.FromSeconds(2), TimeSpan.FromMinutes(2),
         TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(5), algorithm);
