@@ -1393,6 +1393,9 @@ class SubjectUnitCompletionTests(unittest.TestCase):
         self.assertEqual(["DOTNET_EnableDiagnostics_IPC=0"],
                          [value for value in assignments if value.startswith("DOTNET_EnableDiagnostics_IPC=")])
         self.assertEqual(1, argv.count("DOTNET_EnableDiagnostics_IPC=0"))
+        self.assertEqual(["DOTNET_EnableDiagnostics_Debugger=0"],
+                         [value for value in assignments if value.startswith("DOTNET_EnableDiagnostics_Debugger=")])
+        self.assertEqual(1, argv.count("DOTNET_EnableDiagnostics_Debugger=0"))
         self.assertEqual(["--property=TasksMax=64"],
                          [value for value in argv if value.startswith("--property=TasksMax=")])
         self.assertEqual(["--property=MemoryMax=1G"],
@@ -1409,8 +1412,8 @@ class SubjectUnitCompletionTests(unittest.TestCase):
             emitted.append((list(call.args[0]), dict(call.kwargs["env"]), str(broker.dotnet)))
             return response
 
-        with patch.dict(os.environ, {"DOTNET_PROCESSOR_COUNT": "4096", "DOTNET_EnableDiagnostics_IPC": "1"}), \
-             patch.dict(launcher.ENV, {"DOTNET_PROCESSOR_COUNT": "4096", "DOTNET_EnableDiagnostics_IPC": "1"}), \
+        with patch.dict(os.environ, {"DOTNET_PROCESSOR_COUNT": "4096", "DOTNET_EnableDiagnostics_IPC": "1", "DOTNET_EnableDiagnostics_Debugger": "1"}), \
+             patch.dict(launcher.ENV, {"DOTNET_PROCESSOR_COUNT": "4096", "DOTNET_EnableDiagnostics_IPC": "1", "DOTNET_EnableDiagnostics_Debugger": "1"}), \
              patch.object(launcher.Broker, "_run", autospec=True, side_effect=capture):
             response, _events, registered, receipts = self.exercise()
         self.assertTrue(response["ok"])
@@ -1420,6 +1423,7 @@ class SubjectUnitCompletionTests(unittest.TestCase):
         argv, host_environment, dotnet = emitted[0]
         self.assertEqual("4096", host_environment["DOTNET_PROCESSOR_COUNT"])
         self.assertEqual("1", host_environment["DOTNET_EnableDiagnostics_IPC"])
+        self.assertEqual("1", host_environment["DOTNET_EnableDiagnostics_Debugger"])
         env_index = argv.index("/usr/bin/env")
         self.assertEqual("-i", argv[env_index + 1])
         dotnet_index = argv.index(dotnet, env_index + 2)
@@ -1432,6 +1436,11 @@ class SubjectUnitCompletionTests(unittest.TestCase):
                           if value.startswith("DOTNET_EnableDiagnostics_IPC=")])
         self.assertEqual(1, argv.count("DOTNET_EnableDiagnostics_IPC=0"))
         self.assertNotIn("DOTNET_EnableDiagnostics_IPC=1", argv)
+        self.assertEqual(["DOTNET_EnableDiagnostics_Debugger=0"],
+                         [value for value in argv[env_index + 2:dotnet_index]
+                          if value.startswith("DOTNET_EnableDiagnostics_Debugger=")])
+        self.assertEqual(1, argv.count("DOTNET_EnableDiagnostics_Debugger=0"))
+        self.assertNotIn("DOTNET_EnableDiagnostics_Debugger=1", argv)
         self.assertEqual(1, argv.count("--property=TasksMax=64"))
         self.assertEqual(1, argv.count("--property=MemoryMax=1G"))
 

@@ -169,7 +169,7 @@ without proving exclusive causality or the absence of later memory events.
 Qualification still failed in the CLI, with empty entries and `None` claim/
 eligibility; the public Host entry did not run.
 
-The next private root-selected subject environment fixes
+The private root-selected subject environment fixes
 `DOTNET_EnableDiagnostics_IPC=0` alongside `DOTNET_PROCESSOR_COUNT=1`, after the
 launcher's defaults in the cleared `env -i` invocation. The official
 [.NET diagnostic IPC setting](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-environment-variables#dotnet_enablediagnostics_ipc)
@@ -188,6 +188,44 @@ capability or admission setting is introduced, and there is no public option.
 The same two [emitted-argv controls](../test_linux_launcher.py) are adapted to
 check one fixed IPC assignment before dotnet and reject inherited IPC value `1`
 while retaining the CPU1 and original limit assertions. No cases were added.
-Their earlier CPU handoffs and results are historical; this IPC source handoff
-has not executed the two adapted controls. Later results require a separately
-bound validation receipt, not an upgrade of the prior CPU-only evidence.
+Their earlier CPU handoffs and results are historical. At the initial IPC source
+handoff, the two adapted controls had not been executed. Later results require a
+separately bound validation receipt, not an upgrade of the prior CPU-only evidence.
+
+
+## Private runtime debugger hypothesis
+
+V18 observed collector connection and testhost startup followed by exit `134`
+and the retained message `Out of memory`; `ExecutedTests` was `0`. Its seven
+retained sampler rows rose from `pids.current=49` to `64`, while
+`pids.events.max` rose from `0` to `1` and the recorded memory OOM counter stayed
+`0`. These bounded observations do not establish an exclusive cause, reproduce
+an exact native syscall failure or prove the absence of later memory events.
+They establish no successful qualification or coverage result.
+
+The next private root-selected subject environment adds exactly
+`DOTNET_EnableDiagnostics_Debugger=0` after the existing IPC0 setting and launcher
+defaults in `env -i`, before the selected dotnet executable. The official
+[.NET debugger setting](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-environment-variables#dotnet_enablediagnostics_debugger)
+disables managed debugger support when set to `0`. The pinned
+[runtime v10.0.12 debugger initialization](https://github.com/dotnet/runtime/blob/v10.0.12/src/coreclr/debug/ee/debugger.cpp#L1752-L1787)
+has an early return at lines 1752–1757 before the RC-thread initialization at
+lines 1760 and 1787. This is an optional debugger-workload reduction hypothesis;
+it does not measure saved threads or predict a native pass.
+
+Only the root-selected subject command receives the fixed debugger literal;
+host or launcher defaults cannot override it. CPU1, IPC0, `TasksMax=64`,
+`MemoryMax=1G`, the existing 90-second timeout, functional argv, quotas, accounts,
+UID/GID and cgroup checks, physical exit/watch/join, worker and application
+environments remain unchanged. No profiler setting is changed. VSTest `--diag`
+logging and functional collector TCP remain intact. There is no new public
+option, capability, admission selector or diagnostics-based acceptance.
+
+The same two [emitted-argv controls](../test_linux_launcher.py) now also assert
+one fixed debugger0 assignment before dotnet and verify that inherited host and
+launcher debugger value `1` cannot replace it. CPU1, IPC0, provenance and limit
+assertions are retained; no cases were added. At this debugger source handoff,
+the two adapted controls have not run. This initial status is historical once a
+later separately bound validation receipt exists; prior CPU/IPC results do not
+validate the new debugger assertions. Native V19 results remain pending, with no
+qualification or coverage claim.
