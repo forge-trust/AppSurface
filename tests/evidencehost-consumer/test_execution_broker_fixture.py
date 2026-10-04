@@ -166,6 +166,62 @@ class ProtocolRejectionTests(unittest.TestCase):
                     self.assertEqual(["artifacts", "artifact"],
                                      [json.loads(line)["op"] for line in scenario.log_file.read_text().splitlines()])
 
+    def test_duplicate_declarations_allow_one_valid_empty_terminal_chunk_before_duplicate_guard(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            scenario = self.scenario(Path(temporary), "protocol-duplicate-declaration")
+            peer = (12345, 65534, 65532)
+            declarations = scenario.response({"op": "artifacts", "relative_root": "coverage-protocol"}, peer)
+            self.assertEqual(2, len(declarations["artifacts"]))
+            first, duplicate = declarations["artifacts"]
+            self.assertEqual(first, duplicate)
+            self.assertEqual("reports/protocol-private-canary.bin", first["path"])
+            self.assertEqual(0, first["length_bytes"])
+            chunk = scenario.response({"op": "artifact", "relative_root": "coverage-protocol",
+                                       "relative_path": first["path"], "offset": 0}, peer)
+            decoded = base64.b64decode(chunk["bytes_base64"], validate=True)
+            self.assertEqual("", chunk["bytes_base64"])
+            self.assertEqual(b"", decoded)
+            self.assertEqual(first["length_bytes"], len(decoded))
+            self.assertTrue(chunk["end"])
+            self.assertEqual(["artifacts", "artifact"],
+                             [json.loads(line)["op"] for line in scenario.log_file.read_text().splitlines()])
+
+    def test_decoded_limit_response_is_one_byte_over_at_exact_legal_base64_length(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            scenario = self.scenario(Path(temporary), "protocol-decoded-limit")
+            peer = (12345, 65534, 65532)
+            declarations = scenario.response({"op": "artifacts", "relative_root": "coverage-protocol"}, peer)
+            row, = declarations["artifacts"]
+            self.assertEqual(128 * 1024 + 1, row["length_bytes"])
+            chunk = scenario.response({"op": "artifact", "relative_root": "coverage-protocol",
+                                       "relative_path": row["path"], "offset": 0}, peer)
+            decoded = base64.b64decode(chunk["bytes_base64"], validate=True)
+            self.assertEqual(row["length_bytes"], len(decoded))
+            self.assertEqual(174764, len(chunk["bytes_base64"]))
+            self.assertEqual(4 * ((128 * 1024 + 2) // 3), len(chunk["bytes_base64"]))
+            self.assertEqual(128 * 1024, len(decoded[:-1]))
+            self.assertEqual(174764, len(base64.b64encode(decoded[:-1])))
+            self.assertTrue(decoded.startswith(broker.PROTOCOL_PRIVATE_CANARY))
+            self.assertTrue(chunk["end"])
+            self.assertLess(len(json.dumps(chunk, separators=(",", ":")).encode()) + 1, 1024 * 1024)
+            self.assertEqual(["artifacts", "artifact"],
+                             [json.loads(line)["op"] for line in scenario.log_file.read_text().splitlines()])
+
+    def test_empty_chunk_response_is_nonterminal_against_a_positive_declaration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            scenario = self.scenario(Path(temporary), "protocol-empty-chunk")
+            peer = (12345, 65534, 65532)
+            declarations = scenario.response({"op": "artifacts", "relative_root": "coverage-protocol"}, peer)
+            row, = declarations["artifacts"]
+            self.assertEqual(1, row["length_bytes"])
+            chunk = scenario.response({"op": "artifact", "relative_root": "coverage-protocol",
+                                       "relative_path": row["path"], "offset": 0}, peer)
+            self.assertEqual("", chunk["bytes_base64"])
+            self.assertEqual(b"", base64.b64decode(chunk["bytes_base64"], validate=True))
+            self.assertFalse(chunk["end"])
+            self.assertEqual(["artifacts", "artifact"],
+                             [json.loads(line)["op"] for line in scenario.log_file.read_text().splitlines()])
+
     def test_false_owned_exit_cannot_acknowledge_terminal_exit(self):
         with tempfile.TemporaryDirectory() as temporary:
             scenario = self.scenario(Path(temporary), "protocol-owned-exit-false")
