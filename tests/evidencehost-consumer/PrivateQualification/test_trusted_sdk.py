@@ -7,16 +7,18 @@ root ownership change without performing it; only the matching observed inode's
 UID/GID are simulated for postcondition checks. Real reads and fchmod exercise
 the procedure. This does not establish root origin or a trusted installation.
 """
-from contextlib import contextmanager, redirect_stderr, redirect_stdout
+from contextlib import contextmanager, nullcontext, redirect_stderr, redirect_stdout
 import errno
 import hashlib
 import importlib.util
 import io
+import json
 import os
 from pathlib import Path
 import stat
 import struct
 import subprocess
+import sys
 import tempfile
 import time
 from types import SimpleNamespace
@@ -378,6 +380,195 @@ class TrustedSdkProcedureControls(unittest.TestCase):
                 self.assertEqual(1, len(scans))
                 self.assertEqual(expected_count + 1, scans[0].yielded)
                 self.assertTrue(scans[0].closed)
+
+
+    def test_sdk_diagnostic_actual_nonexec_host_records_failed_phase_and_numeric_stat_before_adoption(self):
+        root, _ = self.tree("diagnostic-host")
+        host = root / "dotnet"
+        host.chmod(0o644)
+        info = host.lstat()
+        diagnostic = sdk.SdkDiagnostic()
+        with self.directory(root) as fd:
+            self.reject(lambda: sdk.inventory(fd, os.geteuid(), os.getegid(), time.monotonic() + 30,
+                                              diagnostic=diagnostic))
+        frame = diagnostic.snapshot()
+        self.assertEqual(("inventory-type", "host", "sdk"),
+                         (frame["phase"], frame["role"], frame["error_class"]))
+        self.assertEqual({"uid": info.st_uid, "gid": info.st_gid, "mode": 0o644,
+                          "links": info.st_nlink, "device": info.st_dev, "inode": info.st_ino,
+                          "length": info.st_size, "kind": "regular"}, frame["node"])
+        self.assertIsNone(frame["runner_uid"])
+        self.assertIsNone(frame["fixed_path_match"])
+
+    def test_sdk_diagnostic_actual_symlink_projects_numeric_type_failure_without_name_or_canary(self):
+        root, _ = self.tree("diagnostic-link")
+        link = root / "sdk/version/private-node-canary"
+        link.symlink_to(root / "dotnet")
+        observed = link.lstat()
+        diagnostic = sdk.SdkDiagnostic()
+        with self.directory(root) as fd:
+            self.reject(lambda: sdk.inventory(fd, os.geteuid(), os.getegid(), time.monotonic() + 30,
+                                              diagnostic=diagnostic))
+        frame = diagnostic.snapshot()
+        self.assertEqual(("inventory-type", "file", "sdk"),
+                         (frame["phase"], frame["role"], frame["error_class"]))
+        self.assertEqual(stat.S_IMODE(observed.st_mode), frame["node"]["mode"])
+        self.assertEqual("symlink", frame["node"]["kind"])
+        self.assertIn(frame["node"]["kind"], ("regular", "directory", "symlink", "other"))
+        encoded = json.dumps(frame, sort_keys=True).encode()
+        self.assertLessEqual(len(encoded), 4096)
+        for forbidden in (b"private-node-canary", str(root).encode(), b"dotnet"):
+            self.assertNotIn(forbidden, encoded)
+
+    def test_sdk_diagnostic_first_failure_bounds_identity_parsing_and_snapshot_copy(self):
+        root, _ = self.tree("diagnostic-data")
+        diagnostic = sdk.SdkDiagnostic()
+        runner = SimpleNamespace(pw_uid=os.geteuid(), pw_gid=os.getegid())
+        diagnostic.identities(runner, str(os.geteuid()), "private-identity-canary")
+        diagnostic.path_match("ambient_path_match", False)
+        diagnostic.note("sudo-identity", "host", (root / "dotnet").lstat())
+        original = sdk.TrustedSdkFailure("private-exception-canary")
+        diagnostic.capture(original)
+        first = diagnostic.snapshot()
+        diagnostic.note("final-deadline", "file")
+        diagnostic.capture(OSError(errno.EIO, "late-private-canary"))
+        diagnostic.identities(runner, "4294967296", "-1")
+        self.assertEqual(first, diagnostic.snapshot())
+        self.assertEqual(os.geteuid(), first["sudo_uid"])
+        self.assertIsNone(first["sudo_gid"])
+        self.assertFalse(first["ambient_path_match"])
+        self.assertIsNone(first["fixed_path_match"])
+        first["node"]["uid"] = -1
+        self.assertEqual(os.geteuid(), diagnostic.snapshot()["node"]["uid"])
+        encoded = json.dumps(diagnostic.snapshot()).encode()
+        self.assertNotIn(b"canary", encoded)
+        self.assertLessEqual(len(encoded), 4096)
+        invalid = sdk.SdkDiagnostic()
+        invalid.identities(runner, "4294967296", "9" * 100)
+        invalid.note([], [])
+        self.assertIsNone(invalid.snapshot()["sudo_uid"])
+        self.assertIsNone(invalid.snapshot()["sudo_gid"])
+        self.assertEqual("unknown", invalid.snapshot()["phase"])
+
+    def test_sdk_diagnostic_observer_failure_preserves_actual_guard_failure_and_no_privileged_call(self):
+        root, _ = self.tree("diagnostic-observer-fault")
+        (root / "dotnet").chmod(0o644)
+        diagnostic = sdk.SdkDiagnostic()
+        with self.directory(root) as fd, \
+                patch.object(diagnostic, "note", side_effect=MemoryError("private-sink-canary")), \
+                patch.object(diagnostic, "capture", side_effect=MemoryError("private-capture-canary")):
+            self.reject(lambda: sdk.inventory(fd, os.geteuid(), os.getegid(), time.monotonic() + 30,
+                                              diagnostic=diagnostic))
+        self.assertIsNone(diagnostic.failure)
+
+
+    def test_unexpired_hash_read_eio_retains_hash_phase_and_original_exception(self):
+        for phase in ("inventory-hash", "sealing-hash"):
+            with self.subTest(phase=phase):
+                root, _ = self.tree("hash-attribution-" + phase)
+                path = root / "sdk/version/sdk.bin"
+                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+                self.addCleanup(os.close, fd)
+                diagnostic = sdk.SdkDiagnostic()
+                diagnostic.note(phase, "file", os.fstat(fd))
+                fault = OSError(errno.EIO, "private-read-attribution-canary")
+                with patch.object(os, "read", side_effect=fault), self.assertRaises(OSError) as caught:
+                    sdk.digest_fd(fd, time.monotonic() + 30, diagnostic=diagnostic)
+                self.assertIs(fault, caught.exception)
+                frame = diagnostic.snapshot()
+                self.assertEqual((phase, "os"), (frame["phase"], frame["error_class"]))
+                self.assertEqual(path.stat().st_ino, frame["node"]["inode"])
+                self.assertNotIn("canary", json.dumps(frame))
+
+    def test_sealing_enumeration_overflow_retains_sealing_count_phase(self):
+        root, _ = self.tree("sealing-count-attribution")
+        diagnostic = sdk.SdkDiagnostic()
+        with self.directory(root) as fd:
+            diagnostic.note("sealing-count", "sdk-root", os.fstat(fd))
+            self.reject(lambda: sdk.bounded_names(fd, 1, time.monotonic() + 30,
+                                                  diagnostic=diagnostic))
+        frame = diagnostic.snapshot()
+        self.assertEqual(("sealing-count", "sdk-root", "sdk"),
+                         (frame["phase"], frame["role"], frame["error_class"]))
+
+    def test_failure_binding_retention_owned_fd_seam_preserves_original_and_closes_all_handles(self):
+        # Load only the preparation module to call its data-retention helper.
+        # This seam changes observed UID/GID for owned test inodes; it cannot
+        # invoke actual root bootstrap, NSS, commands or SDK system paths.
+        spec = importlib.util.spec_from_file_location(
+            "private_sdk_retention_data", Path(__file__).with_name("prepare.py"))
+        preparation = importlib.util.module_from_spec(spec)
+        with patch.object(sys, "path", [str(Path(__file__).parent), *sys.path]):
+            spec.loader.exec_module(preparation)
+        for kind in ("success", "oversized", "unsafe-mode", "replace-failure"):
+            with self.subTest(kind=kind):
+                workspace = self.base / ("retention-" + kind)
+                workspace.mkdir(mode=0o700)
+                workspace.chmod(0o700)
+                source = workspace / "build-binding.json"
+                original = {"source_commit": "b" * 40, "preparation_complete": False,
+                            "sdk_bootstrap": {"host_before": {"uid": os.geteuid(), "mode": "0777"},
+                                              "host_metadata_state": "observed"}}
+                raw = json.dumps(original, sort_keys=True).encode() + b"\n"
+                source.write_bytes(b"X" * 4097 if kind == "oversized" else raw)
+                source.chmod(0o644 if kind == "unsafe-mode" else 0o600)
+                before_bytes = source.read_bytes()
+                before_inode = source.stat().st_ino
+                diagnostic = preparation.SdkDiagnostic()
+                diagnostic.note("inventory-mode", "host", source.lstat())
+                original_failure = OSError(errno.EIO, "private-original-failure-canary")
+                diagnostic.capture(original_failure)
+                real_open, real_stat, real_fstat = os.open, os.stat, os.fstat
+                allowed = {(workspace.stat().st_dev, workspace.stat().st_ino),
+                           (source.stat().st_dev, before_inode)}
+                opened = []
+
+                def owned_info(info):
+                    if (info.st_dev, info.st_ino) in allowed:
+                        self.assertEqual(os.geteuid(), info.st_uid)
+                        return self.changed_stat(info, st_uid=0, st_gid=0)
+                    return info
+
+                def owned_open(path, flags, *args, **kwargs):
+                    self.assertTrue(path == workspace or path in
+                                    ("build-binding.json", ".build-binding-sdk-diagnostic.tmp"))
+                    selected = real_open(path, flags, *args, **kwargs)
+                    opened.append(selected)
+                    info = real_fstat(selected)
+                    self.assertEqual(os.geteuid(), info.st_uid)
+                    if path == ".build-binding-sdk-diagnostic.tmp":
+                        allowed.add((info.st_dev, info.st_ino))
+                    return selected
+
+                replace_failure = patch.object(os, "replace", side_effect=OSError(errno.EIO, "private-replace-canary"))
+                with patch.object(os, "open", side_effect=owned_open), \
+                        patch.object(os, "fstat", side_effect=lambda fd: owned_info(real_fstat(fd))), \
+                        patch.object(os, "stat", side_effect=lambda *a, **kw: owned_info(real_stat(*a, **kw))):
+                    with replace_failure if kind == "replace-failure" else nullcontext():
+                        with self.assertRaises(OSError) as caught:
+                            try:
+                                raise original_failure
+                            except OSError:
+                                retained = preparation.retain_sdk_failure_diagnostic(workspace, diagnostic)
+                                self.assertEqual(kind == "success", retained)
+                                raise
+                self.assertIs(original_failure, caught.exception)
+                for selected in opened:
+                    with self.assertRaises(OSError) as closed:
+                        real_fstat(selected)
+                    self.assertEqual(errno.EBADF, closed.exception.errno)
+                self.assertFalse((workspace / ".build-binding-sdk-diagnostic.tmp").exists())
+                if kind == "success":
+                    after = json.loads(source.read_bytes())
+                    self.assertFalse(after["preparation_complete"])
+                    self.assertEqual(original["sdk_bootstrap"]["host_before"], after["sdk_bootstrap"]["host_before"])
+                    self.assertEqual(diagnostic.snapshot(), after["sdk_bootstrap"]["diagnostic"])
+                    self.assertEqual(0o600, stat.S_IMODE(source.stat().st_mode))
+                    self.assertLessEqual(source.stat().st_size, 4096)
+                    self.assertNotIn(b"canary", source.read_bytes())
+                else:
+                    self.assertEqual(before_bytes, source.read_bytes())
+                    self.assertEqual(before_inode, source.stat().st_ino)
 
 
 if __name__ == "__main__":

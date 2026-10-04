@@ -16,7 +16,7 @@ import stat
 import subprocess
 import time
 
-from trusted_sdk import SDK_ROOT, metadata as sdk_metadata, seal_trusted_sdk
+from trusted_sdk import SDK_ROOT, SdkDiagnostic, identity as sdk_identity, metadata as sdk_metadata, seal_trusted_sdk
 
 BASELINE = "5d325bb8c0f857eb37f0a736f39a0342b03e5c38"
 APP_ID = "issue779-qualified-native-http"
@@ -292,6 +292,67 @@ def retain_sdk_preflight_binding(workspace, source_commit):
         binding_path.write_text(json.dumps(incomplete, sort_keys=True) + "\n")
 
 
+def retain_sdk_failure_diagnostic(workspace, diagnostic):
+    """Best-effort atomic update of the existing incomplete binding, <=4096 bytes.
+
+    Only the owning preparation procedure calls this after bootstrap failure.
+    The already retained host-before record is preserved. Capture failure returns
+    false and cannot replace the original exception or mark preparation complete.
+    No SDK paths or arbitrary exception material enter the closed diagnostic.
+    """
+    parent = source = target = None
+    temporary = '.build-binding-sdk-diagnostic.tmp'
+    created = False
+    try:
+        require(type(diagnostic) is SdkDiagnostic and diagnostic.failure is not None)
+        parent = os.open(workspace, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        parent_info = os.fstat(parent)
+        require(parent_info.st_uid == 0 and not parent_info.st_mode & 0o022)
+        source = os.open('build-binding.json', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+                         dir_fd=parent)
+        info = os.fstat(source)
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_nlink == 1
+                and stat.S_IMODE(info.st_mode) == 0o600 and 0 <= info.st_size <= 4096)
+        raw = os.read(source, 4097)
+        require(len(raw) == info.st_size)
+        binding = unique_json(raw)
+        require(binding.get('preparation_complete') is False and type(binding.get('sdk_bootstrap')) is dict)
+        binding['sdk_bootstrap']['diagnostic'] = diagnostic.snapshot()
+        encoded = (json.dumps(binding, sort_keys=True) + '\n').encode()
+        require(len(encoded) <= 4096)
+        require(sdk_identity(os.fstat(source)) == sdk_identity(info)
+                and sdk_identity(os.stat('build-binding.json', dir_fd=parent, follow_symlinks=False)) == sdk_identity(info))
+        target = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                         0o600, dir_fd=parent)
+        created = True
+        require(os.write(target, encoded) == len(encoded))
+        after = os.fstat(target)
+        require(after.st_uid == 0 and after.st_nlink == 1 and stat.S_IMODE(after.st_mode) == 0o600)
+        require(sdk_identity(os.stat('build-binding.json', dir_fd=parent, follow_symlinks=False)) == sdk_identity(info))
+        os.replace(temporary, 'build-binding.json', src_dir_fd=parent, dst_dir_fd=parent)
+        created = False
+        return True
+    except BaseException:
+        return False
+    finally:
+        for fd in (target, source):
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except BaseException:
+                    pass
+        if created and parent is not None:
+            try:
+                os.unlink(temporary, dir_fd=parent)
+            except BaseException:
+                pass
+        if parent is not None:
+            try:
+                os.close(parent)
+            except BaseException:
+                pass
+
+
 def prepare(source, workspace, source_commit, run_id, workflow_identity):
     """Build both actual entries from the same frozen variant and exact compiled bindings."""
     require(os.geteuid() == 0 and re.fullmatch(r"[0-9a-f]{40}", source_commit)
@@ -305,7 +366,16 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
     # Retain initial host facts even if the closed bootstrap rejects preparation.
     # This root-private partial record is not a completed build or admission binding.
     retain_sdk_preflight_binding(workspace, source_commit)
-    dotnet, sdk_binding = seal_trusted_sdk(min(runner.deadline, time.monotonic() + 120))
+    sdk_diagnostic = SdkDiagnostic()
+    try:
+        dotnet, sdk_binding = seal_trusted_sdk(min(runner.deadline, time.monotonic() + 120),
+                                             diagnostic=sdk_diagnostic)
+    except BaseException:
+        try:
+            retain_sdk_failure_diagnostic(workspace, sdk_diagnostic)
+        except BaseException:
+            pass
+        raise
     baseline, build = workspace / "baseline", workspace / "build"
     archive(source, BASELINE, baseline, runner)
     archive(source, source_commit, build, runner)
