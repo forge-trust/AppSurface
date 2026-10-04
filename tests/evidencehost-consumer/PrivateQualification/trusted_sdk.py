@@ -23,6 +23,9 @@ MAX_DEPTH = 32
 MAX_WORK_NODES = 3 * MAX_NODES
 MAX_HASHED_BYTES = 4 * MAX_TOTAL_BYTES
 MAX_ELAPSED_MILLISECONDS = 120_000
+COST_KINDS = frozenset(('read', 'sha-update', 'filesystem', 'projection'))
+MAX_COST_CALLS = 32 * (MAX_HASHED_BYTES + MAX_WORK_NODES)
+MAX_COST_NANOSECONDS = 120_000_000_000
 SDK_WORK_PASSES = frozenset(('unknown', 'initial-inventory', 'seal-before', 'seal-after', 'final-inventory'))
 
 SDK_PHASES = frozenset(('unknown', 'root-identity', 'sudo-identity', 'path-binding',
@@ -47,13 +50,17 @@ class SdkDiagnostic:
             'runner_uid': None, 'runner_gid': None, 'sudo_uid': None, 'sudo_gid': None,
             'ambient_path_match': None, 'fixed_path_match': None, 'error_class': None,
             'phase_before_deadline': None, 'work_pass': 'unknown', 'elapsed_milliseconds': None,
-            'nodes_observed': 0, 'hashed_bytes': 0, 'work_overflow': False}
+            'nodes_observed': 0, 'hashed_bytes': 0, 'work_overflow': False,
+            'process_cpu_nanoseconds': None, 'measurement_incomplete': False, 'measurement_clamped': False,
+            'costs': {kind: {'calls': 0, 'nanoseconds': 0} for kind in sorted(COST_KINDS)}}
+        self.cpu_started = None
         self.started_at = None
         self.failure = None
 
     def note(self, phase, role=None, info=None):
         if self.failure is not None:
             return
+        token = self.cost_begin('projection')
         try:
             if type(phase) is not str or phase not in SDK_PHASES:
                 return
@@ -72,6 +79,53 @@ class SdkDiagnostic:
                     self.current['node'] = values
         except BaseException:
             pass
+        finally:
+            self.cost_end('projection', token)
+
+    def cost_begin(self, kind):
+        """Optional diagnostic clocks only; no measurement participates in a guard."""
+        if self.failure is not None:
+            return None
+        try:
+            if kind not in COST_KINDS:
+                return None
+            row = self.current['costs'][kind]
+            if row['calls'] < MAX_COST_CALLS:
+                row['calls'] += 1
+            else:
+                self.current['measurement_clamped'] = True
+                self.current['measurement_incomplete'] = True
+            stamp, cpu = time.perf_counter_ns(), time.process_time_ns()
+            if type(stamp) is not int or stamp < 0 or type(cpu) is not int or cpu < 0:
+                raise ValueError()
+            if self.cpu_started is None:
+                self.cpu_started = cpu
+            return stamp
+        except BaseException:
+            self.current['measurement_incomplete'] = True
+            if type(kind) is str and kind in COST_KINDS:
+                self.current['costs'][kind]['nanoseconds'] = None
+            return None
+
+    def cost_end(self, kind, token):
+        if self.failure is not None:
+            return
+        try:
+            stamp, cpu = time.perf_counter_ns(), time.process_time_ns()
+            if token is None or type(token) is not int or type(stamp) is not int or stamp < token \
+                    or type(cpu) is not int or self.cpu_started is None or cpu < self.cpu_started:
+                raise ValueError()
+            row = self.current['costs'][kind]
+            elapsed, cpu_span = row['nanoseconds'] + stamp - token, cpu - self.cpu_started
+            row['nanoseconds'] = min(MAX_COST_NANOSECONDS, elapsed)
+            self.current['process_cpu_nanoseconds'] = min(MAX_COST_NANOSECONDS, cpu_span)
+            if elapsed > MAX_COST_NANOSECONDS or cpu_span > MAX_COST_NANOSECONDS:
+                self.current['measurement_clamped'] = True
+                self.current['measurement_incomplete'] = True
+        except BaseException:
+            self.current['measurement_incomplete'] = True
+            if type(kind) is str and kind in COST_KINDS:
+                self.current['costs'][kind]['nanoseconds'] = None
 
     def work_pass(self, value):
         if self.failure is None and type(value) is str and value in SDK_WORK_PASSES:
@@ -138,6 +192,7 @@ class SdkDiagnostic:
         value = dict(self.failure if self.failure is not None else self.current)
         if value['node'] is not None:
             value['node'] = dict(value['node'])
+        value['costs'] = {kind: dict(row) for kind, row in value['costs'].items()}
         return value
 
 
@@ -147,6 +202,24 @@ def _note(diagnostic, phase, role=None, info=None):
             diagnostic.note(phase, role, info)
     except BaseException:
         pass
+
+
+def _measure(diagnostic, kind, operation, *args, **kwargs):
+    """Run the same operation once; clock failure never replaces its result/error."""
+    token = None
+    if type(diagnostic) is SdkDiagnostic:
+        try:
+            token = diagnostic.cost_begin(kind)
+        except BaseException:
+            pass
+    try:
+        return operation(*args, **kwargs)
+    finally:
+        if type(diagnostic) is SdkDiagnostic:
+            try:
+                diagnostic.cost_end(kind, token)
+            except BaseException:
+                pass
 
 
 def _work(diagnostic, *, nodes=0, hashed_bytes=0):
@@ -225,22 +298,22 @@ def metadata(info):
 
 @_observed
 def named_matches(parent, name, fd, *, diagnostic=None):
-    observed = os.stat(name, dir_fd=parent, follow_symlinks=False)
+    observed = _measure(diagnostic, 'filesystem', os.stat, name, dir_fd=parent, follow_symlinks=False)
     _note(diagnostic, diagnostic.current['phase'] if type(diagnostic) is SdkDiagnostic else 'unknown', info=observed)
-    require(identity(observed) == identity(os.fstat(fd)))
+    require(identity(observed) == identity(_measure(diagnostic, 'filesystem', os.fstat, fd)))
 
 
 @_observed
 def digest_fd(fd, deadline, *, diagnostic=None):
-    before = os.fstat(fd)
+    before = _measure(diagnostic, 'filesystem', os.fstat, fd)
     _note(diagnostic, 'sealing-hash' if type(diagnostic) is SdkDiagnostic
           and diagnostic.current['phase'].startswith('sealing-') else 'inventory-hash', info=before)
     require(stat.S_ISREG(before.st_mode) and 0 <= before.st_size <= MAX_FILE_BYTES)
-    os.lseek(fd, 0, os.SEEK_SET)
+    _measure(diagnostic, 'filesystem', os.lseek, fd, 0, os.SEEK_SET)
     digest, total, prefix = hashlib.sha256(), 0, b''
     while True:
         remaining(deadline, diagnostic=diagnostic)
-        block = os.read(fd, min(128 * 1024, before.st_size + 1 - total))
+        block = _measure(diagnostic, 'read', os.read, fd, min(128 * 1024, before.st_size + 1 - total))
         if not block:
             break
         if len(prefix) < 20:
@@ -248,8 +321,8 @@ def digest_fd(fd, deadline, *, diagnostic=None):
         total += len(block)
         require(total <= before.st_size)
         _work(diagnostic, hashed_bytes=len(block))
-        digest.update(block)
-    require(total == before.st_size and identity(os.fstat(fd)) == identity(before))
+        _measure(diagnostic, 'sha-update', digest.update, block)
+    require(total == before.st_size and identity(_measure(diagnostic, 'filesystem', os.fstat, fd)) == identity(before))
     return digest.hexdigest(), prefix
 
 
@@ -260,7 +333,7 @@ def bounded_names(directory, maximum, deadline, *, diagnostic=None):
           and diagnostic.current['phase'] == 'sealing-count' else 'inventory-count')
     require(type(maximum) is int and 0 <= maximum <= MAX_NODES)
     names = []
-    with os.scandir(directory) as entries:
+    with _measure(diagnostic, 'filesystem', os.scandir, directory) as entries:
         for entry in entries:
             remaining(deadline, diagnostic=diagnostic)
             names.append(entry.name)
@@ -284,7 +357,7 @@ def inventory(root_fd, setup_uid, setup_gid, deadline, *, diagnostic=None):
         remaining(deadline, diagnostic=diagnostic)
         _note(diagnostic, 'inventory-count')
         require(depth <= MAX_DEPTH and len(rows) < MAX_NODES)
-        info = os.fstat(directory)
+        info = _measure(diagnostic, 'filesystem', os.fstat, directory)
         mode = stat.S_IMODE(info.st_mode)
         _note(diagnostic, 'inventory-directory', 'sdk-root' if not relative else 'directory', info)
         _work(diagnostic, nodes=1)
@@ -297,7 +370,7 @@ def inventory(root_fd, setup_uid, setup_gid, deadline, *, diagnostic=None):
             remaining(deadline, diagnostic=diagnostic)
             require(name not in ('.', '..') and '/' not in name and '\x00' not in name)
             _note(diagnostic, 'inventory-node', 'unknown')
-            observed = os.stat(name, dir_fd=directory, follow_symlinks=False)
+            observed = _measure(diagnostic, 'filesystem', os.stat, name, dir_fd=directory, follow_symlinks=False)
             role = 'host' if not relative and name == 'dotnet' else 'directory' if stat.S_ISDIR(observed.st_mode) else 'file'
             _note(diagnostic, 'inventory-node', role, observed)
             if not stat.S_ISDIR(observed.st_mode):
@@ -307,7 +380,7 @@ def inventory(root_fd, setup_uid, setup_gid, deadline, *, diagnostic=None):
                     and _check(diagnostic, 'inventory-mode', role, not mode & 0o7000, observed))
             child_relative = name if not relative else relative + '/' + name
             if stat.S_ISDIR(observed.st_mode):
-                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                child = _measure(diagnostic, 'filesystem', os.open, name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
                                 dir_fd=directory)
                 try:
                     named_matches(directory, name, child, diagnostic=diagnostic)
@@ -320,7 +393,7 @@ def inventory(root_fd, setup_uid, setup_gid, deadline, *, diagnostic=None):
                         and _check(diagnostic, 'inventory-type', role, observed.st_nlink == 1, observed)
                         and _check(diagnostic, 'inventory-mode', role, mode & 0o444 == 0o444, observed)
                         and _check(diagnostic, 'inventory-size', role, 0 <= observed.st_size <= MAX_FILE_BYTES, observed))
-                child = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+                child = _measure(diagnostic, 'filesystem', os.open, name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
                                 dir_fd=directory)
                 try:
                     named_matches(directory, name, child, diagnostic=diagnostic)
@@ -364,7 +437,7 @@ def seal_inventory(root_fd, before, deadline, *, diagnostic=None):
         require(relative in before and before[relative]['directory'])
         row = before[relative]
         _note(diagnostic, 'sealing-directory', 'sdk-root' if not relative else 'directory')
-        info = os.fstat(directory)
+        info = _measure(diagnostic, 'filesystem', os.fstat, directory)
         _work(diagnostic, nodes=1)
         require(metadata(info) == row['metadata'])
         _note(diagnostic, 'sealing-adoption')
@@ -383,10 +456,10 @@ def seal_inventory(root_fd, before, deadline, *, diagnostic=None):
             flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
             flags |= os.O_DIRECTORY if row['directory'] else os.O_NONBLOCK
             _note(diagnostic, 'sealing-node', 'directory' if row['directory'] else 'host' if child_relative == 'dotnet' else 'file')
-            child = os.open(name, flags, dir_fd=directory)
+            child = _measure(diagnostic, 'filesystem', os.open, name, flags, dir_fd=directory)
             try:
                 named_matches(directory, name, child, diagnostic=diagnostic)
-                info = os.fstat(child)
+                info = _measure(diagnostic, 'filesystem', os.fstat, child)
                 require(metadata(info) == row['metadata'])
                 if row['directory']:
                     seal(child, child_relative)
@@ -404,7 +477,7 @@ def seal_inventory(root_fd, before, deadline, *, diagnostic=None):
                     _note(diagnostic, 'sealing-hash')
                     require(digest_fd(child, deadline, diagnostic=diagnostic)[0] == row['sha256'])
                     seen.add(child_relative)
-                info = os.fstat(child)
+                info = _measure(diagnostic, 'filesystem', os.fstat, child)
                 _note(diagnostic, 'sealing-recheck', info=info)
                 require(info.st_uid == 0 and info.st_gid == 0
                         and stat.S_IMODE(info.st_mode) == int(row['metadata']['mode'], 8) & ~0o022)
@@ -427,20 +500,20 @@ def seal_share_ancestor(parent, share_fd, deadline, *, diagnostic=None):
     """
     _note(diagnostic, 'share-validation', 'share')
     named_matches(parent, 'share', share_fd, diagnostic=diagnostic)
-    before = os.fstat(share_fd)
+    before = _measure(diagnostic, 'filesystem', os.fstat, share_fd)
     _note(diagnostic, 'share-validation', 'share', before)
     mode = stat.S_IMODE(before.st_mode)
     require(stat.S_ISDIR(before.st_mode) and before.st_uid == 0 and before.st_gid == 0
             and not mode & 0o7000 and mode & 0o555 == 0o555)
     remaining(deadline, diagnostic=diagnostic)
     named_matches(parent, 'share', share_fd, diagnostic=diagnostic)
-    require(identity(os.fstat(share_fd)) == identity(before))
+    require(identity(_measure(diagnostic, 'filesystem', os.fstat, share_fd)) == identity(before))
     if mode & 0o022:
         _note(diagnostic, 'share-sealing', 'share', before)
         remaining(deadline, diagnostic=diagnostic)
         os.fchmod(share_fd, mode & ~0o022)
     _note(diagnostic, 'share-recheck', 'share')
-    after = os.fstat(share_fd)
+    after = _measure(diagnostic, 'filesystem', os.fstat, share_fd)
     _note(diagnostic, 'share-recheck', 'share', after)
     require(stat.S_ISDIR(after.st_mode) and after.st_uid == 0 and after.st_gid == 0
             and stat.S_IMODE(after.st_mode) == mode & ~0o022
@@ -475,15 +548,15 @@ def seal_trusted_sdk(deadline, *, diagnostic=None):
     _note(diagnostic, 'path-binding')
     require(_match(diagnostic, 'ambient_path_match', Path(shutil.which('dotnet') or '').resolve(strict=True) == host)
             and _match(diagnostic, 'fixed_path_match', Path(shutil.which('dotnet', path='/usr/bin:/bin') or '').resolve(strict=True) == host))
-    parent = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    parent = _measure(diagnostic, 'filesystem', os.open, '/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
     try:
         for name in ('usr', 'share'):
             remaining(deadline, diagnostic=diagnostic)
             _note(diagnostic, 'usr-validation' if name == 'usr' else 'share-validation', name)
-            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+            child = _measure(diagnostic, 'filesystem', os.open, name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
             try:
                 named_matches(parent, name, child, diagnostic=diagnostic)
-                info = os.fstat(child)
+                info = _measure(diagnostic, 'filesystem', os.fstat, child)
                 _note(diagnostic, 'usr-validation' if name == 'usr' else 'share-validation', name, info)
                 if name == 'usr':
                     require(stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022)
@@ -495,7 +568,7 @@ def seal_trusted_sdk(deadline, *, diagnostic=None):
             os.close(parent)
             parent = child
         _note(diagnostic, 'sdk-root-validation', 'sdk-root')
-        root = os.open('dotnet', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+        root = _measure(diagnostic, 'filesystem', os.open, 'dotnet', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
         try:
             named_matches(parent, 'dotnet', root, diagnostic=diagnostic)
             _work_pass(diagnostic, 'initial-inventory')

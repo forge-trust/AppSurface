@@ -830,5 +830,102 @@ class TrustedSdkProcedureControls(unittest.TestCase):
         self.assertEqual(contents, {name: (root / name).read_bytes() for name in contents})
 
 
+    def test_cost_measurement_real_fd_read_hash_and_filesystem_calls_preserve_result(self):
+        path = self.base / "cost-owned-file"
+        payload = b"private-cost-canary\x00\xff"
+        path.write_bytes(payload)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            baseline = sdk.digest_fd(fd, time.monotonic() + 30)
+            diagnostic = sdk.SdkDiagnostic()
+            diagnostic.note("inventory-hash", "file", os.fstat(fd))
+            measured = sdk.digest_fd(fd, time.monotonic() + 30, diagnostic=diagnostic)
+            self.assertEqual(baseline, measured)
+            frame = diagnostic.snapshot()
+            self.assertEqual(2, frame["costs"]["read"]["calls"])
+            self.assertEqual(1, frame["costs"]["sha-update"]["calls"])
+            self.assertEqual(3, frame["costs"]["filesystem"]["calls"])
+            self.assertGreaterEqual(frame["costs"]["projection"]["calls"], 1)
+            self.assertTrue(all(type(row["nanoseconds"]) is int and row["nanoseconds"] >= 0
+                                for row in frame["costs"].values()))
+            self.assertIsInstance(frame["process_cpu_nanoseconds"], int)
+            self.assertFalse(frame["measurement_incomplete"])
+            self.assertFalse(frame["measurement_clamped"])
+            self.assertEqual(len(payload), frame["hashed_bytes"])
+            frame["costs"]["read"]["calls"] = -1
+            self.assertEqual(2, diagnostic.snapshot()["costs"]["read"]["calls"])
+            encoded = json.dumps(diagnostic.snapshot()).encode()
+            self.assertLessEqual(len(encoded), 4096)
+            self.assertNotIn(b"canary", encoded)
+            self.assertEqual(payload, path.read_bytes())
+        finally:
+            os.close(fd)
+
+    def test_cost_clock_failure_preserves_actual_eio_and_success_without_extra_io(self):
+        path = self.base / "cost-failure-file"
+        path.write_bytes(b"failure-private-canary")
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            original = OSError(errno.EIO, "original-private-cost-canary")
+            diagnostic = sdk.SdkDiagnostic()
+            with patch.object(sdk.time, "perf_counter_ns", side_effect=RuntimeError("clock-private-canary")), \
+                    patch.object(os, "read", side_effect=original) as read, self.assertRaises(OSError) as caught:
+                sdk.digest_fd(fd, time.monotonic() + 30, diagnostic=diagnostic)
+            self.assertIs(original, caught.exception)
+            read.assert_called_once()
+            frame = diagnostic.snapshot()
+            self.assertEqual("os", frame["error_class"])
+            self.assertTrue(frame["measurement_incomplete"])
+            self.assertIsNone(frame["costs"]["read"]["nanoseconds"])
+            self.assertIsNone(frame["process_cpu_nanoseconds"])
+            self.assertNotIn(b"canary", json.dumps(frame).encode())
+            diagnostic = sdk.SdkDiagnostic()
+            real_read = os.read
+            with patch.object(sdk.time, "process_time_ns", side_effect=OSError(errno.EIO, "cpu-clock-canary")), \
+                    patch.object(os, "read", wraps=real_read) as read:
+                digest, _ = sdk.digest_fd(fd, time.monotonic() + 30, diagnostic=diagnostic)
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), digest)
+            self.assertEqual(2, read.call_count)
+            self.assertTrue(diagnostic.snapshot()["measurement_incomplete"])
+            self.assertIsNone(diagnostic.snapshot()["costs"]["sha-update"]["nanoseconds"])
+        finally:
+            os.close(fd)
+
+    def test_cost_clamps_are_diagnostic_only_and_first_failure_frame_remains_bounded(self):
+        path = self.base / "cost-bounds-file"
+        path.write_bytes(b"bounded-private-cost-canary")
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            diagnostic = sdk.SdkDiagnostic()
+            with patch.object(sdk, "MAX_COST_CALLS", 0), patch.object(sdk, "MAX_COST_NANOSECONDS", 0):
+                digest, _ = sdk.digest_fd(fd, time.monotonic() + 30, diagnostic=diagnostic)
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), digest)
+            frame = diagnostic.snapshot()
+            self.assertTrue(frame["measurement_clamped"])
+            self.assertTrue(frame["measurement_incomplete"])
+            self.assertTrue(all(row["calls"] == 0 and row["nanoseconds"] == 0
+                                for row in frame["costs"].values()))
+            diagnostic.note("inventory-hash", "file", os.fstat(fd))
+            sdk._work_pass(diagnostic, "initial-inventory")
+            # Keep the sample forward from the real digest samples, so expiry
+            # reaches the deadline predicate rather than the backward-clock guard.
+            sampled_time = diagnostic.started_at + 1.0
+            deadline = diagnostic.started_at + 0.5
+            with patch.object(sdk.time, "monotonic", return_value=sampled_time):
+                self.reject(lambda: sdk.remaining(deadline, diagnostic=diagnostic))
+            first = diagnostic.snapshot()
+            self.assertEqual("inventory-hash", first["phase_before_deadline"])
+            sdk._measure(diagnostic, "filesystem", os.fstat, fd)
+            diagnostic.note("final-deadline")
+            diagnostic.capture(OSError(errno.EIO, "later-private-cost-canary"))
+            self.assertEqual(first, diagnostic.snapshot())
+            encoded = json.dumps(first).encode()
+            self.assertLessEqual(len(encoded), 4096)
+            self.assertNotIn(b"canary", encoded)
+            self.assertEqual(b"bounded-private-cost-canary", path.read_bytes())
+        finally:
+            os.close(fd)
+
+
 if __name__ == "__main__":
     unittest.main()
