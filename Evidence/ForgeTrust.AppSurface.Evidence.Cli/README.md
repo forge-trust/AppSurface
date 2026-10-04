@@ -62,6 +62,30 @@ physical application exit, including failed or cancelled startup; no extra stop 
 or public health callback is introduced. Artifact transfer during production requires
 stopped producer work; final completion also requires application teardown.
 
+The internal `RunApplicationStagesAsync` returns a defensive read-only list of
+[`EvidenceResourceResult`](../ForgeTrust.AppSurface.Evidence.Contracts/README.md) metadata.
+It appends `Ready` only after the tracked Resource stage passes, the supervisor has
+validated a nonnull root ACK for the exact resource, and admission is rechecked for
+the captured plan. A failed or cancelled stage cannot contribute a Ready result.
+Each wait uses the lifecycle's monotonic clock from immediately before the stage;
+whole elapsed milliseconds exclude application startup. Final collection passes
+this list to the manifest builder and sums its elapsed values into
+`Metrics.ResourceReadinessMilliseconds`. The producer-only v1 path retains an
+empty list and a zero readiness metric.
+
+`AppendResourceReadinessResult(completed, resourceId, outcome, receipt, clock,
+startedTimestamp)` is an intentionally internal data projection used by this path.
+It copies prior results, rejects unsuccessful stages, null receipts and mismatched
+resource identifiers with `ASEVD410`, and returns read-only storage. It authenticates
+no root peer, application, HTTP response or admission. Its metadata-only controls
+cannot establish end-to-end health; the real protected root qualification must
+exercise ACK validation and final manifest propagation. Omitting readiness results
+from the manifest leaves a resource-bearing profile incomplete even when its
+producer and numeric coverage gate pass. A successful startup receipt alone also
+contains no readiness result. See the
+[manifest and resource contract](../ForgeTrust.AppSurface.Evidence.Contracts/README.md)
+and [consumer acceptance record](../../docs/evidence/issue779-consumer-acceptance.md).
+
 The production catalogue is empty, and Trusted consumer proof is still unregistered.
 The stage preparation therefore establishes no supported application run. A dependency
 profile cannot use Observation to bypass its admission rule, and parsed v2 metadata

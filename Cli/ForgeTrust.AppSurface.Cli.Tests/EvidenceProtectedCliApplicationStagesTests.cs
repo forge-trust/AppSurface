@@ -85,6 +85,58 @@ public sealed class EvidenceProtectedCliApplicationStagesTests
         Assert.Null(stage);
     }
 
+    [Fact]
+    public void ReadinessMetadataCopiesPriorResultsAndMeasuresOnlyTheMonotonicWait()
+    {
+        // Synthetic receipt data exercises projection only; no root health or admission is established.
+        EvidenceResourceResult[] prior = [new("previous", EvidenceResourceOutcome.Ready, 7)];
+        var clock = new ReadinessTimeProvider { Timestamp = 35 };
+        var results = EvidenceProtectedCliExecution.AppendResourceReadinessResult(prior, "http",
+            EvidenceWorkerStageOutcome.Passed, ResourceReceipt("http"), clock, 10);
+        prior[0] = prior[0] with { Outcome = EvidenceResourceOutcome.Invalid, ElapsedMilliseconds = 999 };
+        Assert.Equal(new EvidenceResourceResult("previous", EvidenceResourceOutcome.Ready, 7), results[0]);
+        Assert.Equal(new EvidenceResourceResult("http", EvidenceResourceOutcome.Ready, 25), results[1]);
+        Assert.Equal(32, results.Sum(static result => result.ElapsedMilliseconds));
+        Assert.Throws<NotSupportedException>(() => ((IList<EvidenceResourceResult>)results).Clear());
+    }
+
+    [Theory]
+    [InlineData((int)EvidenceWorkerStageOutcome.Passed, false)]
+    [InlineData((int)EvidenceWorkerStageOutcome.Failed, true)]
+    [InlineData((int)EvidenceWorkerStageOutcome.Cancelled, true)]
+    [InlineData((int)EvidenceWorkerStageOutcome.TimedOut, true)]
+    [InlineData((int)EvidenceWorkerStageOutcome.Rejected, true)]
+    public void UnsuccessfulOrMissingReceiptCannotProjectAReadyResource(int outcome, bool hasReceipt)
+    {
+        EvidenceResourceResult[] prior = [new("previous", EvidenceResourceOutcome.Ready, 7)];
+        var error = Assert.Throws<EvidenceAdmissionException>(() => EvidenceProtectedCliExecution.AppendResourceReadinessResult(
+            prior, "http", (EvidenceWorkerStageOutcome)outcome, hasReceipt ? ResourceReceipt("http") : null, new ReadinessTimeProvider(), 0));
+        Assert.Equal("ASEVD410", error.Code);
+        Assert.Null(error.InnerException);
+        Assert.Single(prior);
+        Assert.Equal(new EvidenceResourceResult("previous", EvidenceResourceOutcome.Ready, 7), prior[0]);
+    }
+
+    [Fact]
+    public void DifferentResourceReceiptCannotSatisfyTheDeclaredReadinessResult()
+    {
+        var error = Assert.Throws<EvidenceAdmissionException>(() => EvidenceProtectedCliExecution.AppendResourceReadinessResult(
+            Array.Empty<EvidenceResourceResult>(), "http", EvidenceWorkerStageOutcome.Passed,
+            ResourceReceipt("other"), new ReadinessTimeProvider(), 0));
+        Assert.Equal("ASEVD410", error.Code);
+        Assert.Null(error.InnerException);
+    }
+
+    private static EvidenceLinuxApplicationResourceReceipt ResourceReceipt(string resourceId) =>
+        new(new string('a', 32), resourceId, 1001, "/system.slice/issue779-app-" + new string('a', 32) + ".service", 200, 1);
+
+    private sealed class ReadinessTimeProvider : TimeProvider
+    {
+        public long Timestamp { get; set; }
+        public override long TimestampFrequency => 1000;
+        public override long GetTimestamp() => Timestamp;
+    }
+
     private static bool CreateBudget(TimeProvider clock, IReadOnlyList<EvidenceRunStageDeadline> stages,
         int seconds, out EvidenceRunTimeBudget? budget) => EvidenceRunTimeBudget.TryCreateFromAllowance(clock,
             TimeSpan.FromSeconds(seconds), stages, TimeSpan.FromSeconds(23), TimeSpan.FromSeconds(29),
