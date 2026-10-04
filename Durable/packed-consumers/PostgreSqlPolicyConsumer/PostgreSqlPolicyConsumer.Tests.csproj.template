@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RepositoryRoot Condition="'$(RepositoryRoot)' == ''">$(MSBuildThisFileDirectory)../../..</RepositoryRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="ForgeTrust.AppSurface.Durable.PostgreSql" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="$(RepositoryRoot)/Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlIntegrationTestDatabase.cs"
+             Link="PackedSupport/PostgreSqlIntegrationTestDatabase.cs" />
+    <Compile Include="$(RepositoryRoot)/Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlTestContainerImage.cs"
+             Link="PackedSupport/PostgreSqlTestContainerImage.cs" />
+  </ItemGroup>
+</Project>

@@ -131,8 +131,83 @@ internal static class TypedWorkDefinitionProof
         maximumLeaseLifetime: TimeSpan.FromMinutes(5),
         backoffAlgorithm: "exponential-v1");
 
+    // docs:snippet durable-execution-policy-chooser:start
+    internal static void VerifyExecutionPolicyChooser()
+    {
+        var scope = new DurableScopeId("execution-policy-proof-scope");
+        var command = new DurableCommandId("execution-policy-proof-command");
+        var input = new LedgerWork("entry-1");
+        var legacy = ReconciledDefinition.CreateRequest(
+            scope, command, "legacy-key", input, retryPolicy: ExplicitRetry);
+        if (legacy.ExecutionPolicy.AttemptPlan is not null
+            || legacy.ExecutionDeadline is not null
+            || legacy.Fingerprint.SchemaId != "appsurface.durable.work.enqueue.v1")
+        {
+            throw new InvalidOperationException("Legacy request construction changed its policy or fingerprint schema.");
+        }
+
+        var deadline = new DurableExecutionDeadline(
+            new DateTimeOffset(2030, 1, 1, 12, 0, 0, TimeSpan.Zero));
+        var deadlineOnly = DurableWorkRequest.CreateWithExecutionPolicy(
+            scope,
+            command,
+            "deadline-only-key",
+            OrdinaryDefinition.WorkName,
+            "v2",
+            OrdinaryDefinition.WorkCodec.Encode(new InvoiceWork("invoice-1002")),
+            OrdinaryDefinition.ProviderSafety,
+            DurableWorkExecutionPolicy.FromRetryPolicy(ExplicitRetry),
+            deadline);
+        if (deadlineOnly.ExecutionPolicy.AttemptPlan is not null
+            || deadlineOnly.ExecutionDeadline != deadline
+            || deadlineOnly.Fingerprint.SchemaId != "appsurface.durable.work.enqueue.v2")
+        {
+            throw new InvalidOperationException("Deadline-only construction must retain legacy backoff with the opt-in fingerprint.");
+        }
+
+        var retry = new DurableWorkRetryPolicy(
+            maximumAttempts: 5,
+            maximumElapsedTime: TimeSpan.FromHours(4),
+            initialRetryDelay: TimeSpan.FromMinutes(5),
+            maximumRetryDelay: TimeSpan.FromHours(1),
+            leaseDuration: TimeSpan.FromMinutes(1),
+            renewalCadence: TimeSpan.FromSeconds(15),
+            maximumLeaseLifetime: TimeSpan.FromMinutes(10),
+            backoffAlgorithm: "exponential-v1");
+        var plan = new DurableAttemptPlan(
+            "attempt-plan-v1",
+            [TimeSpan.Zero, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(20),
+             TimeSpan.FromMinutes(60), TimeSpan.FromMinutes(180)],
+            TimeSpan.FromMinutes(240));
+        var policy = DurableWorkExecutionPolicy.ForAttemptPlan(retry, plan);
+        var definition = DurableWork.DefineWithExecutionPolicy<LedgerWork, LedgerResult>(
+            "examples.ledger.reconcile", "v2",
+            TypedWorkCodecs.LedgerWorkCodec, TypedWorkCodecs.LedgerResultCodec,
+            DurableProviderSafety.ReconcileBeforeRetry, policy);
+        var services = new ServiceCollection();
+        services.AddDurableWork(definition.ExecutedBy<LedgerExecutor>()
+            .ReconciledBy<LedgerReconciler>());
+        var request = definition.CreateRequestWithExecutionPolicy(
+            scope, command, "ledger-reconcile-v2", input,
+            executionDeadline: deadline);
+        using var provider = services.BuildServiceProvider();
+        var registration = provider.GetRequiredService<IDurableWorkRegistry>()
+            .GetRequired(definition.WorkName, definition.WorkVersion);
+        if (!request.ExecutionPolicy.Equals(policy)
+            || request.ExecutionDeadline != deadline
+            || request.DueAtUtc is not null
+            || request.Fingerprint.SchemaId != "appsurface.durable.work.enqueue.v2"
+            || !registration.DefaultExecutionPolicy.Equals(policy))
+        {
+            throw new InvalidOperationException("Planned Work must preserve its named policy through request and registration.");
+        }
+    }
+    // docs:snippet durable-execution-policy-chooser:end
+
     internal static void Run()
     {
+        VerifyExecutionPolicyChooser();
+
         var services = new ServiceCollection();
         new AppSurfaceDurableModule().ConfigureServices(
             new StartupContext([], new PassiveHostModule()),

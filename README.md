@@ -431,7 +431,7 @@ how to use this project.
   solo development before a remote vault exists.
 - [Flow approval local example](examples/flow-approval-local/README.md) – shows a typed
   flow that waits for an approval event and resumes through the in-memory runner.
-- [Durable PostgreSQL example](examples/durable-postgresql/README.md) – demonstrates disposable one-pair and complete two-pair manifests, distinct runtime preflight commands, and the boundary between local source proof and candidate/public package receipts.
+- [Durable PostgreSQL example](examples/durable-postgresql/README.md) – demonstrates disposable one-pair and complete two-pair manifests, distinct runtime preflight commands, and the boundary between local source proof and candidate/public package receipts. For the canonical legacy, deadline-only, and planned retry chooser, see the [execution-policy guide](Durable/execution-policies-v1.md).
 - [Product readiness lab](examples/product-readiness-lab/README.md) – runs a composed
   local evaluator with AppSurface Web, Auth.AspNetCore, Flow, DurableTask-facing
   host-shape guidance, and Postgres product-state proof. Use its AppHost `verify`

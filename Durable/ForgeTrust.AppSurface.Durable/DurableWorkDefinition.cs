@@ -29,7 +29,32 @@ public static class DurableWork
         ArgumentNullException.ThrowIfNull(resultCodec);
         ArgumentNullException.ThrowIfNull(defaultRetryPolicy);
         return new(DurableWorkContractSnapshot<TWork, TResult>.Create(workName, workVersion, providerSafety,
-            workCodec, resultCodec, defaultRetryPolicy));
+            workCodec, resultCodec, DurableWorkExecutionPolicy.FromRetryPolicy(defaultRetryPolicy)));
+    }
+
+    /// <summary>Defines Work identity and codec facts with a captured immutable execution-policy default.</summary>
+    /// <typeparam name="TWork">Work input type.</typeparam>
+    /// <typeparam name="TResult">Successful result type.</typeparam>
+    /// <param name="workName">Stable Work name, at most 200 characters.</param>
+    /// <param name="workVersion">Immutable Work version, at most 100 characters.</param>
+    /// <param name="workCodec">Explicitly approved input codec.</param>
+    /// <param name="resultCodec">Explicitly approved result codec.</param>
+    /// <param name="providerSafety">Declared provider-effect ambiguity policy.</param>
+    /// <param name="defaultExecutionPolicy">Required default execution policy.</param>
+    /// <returns>A passive definition with stable guarded codec views.</returns>
+    /// <exception cref="ArgumentNullException">A codec or policy is null.</exception>
+    /// <exception cref="ArgumentException">An identifier, policy composition, or declared codec type is invalid.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Safety or classification is undefined.</exception>
+    public static DurableWorkDefinition<TWork, TResult> DefineWithExecutionPolicy<TWork, TResult>(
+        string workName, string workVersion, IDurablePayloadCodec<TWork> workCodec,
+        IDurablePayloadCodec<TResult> resultCodec, DurableProviderSafety providerSafety,
+        DurableWorkExecutionPolicy defaultExecutionPolicy)
+    {
+        ArgumentNullException.ThrowIfNull(workCodec);
+        ArgumentNullException.ThrowIfNull(resultCodec);
+        ArgumentNullException.ThrowIfNull(defaultExecutionPolicy);
+        return new(DurableWorkContractSnapshot<TWork, TResult>.Create(workName, workVersion, providerSafety,
+            workCodec, resultCodec, defaultExecutionPolicy));
     }
 }
 
@@ -63,7 +88,9 @@ public sealed class DurableWorkDefinition<TWork, TResult>
     /// <summary>Gets the declared provider-effect ambiguity policy.</summary>
     public DurableProviderSafety ProviderSafety => Snapshot.ProviderSafety;
     /// <summary>Gets the explicit retry policy used when a request omits an override.</summary>
-    public DurableWorkRetryPolicy DefaultRetryPolicy => Snapshot.DefaultRetryPolicy;
+    public DurableWorkRetryPolicy DefaultRetryPolicy => Snapshot.DefaultExecutionPolicy.RetryPolicy;
+    /// <summary>Gets the immutable execution-policy default captured by this definition.</summary>
+    public DurableWorkExecutionPolicy DefaultExecutionPolicy => Snapshot.DefaultExecutionPolicy;
 
     /// <summary>Validates caller choices, encodes input once and creates the existing immutable request.</summary>
     /// <param name="scopeId">Trusted owning scope.</param>
@@ -84,8 +111,70 @@ public sealed class DurableWorkDefinition<TWork, TResult>
         DurableIdentifier.Require(commandId.Value, nameof(commandId), 200);
         DurableIdentifier.Require(idempotencyKey, nameof(idempotencyKey), 200);
         ArgumentNullException.ThrowIfNull(work);
+        if (DefaultExecutionPolicy.AttemptPlan is not null)
+        {
+            if (retryPolicy is not null)
+            {
+                throw new ArgumentException(
+                    "A planned definition cannot be overridden with a legacy retry policy; use CreateRequestWithExecutionPolicy.",
+                    nameof(retryPolicy));
+            }
+
+            if (dueAtUtc is not null)
+            {
+                throw new ArgumentException("A planned request is anchored to acceptance and cannot specify dueAtUtc.", nameof(dueAtUtc));
+            }
+
+            return CreateRequestWithExecutionPolicy(scopeId, commandId, idempotencyKey, work);
+        }
+
         return new(scopeId, commandId, idempotencyKey, WorkName, WorkVersion, WorkCodec.Encode(work),
             ProviderSafety, retryPolicy ?? DefaultRetryPolicy, dueAtUtc);
+    }
+
+    /// <summary>Creates a request using this definition's execution policy or a validated per-request override.</summary>
+    /// <param name="scopeId">Trusted owning scope.</param>
+    /// <param name="commandId">Caller command identity.</param>
+    /// <param name="idempotencyKey">Explicit duplicate-submission key.</param>
+    /// <param name="work">Non-null input approved by the captured codec.</param>
+    /// <param name="executionPolicy">Optional policy override; null selects the captured definition default.</param>
+    /// <param name="executionDeadline">Optional exclusive absolute deadline.</param>
+    /// <param name="dueAtUtc">Optional initial due time; allowed for deadline-only policies, rejected for a plan.</param>
+    /// <returns>An immutable request with v1 fingerprint semantics when no plan or deadline is selected, otherwise v2 semantics.</returns>
+    /// <exception cref="ArgumentException">Caller identities are invalid or the selected plan conflicts with dueAtUtc.</exception>
+    /// <exception cref="ArgumentNullException">Input is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">An opt-in timing value lacks microsecond precision.</exception>
+    /// <remarks>Caller choices are validated before the codec encodes the input, which is encoded once.</remarks>
+    public DurableWorkRequest CreateRequestWithExecutionPolicy(DurableScopeId scopeId, DurableCommandId commandId,
+        string idempotencyKey, TWork work, DurableWorkExecutionPolicy? executionPolicy = null,
+        DurableExecutionDeadline? executionDeadline = null, DateTimeOffset? dueAtUtc = null)
+    {
+        DurableIdentifier.Require(scopeId.Value, nameof(scopeId), 200);
+        DurableIdentifier.Require(commandId.Value, nameof(commandId), 200);
+        DurableIdentifier.Require(idempotencyKey, nameof(idempotencyKey), 200);
+        ArgumentNullException.ThrowIfNull(work);
+        var selectedPolicy = executionPolicy ?? DefaultExecutionPolicy;
+        ArgumentNullException.ThrowIfNull(selectedPolicy);
+        var optedIntoExecutionTiming = selectedPolicy.AttemptPlan is not null || executionDeadline is not null;
+        if (optedIntoExecutionTiming)
+        {
+            DurableWorkExecutionPolicy.ValidateOptInRetryPrecision(selectedPolicy.RetryPolicy);
+        }
+
+        if (selectedPolicy.AttemptPlan is not null && dueAtUtc is not null)
+        {
+            throw new ArgumentException("A planned request is anchored to acceptance and cannot specify dueAtUtc.", nameof(dueAtUtc));
+        }
+
+        if (dueAtUtc is { } due)
+        {
+            _ = optedIntoExecutionTiming
+                ? DurableAttemptPlan.NormalizeUtc(due, nameof(dueAtUtc))
+                : due.ToUniversalTime();
+        }
+
+        return DurableWorkRequest.CreateWithExecutionPolicy(scopeId, commandId, idempotencyKey, WorkName,
+            WorkVersion, WorkCodec.Encode(work), ProviderSafety, selectedPolicy, executionDeadline, dueAtUtc);
     }
 
     /// <summary>Binds an ordinary transient executor; reconcile-before-retry still requires a reconciler before registration.</summary>
@@ -115,11 +204,11 @@ internal class DurableWorkContractSnapshot
 {
     /// <summary>Initializes facts already validated by the capture operation.</summary>
     protected DurableWorkContractSnapshot(DurableWorkContractIdentity identity, DurableProviderSafety safety,
-        DurableWorkRetryPolicy retry, DurablePayloadCodecSnapshot work, DurablePayloadCodecSnapshot result)
+        DurableWorkExecutionPolicy executionPolicy, DurablePayloadCodecSnapshot work, DurablePayloadCodecSnapshot result)
     {
         Identity = identity;
         ProviderSafety = safety;
-        DefaultRetryPolicy = retry;
+        DefaultExecutionPolicy = executionPolicy;
         Work = work;
         Result = result;
     }
@@ -129,7 +218,7 @@ internal class DurableWorkContractSnapshot
     /// <summary>Declared provider-effect ambiguity policy.</summary>
     internal DurableProviderSafety ProviderSafety { get; }
     /// <summary>Request construction default, never a replacement for accepted policy.</summary>
-    internal DurableWorkRetryPolicy DefaultRetryPolicy { get; }
+    internal DurableWorkExecutionPolicy DefaultExecutionPolicy { get; }
     /// <summary>Captured input source and metadata.</summary>
     internal DurablePayloadCodecSnapshot Work { get; }
     /// <summary>Captured successful-result source and metadata.</summary>
@@ -156,7 +245,7 @@ internal class DurableWorkContractSnapshot
         var identity = Validate(name, version, safety, DurableWorkRetryPolicy.Default);
         var (input, output) = CaptureCodecs(workCodec, resultCodec,
             DurablePayloadCodecSnapshot.Capture, DurablePayloadCodecSnapshot.Capture);
-        return new(identity, safety, DurableWorkRetryPolicy.Default, input, output);
+        return new(identity, safety, DurableWorkExecutionPolicy.FromRetryPolicy(DurableWorkRetryPolicy.Default), input, output);
     }
 
     /// <summary>Captures each distinct source once, reuses supplied views and rejects conflicting facts for one source.</summary>
@@ -187,8 +276,8 @@ internal class DurableWorkContractSnapshot
 internal sealed class DurableWorkContractSnapshot<TWork, TResult> : DurableWorkContractSnapshot
 {
     private DurableWorkContractSnapshot(DurableWorkContractIdentity identity, DurableProviderSafety safety,
-        DurableWorkRetryPolicy retry, DurablePayloadCodecSnapshot work, DurablePayloadCodecSnapshot result)
-        : base(identity, safety, retry, work, result)
+        DurableWorkExecutionPolicy executionPolicy, DurablePayloadCodecSnapshot work, DurablePayloadCodecSnapshot result)
+        : base(identity, safety, executionPolicy, work, result)
     {
         WorkView = (IDurablePayloadCodec<TWork>)work.CreateView();
         ResultView = ReferenceEquals(work, result)
@@ -203,9 +292,10 @@ internal sealed class DurableWorkContractSnapshot<TWork, TResult> : DurableWorkC
     /// <summary>Captures each unique source once, with independent exact generic-type checks.</summary>
     internal static DurableWorkContractSnapshot<TWork, TResult> Create(string name, string version,
         DurableProviderSafety safety, IDurablePayloadCodec<TWork> workCodec, IDurablePayloadCodec<TResult> resultCodec,
-        DurableWorkRetryPolicy retry)
+        DurableWorkExecutionPolicy executionPolicy)
     {
-        var identity = Validate(name, version, safety, retry);
+        ArgumentNullException.ThrowIfNull(executionPolicy);
+        var identity = Validate(name, version, safety, executionPolicy.RetryPolicy);
         var (input, output) = CaptureCodecs(workCodec, resultCodec,
             static codec => DurablePayloadCodecSnapshot.Capture(codec, nameof(workCodec)),
             static codec => DurablePayloadCodecSnapshot.Capture(codec, nameof(resultCodec)));
@@ -219,6 +309,6 @@ internal sealed class DurableWorkContractSnapshot<TWork, TResult> : DurableWorkC
             throw new ArgumentException("The durable result codec must declare the exact generic payload type.", nameof(resultCodec));
         }
 
-        return new(identity, safety, retry, input, output);
+        return new(identity, safety, executionPolicy, input, output);
     }
 }

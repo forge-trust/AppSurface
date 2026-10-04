@@ -221,6 +221,35 @@ before any bounded retry.
 
 ## PostgreSQL Work provider diagnostics
 
+### Execution deadline and attempt-plan diagnostics
+
+The canonical [execution-policy reference](../Durable/execution-policies-v1.md) defines the exclusive timing
+boundaries. `ASDUR120` identifies a planned policy whose circuit closed or whose fixed slots are exhausted;
+`ASDUR121` identifies an absolute deadline. Legacy backoff keeps its existing `retry_policy_exhausted` code when its
+elapsed horizon closes. The safe timing reason distinguishes `deadline_elapsed`, `circuit_elapsed`,
+`elapsed_exhausted`, and `slots_exhausted`; pair it with lifecycle/effect state instead of treating one code as proof
+of no effect. `ASDUR106` remains primary when an admitted external effect is unresolved; deadline expiry may be recorded
+as a secondary safe reason but never settles effect truth.
+
+The PostgreSQL store preserves the first admission-closure timestamp and reason separately from the first observed
+deadline reach. An earlier `circuit_elapsed` or `slots_exhausted` closure remains the first recorded cause; a later
+observation at or after the deadline is retained independently in `execution_deadline_reached_at`. This internal
+storage witness is not a public API projection. Diagnose effect truth from the authorized Work/operator surfaces and
+safe lifecycle diagnostics below; neither timing witness establishes whether a provider effect occurred.
+
+| Observation | Meaning | Safe response |
+|---|---|---|
+| `ASDUR120` / `circuit_elapsed` or `slots_exhausted` | The planned policy's exclusive circuit closed or the immutable plan has no next slot | Do not edit accepted offsets or resubmit changed semantics under the same idempotency identity; use a new Work version for new policy |
+| `ASDUR121` / `deadline_elapsed` | The absolute deadline is reached and no effect remains unresolved | Treat the Work as timing-closed; do not release or retry it |
+| `retry_policy_exhausted` / `elapsed_exhausted` | A legacy retry policy's elapsed horizon is closed | Keep the legacy policy and retry semantics; only authorized proof/reconciliation may update effect truth |
+| `ASDUR106` with a timing reason | A permit or late result leaves external effect truth unresolved at a timing boundary | Reconcile or use the authorized manual-resolution path for that safety class; never infer NotApplied from expiry or a quarantined result |
+| `ASDUR104` / `ASDUR105` | Claim or lease fence is stale | Stop the attempt and reload current scoped Work; timing facts do not revive stale authority |
+
+These codes and reason labels are payload-free. Do not expose Work/scope IDs, provider keys, input/result bytes,
+exception text, or arbitrary plan-version strings in public logs or metrics. An observation can be a safe duplicate
+after expiry; compare the original accepted fingerprint before treating it as a new request. See the
+[schema-12 rollout checklist](../Durable/migrations/execution-policies-v1.md).
+
 | Code | Meaning | Safe response |
 |---|---|---|
 | `ASDUR101` | Active caller transaction required | Start and pass the intended transaction; the writer never creates one for this API. |

@@ -24,6 +24,10 @@ All four packages participate in the coordinated prerelease publish plan. They r
 only with the reviewed schema, role, recovery, and operational evidence described below, and do not treat the preview
 as production support.
 
+For #765 retry timing choices, start with the [execution-policy v1 reference](execution-policies-v1.md). It compares
+legacy completion-relative backoff, deadline-only execution, and fixed acceptance-relative attempt plans, then links the
+source-compiled adopter example, diagnostics, and schema-12 rollout procedure.
+
 For the internal W3C causal-link contract, safe telemetry attributes, deployment order, and reference proof, read
 [Durable Flow trace context v1](flow-trace-context-v1.md). It supplies persistence and crash-proof seams now; it does
 not make Slice 4 a hosted runtime.
@@ -55,9 +59,10 @@ The application package registers only passive registries. A provider is selecte
 provider adds explicit migrations (`0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`,
 `0004_schedule_protocol`, `0005_runtime_heartbeat`, `0006_flow_trace_context`, `0007_flow_retention`,
 `0008_flow_repair`, `0009_work_contract_discovery`, `0010_runtime_health_observation`, and
-`0011_runtime_heartbeat_retention`) plus one-operation-at-a-time Work, Flow, and Work-first Schedule
-persistence with versioned W3C
-causal evidence, verified retention, and evidence-first Flow repair. PostgreSQL registration remains passive; an
+`0011_runtime_heartbeat_retention`, and `0012_work_execution_policy`) plus one-operation-at-a-time Work, Flow, and
+Work-first Schedule persistence with versioned W3C causal evidence, verified retention, evidence-first Flow repair, and
+opt-in execution deadlines and fixed attempt plans. Schema 12 is the reader/writer compatibility floor for opted-in
+execution policies; legacy rows retain their existing timing and fingerprint behavior. PostgreSQL registration remains passive; an
 application explicitly adds one bounded polling host through
 [`AddWorkerHost()`](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host) only where it intends
 continuous activation. It adds no public endpoint, dashboard, or automatic migration.
@@ -88,10 +93,11 @@ The forward-only deployment order is:
 9. `0009_work_contract_discovery.sql`
 10. `0010_runtime_health_observation.sql`
 11. `0011_runtime_heartbeat_retention.sql`
-12. [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
+12. [`0012_work_execution_policy.sql`](https://github.com/forge-trust/AppSurface/blob/codex/make-it-so-765-retry-deadlines/Durable/ForgeTrust.AppSurface.Durable.PostgreSql/Migrations/0012_work_execution_policy.sql)
+13. [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
 
 The preferred production flow is to generate and review the Durable schema script offline, drain and stop every pre-`0009`
-worker, apply the reviewed migrations in the order above (including `0011_runtime_heartbeat_retention.sql`), apply the canonical
+worker, apply the reviewed migrations in the order above (including `0012_work_execution_policy.sql`), apply the canonical
 role recipe, and run schema status/preflight before enabling the
 worker host. The [`durable schema` CLI commands](../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands)
 make those checks discoverable. `apply --apply` is an explicit migration-owner operation only; deployments normally
@@ -103,7 +109,7 @@ operation. Never delete or rewrite migration history. The [`durable-postgresql` 
 is a local proof of the boundaries above, not production operations guidance.
 
 The role recipe takes a complete version-1 `role_pairs_json` manifest on every run. Each pair explicitly chooses
-`full` or `work_only`; omission is not retirement. After schema 11, the reviewed deployment manifest is the authority
+`full` or `work_only`; omission is not retirement. Since schema 11, the reviewed deployment manifest is the authority
 for the complete pair set, and the recipe refuses omissions it can observe in package ACLs or policy targets. Compare
 the exact reviewed manifest file with the prior release record because a privileged actor could erase every catalog
 trace of a former pair. The recipe is transactional, but policy DDL can wait briefly on active work. See the

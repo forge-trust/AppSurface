@@ -717,15 +717,27 @@ internal sealed partial class PostgreSqlDurableFlowStore
 
                 _ = registration.WorkCodec.DecodeObject(activity.Work);
                 activityIdentity = ComputeActivityIdentity(claim, decision);
-                var request = new DurableWorkRequest(
-                    claim.ScopeId,
-                    new DurableCommandId("flow-work-command-v1-" + activityIdentity),
-                    "flow-work-idempotency-v1-" + activityIdentity,
-                    activity.WorkName,
-                    activity.WorkVersion,
-                    activity.Work,
-                    activity.ProviderSafety,
-                    DurableWorkRetryPolicy.Default);
+                var commandId = new DurableCommandId("flow-work-command-v1-" + activityIdentity);
+                var idempotencyKey = "flow-work-idempotency-v1-" + activityIdentity;
+                var request = registration.DefaultExecutionPolicy.AttemptPlan is not null
+                    ? DurableWorkRequest.CreateWithExecutionPolicy(
+                        claim.ScopeId,
+                        commandId,
+                        idempotencyKey,
+                        activity.WorkName,
+                        activity.WorkVersion,
+                        activity.Work,
+                        activity.ProviderSafety,
+                        registration.DefaultExecutionPolicy)
+                    : new DurableWorkRequest(
+                        claim.ScopeId,
+                        commandId,
+                        idempotencyKey,
+                        activity.WorkName,
+                        activity.WorkVersion,
+                        activity.Work,
+                        activity.ProviderSafety,
+                        DurableWorkRetryPolicy.Default);
                 var acceptance = await PostgreSqlDurableWorkStore.AcceptFlowChildAsync(
                     transaction,
                     request,

@@ -2,6 +2,8 @@
 
 The [schema-11 heartbeat retention guide](../../Durable/heartbeat-retention-operations.md) explains the feature's default settings and production rollout. The one-command proof below also verifies a single bounded stale-row cleanup, current-row survival, and healthy Work execution.
 
+For the canonical choice between legacy backoff, an absolute execution deadline, and deterministic acceptance-relative attempt plans, start with the [Durable execution-policy guide](../../Durable/execution-policies-v1.md).
+
 This public-preview tutorial proves the current [`ForgeTrust.AppSurface.Durable.PostgreSql`](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) adoption path on a disposable PostgreSQL 16+ database. Read the [operational-assessment adoption guide](../../Durable/operational-assessments.md) first for the existing-host recipe, health predicate meanings, exhaustive admission switch, diagnostics, migration `9 -> 10`, role reconciliation, and rollback boundary. This example is a local composition reference, not production operations guidance. Application startup never applies DDL.
 
 The [AppSurface CLI](../../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands) owns migration status, reviewed scripts, preflight, and guarded apply. This example owns only two local-proof commands:

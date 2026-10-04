@@ -7,6 +7,7 @@ TMP_ROOT="$(cd "${TMPDIR:-/tmp}" && pwd -P)"
 WORK_DIR="$(mktemp -d "$TMP_ROOT/appsurface-durable-consumers.XXXXXX")"
 FEED_DIR="$WORK_DIR/feed"
 CONFIG_FILE="$WORK_DIR/NuGet.config"
+LEGACY_ABI_CONFIG_FILE="$WORK_DIR/LegacyAbi.NuGet.config"
 ARTIFACTS_DIR="$WORK_DIR/artifacts"
 export NUGET_PACKAGES="$WORK_DIR/packages"
 export DOTNET_CLI_HOME="$WORK_DIR/dotnet-home"
@@ -544,6 +545,108 @@ PY
     || fail "the packaged PostgreSQL role recipe differs from the canonical source bytes"
 }
 
+verify_legacy_core_provider_abi_consumer() {
+  local legacy_dir="$WORK_DIR/legacy-core-provider-abi"
+  local legacy_project="$legacy_dir/LegacyCoreProviderAbiConsumer.csproj"
+  local legacy_probe="$legacy_dir/bin/Release/net10.0/ForgeTrust.AppSurface.Durable.LegacyCoreProviderAbiConsumer.dll"
+  local legacy_packages="$WORK_DIR/legacy-abi-packages"
+  local host_dir="$WORK_DIR/CoreProviderAbiHost"
+  local host_project="$host_dir/CoreProviderAbiHost.csproj"
+  local host_assets="$host_dir/obj/project.assets.json"
+
+  # This locked historical compile is separate from V2WorkHarness's cached
+  # preview.8 PostgreSQL runtime/artifact proof; it checks Core/Provider ABI only.
+  cp -R "$ROOT_DIR/Durable/compatibility/LegacyCoreProviderAbiConsumer" "$legacy_dir"
+  cp "$ROOT_DIR/Directory.Packages.props" "$legacy_dir/Directory.Packages.props"
+  mkdir -p "$legacy_packages"
+  NUGET_PACKAGES="$legacy_packages" dotnet restore "$legacy_project" \
+    --configfile "$LEGACY_ABI_CONFIG_FILE" \
+    --locked-mode \
+    -m:1 \
+    -p:UseSharedCompilation=false
+  NUGET_PACKAGES="$legacy_packages" dotnet build "$legacy_project" \
+    --configuration Release \
+    --no-restore \
+    -m:1 \
+    -p:UseSharedCompilation=false
+  [[ -f "$legacy_probe" ]] || fail "the independently compiled historical Core/Provider ABI consumer is missing"
+
+  cp -R "$ROOT_DIR/Durable/packed-consumers/CoreProviderAbiHost" "$host_dir"
+  mv "$host_dir/CoreProviderAbiHost.csproj.template" "$host_project"
+  dotnet restore "$host_project" \
+    --configfile "$CONFIG_FILE" \
+    -m:1 \
+    -p:AppSurfacePackageVersion="$PACKAGE_VERSION" \
+    -p:UseSharedCompilation=false
+  verify_appsurface_assets_closure "$host_assets" "current-package Core/Provider ABI host"
+  dotnet build "$host_project" \
+    --configuration Release \
+    --no-restore \
+    -m:1 \
+    -p:AppSurfacePackageVersion="$PACKAGE_VERSION" \
+    -p:UseSharedCompilation=false
+  cp "$legacy_probe" "$host_dir/bin/Release/net10.0/ForgeTrust.AppSurface.Durable.LegacyCoreProviderAbiConsumer.dll"
+  dotnet run --project "$host_project" \
+    --configuration Release \
+    --no-build \
+    --no-restore \
+    -p:AppSurfacePackageVersion="$PACKAGE_VERSION"
+}
+
+verify_packed_postgresql_execution_policy_consumer() {
+  local consumer_dir="$WORK_DIR/PostgreSqlPolicyConsumer"
+  local consumer_project="$consumer_dir/PostgreSqlPolicyConsumer.Tests.csproj"
+  local assets_file="$consumer_dir/obj/project.assets.json"
+
+  cp -R "$ROOT_DIR/Durable/packed-consumers/PostgreSqlPolicyConsumer" "$consumer_dir"
+  mv "$consumer_dir/PostgreSqlPolicyConsumer.Tests.csproj.template" "$consumer_project"
+  cp "$ROOT_DIR/Directory.Packages.props" "$consumer_dir/Directory.Packages.props"
+  cp "$ROOT_DIR/Directory.Build.props" "$consumer_dir/Directory.Build.props"
+  cp "$ROOT_DIR/Directory.Build.targets" "$consumer_dir/Directory.Build.targets"
+  python3 - "$consumer_dir/Directory.Packages.props" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+path = sys.argv[1]
+tree = ET.parse(path)
+root = tree.getroot()
+local_name = lambda tag: tag.rsplit("}", 1)[-1]
+group = next((item for item in root if local_name(item.tag) == "ItemGroup"), None)
+if group is None:
+    group = ET.SubElement(root, "ItemGroup")
+package_id = "ForgeTrust.AppSurface.Durable.PostgreSql"
+if not any(
+    local_name(item.tag) == "PackageVersion"
+    and item.get("Include", "").lower() == package_id.lower()
+    for item in group
+):
+    version = ET.SubElement(group, "PackageVersion")
+    version.set("Include", package_id)
+    version.set("Version", "$(AppSurfacePackageVersion)")
+tree.write(path, encoding="utf-8", xml_declaration=True)
+PY
+  dotnet restore "$consumer_project" \
+    --configfile "$CONFIG_FILE" \
+    -m:1 \
+    -p:AppSurfacePackageVersion="$PACKAGE_VERSION" \
+    -p:RepositoryRoot="$ROOT_DIR" \
+    -p:RestoreLockedMode=false \
+    -p:UseSharedCompilation=false
+  verify_appsurface_assets_closure "$assets_file" "packed PostgreSQL execution-policy consumer"
+  run_external_activation_test_project \
+    "$consumer_project" \
+    "$WORK_DIR/postgresql-execution-policy-packed-tests.log" \
+    "Packed PostgreSQL execution-policy consumer proof" \
+    --configuration Release \
+    --no-restore \
+    -m:1 \
+    -p:AppSurfacePackageVersion="$PACKAGE_VERSION" \
+    -p:RepositoryRoot="$ROOT_DIR" \
+    -p:RestoreLockedMode=false \
+    -p:UseSharedCompilation=false \
+    --nologo
+}
+
 verify_external_activation_source_projects
 
 for project in "${projects[@]}"; do
@@ -586,6 +689,18 @@ sed "s|__LOCAL_FEED__|$FEED_DIR|g" > "$CONFIG_FILE" <<'EOF'
   </packageSourceMapping>
 </configuration>
 EOF
+
+cat > "$LEGACY_ABI_CONFIG_FILE" <<'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+  </packageSources>
+</configuration>
+EOF
+
+verify_legacy_core_provider_abi_consumer
 
 testing_consumer_dir="$WORK_DIR/TestingConsumer"
 testing_adoption_started_at="$(date +%s)"
@@ -685,6 +800,7 @@ for consumer in Adopter Provider PostgreSqlProvider; do
 done
 
 verify_external_activation_package_consumer
+verify_packed_postgresql_execution_policy_consumer
 
 for package_id in "${packed_packages[@]}"; do
   verify_restored_package "$package_id"

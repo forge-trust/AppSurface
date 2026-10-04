@@ -558,7 +558,7 @@ public sealed class DurableSchemaCommandTests
 
     [Theory]
     [InlineData(-1)]
-    [InlineData(12)]
+    [InlineData(13)]
     public async Task Script_rejects_versions_outside_the_current_catalog(int fromVersion)
     {
         var command = new DurableSchemaScriptCommand(new DurableSchemaCommandService()) { FromVersion = fromVersion };
@@ -573,7 +573,7 @@ public sealed class DurableSchemaCommandTests
     public async Task Script_at_the_current_version_contains_only_the_deterministic_advisory_lock_boundary()
     {
         var service = new DurableSchemaCommandService();
-        var command = new DurableSchemaScriptCommand(service) { FromVersion = 11 };
+        var command = new DurableSchemaScriptCommand(service) { FromVersion = PostgreSqlDurableRuntimeSchemaManager.RequiredVersion };
         using var console = new FakeInMemoryConsole();
 
         await command.ExecuteAsync(console);
@@ -581,7 +581,7 @@ public sealed class DurableSchemaCommandTests
         var script = console.ReadOutputString();
         Assert.Contains("pg_catalog.pg_try_advisory_lock", script, StringComparison.Ordinal);
         Assert.Contains("SELECT pg_advisory_unlock", script, StringComparison.Ordinal);
-        Assert.DoesNotContain("Migration 000", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("-- Migration", script, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -890,7 +890,7 @@ public sealed class DurableSchemaCommandTests
         var compatible = await service.GetStatusAsync(connectionString, CancellationToken.None);
 
         Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missing.Compatibility);
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], applied.AppliedVersions);
+        Assert.Equal(Enumerable.Range(1, PostgreSqlDurableRuntimeSchemaManager.RequiredVersion), applied.AppliedVersions);
         Assert.Equal(DurableRuntimeSchemaCompatibility.Compatible, compatible.Compatibility);
     }
 

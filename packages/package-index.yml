@@ -827,6 +827,16 @@ packages:
     release_notes_path: releases/unreleased.md
     order: 212
     note: Non-packable release proof controller for complete runtime role sets, exact candidate and published package bytes, and guarded lane execution. See the [artifact proof reference](../tools/ForgeTrust.AppSurface.PackageIndex/README.md#durable-preflight-artifact-proof-845).
+  - project: Durable/compatibility/LegacyCoreProviderAbiConsumer/LegacyCoreProviderAbiConsumer.csproj
+    classification: excluded
+    publish_decision: do_not_publish
+    product_family: internal_support
+    publish_reason: This independently compiled historical Core/Provider compatibility probe exists only to validate a consumer built against the retained preview package graph.
+    release_status: excluded
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 213
+    note: Non-packable historical ABI consumer proof; it compiles against the exact locked legacy package version and is loaded by a separate current-package host.
   - project: Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64.csproj
     classification: support
     publish_decision: support_publish

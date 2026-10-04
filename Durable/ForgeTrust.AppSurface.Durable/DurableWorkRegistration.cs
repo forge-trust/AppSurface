@@ -34,6 +34,19 @@ public sealed record DurableWorkExecutionContext
         DurableEncodedPayload payload,
         DurableProviderSafety providerSafety,
         DurableWorkerExecutionIdentity executionIdentity)
+        : this(scopeId, workId, workName, workVersion, payload, providerSafety, executionIdentity, null)
+    {
+    }
+
+    private DurableWorkExecutionContext(
+        DurableScopeId scopeId,
+        DurableWorkId workId,
+        string workName,
+        string workVersion,
+        DurableEncodedPayload payload,
+        DurableProviderSafety providerSafety,
+        DurableWorkerExecutionIdentity executionIdentity,
+        DurableWorkExecutionSnapshot? execution)
     {
         DurableIdentifier.Require(scopeId.Value, nameof(scopeId), 200);
         DurableIdentifier.Require(workId.Value, nameof(workId), 200);
@@ -49,6 +62,17 @@ public sealed record DurableWorkExecutionContext
         Payload = payload ?? throw new ArgumentNullException(nameof(payload));
         ProviderSafety = providerSafety;
         ExecutionIdentity = executionIdentity ?? throw new ArgumentNullException(nameof(executionIdentity));
+        Execution = execution;
+    }
+
+    /// <summary>Creates a context carrying the accepted immutable timing snapshot.</summary>
+    /// <remarks>The snapshot is descriptive only and does not authorize invocation or replace a provider-store check.</remarks>
+    public static DurableWorkExecutionContext CreateWithExecution(DurableScopeId scopeId, DurableWorkId workId,
+        string workName, string workVersion, DurableEncodedPayload payload, DurableProviderSafety providerSafety,
+        DurableWorkerExecutionIdentity executionIdentity, DurableWorkExecutionSnapshot execution)
+    {
+        ArgumentNullException.ThrowIfNull(execution);
+        return new(scopeId, workId, workName, workVersion, payload, providerSafety, executionIdentity, execution);
     }
 
     /// <summary>Gets the trusted owning scope.</summary>
@@ -71,6 +95,9 @@ public sealed record DurableWorkExecutionContext
 
     /// <summary>Gets the provider-validated execution identity and authorization fence.</summary>
     public DurableWorkerExecutionIdentity ExecutionIdentity { get; }
+
+    /// <summary>Gets the immutable accepted timing facts, or null for a legacy context.</summary>
+    public DurableWorkExecutionSnapshot? Execution { get; }
 }
 
 /// <summary>
@@ -121,6 +148,7 @@ public abstract class DurableWorkRegistration
         WorkName = Snapshot.Identity.WorkName;
         WorkVersion = Snapshot.Identity.WorkVersion;
         ProviderSafety = Snapshot.ProviderSafety;
+        DefaultExecutionPolicy = Snapshot.DefaultExecutionPolicy;
         WorkCodec = workCodec;
         ResultCodec = resultCodec;
     }
@@ -134,6 +162,7 @@ public abstract class DurableWorkRegistration
         WorkName = snapshot.Identity.WorkName;
         WorkVersion = snapshot.Identity.WorkVersion;
         ProviderSafety = snapshot.ProviderSafety;
+        DefaultExecutionPolicy = snapshot.DefaultExecutionPolicy;
         WorkCodec = workCodec;
         ResultCodec = resultCodec;
     }
@@ -151,6 +180,9 @@ public abstract class DurableWorkRegistration
 
     /// <summary>Gets the declared provider ambiguity policy.</summary>
     public DurableProviderSafety ProviderSafety { get; }
+
+    /// <summary>Gets the execution-policy default captured when this Work registration was created.</summary>
+    public DurableWorkExecutionPolicy DefaultExecutionPolicy { get; }
 
     /// <summary>Gets the work payload codec.</summary>
     public IDurablePayloadCodec WorkCodec { get; }
@@ -271,7 +303,8 @@ public sealed class DurableWorkRegistration<TWork, TResult, TExecutor> : Durable
         IDurablePayloadCodec<TResult> resultCodec,
         Func<IServiceProvider, IDurableEffectReconciler<TWork, TResult>>? reconcilerFactory = null)
         : this(DurableWorkContractSnapshot<TWork, TResult>.Create(workName, workVersion, providerSafety,
-            workCodec, resultCodec, DurableWorkRetryPolicy.Default), false, reconcilerFactory, workCodec, resultCodec)
+            workCodec, resultCodec, DurableWorkExecutionPolicy.FromRetryPolicy(DurableWorkRetryPolicy.Default)),
+            false, reconcilerFactory, workCodec, resultCodec)
     {
     }
 
@@ -373,7 +406,8 @@ public sealed class DurableWorkExitRegistration<TWork, TResult, TExecutor> : Dur
         IDurablePayloadCodec<TWork> workCodec,
         IDurablePayloadCodec<TResult> resultCodec)
         : this(DurableWorkContractSnapshot<TWork, TResult>.Create(workName, workVersion,
-            DurableProviderSafety.ProviderKeyed, workCodec, resultCodec, DurableWorkRetryPolicy.Default), false, workCodec, resultCodec)
+            DurableProviderSafety.ProviderKeyed, workCodec, resultCodec,
+            DurableWorkExecutionPolicy.FromRetryPolicy(DurableWorkRetryPolicy.Default)), false, workCodec, resultCodec)
     {
     }
 

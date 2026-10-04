@@ -368,7 +368,7 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
                 && snapshot.HasExactAmbiguousPermit;
             var cancelSafe = snapshot.ProviderSafety is DurableProviderSafety.Idempotent or DurableProviderSafety.ProviderKeyed
                 && snapshot.State == "suspended_ambiguous_external_outcome"
-                && snapshot.CancellationRequested
+                && (snapshot.CancellationRequested || snapshot.Execution?.AdmissionReason(false) is not null)
                 && snapshot.HasExactAmbiguousPermit;
             if (!manual && !cancelSafe)
             {
@@ -437,15 +437,28 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
         OperatorTransition transition,
         CancellationToken cancellationToken)
     {
+        var executionDecision = snapshot.Execution is { } execution
+            ? PostgreSqlExecutionOperatorDecision.Evaluate(execution, transition.State, transition.PermitProof) : null;
+        if (executionDecision is { } decision)
+            transition = transition with
+            {
+                State = decision.State,
+                Terminal = decision.Terminal,
+                ClearCancellation = transition.ClearCancellation && decision.State == "retry_wait"
+            };
         var revision = snapshot.Revision + 1;
         const string workSql = """
             WITH updated_work AS
             (
             UPDATE appsurface_durable.work
             SET state = @state,
-                due_at = CASE WHEN @state = 'retry_wait' THEN clock_timestamp() ELSE due_at END,
-                terminal_at = CASE WHEN @terminal THEN clock_timestamp() ELSE NULL END,
+                due_at = CASE WHEN @state = 'retry_wait' THEN COALESCE(@execution_due, COALESCE(@execution_now, pg_catalog.clock_timestamp())) ELSE due_at END,
+                terminal_at = CASE WHEN @terminal THEN COALESCE(@execution_now, pg_catalog.clock_timestamp()) ELSE NULL END,
                 terminal_code = @terminal_code,
+                execution_admission_closed_at = COALESCE(execution_admission_closed_at,@execution_closed_at),
+                execution_admission_closed_reason = COALESCE(execution_admission_closed_reason,@execution_reason),
+                execution_deadline_reached_at = CASE WHEN @execution_reason = 'deadline_elapsed'
+                    THEN COALESCE(execution_deadline_reached_at, @execution_now) ELSE execution_deadline_reached_at END,
                 lease_owner = NULL,
                 lease_started_at = NULL,
                 lease_expires_at = NULL,
@@ -459,7 +472,7 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
                 result_payload = @result_payload,
                 result_sha256 = @result_sha256,
                 revision = @revision,
-                updated_at = clock_timestamp()
+                updated_at = COALESCE(@execution_now, pg_catalog.clock_timestamp())
             WHERE scope_id = @scope_id AND work_id = @work_id AND revision = @expected_revision
             RETURNING scope_id, work_id
             ), updated_dispatch AS
@@ -470,9 +483,11 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
                     WHEN @state = 'retry_wait' THEN 'available'
                     ELSE 'suspended'
                 END,
-                due_at = CASE WHEN @state = 'retry_wait' THEN clock_timestamp() ELSE due_at END,
+                due_at = CASE WHEN @state = 'retry_wait' THEN COALESCE(@execution_due, COALESCE(@execution_now, pg_catalog.clock_timestamp())) ELSE due_at END,
                 expected_revision = @revision,
-                updated_at = clock_timestamp()
+                execution_discovery_at = CASE WHEN @execution_now IS NULL THEN execution_discovery_at
+                    WHEN @state='retry_wait' THEN LEAST(@execution_due,@execution_cutoff) ELSE NULL END,
+                updated_at = COALESCE(@execution_now, pg_catalog.clock_timestamp())
             FROM updated_work
             WHERE dispatch.scope_id = updated_work.scope_id
               AND dispatch.aggregate_kind = 'work'
@@ -483,7 +498,7 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
             UPDATE appsurface_durable.effect_permit AS permit
             SET status = COALESCE(@permit_status, permit.status),
                 runtime_epoch = CASE WHEN @move_permit_epoch THEN @runtime_epoch ELSE permit.runtime_epoch END,
-                observed_at = clock_timestamp()
+                observed_at = COALESCE(@execution_now, pg_catalog.clock_timestamp())
             FROM updated_dispatch
             WHERE (@permit_status IS NOT NULL OR @move_permit_epoch)
               AND permit.scope_id = updated_dispatch.scope_id
@@ -498,12 +513,12 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
             (
             INSERT INTO appsurface_durable.work_history
                 (scope_id, work_id, aggregate_revision, event_type, command_id, actor_id, reason_code,
-                 attempt_number, lease_generation, scope_generation, runtime_epoch, details)
+                 attempt_number, lease_generation, scope_generation, runtime_epoch, details, observed_at)
             SELECT
                 @scope_id, @work_id, @revision, @event_type, @command_id, @actor_id, @reason_code,
                  @attempt_number, @lease_generation, @scope_generation,
                  CASE WHEN @replace_epoch THEN @runtime_epoch ELSE @work_epoch END,
-                 jsonb_strip_nulls(jsonb_build_object('resulting_state', @state, 'resolution_kind', @resolution_kind))
+                 jsonb_strip_nulls(jsonb_build_object('resulting_state', @state, 'resolution_kind', @resolution_kind, 'code', @execution_code, 'timing_reason', @execution_reason)), COALESCE(@execution_now, pg_catalog.clock_timestamp())
             FROM updated_dispatch
             WHERE @permit_status IS NULL OR (SELECT count(*) FROM updated_permit) = 1
             RETURNING scope_id, work_id
@@ -511,7 +526,7 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
             (
             UPDATE appsurface_durable.work_operator_command
             SET status = 'completed', resulting_state = @state, resulting_revision = @revision,
-                resolution_kind = @resolution_kind, completed_at = clock_timestamp()
+                resolution_kind = @resolution_kind, completed_at = COALESCE(@execution_now, pg_catalog.clock_timestamp())
             FROM inserted_history
             WHERE work_operator_command.scope_id = inserted_history.scope_id
               AND work_operator_command.work_id = inserted_history.work_id
@@ -533,7 +548,7 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
         sql.Parameters.AddWithValue("revision", revision);
         sql.Parameters.AddWithValue("state", transition.State);
         sql.Parameters.AddWithValue("terminal", transition.Terminal);
-        sql.Parameters.AddWithValue("terminal_code", $"operator_{command.Type}");
+        sql.Parameters.AddWithValue("terminal_code", executionDecision?.Code ?? $"operator_{command.Type}");
         sql.Parameters.AddWithValue("clear_cancellation", transition.ClearCancellation);
         sql.Parameters.AddWithValue("replace_epoch", transition.ReplaceEpoch);
         sql.Parameters.AddWithValue("move_permit_epoch", transition.MovePermitEpoch);
@@ -565,6 +580,18 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
                 ? FormatPermitProof(permitProof)
                 : DBNull.Value,
         });
+        sql.Parameters.Add(new NpgsqlParameter("execution_now", NpgsqlDbType.TimestampTz)
+        { Value = snapshot.Execution is { } timing ? timing.NowUtc.UtcDateTime : DBNull.Value });
+        sql.Parameters.Add(new NpgsqlParameter("execution_due", NpgsqlDbType.TimestampTz)
+        { Value = executionDecision is { } planned ? planned.DueAtUtc.UtcDateTime : DBNull.Value });
+        sql.Parameters.Add(new NpgsqlParameter("execution_cutoff", NpgsqlDbType.TimestampTz)
+        { Value = snapshot.Execution is { } cutoff ? cutoff.CutoffUtc.UtcDateTime : DBNull.Value });
+        sql.Parameters.Add(new NpgsqlParameter("execution_closed_at", NpgsqlDbType.TimestampTz)
+        { Value = executionDecision?.TimingReason is not null ? snapshot.Execution!.NowUtc.UtcDateTime : DBNull.Value });
+        sql.Parameters.Add(new NpgsqlParameter("execution_reason", NpgsqlDbType.Text)
+        { Value = executionDecision?.TimingReason ?? (object)DBNull.Value });
+        sql.Parameters.Add(new NpgsqlParameter("execution_code", NpgsqlDbType.Text)
+        { Value = executionDecision?.Code ?? (object)DBNull.Value });
         AddResultParameters(sql, transition.Result);
         await using var reader = await sql.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
@@ -578,6 +605,16 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
                 "The authoritative Work, dispatch, permit, history, or operator-command projection changed unexpectedly.");
         }
 
+        await reader.DisposeAsync().ConfigureAwait(false);
+        if (snapshot.Execution is not null && executionDecision?.TimingReason is { } refusalReason)
+            PostgreSqlDurableWorkStore.RecordExecutionRefusal("operator_release", refusalReason);
+        var resultingState = ParseWorkState(transition.State);
+        if (snapshot.Execution is not null && (transition.Terminal || resultingState == DurableWorkState.Suspended))
+            await PostgreSqlDurableFlowActivityProjector.ProjectAsync(transaction, command.ScopeId, command.WorkId,
+                resultingState, cancellationToken).ConfigureAwait(false);
+        if (snapshot.Execution is not null && transition.Terminal)
+            await PostgreSqlDurableScheduleWorkProjector.RequeuePendingOccurrenceAsync(transaction, command.ScopeId,
+                command.WorkId, cancellationToken).ConfigureAwait(false);
         return DurableOperationResult<DurableWorkOperatorResult>.Success(new DurableWorkOperatorResult(
             command.WorkId,
             DurableWorkOperatorOutcome.Applied,
@@ -619,29 +656,43 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
         await using var command = new NpgsqlCommand(sql, connection, transaction);
         command.Parameters.AddWithValue("scope_id", scopeId.Value);
         command.Parameters.AddWithValue("work_id", workId.Value);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        OperatorWorkSnapshot snapshot;
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
         {
-            return null;
+            if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                return null;
+            }
+
+            snapshot = new OperatorWorkSnapshot(
+                scopeId,
+                workId,
+                reader.GetString(0),
+                reader.GetString(1),
+                ParseProviderSafety(reader.GetString(2)),
+                reader.GetString(3),
+                reader.GetInt32(4),
+                reader.GetInt64(5),
+                reader.GetInt64(6),
+                reader.GetGuid(7),
+                reader.GetInt64(8),
+                reader.GetString(9),
+                reader.IsDBNull(10) ? null : reader.GetString(10),
+                reader.GetBoolean(11),
+                reader.GetBoolean(12),
+                reader.GetBoolean(13));
         }
 
-        return new OperatorWorkSnapshot(
-            scopeId,
-            workId,
-            reader.GetString(0),
-            reader.GetString(1),
-            ParseProviderSafety(reader.GetString(2)),
-            reader.GetString(3),
-            reader.GetInt32(4),
-            reader.GetInt64(5),
-            reader.GetInt64(6),
-            reader.GetGuid(7),
-            reader.GetInt64(8),
-            reader.GetString(9),
-            reader.IsDBNull(10) ? null : reader.GetString(10),
-            reader.GetBoolean(11),
-            reader.GetBoolean(12),
-            reader.GetBoolean(13));
+        var execution = await PostgreSqlDurableWorkStore.ReadExecutionRowLockedAsync(
+            connection, transaction, scopeId, workId, cancellationToken).ConfigureAwait(false);
+        if (execution is not null) snapshot = snapshot with
+        {
+            Execution = execution,
+            HasAmbiguousPermit = execution.HasUncertainEffect,
+            HasExactAmbiguousPermit = execution.InvocationAdmittedAtUtc is not null && execution.PermitStatus is ("granted" or "ambiguous"),
+        };
+
+        return snapshot;
     }
 
     private static async ValueTask<DurableEncodedPayload> ReadPayloadAsync(
@@ -953,7 +1004,12 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
         bool HasAmbiguousPermit,
         bool HasExactAmbiguousPermit)
     {
-        internal DurableClaimedWork ToProviderClaim(DurableEncodedPayload payload) => new(
+        internal PostgreSqlWorkExecutionRow? Execution { get; init; }
+
+        internal DurableClaimedWork ToProviderClaim(DurableEncodedPayload payload) => Execution is { } execution
+            ? DurableClaimedWork.CreateWithExecution(ScopeId, WorkId, ActivityId, WorkName, WorkVersion, payload,
+                ProviderSafety, AttemptNumber, LeaseGeneration, ScopeGeneration, RuntimeEpoch.ToString("D"), execution.ExecutionSnapshot)
+            : new(
             ScopeId,
             WorkId,
             ActivityId,

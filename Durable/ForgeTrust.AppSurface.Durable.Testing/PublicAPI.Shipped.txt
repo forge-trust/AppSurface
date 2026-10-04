@@ -1,3 +1,39 @@
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointController : System.IAsyncDisposable, System.IDisposable
+  constructor public ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointController(System.Nullable<System.TimeSpan> maximumWait = null, System.Int32 maximumObservations = 256, System.TimeProvider? timeProvider = null)
+  method public System.Boolean Cancel(ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointName name)
+  method public System.Boolean Release(ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointName name)
+  method public System.Threading.Tasks.ValueTask DisposeAsync()
+  method public System.Threading.Tasks.ValueTask ReachAsync(ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointName name, System.Int32 attemptNumber, System.Threading.CancellationToken cancellationToken = default)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointObservation> WaitForObservationAsync(ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointName name, System.Threading.CancellationToken cancellationToken = default)
+  method public System.Void Dispose()
+  method public System.Void PauseOnce(ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointName name)
+  method public System.Void ThrowOnce(ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointName name)
+  property public System.Collections.Generic.IReadOnlyList<ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointObservation> Observations { get: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointException : System.Exception, System.Runtime.Serialization.ISerializable
+  property public ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointName Name { get: public; }
+  property public System.Int32 AttemptNumber { get: public; }
+type public enum ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointName : System.Int32
+  enum-member AfterInvocationAdmission = 3
+  enum-member AfterPermitCommit = 1
+  enum-member AfterProviderCall = 5
+  enum-member BeforeCompletion = 6
+  enum-member BeforeInvocationAdmission = 2
+  enum-member BeforePermit = 0
+  enum-member BeforeProviderCall = 4
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointObservation : System.IEquatable<ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointObservation>
+  constructor public ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointObservation(System.Int64 Sequence, ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointName Name, System.Int32 AttemptNumber, System.DateTimeOffset ObservedAtUtc)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointObservation <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointObservation? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public System.Void Deconstruct(out System.Int64 Sequence, out ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointName Name, out System.Int32 AttemptNumber, out System.DateTimeOffset ObservedAtUtc)
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointObservation? left, ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointObservation? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointObservation? left, ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointObservation? right)
+  property public ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointName Name { get: public; init: public; }
+  property public System.DateTimeOffset ObservedAtUtc { get: public; init: public; }
+  property public System.Int32 AttemptNumber { get: public; init: public; }
+  property public System.Int64 Sequence { get: public; init: public; }
 type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder
   constructor public ForgeTrust.AppSurface.Durable.Testing.DurableHealthSnapshotBuilder()
   method public ForgeTrust.AppSurface.Durable.Provider.DurableRuntimeHealthSnapshot Build()
@@ -152,6 +188,22 @@ type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableWorkDefini
   property public System.String WorkVersion { get: public; init: public; }
   property public System.Type ResultPayloadType { get: public; init: public; }
   property public System.Type WorkPayloadType { get: public; init: public; }
+type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableWorkExecutionObservation : System.IEquatable<ForgeTrust.AppSurface.Durable.Testing.DurableWorkExecutionObservation>
+  constructor public ForgeTrust.AppSurface.Durable.Testing.DurableWorkExecutionObservation(ForgeTrust.AppSurface.Durable.DurableWorkExecutionPolicy Policy, ForgeTrust.AppSurface.Durable.DurableExecutionDeadline? Deadline, System.DateTimeOffset AcceptedAtUtc, System.Nullable<System.DateTimeOffset> NextEligibilityAtUtc, System.DateTimeOffset AdmissionCutoffUtc)
+  method public ForgeTrust.AppSurface.Durable.Testing.DurableWorkExecutionObservation <Clone>$()
+  method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.Testing.DurableWorkExecutionObservation? other)
+  method public System.Boolean Equals(System.Object? obj)
+  method public System.Int32 GetHashCode()
+  method public System.String ToString()
+  method public System.Void Deconstruct(out ForgeTrust.AppSurface.Durable.DurableWorkExecutionPolicy Policy, out ForgeTrust.AppSurface.Durable.DurableExecutionDeadline? Deadline, out System.DateTimeOffset AcceptedAtUtc, out System.Nullable<System.DateTimeOffset> NextEligibilityAtUtc, out System.DateTimeOffset AdmissionCutoffUtc)
+  method public static ForgeTrust.AppSurface.Durable.Testing.DurableWorkExecutionObservation Capture(ForgeTrust.AppSurface.Durable.DurableWorkExecutionSnapshot snapshot)
+  method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Testing.DurableWorkExecutionObservation? left, ForgeTrust.AppSurface.Durable.Testing.DurableWorkExecutionObservation? right)
+  method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Testing.DurableWorkExecutionObservation? left, ForgeTrust.AppSurface.Durable.Testing.DurableWorkExecutionObservation? right)
+  property public ForgeTrust.AppSurface.Durable.DurableExecutionDeadline? Deadline { get: public; init: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkExecutionPolicy Policy { get: public; init: public; }
+  property public System.DateTimeOffset AcceptedAtUtc { get: public; init: public; }
+  property public System.DateTimeOffset AdmissionCutoffUtc { get: public; init: public; }
+  property public System.Nullable<System.DateTimeOffset> NextEligibilityAtUtc { get: public; init: public; }
 type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableWorkRegistryObservation : System.IEquatable<ForgeTrust.AppSurface.Durable.Testing.DurableWorkRegistryObservation>
   constructor public ForgeTrust.AppSurface.Durable.Testing.DurableWorkRegistryObservation(System.String WorkName, System.String WorkVersion, ForgeTrust.AppSurface.Durable.DurableWorkRegistration Registration)
   method public ForgeTrust.AppSurface.Durable.Testing.DurableWorkRegistryObservation <Clone>$()

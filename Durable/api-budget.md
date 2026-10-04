@@ -157,3 +157,19 @@ internal. Existing registration constructors and request APIs remain supported; 
 provider execution boundary are unchanged. Flow uses compatible codecs from the same original source without relaxing
 its exact Work-registration reference requirement. The [API snapshot](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable/PublicAPI.Shipped.txt)
 records every member and generic constraint.
+
+## Deterministic execution-policy v1 (#765)
+
+The existing retry-policy and Work-request constructors, typed `Define`, `CreateRequest`, `DurableClaimedWork`, and
+`DurableWorkSnapshot` constructor signatures remain. The Durable package adds the closed immutable
+`DurableAttemptPlan`, `DurableExecutionDeadline`, `DurableWorkExecutionPolicy`, and `DurableWorkExecutionSnapshot`
+contracts; `DurableWork.DefineWithExecutionPolicy`, `DurableWorkRequest.CreateWithExecutionPolicy`, and
+`DurableWorkDefinition<TWork,TResult>.CreateRequestWithExecutionPolicy`; and read-only execution-policy/deadline
+projections. The Provider package adds named execution-aware claim and inspection factories while keeping old
+constructors and nullable legacy `Execution` projections. Core and Provider API snapshots remain the exhaustive member
+inventory.
+
+No PostgreSQL public type or Workers-envelope metadata is added for this feature. Storage schema `12` adds nullable
+execution fields without backfilling legacy rows. Existing requests keep v1 fingerprint bytes; opt-in requests use v2.
+The [canonical chooser/reference](execution-policies-v1.md) and [migration checklist](migrations/execution-policies-v1.md)
+cover defaults, validation, deadline semantics, safe effect truth, and rollout/rollback constraints.

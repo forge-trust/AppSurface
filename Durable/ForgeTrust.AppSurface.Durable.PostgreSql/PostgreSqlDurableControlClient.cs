@@ -43,6 +43,8 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
         {
             await SetScopeAsync(connection, transaction, request.ScopeId, cancellationToken)
                 .ConfigureAwait(false);
+            await LockScopeForInspectionAsync(connection, transaction, request.ScopeId, cancellationToken)
+                .ConfigureAwait(false);
             const string sql = """
                 SELECT work_id, activity_id, work_name, work_version, state, provider_safety, attempt_number, revision,
                        accepted_at, due_at, updated_at, terminal_code, cancellation_requested_at IS NOT NULL,
@@ -61,9 +63,10 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
                           runtime_epoch <> @runtime_epoch
                           AND state NOT IN ('succeeded', 'succeeded_after_cancel_requested', 'failed', 'canceled_before_effect')
                       )
-                  )
+                )
                 ORDER BY work_id
-                LIMIT @query_size;
+                LIMIT @query_size
+                FOR UPDATE;
                 """;
             await using var command = new NpgsqlCommand(sql, connection, transaction);
             command.Parameters.AddWithValue("scope_id", request.ScopeId.Value);
@@ -101,12 +104,43 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
                 }
             }
 
-            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             var hasMore = items.Count > request.PageSize;
             if (hasMore)
             {
                 items.RemoveAt(items.Count - 1);
             }
+
+            for (var index = 0; index < items.Count; index++)
+            {
+                var item = items[index];
+                var execution = await PostgreSqlDurableWorkStore.ReadExecutionRowLockedAsync(
+                    connection,
+                    transaction,
+                    request.ScopeId,
+                    item.WorkId,
+                    cancellationToken).ConfigureAwait(false);
+                if (execution is not null)
+                {
+                    items[index] = DurableWorkListItem.CreateWithExecution(
+                        item.WorkId,
+                        item.ActivityId,
+                        item.WorkName,
+                        item.WorkVersion,
+                        item.State,
+                        item.ProviderSafety,
+                        item.AttemptNumber,
+                        item.Revision,
+                        item.AcceptedAtUtc,
+                        item.DueAtUtc,
+                        item.UpdatedAtUtc,
+                        item.TerminalCode,
+                        item.CancellationRequested,
+                        item.RequiresRecoveryRelease,
+                        execution.ExecutionSnapshot);
+                }
+            }
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
             return DurableOperationResult<DurableWorkListResult>.Success(new DurableWorkListResult(
                 items,
@@ -131,13 +165,16 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
         {
             await SetScopeAsync(connection, transaction, request.ScopeId, cancellationToken)
                 .ConfigureAwait(false);
+            await LockScopeForInspectionAsync(connection, transaction, request.ScopeId, cancellationToken)
+                .ConfigureAwait(false);
             const string sql = """
                 SELECT activity_id, work_name, work_version, state, provider_safety, idempotency_key, attempt_number,
                        revision, accepted_at, due_at, updated_at, terminal_at, terminal_code, result_contract_id,
                        result_schema_version, result_classification, result_payload, result_sha256,
                        result_retention_policy_id
                 FROM appsurface_durable.work
-                WHERE scope_id = @scope_id AND work_id = @work_id;
+                WHERE scope_id = @scope_id AND work_id = @work_id
+                FOR UPDATE;
                 """;
             await using var command = new NpgsqlCommand(sql, connection, transaction);
             command.Parameters.AddWithValue("scope_id", request.ScopeId.Value);
@@ -175,6 +212,37 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
                 reader.IsDBNull(12) ? null : reader.GetString(12),
                 result);
             await reader.CloseAsync().ConfigureAwait(false);
+
+            // Inspection observes the policy in the same scoped transaction and runtime epoch. It takes no
+            // authoritative mutation and never interprets the projection as invocation permission.
+            var execution = await PostgreSqlDurableWorkStore.ReadExecutionRowLockedAsync(
+                connection,
+                transaction,
+                request.ScopeId,
+                request.WorkId,
+                cancellationToken).ConfigureAwait(false);
+            if (execution is not null)
+            {
+                snapshot = DurableWorkSnapshot.CreateWithExecution(
+                    snapshot.ScopeId,
+                    snapshot.WorkId,
+                    snapshot.ActivityId,
+                    snapshot.WorkName,
+                    snapshot.WorkVersion,
+                    snapshot.State,
+                    snapshot.ProviderSafety,
+                    snapshot.ProviderKey,
+                    snapshot.AttemptNumber,
+                    snapshot.Revision,
+                    snapshot.AcceptedAtUtc,
+                    snapshot.DueAtUtc,
+                    snapshot.UpdatedAtUtc,
+                    snapshot.TerminalAtUtc,
+                    snapshot.TerminalCode,
+                    snapshot.Result,
+                    execution.ExecutionSnapshot);
+            }
+
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return DurableOperationResult<DurableWorkSnapshot>.Success(snapshot);
         }
@@ -352,6 +420,21 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
             transaction);
         command.Parameters.AddWithValue("scope_id", scopeId.Value);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async ValueTask LockScopeForInspectionAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        DurableScopeId scopeId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(
+            "SELECT generation FROM appsurface_durable.scope WHERE scope_id = @scope_id FOR SHARE;",
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("scope_id", scopeId.Value);
+        // A missing Scope remains equivalent to an empty Work inventory, preserving the read API's legacy behavior.
+        _ = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static async ValueTask TryRollbackAsync(NpgsqlTransaction transaction)

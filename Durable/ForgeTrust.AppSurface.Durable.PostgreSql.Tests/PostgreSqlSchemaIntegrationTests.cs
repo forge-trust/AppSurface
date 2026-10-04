@@ -58,7 +58,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missing.Compatibility);
         Assert.Equal(DurableRuntimeSchemaCompatibility.Missing, missingEpoch.Status.Compatibility);
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], first.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], first.AppliedVersions);
         Assert.Empty(second.AppliedVersions);
         Assert.True(compatible.IsCompatible);
         Assert.NotEqual(Guid.Empty, compatible.StoreId);
@@ -350,9 +350,9 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         var retry = await retryManager.ApplyAsync();
         var compatible = await retryManager.GetStatusAsync();
-        Assert.Equal([3, 4, 5, 6, 7, 8, 9, 10, 11], retry.AppliedVersions);
+        Assert.Equal([3, 4, 5, 6, 7, 8, 9, 10, 11, 12], retry.AppliedVersions);
         Assert.True(compatible.IsCompatible);
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], compatible.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], compatible.AppliedVersions);
     }
 
     [Fact]
@@ -395,7 +395,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var retry = await new PostgreSqlDurableRuntimeSchemaManager(database.DataSource).ApplyAsync();
-        Assert.Equal([9, 10, 11], retry.AppliedVersions);
+        Assert.Equal([9, 10, 11, 12], retry.AppliedVersions);
     }
 
     [Fact]
@@ -434,7 +434,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         await writerTransaction.RollbackAsync();
         var applied = await manager.ApplyAsync();
-        Assert.Equal([10, 11], applied.AppliedVersions);
+        Assert.Equal([10, 11, 12], applied.AppliedVersions);
     }
 
     [Fact]
@@ -609,7 +609,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
                 database.DataSource,
                 "ALTER FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) OWNER TO CURRENT_USER;");
             var repaired = await manager.ApplyAsync();
-            Assert.Equal([10, 11], repaired.AppliedVersions);
+            Assert.Equal([10, 11, 12], repaired.AppliedVersions);
         }
         finally
         {
@@ -687,7 +687,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var applied = await new PostgreSqlDurableRuntimeSchemaManager(database.DataSource).ApplyAsync();
-        Assert.Equal([10, 11], applied.AppliedVersions);
+        Assert.Equal([10, 11, 12], applied.AppliedVersions);
         await using (var after = database.DataSource.CreateCommand(
             """
             SELECT owner_role.rolname = current_user,
@@ -1782,15 +1782,15 @@ public sealed class PostgreSqlSchemaIntegrationTests
                                         'lease_expires_at', 'runtime_epoch', 'revision', 'result_contract_id',
                                         'result_schema_version', 'result_codec_id', 'result_classification',
                                         'result_retention_policy_id', 'result_payload', 'result_sha256', 'terminal_code',
-                                        'trace_context_id'
+                                        'trace_context_id', 'execution_admission_closed_at', 'execution_admission_closed_reason', 'execution_deadline_reached_at'
                                     )
                                     OR column_value.relname = 'dispatch'
-                                    AND column_value.attname IN ('due_at', 'state', 'expected_revision', 'updated_at')
+                                    AND column_value.attname IN ('due_at', 'state', 'expected_revision', 'updated_at', 'execution_discovery_at')
                                     OR column_value.relname = 'work_operator_command'
                                     AND column_value.attname IN
                                         ('status', 'resulting_state', 'resulting_revision', 'resolution_kind', 'completed_at')
                                     OR column_value.relname = 'effect_permit'
-                                    AND column_value.attname IN ('status', 'observed_at', 'details', 'runtime_epoch')
+                                    AND column_value.attname IN ('status', 'observed_at', 'details', 'runtime_epoch', 'invocation_admitted_at')
                                     OR column_value.relname = 'flow_instance'
                                     AND column_value.attname IN
                                     (
@@ -3412,7 +3412,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
             database.DataSource,
             """
            UPDATE appsurface_durable.store_metadata
-           SET schema_version = 11,
+           SET schema_version = 12,
                minimum_reader_version = 1,
                maximum_reader_version = 1,
                minimum_writer_version = 1,
@@ -3433,7 +3433,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         await ExecuteNonQueryAsync(
             database.DataSource,
             """
-           DELETE FROM appsurface_durable.schema_migration WHERE version IN (3, 4, 5, 6, 7, 8, 9, 10, 11);
+           DELETE FROM appsurface_durable.schema_migration WHERE version IN (3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
            UPDATE appsurface_durable.store_metadata
            SET schema_version = 2,
                minimum_reader_version = 1,
@@ -3445,7 +3445,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         var upgrade = await manager.GetStatusAsync();
         Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, upgrade.Compatibility);
         Assert.Equal([1, 2], upgrade.AppliedVersions);
-        Assert.Equal([3, 4, 5, 6, 7, 8, 9, 10, 11], upgrade.PendingVersions);
+        Assert.Equal([3, 4, 5, 6, 7, 8, 9, 10, 11, 12], upgrade.PendingVersions);
         var upgradeValidation = await Assert.ThrowsAsync<DurableRuntimeSchemaException>(
             async () => await manager.ValidateAsync());
         Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, upgradeValidation.Status.Compatibility);
@@ -3466,12 +3466,12 @@ public sealed class PostgreSqlSchemaIntegrationTests
         var results = await Task.WhenAll(first.ApplyAsync().AsTask(), second.ApplyAsync().AsTask())
             .WaitAsync(TimeSpan.FromSeconds(30));
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], results.SelectMany(result => result.AppliedVersions).Order().ToArray());
-        Assert.Contains(results, result => result.AppliedVersions.SequenceEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]));
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], results.SelectMany(result => result.AppliedVersions).Order().ToArray());
+        Assert.Contains(results, result => result.AppliedVersions.SequenceEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]));
         Assert.Contains(results, result => result.AppliedVersions.Count == 0);
         await using var count = database.DataSource.CreateCommand(
             "SELECT count(*) FROM appsurface_durable.schema_migration;");
-        Assert.Equal(11, (long)(await count.ExecuteScalarAsync())!);
+        Assert.Equal(12, (long)(await count.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -3506,8 +3506,8 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         var status = await statusTask.WaitAsync(TimeSpan.FromSeconds(30));
         Assert.True(status.IsCompatible);
-        Assert.Equal(11, status.InstalledVersion);
-        Assert.Equal(11, status.RequiredVersion);
+        Assert.Equal(12, status.InstalledVersion);
+        Assert.Equal(12, status.RequiredVersion);
     }
 
     [Fact]
@@ -3533,7 +3533,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], applied.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], applied.AppliedVersions);
     }
 
     [Fact]
@@ -3565,7 +3565,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], applied.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], applied.AppliedVersions);
     }
 
     [Fact]
@@ -3595,7 +3595,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], applied.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], applied.AppliedVersions);
     }
 
     [Fact]
@@ -3647,7 +3647,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
 
         var status = await manager.GetStatusAsync();
         Assert.True(status.IsCompatible);
-        Assert.Equal(11, status.InstalledVersion);
+        Assert.Equal(12, status.InstalledVersion);
     }
 
     [Fact]
@@ -3712,7 +3712,7 @@ public sealed class PostgreSqlSchemaIntegrationTests
         }
 
         var applied = await manager.ApplyAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], applied.AppliedVersions);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], applied.AppliedVersions);
     }
 
     [Fact]

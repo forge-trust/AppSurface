@@ -594,6 +594,14 @@ REVOKE ALL ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, int
 SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) FROM %s', :'dispatcher_roles_sql') \gexec
 SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) FROM %s', :'runtime_roles_sql') \gexec
 SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) FROM %I', :'retention_operator_role') \gexec
+REVOKE ALL ON FUNCTION appsurface_durable.work_execution_now() FROM PUBLIC;
+REVOKE ALL ON FUNCTION appsurface_durable.attempt_plan_offsets_are_valid(bigint[]) FROM PUBLIC;
+SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.work_execution_now() FROM %s', :'dispatcher_roles_sql') \gexec
+SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.work_execution_now() FROM %s', :'runtime_roles_sql') \gexec
+SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.attempt_plan_offsets_are_valid(bigint[]) FROM %s', :'dispatcher_roles_sql') \gexec
+SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.attempt_plan_offsets_are_valid(bigint[]) FROM %s', :'runtime_roles_sql') \gexec
+SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.work_execution_now() FROM %I', :'retention_operator_role') \gexec
+SELECT format('REVOKE ALL ON FUNCTION appsurface_durable.attempt_plan_offsets_are_valid(bigint[]) FROM %I', :'retention_operator_role') \gexec
 SELECT format('REVOKE ALL ON TABLE appsurface_durable.dispatch FROM %s', :'dispatcher_roles_sql') \gexec
 
 -- Remove PostgreSQL's default PUBLIC capabilities throughout the reserved
@@ -1056,14 +1064,15 @@ SELECT NOT EXISTS
            'state', 'due_at', 'updated_at', 'terminal_at', 'cancellation_requested_at', 'attempt_number',
            'lease_generation', 'lease_owner', 'lease_started_at', 'lease_expires_at', 'runtime_epoch', 'revision',
            'result_contract_id', 'result_schema_version', 'result_codec_id', 'result_classification',
-           'result_retention_policy_id', 'result_payload', 'result_sha256', 'terminal_code', 'trace_context_id'
+           'result_retention_policy_id', 'result_payload', 'result_sha256', 'terminal_code',
+           'execution_admission_closed_at', 'execution_admission_closed_reason', 'execution_deadline_reached_at', 'trace_context_id'
          )
          OR column_value.relname = 'dispatch'
-         AND column_value.attname IN ('due_at', 'state', 'expected_revision', 'updated_at')
+         AND column_value.attname IN ('due_at', 'state', 'expected_revision', 'updated_at', 'execution_discovery_at')
          OR column_value.relname = 'work_operator_command'
          AND column_value.attname IN ('status', 'resulting_state', 'resulting_revision', 'resolution_kind', 'completed_at')
          OR column_value.relname = 'effect_permit'
-         AND column_value.attname IN ('status', 'observed_at', 'details', 'runtime_epoch')
+         AND column_value.attname IN ('status', 'observed_at', 'details', 'runtime_epoch', 'invocation_admitted_at')
          OR column_value.relname = 'flow_instance'
          AND column_value.attname IN
          (
@@ -1204,7 +1213,9 @@ SELECT NOT EXISTS
       AND routine.oid IN
       (
         'appsurface_durable.runtime_due_dispatch_health(integer)'::pg_catalog.regprocedure,
-        'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)'::pg_catalog.regprocedure
+        'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)'::pg_catalog.regprocedure,
+        'appsurface_durable.work_execution_now()'::pg_catalog.regprocedure,
+        'appsurface_durable.attempt_plan_offsets_are_valid(bigint[])'::pg_catalog.regprocedure
       )
       AND privilege.privilege_name = 'EXECUTE'
       OR service.role_type = 'retention'
@@ -1245,6 +1256,8 @@ SELECT format(
 SELECT format('GRANT USAGE ON SCHEMA appsurface_durable TO %s', :'runtime_roles_sql') \gexec
 SELECT format('GRANT EXECUTE ON FUNCTION appsurface_durable.runtime_due_dispatch_health(integer) TO %s', :'runtime_roles_sql') \gexec
 SELECT format('GRANT EXECUTE ON FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid) TO %s', :'runtime_roles_sql') \gexec
+SELECT format('GRANT EXECUTE ON FUNCTION appsurface_durable.work_execution_now() TO %s', :'runtime_roles_sql') \gexec
+SELECT format('GRANT EXECUTE ON FUNCTION appsurface_durable.attempt_plan_offsets_are_valid(bigint[]) TO %s', :'runtime_roles_sql') \gexec
 SELECT NOT EXISTS (
          SELECT 1 FROM role_pair p
          WHERE NOT has_function_privilege(p.runtime_oid, 'appsurface_durable.runtime_due_dispatch_health(integer)', 'EXECUTE')
@@ -1295,6 +1308,58 @@ SELECT NOT EXISTS (
   \echo 'prune_runtime_heartbeats(interval, integer, text, uuid) must be executable by every manifest runtime and no dispatcher, retention operator, PUBLIC, or other principal.'
   SELECT 1 / 0;
 \endif
+SELECT NOT EXISTS
+       (
+           SELECT 1
+           FROM role_pair p
+           WHERE NOT has_function_privilege(p.runtime_oid, 'appsurface_durable.work_execution_now()', 'EXECUTE')
+              OR has_function_privilege(p.dispatcher_oid, 'appsurface_durable.work_execution_now()', 'EXECUTE')
+              OR has_function_privilege(p.dispatcher_oid, 'appsurface_durable.work_execution_now()', 'EXECUTE WITH GRANT OPTION')
+              OR has_function_privilege(p.runtime_oid, 'appsurface_durable.work_execution_now()', 'EXECUTE WITH GRANT OPTION')
+       )
+       AND NOT has_function_privilege('public', 'appsurface_durable.work_execution_now()', 'EXECUTE')
+       AND NOT has_function_privilege(:'retention_operator_role', 'appsurface_durable.work_execution_now()', 'EXECUTE')
+       AND NOT EXISTS
+       (
+           SELECT 1
+           FROM pg_catalog.pg_proc AS routine
+           CROSS JOIN LATERAL pg_catalog.aclexplode(routine.proacl) AS privilege
+           WHERE routine.oid = 'appsurface_durable.work_execution_now()'::pg_catalog.regprocedure
+             AND privilege.privilege_type = 'EXECUTE'
+             AND privilege.grantee <> routine.proowner
+             AND privilege.grantee NOT IN
+                 (SELECT runtime_oid FROM role_pair)
+       ) AS work_execution_now_acl_is_exact \gset
+\if :work_execution_now_acl_is_exact
+\else
+  \echo 'work_execution_now() must be executable only by manifest runtimes and no dispatcher, retention operator, PUBLIC, or other principal.'
+  SELECT 1 / 0;
+\endif
+SELECT NOT EXISTS
+       (
+           SELECT 1
+           FROM role_pair p
+           WHERE NOT has_function_privilege(p.runtime_oid, 'appsurface_durable.attempt_plan_offsets_are_valid(bigint[])', 'EXECUTE')
+              OR has_function_privilege(p.runtime_oid, 'appsurface_durable.attempt_plan_offsets_are_valid(bigint[])', 'EXECUTE WITH GRANT OPTION')
+              OR has_function_privilege(p.dispatcher_oid, 'appsurface_durable.attempt_plan_offsets_are_valid(bigint[])', 'EXECUTE')
+       )
+       AND NOT has_function_privilege('public', 'appsurface_durable.attempt_plan_offsets_are_valid(bigint[])', 'EXECUTE')
+       AND NOT has_function_privilege(:'retention_operator_role', 'appsurface_durable.attempt_plan_offsets_are_valid(bigint[])', 'EXECUTE')
+       AND NOT EXISTS
+       (
+           SELECT 1
+           FROM pg_catalog.pg_proc AS routine
+           CROSS JOIN LATERAL pg_catalog.aclexplode(routine.proacl) AS privilege
+           WHERE routine.oid = 'appsurface_durable.attempt_plan_offsets_are_valid(bigint[])'::pg_catalog.regprocedure
+             AND privilege.privilege_type = 'EXECUTE'
+             AND privilege.grantee <> routine.proowner
+             AND privilege.grantee NOT IN (SELECT runtime_oid FROM role_pair)
+       ) AS attempt_plan_offsets_function_acl_is_exact \gset
+\if :attempt_plan_offsets_function_acl_is_exact
+\else
+  \echo 'attempt_plan_offsets_are_valid(bigint[]) must be executable by every manifest runtime and no dispatcher, retention operator, PUBLIC, or other principal.'
+  SELECT 1 / 0;
+\endif
 SELECT format(
     'GRANT SELECT ON appsurface_durable.store_metadata, appsurface_durable.schema_migration, appsurface_durable.runtime_heartbeat TO %s',
     :'runtime_roles_sql') \gexec
@@ -1308,10 +1373,10 @@ SELECT format(
     'GRANT UPDATE (generation, state, updated_at) ON appsurface_durable.scope TO %s',
     :'runtime_roles_sql') \gexec
 SELECT format(
-    'GRANT UPDATE (state, due_at, updated_at, terminal_at, cancellation_requested_at, attempt_number, lease_generation, lease_owner, lease_started_at, lease_expires_at, runtime_epoch, revision, result_contract_id, result_schema_version, result_codec_id, result_classification, result_retention_policy_id, result_payload, result_sha256, terminal_code, trace_context_id) ON appsurface_durable.work TO %s',
+    'GRANT UPDATE (state, due_at, updated_at, terminal_at, cancellation_requested_at, attempt_number, lease_generation, lease_owner, lease_started_at, lease_expires_at, runtime_epoch, revision, result_contract_id, result_schema_version, result_codec_id, result_classification, result_retention_policy_id, result_payload, result_sha256, terminal_code, execution_admission_closed_at, execution_admission_closed_reason, execution_deadline_reached_at, trace_context_id) ON appsurface_durable.work TO %s',
     :'runtime_roles_sql') \gexec
 SELECT format(
-    'GRANT UPDATE (due_at, state, expected_revision, updated_at) ON appsurface_durable.dispatch TO %s',
+    'GRANT UPDATE (due_at, state, expected_revision, updated_at, execution_discovery_at) ON appsurface_durable.dispatch TO %s',
     :'runtime_roles_sql') \gexec
 SELECT format(
     'GRANT UPDATE (state, current_node_id, context_contract_id, context_schema_version, context_codec_id, context_payload, context_sha256, context_classification, context_retention, resume_event_name, resume_event_is_timeout, resume_event_contract_id, resume_event_schema_version, resume_event_codec_id, resume_event_payload, resume_event_sha256, resume_event_classification, resume_event_retention, activity_callsite_id, activity_result_contract_id, activity_result_schema_version, activity_result_codec_id, activity_result_payload, activity_result_sha256, activity_result_classification, activity_result_retention, lease_generation, lease_owner, lease_started_at, lease_expires_at, updated_at, cancellation_requested_at, terminal_at, terminal_code, suspension_descriptor, suspended_from_state, suspension_descriptor_schema, suspension_descriptor_sha256, revision, scope_generation, runtime_epoch, trace_context_id) ON appsurface_durable.flow_instance TO %s',
@@ -1347,7 +1412,7 @@ SELECT format(
     'GRANT UPDATE (status, resulting_state, resulting_revision, resolution_kind, completed_at) ON appsurface_durable.work_operator_command TO %s',
     :'runtime_roles_sql') \gexec
 SELECT format(
-    'GRANT UPDATE (status, observed_at, details, runtime_epoch) ON appsurface_durable.effect_permit TO %s',
+    'GRANT UPDATE (status, observed_at, details, runtime_epoch, invocation_admitted_at) ON appsurface_durable.effect_permit TO %s',
     :'runtime_roles_sql') \gexec
 SELECT format(
     'GRANT SELECT, INSERT ON appsurface_durable.scope_history, appsurface_durable.work_history TO %s',
@@ -1509,11 +1574,14 @@ WITH allowed_runtime_update_column(relname, attname) AS (VALUES
   ('work','lease_expires_at'),('work','runtime_epoch'),('work','revision'),('work','result_contract_id'),
   ('work','result_schema_version'),('work','result_codec_id'),('work','result_classification'),
   ('work','result_retention_policy_id'),('work','result_payload'),('work','result_sha256'),('work','terminal_code'),
-  ('work','trace_context_id'),
+  ('work','execution_admission_closed_at'),('work','execution_admission_closed_reason'),
+  ('work','execution_deadline_reached_at'),('work','trace_context_id'),
   ('dispatch','due_at'),('dispatch','state'),('dispatch','expected_revision'),('dispatch','updated_at'),
+  ('dispatch','execution_discovery_at'),
   ('work_operator_command','status'),('work_operator_command','resulting_state'),('work_operator_command','resulting_revision'),
   ('work_operator_command','resolution_kind'),('work_operator_command','completed_at'),
   ('effect_permit','status'),('effect_permit','observed_at'),('effect_permit','details'),('effect_permit','runtime_epoch'),
+  ('effect_permit','invocation_admitted_at'),
   ('flow_instance','state'),('flow_instance','current_node_id'),('flow_instance','context_contract_id'),
   ('flow_instance','context_schema_version'),('flow_instance','context_codec_id'),('flow_instance','context_payload'),
   ('flow_instance','context_sha256'),('flow_instance','context_classification'),('flow_instance','context_retention'),
@@ -1610,7 +1678,9 @@ SELECT NOT EXISTS (
         OR s.dispatcher_profile='full' AND f.oid='appsurface_durable.claim_schedule_dispatch(text, interval)'::regprocedure)
       OR s.role_type='runtime' AND f.oid IN
         ('appsurface_durable.runtime_due_dispatch_health(integer)'::regprocedure,
-         'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)'::regprocedure)
+         'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)'::regprocedure,
+         'appsurface_durable.work_execution_now()'::regprocedure,
+         'appsurface_durable.attempt_plan_offsets_are_valid(bigint[])'::regprocedure)
       OR s.role_type='retention' AND f.oid IN
         ('appsurface_durable.create_flow_retention_manifest(text, text, text, text, char(64), text, char(64), integer, bigint, jsonb, text, text, char(64))'::regprocedure,
          'appsurface_durable.apply_flow_retention_lifecycle(text, text, text, text, text, char(64), text, text, bigint, text, text, char(64), text, char(64), integer, boolean)'::regprocedure)
@@ -1619,8 +1689,11 @@ SELECT NOT EXISTS (
 ) AND NOT EXISTS (
   SELECT 1 FROM role_pair p
   WHERE NOT has_function_privilege(p.dispatcher_oid,'appsurface_durable.discover_work_dispatch(text[], text[], integer)','EXECUTE')
+     OR has_function_privilege(p.dispatcher_oid,'appsurface_durable.work_execution_now()','EXECUTE')
      OR NOT has_function_privilege(p.runtime_oid,'appsurface_durable.runtime_due_dispatch_health(integer)','EXECUTE')
      OR NOT has_function_privilege(p.runtime_oid,'appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid)','EXECUTE')
+     OR NOT has_function_privilege(p.runtime_oid,'appsurface_durable.work_execution_now()','EXECUTE')
+     OR NOT has_function_privilege(p.runtime_oid,'appsurface_durable.attempt_plan_offsets_are_valid(bigint[])','EXECUTE')
 ) AS final_pair_function_privileges_are_exact \gset
 \if :final_pair_function_privileges_are_exact
 \else

@@ -28,9 +28,11 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
     private const int ContainerStartupProbeMaximumAttempts = 3;
     private static readonly TimeSpan ContainerStartupProbeRetryDelay = TimeSpan.FromMilliseconds(250);
     private static readonly SemaphoreSlim SharedContainerServerGate = new(1, 1);
+    private readonly SemaphoreSlim _executionClockGate = new(1, 1);
     private readonly List<NpgsqlDataSource> _additionalDataSources = [];
     private readonly string _databaseName;
     private readonly string _maintenanceConnectionString;
+    private string? _executionClockReaderRole;
     private static Task<PostgreSqlTestServer>? _sharedContainerServer;
 
     private PostgreSqlIntegrationTestDatabase(
@@ -48,6 +50,85 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
     internal NpgsqlDataSource DataSource { get; }
 
     internal string ConnectionString { get; }
+
+    /// <summary>
+    /// Sets this isolated database's authoritative execution time for integration tests.
+    /// </summary>
+    /// <remarks>
+    /// The first call installs a private clock row and replaces the migration's production clock function with a
+    /// fixture-only <c>SECURITY DEFINER</c> reader owned by a unique <c>NOLOGIN</c> role. That role can only read the
+    /// clock row; the fixture's administrative data source alone can change it. Production processes and other test
+    /// databases do not share this clock.
+    /// </remarks>
+    /// <param name="executionTimeUtc">The exact instant returned by the fixture clock.</param>
+    internal async ValueTask SetExecutionTimeAsync(DateTimeOffset executionTimeUtc)
+    {
+        var instant = executionTimeUtc.ToUniversalTime();
+        await _executionClockGate.WaitAsync();
+        try
+        {
+            await using var connection = await DataSource.OpenConnectionAsync();
+            if (_executionClockReaderRole is null)
+            {
+                var roleName = $"appsurface_clock_reader_{Guid.NewGuid():N}";
+                await using var transaction = await connection.BeginTransactionAsync();
+                await ExecuteAsync($"CREATE ROLE \"{roleName}\" NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;", transaction);
+                await ExecuteAsync("CREATE SCHEMA appsurface_test_clock;", transaction);
+                await ExecuteAsync($"GRANT USAGE, CREATE ON SCHEMA appsurface_durable TO {roleName};", transaction);
+                await ExecuteAsync($"GRANT {roleName} TO CURRENT_USER;", transaction);
+                await ExecuteAsync("REVOKE ALL ON SCHEMA appsurface_test_clock FROM PUBLIC;", transaction);
+                await ExecuteAsync(
+                    "CREATE TABLE appsurface_test_clock.execution_clock (singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton), clock_value timestamp with time zone NOT NULL);",
+                    transaction);
+                await using (var insert = new NpgsqlCommand(
+                    "INSERT INTO appsurface_test_clock.execution_clock (singleton, clock_value) VALUES (true, @clock_value);",
+                    connection,
+                    transaction))
+                {
+                    insert.Parameters.AddWithValue("clock_value", instant);
+                    await insert.ExecuteNonQueryAsync();
+                }
+
+                await ExecuteAsync($"GRANT USAGE ON SCHEMA appsurface_test_clock TO \"{roleName}\";", transaction);
+                await ExecuteAsync($"GRANT SELECT ON appsurface_test_clock.execution_clock TO \"{roleName}\";", transaction);
+                await ExecuteAsync(
+                    "CREATE OR REPLACE FUNCTION appsurface_durable.work_execution_now() " +
+                    "RETURNS timestamp with time zone LANGUAGE sql VOLATILE SECURITY DEFINER " +
+                    "SET search_path = pg_catalog AS " +
+                    "$$ SELECT clock_value FROM appsurface_test_clock.execution_clock WHERE singleton $$;",
+                    transaction);
+                await ExecuteAsync(
+                    $"ALTER FUNCTION appsurface_durable.work_execution_now() OWNER TO \"{roleName}\";",
+                    transaction);
+                await ExecuteAsync("REVOKE ALL ON FUNCTION appsurface_durable.work_execution_now() FROM PUBLIC;", transaction);
+                await ExecuteAsync($"REVOKE CREATE ON SCHEMA appsurface_durable FROM {roleName};", transaction);
+                await ExecuteAsync($"REVOKE {roleName} FROM CURRENT_USER;", transaction);
+                await transaction.CommitAsync();
+                _executionClockReaderRole = roleName;
+            }
+            else
+            {
+                await using var update = new NpgsqlCommand(
+                    "UPDATE appsurface_test_clock.execution_clock SET clock_value = @clock_value WHERE singleton;",
+                    connection);
+                update.Parameters.AddWithValue("clock_value", instant);
+                if (await update.ExecuteNonQueryAsync() != 1)
+                {
+                    throw new InvalidOperationException("The isolated PostgreSQL execution clock row is missing.");
+                }
+            }
+        }
+        finally
+        {
+            _executionClockGate.Release();
+        }
+
+        async ValueTask ExecuteAsync(string sql, NpgsqlTransaction transaction)
+        {
+            await using var command = new NpgsqlCommand(sql, transaction.Connection, transaction);
+            await command.ExecuteNonQueryAsync();
+        }
+    }
 
     /// <summary>Creates a separately owned data source for testing configuration that requires distinct instances.</summary>
     internal NpgsqlDataSource CreateDataSource()
@@ -355,6 +436,11 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
         await maintenance.OpenAsync();
         await using var drop = new NpgsqlCommand($"DROP DATABASE \"{_databaseName}\" WITH (FORCE);", maintenance);
         await drop.ExecuteNonQueryAsync();
+        if (_executionClockReaderRole is { } roleName)
+        {
+            await using var dropRole = new NpgsqlCommand($"DROP ROLE \"{roleName}\";", maintenance);
+            await dropRole.ExecuteNonQueryAsync();
+        }
     }
 
     private sealed record PostgreSqlTestServer(

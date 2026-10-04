@@ -15,6 +15,7 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 /// </remarks>
 public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchemaManager
 {
+    internal const int ExecutionPolicyCompatibilityFloorVersion = 12;
     internal const long MigrationAdvisoryLock = 0x415344555241424C;
 
     /// <summary>Bounds programmatic and generated-script waits for the migration session lock.</summary>
@@ -700,13 +701,20 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
                 """
                 INSERT INTO appsurface_durable.schema_migration (version, name, sha256) VALUES (@version, @name, @sha256);
                 UPDATE appsurface_durable.store_metadata
-                SET schema_version = @version, minimum_reader_version = 1, maximum_reader_version = @version,
-                    minimum_writer_version = 1, maximum_writer_version = @version, updated_at = clock_timestamp()
+                SET schema_version = @version,
+                    minimum_reader_version = GREATEST(minimum_reader_version, @minimum_compatibility_version),
+                    maximum_reader_version = @version,
+                    minimum_writer_version = GREATEST(minimum_writer_version, @minimum_compatibility_version),
+                    maximum_writer_version = @version,
+                    updated_at = clock_timestamp()
                 WHERE singleton;
                 """,
                 connection,
                 transaction);
             metadata.Parameters.AddWithValue("version", migration.Version);
+            metadata.Parameters.AddWithValue(
+                "minimum_compatibility_version",
+                MinimumCompatibilityVersionFor(migration.Version));
             metadata.Parameters.AddWithValue("name", migration.Name);
             metadata.Parameters.AddWithValue("sha256", migration.Sha256);
             await metadata.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -842,11 +850,20 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
             .Append("', '").Append(EscapeSqlLiteral(migration.Sha256)).AppendLine("');");
         builder.Append("UPDATE appsurface_durable.store_metadata SET schema_version = ")
             .Append(migration.Version.ToString(CultureInfo.InvariantCulture))
-            .Append(", minimum_reader_version = 1, maximum_reader_version = ").Append(migration.Version.ToString(CultureInfo.InvariantCulture))
-            .Append(", minimum_writer_version = 1, maximum_writer_version = ").Append(migration.Version.ToString(CultureInfo.InvariantCulture))
+            .Append(", minimum_reader_version = GREATEST(minimum_reader_version, ")
+            .Append(MinimumCompatibilityVersionFor(migration.Version).ToString(CultureInfo.InvariantCulture))
+            .Append("), maximum_reader_version = ").Append(migration.Version.ToString(CultureInfo.InvariantCulture))
+            .Append(", minimum_writer_version = GREATEST(minimum_writer_version, ")
+            .Append(MinimumCompatibilityVersionFor(migration.Version).ToString(CultureInfo.InvariantCulture))
+            .Append("), maximum_writer_version = ").Append(migration.Version.ToString(CultureInfo.InvariantCulture))
             .AppendLine(", updated_at = clock_timestamp() WHERE singleton;")
             .AppendLine("COMMIT;");
     }
+
+    private static int MinimumCompatibilityVersionFor(int migrationVersion) =>
+        migrationVersion >= ExecutionPolicyCompatibilityFloorVersion
+            ? ExecutionPolicyCompatibilityFloorVersion
+            : 1;
 
     private static string EscapeSqlLiteral(string value) => value.Replace("'", "''", StringComparison.Ordinal);
 

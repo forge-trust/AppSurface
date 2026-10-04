@@ -118,6 +118,28 @@ eligible_at = PostgreSQL clock_timestamp() + delay
 Calculation is cap-first and overflow safe, with no jitter or provider Retry-After. Unknown algorithms and invalid
 bounds fail before mutation.
 
+## Execution-policy v1
+
+The optional [execution-policy reference](execution-policies-v1.md) defines the additive deadline-only and fixed-plan
+contracts. Existing requests retain fingerprint schema v1 and completion-relative `exponential-v1` behavior. Opt-in
+requests use semantic fingerprint v2 and persist their immutable policy with acceptance. For a plan, offset `i` is
+anchored to accepted-at `A`, attempt number `i + 1` becomes eligible at `A + O[i]`, and the exclusive admission cutoff
+is the minimum of `A + MaximumCircuitDuration`, `A + MaximumElapsedTime`, and the optional deadline. For deadline-only
+policy it is the minimum of the elapsed horizon and absolute deadline; retry spacing remains legacy backoff.
+
+The PostgreSQL timestamp is sampled under the authoritative lock. Equality with a cutoff is closed. A request's
+acceptance instant is its insert time, so caller-owned transaction delay consumes the window. Overdue offsets are not
+rebased or automatically consumed: every next attempt still requires the existing safe sequential retry transition.
+The execution snapshot is descriptive; claim, effect permit, invocation admission, retry release, and completion must
+revalidate current fences and timing in the store. Deadline expiry never proves that an external effect did not occur.
+The store preserves two separate internal timing witnesses. `execution_admission_closed_at` and
+`execution_admission_closed_reason` retain the first observed admission closure and are never overwritten by a later
+cutoff. `execution_deadline_reached_at` independently retains the first authoritative observation at or after the
+absolute deadline, even when circuit or slot exhaustion closed admission earlier. These storage facts add no public API
+member.
+See the [outcome and diagnostics rules](../troubleshooting/durable-diagnostics.md#execution-deadline-and-attempt-plan-diagnostics)
+and [schema-12 migration procedure](migrations/execution-policies-v1.md).
+
 ## Caller-owned transaction contract
 
 Local preflight failures before SQL preserve transaction usability: inactive/wrong target, empty epoch/StoreId,

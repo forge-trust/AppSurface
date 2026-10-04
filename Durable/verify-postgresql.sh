@@ -16,6 +16,8 @@ test_log="$work_dir/test-output.log"
 recovery_list_log="$work_dir/recovery-list-tests.log"
 recovery_test_log="$work_dir/recovery-test-output.log"
 ci_all_list_log="$work_dir/ci-all-list-tests.log"
+ci_execution_fixture_list_log="$work_dir/ci-execution-fixture-list-tests.log"
+ci_execution_fixture_test_log="$work_dir/ci-execution-fixture-test-output.log"
 ci_remaining_list_log="$work_dir/ci-remaining-list-tests.log"
 ci_remaining_test_log="$work_dir/ci-remaining-test-output.log"
 recovery_evidence_file=""
@@ -70,6 +72,22 @@ count_exact_discovered_test() {
       sub(/^[[:space:]]+/, "", line)
       sub(/[[:space:]]+$/, "", line)
       if (line == expected) {
+        count++
+      }
+    }
+    END { print count + 0 }
+  ' "$log_file"
+}
+
+count_discovered_test_class() {
+  local log_file="$1"
+  local expected_class="$2"
+  awk -v expected="$expected_class" '
+    {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      if (index(line, expected ".") == 1) {
         count++
       }
     }
@@ -376,7 +394,7 @@ case "$mode" in
     v2_harness_path="$v2_harness_bin/Release/net10.0/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost.dll"
     [[ -f "$v2_harness_path" ]] \
       || fail "the exact $v2_package_version compatibility harness output is missing"
-    v2_release_test="ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlMixedVersionCompatibilityTests.ExactPreviousPackage_OperatesAfterSchema11AndSupportsBinaryRollback"
+    v2_release_test="ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlMixedVersionCompatibilityTests.ExactPreviousPackage_OperatesOnSchema11ThenRefusesSchema12"
     dotnet test "$project" --list-tests \
       -m:1 -p:UseSharedCompilation=false \
       >"$ci_all_list_log" \
@@ -387,7 +405,46 @@ case "$mode" in
     ci_release_discovered_test_count="$(count_exact_discovered_test "$ci_all_list_log" "$v2_release_test")"
     [[ "$ci_release_discovered_test_count" == "1" ]] \
       || fail "the exact $v2_package_version release proof was discovered $ci_release_discovered_test_count times"
+    ci_execution_fixture_test_classes=(
+      "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlDurableWorkExecutionProcessTests"
+      "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlDurableExecutionOperatorTests"
+      "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlExecutionOperatorDecisionTests"
+    )
+    ci_execution_fixture_test_filter=""
+    ci_execution_fixture_expected_test_count=0
+    ci_process_proof_discovered_test_count=0
+    for ci_execution_fixture_test_class in "${ci_execution_fixture_test_classes[@]}"; do
+      if [[ -n "$ci_execution_fixture_test_filter" ]]; then
+        ci_execution_fixture_test_filter+="|"
+      fi
+      ci_execution_fixture_test_filter+="FullyQualifiedName~$ci_execution_fixture_test_class"
+      ci_class_all_discovered_test_count="$(count_discovered_test_class "$ci_all_list_log" "$ci_execution_fixture_test_class")"
+      [[ "$ci_class_all_discovered_test_count" -gt 0 ]] \
+        || fail "required execution fixture class $ci_execution_fixture_test_class was not discovered"
+      ci_execution_fixture_expected_test_count=$((ci_execution_fixture_expected_test_count + ci_class_all_discovered_test_count))
+      if [[ "$ci_execution_fixture_test_class" == "ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlDurableWorkExecutionProcessTests" ]]; then
+        ci_process_proof_discovered_test_count="$ci_class_all_discovered_test_count"
+      fi
+    done
+    [[ "$ci_process_proof_discovered_test_count" == "48" ]] \
+      || fail "execution-checkpoint process proof discovery selected $ci_process_proof_discovered_test_count tests; expected exactly 48"
+    dotnet test "$project" --list-tests \
+      -m:1 -p:UseSharedCompilation=false \
+      --filter "$ci_execution_fixture_test_filter" >"$ci_execution_fixture_list_log" \
+      || fail "execution fixture test discovery failed"
+    ci_execution_fixture_discovered_test_count="$(count_discovered_tests "$ci_execution_fixture_list_log")"
+    [[ "$ci_execution_fixture_discovered_test_count" == "$ci_execution_fixture_expected_test_count" ]] \
+      || fail "execution fixture selection included $ci_execution_fixture_discovered_test_count tests; expected exactly $ci_execution_fixture_expected_test_count"
+    for ci_execution_fixture_test_class in "${ci_execution_fixture_test_classes[@]}"; do
+      ci_class_all_discovered_test_count="$(count_discovered_test_class "$ci_all_list_log" "$ci_execution_fixture_test_class")"
+      ci_class_selected_test_count="$(count_discovered_test_class "$ci_execution_fixture_list_log" "$ci_execution_fixture_test_class")"
+      [[ "$ci_class_selected_test_count" == "$ci_class_all_discovered_test_count" ]] \
+        || fail "strict execution fixture selection changed the discovered count for $ci_execution_fixture_test_class"
+    done
     ci_remaining_test_filter="FullyQualifiedName!=$v2_release_test"
+    for ci_execution_fixture_test_class in "${ci_execution_fixture_test_classes[@]}"; do
+      ci_remaining_test_filter+="&FullyQualifiedName!~$ci_execution_fixture_test_class"
+    done
     dotnet test "$project" --list-tests \
       -m:1 -p:UseSharedCompilation=false \
       --filter "$ci_remaining_test_filter" >"$ci_remaining_list_log" \
@@ -396,8 +453,15 @@ case "$mode" in
     ci_remaining_release_count="$(count_exact_discovered_test "$ci_remaining_list_log" "$v2_release_test")"
     [[ "$ci_remaining_release_count" == "0" ]] \
       || fail "the exact $v2_package_version release proof was included in the remaining CI suite"
-    [[ "$((ci_remaining_expected_test_count + ci_release_discovered_test_count))" == "$ci_all_expected_test_count" ]] \
-      || fail "CI test discovery was not partitioned exactly between the release proof and remaining suite"
+    ci_remaining_execution_fixture_count=0
+    for ci_execution_fixture_test_class in "${ci_execution_fixture_test_classes[@]}"; do
+      ci_class_remaining_test_count="$(count_discovered_test_class "$ci_remaining_list_log" "$ci_execution_fixture_test_class")"
+      [[ "$ci_class_remaining_test_count" == "0" ]] \
+        || fail "execution fixture class $ci_execution_fixture_test_class leaked into the remaining CI suite"
+      ci_remaining_execution_fixture_count=$((ci_remaining_execution_fixture_count + ci_class_remaining_test_count))
+    done
+    [[ "$((ci_remaining_expected_test_count + ci_release_discovered_test_count + ci_execution_fixture_discovered_test_count))" == "$ci_all_expected_test_count" ]] \
+      || fail "CI test discovery was not partitioned exactly between the release proof, execution fixture cohort, and remaining suite"
     APPSURFACE_REQUIRE_PREVIOUS_PACKAGE_RELEASE_PROOF=true \
     APPSURFACE_DURABLE_V020_HARNESS_PATH="$v2_harness_path" \
     APPSURFACE_DURABLE_V020_PACKAGE_PATH="$v2_package_path" \
@@ -410,6 +474,15 @@ case "$mode" in
       "$work_dir/v2-release-test-output.log" \
       1 \
       "the exact $v2_package_version release proof"
+    dotnet test "$project" \
+      -m:1 -p:UseSharedCompilation=false \
+      --filter "$ci_execution_fixture_test_filter" \
+      --logger 'console;verbosity=normal' | tee "$ci_execution_fixture_test_log" \
+      || fail "the opted-in execution fixture cohort failed"
+    verify_test_summary \
+      "$ci_execution_fixture_test_log" \
+      "$ci_execution_fixture_discovered_test_count" \
+      "the opted-in execution fixture cohort"
     dotnet test "$project" \
       -m:1 -p:UseSharedCompilation=false \
       --filter "$ci_remaining_test_filter" \

@@ -197,6 +197,8 @@ public sealed record DurableWorkRequest
         Payload = payload ?? throw new ArgumentNullException(nameof(payload));
         ProviderSafety = providerSafety;
         RetryPolicy = retryPolicy ?? DurableWorkRetryPolicy.Default;
+        ExecutionPolicy = DurableWorkExecutionPolicy.FromRetryPolicy(RetryPolicy);
+        ExecutionDeadline = null;
         DueAtUtc = dueAtUtc?.ToUniversalTime();
         Fingerprint = DurableCommandFingerprints.Create(
             "appsurface.durable.work.enqueue.v1",
@@ -208,6 +210,86 @@ public sealed record DurableWorkRequest
             RetryPolicy,
             DueAtUtc);
     }
+
+    private DurableWorkRequest(DurableScopeId scopeId, DurableCommandId commandId, string idempotencyKey,
+        string workName, string workVersion, DurableEncodedPayload payload, DurableProviderSafety providerSafety,
+        DurableWorkExecutionPolicy executionPolicy, DurableExecutionDeadline? executionDeadline, DateTimeOffset? dueAtUtc)
+    {
+        DurableIdentifier.Require(scopeId.Value, nameof(scopeId), 200);
+        DurableIdentifier.Require(commandId.Value, nameof(commandId), 200);
+        if (!Enum.IsDefined(providerSafety))
+        {
+            throw new ArgumentOutOfRangeException(nameof(providerSafety));
+        }
+
+        ArgumentNullException.ThrowIfNull(executionPolicy);
+        var optedIntoExecutionTiming = executionPolicy.AttemptPlan is not null || executionDeadline is not null;
+        if (optedIntoExecutionTiming)
+        {
+            DurableWorkExecutionPolicy.ValidateOptInRetryPrecision(executionPolicy.RetryPolicy);
+        }
+
+        if (executionPolicy.AttemptPlan is not null && dueAtUtc is not null)
+        {
+            throw new ArgumentException("A planned request is anchored to acceptance and cannot specify dueAtUtc.", nameof(dueAtUtc));
+        }
+
+        ScopeId = scopeId;
+        CommandId = commandId;
+        IdempotencyKey = DurableIdentifier.Require(idempotencyKey, nameof(idempotencyKey), 200);
+        WorkName = DurableIdentifier.Require(workName, nameof(workName), 200);
+        WorkVersion = DurableIdentifier.Require(workVersion, nameof(workVersion), 100);
+        Payload = payload ?? throw new ArgumentNullException(nameof(payload));
+        ProviderSafety = providerSafety;
+        ExecutionPolicy = executionPolicy;
+        RetryPolicy = executionPolicy.RetryPolicy;
+        ExecutionDeadline = executionDeadline;
+        DueAtUtc = dueAtUtc is { } due
+            ? optedIntoExecutionTiming ? DurableAttemptPlan.NormalizeUtc(due, nameof(dueAtUtc)) : due.ToUniversalTime()
+            : null;
+        Fingerprint = optedIntoExecutionTiming
+            ? DurableCommandFingerprints.Create(
+                "appsurface.durable.work.enqueue.v2",
+                ScopeId.Value,
+                WorkName,
+                WorkVersion,
+                Payload,
+                ProviderSafety,
+                ExecutionPolicy,
+                ExecutionDeadline,
+                DueAtUtc)
+            : DurableCommandFingerprints.Create(
+                "appsurface.durable.work.enqueue.v1",
+                ScopeId.Value,
+                WorkName,
+                WorkVersion,
+                Payload,
+                ProviderSafety,
+                RetryPolicy,
+                DueAtUtc);
+    }
+
+    /// <summary>Creates a new request using a validated execution policy and optional absolute deadline.</summary>
+    /// <param name="scopeId">Trusted owning scope.</param>
+    /// <param name="commandId">Caller command identity.</param>
+    /// <param name="idempotencyKey">Explicit duplicate-submission key.</param>
+    /// <param name="workName">Stable Work name.</param>
+    /// <param name="workVersion">Immutable Work contract version.</param>
+    /// <param name="payload">Encoded Work input.</param>
+    /// <param name="providerSafety">Declared provider-effect ambiguity policy.</param>
+    /// <param name="executionPolicy">Required retry/lease policy and optional fixed attempt plan.</param>
+    /// <param name="executionDeadline">Optional exclusive absolute execution deadline.</param>
+    /// <param name="dueAtUtc">Optional initial due time; supported for deadline-only policies.</param>
+    /// <returns>An immutable request with v1 fingerprint semantics when no plan or deadline is selected, otherwise v2 semantics.</returns>
+    /// <exception cref="ArgumentException">An identity is invalid or a planned request specifies an initial due time.</exception>
+    /// <exception cref="ArgumentNullException">A required value is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">An opt-in time lacks microsecond precision.</exception>
+    public static DurableWorkRequest CreateWithExecutionPolicy(DurableScopeId scopeId, DurableCommandId commandId,
+        string idempotencyKey, string workName, string workVersion, DurableEncodedPayload payload,
+        DurableProviderSafety providerSafety, DurableWorkExecutionPolicy executionPolicy,
+        DurableExecutionDeadline? executionDeadline = null, DateTimeOffset? dueAtUtc = null) =>
+        new(scopeId, commandId, idempotencyKey, workName, workVersion, payload, providerSafety,
+            executionPolicy, executionDeadline, dueAtUtc);
 
     /// <summary>Gets the trusted owning scope.</summary>
     public DurableScopeId ScopeId { get; }
@@ -232,6 +314,12 @@ public sealed record DurableWorkRequest
 
     /// <summary>Gets the retry and lease policy snapshot.</summary>
     public DurableWorkRetryPolicy RetryPolicy { get; }
+
+    /// <summary>Gets the immutable execution policy snapshot, including any fixed attempt plan.</summary>
+    public DurableWorkExecutionPolicy ExecutionPolicy { get; }
+
+    /// <summary>Gets the optional immutable absolute execution deadline.</summary>
+    public DurableExecutionDeadline? ExecutionDeadline { get; }
 
     /// <summary>Gets the first UTC eligibility time, or immediate eligibility when absent.</summary>
     public DateTimeOffset? DueAtUtc { get; }
