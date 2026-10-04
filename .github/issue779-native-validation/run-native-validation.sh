@@ -33,7 +33,7 @@ git rev-parse HEAD origin/main > "$task_receipts/revisions.txt"
 git status --porcelain=v1 > "$task_receipts/status-before.txt"
 [[ ! -s "$task_receipts/status-before.txt" ]] || { printf 'Snapshot checkout must be clean.\n' >&2; exit 2; }
 # Compiler process isolation preserves source, selection, thresholds and gate policy.
-export UseSharedCompilation=false MSBUILDDISABLENODEREUSE=1
+export UseSharedCompilation=false MSBUILDDISABLENODEREUSE=1 PYTHONDONTWRITEBYTECODE=1
 python3 -B tests/evidencehost-consumer/test_linux_launcher.py 2>&1 | tee "$task_receipts/launcher.log"
 python3 -B tests/evidencehost-consumer/test_runtime_proof.py 2>&1 | tee "$task_receipts/proof-driver.log"
 python3 -B tests/evidencehost-consumer/test_execution_broker_fixture.py 2>&1 | tee "$task_receipts/broker-descriptor.log"
@@ -82,12 +82,12 @@ done
 task_run_broker() {
   local task_timeout="$1"
   shift
-  timeout --signal=TERM --kill-after=30s "$task_timeout" sudo -n /usr/bin/env "${task_marker_args[@]}" python3 -B tests/evidencehost-consumer/test_execution_broker.py \
+  timeout --signal=TERM --kill-after=30s "$task_timeout" sudo -n /usr/bin/env PYTHONDONTWRITEBYTECODE=1 "${task_marker_args[@]}" python3 -B tests/evidencehost-consumer/test_execution_broker.py \
     --worker-uid "$task_uid" --worker-gid "$task_gid" \
     --subject-uid "$task_subject" --subject-gid "$task_subject" \
     "${task_group_args[@]}" --dotnet "$task_dotnet" \
     --reportgenerator-package "$task_cache/reportgenerator/5.5.10" \
-    -- /usr/bin/env "PATH=$PATH" "NUGET_PACKAGES=$task_cache" "PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}" UseSharedCompilation=false MSBUILDDISABLENODEREUSE=1 "$@"
+    -- /usr/bin/env "PATH=$PATH" "NUGET_PACKAGES=$task_cache" "PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}" UseSharedCompilation=false MSBUILDDISABLENODEREUSE=1 PYTHONDONTWRITEBYTECODE=1 "$@"
 }
 # Diagnose real Linux consumer branches before the longer solution gate.
 # The whole gate uses a separate fresh broker and unchanged test selection.
