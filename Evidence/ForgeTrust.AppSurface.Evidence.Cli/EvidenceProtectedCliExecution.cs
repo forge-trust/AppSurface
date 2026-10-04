@@ -121,9 +121,10 @@ internal static class EvidenceProtectedCliExecution
                 throw new EvidenceAdmissionException("ASEVD409", "Fresh output allocation or activation failed.");
             }
 
+            IReadOnlyList<EvidenceResourceResult> resourceResults = Array.Empty<EvidenceResourceResult>();
             if (application is not null)
-                await RunApplicationStagesAsync(worker, admission, plan, execution, budget,
-                    application, callerCancellation).ConfigureAwait(false);
+                resourceResults = await RunApplicationStagesAsync(worker, admission, plan, execution, budget,
+                    application, clock, callerCancellation).ConfigureAwait(false);
 
             var results = new List<EvidenceProducerResult>();
             var writers = new List<EvidenceArtifactWriter>();
@@ -184,7 +185,8 @@ internal static class EvidenceProtectedCliExecution
                 foreach (var writer in writers)
                     artifactsVerified &= await writer.VerifyWrittenArtifactsAsync(token).ConfigureAwait(false);
                 admission.Complete(ownedWorkStopped, artifactsVerified, cleanup);
-                var manifest = EvidenceManifestBuilder.Build(plan, results, admission, metrics: new EvidenceExecutionMetrics(
+                var manifest = EvidenceManifestBuilder.Build(plan, results, admission, resourceResults, metrics: new EvidenceExecutionMetrics(
+                    ResourceReadinessMilliseconds: resourceResults.Sum(static result => result.ElapsedMilliseconds),
                     CleanupCompleted: cleanup,
                     TerminalFailureCode: execution.TerminalCode != EvidenceWorkerTerminalCode.None
                         ? execution.TerminalCode.ToString()
@@ -248,10 +250,21 @@ internal static class EvidenceProtectedCliExecution
         return Array.AsReadOnly(stages.ToArray());
     }
 
-    private static async Task RunApplicationStagesAsync(EvidenceLinuxWorkerSupervisor worker,
+    /// <summary>Collects copied readiness metadata only after authenticated application and resource stages pass.</summary>
+    /// <param name="worker">Actual authenticated supervisor that owns the pending application lease.</param>
+    /// <param name="admission">Active admission for the exact captured plan.</param>
+    /// <param name="plan">Resolved resource declarations, in their serial budget order.</param>
+    /// <param name="execution">Existing stage and owned-work lifecycle.</param>
+    /// <param name="budget">Declared startup, readiness, producer and cleanup reserves.</param>
+    /// <param name="application">Compile-owned application resolved before admission.</param>
+    /// <param name="clock">The lifecycle's monotonic clock used to measure each readiness wait.</param>
+    /// <param name="callerCancellation">Original caller cancellation, linked by each tracked stage.</param>
+    /// <returns>A defensive read-only list; empty when the resolved application declares no resources.</returns>
+    /// <remarks>Failed stages return no Ready result. Metadata never substitutes for root ACK validation or active admission.</remarks>
+    private static async Task<IReadOnlyList<EvidenceResourceResult>> RunApplicationStagesAsync(EvidenceLinuxWorkerSupervisor worker,
         EvidenceAdmissionResult admission, EvidencePlan plan, EvidenceWorkerExecution execution,
         EvidenceRunTimeBudget budget, EvidenceClosedApplicationDefinition application,
-        CancellationToken callerCancellation)
+        TimeProvider clock, CancellationToken callerCancellation)
     {
         if (!budget.TryBeginNextStage(callerCancellation, out var stage) || stage!.Stage != EvidenceRunStage.Start)
             throw new EvidenceAdmissionException("ASEVD421", "The protected application startup reserve is exhausted.");
@@ -269,10 +282,12 @@ internal static class EvidenceProtectedCliExecution
         if (started.Outcome != EvidenceWorkerStageOutcome.Passed || started.Value is null)
             throw new EvidenceAdmissionException("ASEVD410", "Protected application startup did not complete.");
 
+        IReadOnlyList<EvidenceResourceResult> results = Array.Empty<EvidenceResourceResult>();
         foreach (var resource in plan.Profile.Resources)
         {
             if (!budget.TryBeginNextStage(callerCancellation, out stage) || stage!.Stage != EvidenceRunStage.Resource)
                 throw new EvidenceAdmissionException("ASEVD421", "The protected resource readiness reserve is exhausted.");
+            var readinessStarted = clock.GetTimestamp();
             var ready = await execution.ExecuteAsync(EvidenceRunStage.Resource, stage.Duration, async token =>
             {
                 admission.ValidateActive(plan);
@@ -284,7 +299,39 @@ internal static class EvidenceProtectedCliExecution
             budget.CompleteCurrentStage();
             if (ready.Outcome != EvidenceWorkerStageOutcome.Passed || ready.Value is null)
                 throw new EvidenceAdmissionException("ASEVD410", "Protected resource readiness did not complete.");
+            admission.ValidateActive(plan);
+            results = AppendResourceReadinessResult(results, resource.Id, ready.Outcome, ready.Value, clock, readinessStarted);
         }
+        return results;
+    }
+
+    /// <summary>Copies completed resource metadata and appends one successful stage's measured readiness result.</summary>
+    /// <param name="completed">Previously completed results; the returned list never shares its mutable backing storage.</param>
+    /// <param name="resourceId">Exact resource identifier from the resolved plan.</param>
+    /// <param name="outcome">Actual tracked stage outcome; every non-Passed outcome rejects.</param>
+    /// <param name="receipt">Typed resource receipt returned by the supervisor; null or a different resource rejects.</param>
+    /// <param name="clock">The same monotonic clock as the lifecycle.</param>
+    /// <param name="startedTimestamp">Timestamp taken immediately before the tracked resource wait.</param>
+    /// <returns>A copied read-only list with one Ready result and nonnegative whole elapsed milliseconds.</returns>
+    /// <remarks>
+    /// This internal data projection grants no readiness authority. Production calls it only after the supervisor
+    /// validates the root ACK and admission is rechecked; constructing equivalent metadata cannot replace either step.
+    /// The measured interval excludes application startup and contributes to the manifest's cumulative readiness metric.
+    /// </remarks>
+    /// <exception cref="EvidenceAdmissionException">ASEVD410 when the stage has no matching successful receipt.</exception>
+    internal static IReadOnlyList<EvidenceResourceResult> AppendResourceReadinessResult(
+        IReadOnlyList<EvidenceResourceResult> completed, string resourceId, EvidenceWorkerStageOutcome outcome,
+        EvidenceLinuxApplicationResourceReceipt? receipt, TimeProvider clock, long startedTimestamp)
+    {
+        ArgumentNullException.ThrowIfNull(completed);
+        ArgumentNullException.ThrowIfNull(clock);
+        if (outcome != EvidenceWorkerStageOutcome.Passed || receipt is null
+            || !string.Equals(receipt.ResourceId, resourceId, StringComparison.Ordinal))
+            throw new EvidenceAdmissionException("ASEVD410", "Protected resource readiness did not complete.");
+        var elapsedMilliseconds = (long)Math.Max(0, clock.GetElapsedTime(startedTimestamp).TotalMilliseconds);
+        EvidenceResourceResult[] snapshot = [.. completed,
+            new EvidenceResourceResult(resourceId, EvidenceResourceOutcome.Ready, elapsedMilliseconds)];
+        return Array.AsReadOnly(snapshot);
     }
 
     /// <summary>Reports only a failed allocation stage after owned exit; any optional sink failure is ignored.</summary>
