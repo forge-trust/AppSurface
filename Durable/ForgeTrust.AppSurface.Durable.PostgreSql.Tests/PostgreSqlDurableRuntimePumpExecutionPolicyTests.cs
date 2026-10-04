@@ -130,7 +130,7 @@ public sealed class PostgreSqlDurableRuntimePumpExecutionPolicyTests
     public async Task Deadline_cancels_an_admitted_cooperative_invocation_and_records_ambiguous_outcome()
     {
         var registration = new PumpPolicyRegistration(InvocationMode.WaitForCancellation);
-        var time = new FakeTimeProvider(Anchor);
+        var time = new MaintenanceWaitTimeProvider(Anchor);
         await using var lab = await PumpLab.CreateAsync(registration);
         var deadline = Anchor.AddMinutes(1);
         var hook = new PostgreSqlDurableExecutionCheckpointHook(async (observation, _) =>
@@ -145,6 +145,7 @@ public sealed class PostgreSqlDurableRuntimePumpExecutionPolicyTests
         var running = pump.RunOnceAsync(new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work)).AsTask();
 
         await registration.Execution.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await time.TimerCreated.Task.WaitAsync(TimeSpan.FromSeconds(5));
         time.Advance(deadline - Anchor);
         await registration.Execution.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var result = await running.WaitAsync(TimeSpan.FromSeconds(5));
@@ -224,7 +225,7 @@ public sealed class PostgreSqlDurableRuntimePumpExecutionPolicyTests
     public async Task Oversized_renewal_cadence_remains_deadline_bounded_without_abandoning_admitted_invocation()
     {
         var registration = new PumpPolicyRegistration(InvocationMode.WaitForCancellation);
-        var time = new FakeTimeProvider(Anchor);
+        var time = new MaintenanceWaitTimeProvider(Anchor);
         await using var lab = await PumpLab.CreateAsync(registration);
         var deadline = Anchor.AddMinutes(1);
         var retry = new DurableWorkRetryPolicy(5, TimeSpan.FromHours(1), TimeSpan.FromSeconds(1),
@@ -244,6 +245,7 @@ public sealed class PostgreSqlDurableRuntimePumpExecutionPolicyTests
         var running = lab.CreatePump(hook, time).RunOnceAsync(
             new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work)).AsTask();
         await registration.Execution.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await time.TimerCreated.Task.WaitAsync(TimeSpan.FromSeconds(5));
         time.Advance(deadline - Anchor);
         await registration.Execution.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var result = await running.WaitAsync(TimeSpan.FromSeconds(5));
@@ -258,7 +260,7 @@ public sealed class PostgreSqlDurableRuntimePumpExecutionPolicyTests
     public async Task Finite_executor_that_ignores_deadline_cancellation_returns_only_quarantined_late_evidence()
     {
         var registration = new PumpPolicyRegistration(InvocationMode.IgnoreCancellation);
-        var time = new FakeTimeProvider(Anchor);
+        var time = new MaintenanceWaitTimeProvider(Anchor);
         await using var lab = await PumpLab.CreateAsync(registration);
         var deadline = Anchor.AddMinutes(1);
         var hook = new PostgreSqlDurableExecutionCheckpointHook(async (observation, _) =>
@@ -273,6 +275,7 @@ public sealed class PostgreSqlDurableRuntimePumpExecutionPolicyTests
         var running = pump.RunOnceAsync(new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work)).AsTask();
 
         await registration.Execution.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await time.TimerCreated.Task.WaitAsync(TimeSpan.FromSeconds(5));
         time.Advance(deadline - Anchor);
         await registration.Execution.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
         registration.Execution.Complete.TrySetResult(registration.EncodedResultCodec.EncodeObject(Encoding.UTF8.GetBytes("late result")));
