@@ -571,5 +571,131 @@ class TrustedSdkProcedureControls(unittest.TestCase):
                     self.assertEqual(before_inode, source.stat().st_ino)
 
 
+    @contextmanager
+    def root_share_observations(self, share_fd, transform=None):
+        """Data-only root-stat projection on one current-owned temporary inode."""
+        real_stat, real_fstat = os.stat, os.fstat
+        key = (real_fstat(share_fd).st_dev, real_fstat(share_fd).st_ino)
+
+        def project(info):
+            if (info.st_dev, info.st_ino) == key:
+                info = self.changed_stat(info, st_uid=0, st_gid=0)
+                if transform is not None:
+                    info = transform(info)
+            return info
+
+        with patch.object(os, "fstat", side_effect=lambda fd: project(real_fstat(fd))), \
+                patch.object(os, "stat", side_effect=lambda *a, **kw: project(real_stat(*a, **kw))):
+            yield
+
+    def test_share_ancestor_retained_fd_only_clears_write_bits_and_preserves_actual_tree(self):
+        for index, mode in enumerate((0o777, 0o755, 0o577)):
+            with self.subTest(mode=oct(mode)):
+                parent = self.base / ("ancestor-positive-" + str(index))
+                parent.mkdir()
+                share = parent / "share"
+                share.mkdir()
+                payload = share / "unchanged"
+                payload.write_bytes(b"ancestor-private-bytes\x00\xff")
+                share.chmod(mode)
+                initial = share.stat()
+                real_fchmod = os.fchmod
+                with self.directory(parent) as parent_fd, self.directory(share) as share_fd, \
+                        self.root_share_observations(share_fd), \
+                        patch.object(os, "fchmod", wraps=real_fchmod) as chmod, \
+                        patch.object(sdk, "inventory", side_effect=AssertionError("SDK-dispatch-forbidden")) as dispatch:
+                    receipt = sdk.seal_share_ancestor(parent_fd, share_fd, time.monotonic() + 30)
+                    self.assertEqual(int(bool(mode & 0o022)), chmod.call_count)
+                    self.assertEqual(format(mode, "04o"), receipt["before"]["mode"])
+                    self.assertEqual(format(mode & ~0o022, "04o"), receipt["after"]["mode"])
+                    self.assertEqual(bool(mode & 0o022), receipt["write_bits_cleared"])
+                    self.assertEqual((0, 0), (receipt["after"]["uid"], receipt["after"]["gid"]))
+                    dispatch.assert_not_called()
+                final = share.stat()
+                self.assertEqual(mode & ~0o022, stat.S_IMODE(final.st_mode))
+                self.assertEqual((initial.st_dev, initial.st_ino, initial.st_uid, initial.st_gid),
+                                 (final.st_dev, final.st_ino, final.st_uid, final.st_gid))
+                self.assertEqual(b"ancestor-private-bytes\x00\xff", payload.read_bytes())
+                self.assertEqual(["unchanged"], sorted(p.name for p in share.iterdir()))
+
+    def test_share_ancestor_unsafe_metadata_or_named_link_rejects_before_chmod(self):
+        cases = ("uid", "gid", "regular", "symlink", "substitution", "link-count", "special", "missing-search")
+        for kind in cases:
+            with self.subTest(kind=kind):
+                parent = self.base / ("ancestor-negative-" + kind)
+                parent.mkdir()
+                share = parent / "share"
+                if kind == "regular":
+                    share.write_bytes(b"not-a-directory")
+                    fd = os.open(share, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+                else:
+                    share.mkdir()
+                    share.chmod(0o1777 if kind == "special" else 0o750 if kind == "missing-search" else 0o777)
+                    fd = os.open(share, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+                self.addCleanup(os.close, fd)
+                if kind == "symlink":
+                    share.rename(parent / "retained")
+                    share.symlink_to(parent / "retained", target_is_directory=True)
+                transform = (lambda info: self.changed_stat(info, **{("st_uid" if kind == "uid" else "st_gid"): 100_000})) \
+                    if kind in ("uid", "gid") else None
+                with self.directory(parent) as parent_fd, self.root_share_observations(fd, transform), \
+                        patch.object(os, "fchmod", side_effect=AssertionError("mutation-forbidden")) as chmod, \
+                        patch.object(sdk, "inventory", side_effect=AssertionError("SDK-dispatch-forbidden")) as dispatch:
+                    if kind in ("substitution", "link-count"):
+                        projected_stat = os.stat
+                        def changed_name(*args, **kwargs):
+                            info = projected_stat(*args, **kwargs)
+                            return self.changed_stat(info, **{"st_ino" if kind == "substitution" else "st_nlink":
+                                info.st_ino + 1 if kind == "substitution" else info.st_nlink + 1})
+                        seam = patch.object(os, "stat", side_effect=changed_name)
+                    else:
+                        seam = nullcontext()
+                    with seam:
+                        self.reject(lambda: sdk.seal_share_ancestor(parent_fd, fd, time.monotonic() + 30))
+                    chmod.assert_not_called()
+                    dispatch.assert_not_called()
+
+    def test_share_ancestor_mutation_recheck_or_deadline_failure_aborts_without_sdk_dispatch(self):
+        for kind in ("chmod-failure", "recheck", "expired", "late-deadline"):
+            with self.subTest(kind=kind):
+                parent = self.base / ("ancestor-failure-" + kind)
+                parent.mkdir()
+                share = parent / "share"
+                share.mkdir()
+                share.chmod(0o777)
+                calls = []
+                real_fchmod = os.fchmod
+                original = OSError(errno.EIO, "ancestor-private-canary")
+                diagnostic = sdk.SdkDiagnostic()
+                def mutate(fd, mode):
+                    calls.append((fd, mode))
+                    if kind == "chmod-failure":
+                        raise original
+                    real_fchmod(fd, mode)
+                def observed(info):
+                    return self.changed_stat(info, st_mode=stat.S_IFDIR | 0o757) \
+                        if kind == "recheck" and calls else info
+                with self.directory(parent) as parent_fd, self.directory(share) as share_fd, \
+                        self.root_share_observations(share_fd, observed), \
+                        patch.object(os, "fchmod", side_effect=mutate), \
+                        patch.object(sdk, "inventory", side_effect=AssertionError("SDK-dispatch-forbidden")) as dispatch:
+                    deadline = time.monotonic() + 30
+                    clock = patch.object(sdk.time, "monotonic", side_effect=[0.0, 0.0, 2.0]) \
+                        if kind == "late-deadline" else nullcontext()
+                    with clock:
+                        if kind == "chmod-failure":
+                            with self.assertRaises(OSError) as caught:
+                                sdk.seal_share_ancestor(parent_fd, share_fd, deadline, diagnostic=diagnostic)
+                            self.assertIs(original, caught.exception)
+                            self.assertEqual("share-sealing", diagnostic.snapshot()["phase"])
+                        else:
+                            self.reject(lambda: sdk.seal_share_ancestor(parent_fd, share_fd,
+                                1.0 if kind == "late-deadline" else time.monotonic() - 1 if kind == "expired" else deadline,
+                                diagnostic=diagnostic))
+                    dispatch.assert_not_called()
+                    self.assertEqual(0 if kind == "expired" else 1, len(calls))
+                    self.assertNotIn("ancestor-private-canary", json.dumps(diagnostic.snapshot()))
+
+
 if __name__ == "__main__":
     unittest.main()
