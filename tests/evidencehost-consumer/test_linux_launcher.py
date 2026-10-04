@@ -2594,4 +2594,211 @@ class StartupRecordControls(unittest.TestCase):
             finally: broker.close_artifact_handles()
 
 
+class PrivateVstestDiagnosticOrchestrationControls(unittest.TestCase):
+    """Portable real-FD procedure controls, no actual root/systemd/exit proof.
+
+    Root identity, kernel group inspection and the diagnostic module are doubles.
+    The broker, its condition, duplicate and close operations use real objects/FDs.
+    """
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="vstest-orchestration-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.broker, _, _ = artifact_broker(self.root)
+        self.addCleanup(self.broker.close_artifact_handles)
+        self.broker.descriptor = {"cgroup": "/system.slice/fixture.service"}
+        for field in ("ready_seen", "wait_completed", "exited", "work_closed"):
+            setattr(self.broker, field, True)
+        directory = self.root / "private-diagnostics"
+        directory.mkdir(mode=0o700)
+        self.fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        self.addCleanup(os.close, self.fd)
+
+    def test_duplicate_under_lock_precedes_real_close_and_capture_borrows_destination(self):
+        events, duplicates = [], []
+        original_dup = os.dup
+        original_close = launcher._close_launch_resources
+        source_fd = self.broker.test_output_fd
+
+        def duplicate(fd):
+            self.assertEqual(source_fd, fd)
+            acquired = self.broker.lock.acquire(blocking=False)
+            if acquired: self.broker.lock.release()
+            self.assertFalse(acquired)
+            events.append("duplicate")
+            duplicates.append(original_dup(fd))
+            return duplicates[-1]
+
+        def close(*args):
+            events.append("close")
+            original_close(*args)
+            self.assertEqual(-1, self.broker.test_output_fd)
+            with self.assertRaises(OSError): os.fstat(source_fd)
+
+        def capture(fd, tokens, destination_fd, subject_uid, results_gid, *, deadline):
+            events.append("capture")
+            self.assertEqual(duplicates, [fd])
+            self.assertEqual(("run-1",), tokens)
+            self.assertEqual(self.fd, destination_fd)
+            self.assertEqual((self.broker.subject_uid, self.broker.results_gid), (subject_uid, results_gid))
+            self.assertIn("run-1", os.listdir(fd))
+            os.fstat(destination_fd)
+            self.assertGreater(deadline, time.monotonic())
+            return True
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(launcher.os, "geteuid", return_value=0))
+            stack.enter_context(patch.object(self.broker, "_group_empty", return_value=True))
+            stack.enter_context(patch.object(self.broker, "_all_owned_work_stopped", return_value=True))
+            stack.enter_context(patch.object(launcher.os, "dup", side_effect=duplicate))
+            stack.enter_context(patch.object(launcher, "_close_launch_resources", side_effect=close))
+            writer = stack.enter_context(patch.object(launcher._vstest, "capture_traces", side_effect=capture))
+            launcher._close_failed_launch_resources(None, [], self.broker, -1, self.fd, True,
+                                                   RuntimeError("original-failure"))
+        self.assertEqual(["duplicate", "close", "capture"], events)
+        writer.assert_called_once()
+        with self.assertRaises(OSError): os.fstat(duplicates[0])
+        os.fstat(self.fd)
+
+    def test_each_open_checkpoint_busy_counter_or_output_failure_rejects_before_duplicate(self):
+        changes = [(field, False) for field in ("ready_seen", "wait_completed", "exited", "work_closed")]
+        changes += [(field, value) for field in ("active_handlers", "active_runs", "active_artifact_operations",
+                                                "active_application_operations") for value in (1, True)]
+        changes += [("subject_output_failed", True), ("subject_output_failed", None),
+                    ("application_work_failed", True), ("application_work_failed", None),
+                    ("allowed_results_roots", set()), ("allowed_results_roots", {"run-1", "run-2"}),
+                    ("allowed_results_roots", ("run-1",))]
+        for field, value in changes:
+            with self.subTest(field=field, value=value), ExitStack() as stack:
+                old = getattr(self.broker, field)
+                stack.callback(setattr, self.broker, field, old)
+                setattr(self.broker, field, value)
+                stack.enter_context(patch.object(launcher.os, "geteuid", return_value=0))
+                group = stack.enter_context(patch.object(self.broker, "_group_empty"))
+                duplicate = stack.enter_context(patch.object(launcher.os, "dup"))
+                self.assertIsNone(launcher._retain_vstest_failure_input(self.broker, self.fd, True))
+                group.assert_not_called()
+                duplicate.assert_not_called()
+        self.broker.output_quota.exceeded.set()
+        try:
+            with patch.object(launcher.os, "geteuid", return_value=0), patch.object(launcher.os, "dup") as duplicate:
+                self.assertIsNone(launcher._retain_vstest_failure_input(self.broker, self.fd, True))
+                duplicate.assert_not_called()
+        finally: self.broker.output_quota.exceeded.clear()
+
+    def test_root_wait_destination_and_physical_group_guards_precede_duplicate(self):
+        for uid, owned, destination, worker_empty, all_empty in (
+                (123, True, self.fd, True, True), (0, False, self.fd, True, True),
+                (0, True, None, True, True), (0, True, True, True, True),
+                (0, True, self.fd, False, True), (0, True, self.fd, True, False)):
+            with self.subTest(uid=uid, owned=owned, destination=destination,
+                              worker_empty=worker_empty, all_empty=all_empty), ExitStack() as stack:
+                stack.enter_context(patch.object(launcher.os, "geteuid", return_value=uid))
+                stack.enter_context(patch.object(self.broker, "_group_empty", return_value=worker_empty))
+                stack.enter_context(patch.object(self.broker, "_all_owned_work_stopped", return_value=all_empty))
+                duplicate = stack.enter_context(patch.object(launcher.os, "dup"))
+                self.assertIsNone(launcher._retain_vstest_failure_input(self.broker, destination, owned))
+                duplicate.assert_not_called()
+
+    def test_capture_exception_never_replaces_original_failure_and_duplicate_always_closes(self):
+        for failure in (OSError("private-capture-canary"), KeyboardInterrupt("private-capture-canary")):
+            with self.subTest(error_class=type(failure).__name__), tempfile.TemporaryDirectory(dir=self.root) as temp:
+                broker, _, _ = artifact_broker(temp)
+                broker.descriptor = dict(self.broker.descriptor)
+                for field in ("ready_seen", "wait_completed", "exited", "work_closed"): setattr(broker, field, True)
+                original = RuntimeError("original-private-failure")
+                seen = []
+                def capture(fd, *args, **kwargs):
+                    seen.append(fd)
+                    os.fstat(fd)
+                    raise failure
+                try:
+                    with ExitStack() as stack:
+                        stack.enter_context(patch.object(launcher.os, "geteuid", return_value=0))
+                        stack.enter_context(patch.object(broker, "_group_empty", return_value=True))
+                        stack.enter_context(patch.object(broker, "_all_owned_work_stopped", return_value=True))
+                        stack.enter_context(patch.object(launcher._vstest, "capture_traces", side_effect=capture))
+                        with self.assertRaises(RuntimeError) as caught:
+                            try: raise original
+                            finally:
+                                launcher._close_failed_launch_resources(None, [], broker, -1, self.fd, True, original)
+                    self.assertIs(original, caught.exception)
+                    self.assertEqual(1, len(seen))
+                    self.assertEqual(-1, broker.test_output_fd)
+                    with self.assertRaises(OSError): os.fstat(seen[0])
+                finally: broker.close_artifact_handles()
+
+    def test_resource_close_failure_skips_capture_and_closes_retained_duplicate(self):
+        duplicates = []
+        original_dup = os.dup
+        original_close = launcher._close_launch_resources
+        def duplicate(fd):
+            duplicates.append(original_dup(fd))
+            return duplicates[-1]
+        def fail_close(*args):
+            original_close(*args)
+            raise OSError("resource-close-failure-canary")
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(launcher.os, "geteuid", return_value=0))
+            stack.enter_context(patch.object(self.broker, "_group_empty", return_value=True))
+            stack.enter_context(patch.object(self.broker, "_all_owned_work_stopped", return_value=True))
+            stack.enter_context(patch.object(launcher.os, "dup", side_effect=duplicate))
+            stack.enter_context(patch.object(launcher, "_close_launch_resources", side_effect=fail_close))
+            writer = stack.enter_context(patch.object(launcher._vstest, "capture_traces"))
+            with self.assertRaises(OSError):
+                launcher._close_failed_launch_resources(None, [], self.broker, -1, self.fd, True,
+                                                       RuntimeError("original-failure"))
+            writer.assert_not_called()
+        self.assertEqual(1, len(duplicates))
+        with self.assertRaises(OSError): os.fstat(duplicates[0])
+
+    def test_postclose_checkpoint_drift_blocks_capture_but_duplicate_still_closes(self):
+        original_close = launcher._close_launch_resources
+        original_dup = os.dup
+        duplicates = []
+        def duplicate(fd):
+            duplicates.append(original_dup(fd))
+            return duplicates[-1]
+        def close(*args):
+            original_close(*args)
+            self.broker.active_application_operations = 1
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(launcher.os, "geteuid", return_value=0))
+            stack.enter_context(patch.object(self.broker, "_group_empty", return_value=True))
+            stack.enter_context(patch.object(self.broker, "_all_owned_work_stopped", return_value=True))
+            stack.enter_context(patch.object(launcher.os, "dup", side_effect=duplicate))
+            stack.enter_context(patch.object(launcher, "_close_launch_resources", side_effect=close))
+            writer = stack.enter_context(patch.object(launcher._vstest, "capture_traces"))
+            launcher._close_failed_launch_resources(None, [], self.broker, -1, self.fd, True,
+                                                   RuntimeError("original-failure"))
+            writer.assert_not_called()
+        self.broker.active_application_operations = 0
+        self.assertEqual(1, len(duplicates))
+        with self.assertRaises(OSError): os.fstat(duplicates[0])
+
+
+    def test_no_original_failure_or_duplicate_error_cannot_skip_close_or_invoke_reader(self):
+        for scenario in ("no-original-failure", "duplicate-error"):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory(dir=self.root) as temp:
+                broker, _, _ = artifact_broker(temp)
+                broker.descriptor = dict(self.broker.descriptor)
+                for field in ("ready_seen", "wait_completed", "exited", "work_closed"): setattr(broker, field, True)
+                source_fd = broker.test_output_fd
+                try:
+                    with ExitStack() as stack:
+                        stack.enter_context(patch.object(launcher.os, "geteuid", return_value=0))
+                        stack.enter_context(patch.object(broker, "_group_empty", return_value=True))
+                        stack.enter_context(patch.object(broker, "_all_owned_work_stopped", return_value=True))
+                        duplicate = stack.enter_context(patch.object(launcher.os, "dup", side_effect=OSError("duplicate-canary")))
+                        writer = stack.enter_context(patch.object(launcher._vstest, "capture_traces"))
+                        launcher._close_failed_launch_resources(None, [], broker, -1, self.fd, True,
+                            None if scenario == "no-original-failure" else RuntimeError("original-failure"))
+                        self.assertEqual(0 if scenario == "no-original-failure" else 1, duplicate.call_count)
+                        writer.assert_not_called()
+                    self.assertEqual(-1, broker.test_output_fd)
+                    with self.assertRaises(OSError): os.fstat(source_fd)
+                    os.fstat(self.fd)
+                finally: broker.close_artifact_handles()
+
+
 if __name__ == "__main__": unittest.main()

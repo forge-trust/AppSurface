@@ -3,7 +3,11 @@ using ForgeTrust.AppSurface.Evidence.Contracts;
 namespace ForgeTrust.AppSurface.Evidence.Coverage;
 
 /// <summary>Runs subject coverage exclusively through the credential-checked restricted broker.</summary>
-/// <remarks>Both subject and protected reporter output charge the same host quota; the broker independently enforces its bound.</remarks>
+/// <remarks>
+/// Both subject and protected reporter output charge the same host quota; the broker independently enforces its bound.
+/// This private diagnostic variant requests VSTest trace files beside the selected results directory under its authenticated parent.
+/// Those files supply no coverage, admission or qualification authority and require separate bounded root retention.
+/// </remarks>
 internal sealed class EvidenceRestrictedCoverageTransport(EvidenceLinuxWorkerSupervisor worker,
     EvidenceRunByteQuota outputQuota) : IEvidenceRestrictedCoverageRun
 {
@@ -21,6 +25,7 @@ internal sealed class EvidenceRestrictedCoverageTransport(EvidenceLinuxWorkerSup
         var result = await worker.RunSubjectAsync(descriptor.DotnetPath,
             ["test", solutionPath, "--configuration", "Debug", "--collect:XPlat Code Coverage",
                 "--results-directory", Path.Join(descriptor.TestOutputRoot, resultsToken),
+                "--diag", Path.Join(descriptor.TestOutputRoot, resultsToken + "-qualification-vstest.log"),
                 "--verbosity", "quiet", "-m:1", "-p:UseSharedCompilation=false", "-nodeReuse:false"],
             descriptor.SubjectRoot, cancellationToken).ConfigureAwait(false);
         if (result.ReceivedBytes < 0 || !outputQuota.TryChargeReceived(result.ReceivedBytes))
