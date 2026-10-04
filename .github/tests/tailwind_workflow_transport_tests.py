@@ -11,6 +11,7 @@ download fields, and execute the native runner preflight shell extracted from YA
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -29,6 +30,18 @@ PUBLISHERS = [
     ROOT / ".github/workflows/nuget-stable-publish.yml",
 ]
 RIDS = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64"]
+
+
+def workflow_step_script(source: str, name: str) -> str:
+    start = source.index(f"      - name: {name}\n")
+    end = source.find("\n      - name:", start + 1)
+    step = source[start : end if end >= 0 else len(source)]
+    body = step.split("        run: |\n", 1)[1]
+    return "\n".join(
+        line[10:] if line.startswith("          ") else ""
+        for line in body.splitlines()
+        if not line or line.startswith("          ")
+    )
 
 
 FAKE_GH = r'''#!/usr/bin/env python3
@@ -333,9 +346,145 @@ class WorkflowTransportTests(unittest.TestCase):
                     env = os.environ.copy()
                     rehearsal = event == "workflow_dispatch" and ("refs/heads/main" not in ref or repository != "forge-trust/AppSurface")
                     env.update(CONFIGURED_RUNNERS=config, REHEARSAL="true" if rehearsal else "false",
-                               EVENT_NAME=event, REF=ref, REPOSITORY=repository, RETENTION_DAYS="30", GITHUB_OUTPUT=output.name)
+                               EVENT_NAME=event, REF=ref, REPOSITORY=repository, RETENTION_DAYS="30",
+                               ARTIFACT_MANIFEST_FILE="package-artifact-manifest.json", GITHUB_OUTPUT=output.name)
                     result = subprocess.run(["bash", "-c", script], env=env, text=True, capture_output=True)
                     self.assertEqual(result.returncode == 0, should_pass, result.stderr)
+
+    def test_native_manifest_input_matches_each_frozen_producer_layout(self) -> None:
+        native = NATIVE.read_text()
+        self.assertIn("default: package-artifact-manifest.json", native)
+        self.assertEqual(
+            native.count("ARTIFACT_MANIFEST_FILE: ${{ inputs.artifact_manifest_file }}"),
+            3,
+        )
+        for publisher in PUBLISHERS:
+            with self.subTest(publisher=publisher.name):
+                source = publisher.read_text()
+                call = source[source.index("  native-host-evidence:") : source.index("  pack-and-verify:")]
+                self.assertIn(
+                    "artifact_manifest_file: package-artifact-manifest.unapproved.json",
+                    call,
+                )
+                producer = source[source.index("- name: Verify package artifacts") :]
+                producer = producer[: producer.index("\n      - name:")]
+                self.assertIn('/package-artifact-manifest.unapproved.json"', producer)
+        rehearsal = (ROOT / ".github/workflows/package-artifacts.yml").read_text()
+        self.assertNotIn("artifact_manifest_file:", rehearsal)
+
+    def test_native_manifest_preflight_rejects_empty_unknown_and_unconfined_names(
+        self,
+    ) -> None:
+        script = workflow_step_script(NATIVE.read_text(), "Validate configured native runner map")
+        for name in (
+            "package-artifact-manifest.json",
+            "package-artifact-manifest.unapproved.json",
+            "",
+            "other.json",
+            "../package-artifact-manifest.json",
+            "/tmp/manifest.json",
+        ):
+            with self.subTest(name=name):
+                output = self.root / "manifest-preflight.out"
+                env = os.environ.copy()
+                env.update(
+                    ARTIFACT_MANIFEST_FILE=name,
+                    REHEARSAL="false",
+                    RETENTION_DAYS="30",
+                    CONFIGURED_RUNNERS=json.dumps({rid: rid for rid in RIDS}),
+                    GITHUB_OUTPUT=str(output),
+                )
+                result = subprocess.run(["bash", "-c", script], env=env, text=True, capture_output=True)
+                self.assertEqual(
+                    result.returncode == 0,
+                    name
+                    in (
+                        "package-artifact-manifest.json",
+                        "package-artifact-manifest.unapproved.json",
+                    ),
+                    result.stderr,
+                )
+
+    def test_native_proof_mutation_and_aggregate_open_the_selected_manifest_without_alias(
+        self,
+    ) -> None:
+        source = NATIVE.read_text()
+        fake_dotnet = self.bin / "dotnet"
+        fake_dotnet.write_text(
+            "#!/usr/bin/env python3\n"
+            "import hashlib, json, os, pathlib, sys\n"
+            "args = sys.argv[1:]\n"
+            "options = {args[i]: args[i + 1] for i in range(len(args) - 1) if args[i].startswith('--')}\n"
+            "pathlib.Path(os.environ['DOTNET_CAPTURE']).write_text(json.dumps(options))\n"
+            "manifest = pathlib.Path(options['--artifact-manifest'])\n"
+            "assert manifest.parent == pathlib.Path(options['--artifacts-input'])\n"
+            "assert manifest.read_text() == 'frozen manifest'\n"
+            "report = pathlib.Path(options['--report-directory']); report.mkdir(parents=True)\n"
+            "subject = pathlib.Path(options['--producer-subject']).read_bytes()\n"
+            "if hashlib.sha256(subject).hexdigest() != options['--expected-subject-sha256']:\n"
+            "    (report / 'diagnostics.json').write_text('{\"code\":\"subject-digest-mismatch\"}')\n"
+            "    sys.exit(1)\n"
+            "if options['--mode'] == 'aggregate':\n"
+            "    (report / 'tailwind-native-aggregate.json').write_text('{}')\n",
+            encoding="utf-8",
+        )
+        fake_dotnet.chmod(0o755)
+        steps = [
+            ("Prove frozen producer package on native host", RIDS),
+            (
+                "Confirm mutated producer subject is rejected (manual rehearsal)",
+                ["linux-x64"],
+            ),
+            ("Validate host receipts and create aggregate", ["linux-x64"]),
+        ]
+        for name in (
+            "package-artifact-manifest.json",
+            "package-artifact-manifest.unapproved.json",
+        ):
+            for index, (step, rids) in enumerate(steps):
+                for rid in rids:
+                    with self.subTest(manifest=name, step=step, rid=rid):
+                        fixture = self.root / f"{name}-{rid}-{index}"
+                        producer = fixture / "tailwind-producer"
+                        producer.mkdir(parents=True)
+                        (producer / name).write_text("frozen manifest")
+                        (producer / "tailwind-proof-subject.json").write_text("frozen subject")
+                        capture = fixture / "arguments.json"
+                        env = os.environ.copy()
+                        env.update(
+                            PATH=f"{self.bin}{os.pathsep}{env.get('PATH', '')}",
+                            RUNNER_TEMP=str(fixture),
+                            GITHUB_WORKSPACE=str(ROOT),
+                            RID=rid,
+                            ARTIFACT_MANIFEST_FILE=name,
+                            PRODUCER_ROOT=str(producer),
+                            MUTATED_PRODUCER_ROOT=str(fixture / "mutated"),
+                            REPORT_ROOT=str(fixture / "reports"),
+                            WORK_ROOT=str(fixture / "work"),
+                            AGGREGATE_ROOT=str(fixture / "aggregate"),
+                            HOST_ROOT=str(fixture / "hosts"),
+                            HOST_MAP=str(fixture / "host-map.json"),
+                            GITHUB_OUTPUT=str(fixture / "output"),
+                            GITHUB_STEP_SUMMARY=str(fixture / "summary.md"),
+                            PRODUCER_ARTIFACT_ID="123",
+                            EXPECTED_REPOSITORY_ID="456",
+                            GITHUB_REPOSITORY_ID="456",
+                            PRODUCER_RUN_ID="789",
+                            GITHUB_RUN_ID="789",
+                            SOURCE_COMMIT="a" * 40,
+                            NATIVE_INVOCATION_ID="123-789-1-tailwind-native",
+                            EXPECTED_SUBJECT_SHA256=hashlib.sha256(b"frozen subject").hexdigest(),
+                            DOTNET_CAPTURE=str(capture),
+                        )
+                        result = subprocess.run(
+                            ["bash", "-c", workflow_step_script(source, step)],
+                            env=env,
+                            text=True,
+                            capture_output=True,
+                        )
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        options = json.loads(capture.read_text())
+                        self.assertEqual(Path(options["--artifact-manifest"]).name, name)
 
     def test_workflow_ids_flow_through_recovery_outputs_and_exact_download_inputs(self) -> None:
         native = NATIVE.read_text()
@@ -405,7 +554,7 @@ class WorkflowTransportTests(unittest.TestCase):
                     artifacts.mkdir()
                     subject_path = artifacts / "tailwind-proof-subject.json"
                     subject_path.write_text('{"schema":"fixture"}', encoding="utf-8")
-                    (artifacts / "package-artifact-manifest.json").write_text("{}", encoding="utf-8")
+                    (artifacts / "package-artifact-manifest.unapproved.json").write_text("{}", encoding="utf-8")
                     capture = fixture / "dotnet-args.json"
                     fake_dotnet = binary / "dotnet"
                     fake_dotnet.write_text(
@@ -413,6 +562,7 @@ class WorkflowTransportTests(unittest.TestCase):
                         "import json, os, pathlib, sys\n"
                         "args = sys.argv[1:]\n"
                         "options = {args[i]: args[i + 1] for i in range(len(args) - 1) if args[i].startswith('--')}\n"
+                        "assert pathlib.Path(options['--artifact-manifest']).read_text() == '{}'\n"
                         "pathlib.Path(os.environ['DOTNET_CAPTURE']).write_text(json.dumps(args), encoding='utf-8')\n"
                         "pathlib.Path(options['--report-directory']).mkdir()\n"
                         "pathlib.Path(options['--resolved-binding-output']).write_text(json.dumps({\n"
