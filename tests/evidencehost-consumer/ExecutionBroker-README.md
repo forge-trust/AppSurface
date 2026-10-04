@@ -70,6 +70,28 @@ properties remain required. The [portable completion controls](test_linux_launch
 that remains waiting until explicit stop and rejects inspection after stop; they establish ordering and guard
 behavior, with no native systemd or consumer acceptance claim.
 
+## Worker completion after control-group pruning
+
+The [root launcher's](../../scripts/evidencehost-linux-launcher.py) internal `_worker_group_empty`
+check uses the worker unit and exact `/system.slice/<unit>` path retained in its root-created descriptor.
+Pinned [systemd v255 prunes the group when a service enters `SERVICE_EXITED`](https://github.com/systemd/systemd/blob/v255/src/core/service.c#L1147-L1150),
+even with `RemainAfterExit=yes`. A loaded unit with `MainPID=0` may therefore report an empty
+`ControlGroup`; this does not establish physical exit. The reported value must be empty or match the
+retained generated pair and the broker's selected unit prefix, and the kernel group at that exact path must be empty. Missing loaded/main/group
+facts, a foreign unit/group, or a populated retained group reject completion before any output handles transfer.
+Both the launch's final worker check and `_completion_after_owned_exit` use this check. Existing successful
+process status, authenticated ready/wait/exit acknowledgements, all application/producer joins, quotas and
+output identity checks remain required.
+
+The [portable root completion controls](test_linux_launcher.py) exercise real retained output descriptors,
+model empty/exact reported groups, and verify that malformed facts cause no physical-group query and that
+a populated retained group rejects completion. Their metadata and kernel-check doubles establish no native
+root/systemd acceptance. The prior qualification's passed CLI manifest and later launcher failure do not
+retain the original `ControlGroup` value or exception cause, so they do not by themselves prove this was that run's cause.
+Late `unit-inspection-failed`, `unexpected-control-group` and `owned-exit-inspection-deadline` exceptions
+retain those fixed categories in the existing safe failure schema. Arbitrary exception attributes, paths and
+child output remain excluded; a preserved category grants no completion or acceptance authority.
+
 ## Internal root application integration
 
 The [runtime output validator](runtime-proof.py) reads the exact PascalCase fields emitted by [Contracts canonical JSON](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceContracts.cs), including `PolicySnapshot`, `Profile`, `PlanDigest`, `ManifestDigest`, producer/artifact metadata and the final summary. The input fixture policy remains lower camel case. `expected_runtime_policy_snapshot` maps only that fixed fixture to the full current emitted policy, including nullable `MinPatchLinePercent`/`MinPatchBranchPercent` and default `PatchLineMode = "measurable"`; it is not a general case converter or a canonical digest implementation. `canonical_output_digests` requires the exact emitted digest fields and matching plan binding before public artifact writes. The [published CLI structural verifier](runtime-proof.py) still re-resolves the collected plan and verifies its canonical bindings independently. The [metadata regression controls](test_runtime_proof.py) combine the observed v16 PascalCase plan shape with explicitly synthetic Passed producer/manifest data solely to test parsing, rejection and public digest extraction; those data do not establish native execution, accepted evidence, admission or qualification. Public runtime-proof record field names remain lower camel case and informational.
