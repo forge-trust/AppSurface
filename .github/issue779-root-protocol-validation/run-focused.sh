@@ -106,12 +106,12 @@ export UseSharedCompilation=false MSBUILDDISABLENODEREUSE=1 PYTHONDONTWRITEBYTEC
 ( umask 022; timeout --signal=TERM --kill-after=10s 180s dotnet build Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --no-restore ) > "$task_receipts/cli-build.log" 2>&1
 # Trusted prerequisites must preserve the pinned source before either test lane.
 python3 -B "$task_root/verify-snapshot.py" > "$task_receipts/source-after-prerequisites.json"
-# Run all 13 portable fixture controls exactly once on Linux, without root.
+# Run all 16 portable fixture controls exactly once on Linux, without root.
 timeout --signal=TERM --kill-after=5s 45s python3 -B tests/evidencehost-consumer/test_execution_broker_fixture.py -v > "$task_receipts/portable.log" 2>&1
 python3 - "$task_receipts/portable.log" <<'PY'
 import re,sys
 raw=open(sys.argv[1],encoding='utf-8').read()
-if not re.search(r'^Ran 13 tests in ',raw,re.M) or not re.search(r'^OK$',raw,re.M): raise SystemExit(1)
+if not re.search(r'^Ran 16 tests in ',raw,re.M) or not re.search(r'^OK$',raw,re.M): raise SystemExit(1)
 PY
 task_uid="$(id -u)"; task_gid="$(id -g)"; task_subject=65533
 task_dotnet="$(command -v dotnet)"; task_cache="${NUGET_PACKAGES:-$HOME/.nuget/packages}"
@@ -155,8 +155,8 @@ import json,sys,xml.etree.ElementTree as ET
 root=ET.parse(sys.argv[1]).getroot(); ns={'t':'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'}
 counters=root.find('t:ResultSummary/t:Counters',ns).attrib
 results=root.findall('t:Results/t:UnitTestResult',ns)
-if len(results)!=9 or any(r.attrib['outcome']!='Passed' for r in results): raise SystemExit(1)
-if any(int(counters[k])!=v for k,v in {'total':9,'executed':9,'passed':9,'failed':0,'notExecuted':0}.items()): raise SystemExit(1)
-with open(sys.argv[2],'x') as f: json.dump({'cli_counters':counters,'portable_passed':13,'coverage_credit':False,'systemd_acceptance':False,'qualification':False},f,sort_keys=True)
+if len(results)!=12 or any(r.attrib['outcome']!='Passed' for r in results): raise SystemExit(1)
+if any(int(counters[k])!=v for k,v in {'total':12,'executed':12,'passed':12,'failed':0,'notExecuted':0}.items()): raise SystemExit(1)
+with open(sys.argv[2],'x') as f: json.dump({'cli_counters':counters,'portable_passed':16,'coverage_credit':False,'systemd_acceptance':False,'qualification':False},f,sort_keys=True)
 PY
 # No XPlat collection is selected: this packet establishes IPC behavior only.

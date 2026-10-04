@@ -1,5 +1,7 @@
 {
   "comparison_base": "416b30919e6c4d03b634d9d3fe558884b02f0b91",
+  "expected_csharp_cases": 12,
+  "expected_portable_cases": 16,
   "historical_native_snapshot_sha256": "738470869ecba5a77c8d937a521cc0f175c7c80d6d1ada3ac11162913a92d9fb",
   "intentional_new_source_files": [
     ".github/workflows/evidencehost-runtime-proof.yml",
@@ -95,12 +97,14 @@
     "Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceRestrictedCoverageTransport.cs"
   ],
   "native_execution": false,
-  "owner_source_binding_sha256": "bc8783dee8ed91830ce3fb94f108ca0c8199470218d5f4e440e239298005f936",
-  "owner_test_receipt_sha256": "385b395a46c99630a317841153997ea736458107814263f7b78b2d7f52f3b11c",
-  "previous_validation_commit": "250584fa420302de05194cd174a4f48330e3ebe9",
+  "owner_capture_receipt_sha256": "cb427cc873c93ed37d966bcbdf35dbc07b4efcdcab4e1f95cd4a2ac43a7ef8d8",
+  "owner_source_binding_sha256": "141ec66bf04b96a21445b12a8a448a032006409d26884154b5df889e9a6e4b1a",
+  "owner_test_receipt_sha256": "4de0d4b63db4ac2287861df29f3fc1e7f83dc9ec45bb682c7d7de8c21883d388",
+  "previous_focused_harness_head": "d7899f922f8b9cc95e73aacdf6e513922cffd239",
+  "previous_validation_commit": "3a3522314c30ff3462c71745d9b0692d77f3b24a",
   "qualification": false,
   "snapshot_kind": "verified-focused-root-protocol-source",
-  "source_commit": "3a3522314c30ff3462c71745d9b0692d77f3b24a",
+  "source_commit": "65fdb774d259894e120f5eed16b34484e8b53c4a",
   "source_count": 2814,
   "source_modes": {
     ".agent/rules.md": "0644",
@@ -2919,8 +2923,7 @@
     "troubleshooting/startup-and-modules.md.yml": "0644"
   },
   "source_parents": [
-    "250584fa420302de05194cd174a4f48330e3ebe9",
-    "fe854582e8b108df7e54dadd141e39af39368335"
+    "3a3522314c30ff3462c71745d9b0692d77f3b24a"
   ],
   "source_sha256": {
     ".agent/rules.md": "910b42379c6d9b3f914659993f64f3c698cbf36cc36aa80bc4ff36f71c54f9b9",
@@ -3224,7 +3227,7 @@
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceJsonShapeTests.cs": "5ce5823ddc99b88e7f5bb69561877ff758fd9466c027a69c2f94fe8359720ed6",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxApplicationProtocolTests.cs": "ed8d4c166f245af9d9ae29408d11b0b15e0b3c74c1d0d8e86dc330cff24fe5ce",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxArtifactRootTests.cs": "3eb6716b7c1480e821c85c061a862e4c66ea3b04d44dcb7af8ece6cebd776a82",
-    "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxControlProtocolTests.cs": "a76da66405afeb989356617a76c77238a30b697a95c3911a63cf9fc456af98dc",
+    "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxControlProtocolTests.cs": "38627f18ca924537968ddffc21574a5b5a45f1747f615f716009173dd4d3ecb9",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxWorkerDescriptorTests.cs": "056ffc428ecd357061228e5de4f3654b6ba89cdd581f50208f76928dff0d879d",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidencePlannerTests.cs": "20cb79c3eaa6445830e9127de4b401971c870218358e69d4a96852978b8666fc",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProcessOutputQuotaTests.cs": "a5b6de4003f158ec4ba8128a6e6703e24fe56d0e145eaee43cef92ad21eebd7b",
@@ -5571,7 +5574,7 @@
     "tests/evidencehost-consumer/ControlProtocolWorker/Program.cs": "b493eec7e37cd59fbb1d1691f05b1733459f19fa97c006e8c8d45d018d7ec53c",
     "tests/evidencehost-consumer/ControlProtocolWorker/README.md": "f1fb459ca3912bf8b3aecb1cf3fba559a63978b1ee61e55e9e9897beea9f58a6",
     "tests/evidencehost-consumer/ControlProtocolWorker/packages.lock.json": "118bbd6ef9cb33f86a5f8e18e0c6e4b3b7a9a575f601fab81f212abbd6b8bef4",
-    "tests/evidencehost-consumer/ExecutionBroker-README.md": "f55e31a58c62578ff8e45feee36ec7949352a221524c18e818d92ddee72b7e74",
+    "tests/evidencehost-consumer/ExecutionBroker-README.md": "ffdc779b09f4b4d8e2048b1977f04ad2e7a7ede3748cb0c2f48fe6792ae9a688",
     "tests/evidencehost-consumer/LifecycleWorker/LifecycleWorker.csproj": "79caae9170b0b27d4600565a7d40e2d3147c63330f1744c0ee0f0ac3cd18e5f4",
     "tests/evidencehost-consumer/LifecycleWorker/Program.cs": "cc509160e894ba2e37bcae5ecba9b48bae971ffab0749e1ff11e634dcf10453f",
     "tests/evidencehost-consumer/LifecycleWorker/packages.lock.json": "118bbd6ef9cb33f86a5f8e18e0c6e4b3b7a9a575f601fab81f212abbd6b8bef4",
@@ -5600,8 +5603,8 @@
     "tests/evidencehost-consumer/test_aspire_child_proof.py": "22a86bb987e59326a06c55f9d928867043579787f1de0cb5d5cd79a94221b997",
     "tests/evidencehost-consumer/test_control_protocol.py": "7aad13c774a05627ae48dc9fb2c68e64a416c3a3a43fa6e752f5920cd9ab8fc7",
     "tests/evidencehost-consumer/test_control_protocol_fixture.py": "94f78996173a586778c1a294992453e315359fb898c0f58dfb5d04c9218b2022",
-    "tests/evidencehost-consumer/test_execution_broker.py": "2efa7f25575fd629fcbe01a1668707eeb2edd9ffe54e3c928bf9885f7c005ad6",
-    "tests/evidencehost-consumer/test_execution_broker_fixture.py": "b43617a92f95dd4e1887a82aecda7ad906dc2bcd2493536da171be3d9e1a1e03",
+    "tests/evidencehost-consumer/test_execution_broker.py": "d5bf18116bd8b93d0565f4226a6cf6320c209fe6e7dd6b846e9236fc2f191af4",
+    "tests/evidencehost-consumer/test_execution_broker_fixture.py": "f5b3ae05ce1f98b4fef493de7d9458ac42136bd3ec3b49093c41215846ffd21a",
     "tests/evidencehost-consumer/test_lifecycle_worker.py": "4e4af1f6b7443ce795cc8b1ff853a67cbff3d1b785a424702d99a59d6f4374f7",
     "tests/evidencehost-consumer/test_linux_application.py": "ba9bc67642f19467e3b4b4a7bed8c35b953f2a4b03d2f7c7ec51e8266fac4608",
     "tests/evidencehost-consumer/test_linux_launcher.py": "6ef4cd10744227be59b9d637bb63ddb94c6bd706a873b58122570dbcdf4f6178",
@@ -5739,5 +5742,5 @@
     "troubleshooting/startup-and-modules.md.yml": "8d74ab38ca0d2a61b8184173fd8413dbfefa056c05e2e9acd582bcfb4d1a1277"
   },
   "trust_claim": false,
-  "validation_commit": "3a3522314c30ff3462c71745d9b0692d77f3b24a"
+  "validation_commit": "65fdb774d259894e120f5eed16b34484e8b53c4a"
 }
