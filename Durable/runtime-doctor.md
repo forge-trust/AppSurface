@@ -57,7 +57,7 @@ Every finding contains canonical problem/cause/fix/documentation and its applica
 
 JSON is one envelope on stdout followed by one newline, with no progress or provider logger text. Consumers must require `schemaVersion == 1`, validate status/exit consistency and check requested-check statuses before interpreting nullable facts. A clean result requires credential, schema, epoch and retention to be requested and passed; worker may be unrequested, or requested and passed. Preserve nonzero process exit alongside the report. Unsupported versions require an explicit consumer upgrade; field shapes are versioned.
 
-The [minimal automation consumer](../examples/durable-external-activation/consume-doctor-report.py) validates those rules and preserves the captured command exit. Save JSON and exit together even when doctor finds a problem:
+The [minimal automation consumer](https://github.com/forge-trust/AppSurface/blob/main/examples/durable-external-activation/consume-doctor-report.py) validates those rules and preserves the captured command exit. Save JSON and exit together even when doctor finds a problem:
 
 ```bash
 set +e
@@ -201,6 +201,6 @@ Internal `IDurableDoctorService` separates private connection custody from print
 
 The [canonical descriptor catalog](ForgeTrust.AppSurface.Durable/README.md) supplies the shared affected diagnostic meanings; correlation remains caller-owned on existing `DurableProblem`. Database timestamps do not depend on process clock or rendering time. No connection value, raw catalog text, payload, scope/aggregate ID, exception, trace context or process-instance ID is output.
 
-Doctor does not prove Work definitions, physical target equivalence, provider-effect truth, application registration/authorization/activation routing, Activity listener/exporter delivery, complete role-set approval or live readiness. Retain [packed-candidate proof](verify-packed-consumers.sh) with matched CLI/provider bytes before release. Rollback reinstalls the prior compatible CLI and reruns schema status; doctor requires no database or epoch rollback.
+Doctor does not prove Work definitions, physical target equivalence, provider-effect truth, application registration/authorization/activation routing, Activity listener/exporter delivery, complete role-set approval or live readiness. Retain [packed-candidate proof](https://github.com/forge-trust/AppSurface/blob/main/Durable/verify-packed-consumers.sh) with matched CLI/provider bytes before release. Rollback reinstalls the prior compatible CLI and reruns schema status; doctor requires no database or epoch rollback.
 
 The [operator workflow comparison](evidence/executable-contract-adoption.md#runtime-doctor-operator-comparison) records two same-store diagnosis/recovery probes and their existing-host timing limits. It does not claim measured adopter onboarding or a human comprehension study.
