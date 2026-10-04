@@ -149,3 +149,45 @@ That receipt remains the CPU2 result. At the CPU1 source handoff, the two adapte
 controls had not been executed; later results belong in the separately bound
 validation receipt. No cases were added. This next private
 hypothesis establishes no native success, qualification or coverage result.
+
+
+## Private runtime diagnostic IPC hypothesis
+
+V17 (run `37199204578`, harness `3689e61c740042b5ad2d61402d80732ddc17e233`,
+source `197fe53eb891f6839637390b0f8e966dc38d8cbc`) observed collector connection
+and testhost startup. The retained host trace then reported `OutOfMemoryException`
+on `Thread.StartCore` through `PortableThreadPool.RegisterWaitForSingleObject`,
+`ProcessHelper.SetExitCallback` and `TestHost.SetParentProcessExitCallback`.
+That exception and stack do not independently establish memory-limit exhaustion
+or reproduce the exact native failure.
+
+The three retained sampler rows, at 0, 341 and 695 ms, recorded `pids.current`
+values 52, 53 and 64 and `pids.events.max` values 0, 0 and 2. Memory-current
+values were 257,196,032, 273,854,464 and 285,421,568 bytes; recorded memory events
+were all zero. These bounded observations support investigating task pressure,
+without proving exclusive causality or the absence of later memory events.
+Qualification still failed in the CLI, with empty entries and `None` claim/
+eligibility; the public Host entry did not run.
+
+The next private root-selected subject environment fixes
+`DOTNET_EnableDiagnostics_IPC=0` alongside `DOTNET_PROCESSOR_COUNT=1`, after the
+launcher's defaults in the cleared `env -i` invocation. The official
+[.NET diagnostic IPC setting](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-environment-variables#dotnet_enablediagnostics_ipc)
+is supported in .NET 8 and later: value `0` disables the runtime diagnostic port
+and cannot be overridden by the other diagnostic settings. This is an optional
+runtime diagnostic-port workload-reduction hypothesis. It does not demonstrate
+any saved thread count, successful native execution, qualification or coverage.
+
+Only the selected subject command receives this literal. Worker/application
+environments, UID/GID and account selection, cgroup guards, physical exit/watch/
+join checks, `TasksMax=64`, `MemoryMax=1G`, the existing 90-second timeout and all
+functional arguments remain unchanged. VSTest `--diag` logging and the collector's
+functional TCP settings are unchanged by this environment-map addition. No
+capability or admission setting is introduced, and there is no public option.
+
+The same two [emitted-argv controls](../test_linux_launcher.py) are adapted to
+check one fixed IPC assignment before dotnet and reject inherited IPC value `1`
+while retaining the CPU1 and original limit assertions. No cases were added.
+Their earlier CPU handoffs and results are historical; this IPC source handoff
+has not executed the two adapted controls. Later results require a separately
+bound validation receipt, not an upgrade of the prior CPU-only evidence.
