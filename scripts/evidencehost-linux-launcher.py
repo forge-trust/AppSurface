@@ -1773,6 +1773,7 @@ class Broker:
                 "/usr/bin/env", "-i", *[f"{key}={value}" for key, value in {
                     **ENV, "DOTNET_CLI_HOME": str(self.scratch / "dotnet"),
                     "NUGET_PACKAGES": str(self.scratch / "nuget"),
+                    "DOTNET_PROCESSOR_COUNT": "2",
                     "EVIDENCE_TEST_OUTPUT_ROOT": str(self.scratch / "test-output")}.items()],
                 str(self.dotnet), *request["arguments"]]
         collector_sampler = None

@@ -107,3 +107,31 @@ last sample is discarded. This flag describes diagnostic availability; it is
 never execution, readiness, owned-exit or admission authority. The initial source
 handoff defined the data controls without executing them; later results belong in
 the parent's bounded validation receipt.
+
+
+## Private managed parallelism hypothesis
+
+The retained V15 collector observations contain 15 samples over approximately
+4.8 seconds. They reached 64 tasks with `pids.events.max=1`, while observed
+memory was approximately 285–288 MB with no memory events recorded. These bounded
+observations do not establish the cause of the collector startup timeout or
+prove the absence of an event outside the observation window.
+
+The private root-selected subject command now places exactly
+`DOTNET_PROCESSOR_COUNT=2` in the cleared `env -i` environment before the selected
+.NET executable. The [.NET processor-count setting](https://learn.microsoft.com/en-us/dotnet/core/compatibility/core-libraries/6.0/environment-processorcount-on-windows#recommended-action)
+fixes the runtime-reported processor count for components that use that value to
+size parallel work. It does not cap the total number of threads. Its effect on
+this private workload remains a hypothesis to measure within the same task ceiling.
+The literal follows the launcher's environment defaults, so a caller or host
+value cannot override it. It is not a public option, admission selector or proof.
+
+The setting applies only to root-selected subject commands. Global launcher,
+worker and application environments are unchanged. `TasksMax=64`, `MemoryMax=1G`,
+functional command arguments, quotas, lifecycle checks and timeouts remain intact.
+Two new [emitted-argv controls](../test_linux_launcher.py) use the existing
+`SubjectUnitCompletionTests.exercise` procedure and inspect the actual `_run`
+Popen call through its existing process double. At the initial source handoff,
+they defined fixed-value/position and hostile inherited-value checks without
+execution. Subsequent execution results belong in the parent's validation receipt.
+This preparation establishes no native success, qualification or coverage result.
