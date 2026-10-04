@@ -15,6 +15,14 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
 
+## 0.2.0-preview.13 - 2026-10-04
+
+- Narrative release note: [v0.2.0-preview.13](./releases/v0.2.0-preview.13.md)
+- Release manifest: `releases/v0.2.0-preview.13.release.json`
+- Release evidence bundle: `releases/v0.2.0-preview.13.evidence.json`
+- Carries forward the changes prepared for [preview.12](./releases/v0.2.0-preview.12.md), whose NuGet publication stopped before packages were pushed, and repairs native producer-inventory verification.
+- Migration: `appsurface durable schema preflight` now requires `--role-pairs-file` and `--migration-owner-role`, including for single-pair stores; update existing invocations. See the [CLI contract](./Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands).
+
 ## 0.2.0-preview.12 - 2026-10-02
 
 - Narrative release note: [v0.2.0-preview.12](./releases/v0.2.0-preview.12.md)
