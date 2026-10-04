@@ -117,8 +117,19 @@ memory was approximately 285–288 MB with no memory events recorded. These boun
 observations do not establish the cause of the collector startup timeout or
 prove the absence of an event outside the observation window.
 
+The retained V16 diagnosis observed a collector connection marker followed by a
+`Process.Start` testhost launch failure reported as `Win32Exception`, native
+error 11 (`EAGAIN`). Its one startup sample, at elapsed 0 ms before the failed
+launch, recorded `pids.current=64` and `pids.events.max=0`. It contains no
+post-failure limit-event snapshot. These facts do not identify the exact failing
+native syscall, prove an exclusive cgroup cause or measure the actual processor
+count. The connection marker does not establish a completed subject test run.
+The local-only diagnosis ledger is
+`TestResults/issue779-recovery-20261003/current-private-qualification-v16/artifact-diagnosis/diagnosis.json`
+(SHA-256 `104c6a01a2ae972ca7b4e9dfdcdb2185b1986c0c499e5af3531cf995c1a2d6f1`).
+
 The private root-selected subject command now places exactly
-`DOTNET_PROCESSOR_COUNT=2` in the cleared `env -i` environment before the selected
+`DOTNET_PROCESSOR_COUNT=1` in the cleared `env -i` environment before the selected
 .NET executable. The [.NET processor-count setting](https://learn.microsoft.com/en-us/dotnet/core/compatibility/core-libraries/6.0/environment-processorcount-on-windows#recommended-action)
 fixes the runtime-reported processor count for components that use that value to
 size parallel work. It does not cap the total number of threads. Its effect on
@@ -131,7 +142,10 @@ worker and application environments are unchanged. `TasksMax=64`, `MemoryMax=1G`
 functional command arguments, quotas, lifecycle checks and timeouts remain intact.
 Two new [emitted-argv controls](../test_linux_launcher.py) use the existing
 `SubjectUnitCompletionTests.exercise` procedure and inspect the actual `_run`
-Popen call through its existing process double. At the initial source handoff,
-they defined fixed-value/position and hostile inherited-value checks without
-execution. Subsequent execution results belong in the parent's validation receipt.
-This preparation establishes no native success, qualification or coverage result.
+Popen call through its existing process double. The historical CPU2 version of
+these two controls passed in the preserved local validation receipt, SHA-256
+`62fed84faef10976b8fe0a430476d0c1eca77bda7baf527fa0c9953ab7ac8771`.
+That receipt remains the CPU2 result. At the CPU1 source handoff, the two adapted
+controls had not been executed; later results belong in the separately bound
+validation receipt. No cases were added. This next private
+hypothesis establishes no native success, qualification or coverage result.
