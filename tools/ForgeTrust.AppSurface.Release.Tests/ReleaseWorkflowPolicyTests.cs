@@ -789,6 +789,12 @@ public sealed class ReleaseWorkflowPolicyTests
             Assert.Contains("contents: write", job, StringComparison.Ordinal);
             Assert.Contains("environment: release-publish", job, StringComparison.Ordinal);
         }
+
+        var pagesDeployment = GetWorkflowJob(workflow, "deploy-docs-pages", "verify-public-docs");
+        Assert.Contains("pages: write", pagesDeployment, StringComparison.Ordinal);
+        Assert.Contains("- validate-release", pagesDeployment, StringComparison.Ordinal);
+        Assert.Contains("- publish-docs-archive", pagesDeployment, StringComparison.Ordinal);
+        Assert.Contains("name: github-pages", pagesDeployment, StringComparison.Ordinal);
     }
 
     [Fact]
