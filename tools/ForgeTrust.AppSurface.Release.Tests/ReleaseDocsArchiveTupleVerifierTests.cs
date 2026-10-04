@@ -108,6 +108,59 @@ public sealed class ReleaseDocsArchiveTupleVerifierTests
         Assert.Contains("contains a link", exception.Diagnostic.Cause, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("plan")]
+    [InlineData("sidecar")]
+    public async Task VerifyRejectsSymlinkedMetadataInput(string input)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var fixture = new TupleFixture();
+        await fixture.WriteValidTupleAsync();
+        var selectedPath = input == "plan" ? fixture.PlanPath : fixture.SidecarPath;
+        var targetPath = Path.Join(fixture.RootPath, $"{input}-target");
+        File.Move(selectedPath, targetPath);
+        File.CreateSymbolicLink(selectedPath, targetPath);
+
+        var exception = await Assert.ThrowsAsync<ReleaseToolException>(() => fixture.VerifyAsync());
+
+        Assert.Equal("release-docs-archive-tuple-invalid", exception.Diagnostic.Code);
+        Assert.Contains("contains a link", exception.Diagnostic.Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VerifyRejectsSymlinkedArchiveParentDirectory()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var fixture = new TupleFixture();
+        await fixture.WriteValidTupleAsync();
+        var alias = Path.Join(Path.GetDirectoryName(fixture.RootPath)!, $"appsurface-docs-tuple-alias-{Guid.NewGuid():N}");
+        File.CreateSymbolicLink(alias, fixture.RootPath);
+        try
+        {
+            var exception = await Assert.ThrowsAsync<ReleaseToolException>(() => ReleaseDocsArchiveTupleVerifier.VerifyAsync(
+                fixture.Version,
+                Path.Join(alias, fixture.AssetName),
+                fixture.PlanPath,
+                fixture.SidecarPath,
+                CancellationToken.None));
+
+            Assert.Equal("release-docs-archive-tuple-invalid", exception.Diagnostic.Code);
+            Assert.Contains("contains a link", exception.Diagnostic.Cause, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(alias);
+        }
+    }
+
     [Fact]
     public async Task VerifyRejectsOversizedArchiveBeforeHashing()
     {

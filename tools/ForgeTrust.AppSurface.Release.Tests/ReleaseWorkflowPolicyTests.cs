@@ -633,9 +633,22 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("expected_release_manifest_sha256=\"$(sha256sum \"${exact_tree}/.appsurface-docs-release-manifest.json\" | awk '{print $1}')\"", publish, StringComparison.Ordinal);
         Assert.Contains("--expected-release-manifest-sha256 \"${expected_release_manifest_sha256}\"", publish, StringComparison.Ordinal);
         Assert.Contains("docs verify-archive", publish, StringComparison.Ordinal);
+        Assert.Contains("archive_path=\"${RUNNER_TEMP}/appsurface-docs-v${VERSION}.tar.gz\"", publish, StringComparison.Ordinal);
+        Assert.Contains("sidecar_path=\"${archive_path}.sha256\"", publish, StringComparison.Ordinal);
+        Assert.Contains("publication_plan=\"${RUNNER_TEMP}/docs-publication-plan.json\"", publish, StringComparison.Ordinal);
+        Assert.Contains("verify-docs-archive-tuple", publish, StringComparison.Ordinal);
         Assert.Contains("gh release create \"${TAG}\" --verify-tag --draft", publish, StringComparison.Ordinal);
         Assert.Contains("gh release edit \"${TAG}\" --title \"${TITLE}\" --notes-file \"${notes_file}\"", publish, StringComparison.Ordinal);
-        Assert.Contains("gh release upload \"${TAG}\" \"${ARCHIVE_PATH}\" \"${SHA256_PATH}\" --clobber", publish, StringComparison.Ordinal);
+        Assert.Contains("gh release upload \"${TAG}\" \"${archive_path}\" \"${sidecar_path}\" --clobber", publish, StringComparison.Ordinal);
+        var draftUploadStep = publish.Split("- name: Create or reuse draft release and upload docs assets", 2, StringSplitOptions.None)[1]
+            .Split("- name: Upload docs publication artifacts", 2, StringSplitOptions.None)[0];
+        Assert.DoesNotContain("steps.docs.outputs.archive_path", draftUploadStep, StringComparison.Ordinal);
+        Assert.DoesNotContain("steps.docs.outputs.sha256_path", draftUploadStep, StringComparison.Ordinal);
+        Assert.DoesNotContain("steps.docs.outputs.docs_publication_plan", draftUploadStep, StringComparison.Ordinal);
+        Assert.True(
+            publish.IndexOf("verify-docs-archive-tuple", StringComparison.Ordinal)
+                < publish.IndexOf("gh release create \"${TAG}\" --verify-tag --draft", StringComparison.Ordinal),
+            "The archive tuple must be verified before the draft release is created.");
         Assert.Contains("${{ runner.temp }}/appsurface-tagged-release-inspect.txt", publish, StringComparison.Ordinal);
         Assert.Contains("actions/upload-pages-artifact", publish, StringComparison.Ordinal);
         Assert.Contains("include-hidden-files: true", publish, StringComparison.Ordinal);

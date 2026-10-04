@@ -376,11 +376,11 @@ jobs:
           TAG_COMMIT: ${{ needs.validate-release.outputs.tag_commit }}
           VERSION: ${{ needs.validate-release.outputs.version }}
           TITLE: AppSurface ${{ needs.validate-release.outputs.tag }}
-          ARCHIVE_PATH: ${{ steps.docs.outputs.archive_path }}
-          SHA256_PATH: ${{ steps.docs.outputs.sha256_path }}
-          DOCS_PUBLICATION_PLAN: ${{ steps.docs.outputs.docs_publication_plan }}
         run: |
           set -euo pipefail
+          archive_path="${RUNNER_TEMP}/appsurface-docs-v${VERSION}.tar.gz"
+          sidecar_path="${archive_path}.sha256"
+          publication_plan="${RUNNER_TEMP}/docs-publication-plan.json"
           require_remote_tag_identity() {
             local remote_tag_refs actual_tag_object_id actual_tag_commit remote_ref_count
             remote_tag_refs="$(git ls-remote --exit-code origin "refs/tags/${TAG}" "refs/tags/${TAG}^{}")"
@@ -401,9 +401,9 @@ jobs:
           dotnet run --project release-verifier/tools/ForgeTrust.AppSurface.Release/ForgeTrust.AppSurface.Release.csproj -c Release --no-build --no-restore -- \
             verify-docs-archive-tuple \
             --version "${VERSION}" \
-            --archive "${ARCHIVE_PATH}" \
-            --plan "${DOCS_PUBLICATION_PLAN}" \
-            --sha256 "${SHA256_PATH}"
+            --archive "${archive_path}" \
+            --plan "${publication_plan}" \
+            --sha256 "${sidecar_path}"
           notes_file="${RUNNER_TEMP}/release-notes.md"
           git show "${TAG_COMMIT}:releases/v${VERSION}.md" > "${notes_file}"
           if gh release view "${TAG}" --json isDraft --jq '.isDraft' | grep -qx true; then
@@ -413,7 +413,7 @@ jobs:
             gh release create "${TAG}" --verify-tag --draft --title "${TITLE}" --notes-file "${notes_file}"
           fi
           require_remote_tag_identity
-          gh release upload "${TAG}" "${ARCHIVE_PATH}" "${SHA256_PATH}" --clobber
+          gh release upload "${TAG}" "${archive_path}" "${sidecar_path}" --clobber
 
       - name: Upload docs publication artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
