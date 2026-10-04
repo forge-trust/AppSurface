@@ -1619,14 +1619,17 @@ class RootCompletionTests(unittest.TestCase):
         output.mkdir(parents=True, mode=0o700)
         os.chmod(parent, 0o700)
         os.chmod(output, 0o700)
-        broker.descriptor = {"cgroup": "/system.slice/fixture-worker.service",
+        broker.unit_prefix = "evidencehost-0123456789ab"
+        broker.descriptor = {"unit": "evidencehost-0123456789ab-worker.service",
+                             "cgroup": "/system.slice/evidencehost-0123456789ab-worker.service",
                              "output_parent_identity": launcher.output_parent_identity(parent),
                              "run_id": "100/1", "paths": ["declared.cs"], "proof_digest": ""}
         broker.ready_seen = broker.exited = broker.wait_completed = broker.work_closed = True
         broker.subject_commands_started = 1
         broker.command_output_receipts = [(7, 4, 3)]
         broker.output_quota.count(7)
-        properties = {"Result": "success", "User": "fixture-worker", "KillMode": "control-group",
+        properties = {"LoadState": "loaded", "MainPID": "0", "Result": "success",
+                      "User": "fixture-worker", "KillMode": "control-group",
                       "ExecMainCode": "1", "ExecMainStatus": "0", "ControlGroup": broker.descriptor["cgroup"]}
         return broker, output, properties
 
@@ -1674,6 +1677,81 @@ class RootCompletionTests(unittest.TestCase):
                     completion.__enter__()
             finally:
                 broker.close_artifact_handles()
+
+    def test_pruned_worker_group_checks_retained_exact_group_before_returning_real_handles(self):
+        for reported in ("", "/system.slice/evidencehost-0123456789ab-worker.service"):
+            with self.subTest(reported=reported), tempfile.TemporaryDirectory() as root:
+                broker, output, properties = self.completion_fixture(root)
+                properties["ControlGroup"] = reported
+                try:
+                    with patch.object(broker, "_group_empty", return_value=True) as physical, \
+                            patch.object(broker, "_all_subject_groups_empty", return_value=True):
+                        with launcher._completion_after_owned_exit(broker, output, "fixture-worker", properties) as completion:
+                            physical.assert_called_once_with(broker.descriptor["cgroup"])
+                            duplicate = completion.duplicate_output_directory()
+                            try:
+                                self.assertEqual(os.fstat(duplicate).st_ino, output.stat().st_ino)
+                            finally:
+                                os.close(duplicate)
+                finally:
+                    broker.close_artifact_handles()
+
+    def test_pruned_property_does_not_hide_populated_retained_worker_group(self):
+        with tempfile.TemporaryDirectory() as root:
+            broker, output, properties = self.completion_fixture(root)
+            properties["ControlGroup"] = ""
+            try:
+                with patch.object(broker, "_group_empty", return_value=False) as physical, \
+                        patch.object(broker, "_all_subject_groups_empty", return_value=True):
+                    self.assertFalse(launcher._worker_group_empty(broker, properties))
+                    with self.assertRaisesRegex(launcher.LauncherError, "completion-ownership-unconfirmed"):
+                        launcher._completion_after_owned_exit(broker, output, "fixture-worker", properties)
+                    self.assertEqual(physical.call_args_list, [
+                        unittest.mock.call(broker.descriptor["cgroup"]),
+                        unittest.mock.call(broker.descriptor["cgroup"])])
+            finally:
+                broker.close_artifact_handles()
+
+    def test_missing_foreign_or_live_worker_facts_never_inspect_a_group(self):
+        cases = (("properties", "LoadState", None), ("properties", "LoadState", "not-found"),
+                 ("properties", "MainPID", None), ("properties", "MainPID", "12"),
+                 ("properties", "MainPID", "malformed"),
+                 ("properties", "ControlGroup", None), ("properties", "ControlGroup", "/system.slice/foreign.service"),
+                 ("properties", "ControlGroup", 123),
+                 ("descriptor", "unit", None), ("descriptor", "unit", "foreign.service"),
+                 ("descriptor", "cgroup", None), ("descriptor", "cgroup", "/system.slice/foreign.service"),
+                 ("broker", "unit_prefix", "evidencehost-ffffffffffff"))
+        for target, key, value in cases:
+            with self.subTest(target=target, key=key, value=value), tempfile.TemporaryDirectory() as root:
+                broker, output, properties = self.completion_fixture(root)
+                if target == "broker":
+                    setattr(broker, key, value)
+                else:
+                    changed = properties if target == "properties" else broker.descriptor
+                    if value is None:
+                        changed.pop(key)
+                    else:
+                        changed[key] = value
+                try:
+                    with patch.object(broker, "_group_empty") as physical, \
+                            patch.object(broker, "_all_subject_groups_empty", return_value=True):
+                        self.assertFalse(launcher._worker_group_empty(broker, properties))
+                        with self.assertRaisesRegex(launcher.LauncherError, "completion-ownership-unconfirmed"):
+                            launcher._completion_after_owned_exit(broker, output, "fixture-worker", properties)
+                        physical.assert_not_called()
+                finally:
+                    broker.close_artifact_handles()
+
+    def test_late_closed_failure_categories_survive_without_raw_exception_or_path(self):
+        for cause in ("unit-inspection-failed", "unexpected-control-group", "owned-exit-inspection-deadline"):
+            with self.subTest(cause=cause):
+                error = launcher.LauncherError(cause)
+                error.private_canary = "/private/raw-secret-779"
+                diagnostic = launcher.failure_diagnostic(error)
+                self.assertEqual(diagnostic, {"schema": launcher.FAILURE_DIAGNOSTIC_SCHEMA,
+                    "error_class": "LauncherError", "cause": cause})
+                self.assertEqual(launcher.validate_failure_diagnostic(diagnostic), diagnostic)
+                self.assertNotIn("raw-secret", json.dumps(diagnostic))
 
     def test_requires_every_protocol_ack_and_no_active_handler_write_or_failed_pump(self):
         values = (("ready_seen", False), ("exited", False), ("wait_completed", False),

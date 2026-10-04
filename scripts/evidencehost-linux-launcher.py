@@ -149,6 +149,7 @@ FAILURE_DIAGNOSTIC_CAUSES = frozenset({
     "completion-ownership-unconfirmed", "completion-output-unconfirmed",
     "completion-output-identity-changed",
     "application-preparation-deadline", "application-workspace-changed",
+    "unit-inspection-failed", "unexpected-control-group", "owned-exit-inspection-deadline",
 })
 FAILURE_DIAGNOSTIC_OPERATIONS = frozenset({"systemctl", "systemd-run", "useradd", "groupadd", "userdel", "groupdel", "worker-exit", "worker-start"})
 WORKER_LOAD_STATES = frozenset({"loaded", "not-found", "error", "bad-setting", "masked"})
@@ -2591,6 +2592,26 @@ def validate_completion_output(receipts, started: int, total: int, application_r
         raise LauncherError("completion-output-unconfirmed")
 
 
+def _worker_group_empty(broker: Broker, worker_properties: dict[str, str]) -> bool:
+    """Inspect only the root-retained generated worker group after its main process exits.
+
+    systemd may prune ControlGroup for an exited RemainAfterExit unit. An empty
+    property is not exit authority: loaded/MainPID facts, the exact retained unit
+    and group pair, and the physical group's empty state are still required.
+    Missing or foreign metadata rejects completion without inspecting another group.
+    This internal check grants no admission and does not replace protocol/pump joins.
+    """
+    unit, group = broker.descriptor.get("unit"), broker.descriptor.get("cgroup")
+    if (type(unit) is not str or not re.fullmatch(r"evidencehost-[0-9a-f]{12}-worker\.service", unit)
+            or unit != broker.unit_prefix + "-worker.service"
+            or group != "/system.slice/" + unit
+            or worker_properties.get("LoadState") != "loaded"
+            or worker_properties.get("MainPID") != "0"
+            or worker_properties.get("ControlGroup") not in ("", group)):
+        return False
+    return broker._group_empty(group)
+
+
 def _completion_after_owned_exit(broker: Broker, output: Path, worker_name: str,
                                  worker_properties: dict[str, str]) -> _LaunchCompletion:
     """Pin final output only after protocol, process, handler and exact pump acknowledgements.
@@ -2618,7 +2639,7 @@ def _completion_after_owned_exit(broker: Broker, output: Path, worker_name: str,
     if (worker_properties.get("Result") != "success" or worker_properties.get("User") != worker_name
             or worker_properties.get("KillMode") != "control-group"
             or worker_properties.get("ExecMainCode") != "1" or worker_properties.get("ExecMainStatus") != "0"
-            or not broker._group_empty(worker_properties.get("ControlGroup", broker.descriptor["cgroup"]))
+            or not _worker_group_empty(broker, worker_properties)
             or not broker._all_owned_work_stopped(inspection_deadline=broker.deadline)
             or time.monotonic() >= broker.deadline):
         raise LauncherError("completion-ownership-unconfirmed")
@@ -3212,7 +3233,7 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
             raise failure
         wprops=broker._unit_properties(worker_unit)
         require_successful_worker(wprops, worker_name, broker, diagnostic_directory_fd)
-        if not broker._group_empty(wprops.get("ControlGroup", desc["cgroup"])): raise LauncherError("worker-exit-unconfirmed")
+        if not _worker_group_empty(broker, wprops): raise LauncherError("worker-exit-unconfirmed")
         if any(not broker._group_empty(g) for _,g in broker.units if g): raise LauncherError("subject-exit-unconfirmed")
         output = output_parent / args.output_slot
         try:
