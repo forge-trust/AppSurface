@@ -19,6 +19,46 @@ SPEC.loader.exec_module(module)
 
 
 class DiagnosticDataControls(unittest.TestCase):
+    def test_failed_cli_completion_fixed_two_limits_are_opaque_private_canonical_members(self):
+        workspace, output = self.roots()
+        expected = {}
+        for name, maximum in (("evidence-manifest.json", 256*1024), ("evidence-summary.json", 64*1024)):
+            data = b"private-canary\x00\xff" + b"x"*(maximum-len(b"private-canary\x00\xff"))
+            self.assertEqual(maximum, len(data))
+            self.write(workspace, "failure-cli/"+name, data)
+            expected["failure-cli/"+name] = data
+            self.write(workspace, "failure-host/"+name, b"not-selected")
+        console = io.StringIO()
+        with redirect_stdout(console), redirect_stderr(console): self.retain(workspace, output)
+        _, contents, index = self.archive(output)
+        self.assertEqual("", console.getvalue())
+        self.assertEqual(set(expected) | {"index.json"}, set(contents))
+        for name, data in expected.items(): self.assertEqual(data, contents[name])
+        self.assertEqual(set(expected), {item["name"] for item in index})
+        self.assertTrue(all(item["state"] == "complete" for item in index))
+
+    def test_failed_cli_completion_oversize_links_and_public_modes_do_not_upgrade_retention(self):
+        for name, maximum in (("evidence-manifest.json", 256*1024), ("evidence-summary.json", 64*1024)):
+            for shape in ("oversize", "symlink", "hardlink", "public-mode"):
+                with self.subTest(name=name, shape=shape):
+                    workspace, output = self.roots()
+                    path = self.write(workspace, "failure-cli/"+name, b"private-canary")
+                    outside = workspace / "outside"
+                    outside.write_bytes(b"outside-canary"); outside.chmod(0o600)
+                    if shape == "oversize": path.write_bytes(b"x"*(maximum+1))
+                    elif shape == "public-mode": path.chmod(0o644)
+                    else:
+                        path.unlink()
+                        if shape == "symlink": path.symlink_to(outside)
+                        else: os.link(outside, path)
+                    if shape == "oversize":
+                        self.retain(workspace, output)
+                        _, contents, index = self.archive(output)
+                        self.assertEqual({"index.json"}, set(contents))
+                        self.assertEqual([{ "name": "failure-cli/"+name, "state": "oversize", "length": maximum+1}], index)
+                    else: self.reject_without_archive(workspace, output, exception=(OSError, module.PreparationFailure))
+                    self.assertEqual(b"outside-canary", outside.read_bytes())
+
     def roots(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

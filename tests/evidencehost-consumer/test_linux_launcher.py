@@ -3034,4 +3034,247 @@ class PrivateVstestDiagnosticOrchestrationControls(unittest.TestCase):
                 finally: broker.close_artifact_handles()
 
 
+class PrivateFailedCompletionControls(unittest.TestCase):
+    """Real file data/procedure controls; root/groups are doubles, never exit proof."""
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="completion-diagnostic-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        self.parent, self.slot, self.destination = self.root / "output", self.root / "output/qualification", self.root / "diagnostics"
+        for path in (self.parent, self.slot, self.destination):
+            path.mkdir(mode=0o700)
+            os.chown(path, -1, os.getgid())
+            path.chmod(0o700)
+        self.fds = []
+        for path in (self.root, self.parent, self.slot, self.destination):
+            fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            self.fds.append(fd)
+            self.addCleanup(os.close, fd)
+        self.write_sources(b"manifest-canary\x00\xff", b"summary-canary")
+
+    def write_sources(self, manifest, summary):
+        for (name, _), data in zip(launcher.FAILED_COMPLETION_FILES, (manifest, summary)):
+            path = self.slot / name
+            path.write_bytes(data)
+            os.chown(path, -1, os.getgid())
+            path.chmod(0o600)
+
+    def copy(self, **overrides):
+        options = dict(deadline=time.monotonic()+5, parent_anchor_fd=self.fds[0], parent_relative="output",
+                       diagnostic_uid=os.geteuid(), diagnostic_gid=os.getgid())
+        options.update(overrides)
+        with patch.object(launcher, "openat2", side_effect=portable_openat2):
+            return launcher._copy_failed_completion_files(self.fds[1], self.fds[2], self.fds[3],
+                "qualification", os.geteuid(), os.getgid(), **options)
+
+    def test_exact_two_limits_copy_private_binary_bytes_and_borrow_all_descriptors(self):
+        data = (b"m"*(256*1024), b"s"*(64*1024))
+        self.write_sources(*data)
+        unrelated = self.slot / "unselected"
+        unrelated.write_bytes(b"not-discovered")
+        console = io.StringIO()
+        with patch("sys.stdout", console), patch("sys.stderr", console):
+            self.assertIs(True, self.copy())
+        self.assertEqual("", console.getvalue())
+        self.assertEqual({name for name, _ in launcher.FAILED_COMPLETION_FILES}, set(os.listdir(self.destination)))
+        for (name, _), expected in zip(launcher.FAILED_COMPLETION_FILES, data):
+            path = self.destination / name
+            self.assertEqual(expected, path.read_bytes())
+            info = path.lstat()
+            self.assertEqual((os.geteuid(), os.getgid(), 0o600, 1),
+                (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode), info.st_nlink))
+        self.assertEqual(b"not-discovered", unrelated.read_bytes())
+        for fd in self.fds: os.fstat(fd)
+
+    def test_each_unsafe_second_file_rejects_before_any_byte_read_or_destination_write(self):
+        summary = self.slot / "evidence-summary.json"
+        for shape in ("symlink", "hardlink", "fifo", "public-mode", "oversize"):
+            with self.subTest(shape=shape):
+                summary.unlink()
+                outside = self.root / ("sentinel-"+shape)
+                outside.write_bytes(b"outside-canary")
+                if shape == "symlink": summary.symlink_to(outside)
+                elif shape == "hardlink": os.link(outside, summary)
+                elif shape == "fifo": os.mkfifo(summary, 0o600)
+                else:
+                    summary.write_bytes(b"s"*(65537 if shape == "oversize" else 1))
+                    summary.chmod(0o644 if shape == "public-mode" else 0o600)
+                with patch.object(launcher.os, "pread", wraps=os.pread) as read, \
+                     patch.object(launcher.os, "write", wraps=os.write) as write:
+                    self.assertIs(False, self.copy())
+                    read.assert_not_called(); write.assert_not_called()
+                self.assertEqual([], os.listdir(self.destination))
+                self.assertEqual(b"outside-canary", outside.read_bytes())
+        summary.unlink(); self.write_sources(b"m", b"s")
+        self.assertIs(True, self.copy())
+
+    def test_missing_file_and_wrong_owner_or_directory_mode_never_create_a_copy(self):
+        summary = self.slot / "evidence-summary.json"
+        summary.unlink()
+        with patch.object(launcher.os, "pread", wraps=os.pread) as read:
+            self.assertIs(False, self.copy()); read.assert_not_called()
+        self.write_sources(b"m", b"s")
+        for options in ({"diagnostic_uid": os.geteuid()+1}, {"diagnostic_gid": os.getgid()+1}):
+            with self.subTest(options=options), patch.object(launcher.os, "pread", wraps=os.pread) as read:
+                self.assertIs(False, self.copy(**options)); read.assert_not_called()
+        self.slot.chmod(0o755)
+        try:
+            self.assertIs(False, self.copy())
+            self.assertEqual([], os.listdir(self.destination))
+        finally: self.slot.chmod(0o700)
+        self.assertIs(True, self.copy())
+
+    def test_source_growth_and_named_parent_substitution_are_detected_without_raw_echo(self):
+        real_read = os.pread
+        for shape in ("growth", "parent-replacement"):
+            with self.subTest(shape=shape):
+                changed = False
+                def read(fd, count, offset):
+                    nonlocal changed
+                    data = real_read(fd, count, offset)
+                    if not changed:
+                        changed = True
+                        if shape == "growth":
+                            with (self.slot / "evidence-manifest.json").open("ab") as stream: stream.write(b"growth-canary")
+                        else:
+                            self.parent.rename(self.root / "old-output")
+                            self.parent.mkdir(mode=0o700)
+                    return data
+                console = io.StringIO()
+                with patch.object(launcher.os, "pread", side_effect=read), patch("sys.stdout", console), patch("sys.stderr", console):
+                    self.assertIs(False, self.copy())
+                self.assertEqual("", console.getvalue())
+                self.assertEqual([], os.listdir(self.destination))
+                if shape == "parent-replacement":
+                    self.parent.rmdir(); (self.root / "old-output").rename(self.parent)
+                self.write_sources(b"m", b"s")
+        self.assertIs(True, self.copy())
+
+    def test_exclusive_destination_and_second_write_failure_preserve_existing_bytes_and_remove_partial_copies(self):
+        target = self.destination / "evidence-manifest.json"
+        target.write_bytes(b"existing-canary"); target.chmod(0o600)
+        self.assertIs(False, self.copy())
+        self.assertEqual(b"existing-canary", target.read_bytes())
+        target.unlink()
+        real_write, calls = os.write, 0
+        def write(fd, data):
+            nonlocal calls
+            calls += 1
+            if calls == 2: raise OSError("private-write-canary")
+            return real_write(fd, data)
+        console = io.StringIO()
+        with patch.object(launcher.os, "write", side_effect=write), patch("sys.stdout", console), patch("sys.stderr", console):
+            self.assertIs(False, self.copy())
+        self.assertEqual(2, calls)
+        self.assertEqual([], os.listdir(self.destination))
+        self.assertEqual("", console.getvalue())
+        self.assertIs(True, self.copy())
+
+    def test_first_source_or_destination_metadata_failure_closes_owned_fd_and_rolls_back_only_proven_inode(self):
+        import errno
+        real_open, real_fstat = os.open, os.fstat
+        for phase, replacement in (("source", False), ("destination", False), ("destination", True)):
+            with self.subTest(phase=phase, replacement=replacement):
+                target_fd, failed = None, False
+                destination = self.destination / "evidence-manifest.json"
+                held_name = self.root / "held-destination"
+                def opened(path, flags, *args, **kwargs):
+                    nonlocal target_fd
+                    fd = real_open(path, flags, *args, **kwargs)
+                    if (path == "evidence-manifest.json"
+                            and bool(flags & os.O_CREAT) == (phase == "destination")):
+                        target_fd = fd
+                    return fd
+                def inspected(fd):
+                    nonlocal failed
+                    if fd == target_fd and not failed:
+                        failed = True
+                        if replacement:
+                            destination.rename(held_name)
+                            destination.write_bytes(b"replacement-canary")
+                            destination.chmod(0o600)
+                        raise OSError("first-metadata-canary")
+                    return real_fstat(fd)
+                original = RuntimeError("original-failure-canary")
+                console = io.StringIO()
+                with patch.object(launcher.os, "open", side_effect=opened), \
+                     patch.object(launcher.os, "fstat", side_effect=inspected), \
+                     patch("sys.stdout", console), patch("sys.stderr", console):
+                    with self.assertRaises(RuntimeError) as caught:
+                        try: raise original
+                        finally: self.assertIs(False, self.copy())
+                self.assertIs(original, caught.exception)
+                self.assertTrue(failed)
+                self.assertIsNotNone(target_fd)
+                with self.assertRaises(OSError) as closed: real_fstat(target_fd)
+                self.assertEqual(errno.EBADF, closed.exception.errno)
+                self.assertEqual("", console.getvalue())
+                if replacement:
+                    self.assertEqual(b"replacement-canary", destination.read_bytes())
+                    self.assertEqual(b"", held_name.read_bytes())
+                    destination.unlink(); held_name.unlink()
+                else: self.assertEqual([], os.listdir(self.destination))
+                for fd in self.fds: real_fstat(fd)
+        self.assertIs(True, self.copy())
+
+    def test_expired_remaining_allowance_rejects_before_open_read_or_write(self):
+        with patch.object(launcher, "openat2") as opened, patch.object(launcher.os, "pread") as read, \
+             patch.object(launcher.os, "write") as write:
+            self.assertIs(False, launcher._copy_failed_completion_files(self.fds[1], self.fds[2], self.fds[3],
+                "qualification", os.geteuid(), os.getgid(), deadline=time.monotonic()-1,
+                parent_anchor_fd=self.fds[0], parent_relative="output"))
+            opened.assert_not_called(); read.assert_not_called(); write.assert_not_called()
+        self.assertIs(True, self.copy())
+
+    def test_every_closed_checkpoint_negative_blocks_root_capture_before_filesystem_io(self):
+        broker, _, _ = artifact_broker(self.root)
+        self.addCleanup(broker.close_artifact_handles)
+        broker.descriptor = {"cgroup": "/system.slice/fixture.service", "output_parent": str(self.parent),
+            "output_slot": "qualification", "output_parent_identity": launcher._identity_from_stat(os.fstat(self.fds[1]))}
+        for field in ("ready_seen", "wait_completed", "exited", "work_closed"): setattr(broker, field, True)
+        retained = (broker.test_output_fd, launcher._vstest_failure_checkpoint(broker, True), time.monotonic()+5)
+        changes = [(name, False) for name in ("ready_seen", "wait_completed", "exited", "work_closed")]
+        changes += [(name, 1) for name in ("active_handlers", "active_runs", "active_artifact_operations", "active_application_operations")]
+        changes += [("subject_output_failed", True), ("application_work_failed", True)]
+        for name, value in changes:
+            old = getattr(broker, name); setattr(broker, name, value)
+            try:
+                with patch.object(launcher.os, "geteuid", return_value=0), patch.object(launcher.os, "open") as opened:
+                    self.assertIs(False, launcher._capture_failed_cli_completion(broker, self.fds[3], True, retained))
+                    opened.assert_not_called()
+            finally: setattr(broker, name, old)
+        with patch.object(launcher.os, "geteuid", return_value=0), patch.object(launcher.os, "open") as opened:
+            self.assertIs(False, launcher._capture_failed_cli_completion(broker, self.fds[3], False, retained))
+            opened.assert_not_called()
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(launcher.os, "geteuid", return_value=0))
+            stack.enter_context(patch.object(broker, "_group_empty", return_value=True))
+            stack.enter_context(patch.object(broker, "_all_owned_work_stopped", return_value=True))
+            stack.enter_context(patch.object(launcher, "openat2", side_effect=portable_openat2))
+            copied = stack.enter_context(patch.object(launcher, "_copy_failed_completion_files", return_value=True))
+            self.assertIs(True, launcher._capture_failed_cli_completion(broker, self.fds[3], True, retained))
+            copied.assert_called_once()
+        os.fstat(self.fds[3])
+
+    def test_failure_hook_precedes_handle_close_preserves_original_error_and_success_has_no_new_io(self):
+        events = []
+        # The helper contains all capture failures; procedure controls also verify
+        # the actual hook ordering without constructing an authenticated worker.
+        with patch.object(launcher, "_retain_vstest_failure_input", return_value=None), \
+             patch.object(launcher, "_capture_failed_cli_completion", side_effect=lambda *args: events.append("capture") or False) as captured, \
+             patch.object(launcher, "_close_launch_resources", side_effect=lambda *args: events.append("close")):
+            original = RuntimeError("original-canary")
+            with self.assertRaises(RuntimeError) as error:
+                try: raise original
+                finally: launcher._close_failed_launch_resources(None, [], None, -1, self.fds[3], True, original)
+            self.assertIs(original, error.exception)
+            captured.assert_called_once()
+        self.assertEqual(["capture", "close"], events)
+        with patch.object(launcher, "_retain_vstest_failure_input") as retained, \
+             patch.object(launcher, "_capture_failed_cli_completion") as captured, \
+             patch.object(launcher, "_close_launch_resources"):
+            launcher._close_failed_launch_resources(None, [], None, -1, self.fds[3], True, None)
+            retained.assert_not_called(); captured.assert_not_called()
+
+
 if __name__ == "__main__": unittest.main()
