@@ -326,5 +326,39 @@ class PreparationDataControls(unittest.TestCase):
                 self.assertEqual(b"outside canary must remain unchanged", canary.read_bytes())
 
 
+    def test_sdk_preflight_records_observed_metadata_without_commands_or_sealing(self):
+        sdk = self.root / "trusted-sdk-metadata"
+        sdk.mkdir()
+        host = sdk / "dotnet"
+        host.write_bytes(b"metadata-only-no-execution")
+        workspace = self.root / "sdk-workspace"
+        workspace.mkdir()
+        with patch.object(prepare, "SDK_ROOT", sdk), patch.object(prepare, "seal_trusted_sdk") as seal:
+            prepare.retain_sdk_preflight_binding(workspace, "0" * 40)
+        seal.assert_not_called()
+        path = workspace / "build-binding.json"
+        value = json.loads(path.read_bytes())
+        self.assertFalse(value["preparation_complete"])
+        self.assertEqual("observed", value["sdk_bootstrap"]["host_metadata_state"])
+        self.assertEqual(prepare.sdk_metadata(host.lstat()), value["sdk_bootstrap"]["host_before"])
+        self.assertEqual(0o600, stat.S_IMODE(path.stat().st_mode))
+
+    def test_sdk_preflight_retains_null_unavailable_before_missing_host_failure(self):
+        sdk = self.root / "missing-sdk-metadata"
+        sdk.mkdir()
+        workspace = self.root / "missing-sdk-workspace"
+        workspace.mkdir()
+        with patch.object(prepare, "SDK_ROOT", sdk), patch.object(prepare, "seal_trusted_sdk") as seal:
+            with self.assertRaises(FileNotFoundError):
+                prepare.retain_sdk_preflight_binding(workspace, "0" * 40)
+        seal.assert_not_called()
+        path = workspace / "build-binding.json"
+        value = json.loads(path.read_bytes())
+        self.assertFalse(value["preparation_complete"])
+        self.assertEqual("unavailable", value["sdk_bootstrap"]["host_metadata_state"])
+        self.assertIsNone(value["sdk_bootstrap"]["host_before"])
+        self.assertEqual(0o600, stat.S_IMODE(path.stat().st_mode))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -16,6 +16,8 @@ import stat
 import subprocess
 import time
 
+from trusted_sdk import SDK_ROOT, metadata as sdk_metadata, seal_trusted_sdk
+
 BASELINE = "5d325bb8c0f857eb37f0a736f39a0342b03e5c38"
 APP_ID = "issue779-qualified-native-http"
 BUILD_ID = "issue779-private-qualification-1"
@@ -267,6 +269,29 @@ def archive(root, revision, destination, runner):
     tar_path.unlink()
 
 
+def retain_sdk_preflight_binding(workspace, source_commit):
+    """Persist data before reading host metadata; never build, seal or admit.
+
+    ``prepare`` supplies its fresh root workspace. Portable controls select an
+    owned metadata file only, and cannot exercise the root SDK sealing API.
+    """
+    sdk_initial = {"schema": "issue779-trusted-sdk-bootstrap-preflight-v1",
+                   "root": str(SDK_ROOT), "host_before": None, "host_metadata_state": "unavailable"}
+    binding_path = workspace / "build-binding.json"
+    incomplete = {"source_commit": source_commit, "sdk_bootstrap": sdk_initial,
+                  "preparation_complete": False}
+    with binding_path.open("x") as stream:
+        json.dump(incomplete, stream, sort_keys=True)
+        stream.write("\n")
+    os.chmod(binding_path, 0o600)
+    try:
+        sdk_initial["host_before"] = sdk_metadata((SDK_ROOT / "dotnet").lstat())
+        sdk_initial["host_metadata_state"] = "observed"
+    finally:
+        # If lstat fails, preserve unavailable/null and propagate that failure.
+        binding_path.write_text(json.dumps(incomplete, sort_keys=True) + "\n")
+
+
 def prepare(source, workspace, source_commit, run_id, workflow_identity):
     """Build both actual entries from the same frozen variant and exact compiled bindings."""
     require(os.geteuid() == 0 and re.fullmatch(r"[0-9a-f]{40}", source_commit)
@@ -277,11 +302,13 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
     logs = workspace / "build-logs"
     logs.mkdir(mode=0o700)
     runner = Runner(logs, time.monotonic()+1200)
+    # Retain initial host facts even if the closed bootstrap rejects preparation.
+    # This root-private partial record is not a completed build or admission binding.
+    retain_sdk_preflight_binding(workspace, source_commit)
+    dotnet, sdk_binding = seal_trusted_sdk(min(runner.deadline, time.monotonic() + 120))
     baseline, build = workspace / "baseline", workspace / "build"
     archive(source, BASELINE, baseline, runner)
     archive(source, source_commit, build, runner)
-    dotnet = Path(shutil.which("dotnet") or "").resolve(strict=True)
-    require(dotnet.is_file() and not any(dotnet.is_relative_to(Path(p)) for p in ("/home", "/root", "/run/user")))
     metadata_project = build / "tests/evidencehost-consumer/PrivateQualificationMetadata/PrivateQualificationMetadata.csproj"
     prop = "-p:QualificationBaselineRoot="+str(baseline)
     runner.run([str(dotnet), "restore", str(metadata_project), "--locked-mode", prop], build)
@@ -364,6 +391,7 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
     result = {"source_commit": source_commit, "source_files": before, "run_id": run_id, "workflow_identity": workflow_identity,
         "subject_revision": subject_revision, "subject_sha256": subject_map, "metadata": metadata, "bundle_files": files,
         "generated_sha256": {str(p.relative_to(build)): sha(p.read_bytes()) for p in (generated_contracts, generated_planner, root_module)},
+        "preparation_complete": True, "sdk_bootstrap": sdk_binding,
         "tools": tools, "build_commands": runner.results, "dotnet": str(dotnet), "build_root": str(build), "subject_root": str(subject)}
     (workspace / "build-binding.json").write_text(json.dumps(result, sort_keys=True, indent=2)+"\n")
     os.chmod(workspace / "build-binding.json", 0o600)

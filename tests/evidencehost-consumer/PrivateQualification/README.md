@@ -60,6 +60,29 @@ changes cannot alter the separately pinned deployment copy. Each trusted build c
 process group, disabled server reuse, finite kill/reap/group-absence checks and an exclusive durable command
 receipt. Nonzero exits, oversized logs, expired deadlines and incomplete ownership remain failures.
 
+Before these trusted builds, [`trusted_sdk.py`](trusted_sdk.py) audits and seals the fixed
+`/usr/share/dotnet` installation selected by the pinned workflow's trusted setup action. The root
+controller requires the NSS `runner` account to match the sudo invoker, and both its preparation PATH
+and the launcher's fixed `/usr/bin:/bin` PATH to resolve to that same canonical host. Root-owned,
+nonwritable system ancestors are retained through no-follow directory FDs. This procedure does not
+accept subject files or a caller-selected SDK root.
+
+The complete initial tree must contain only readable regular single-link files and searchable directories
+owned by root or that trusted setup account, with no special permission bits. The host must be an executable
+Linux x64 ELF file. Bounds are 100,000 nodes, 32 directory levels, 256 MiB per file, 16 GiB total and one
+120-second allowance inside the existing cumulative build deadline. After the complete audit, root adopts
+ownership through retained FDs and removes group/other write bits. It preserves all bytes, read/execute bits,
+canonical paths and executable device/inode identity, then independently rehashes the exact tree. Any
+substitution, foreign owner, link, unsupported type, mismatch or deadline expiry fails preparation; a partial
+seal never permits consumer execution. The application startup ownership guard remains unchanged.
+
+The private build binding records actual initial and final host UID/GID, mode, link count, device/inode,
+length and SHA256, tree digests and counts. A bootstrap failure retains an explicitly incomplete private
+preflight binding with initial host metadata, or explicit unavailable/null if metadata cannot be read,
+not a completed build or acceptance record. Earlier V7 measured
+only rejection at `dotnet-validation`; it did not measure which ownership/permission predicate failed. This
+bootstrap is a controlled trusted-installation handoff, not an inference about that missing native field.
+
 The copied subject snapshot is separately sealed to `0555` directories and `0444` files before immutable
 preflight. Git tar entries may carry `0775`/`0664` modes; copying those modes does not satisfy the protected
 snapshot's no-write requirement. Sealing changes no bytes and evaluates no subject project. The launcher
