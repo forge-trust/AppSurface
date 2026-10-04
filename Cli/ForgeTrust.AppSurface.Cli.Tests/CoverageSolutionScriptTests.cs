@@ -64,7 +64,7 @@ public sealed class CoverageSolutionScriptTests
     }
 
     [Fact]
-    public void BuildWorkflow_ShouldUseCoverageSolutionScriptForDefaultLane()
+    public void BuildWorkflow_ShouldUseCoverageSolutionScriptForPullRequestsAndManualBranchRuns()
     {
         var workflow = ReadWorkflow();
 
@@ -72,7 +72,8 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("BUILD_CONFIGURATION: Release", workflow, StringComparison.Ordinal);
         Assert.Contains("BUILD_NO_RESTORE: true", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_PARALLELISM: 2", workflow, StringComparison.Ordinal);
-        Assert.Contains("COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("fetch-depth: ${{ github.event_name == 'workflow_dispatch' && '0' || github.event_name == 'pull_request' && '2' || '1' }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event_name == 'workflow_dispatch' && 'origin/main' || '' }}", workflow, StringComparison.Ordinal);
         Assert.Contains("./scripts/coverage-solution.sh", workflow, StringComparison.Ordinal);
         Assert.Contains("Publish bounded test-result and slow-test diagnostics summary", workflow, StringComparison.Ordinal);
         Assert.Contains("test-result-diagnostics", workflow, StringComparison.Ordinal);

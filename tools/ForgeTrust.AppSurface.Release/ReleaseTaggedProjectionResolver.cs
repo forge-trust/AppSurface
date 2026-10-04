@@ -46,36 +46,107 @@ internal sealed class ReleaseTaggedProjectionResolver
     }
 
     /// <summary>
-    /// Resolves and validates the tag-bound tagged projection for inspect and publish.
+    /// Resolves and validates the tag-bound tagged projection for ordinary inspect and publish.
     /// </summary>
     /// <param name="options">Release command options containing the canonical version, tag, and base ref.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Validated immutable tag details and transient tagged sidecar YAML.</returns>
-    internal async Task<ReleaseTaggedProjection> ResolveAsync(ReleaseOptions options, CancellationToken cancellationToken)
+    internal Task<ReleaseTaggedProjection> ResolveAsync(ReleaseOptions options, CancellationToken cancellationToken)
+    {
+        return ResolveCoreAsync(options, cancellationToken, captureTagObjectIdentity: false);
+    }
+
+    /// <summary>
+    /// Resolves the tagged projection and pins all tag-related reads to one captured annotated-tag object ID.
+    /// </summary>
+    /// <param name="options">Release command options containing the canonical version, tag, and base ref.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Validated immutable tag details and transient tagged sidecar YAML.</returns>
+    internal Task<ReleaseTaggedProjection> ResolveMachineInspectAsync(ReleaseOptions options, CancellationToken cancellationToken)
+    {
+        return ResolveCoreAsync(options, cancellationToken, captureTagObjectIdentity: true);
+    }
+
+    private async Task<ReleaseTaggedProjection> ResolveCoreAsync(
+        ReleaseOptions options,
+        CancellationToken cancellationToken,
+        bool captureTagObjectIdentity)
     {
         var tag = options.Tag ?? options.Version.TagName;
-        await RequireAnnotatedTagAsync(tag, cancellationToken);
-        var tagObject = await RequireCommandOutputAsync(
-            "git",
-            ["cat-file", "-p", $"refs/tags/{tag}"],
-            "release-tag-object-missing",
-            $"Annotated tag {tag} could not be read.",
-            cancellationToken);
+        string? tagObjectId = null;
+        string tagObject;
+        string tagCommit;
+        string artifactRevision;
+        if (captureTagObjectIdentity)
+        {
+            tagObjectId = await ResolveAnnotatedTagObjectIdAsync(tag, cancellationToken);
+            tagObject = await RequireCommandOutputAsync(
+                "git",
+                ["cat-file", "-p", tagObjectId],
+                "release-tag-object-missing",
+                $"Annotated tag {tag} could not be read.",
+                cancellationToken);
+            tagCommit = (await RequireCommandOutputAsync(
+                "git",
+                ["rev-parse", $"{tagObjectId}^{{commit}}"],
+                "release-tag-commit-missing",
+                $"Annotated tag {tag} does not resolve to a commit.",
+                cancellationToken)).Trim();
+            if (!IsCanonicalGitObjectId(tagCommit) || tagCommit.Length != tagObjectId.Length)
+            {
+                throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                    "release-tag-commit-id-invalid",
+                    $"Annotated tag {tag} resolved to an invalid peeled commit ID.",
+                    "The captured tag object and peeled commit must be full lowercase IDs using the same Git object format.",
+                    "Check the local tag object and repository object format, then retry inspect.",
+                    DocsPath));
+            }
+
+            ValidateCapturedTagObjectHeaders(tag, tagObject, tagCommit);
+
+            artifactRevision = tagCommit;
+        }
+        else
+        {
+            await RequireAnnotatedTagAsync(tag, cancellationToken);
+            tagObject = await RequireCommandOutputAsync(
+                "git",
+                ["cat-file", "-p", $"refs/tags/{tag}"],
+                "release-tag-object-missing",
+                $"Annotated tag {tag} could not be read.",
+                cancellationToken);
+            tagCommit = (await RequireCommandOutputAsync(
+                "git",
+                ["rev-parse", $"refs/tags/{tag}^{{commit}}"],
+                "release-tag-commit-missing",
+                $"Annotated tag {tag} does not resolve to a commit.",
+                cancellationToken)).Trim();
+            artifactRevision = tag;
+        }
+
         var taggerTimestamp = ReleaseTagBinding.ParseTaggerTimestamp(tag, tagObject);
-        var tagCommit = (await RequireCommandOutputAsync(
-            "git",
-            ["rev-parse", $"refs/tags/{tag}^{{commit}}"],
-            "release-tag-commit-missing",
-            $"Annotated tag {tag} does not resolve to a commit.",
-            cancellationToken)).Trim();
         await RequireReachableFromBaseAsync(tag, tagCommit, options.BaseRef, cancellationToken);
 
-        var artifacts = await ReadArtifactsAsync(tag, options.Version, "release-note-missing-from-tag", cancellationToken);
+        var artifacts = await ReadArtifactsAsync(artifactRevision, options.Version, "release-note-missing-from-tag", cancellationToken);
         var evidence = await ValidateEvidenceAsync(options.Version, tag, tagCommit, artifacts, cancellationToken);
+        var evidenceBundle = RequireCompleteValidationResult(evidence);
+        var evidenceSchema = ReleaseEvidence.IsV2(artifacts.Evidence)
+            ? ReleaseEvidenceV2.Schema
+            : ReleaseEvidence.Schema;
+        var preparationBaseCommit = string.Equals(evidenceSchema, ReleaseEvidenceV2.Schema, StringComparison.Ordinal)
+            ? evidenceBundle.Commits.ContentSourceCommit
+            : null;
+        var releaseArtifactDigests = evidenceBundle.ReleaseArtifactDigests;
+        var evidenceBundleSha256 = ReleaseEvidence.ComputeSha256Hex(artifacts.Evidence);
         var sidecar = ReleaseSidecar.Parse(artifacts.Sidecar, $"{tag}:releases/v{options.Version}.md.yml");
         sidecar.EnsurePrepared(options.Version, $"{tag}:releases/v{options.Version}.md.yml");
         var expectedBinding = CreateBinding(options.Version, artifacts, evidence);
         ReleaseTagBinding.ParseAndValidate(tag, tagObject, expectedBinding);
+        if (tagObjectId is not null)
+        {
+            await RequireCapturedTagRefUnchangedAsync(tag, tagObjectId, cancellationToken);
+        }
+
         var projectedYaml = sidecar.ToTaggedProjection(
             options.Version,
             taggerTimestamp,
@@ -83,11 +154,113 @@ internal sealed class ReleaseTaggedProjectionResolver
 
         return new ReleaseTaggedProjection(
             tag,
+            tagObjectId,
             tagCommit,
             taggerTimestamp,
             artifacts.Note,
             projectedYaml,
-            evidence);
+            evidence,
+            evidenceSchema,
+            preparationBaseCommit,
+            evidenceBundle.Subject.Sha256,
+            evidenceBundleSha256,
+            releaseArtifactDigests);
+    }
+
+    private async Task RequireCapturedTagRefUnchangedAsync(string tag, string capturedTagObjectId, CancellationToken cancellationToken)
+    {
+        var result = await RunAsync("git", ["rev-parse", "--verify", $"refs/tags/{tag}"], cancellationToken);
+        var currentTagObjectId = result.ExitCode == 0 ? result.StandardOutput.Trim() : string.Empty;
+        if (string.Equals(currentTagObjectId, capturedTagObjectId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        throw new ReleaseToolException(ReleaseDiagnostic.Error(
+            "release-tag-moved-during-inspect",
+            $"Release tag {tag} changed while inspect was validating its artifacts.",
+            result.ExitCode == 0
+                ? $"Captured tag object {capturedTagObjectId}, but the tag ref now resolves to {currentTagObjectId}."
+                : string.IsNullOrWhiteSpace(result.StandardError) ? "The tag ref could not be re-read after artifact validation." : result.StandardError.Trim(),
+            "Restore the protected annotated tag identity and rerun inspect; do not accept a result produced across a tag move.",
+            DocsPath));
+    }
+
+    private static void ValidateCapturedTagObjectHeaders(string tag, string tagObject, string peeledCommit)
+    {
+        var normalized = tagObject.Replace("\r\n", "\n", StringComparison.Ordinal);
+        var separator = normalized.IndexOf("\n\n", StringComparison.Ordinal);
+        var header = separator < 0 ? normalized : normalized[..separator];
+        var lines = header.Split('\n');
+        var fields = lines.Length >= 3
+            && lines[0].StartsWith("object ", StringComparison.Ordinal)
+            && lines[1] == "type commit"
+            && lines[2].StartsWith("tag ", StringComparison.Ordinal);
+        if (fields
+            && string.Equals(lines[0]["object ".Length..], peeledCommit, StringComparison.Ordinal)
+            && string.Equals(lines[2]["tag ".Length..], tag, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        throw new ReleaseToolException(ReleaseDiagnostic.Error(
+            "release-tag-object-binding-invalid",
+            $"Annotated tag {tag} has headers that do not match its captured tag and peeled commit.",
+            "The captured object must directly name the requested tag and the exact commit returned by Git peeling.",
+            "Create a canonical annotated release tag directly on the validated release commit and rerun inspect.",
+            DocsPath));
+    }
+
+    private async Task<string> ResolveAnnotatedTagObjectIdAsync(string tag, CancellationToken cancellationToken)
+    {
+        var tagObjectResult = await RunAsync("git", ["rev-parse", "--verify", $"refs/tags/{tag}"], cancellationToken);
+        if (tagObjectResult.ExitCode != 0)
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-tag-missing",
+                $"Annotated tag {tag} could not be found.",
+                string.IsNullOrWhiteSpace(tagObjectResult.StandardError)
+                    ? (string.IsNullOrWhiteSpace(tagObjectResult.StandardOutput) ? "Git did not resolve the requested tag." : tagObjectResult.StandardOutput.Trim())
+                    : tagObjectResult.StandardError.Trim(),
+                "Create the annotated tag locally, run inspect, then push it only after validation succeeds.",
+                DocsPath));
+        }
+
+        var tagObjectId = tagObjectResult.StandardOutput.Trim();
+        if (!IsCanonicalGitObjectId(tagObjectId))
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-tag-object-id-invalid",
+                $"Annotated tag {tag} resolved to an invalid Git object ID.",
+                "Git must return one full lowercase 40- or 64-character object ID.",
+                "Check the local tag ref and Git repository object format, then retry inspect.",
+                DocsPath));
+        }
+
+        var typeResult = await RunAsync("git", ["cat-file", "-t", tagObjectId], cancellationToken);
+        if (typeResult.ExitCode != 0)
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-tag-object-missing",
+                $"Annotated tag {tag} object {tagObjectId} could not be read.",
+                string.IsNullOrWhiteSpace(typeResult.StandardError)
+                    ? "Git could not inspect the captured tag object."
+                    : typeResult.StandardError.Trim(),
+                "Check that the captured local tag object is present, then retry inspect.",
+                DocsPath));
+        }
+
+        if (!string.Equals(typeResult.StandardOutput.Trim(), "tag", StringComparison.Ordinal))
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-tag-lightweight",
+                $"Release tag {tag} is not an annotated tag.",
+                $"Git reported object type {typeResult.StandardOutput.Trim()}.",
+                "Delete and recreate the unpushed local tag with git tag -a, then run inspect again.",
+                DocsPath));
+        }
+
+        return tagObjectId;
     }
 
     private async Task RequireAnnotatedTagAsync(string tag, CancellationToken cancellationToken)
@@ -113,6 +286,10 @@ internal sealed class ReleaseTaggedProjectionResolver
                 DocsPath));
         }
     }
+
+    private static bool IsCanonicalGitObjectId(string value) =>
+        (value.Length is 40 or 64)
+        && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private async Task RequireReachableFromBaseAsync(string tag, string tagCommit, string baseRef, CancellationToken cancellationToken)
     {
@@ -342,8 +519,14 @@ internal sealed record ReleaseTagArtifacts(
 /// </summary>
 internal sealed record ReleaseTaggedProjection(
     string Tag,
+    string? TagObjectId,
     string TagCommit,
     DateTimeOffset TaggerTimestamp,
     string ReleaseNote,
     string SidecarYaml,
-    ReleaseEvidenceValidationResult Evidence);
+    ReleaseEvidenceValidationResult Evidence,
+    string EvidenceSchema,
+    string? PreparationBaseCommit,
+    string EvidenceSubjectSha256,
+    string EvidenceBundleSha256,
+    IReadOnlyList<ReleaseEvidenceArtifactDigest> ReleaseArtifactDigests);

@@ -154,9 +154,14 @@ internal sealed record ReleaseDiagnosticRecord(
 /// <summary>
 /// Structured publish outputs for GitHub Actions.
 /// </summary>
+/// <remarks>
+/// <see cref="TagObjectId"/> is the validated annotated tag object ID when GitHub outputs are requested;
+/// report-only publishing leaves it null.
+/// </remarks>
 internal sealed record PublishOutputs(
     string Version,
     string Tag,
+    string? TagObjectId,
     string TagCommit,
     string NotePath,
     string NotesFile,

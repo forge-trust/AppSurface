@@ -704,6 +704,7 @@ public sealed class CoverageRunWatchdogTests
 
         await sink.WriteCriticalErrorAsync("critical-error").WaitAsync(TimeSpan.FromSeconds(1));
 
+        await error.FirstWriteCompleted.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.Equal(1, error.WriteCount);
         Assert.Contains("critical-error", error.ReadString(), StringComparison.Ordinal);
 
@@ -1216,12 +1217,15 @@ public sealed class CoverageRunWatchdogTests
     {
         private readonly MemoryStream _capture = new();
         private readonly TaskCompletionSource _firstWriteStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _firstWriteCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _releaseFirstWrite = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _secondWriteCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly object _sync = new();
         private int _writeCount;
 
         public Task FirstWriteStarted => _firstWriteStarted.Task;
+
+        public Task FirstWriteCompleted => _firstWriteCompleted.Task;
 
         public Task SecondWriteCompleted => _secondWriteCompleted.Task;
 
@@ -1276,6 +1280,11 @@ public sealed class CoverageRunWatchdogTests
             lock (_sync)
             {
                 _capture.Write(buffer.Span);
+            }
+
+            if (ordinal == 1)
+            {
+                _firstWriteCompleted.TrySetResult();
             }
 
             if (ordinal == 2)

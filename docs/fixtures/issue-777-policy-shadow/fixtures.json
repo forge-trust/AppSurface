@@ -1,0 +1,61 @@
+[
+  {
+    "id": "documentation-reference",
+    "kind": "Documentation",
+    "changedPath": { "path": "docs/overview.md" }
+  },
+  {
+    "id": "ordinary-code",
+    "kind": "Code",
+    "changedPath": { "path": "src/Orders/SubmitOrder.cs" }
+  },
+  {
+    "id": "postgresql-resource",
+    "kind": "Resource",
+    "changedPath": { "path": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql/Store.cs" }
+  },
+  {
+    "id": "keycloak-resource",
+    "kind": "Resource",
+    "changedPath": { "path": "Web/ForgeTrust.AppSurface.Web.Tailwind/theme.css" }
+  },
+  {
+    "id": "package-artifact",
+    "kind": "Code",
+    "changedPath": { "path": "packages/package-index.yml" }
+  },
+  {
+    "id": "workflow-control-plane",
+    "kind": "ControlPlane",
+    "changedPath": { "path": ".github/workflows/evidence-gate.yml" }
+  },
+  {
+    "id": "runner-control-plane",
+    "kind": "ControlPlane",
+    "changedPath": { "path": "tools/ForgeTrust.AppSurface.EvidenceGate/Program.cs" }
+  },
+  {
+    "id": "release-tool-control-plane",
+    "kind": "ControlPlane",
+    "changedPath": { "path": "tools/ForgeTrust.AppSurface.Release/ReleaseCommands.cs" }
+  },
+  {
+    "id": "fixture-control-plane",
+    "kind": "ControlPlane",
+    "changedPath": { "path": "docs/fixtures/issue-777-policy-shadow/fixtures.json" }
+  },
+  {
+    "id": "unrecognized-path",
+    "kind": "Unknown",
+    "changedPath": { "path": "new-surface/unclassified.bin" }
+  },
+  {
+    "id": "resource-to-code-rename",
+    "kind": "Resource",
+    "changedPath": {
+      "path": "src/Orders/MovedStore.cs",
+      "kind": "renamed",
+      "previousPath": "Durable/ForgeTrust.AppSurface.Durable.PostgreSql/OldStore.cs"
+    }
+  }
+]

@@ -625,9 +625,28 @@ appsurface evidence verify ./TestResults/evidence/evidence-manifest.json
 
 `init --sample` is safe to run in an existing repository: it creates a marked policy, host skeleton, and README and refuses to overwrite unmarked files. `doctor` does not start tests or resources; it reports whether the selected policy needs Docker, a browser runtime, or a protected release envelope. `explain` writes `evidence-plan.json` and a concise human summary before any producer runs. `run` writes the plan, `evidence-manifest.json`, and `evidence-summary.json`; it also appends a short claim summary to `$GITHUB_STEP_SUMMARY` when that CI-provided path exists. `verify` validates plan/manifest digest binding without rerunning producers.
 
+For revision-bound PR planning, pass the complete `--base-revision`, complete `--head-revision`, and byte-exact `--diff-file` together. `--repository` identifies the Git object store (default: current directory for planning), and `--gate-mode` rejects path-only input. A trusted controller may also pass `--pr-run-identity` pointing at canonical JSON with numeric `repositoryId`, `headRepositoryId`, `pullRequestNumber`, `workflowRunId`, `workflowRunAttempt`, and a bounded `targetBranch`; partial or local-only input cannot use it. The [cookbook](../../guides/evidencehost-cookbook.md#revision-bound-pr-rehearsal) supplies the exact diff command and a complete `explain`/`run`/`verify` rehearsal. Version-2 plans bind the source diff and NUL status digests separately from the normalized path digest. `verify` requires `--policy` from a separately trusted base checkout and `--repository` for v2, then regenerates the plan from those inputs. The CLI still cannot authenticate GitHub PR freshness or job provenance: its v2 `run` is `ObservationOnly`, and `--gate-mode` exits nonzero for it. Version-1 path and diff commands remain local compatibility paths and cannot authorize the new required check.
+
 The built-in producer reuses the private [`ForgeTrust.AppSurface.Evidence.Coverage`](../../Evidence/ForgeTrust.AppSurface.Evidence.Coverage/README.md) engine used by `coverage run` and `coverage gate`; it writes the normal gate and patch-target artifacts beside its coverage output. When a policy requires patch thresholds, `evidence run` measures the same bounded `--diff-file` snapshot used to plan the selected profile, rather than reopening that path after execution starts. Browser E2E and resource-backed evidence belong in the separate consumer-owned [`ForgeTrust.AppSurface.Evidence.Aspire`](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) lifecycle. An explicit policy-selected empty profile may claim `NoEvidenceRequired`; unavailable capability, filtered required tests, a failed producer, a missing assertion, an unready declared resource, or a failed declared coverage threshold produces `ClaimKind.None` and command failure. `--observation-only` records a diagnostic claim that is deliberately ineligible for a PR or release gate.
 
 The v1 workflow has no outbound telemetry, no automatic assembly/test discovery, no Docker sandbox, no independent artifact attestation, and no semantic classifier that silently labels arbitrary getters or constructors low value. Keep generated-code exclusions and the coverage thresholds in the reviewed Evidence policy explicit. See the [EvidenceHost cookbook](../../guides/evidencehost-cookbook.md) for policy, E2E, release-envelope, and incomplete-profile patterns.
+
+#### `appsurface evidence shadow-policy`
+
+Use `shadow-policy` to compare a proposed policy with the protected base policy and its base-owned fixture set before proposing a policy change. The [planner policy-shadow documentation](../../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md) describes the comparison and its bounded diagnostics.
+
+```bash
+appsurface evidence shadow-policy \
+  --base-policy ../protected-base/.appsurface/evidence/evidence.policy.json \
+  --candidate-policy .appsurface/evidence/evidence.policy.json \
+  --base-fixtures ../protected-base/docs/fixtures/issue-777-policy-shadow/fixtures.json \
+  --candidate-fixtures ./docs/fixtures/issue-777-policy-shadow/fixtures.json \
+  --output ./TestResults/evidence-policy-shadow
+```
+
+All four input flags and the output flag are explicit. Each input and the serialized result are limited to 1 MiB; inputs are parsed with the Evidence contract serializer. Fixture inputs are JSON arrays of `EvidencePolicyShadowFixture` records; the camelCase form is `[{"id":"ordinary-code","kind":"Code","changedPath":{"path":"src/Feature.cs","kind":"modified","previousPath":null}}]`. A specified but missing candidate fixture file means an empty candidate set, so base-owned deletions are reported. A missing base fixture file, malformed input, or oversized input fails closed. The output directory receives a new `evidence-policy-shadow.json`; a `--output` path ending in `.json` selects a new file directly. Existing result files are never overwritten.
+
+The JSON result always sets `claimEligible` to `false` and contains no Evidence manifest claim. A compatible comparison exits zero; any validator finding or input failure exits nonzero. Human diagnostics report stable codes and do not echo candidate-controlled IDs, paths, policy text, or exception details. The caller must source both base inputs from the protected base checkout. This CLI cannot authenticate input provenance, select a trusted revision, authorize a gate, or establish Evidence claim authority; a protected workflow must independently enforce any result it chooses to use.
 
 ### `appsurface coverage run`
 

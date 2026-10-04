@@ -37,6 +37,21 @@ The selected coverage producer runs the existing `coverage gate` evaluator with 
 
 If CI intentionally selects only part of the test suite, call that a targeted observation or create a policy profile whose declared obligations match that selection. Do not run a repository-wide threshold and call the outcome “full coverage.”
 
+## Revision-bound PR rehearsal
+
+The [Git change capture reference](../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md#revision-bound-git-change-capture) defines the fixed diff and NUL status inputs. For a local rehearsal with two complete commit IDs, capture the source diff using the same fixed options, then run:
+
+```bash
+base=$(git rev-parse --verify HEAD~1^{commit})
+head=$(git rev-parse --verify HEAD^{commit})
+git -c diff.external= -c diff.noprefix=false -c diff.mnemonicprefix=false -c diff.algorithm=myers diff --no-ext-diff --no-textconv --no-color --binary --full-index --unified=3 --find-renames=50% --find-copies=50% --submodule=short --ignore-submodules=none --no-relative --src-prefix=a/ --dst-prefix=b/ "$base" "$head" -- > change.diff
+appsurface evidence explain --gate-mode --policy .appsurface/evidence/evidence.policy.json --repository . --base-revision "$base" --head-revision "$head" --diff-file change.diff --output TestResults/evidence
+appsurface evidence run --gate-mode --policy .appsurface/evidence/evidence.policy.json --repository . --base-revision "$base" --head-revision "$head" --diff-file change.diff --output TestResults/evidence
+appsurface evidence verify TestResults/evidence/evidence-manifest.json --policy .appsurface/evidence/evidence.policy.json --repository .
+```
+
+The quoted `^{commit}` suffix is Git syntax for resolving a commit, including a peeled annotated tag; for PRs, use the event's full base and head commit IDs instead of ambient `HEAD`. The two planning commands produce the same v2 `PlanDigest` for identical inputs. A changed base/head, altered diff file, missing Git object, or policy mismatch fails. `--gate-mode` rejects path-only input, and `--path` cannot be combined with revision inputs. The built-in CLI's `run` emits `ObservationOnly` for v2 and exits nonzero in gate mode; it does not establish the trusted job and sandbox evidence needed for a required check. `verify` needs a separately trusted policy and Git object store for v2, but a successful local verification is still not a CI authorization. Keep the [policy matrix](../docs/evidence-gate-policy-matrix.md) alongside the base-owned controller and host registrations.
+
 ## Resource-backed browser E2E
 
 Put the EvidenceHost in a test/CI project, separate from the application AppHost. Register each resource readiness probe and browser producer explicitly:

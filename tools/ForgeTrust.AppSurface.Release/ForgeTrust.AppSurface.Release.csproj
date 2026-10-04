@@ -10,6 +10,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Release.Tests" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.EvidenceGate" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.EvidenceGate.Tests" />
   </ItemGroup>
 
   <ItemGroup>

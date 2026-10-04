@@ -1,0 +1,8 @@
+{
+  "baseRevision": "eff492202f8e7a858dcc1ba9af71bbedd7c012da",
+  "bundleSha256": "9680904e9aa22193b07f86dd1b78b016b0faf3922b4e4a45b8979413229f2554",
+  "changedPath": "docs/fixture-note.md",
+  "headRevision": "5251205a29db7c66a33b6a25cf2bc7b5b0481b2b",
+  "policySha256": "cb0bd61016adc9d0aef87efa84b4d777eedcb0d36c6fdf7314a1f4266d58facd",
+  "sourceDiffSha256": "639049c29cdd44e08c3eae50aa15a99d90aa83dea8c8496bd4b055f21f10362f"
+}

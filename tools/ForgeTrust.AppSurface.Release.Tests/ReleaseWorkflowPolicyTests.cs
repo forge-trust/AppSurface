@@ -587,8 +587,9 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.DoesNotContain("ref: ${{ needs.validate-release.outputs.tag }}", publish, StringComparison.Ordinal);
         Assert.Contains("persist-credentials: false", publish, StringComparison.Ordinal);
         Assert.Contains("TAG_COMMIT: ${{ needs.validate-release.outputs.tag_commit }}", publish, StringComparison.Ordinal);
-        Assert.Contains("actual_tag_commit=\"$(git rev-parse \"refs/tags/${TAG}^{commit}\")\"", publish, StringComparison.Ordinal);
-        Assert.Contains("Expected ${TAG} to resolve to ${TAG_COMMIT}; got ${actual_tag_commit}.", publish, StringComparison.Ordinal);
+        Assert.Contains("git ls-remote --exit-code origin \"refs/tags/${TAG}\" \"refs/tags/${TAG}^{}\"", publish, StringComparison.Ordinal);
+        Assert.Contains("${actual_tag_object_id}\" != \"${TAG_OBJECT_ID}", publish, StringComparison.Ordinal);
+        Assert.Contains("${actual_tag_commit}\" != \"${TAG_COMMIT}", publish, StringComparison.Ordinal);
         Assert.Contains("git show \"${TAG_COMMIT}:releases/v${VERSION}.md\"", publish, StringComparison.Ordinal);
         Assert.Contains("Resolve tag-bound sidecar for docs export", publish, StringComparison.Ordinal);
         Assert.Contains("./eng/release inspect", publish, StringComparison.Ordinal);
@@ -673,6 +674,231 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("supportState:\"Maintained\"", publish, StringComparison.Ordinal);
         Assert.Contains("stable_version", publish, StringComparison.Ordinal);
         Assert.Contains("semver_key", publish, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReleasePublicationRequiresProtectedMainToolingBeforeTagInspection()
+    {
+        var workflow = await ReadRepositoryFileAsync(".github/workflows/release-publish.yml");
+        var validation = GetWorkflowJob(workflow, "validate-release", "publish-docs-archive");
+
+        Assert.Contains(
+            "if: ${{ github.repository == 'forge-trust/AppSurface' }}",
+            validation,
+            StringComparison.Ordinal);
+        Assert.Contains("ref: ${{ github.workflow_sha }}", validation, StringComparison.Ordinal);
+        Assert.Contains("persist-credentials: false", validation, StringComparison.Ordinal);
+        Assert.Contains("TRUSTED_WORKFLOW_REF: ${{ github.workflow_ref }}", validation, StringComparison.Ordinal);
+        Assert.Contains("TRUSTED_WORKFLOW_SHA: ${{ github.workflow_sha }}", validation, StringComparison.Ordinal);
+        Assert.Contains("tag_object_id: ${{ steps.release.outputs.tag_object_id }}", validation, StringComparison.Ordinal);
+        Assert.Contains("actual_commit=\"$(git rev-parse HEAD^{commit})\"", validation, StringComparison.Ordinal);
+        Assert.Contains("\"$actual_commit\" != \"$TRUSTED_WORKFLOW_SHA\"", validation, StringComparison.Ordinal);
+        Assert.True(
+            validation.IndexOf("Require the protected workflow commit", StringComparison.Ordinal)
+            < validation.IndexOf("Validate tag-bound release evidence", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ReleasePublicationRemoteTagChecksRequestBothExactAnnotatedTagRefs()
+    {
+        var workflow = await ReadRepositoryFileAsync(".github/workflows/release-publish.yml");
+        const string command = "git ls-remote --exit-code origin \"refs/tags/${TAG}\" \"refs/tags/${TAG}^{}\"";
+        var uploadJob = GetWorkflowJob(workflow, "publish-docs-archive", "deploy-docs-pages");
+        var uploadScript = GetWorkflowStepRun(uploadJob, "Create or reuse draft release and upload docs assets");
+        var promotionJob = GetWorkflowJob(workflow, "publish-github-release");
+        var promotionScript = GetWorkflowStepRun(promotionJob, "Publish draft GitHub Release");
+
+        Assert.Equal(2, Regex.Matches(workflow, Regex.Escape(command)).Count);
+        Assert.Contains("remote_ref_count=\"$(awk 'END { print NR }' <<< \"${remote_tag_refs}\")\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("$2 == ref { print $1 }", workflow, StringComparison.Ordinal);
+        Assert.Contains("${actual_tag_object_id}\" != \"${TAG_OBJECT_ID}", workflow, StringComparison.Ordinal);
+        Assert.Contains("${actual_tag_commit}\" != \"${TAG_COMMIT}", workflow, StringComparison.Ordinal);
+        Assert.Contains("TAG_OBJECT_ID: ${{ needs.validate-release.outputs.tag_object_id }}", uploadJob, StringComparison.Ordinal);
+        Assert.Contains("TAG_OBJECT_ID: ${{ needs.validate-release.outputs.tag_object_id }}", promotionJob, StringComparison.Ordinal);
+        Assert.Equal(2, Regex.Matches(uploadScript, @"(?m)^require_remote_tag_identity$").Count);
+        Assert.Equal(2, Regex.Matches(promotionScript, @"(?m)^require_remote_tag_identity$").Count);
+        Assert.True(
+            uploadScript.LastIndexOf("require_remote_tag_identity", StringComparison.Ordinal)
+            < uploadScript.IndexOf("gh release upload", StringComparison.Ordinal));
+        Assert.True(
+            promotionScript.LastIndexOf("require_remote_tag_identity", StringComparison.Ordinal)
+            < promotionScript.IndexOf("gh \"${args[@]}\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ReleasePublicationTagIdentityCheckRejectsReplacementAnnotatedTagWithSameCommit()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        const string tag = "v0.2.0-preview.11";
+        var temporaryDirectory = Path.Join(Path.GetTempPath(), $"appsurface-release-annotated-tag-{Guid.NewGuid():N}");
+        var remotePath = Path.Join(temporaryDirectory, "remote.git");
+        var sourcePath = Path.Join(temporaryDirectory, "source");
+        Directory.CreateDirectory(temporaryDirectory);
+        Directory.CreateDirectory(sourcePath);
+
+        try
+        {
+            await RunGitFixtureCommandAsync(temporaryDirectory, "init", "--bare", remotePath);
+            await RunGitFixtureCommandAsync(sourcePath, "init");
+            await RunGitFixtureCommandAsync(
+                sourcePath,
+                "-c", "user.name=Release Test",
+                "-c", "user.email=release-test@example.test",
+                "commit", "--allow-empty", "-m", "fixture");
+            await RunGitFixtureCommandAsync(
+                sourcePath,
+                "-c", "user.name=Release Test",
+                "-c", "user.email=release-test@example.test",
+                "tag", "-a", tag, "-m", "validated annotation");
+            await RunGitFixtureCommandAsync(sourcePath, "remote", "add", "origin", remotePath);
+            await RunGitFixtureCommandAsync(sourcePath, "push", "origin", $"refs/tags/{tag}");
+
+            var singlePattern = await RunGitFixtureCommandAsync(sourcePath, "ls-remote", "--exit-code", "origin", $"refs/tags/{tag}");
+            Assert.Single(singlePattern.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries));
+
+            var tagCommit = (await RunGitFixtureCommandAsync(sourcePath, "rev-parse", $"refs/tags/{tag}^{{commit}}")).StandardOutput.Trim();
+            var originalTagObject = (await RunGitFixtureCommandAsync(sourcePath, "rev-parse", $"refs/tags/{tag}")).StandardOutput.Trim();
+            var workflow = await ReadRepositoryFileAsync(".github/workflows/release-publish.yml");
+            var identityFunction = GetBashFunction(workflow, "require_remote_tag_identity") + "\n}";
+
+            var initialCheck = await RunBashFixtureScriptAsync(
+                sourcePath,
+                identityFunction + "\nrequire_remote_tag_identity",
+                ("TAG", tag),
+                ("TAG_OBJECT_ID", originalTagObject),
+                ("TAG_COMMIT", tagCommit));
+            Assert.Equal(0, initialCheck.ExitCode);
+
+            await RunGitFixtureCommandAsync(
+                sourcePath,
+                "-c", "user.name=Release Test",
+                "-c", "user.email=release-test@example.test",
+                "tag", "--force", "-a", tag, "-m", "replacement annotation");
+            var replacementTagObject = (await RunGitFixtureCommandAsync(sourcePath, "rev-parse", $"refs/tags/{tag}")).StandardOutput.Trim();
+            var replacementTagCommit = (await RunGitFixtureCommandAsync(sourcePath, "rev-parse", $"refs/tags/{tag}^{{commit}}")).StandardOutput.Trim();
+            await RunGitFixtureCommandAsync(sourcePath, "push", "--force", "origin", $"refs/tags/{tag}");
+
+            var replacementCheck = await RunBashFixtureScriptAsync(
+                sourcePath,
+                identityFunction + "\nrequire_remote_tag_identity",
+                ("TAG", tag),
+                ("TAG_OBJECT_ID", originalTagObject),
+                ("TAG_COMMIT", tagCommit));
+
+            Assert.NotEqual(originalTagObject, replacementTagObject);
+            Assert.Equal(tagCommit, replacementTagCommit);
+            Assert.Equal(1, replacementCheck.ExitCode);
+            Assert.Contains("Remote v0.2.0-preview.11 identity does not match", replacementCheck.StandardError, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("workflow_dispatch", "refs/heads/main", "expected", "current", 0)]
+    [InlineData("push", "refs/heads/main", "expected", "current", 1)]
+    [InlineData("workflow_dispatch", "refs/heads/feature", "expected", "current", 1)]
+    [InlineData("workflow_dispatch", "refs/heads/main", "wrong", "current", 1)]
+    [InlineData("workflow_dispatch", "refs/heads/main", "expected", "changed", 1)]
+    [InlineData("workflow_dispatch", "refs/heads/main", "expected", "malformed", 1)]
+    public async Task ReleasePublicationCommitGuardRejectsUnprotectedOrMismatchedDispatch(
+        string eventName,
+        string dispatchRef,
+        string workflowRef,
+        string workflowCommit,
+        int expectedExitCode)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var root = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var workflow = await ReadRepositoryFileAsync(".github/workflows/release-publish.yml");
+        var validation = GetWorkflowJob(workflow, "validate-release", "publish-docs-archive");
+        var script = GetWorkflowStepRun(validation, "Require the protected workflow commit");
+
+        using var revisionProcess = Process.Start(new ProcessStartInfo("git")
+        {
+            WorkingDirectory = root,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            ArgumentList = { "rev-parse", "HEAD^{commit}" }
+        })!;
+        var revision = (await revisionProcess.StandardOutput.ReadToEndAsync()).Trim();
+        await revisionProcess.WaitForExitAsync();
+        Assert.Equal(0, revisionProcess.ExitCode);
+
+        var suppliedRevision = workflowCommit switch
+        {
+            "changed" => revision[..^1] + (revision[^1] == 'a' ? 'b' : 'a'),
+            "malformed" => "HEAD",
+            _ => revision
+        };
+        using var guardProcess = Process.Start(new ProcessStartInfo("/bin/bash")
+        {
+            WorkingDirectory = root,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            ArgumentList = { "-c", script },
+            Environment =
+            {
+                ["GITHUB_EVENT_NAME"] = eventName,
+                ["GITHUB_REF"] = dispatchRef,
+                ["TRUSTED_WORKFLOW_REF"] = workflowRef == "expected"
+                    ? "forge-trust/AppSurface/.github/workflows/release-publish.yml@refs/heads/main"
+                    : "forge-trust/AppSurface/.github/workflows/release-publish.yml@refs/heads/feature",
+                ["TRUSTED_WORKFLOW_SHA"] = suppliedRevision
+            }
+        })!;
+        var standardError = await guardProcess.StandardError.ReadToEndAsync();
+        await guardProcess.WaitForExitAsync();
+
+        Assert.Equal(expectedExitCode, guardProcess.ExitCode);
+        if (expectedExitCode != 0)
+        {
+            Assert.Contains("protected", standardError, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public async Task ReleasePublicationRequiresProtectedEnvironmentBeforeAnyWriteCapableJob()
+    {
+        var workflow = await ReadRepositoryFileAsync(".github/workflows/release-publish.yml");
+        var validation = GetWorkflowJob(workflow, "validate-release", "publish-docs-archive");
+        var environmentGuard = GetWorkflowStepRun(validation, "Require the protected release publication environment");
+
+        Assert.Contains("actions: read", validation, StringComparison.Ordinal);
+        Assert.Contains("environments/release-publish\"", environmentGuard, StringComparison.Ordinal);
+        Assert.Contains("environments/release-publish/deployment-branch-policies", environmentGuard, StringComparison.Ordinal);
+        Assert.Contains("publish_guard.py environment", environmentGuard, StringComparison.Ordinal);
+        Assert.True(
+            validation.IndexOf("Require the protected release publication environment", StringComparison.Ordinal)
+            < validation.IndexOf("Validate tag-bound release evidence", StringComparison.Ordinal));
+        Assert.Equal(3, Regex.Matches(workflow, @"\bcontents: write\b").Count);
+
+        foreach (var job in new[]
+        {
+            GetWorkflowJob(workflow, "publish-docs-archive", "deploy-docs-pages"),
+            GetWorkflowJob(workflow, "verify-public-docs", "publish-github-release"),
+            GetWorkflowJob(workflow, "publish-github-release")
+        })
+        {
+            Assert.Contains("contents: write", job, StringComparison.Ordinal);
+            Assert.Contains("environment: release-publish", job, StringComparison.Ordinal);
+        }
+
+        var pagesDeployment = GetWorkflowJob(workflow, "deploy-docs-pages", "verify-public-docs");
+        Assert.Contains("pages: write", pagesDeployment, StringComparison.Ordinal);
+        Assert.Contains("- validate-release", pagesDeployment, StringComparison.Ordinal);
+        Assert.Contains("- publish-docs-archive", pagesDeployment, StringComparison.Ordinal);
+        Assert.Contains("name: github-pages", pagesDeployment, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -846,6 +1072,52 @@ public sealed class ReleaseWorkflowPolicyTests
         var end = workflow.IndexOf("\n          }", start, StringComparison.Ordinal);
         Assert.True(end > start, $"Expected workflow function {name} to have a closing brace.");
         return workflow[start..end];
+    }
+
+    private static async Task<CommandResult> RunGitFixtureCommandAsync(string workingDirectory, params string[] arguments)
+    {
+        var startInfo = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(startInfo)!;
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync());
+        Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {errorTask.Result}");
+        return new CommandResult(process.ExitCode, outputTask.Result, errorTask.Result);
+    }
+
+    private static async Task<CommandResult> RunBashFixtureScriptAsync(
+        string workingDirectory,
+        string script,
+        params (string Name, string Value)[] environment)
+    {
+        var startInfo = new ProcessStartInfo("/bin/bash")
+        {
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add(script);
+        foreach (var (name, value) in environment)
+        {
+            startInfo.Environment[name] = value;
+        }
+
+        using var process = Process.Start(startInfo)!;
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+        await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync());
+        return new CommandResult(process.ExitCode, outputTask.Result, errorTask.Result);
     }
 
     private static string GetWorkflowJob(string workflow, string jobName, string? nextJobName = null)

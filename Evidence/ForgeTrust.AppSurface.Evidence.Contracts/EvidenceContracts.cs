@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -307,6 +308,24 @@ public sealed record EvidencePolicy(
     IReadOnlyList<EvidencePolicyRule> Rules);
 
 /// <summary>
+/// Records bounded pull-request and workflow identity captured by the trusted controller.
+/// These fields are provenance to compare with an authoritative CI provider, not proof by themselves.
+/// </summary>
+/// <param name="RepositoryId">GitHub repository's stable numeric identifier.</param>
+/// <param name="HeadRepositoryId">Head repository's stable numeric identifier; differs for forks.</param>
+/// <param name="PullRequestNumber">Pull-request number in the target repository.</param>
+/// <param name="TargetBranch">Target branch name at capture time.</param>
+/// <param name="WorkflowRunId">GitHub Actions workflow-run identifier.</param>
+/// <param name="WorkflowRunAttempt">Positive attempt number for that run.</param>
+public sealed record EvidencePullRequestRunIdentity(
+    long RepositoryId,
+    long HeadRepositoryId,
+    int PullRequestNumber,
+    string TargetBranch,
+    long WorkflowRunId,
+    int WorkflowRunAttempt);
+
+/// <summary>
 /// Captures the immutable result of policy resolution before resource or producer execution.
 /// </summary>
 /// <param name="ContractVersion">Evidence contract version.</param>
@@ -318,6 +337,11 @@ public sealed record EvidencePolicy(
 /// <param name="MatchedRuleIds">Rules that explain selection.</param>
 /// <param name="PlanDigest">SHA-256 digest of canonical plan bytes excluding this digest field.</param>
 /// <param name="PolicySnapshot">Canonical checked-in policy snapshot used for resolution and later verification.</param>
+/// <param name="BaseRevision">Complete base commit ID for a v2 revision-bound plan; absent for legacy local plans.</param>
+/// <param name="HeadRevision">Complete head commit ID for a v2 revision-bound plan; absent for legacy local plans.</param>
+/// <param name="SourceDiffDigest">SHA-256 of the exact fixed-options Git diff bytes for a v2 plan.</param>
+/// <param name="NameStatusDigest">SHA-256 of the exact NUL-delimited Git name-status bytes for a v2 plan.</param>
+/// <param name="PullRequestRunIdentity">Controller-captured PR/run identity for a CI v2 plan; absent in local rehearsal.</param>
 public sealed record EvidencePlan(
     string ContractVersion,
     string PolicyId,
@@ -327,7 +351,12 @@ public sealed record EvidencePlan(
     IReadOnlyList<NormalizedDiffPath> ChangedPaths,
     IReadOnlyList<string> MatchedRuleIds,
     string PlanDigest,
-    EvidencePolicy? PolicySnapshot = null);
+    EvidencePolicy? PolicySnapshot = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? BaseRevision = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? HeadRevision = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SourceDiffDigest = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? NameStatusDigest = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EvidencePullRequestRunIdentity? PullRequestRunIdentity = null);
 
 /// <summary>
 /// Captures a bounded producer result returned to the EvidenceHost.
@@ -381,6 +410,11 @@ public sealed record EvidenceExecutionMetrics(
 /// <param name="ProducerResults">Bounded producer terminal results.</param>
 /// <param name="Metrics">Secret-free lifecycle timing and cleanup state.</param>
 /// <param name="ManifestDigest">SHA-256 digest of canonical manifest bytes excluding this digest field.</param>
+/// <param name="BaseRevision">Complete base commit ID copied from a v2 plan.</param>
+/// <param name="HeadRevision">Complete head commit ID copied from a v2 plan.</param>
+/// <param name="SourceDiffDigest">SHA-256 of the exact Git diff bytes copied from a v2 plan.</param>
+/// <param name="NameStatusDigest">SHA-256 of the exact Git name-status bytes copied from a v2 plan.</param>
+/// <param name="PullRequestRunIdentity">Controller-captured PR/run identity copied from a v2 plan.</param>
 public sealed record EvidenceManifest(
     string ContractVersion,
     string PlanDigest,
@@ -394,7 +428,12 @@ public sealed record EvidenceManifest(
     IReadOnlyList<string> UnmediatedObligationIds,
     IReadOnlyList<EvidenceProducerResult> ProducerResults,
     EvidenceExecutionMetrics Metrics,
-    string ManifestDigest);
+    string ManifestDigest,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? BaseRevision = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? HeadRevision = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SourceDiffDigest = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? NameStatusDigest = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EvidencePullRequestRunIdentity? PullRequestRunIdentity = null);
 
 /// <summary>
 /// Supplies the immutable execution context exposed to a registered evidence producer.
@@ -435,6 +474,8 @@ public sealed class EvidenceArtifactWriter
 {
     /// <summary>Maximum total artifact bytes accepted by one v1 producer declaration.</summary>
     public const long MaximumTotalArtifactBytes = 256L * 1024 * 1024;
+
+    private const int StreamBufferSize = 81_920;
 
     private readonly EvidenceProducerDeclaration _producer;
     private readonly string _rootPath;
@@ -519,24 +560,151 @@ public sealed class EvidenceArtifactWriter
     }
 
     /// <summary>
+    /// Copies one declared artifact from a readable stream while hashing it, without buffering the complete artifact.
+    /// The source stream remains owned by the caller and must yield exactly <paramref name="declaredLengthBytes"/> bytes.
+    /// </summary>
+    /// <param name="logicalName">Declared artifact slot identifier.</param>
+    /// <param name="relativePath">Normalized artifact-root-relative destination path.</param>
+    /// <param name="contents">Readable source stream. The writer does not dispose it.</param>
+    /// <param name="declaredLengthBytes">Exact expected byte count, checked against both slot and v1 producer limits before reading.</param>
+    /// <param name="cancellationToken">Cancellation requested by the EvidenceHost lifecycle.</param>
+    /// <returns>Hash and metadata for the copied artifact.</returns>
+    /// <remarks>
+    /// This method writes to a path beneath the controlled artifact root and does not provide no-follow or
+    /// descriptor-relative extraction guarantees. Use it only for separately validated trusted streams; it is not
+    /// a safe copier for paths or streams supplied directly by an untrusted extraction boundary.
+    /// </remarks>
+    public async ValueTask<EvidenceArtifactResult> WriteAsync(
+        string logicalName,
+        string relativePath,
+        Stream contents,
+        long declaredLengthBytes,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(contents);
+        if (!contents.CanRead)
+        {
+            throw new ArgumentException("Evidence artifact source streams must be readable.", nameof(contents));
+        }
+
+        if (declaredLengthBytes < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(declaredLengthBytes));
+        }
+
+        if (_producer.ArtifactSlots.FirstOrDefault(slot => string.Equals(slot.LogicalName, logicalName, StringComparison.Ordinal)) is not { } slot)
+        {
+            throw new InvalidOperationException($"Artifact '{logicalName}' is not declared by producer '{_producer.Id}'.");
+        }
+
+        var normalizedPath = EvidenceArtifactValidation.NormalizeRelativePath(relativePath);
+        EvidenceArtifactValidation.ValidatePathForSlot(slot, normalizedPath);
+        ReserveArtifact(logicalName, normalizedPath, declaredLengthBytes, slot.MaximumBytes);
+
+        string? temporaryPath = null;
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var destination = EvidenceArtifactValidation.GetContainedPath(_rootPath, normalizedPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            temporaryPath = destination + "." + Guid.NewGuid().ToString("N") + ".tmp";
+
+            string digest;
+            long copiedLength;
+            await using (var destinationStream = new FileStream(
+                temporaryPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                StreamBufferSize,
+                FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                var result = await CopyAndHashAsync(contents, destinationStream, declaredLengthBytes, cancellationToken).ConfigureAwait(false);
+                copiedLength = result.Length;
+                digest = result.Sha256;
+                await destinationStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            if (copiedLength != declaredLengthBytes)
+            {
+                throw new InvalidDataException($"Artifact '{logicalName}' stream length did not match its declared length.");
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(temporaryPath, destination, overwrite: true);
+            var artifact = new EvidenceArtifactResult(logicalName, normalizedPath, slot.MediaType, copiedLength, digest);
+            lock (_sync)
+            {
+                _artifacts[logicalName] = artifact;
+            }
+
+            return artifact;
+        }
+        catch
+        {
+            if (temporaryPath is not null)
+            {
+                try
+                {
+                    File.Delete(temporaryPath);
+                }
+                catch (IOException)
+                {
+                    // Preserve the original write, read, or cancellation failure.
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // Preserve the original write, read, or cancellation failure.
+                }
+            }
+
+            ReleaseArtifact(logicalName, normalizedPath, declaredLengthBytes);
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Revalidates the final on-disk bytes for every artifact written through this writer.
     /// </summary>
     /// <param name="cancellationToken">Cancellation requested by the EvidenceHost lifecycle.</param>
     /// <returns><see langword="true"/> when every artifact still has its declared length and digest.</returns>
     public async Task<bool> VerifyWrittenArtifactsAsync(CancellationToken cancellationToken = default)
     {
+        long totalBytes = 0;
         foreach (var artifact in WrittenArtifacts)
         {
             string path;
             try
             {
-                path = EvidenceArtifactValidation.GetContainedPath(_rootPath, artifact.RelativePath);
-                var bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
-                if (bytes.LongLength != artifact.LengthBytes
-                    || !string.Equals(EvidenceDigest.Sha256(bytes), artifact.Sha256, StringComparison.Ordinal))
+                var slot = _producer.ArtifactSlots.FirstOrDefault(candidate =>
+                    string.Equals(candidate.LogicalName, artifact.LogicalName, StringComparison.Ordinal));
+                if (slot is null
+                    || artifact.LengthBytes < 0
+                    || artifact.LengthBytes > slot.MaximumBytes
+                    || artifact.LengthBytes > MaximumTotalArtifactBytes - totalBytes)
                 {
                     return false;
                 }
+
+                totalBytes += artifact.LengthBytes;
+                path = EvidenceArtifactValidation.GetContainedPath(_rootPath, artifact.RelativePath);
+                await using var stream = new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read,
+                    StreamBufferSize,
+                    FileOptions.Asynchronous | FileOptions.SequentialScan);
+                var result = await CopyAndHashAsync(stream, null, artifact.LengthBytes, cancellationToken).ConfigureAwait(false);
+                if (result.Length != artifact.LengthBytes
+                    || !string.Equals(result.Sha256, artifact.Sha256, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+            }
+            catch (InvalidDataException)
+            {
+                return false;
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
             {
@@ -547,7 +715,7 @@ public sealed class EvidenceArtifactWriter
         return true;
     }
 
-    private void ReserveArtifact(string logicalName, string normalizedPath, int lengthBytes, long maximumBytes)
+    private void ReserveArtifact(string logicalName, string normalizedPath, long lengthBytes, long maximumBytes)
     {
         lock (_sync)
         {
@@ -574,13 +742,59 @@ public sealed class EvidenceArtifactWriter
         }
     }
 
-    private void ReleaseArtifact(string logicalName, string normalizedPath, int lengthBytes)
+    private void ReleaseArtifact(string logicalName, string normalizedPath, long lengthBytes)
     {
         lock (_sync)
         {
             _artifacts.Remove(logicalName);
             _destinations.Remove(normalizedPath);
             _totalBytes -= lengthBytes;
+        }
+    }
+
+    private static async Task<(long Length, string Sha256)> CopyAndHashAsync(
+        Stream source,
+        Stream? destination,
+        long maximumBytes,
+        CancellationToken cancellationToken)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = ArrayPool<byte>.Shared.Rent(StreamBufferSize);
+        long length = 0;
+        try
+        {
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var remaining = maximumBytes - length;
+                var readSize = remaining > 0
+                    ? (int)Math.Min(StreamBufferSize, Math.Min(buffer.Length, remaining))
+                    : 1;
+                var bytesRead = await source.ReadAsync(buffer.AsMemory(0, readSize), cancellationToken).ConfigureAwait(false);
+                if (bytesRead == 0)
+                {
+                    break;
+                }
+
+                if (remaining == 0)
+                {
+                    throw new InvalidDataException("Evidence artifact stream exceeds its declared or allowed length.");
+                }
+
+                hash.AppendData(buffer, 0, bytesRead);
+                if (destination is not null)
+                {
+                    await destination.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken).ConfigureAwait(false);
+                }
+
+                length += bytesRead;
+            }
+
+            return (length, Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant());
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
         }
     }
 }
@@ -920,7 +1134,12 @@ public static class EvidenceManifestBuilder
             UnmediatedObligationIds: unmediated.OrderBy(static id => id, StringComparer.Ordinal).ToArray(),
             ProducerResults: producerResults.OrderBy(static result => result.ProducerId, StringComparer.Ordinal).ToArray(),
             Metrics: metrics,
-            ManifestDigest: string.Empty);
+            ManifestDigest: string.Empty,
+            BaseRevision: plan.BaseRevision,
+            HeadRevision: plan.HeadRevision,
+            SourceDiffDigest: plan.SourceDiffDigest,
+            NameStatusDigest: plan.NameStatusDigest,
+            PullRequestRunIdentity: plan.PullRequestRunIdentity);
 
         return draft with { ManifestDigest = EvidenceDigest.CanonicalSha256(draft) };
     }
@@ -939,7 +1158,14 @@ public static class EvidenceManifestBuilder
         ArgumentNullException.ThrowIfNull(manifest);
 
         var planWithoutDigest = plan with { PlanDigest = string.Empty };
-        if (plan.PolicySnapshot is null
+        if (!HasValidRevisionBinding(plan)
+            || !string.Equals(plan.ContractVersion, manifest.ContractVersion, StringComparison.Ordinal)
+            || !string.Equals(plan.BaseRevision, manifest.BaseRevision, StringComparison.Ordinal)
+            || !string.Equals(plan.HeadRevision, manifest.HeadRevision, StringComparison.Ordinal)
+            || !string.Equals(plan.SourceDiffDigest, manifest.SourceDiffDigest, StringComparison.Ordinal)
+            || !string.Equals(plan.NameStatusDigest, manifest.NameStatusDigest, StringComparison.Ordinal)
+            || !Equals(plan.PullRequestRunIdentity, manifest.PullRequestRunIdentity)
+            || plan.PolicySnapshot is null
             || !string.Equals(plan.PolicyDigest, EvidenceDigest.CanonicalSha256(plan.PolicySnapshot), StringComparison.Ordinal)
             || !string.Equals(plan.DiffDigest, EvidenceDigest.CanonicalSha256(plan.ChangedPaths), StringComparison.Ordinal)
             || !string.Equals(plan.PlanDigest, EvidenceDigest.CanonicalSha256(planWithoutDigest), StringComparison.Ordinal)
@@ -963,6 +1189,40 @@ public static class EvidenceManifestBuilder
             manifest.Metrics);
         return string.Equals(manifest.ManifestDigest, expected.ManifestDigest, StringComparison.Ordinal);
     }
+
+    private static bool HasValidRevisionBinding(EvidencePlan plan)
+    {
+        if (string.Equals(plan.ContractVersion, "1.0", StringComparison.Ordinal))
+        {
+            return plan.BaseRevision is null
+                && plan.HeadRevision is null
+                && plan.SourceDiffDigest is null
+                && plan.NameStatusDigest is null
+                && plan.PullRequestRunIdentity is null;
+        }
+
+        return string.Equals(plan.ContractVersion, "2.0", StringComparison.Ordinal)
+            && IsLowerHex(plan.BaseRevision, 40, 64)
+            && plan.HeadRevision?.Length == plan.BaseRevision?.Length
+            && IsLowerHex(plan.HeadRevision, 40, 64)
+            && IsLowerHex(plan.SourceDiffDigest, 64)
+            && IsLowerHex(plan.NameStatusDigest, 64)
+            && (plan.PullRequestRunIdentity is null
+                || plan.PullRequestRunIdentity is
+                {
+                    RepositoryId: > 0,
+                    HeadRepositoryId: > 0,
+                    PullRequestNumber: > 0,
+                    TargetBranch.Length: > 0 and <= 128,
+                    WorkflowRunId: > 0,
+                    WorkflowRunAttempt: > 0,
+                });
+    }
+
+    private static bool IsLowerHex(string? value, params int[] allowedLengths)
+        => value is not null
+            && allowedLengths.Contains(value.Length)
+            && value.All(static character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
 }
 
 /// <summary>
