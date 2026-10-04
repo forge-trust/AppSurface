@@ -1,8 +1,8 @@
-"""Private root bootstrap for the fixed, trusted setup-dotnet installation.
+"""Private root bootstrap for the fixed publisher-pinned SDK installation.
 
 This does not accept subject material or grant admission. The trusted workflow's
 runner identity and both dotnet resolutions must agree before root seals the
-existing installation. Portable helpers exercise filesystem procedures only.
+complete installation. Portable helpers exercise filesystem procedures only.
 """
 import hashlib
 from functools import wraps
@@ -15,7 +15,8 @@ import shutil
 import stat
 import time
 
-SDK_ROOT = Path('/usr/share/dotnet')
+SDK_ROOT = Path('/usr/share/issue779-dotnet-10.0.401')
+SDK_PATH = str(SDK_ROOT) + ':/usr/bin:/bin'
 MAX_NODES = 100_000
 MAX_FILE_BYTES = 256 * 1024 * 1024
 MAX_TOTAL_BYTES = 16 * 1024 * 1024 * 1024
@@ -526,6 +527,48 @@ def seal_share_ancestor(parent, share_fd, deadline, *, diagnostic=None):
 
 
 @_observed
+def protect_sdk_ancestors(deadline, *, diagnostic=None):
+    """Protect the fixed installation's ancestors before publisher extraction.
+
+    Root and the NSS sudo invoker are authenticated before any mutation. /usr
+    remains root:root, readable/searchable, ordinary and nonwritable by others.
+    Only the retained, named /usr/share directory may lose its existing 022
+    bits through seal_share_ancestor. No SDK path is opened or installed here.
+    Returned metadata is provenance; it cannot admit a consumer.
+    """
+    _note(diagnostic, 'root-identity')
+    require(os.geteuid() == os.getegid() == 0)
+    _note(diagnostic, 'sudo-identity')
+    runner = pwd.getpwnam('runner')
+    if type(diagnostic) is SdkDiagnostic:
+        diagnostic.identities(runner, os.environ.get('SUDO_UID'), os.environ.get('SUDO_GID'))
+    require(runner.pw_uid > 0 and runner.pw_gid > 0
+            and os.environ.get('SUDO_UID') == str(runner.pw_uid)
+            and os.environ.get('SUDO_GID') == str(runner.pw_gid))
+    parent = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    share = None
+    try:
+        remaining(deadline, diagnostic=diagnostic)
+        usr = os.open('usr', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+        try:
+            named_matches(parent, 'usr', usr, diagnostic=diagnostic)
+            info = os.fstat(usr)
+            require(stat.S_ISDIR(info.st_mode) and info.st_uid == info.st_gid == 0
+                    and not info.st_mode & 0o7022 and info.st_mode & 0o555 == 0o555)
+        except BaseException:
+            os.close(usr)
+            raise
+        os.close(parent)
+        parent = usr
+        share = os.open('share', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+        return seal_share_ancestor(parent, share, deadline, diagnostic=diagnostic)
+    finally:
+        if share is not None:
+            os.close(share)
+        os.close(parent)
+
+
+@_observed
 def seal_trusted_sdk(deadline, *, diagnostic=None):
     """Root-only audit/adoption of the independently named trusted runner SDK.
 
@@ -547,7 +590,7 @@ def seal_trusted_sdk(deadline, *, diagnostic=None):
     host = SDK_ROOT / 'dotnet'
     _note(diagnostic, 'path-binding')
     require(_match(diagnostic, 'ambient_path_match', Path(shutil.which('dotnet') or '').resolve(strict=True) == host)
-            and _match(diagnostic, 'fixed_path_match', Path(shutil.which('dotnet', path='/usr/bin:/bin') or '').resolve(strict=True) == host))
+            and _match(diagnostic, 'fixed_path_match', Path(shutil.which('dotnet', path=SDK_PATH) or '').resolve(strict=True) == host))
     parent = _measure(diagnostic, 'filesystem', os.open, '/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
     try:
         for name in ('usr', 'share'):
@@ -568,9 +611,9 @@ def seal_trusted_sdk(deadline, *, diagnostic=None):
             os.close(parent)
             parent = child
         _note(diagnostic, 'sdk-root-validation', 'sdk-root')
-        root = _measure(diagnostic, 'filesystem', os.open, 'dotnet', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+        root = _measure(diagnostic, 'filesystem', os.open, SDK_ROOT.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
         try:
-            named_matches(parent, 'dotnet', root, diagnostic=diagnostic)
+            named_matches(parent, SDK_ROOT.name, root, diagnostic=diagnostic)
             _work_pass(diagnostic, 'initial-inventory')
             before, total = inventory(root, runner.pw_uid, runner.pw_gid, deadline, diagnostic=diagnostic)
             initial_host = before['dotnet']
@@ -586,7 +629,7 @@ def seal_trusted_sdk(deadline, *, diagnostic=None):
                 expected = dict(row['metadata'], uid=0, gid=0, mode=format(int(row['metadata']['mode'], 8) & ~0o022, '04o'))
                 require(after[name]['metadata'] == expected and after[name]['directory'] == row['directory']
                         and after[name].get('sha256') == row.get('sha256'))
-            named_matches(parent, 'dotnet', root, diagnostic=diagnostic)
+            named_matches(parent, SDK_ROOT.name, root, diagnostic=diagnostic)
             remaining(deadline, diagnostic=diagnostic)
             encode = lambda value: json.dumps(value, sort_keys=True, separators=(',', ':')).encode()
             record = {'schema': 'issue779-trusted-sdk-bootstrap-v1', 'root': str(SDK_ROOT),
