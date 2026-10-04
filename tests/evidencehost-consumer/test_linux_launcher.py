@@ -1742,6 +1742,114 @@ class RootCompletionTests(unittest.TestCase):
                 finally:
                     broker.close_artifact_handles()
 
+    def test_final_stop_targets_only_worker_and_rechecks_owned_groups_after_subject_collection(self):
+        with tempfile.TemporaryDirectory() as root:
+            broker, output, properties = self.completion_fixture(root)
+            broker.units = [(broker.unit_prefix + "-command-1.service", "/system.slice/collected-subject.service")]
+            calls = []
+            try:
+                def stop(argv, timeout):
+                    self.assertEqual(argv, ["systemctl", "stop", broker.descriptor["unit"]])
+                    self.assertGreater(timeout, 0)
+                    self.assertLessEqual(timeout, 5)
+                    calls.append("stop-worker")
+                def worker_group(group):
+                    self.assertEqual(group, broker.descriptor["cgroup"])
+                    calls.append("worker-empty")
+                    return True
+                def owned(inspection_deadline):
+                    self.assertEqual(inspection_deadline, broker.deadline)
+                    calls.append("owned-empty")
+                    return True
+                with patch.object(launcher, "_systemd", side_effect=stop) as systemd, \
+                        patch.object(broker, "_group_empty", side_effect=worker_group), \
+                        patch.object(broker, "_all_owned_work_stopped", side_effect=owned), \
+                        patch.object(broker, "_unit_properties", side_effect=AssertionError("No post-stop unit query")):
+                    launcher._stop_completed_worker(broker, properties)
+                systemd.assert_called_once()
+                self.assertEqual(calls, ["worker-empty", "owned-empty", "stop-worker", "worker-empty", "owned-empty"])
+            finally:
+                broker.close_artifact_handles()
+
+    def test_final_worker_stop_failure_remains_failure_and_never_uses_returncode_fallback(self):
+        with tempfile.TemporaryDirectory() as root:
+            broker, _, properties = self.completion_fixture(root)
+            failure = launcher.LauncherError("systemd-operation-failed", operation="systemctl", exit_code=5)
+            try:
+                with patch.object(broker, "_group_empty", return_value=True), \
+                        patch.object(broker, "_all_owned_work_stopped", return_value=True) as owned, \
+                        patch.object(launcher, "_systemd", side_effect=failure) as systemd:
+                    with self.assertRaises(launcher.LauncherError) as error:
+                        launcher._stop_completed_worker(broker, properties)
+                    self.assertIs(error.exception, failure)
+                    self.assertEqual(owned.call_count, 1)
+                    systemd.assert_called_once()
+            finally:
+                broker.close_artifact_handles()
+
+    def test_final_stop_rejects_unconfirmed_owned_work_before_systemctl(self):
+        for failed in ("worker", "owned"):
+            with self.subTest(failed=failed), tempfile.TemporaryDirectory() as root:
+                broker, _, properties = self.completion_fixture(root)
+                try:
+                    with patch.object(broker, "_group_empty", return_value=failed != "worker"), \
+                            patch.object(broker, "_all_owned_work_stopped", return_value=failed != "owned"), \
+                            patch.object(launcher, "_systemd") as systemd:
+                        with self.assertRaisesRegex(launcher.LauncherError, "completion-ownership-unconfirmed"):
+                            launcher._stop_completed_worker(broker, properties)
+                        systemd.assert_not_called()
+                finally:
+                    broker.close_artifact_handles()
+
+    def test_final_stop_rechecks_physical_worker_and_owned_work_after_stop(self):
+        for failed in ("worker", "owned"):
+            with self.subTest(failed=failed), tempfile.TemporaryDirectory() as root:
+                broker, _, properties = self.completion_fixture(root)
+                try:
+                    with patch.object(broker, "_group_empty", side_effect=[True, failed != "worker"]), \
+                            patch.object(broker, "_all_owned_work_stopped", side_effect=[True, failed != "owned"]), \
+                            patch.object(launcher, "_systemd") as systemd:
+                        with self.assertRaisesRegex(launcher.LauncherError, "completion-ownership-unconfirmed"):
+                            launcher._stop_completed_worker(broker, properties)
+                        systemd.assert_called_once_with(["systemctl", "stop", broker.descriptor["unit"]], timeout=5)
+                finally:
+                    broker.close_artifact_handles()
+
+    def test_final_stop_does_not_reset_job_deadline_before_or_after_checked_stop(self):
+        for expired_after in (False, True):
+            with self.subTest(expired_after=expired_after), tempfile.TemporaryDirectory() as root:
+                broker, _, properties = self.completion_fixture(root)
+                broker.deadline = 10
+                clock = [9, 9, 11] if expired_after else [11]
+                try:
+                    with patch.object(launcher.time, "monotonic", side_effect=clock), \
+                            patch.object(broker, "_group_empty", return_value=True), \
+                            patch.object(broker, "_all_owned_work_stopped", return_value=True), \
+                            patch.object(launcher, "_systemd") as systemd:
+                        with self.assertRaisesRegex(launcher.LauncherError, "completion-ownership-unconfirmed"):
+                            launcher._stop_completed_worker(broker, properties)
+                        if expired_after:
+                            systemd.assert_called_once_with(["systemctl", "stop", broker.descriptor["unit"]], timeout=1)
+                        else:
+                            systemd.assert_not_called()
+                finally:
+                    broker.close_artifact_handles()
+
+    def test_final_stop_rechecks_deadline_after_last_physical_owned_work_inspection(self):
+        with tempfile.TemporaryDirectory() as root:
+            broker, _, properties = self.completion_fixture(root)
+            broker.deadline = 10
+            try:
+                with patch.object(launcher.time, "monotonic", side_effect=[9, 9, 9, 11]), \
+                        patch.object(broker, "_group_empty", return_value=True), \
+                        patch.object(broker, "_all_owned_work_stopped", return_value=True), \
+                        patch.object(launcher, "_systemd") as systemd:
+                    with self.assertRaisesRegex(launcher.LauncherError, "completion-ownership-unconfirmed"):
+                        launcher._stop_completed_worker(broker, properties)
+                    systemd.assert_called_once_with(["systemctl", "stop", broker.descriptor["unit"]], timeout=1)
+            finally:
+                broker.close_artifact_handles()
+
     def test_late_closed_failure_categories_survive_without_raw_exception_or_path(self):
         for cause in ("unit-inspection-failed", "unexpected-control-group", "owned-exit-inspection-deadline"):
             with self.subTest(cause=cause):

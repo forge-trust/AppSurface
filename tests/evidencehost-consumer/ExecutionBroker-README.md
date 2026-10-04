@@ -92,6 +92,31 @@ Late `unit-inspection-failed`, `unexpected-control-group` and `owned-exit-inspec
 retain those fixed categories in the existing safe failure schema. Arbitrary exception attributes, paths and
 child output remain excluded; a preserved category grants no completion or acceptance authority.
 
+### Final worker stop after producer completion
+
+After `_completion_after_owned_exit` pins the output, the root launcher's internal
+`_stop_completed_worker` stops only the still-retained worker unit. Each producer's owning
+procedure already checked its stop, joined its launcher and both pumps, and confirmed its
+physical cgroup empty. The transient producer unit may subsequently be collected; another
+batch stop would make completed ownership depend on the unit name still existing.
+[systemd v255 maps a missing unit during StopUnit to exit 5](https://github.com/systemd/systemd/blob/v255/src/systemctl/systemctl-util.c#L82-L106).
+The retained qualification22 failure records `systemctl` exit5 after a Passed CLI manifest,
+but it does not identify the subcommand; that record alone does not prove the duplicate stop
+was the native failure's cause.
+
+The worker stop remains checked. Before and after it, retained worker and producer groups,
+application completion and the original job deadline are checked; no post-stop unit metadata
+query or `reset-failed` command supplies ownership evidence. A failed stop, populated group,
+unjoined owned work or expired deadline still rejects transfer. Resetting failed-state records
+is unnecessary for this ownership protocol and could erase diagnostic evidence. Accounts and
+retained output handles keep their existing strict close order before collected evidence is
+structurally evaluated.
+
+The [portable root completion controls](test_linux_launcher.py) check the actual final helper's
+emitted worker-only command and ordering, retained-group rechecks, stop failure, and deadline
+expiry. They use explicitly modeled kernel/systemd responses and prove no native qualification,
+protected admission or coverage gain.
+
 ## Internal root application integration
 
 The [runtime output validator](runtime-proof.py) reads the exact PascalCase fields emitted by [Contracts canonical JSON](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceContracts.cs), including `PolicySnapshot`, `Profile`, `PlanDigest`, `ManifestDigest`, producer/artifact metadata and the final summary. The input fixture policy remains lower camel case. `expected_runtime_policy_snapshot` maps only that fixed fixture to the full current emitted policy, including nullable `MinPatchLinePercent`/`MinPatchBranchPercent` and default `PatchLineMode = "measurable"`; it is not a general case converter or a canonical digest implementation. `canonical_output_digests` requires the exact emitted digest fields and matching plan binding before public artifact writes. The [published CLI structural verifier](runtime-proof.py) still re-resolves the collected plan and verifies its canonical bindings independently. The [metadata regression controls](test_runtime_proof.py) combine the observed v16 PascalCase plan shape with explicitly synthetic Passed producer/manifest data solely to test parsing, rejection and public digest extraction; those data do not establish native execution, accepted evidence, admission or qualification. Public runtime-proof record field names remain lower camel case and informational.

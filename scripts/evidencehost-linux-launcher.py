@@ -2612,6 +2612,30 @@ def _worker_group_empty(broker: Broker, worker_properties: dict[str, str]) -> bo
     return broker._group_empty(group)
 
 
+def _stop_completed_worker(broker: Broker, worker_properties: dict[str, str]) -> None:
+    """Stop only the retained worker after complete producer/application ownership checks.
+
+    Producer units were already stopped and joined by their owning procedures. Their
+    transient names may have been collected; stopping them again supplies no physical
+    exit evidence. Keep the worker stop checked and recheck retained kernel groups and
+    application/producer joins under the original job deadline, without querying a
+    stopped unit's possibly collected metadata or resetting failed-state diagnostics.
+    """
+    if (time.monotonic() >= broker.deadline
+            or not _worker_group_empty(broker, worker_properties)
+            or not broker._all_owned_work_stopped(inspection_deadline=broker.deadline)):
+        raise LauncherError("completion-ownership-unconfirmed")
+    remaining = broker.deadline - time.monotonic()
+    if remaining <= 0:
+        raise LauncherError("completion-ownership-unconfirmed")
+    _systemd(["systemctl", "stop", broker.descriptor["unit"]], timeout=min(5, remaining))
+    if (time.monotonic() >= broker.deadline
+            or not _worker_group_empty(broker, worker_properties)
+            or not broker._all_owned_work_stopped(inspection_deadline=broker.deadline)
+            or time.monotonic() >= broker.deadline):
+        raise LauncherError("completion-ownership-unconfirmed")
+
+
 def _completion_after_owned_exit(broker: Broker, output: Path, worker_name: str,
                                  worker_properties: dict[str, str]) -> _LaunchCompletion:
     """Pin final output only after protocol, process, handler and exact pump acknowledgements.
@@ -3247,9 +3271,7 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
                 or output_parent.stat().st_mode & 0o777 != 0o700):
             raise LauncherError("output-parent-identity-changed")
         completion = _completion_after_owned_exit(broker, output, worker_name, wprops)
-        _systemd(["systemctl", "stop", worker_unit, *[unit for unit,_ in broker.units]], timeout=5)
-        _systemd(["systemctl","reset-failed",worker_unit])
-        for unit,_ in broker.units: _systemd(["systemctl","reset-failed",unit])
+        _stop_completed_worker(broker, wprops)
         completion_ready = True
     finally:
         if not completion_ready:
