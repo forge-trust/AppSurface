@@ -21,7 +21,7 @@ MAX_TOTAL_BYTES = 16 * 1024 * 1024 * 1024
 MAX_DEPTH = 32
 
 SDK_PHASES = frozenset(('unknown', 'root-identity', 'sudo-identity', 'path-binding',
-    'usr-validation', 'share-validation', 'sdk-root-validation', 'inventory-directory',
+    'usr-validation', 'share-validation', 'share-sealing', 'share-recheck', 'sdk-root-validation', 'inventory-directory',
     'inventory-node', 'inventory-type', 'inventory-owner', 'inventory-mode',
     'inventory-size', 'inventory-hash', 'inventory-count', 'inventory-shape',
     'deadline', 'sealing-directory', 'sealing-node', 'sealing-hash', 'sealing-adoption',
@@ -347,12 +347,50 @@ def seal_inventory(root_fd, before, deadline, *, diagnostic=None):
 
 
 @_observed
+def seal_share_ancestor(parent, share_fd, deadline, *, diagnostic=None):
+    """Clear only 022 on the fixed named, retained root-owned share directory.
+
+    Internal FD procedure only; the root bootstrap supplies its pinned /usr FD.
+    Root ownership, directory type, ordinary permission bits and named identity
+    must be established before mutation. Failure propagates without rollback or
+    SDK dispatch. Portable tests simulate only the observed root UID/GID.
+    """
+    _note(diagnostic, 'share-validation', 'share')
+    named_matches(parent, 'share', share_fd, diagnostic=diagnostic)
+    before = os.fstat(share_fd)
+    _note(diagnostic, 'share-validation', 'share', before)
+    mode = stat.S_IMODE(before.st_mode)
+    require(stat.S_ISDIR(before.st_mode) and before.st_uid == 0 and before.st_gid == 0
+            and not mode & 0o7000 and mode & 0o555 == 0o555)
+    remaining(deadline, diagnostic=diagnostic)
+    named_matches(parent, 'share', share_fd, diagnostic=diagnostic)
+    require(identity(os.fstat(share_fd)) == identity(before))
+    if mode & 0o022:
+        _note(diagnostic, 'share-sealing', 'share', before)
+        remaining(deadline, diagnostic=diagnostic)
+        os.fchmod(share_fd, mode & ~0o022)
+    _note(diagnostic, 'share-recheck', 'share')
+    after = os.fstat(share_fd)
+    _note(diagnostic, 'share-recheck', 'share', after)
+    require(stat.S_ISDIR(after.st_mode) and after.st_uid == 0 and after.st_gid == 0
+            and stat.S_IMODE(after.st_mode) == mode & ~0o022
+            and (after.st_dev, after.st_ino, after.st_nlink, after.st_size, after.st_mtime_ns)
+            == (before.st_dev, before.st_ino, before.st_nlink, before.st_size, before.st_mtime_ns))
+    named_matches(parent, 'share', share_fd, diagnostic=diagnostic)
+    remaining(deadline, diagnostic=diagnostic)
+    return {'before': metadata(before), 'after': metadata(after),
+            'write_bits_cleared': bool(mode & 0o022)}
+
+
+@_observed
 def seal_trusted_sdk(deadline, *, diagnostic=None):
     """Root-only audit/adoption of the independently named trusted runner SDK.
 
     The sudo invoker must be the NSS ``runner`` account. Both the preparation
     PATH and the launcher's fixed PATH must resolve to the fixed canonical host.
-    Root-owned system ancestors remain unchanged. No subject has been evaluated.
+    The /usr ancestor remains strict and unchanged; the fixed retained root-owned
+    /usr/share directory may lose only group/other write bits. No subject has
+    been evaluated.
     """
     _note(diagnostic, 'root-identity')
     require(os.geteuid() == 0)
@@ -377,7 +415,10 @@ def seal_trusted_sdk(deadline, *, diagnostic=None):
                 named_matches(parent, name, child, diagnostic=diagnostic)
                 info = os.fstat(child)
                 _note(diagnostic, 'usr-validation' if name == 'usr' else 'share-validation', name, info)
-                require(stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022)
+                if name == 'usr':
+                    require(stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022)
+                else:
+                    share_ancestor = seal_share_ancestor(parent, child, deadline, diagnostic=diagnostic)
             except BaseException:
                 os.close(child)
                 raise
@@ -409,6 +450,7 @@ def seal_trusted_sdk(deadline, *, diagnostic=None):
                           'before_sha256': hashlib.sha256(encode(before)).hexdigest(),
                           'after_sha256': hashlib.sha256(encode(after)).hexdigest(),
                           'host_before': initial_host, 'host_after': after['dotnet'],
+                          'share_ancestor': share_ancestor,
                           'sealed': True, 'contents_unchanged': True}
             _note(diagnostic, 'final-deadline')
             remaining(deadline, diagnostic=diagnostic)

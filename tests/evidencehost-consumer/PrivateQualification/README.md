@@ -63,9 +63,24 @@ receipt. Nonzero exits, oversized logs, expired deadlines and incomplete ownersh
 Before these trusted builds, [`trusted_sdk.py`](trusted_sdk.py) audits and seals the fixed
 `/usr/share/dotnet` installation selected by the pinned workflow's trusted setup action. The root
 controller requires the NSS `runner` account to match the sudo invoker, and both its preparation PATH
-and the launcher's fixed `/usr/bin:/bin` PATH to resolve to that same canonical host. Root-owned,
-nonwritable system ancestors are retained through no-follow directory FDs. This procedure does not
-accept subject files or a caller-selected SDK root.
+and the launcher's fixed `/usr/bin:/bin` PATH to resolve to that same canonical host. The `/usr`
+ancestor retains its strict root-owned, nonwritable guard. The fixed `/usr/share` ancestor is retained
+through a no-follow directory FD and must have root UID/GID, directory type, no special permission
+bits and all `0555` bits. Before opening the SDK tree, root may clear only its group/other write bits
+(`022`) through that FD. Its named identity, ownership, type and all other permission bits are
+rechecked. This private trusted-CI setup hardening accepts neither subject files nor a caller-selected
+SDK root and leaves the SDK tree's complete-audit-before-adoption ordering unchanged.
+
+The internal `seal_share_ancestor(parent, share_fd, deadline, *, diagnostic=None)` FD procedure is
+called only with the bootstrap's pinned `/usr` and fixed `share` directory. It returns numeric
+`before`/`after` metadata plus `write_bits_cleared`; the completed SDK record stores this as
+`share_ancestor`. An already nonwritable ancestor is checked without `fchmod`. There is no `fchown`,
+recursive mode change or rollback promise. A syscall failure, substitution, invalid metadata or
+expired deadline propagates and prevents SDK/consumer dispatch, even after permissions were tightened.
+The diagnostic phases `share-sealing` and `share-recheck` preserve the first failure without paths or
+exception messages. Three [portable procedure matrices](test_trusted_sdk.py) use real current-owned
+temporary FDs and substitute only root stat observations; they verify mode preservation, named/type/
+owner rejection and mutation/recheck/deadline failure. They do not invoke root bootstrap or a system SDK.
 
 The complete initial tree must contain only readable regular single-link files and searchable directories
 owned by root or that trusted setup account, with no special permission bits. The host must be an executable
