@@ -140,15 +140,12 @@ internal static class Program
             }
         }
 
-        if (!values.TryGetValue("--plan", out var planPath)
-            || !values.TryGetValue("--policy", out var policyPath)
-            || !values.TryGetValue("--repository", out var repositoryPath)
-            || !values.TryGetValue("--output-dir", out var outputDirectory))
-        {
-            return false;
-        }
-
-        options = new RunOptions(planPath, policyPath, repositoryPath, outputDirectory);
+        // Four distinct entries from this four-option allowlist contain every required option.
+        options = new RunOptions(
+            values["--plan"],
+            values["--policy"],
+            values["--repository"],
+            values["--output-dir"]);
         return true;
     }
 
