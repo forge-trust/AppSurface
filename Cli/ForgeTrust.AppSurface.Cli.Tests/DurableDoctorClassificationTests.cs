@@ -716,8 +716,7 @@ public sealed class DurableDoctorClassificationTests
 
     private static DurableDoctorObservation CreateObservation(DurableDoctorMatrixRow row, DurableDoctorRequest request)
     {
-        var scenario = row.Scenario;
-        ArgumentNullException.ThrowIfNull(scenario);
+        var scenario = row.Scenario ?? throw new ArgumentNullException(nameof(row.Scenario));
 
         if (scenario.StartsWith("credential-unsafe", StringComparison.Ordinal))
         {

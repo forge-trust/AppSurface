@@ -660,12 +660,11 @@ public sealed class DurableDoctorInstalledToolTests
             }
         }
 
-        foreach (var relativePath in new[]
+        foreach (var path in new[]
         {
             "Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props", "NuGet.Config", "global.json",
-        })
+        }.Select(relativePath => TestPathUtils.PathUnder(repositoryRoot, relativePath)))
         {
-            var path = TestPathUtils.PathUnder(repositoryRoot, relativePath);
             if (File.Exists(path))
             {
                 paths.Add(path);

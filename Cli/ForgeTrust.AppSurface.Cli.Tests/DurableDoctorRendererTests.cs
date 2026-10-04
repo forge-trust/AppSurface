@@ -690,9 +690,8 @@ public sealed class DurableDoctorRendererTests
             finding with { FailedChecks = ["function-owner", "function-signature"] },
         };
 
-        foreach (var candidateFinding in malformed)
+        foreach (var candidate in malformed.Select(candidateFinding => Copy(valid, findings: [candidateFinding])))
         {
-            var candidate = Copy(valid, findings: [candidateFinding]);
             var exception = Assert.Throws<InvalidOperationException>(
                 () => DurableDoctorRenderer.Render(candidate, request, format));
             Assert.Equal("Durable doctor result does not satisfy the v1 rendering contract.", exception.Message);

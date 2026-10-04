@@ -470,8 +470,7 @@ public sealed class DurableDoctorIntegrationTests
         Assert.Equal(row.ExpectedCodes, result.Findings.Select(finding => finding.Code));
         AssertAction(row, result.NextAction, staleAfter, "json");
 
-        var scenario = row.Scenario;
-        ArgumentNullException.ThrowIfNull(scenario);
+        var scenario = row.Scenario ?? throw new ArgumentNullException(nameof(row.Scenario));
         if (scenario.StartsWith("schema-", StringComparison.Ordinal))
         {
             Assert.Null(result.Retention);
