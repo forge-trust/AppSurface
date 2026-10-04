@@ -764,6 +764,34 @@ public sealed class ReleaseWorkflowPolicyTests
     }
 
     [Fact]
+    public async Task ReleasePublicationRequiresProtectedEnvironmentBeforeAnyWriteCapableJob()
+    {
+        var workflow = await ReadRepositoryFileAsync(".github/workflows/release-publish.yml");
+        var validation = GetWorkflowJob(workflow, "validate-release", "publish-docs-archive");
+        var environmentGuard = GetWorkflowStepRun(validation, "Require the protected release publication environment");
+
+        Assert.Contains("actions: read", validation, StringComparison.Ordinal);
+        Assert.Contains("environments/release-publish\"", environmentGuard, StringComparison.Ordinal);
+        Assert.Contains("environments/release-publish/deployment-branch-policies", environmentGuard, StringComparison.Ordinal);
+        Assert.Contains("publish_guard.py environment", environmentGuard, StringComparison.Ordinal);
+        Assert.True(
+            validation.IndexOf("Require the protected release publication environment", StringComparison.Ordinal)
+            < validation.IndexOf("Validate tag-bound release evidence", StringComparison.Ordinal));
+        Assert.Equal(3, Regex.Matches(workflow, @"\bcontents: write\b").Count);
+
+        foreach (var job in new[]
+        {
+            GetWorkflowJob(workflow, "publish-docs-archive", "deploy-docs-pages"),
+            GetWorkflowJob(workflow, "verify-public-docs", "publish-github-release"),
+            GetWorkflowJob(workflow, "publish-github-release")
+        })
+        {
+            Assert.Contains("contents: write", job, StringComparison.Ordinal);
+            Assert.Contains("environment: release-publish", job, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public async Task ReleasePrepPushScriptHandlesNewExistingAndFailureBranchStates()
     {
         if (OperatingSystem.IsWindows())

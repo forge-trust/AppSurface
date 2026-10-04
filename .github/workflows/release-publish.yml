@@ -74,6 +74,21 @@ jobs:
             exit 1
           fi
 
+      - name: Require the protected release publication environment
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          environment_json="$RUNNER_TEMP/release-publication-environment.json"
+          branch_policies_json="$RUNNER_TEMP/release-publication-branches.json"
+          gh api "repos/$GITHUB_REPOSITORY/environments/release-publish" > "$environment_json"
+          gh api "repos/$GITHUB_REPOSITORY/environments/release-publish/deployment-branch-policies" \
+            > "$branch_policies_json"
+          python3 scripts/evidence-gate-subject-image/publish_guard.py environment \
+            --environment-json "$environment_json" \
+            --branch-policies-json "$branch_policies_json"
+
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
@@ -126,6 +141,7 @@ jobs:
     needs: validate-release
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    environment: release-publish
     permissions:
       contents: write # Required to create or reuse the draft GitHub Release and upload docs archive assets.
     outputs:
@@ -423,6 +439,7 @@ jobs:
       - deploy-docs-pages
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: release-publish
     permissions:
       contents: write # Required because draft release assets are not downloadable with the workflow token under contents: read.
 
@@ -500,6 +517,7 @@ jobs:
       - verify-public-docs
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: release-publish
     permissions:
       contents: write # Required to promote the verified draft GitHub Release to public.
 
