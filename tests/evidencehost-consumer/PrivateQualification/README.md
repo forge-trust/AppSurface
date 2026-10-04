@@ -83,6 +83,36 @@ not a completed build or acceptance record. Earlier V7 measured
 only rejection at `dotnet-validation`; it did not measure which ownership/permission predicate failed. This
 bootstrap is a controlled trusted-installation handoff, not an inference about that missing native field.
 
+The optional internal `diagnostic=SdkDiagnostic()` keyword on the SDK procedures records data only;
+it supplies no root, owner, path or guard override. On bootstrap failure, `prepare` attempts an atomic
+update of the existing incomplete `build-binding.json`, capped at 4096 bytes, preserving `host_before`
+and `preparation_complete:false`. The nested `sdk_bootstrap.diagnostic` schema is
+`issue779-trusted-sdk-diagnostic-v1`: closed phase/role/error-class labels, last observed node numeric
+UID/GID/mode/link-count/device/inode/length, NSS runner IDs, bounded parsed sudo IDs, and nullable
+ambient/fixed PATH-match booleans. Node mode is an integer permission mask. Unknown observations are
+null; no SDK node paths, filenames, arguments, exception messages or content bytes are recorded.
+The node also records the closed kind `regular`, `directory`, `symlink` or `other`, derived from that
+same observed stat without another lookup; this distinguishes file type from permission bits.
+
+Phases cover root/sudo identity, PATH binding, the two system ancestors, SDK-root validation, inventory
+directory/node/type/owner/mode/size/hash/count/shape/deadline, sealing directory/node/hash/adoption/
+recheck/count, and final recheck/deadline. The first propagated failure freezes its snapshot. The node
+is the last observation already made by the procedure, not an additional lookup at failure time.
+Missing diagnostics or failed capture do not replace the original failure, complete preparation or
+permit consumer execution. Earlier verified nodes may already be sealed when a later check fails;
+the diagnostic neither rolls that state back nor treats it as successful sealing. Four additional
+[portable controls](test_trusted_sdk.py) use owned temporary metadata and deliberately failed guards;
+they do not invoke root bootstrap, NSS, system SDK paths or native execution.
+
+A successful deadline check keeps the active operation phase; only its failed predicate records
+`deadline` (or retains `final-deadline`). It takes the same single monotonic sample as the guard.
+Enumeration entered during sealing retains `sealing-count` when its bound rejects. Three additional
+controls cover retained-FD read failure attribution, sealing enumeration overflow, and atomic retention
+of the closed frame. The retention control explicitly substitutes root UID/GID observations only for
+owned temporary inodes; it establishes no native ownership. Its success preserves initial host data
+and the incomplete state. Unsafe/oversized inputs or replace failure leave the original binding and
+exception intact and remove any diagnostic temporary file.
+
 The copied subject snapshot is separately sealed to `0555` directories and `0444` files before immutable
 preflight. Git tar entries may carry `0775`/`0664` modes; copying those modes does not satisfy the protected
 snapshot's no-write requirement. Sealing changes no bytes and evaluates no subject project. The launcher
