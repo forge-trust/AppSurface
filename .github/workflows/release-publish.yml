@@ -348,6 +348,7 @@ jobs:
           set -euo pipefail
           test "$(git -C release-verifier rev-parse HEAD)" = "${GITHUB_SHA}"
           dotnet build release-verifier/Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release
+          dotnet build release-verifier/tools/ForgeTrust.AppSurface.Release/ForgeTrust.AppSurface.Release.csproj -c Release
 
       - name: Verify staged docs archive
         env:
@@ -377,6 +378,7 @@ jobs:
           TITLE: AppSurface ${{ needs.validate-release.outputs.tag }}
           ARCHIVE_PATH: ${{ steps.docs.outputs.archive_path }}
           SHA256_PATH: ${{ steps.docs.outputs.sha256_path }}
+          DOCS_PUBLICATION_PLAN: ${{ steps.docs.outputs.docs_publication_plan }}
         run: |
           set -euo pipefail
           require_remote_tag_identity() {
@@ -396,6 +398,12 @@ jobs:
             fi
           }
           require_remote_tag_identity
+          dotnet run --project release-verifier/tools/ForgeTrust.AppSurface.Release/ForgeTrust.AppSurface.Release.csproj -c Release --no-build --no-restore -- \
+            verify-docs-archive-tuple \
+            --version "${VERSION}" \
+            --archive "${ARCHIVE_PATH}" \
+            --plan "${DOCS_PUBLICATION_PLAN}" \
+            --sha256 "${SHA256_PATH}"
           notes_file="${RUNNER_TEMP}/release-notes.md"
           git show "${TAG_COMMIT}:releases/v${VERSION}.md" > "${notes_file}"
           if gh release view "${TAG}" --json isDraft --jq '.isDraft' | grep -qx true; then

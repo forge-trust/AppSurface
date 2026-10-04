@@ -161,6 +161,18 @@ The command exits nonzero if the environment is missing, has an extra branch or 
 - a Pages staging root containing the current docs payload, `versions.json`, and `releases/{version}/`
 - a maintainer recovery summary with resume, publish, and abort commands for partial failures
 
+The read-only `verify-docs-archive-tuple` command checks a host-selected archive, publication plan, and `.sha256` sidecar after they are collected into a trusted private artifact handoff:
+
+```bash
+./eng/release verify-docs-archive-tuple \
+  --version 0.1.0-preview.1 \
+  --archive "$RUNNER_TEMP/appsurface-docs-v0.1.0-preview.1.tar.gz" \
+  --plan "$RUNNER_TEMP/docs-publication-plan.json" \
+  --sha256 "$RUNNER_TEMP/appsurface-docs-v0.1.0-preview.1.tar.gz.sha256"
+```
+
+All four options are required; `--version` is canonical SemVer without a leading `v`, and relative paths resolve from the command's working directory. It requires the canonical `appsurface-docs-v{version}.tar.gz` and matching `.sha256` names, validates the plan's version, tag, asset name, and lowercase SHA-256, checks the exact sidecar line, and recomputes the digest from the selected archive bytes. Plan and sidecar inputs are capped at 64 KiB and 256 bytes; archive hashing is streamed and capped at 1 GiB. Success emits a bounded JSON tuple result without local input paths; invalid or unreadable input returns a fixed diagnostic without echoing path or exception details. Select all three files from the same trusted private handoff: the command checks tuple consistency, not artifact provenance, publication authorization, or race-proof filesystem traversal. EvidenceGate remains non-claiming until it has an authenticated release invocation and independently verified package/archive artifact handoff.
+
 Stable publication rejects release-manifest digest mismatches and recommended-version downgrades. GitHub Release assets are policy-immutable rather than platform-immutable: draft assets may be replaced during recovery for the same tag, but public release assets are no-clobber and require manual recovery or a fix-forward release.
 
 `--pages-staging-root` is reset before the verified Pages payload is copied into it. Use a disposable directory outside the repository and outside the exported exact tree, existing Pages root, archive output, plan output, and recovery summary output. Generated outputs must also stay outside `--existing-pages-root`, because that root is copied into the public Pages payload before the new release tree is staged. The command rejects root paths and overlapping staging or generated-output paths before deleting or copying anything.
