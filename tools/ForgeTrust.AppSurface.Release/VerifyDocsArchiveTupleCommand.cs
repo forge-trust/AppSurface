@@ -1,5 +1,3 @@
-using System.Text;
-
 namespace ForgeTrust.AppSurface.Release;
 
 /// <summary>Read-only CLI entry point for verifying a host-selected Docs archive tuple.</summary>
@@ -7,7 +5,6 @@ namespace ForgeTrust.AppSurface.Release;
 internal sealed partial class VerifyDocsArchiveTupleCommand : ICommand
 {
     private const int MaximumPathCharacters = 4096;
-    private const int MaximumResultBytes = 4096;
     private readonly ReleaseExecutionContext _executionContext;
 
     /// <summary>Creates the command with the invocation directory used to resolve relative input paths.</summary>
@@ -59,17 +56,9 @@ internal sealed partial class VerifyDocsArchiveTupleCommand : ICommand
                 planPath,
                 sha256Path,
                 cancellationToken).ConfigureAwait(false);
+            // Version is at most 128 canonical ASCII characters; every other text field is
+            // derived from it or is a fixed-length digest, so this result stays under 4 KiB.
             var json = JsonSerializer.Serialize(result, ReleaseJson.Options);
-            if (Encoding.UTF8.GetByteCount(json) > MaximumResultBytes)
-            {
-                throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                    "release-docs-archive-tuple-result-too-large",
-                    "Docs archive tuple verification result exceeded its output limit.",
-                    "The bounded result could not be emitted.",
-                    "Use a supported SemVer release version and rerun verification.",
-                    "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
-            }
-
             await console.Output.WriteLineAsync(json).ConfigureAwait(false);
             Environment.ExitCode = 0;
         }

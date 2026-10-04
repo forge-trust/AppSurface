@@ -1,9 +1,17 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Release;
 
 namespace ForgeTrust.AppSurface.Release.Tests;
 
+[CollectionDefinition("Release archive tuple CLI", DisableParallelization = true)]
+public sealed class ReleaseArchiveTupleCliCollection
+{
+}
+
+[Collection("Release archive tuple CLI")]
 public sealed class ReleaseDocsArchiveTupleVerifierTests
 {
     [Fact]
@@ -178,6 +186,34 @@ public sealed class ReleaseDocsArchiveTupleVerifierTests
     }
 
     [Fact]
+    public async Task VerifyRejectsEmptyArchiveBeforeHashing()
+    {
+        using var fixture = new TupleFixture();
+        await fixture.WriteValidTupleAsync();
+        await File.WriteAllBytesAsync(fixture.ArchivePath, []);
+
+        var exception = await Assert.ThrowsAsync<ReleaseToolException>(() => fixture.VerifyAsync());
+
+        Assert.Equal("release-docs-archive-tuple-invalid", exception.Diagnostic.Code);
+        Assert.Equal("The selected Docs archive is empty or exceeds its byte limit.", exception.Diagnostic.Cause);
+        Assert.DoesNotContain(fixture.RootPath, exception.Diagnostic.Render(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VerifyMapsMissingArchiveToFixedIoDiagnostic()
+    {
+        using var fixture = new TupleFixture();
+        await fixture.WriteValidTupleAsync();
+        File.Delete(fixture.ArchivePath);
+
+        var exception = await Assert.ThrowsAsync<ReleaseToolException>(() => fixture.VerifyAsync());
+
+        Assert.Equal("release-docs-archive-tuple-invalid", exception.Diagnostic.Code);
+        Assert.Equal("A selected tuple input could not be read safely.", exception.Diagnostic.Cause);
+        Assert.DoesNotContain(fixture.RootPath, exception.Diagnostic.Render(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task VerifyRejectsMalformedPlanJsonWithFixedDiagnostic()
     {
         using var fixture = new TupleFixture();
@@ -239,6 +275,40 @@ public sealed class ReleaseDocsArchiveTupleVerifierTests
 
         Assert.Equal("release-docs-archive-tuple-invalid", exception.Diagnostic.Code);
         Assert.Equal("A selected tuple input could not be read safely.", exception.Diagnostic.Cause);
+        Assert.DoesNotContain(fixture.RootPath, exception.Diagnostic.Render(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VerifyRejectsMissingSelectedPlanPath()
+    {
+        using var fixture = new TupleFixture();
+        await fixture.WriteValidTupleAsync();
+
+        var exception = await Assert.ThrowsAsync<ReleaseToolException>(() => ReleaseDocsArchiveTupleVerifier.VerifyAsync(
+            fixture.Version,
+            fixture.ArchivePath,
+            " ",
+            fixture.SidecarPath,
+            CancellationToken.None));
+
+        Assert.Equal("A required tuple input path is missing.", exception.Diagnostic.Cause);
+        Assert.DoesNotContain(fixture.RootPath, exception.Diagnostic.Render(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VerifyRejectsFilesystemRootAsSelectedPlan()
+    {
+        using var fixture = new TupleFixture();
+        await fixture.WriteValidTupleAsync();
+
+        var exception = await Assert.ThrowsAsync<ReleaseToolException>(() => ReleaseDocsArchiveTupleVerifier.VerifyAsync(
+            fixture.Version,
+            fixture.ArchivePath,
+            Path.GetPathRoot(fixture.PlanPath)!,
+            fixture.SidecarPath,
+            CancellationToken.None));
+
+        Assert.Equal("A selected tuple input is not an ordinary file path.", exception.Diagnostic.Cause);
         Assert.DoesNotContain(fixture.RootPath, exception.Diagnostic.Render(), StringComparison.Ordinal);
     }
 
@@ -310,6 +380,61 @@ public sealed class ReleaseDocsArchiveTupleVerifierTests
         Assert.Empty(missingPlan.Stdout);
         Assert.Contains("release-docs-archive-tuple-invalid", missingPlan.Stderr, StringComparison.Ordinal);
         Assert.DoesNotContain(fixture.RootPath, missingPlan.Stderr, StringComparison.Ordinal);
+
+        var malformedVersion = await fixture.RunCliAsync("not-semver");
+        Assert.Equal(1, malformedVersion.ExitCode);
+        Assert.Empty(malformedVersion.Stdout);
+        Assert.Contains("release-docs-archive-tuple-arguments-invalid", malformedVersion.Stderr, StringComparison.Ordinal);
+
+        var overlongPath = await fixture.RunCliAsync(
+            fixture.Version.ToString(),
+            archivePath: new string('a', 4097));
+        Assert.Equal(1, overlongPath.ExitCode);
+        Assert.Empty(overlongPath.Stdout);
+        Assert.Contains("release-docs-archive-tuple-arguments-invalid", overlongPath.Stderr, StringComparison.Ordinal);
+
+        var invalidPath = await fixture.RunCliAsync(
+            fixture.Version.ToString(),
+            archivePath: "invalid\0archive-path");
+        Assert.Equal(1, invalidPath.ExitCode);
+        Assert.Empty(invalidPath.Stdout);
+        Assert.Contains("release-docs-archive-tuple-invalid", invalidPath.Stderr, StringComparison.Ordinal);
+        Assert.Contains("could not be read safely", invalidPath.Stderr, StringComparison.Ordinal);
+        Assert.DoesNotContain(fixture.RootPath, invalidPath.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CliCancellationEmitsAStableDiagnosticWithoutReadingTheTuple()
+    {
+        using var fixture = new TupleFixture();
+        await fixture.WriteValidTupleAsync();
+        using var stderr = new MemoryStream();
+        using var console = new FakeConsole(new MemoryStream(), new MemoryStream(), stderr);
+        var cancellationToken = console.RegisterCancellationHandler();
+        console.RequestCancellation(TimeSpan.Zero);
+        Assert.True(cancellationToken.IsCancellationRequested);
+
+        var command = new VerifyDocsArchiveTupleCommand(new ReleaseExecutionContext(fixture.RootPath))
+        {
+            VersionText = fixture.Version.ToString(),
+            ArchivePath = fixture.ArchivePath,
+            PlanPath = fixture.PlanPath,
+            Sha256Path = fixture.SidecarPath,
+        };
+        var previousExitCode = Environment.ExitCode;
+        try
+        {
+            await command.ExecuteAsync(console);
+            Assert.Equal(1, Environment.ExitCode);
+        }
+        finally
+        {
+            Environment.ExitCode = previousExitCode;
+        }
+
+        var diagnostic = Encoding.UTF8.GetString(stderr.ToArray());
+        Assert.Contains("release-docs-archive-tuple-cancelled", diagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain(fixture.RootPath, diagnostic, StringComparison.Ordinal);
     }
 
     internal sealed class TupleFixture : IDisposable
@@ -389,7 +514,10 @@ public sealed class ReleaseDocsArchiveTupleVerifierTests
         internal Task<ReleaseDocsArchiveTupleVerification> VerifyAsync() =>
             ReleaseDocsArchiveTupleVerifier.VerifyAsync(Version, ArchivePath, PlanPath, SidecarPath, CancellationToken.None);
 
-        internal async Task<(int ExitCode, string Stdout, string Stderr)> RunCliAsync(string version, string? planPath = null)
+        internal async Task<(int ExitCode, string Stdout, string Stderr)> RunCliAsync(
+            string version,
+            string? planPath = null,
+            string? archivePath = null)
         {
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
@@ -397,7 +525,7 @@ public sealed class ReleaseDocsArchiveTupleVerifierTests
                 [
                     "verify-docs-archive-tuple",
                     "--version", version,
-                    "--archive", ArchivePath,
+                    "--archive", archivePath ?? ArchivePath,
                     "--plan", planPath ?? PlanPath,
                     "--sha256", SidecarPath,
                 ],
