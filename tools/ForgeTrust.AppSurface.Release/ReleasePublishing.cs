@@ -40,7 +40,7 @@ internal sealed class ReleasePublishing
     /// </summary>
     /// <param name="options">Publish command options. The version and tag must match, and stable versions require protected stable package publishing proof.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Structured workflow outputs for GitHub Release creation.</returns>
+    /// <returns>Structured publish validation output, with captured tag object identity when GitHub workflow outputs are requested.</returns>
     /// <remarks>
     /// <see cref="PublishAsync"/> verifies annotated tag shape, reachability from the configured base ref, package publication, draft-safe
     /// GitHub Release state, and presence of <c>releases/v{version}.md</c> in the tag commit. The tag commit must also contain the release
@@ -62,9 +62,22 @@ internal sealed class ReleasePublishing
                 "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
         }
 
-        var projection = await _taggedProjectionResolver.ResolveAsync(options, cancellationToken);
+        var projection = options.GitHubOutputPath is null
+            ? await _taggedProjectionResolver.ResolveAsync(options, cancellationToken)
+            : await _taggedProjectionResolver.ResolveMachineInspectAsync(options, cancellationToken);
         var tag = projection.Tag;
         var tagCommit = projection.TagCommit;
+        var tagObjectId = projection.TagObjectId;
+        if (options.GitHubOutputPath is not null && string.IsNullOrWhiteSpace(tagObjectId))
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-tag-object-id-unavailable",
+                $"Annotated tag {tag} did not produce a captured tag object ID.",
+                "The release output must bind both the annotated tag object and its peeled commit.",
+                "Retry after tag identity validation succeeds; do not publish from an unbound tag projection.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
+        }
+
         await ValidatePackagePublishingSucceededAsync(options.Version, tag, tagCommit, cancellationToken);
         await ValidateGitHubReleaseDraftSafeAsync(tag, cancellationToken);
 
@@ -104,6 +117,7 @@ internal sealed class ReleasePublishing
         return new PublishOutputs(
             options.Version.ToString(),
             tag,
+            tagObjectId,
             tagCommit,
             notePathInTag,
             notesFile,
@@ -133,6 +147,16 @@ internal sealed class ReleasePublishing
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(outputs.TagObjectId))
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-tag-object-id-unavailable",
+                $"Annotated tag {outputs.Tag} did not produce a captured tag object ID.",
+                "The release output must bind both the annotated tag object and its peeled commit.",
+                "Retry after tag identity validation succeeds; do not publish from an unbound tag projection.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
+        }
+
         var outputDirectory = Path.GetDirectoryName(options.GitHubOutputPath);
         if (string.IsNullOrEmpty(outputDirectory))
         {
@@ -148,6 +172,7 @@ internal sealed class ReleasePublishing
         var builder = new StringBuilder();
         AppendOutput(builder, "version", outputs.Version);
         AppendOutput(builder, "tag", outputs.Tag);
+        AppendOutput(builder, "tag_object_id", outputs.TagObjectId);
         AppendOutput(builder, "tag_commit", outputs.TagCommit);
         AppendOutput(builder, "note_path", outputs.NotePath);
         AppendOutput(builder, "notes_file", outputs.NotesFile);

@@ -41,6 +41,7 @@ jobs:
       version: ${{ steps.release.outputs.version }}
       tag: ${{ steps.release.outputs.tag }}
       base_ref: ${{ steps.base.outputs.base_ref }}
+      tag_object_id: ${{ steps.release.outputs.tag_object_id }}
       tag_commit: ${{ steps.release.outputs.tag_commit }}
       notes_file: ${{ steps.release.outputs.notes_file }}
       prerelease: ${{ steps.release.outputs.prerelease }}
@@ -370,6 +371,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.validate-release.outputs.tag }}
+          TAG_OBJECT_ID: ${{ needs.validate-release.outputs.tag_object_id }}
           TAG_COMMIT: ${{ needs.validate-release.outputs.tag_commit }}
           VERSION: ${{ needs.validate-release.outputs.version }}
           TITLE: AppSurface ${{ needs.validate-release.outputs.tag }}
@@ -377,12 +379,23 @@ jobs:
           SHA256_PATH: ${{ steps.docs.outputs.sha256_path }}
         run: |
           set -euo pipefail
-          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
-          actual_tag_commit="$(git rev-parse "refs/tags/${TAG}^{commit}")"
-          if [[ "${actual_tag_commit}" != "${TAG_COMMIT}" ]]; then
-            echo "Expected ${TAG} to resolve to ${TAG_COMMIT}; got ${actual_tag_commit}." >&2
-            exit 1
-          fi
+          require_remote_tag_identity() {
+            local remote_tag_refs actual_tag_object_id actual_tag_commit remote_ref_count
+            remote_tag_refs="$(git ls-remote --exit-code origin "refs/tags/${TAG}" "refs/tags/${TAG}^{}")"
+            remote_ref_count="$(awk 'END { print NR }' <<< "${remote_tag_refs}")"
+            actual_tag_object_id="$(awk -F '\t' -v ref="refs/tags/${TAG}" '$2 == ref { print $1 }' <<< "${remote_tag_refs}")"
+            actual_tag_commit="$(awk -F '\t' -v ref="refs/tags/${TAG}^{}" '$2 == ref { print $1 }' <<< "${remote_tag_refs}")"
+            if [[ "${remote_ref_count}" != 2 \
+                  || ! "${actual_tag_object_id}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ \
+                  || ! "${actual_tag_commit}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ \
+                  || "${#actual_tag_object_id}" -ne "${#actual_tag_commit}" \
+                  || "${actual_tag_object_id}" != "${TAG_OBJECT_ID}" \
+                  || "${actual_tag_commit}" != "${TAG_COMMIT}" ]]; then
+              echo "Remote ${TAG} identity does not match validated tag object ${TAG_OBJECT_ID} and commit ${TAG_COMMIT}." >&2
+              exit 1
+            fi
+          }
+          require_remote_tag_identity
           notes_file="${RUNNER_TEMP}/release-notes.md"
           git show "${TAG_COMMIT}:releases/v${VERSION}.md" > "${notes_file}"
           if gh release view "${TAG}" --json isDraft --jq '.isDraft' | grep -qx true; then
@@ -391,6 +404,7 @@ jobs:
           else
             gh release create "${TAG}" --verify-tag --draft --title "${TITLE}" --notes-file "${notes_file}"
           fi
+          require_remote_tag_identity
           gh release upload "${TAG}" "${ARCHIVE_PATH}" "${SHA256_PATH}" --clobber
 
       - name: Upload docs publication artifacts
@@ -533,20 +547,33 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.validate-release.outputs.tag }}
+          TAG_OBJECT_ID: ${{ needs.validate-release.outputs.tag_object_id }}
           TAG_COMMIT: ${{ needs.validate-release.outputs.tag_commit }}
           PRERELEASE: ${{ needs.validate-release.outputs.prerelease }}
         run: |
           set -euo pipefail
-          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
-          actual_tag_commit="$(git rev-parse "refs/tags/${TAG}^{commit}")"
-          if [[ "${actual_tag_commit}" != "${TAG_COMMIT}" ]]; then
-            echo "Expected ${TAG} to resolve to ${TAG_COMMIT}; got ${actual_tag_commit}." >&2
-            exit 1
-          fi
+          require_remote_tag_identity() {
+            local remote_tag_refs actual_tag_object_id actual_tag_commit remote_ref_count
+            remote_tag_refs="$(git ls-remote --exit-code origin "refs/tags/${TAG}" "refs/tags/${TAG}^{}")"
+            remote_ref_count="$(awk 'END { print NR }' <<< "${remote_tag_refs}")"
+            actual_tag_object_id="$(awk -F '\t' -v ref="refs/tags/${TAG}" '$2 == ref { print $1 }' <<< "${remote_tag_refs}")"
+            actual_tag_commit="$(awk -F '\t' -v ref="refs/tags/${TAG}^{}" '$2 == ref { print $1 }' <<< "${remote_tag_refs}")"
+            if [[ "${remote_ref_count}" != 2 \
+                  || ! "${actual_tag_object_id}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ \
+                  || ! "${actual_tag_commit}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ \
+                  || "${#actual_tag_object_id}" -ne "${#actual_tag_commit}" \
+                  || "${actual_tag_object_id}" != "${TAG_OBJECT_ID}" \
+                  || "${actual_tag_commit}" != "${TAG_COMMIT}" ]]; then
+              echo "Remote ${TAG} identity does not match validated tag object ${TAG_OBJECT_ID} and commit ${TAG_COMMIT}." >&2
+              exit 1
+            fi
+          }
+          require_remote_tag_identity
           args=(release edit "${TAG}" --draft=false)
           if [[ "${PRERELEASE}" == "true" ]]; then
             args+=(--prerelease)
           else
             args+=(--latest)
           fi
+          require_remote_tag_identity
           gh "${args[@]}"

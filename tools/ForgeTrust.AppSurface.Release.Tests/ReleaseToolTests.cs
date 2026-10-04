@@ -6247,7 +6247,12 @@ public sealed class ReleaseToolTests : IDisposable
     {
         await SeedRepositoryAsync();
         var githubOutput = Path.Join(_repositoryRoot, "github-output.txt");
-        var runner = CreateSuccessfulPublishRunner();
+        var runner = CreateSuccessfulV1InspectRunner();
+        runner.Add(
+            "gh run list --workflow nuget-prerelease-publish.yml --commit "
+            + PreviewPeeledCommit
+            + " --json conclusion,headBranch,status,url --jq [.[] | select(.headBranch == \"v0.1.0-preview.1\" and .status == \"completed\" and .conclusion == \"success\")][0].url // \"\"",
+            new CommandResult(0, "https://github.com/example/actions/runs/1\n", ""));
 
         var result = await RunAsync(
             [
@@ -6267,10 +6272,11 @@ public sealed class ReleaseToolTests : IDisposable
 
         var output = await File.ReadAllTextAsync(githubOutput);
         Assert.Contains("tag=v0.1.0-preview.1", output, StringComparison.Ordinal);
-        Assert.Contains("tag_commit=abc123", output, StringComparison.Ordinal);
+        Assert.Contains($"tag_object_id={PreviewTagObjectId}", output, StringComparison.Ordinal);
+        Assert.Contains($"tag_commit={PreviewPeeledCommit}", output, StringComparison.Ordinal);
         Assert.Contains("evidence_path=releases/v0.1.0-preview.1.evidence.json", output, StringComparison.Ordinal);
         Assert.Contains("evidence_subject_sha256=", output, StringComparison.Ordinal);
-        Assert.Contains("evidence_tag_commit=abc123", output, StringComparison.Ordinal);
+        Assert.Contains($"evidence_tag_commit={PreviewPeeledCommit}", output, StringComparison.Ordinal);
         Assert.Contains("prerelease=true", output, StringComparison.Ordinal);
         Assert.Contains("notes_file=", output, StringComparison.Ordinal);
     }
@@ -6683,6 +6689,7 @@ public sealed class ReleaseToolTests : IDisposable
         var outputs = new PublishOutputs(
             "0.1.0-preview.1",
             "v0.1.0-preview.1",
+            PreviewTagObjectId,
             "abc123",
             "releases/v0.1.0-preview.1.md",
             "first\nsecond",
@@ -6699,6 +6706,44 @@ public sealed class ReleaseToolTests : IDisposable
         var output = await File.ReadAllTextAsync(githubOutput);
         Assert.Contains("notes_file<<EOF_", output, StringComparison.Ordinal);
         Assert.Contains("first\nsecond", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishRejectsGithubOutputWithoutCapturedTagObjectId()
+    {
+        await SeedRepositoryAsync();
+        var githubOutput = Path.Join(_repositoryRoot, "artifacts", "github-output.txt");
+        var publishing = new ReleasePublishing(new ReleaseWorkspace(_repositoryRoot), new FakeCommandRunner());
+        var options = new ReleaseOptions(
+            "publish",
+            _repositoryRoot,
+            SemVer.Parse("0.1.0-preview.1"),
+            "v0.1.0-preview.1",
+            Date: null,
+            DryRun: true,
+            ReportPath: null,
+            GitHubOutputPath: githubOutput,
+            FailOnWarnings: false,
+            AllowExistingTargets: false);
+        var outputs = new PublishOutputs(
+            "0.1.0-preview.1",
+            "v0.1.0-preview.1",
+            null,
+            "abc123",
+            "releases/v0.1.0-preview.1.md",
+            "notes.md",
+            "prerelease",
+            "releases/v0.1.0-preview.1.evidence.json",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "abc123",
+            null,
+            Prerelease: true,
+            DryRun: true);
+
+        var exception = await Assert.ThrowsAsync<ReleaseToolException>(() => publishing.WriteOutputsAsync(outputs, options, CancellationToken.None));
+
+        Assert.Equal("release-tag-object-id-unavailable", exception.Diagnostic.Code);
+        Assert.False(File.Exists(githubOutput));
     }
 
     [Fact]
@@ -6719,6 +6764,7 @@ public sealed class ReleaseToolTests : IDisposable
         var outputs = new PublishOutputs(
             "0.1.0-preview.1",
             "v0.1.0-preview.1",
+            PreviewTagObjectId,
             "abc123",
             "releases/v0.1.0-preview.1.md",
             "notes.md",
