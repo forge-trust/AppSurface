@@ -704,6 +704,7 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             }
         });
         var page = await context.NewPageAsync();
+        await page.Clock.InstallAsync();
 
         await AppSurfaceDocsRouteHelper.GotoFirstAvailableAsync(
             page,
@@ -724,9 +725,11 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
         await page.EvaluateAsync(
             """
             () => {
+              window.__rwLateMainScrollApplied = false;
               window.setTimeout(() => {
                 const main = document.getElementById('main-content');
                 main?.scrollTo(0, main.scrollHeight);
+                window.__rwLateMainScrollApplied = true;
               }, 60);
             }
             """);
@@ -741,12 +744,16 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
         await page.WaitForFunctionAsync(
             """
             () => window.__rwFrameNavigationSentinel === 'alive'
+              && window.__rwLateMainScrollApplied === true
               && window.location.pathname === '/docs/Namespaces/ForgeTrust.AppSurface.Aspire.html'
               && document.querySelector('#doc-content h1')?.textContent?.trim() === 'Aspire'
               && (document.getElementById('main-content')?.scrollTop ?? Number.MAX_SAFE_INTEGER) <= 8
             """,
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+        // Run the pending frame-restoration callbacks before testing subsequent manual scrolling.
+        await page.Clock.RunForAsync(300);
 
         var scrollTop = await page.EvaluateAsync<int>(
             "() => Math.round(document.getElementById('main-content')?.scrollTop ?? Number.MAX_SAFE_INTEGER)");
