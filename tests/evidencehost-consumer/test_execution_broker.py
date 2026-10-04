@@ -15,6 +15,7 @@ import json
 import os
 import platform
 import shutil
+import signal
 import socket
 import socketserver
 import struct
@@ -35,6 +36,7 @@ REPORT = (
     b'coverage="100%" /></conditions></line></lines></class></classes></package></packages></coverage>'
 )
 MAX_LINE = 64 * 1024
+PROTOCOL_PRIVATE_CANARY = b"protocol-private-canary"
 SANDBOX_MARKER_ENVIRONMENT = ("CODEX_SANDBOX", "SANDBOX_MODE", "IN_SANDBOX", "IS_SANDBOX")
 SCENARIOS: dict[str, tuple[str, str, str]] = {
     "cli-coverage": ("observation", "coverage", "coverage"),
@@ -45,6 +47,13 @@ SCENARIOS: dict[str, tuple[str, str, str]] = {
     "cli-output-overflow": ("observation", "coverage", "overflow"),
     "cli-malformed": ("observation", "coverage", "malformed"),
     "cli-cancel": ("observation", "coverage", "none"),
+    "protocol-negative-length": ("observation", "empty", "negative-length"),
+    "protocol-declared-length": ("observation", "empty", "declared-length"),
+    "protocol-encoded-limit": ("observation", "empty", "encoded-limit"),
+    "protocol-owned-exit-false": ("observation", "empty", "owned-exit-false"),
+    "protocol-duplicate-declaration": ("observation", "empty", "duplicate-declaration"),
+    "protocol-decoded-limit": ("observation", "empty", "decoded-limit"),
+    "protocol-empty-chunk": ("observation", "empty", "empty-chunk"),
     "aspire-empty": ("observation", "empty", "none"),
     "aspire-trusted": ("trusted", "coverage", "none"),
     "aspire-mode-conflict": ("observation", "empty", "none"),
@@ -283,6 +292,38 @@ class Scenario:
             else:
                 return {"ok": False, "error": "unexpected-run"}
             return {"ok": True, "exit_code": code, "stdout": "", "stderr": "", "output_truncated": False, "received_bytes": received}
+        if op == "artifacts" and self.behavior in ("negative-length", "declared-length", "encoded-limit"):
+            if request.get("relative_root") != "coverage-protocol":
+                return {"ok": False, "error": "invalid-results-token"}
+            length = {"negative-length": -1, "declared-length": 1, "encoded-limit": 131076}[self.behavior]
+            return {"ok": True, "artifacts": [{"path": "reports/result.bin", "length_bytes": length}]}
+        if op == "artifact" and self.behavior in ("declared-length", "encoded-limit"):
+            if (request.get("relative_root") != "coverage-protocol"
+                    or request.get("relative_path") != "reports/result.bin" or request.get("offset") != 0):
+                return {"ok": False, "error": "invalid-artifact-request"}
+            payload = b"ab" if self.behavior == "declared-length" else b"p" * 131076
+            return {"ok": True, "bytes_base64": base64.b64encode(payload).decode("ascii"), "end": True}
+        if op == "artifacts" and self.behavior in ("duplicate-declaration", "decoded-limit", "empty-chunk"):
+            if request.get("relative_root") != "coverage-protocol":
+                return {"ok": False, "error": "invalid-results-token"}
+            length = {"duplicate-declaration": 0,
+                      "decoded-limit": 128 * 1024 + 1, "empty-chunk": 1}[self.behavior]
+            row = {"path": "reports/protocol-private-canary.bin", "length_bytes": length}
+            declarations = [dict(row), dict(row)] if self.behavior == "duplicate-declaration" else [row]
+            return {"ok": True, "artifacts": declarations}
+        if op == "artifact" and self.behavior in ("duplicate-declaration", "decoded-limit", "empty-chunk"):
+            if (request.get("relative_root") != "coverage-protocol"
+                    or request.get("relative_path") != "reports/protocol-private-canary.bin"
+                    or request.get("offset") != 0):
+                return {"ok": False, "error": "invalid-artifact-request"}
+            if self.behavior == "duplicate-declaration":
+                payload = b""
+            elif self.behavior == "decoded-limit":
+                payload = PROTOCOL_PRIVATE_CANARY + b"p" * (128 * 1024 + 1 - len(PROTOCOL_PRIVATE_CANARY))
+            else:
+                payload = b""
+            return {"ok": True, "bytes_base64": base64.b64encode(payload).decode("ascii"),
+                    "end": self.behavior != "empty-chunk"}
         if op == "artifacts" and self.behavior == "coverage":
             if not isinstance(request.get("relative_root"), str) or not request["relative_root"].startswith("coverage-"):
                 return {"ok": False, "error": "invalid-results-token"}
@@ -299,8 +340,8 @@ class Scenario:
             return {"ok": True}
         if op == "wait":
             self.stop_seen = True
-            return {"ok": True, "owned_exit": True}
-        if op == "exit" and self.stop_seen:
+            return {"ok": True, "owned_exit": self.behavior != "owned-exit-false"}
+        if op == "exit" and self.stop_seen and self.behavior != "owned-exit-false":
             self.exit_seen = True
             return {"ok": True}
         return {"ok": False, "error": "unsupported-fixture-operation"}
@@ -309,7 +350,16 @@ class Scenario:
 def scenario_server(scenario: Scenario, gid: int) -> socketserver.ThreadingUnixStreamServer:
     class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         daemon_threads = True
+        block_on_close = False
         allow_reuse_address = False
+
+        def process_request(self, request: socket.socket, client_address: Any) -> None:
+            request.settimeout(5)
+            thread = threading.Thread(target=self.process_request_thread, args=(request, client_address),
+                                      name=f"handler-{scenario.name}", daemon=True)
+            with self.handler_lock:
+                self.handler_threads.append(thread)
+            thread.start()
 
     class Handler(socketserver.StreamRequestHandler):
         def handle(self) -> None:
@@ -330,6 +380,8 @@ def scenario_server(scenario: Scenario, gid: int) -> socketserver.ThreadingUnixS
     server = Server(str(scenario.socket_path), Handler)
     os.chown(scenario.socket_path, 0, gid)
     os.chmod(scenario.socket_path, 0o660)
+    server.handler_lock = threading.Lock()
+    server.handler_threads = []
     server.scenario = scenario  # type: ignore[attr-defined]
     return server
 
@@ -416,53 +468,124 @@ def main(argv: list[str]) -> int:
     scenarios: dict[str, Scenario] = {}
     servers: list[socketserver.ThreadingUnixStreamServer] = []
     threads: list[threading.Thread] = []
-    for name in SCENARIOS:
-        control_root = socket_dir / name
-        broker_root = control_root / "broker"
-        for directory in (control_root, broker_root):
-            directory.mkdir(mode=0o710)
-            chown_mode(directory, 0, args.worker_gid, 0o710)
-        output = output_root / name
-        output.mkdir(mode=0o700)
-        chown_mode(output, args.worker_uid, args.worker_gid, 0o700)
-        log_file = worker_root / f"{name}.jsonl"
-        fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        os.close(fd)
-        chown_mode(log_file, args.worker_uid, args.worker_gid, 0o600)
-        scenario = Scenario(name, base, tool, subject, output, args.worker_uid, args.worker_gid,
-                            args.subject_uid, args.subject_gid, dotnet, policy_file, policy_digest,
-                            log_file, broker_root / "control.sock")
-        server = scenario_server(scenario, args.worker_gid)
-        metadata_file = socket_dir / f"{name}.json"
-        write_root_file(metadata_file, json.dumps(scenario.metadata, separators=(",", ":")).encode() + b"\n", args.worker_gid)
-        scenarios[name] = scenario
-        servers.append(server)
-        thread = threading.Thread(target=server.serve_forever, name=f"fixture-{name}", daemon=True)
-        thread.start()
-        threads.append(thread)
-    env = make_environment(base, socket_dir, worker_root, args.worker_uid, args.worker_gid, dotnet)
-    env["EVIDENCEHOST_TEST_BROKER_METADATA"] = str(socket_dir)
-    child_command = [setpriv, "--reuid", str(args.worker_uid), "--regid", str(args.worker_gid)]
-    if args.worker_supplementary_groups is None:
-        child_command.append("--clear-groups")
-    else:
-        child_command.extend(("--groups", ",".join(map(str, args.worker_supplementary_groups))))
-    child_command.extend(("--", *command))
-    print(f"fixture_root={base}", file=sys.stderr, flush=True)
-    print(f"fixture_worker_uid={args.worker_uid} fixture_worker_gid={args.worker_gid}", file=sys.stderr, flush=True)
     try:
-        result = subprocess.run(child_command, env=env, check=False)
+        for name in SCENARIOS:
+            control_root = socket_dir / name
+            broker_root = control_root / "broker"
+            for directory in (control_root, broker_root):
+                directory.mkdir(mode=0o710)
+                chown_mode(directory, 0, args.worker_gid, 0o710)
+            output = output_root / name
+            output.mkdir(mode=0o700)
+            chown_mode(output, args.worker_uid, args.worker_gid, 0o700)
+            log_file = worker_root / f"{name}.jsonl"
+            fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            os.close(fd)
+            chown_mode(log_file, args.worker_uid, args.worker_gid, 0o600)
+            scenario = Scenario(name, base, tool, subject, output, args.worker_uid, args.worker_gid,
+                                args.subject_uid, args.subject_gid, dotnet, policy_file, policy_digest,
+                                log_file, broker_root / "control.sock")
+            server = scenario_server(scenario, args.worker_gid)
+            metadata_file = socket_dir / f"{name}.json"
+            write_root_file(metadata_file, json.dumps(scenario.metadata, separators=(",", ":")).encode() + b"\n", args.worker_gid)
+            scenarios[name] = scenario
+            servers.append(server)
+            thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05},
+                                      name=f"fixture-{name}", daemon=True)
+            threads.append(thread)
+            thread.start()
+        env = make_environment(base, socket_dir, worker_root, args.worker_uid, args.worker_gid, dotnet)
+        env["EVIDENCEHOST_TEST_BROKER_METADATA"] = str(socket_dir)
+        child_command = [setpriv, "--reuid", str(args.worker_uid), "--regid", str(args.worker_gid)]
+        if args.worker_supplementary_groups is None:
+            child_command.append("--clear-groups")
+        else:
+            child_command.extend(("--groups", ",".join(map(str, args.worker_supplementary_groups))))
+        child_command.extend(("--", *command))
+        print(f"fixture_root={base}", file=sys.stderr, flush=True)
+        print(f"fixture_worker_uid={args.worker_uid} fixture_worker_gid={args.worker_gid}", file=sys.stderr, flush=True)
+        returncode = run_test_command(child_command, env, args.command_timeout_seconds)
     finally:
-        for server in servers:
-            server.shutdown()
-            server.server_close()
+        # Physical ownership is independent of any synthetic owned_exit acknowledgement.
+        cleanup_ok = join_broker_servers(servers, threads)
+        if not cleanup_ok:
+            fail("fixture-owned-work-not-joined")
     for scenario in scenarios.values():
         if scenario.peer is not None:
             expected = (scenario.peer[1], scenario.peer[2])
             if expected != (args.worker_uid, args.worker_gid):
                 fail(f"Broker peer identity mismatch in {scenario.name}.")
-    print(f"fixture_process_exit={result.returncode}", file=sys.stderr, flush=True)
-    return result.returncode
+    print(f"fixture_process_exit={returncode}", file=sys.stderr, flush=True)
+    return returncode
+
+
+def run_test_command(command: list[str], environment: dict[str, str], timeout_seconds: float) -> int:
+    """Run the owner's selected command, then independently close its physical ownership."""
+    process = subprocess.Popen(command, env=environment, start_new_session=True)
+    try:
+        return process.wait(timeout=timeout_seconds)
+    finally:
+        if not join_test_process(process):
+            fail("fixture-process-group-not-joined")
+
+
+def join_test_process(process: subprocess.Popen, cleanup_seconds: float = 8) -> bool:
+    """Reap the leader and poll physical group absence under one retained cleanup deadline."""
+    deadline = time.monotonic() + cleanup_seconds
+
+    def remaining() -> float:
+        return max(0, deadline - time.monotonic())
+
+    def group_present() -> bool:
+        try:
+            os.killpg(process.pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+
+    if group_present():
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            process.wait(timeout=min(2, remaining()))
+        except subprocess.TimeoutExpired:
+            pass
+        # Leader exit never substitutes for whole-group absence.
+        if group_present():
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except OSError:
+                pass  # Reap even if a dead, unreaped leader cannot be signalled.
+    try:
+        process.wait(timeout=min(3, remaining()))
+    except subprocess.TimeoutExpired:
+        return False
+    poll = threading.Event()
+    while group_present():
+        allowance = remaining()
+        if allowance <= 0:
+            return False
+        poll.wait(timeout=min(0.02, allowance))
+    return time.monotonic() <= deadline
+
+
+def join_broker_servers(servers: list[Any], threads: list[threading.Thread], cleanup_seconds: float = 6) -> bool:
+    """Explicitly join retained daemon threads; survivors reject cleanup without trapping interpreter exit."""
+    for index, server in enumerate(servers):
+        if index < len(threads) and threads[index].is_alive():
+            server.shutdown()
+        server.server_close()
+    deadline = time.monotonic() + cleanup_seconds
+    owned = list(threads)
+    for server in servers:
+        with server.handler_lock:
+            owned.extend(server.handler_threads)
+    for thread in owned:
+        if thread.ident is not None:
+            thread.join(timeout=max(0, deadline - time.monotonic()))
+    return all(not thread.is_alive() for thread in owned)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -475,7 +598,18 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--subject-gid", required=True, type=int)
     result.add_argument("--reportgenerator-package", required=True)
     result.add_argument("--dotnet")
+    result.add_argument("--command-timeout-seconds", type=parse_command_timeout, default=4200,
+                        help="owner-selected command allowance, 1..4200 seconds; focused runs may select 600")
     return result
+
+
+def parse_command_timeout(value: str) -> int:
+    if not value.isascii() or not value.isdecimal():
+        raise argparse.ArgumentTypeError("command timeout must be an integer from 1 through 4200 seconds")
+    seconds = int(value)
+    if not 1 <= seconds <= 4200:
+        raise argparse.ArgumentTypeError("command timeout must be an integer from 1 through 4200 seconds")
+    return seconds
 
 
 def parse_supplementary_groups(value: str) -> list[int]:
