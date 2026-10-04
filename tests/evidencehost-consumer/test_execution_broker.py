@@ -36,6 +36,7 @@ REPORT = (
     b'coverage="100%" /></conditions></line></lines></class></classes></package></packages></coverage>'
 )
 MAX_LINE = 64 * 1024
+PROTOCOL_PRIVATE_CANARY = b"protocol-private-canary"
 SANDBOX_MARKER_ENVIRONMENT = ("CODEX_SANDBOX", "SANDBOX_MODE", "IN_SANDBOX", "IS_SANDBOX")
 SCENARIOS: dict[str, tuple[str, str, str]] = {
     "cli-coverage": ("observation", "coverage", "coverage"),
@@ -50,6 +51,9 @@ SCENARIOS: dict[str, tuple[str, str, str]] = {
     "protocol-declared-length": ("observation", "empty", "declared-length"),
     "protocol-encoded-limit": ("observation", "empty", "encoded-limit"),
     "protocol-owned-exit-false": ("observation", "empty", "owned-exit-false"),
+    "protocol-duplicate-declaration": ("observation", "empty", "duplicate-declaration"),
+    "protocol-decoded-limit": ("observation", "empty", "decoded-limit"),
+    "protocol-empty-chunk": ("observation", "empty", "empty-chunk"),
     "aspire-empty": ("observation", "empty", "none"),
     "aspire-trusted": ("trusted", "coverage", "none"),
     "aspire-mode-conflict": ("observation", "empty", "none"),
@@ -299,6 +303,27 @@ class Scenario:
                 return {"ok": False, "error": "invalid-artifact-request"}
             payload = b"ab" if self.behavior == "declared-length" else b"p" * 131076
             return {"ok": True, "bytes_base64": base64.b64encode(payload).decode("ascii"), "end": True}
+        if op == "artifacts" and self.behavior in ("duplicate-declaration", "decoded-limit", "empty-chunk"):
+            if request.get("relative_root") != "coverage-protocol":
+                return {"ok": False, "error": "invalid-results-token"}
+            length = {"duplicate-declaration": 0,
+                      "decoded-limit": 128 * 1024 + 1, "empty-chunk": 1}[self.behavior]
+            row = {"path": "reports/protocol-private-canary.bin", "length_bytes": length}
+            declarations = [dict(row), dict(row)] if self.behavior == "duplicate-declaration" else [row]
+            return {"ok": True, "artifacts": declarations}
+        if op == "artifact" and self.behavior in ("duplicate-declaration", "decoded-limit", "empty-chunk"):
+            if (request.get("relative_root") != "coverage-protocol"
+                    or request.get("relative_path") != "reports/protocol-private-canary.bin"
+                    or request.get("offset") != 0):
+                return {"ok": False, "error": "invalid-artifact-request"}
+            if self.behavior == "duplicate-declaration":
+                payload = b""
+            elif self.behavior == "decoded-limit":
+                payload = PROTOCOL_PRIVATE_CANARY + b"p" * (128 * 1024 + 1 - len(PROTOCOL_PRIVATE_CANARY))
+            else:
+                payload = b""
+            return {"ok": True, "bytes_base64": base64.b64encode(payload).decode("ascii"),
+                    "end": self.behavior != "empty-chunk"}
         if op == "artifacts" and self.behavior == "coverage":
             if not isinstance(request.get("relative_root"), str) or not request["relative_root"].startswith("coverage-"):
                 return {"ok": False, "error": "invalid-results-token"}

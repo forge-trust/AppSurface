@@ -94,6 +94,37 @@ mechanical authenticated root protocol coverage with synthetic cgroup metadata, 
 no application admission or consumer qualification, and no Trusted acceptance. The original scenarios,
 policy, report, root/platform checks and supplementary-group restrictions are retained.
 
+### Additional artifact guards (prepared)
+
+Three additional [C# wire cases](../../Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxControlProtocolTests.cs)
+use the same actual root broker and authenticated non-root testhost contract. Each expects fixed
+`ASEVD420`, no returned artifact collection or inner exception, no canary disclosure, and exactly
+`ready, artifacts, artifact, stop, wait`. Cleanup uses a fresh five-second token. No second artifact
+request or subject `run` is permitted by the operation assertion.
+
+| Scenario | Fixture bytes/declarations | Guard exercised |
+| --- | --- | --- |
+| `protocol-duplicate-declaration` | Two identical zero-length declarations; the first receives valid empty base64 with terminal `end=true`. | The later duplicate rejects before reading the duplicate's bytes. |
+| `protocol-decoded-limit` | A declared/decoded 131,073-byte chunk, encoded as exactly 174,764 base64 characters, with terminal `end=true`. | The decoded 128 KiB bound rejects, while the encoded bound and declared-length comparison remain satisfied. |
+| `protocol-empty-chunk` | A one-byte declaration receives valid empty base64 with `end=false`. | An empty nonterminal transfer rejects before a further chunk request. |
+
+The duplicate check occurs as the production supervisor iterates declarations: the first valid artifact
+is read before the later duplicate is reached. This case does **not** claim duplicate validation before
+any artifact read. The production do-loop makes one legitimate request for the first zero-length
+artifact, and its empty terminal chunk is accepted before the duplicate rejects. This is the adjacent
+positive transfer control to the empty nonterminal rejection; the overall collection remains rejected.
+The common path and decoded-limit payload include a fixed test canary that must not
+appear in the protected diagnostic.
+
+The three new [portable methods](test_execution_broker_fixture.py) verify only fixture response shapes,
+lengths, legal base64, terminal flags and recorded request counts. They exercise no supervisor or root
+authentication. Source counts are twelve C# cases and sixteen portable methods after these additions;
+the new cases have not been compiled or executed at this source-ready stage. Existing nine C# cases,
+thirteen portable controls, authentication, identity selection and cleanup behavior remain intact.
+Actual Linux execution and any instrumented coverage must be measured separately. The synthetic report,
+artifact and cgroup metadata establish no systemd supervision, application admission, consumer
+qualification or Trusted acceptance.
+
 ## Production worker syscall compatibility
 
 The [production launcher's worker unit](../../scripts/evidencehost-linux-launcher.py) explicitly uses `RestrictSUIDSGID=no`; its subject units retain `RestrictSUIDSGID=yes`. In pinned [systemd v255 `seccomp_restrict_sxid`](https://github.com/systemd/systemd/blob/v255/src/shared/seccomp-util.c#L2148-L2164), the filter blocks `openat2` with `ENOSYS` because the syscall's flags are passed indirectly; [`RestrictSUIDSGID` installs that filter](https://github.com/systemd/systemd/blob/v255/src/shared/seccomp-util.c#L2179-L2205). The protected artifact allocator requires `openat2` and has no syscall fallback, so the worker must permit that syscall to allocate its retained output handles.

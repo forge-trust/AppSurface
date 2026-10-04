@@ -97,6 +97,18 @@ public sealed class EvidenceLinuxControlProtocolTests
         AssertArtifactRejectionAsync("protocol-encoded-limit", "chunk exceeds", "ready", "artifacts", "artifact", "stop", "wait");
 
     [Fact]
+    public Task CollectArtifactsAsync_RejectsDuplicateDeclarationBeforeReadingItsBytes() =>
+        AssertAdditionalArtifactRejectionAsync("protocol-duplicate-declaration", "declarations exceed");
+
+    [Fact]
+    public Task CollectArtifactsAsync_RejectsDecodedChunkLimitAtLegalEncodedLength() =>
+        AssertAdditionalArtifactRejectionAsync("protocol-decoded-limit", "declared size");
+
+    [Fact]
+    public Task CollectArtifactsAsync_RejectsEmptyNonterminalChunkWithoutRequestingAnotherChunk() =>
+        AssertAdditionalArtifactRejectionAsync("protocol-empty-chunk", "transfer did not match");
+
+    [Fact]
     public async Task WaitForOwnedExitAsync_RejectsFalseAcknowledgementWithoutCompletingWorker()
     {
         var fixture = await RequireRootProtocolFixtureAsync("protocol-owned-exit-false");
@@ -146,6 +158,37 @@ public sealed class EvidenceLinuxControlProtocolTests
             await supervisor.WaitForOwnedExitAsync(cleanup.Token);
         }
         Assert.Equal(operations, ReadProtocolOperations(fixture));
+    }
+
+    private static async Task AssertAdditionalArtifactRejectionAsync(string scenario, string message)
+    {
+        var fixture = await RequireRootProtocolFixtureAsync(scenario);
+        if (fixture is null) return;
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var supervisor = await EvidenceLinuxWorkerSupervisor.ConnectAsync(fixture.Socket, deadline.Token);
+        try
+        {
+            AssertAuthenticatedTestHost(supervisor, fixture);
+            IReadOnlyList<EvidenceRestrictedArtifact>? artifacts = null;
+            var exception = await Assert.ThrowsAsync<EvidenceAdmissionException>(async () =>
+            {
+                artifacts = await supervisor.CollectArtifactsAsync("coverage-protocol", deadline.Token);
+            });
+            Assert.Equal("ASEVD420", exception.Code);
+            Assert.Contains(message, exception.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("protocol-private-canary", exception.Message, StringComparison.Ordinal);
+            Assert.Null(exception.InnerException);
+            Assert.Null(artifacts);
+        }
+        finally
+        {
+            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await supervisor.RequestStopAsync(cleanup.Token);
+            await supervisor.WaitForOwnedExitAsync(cleanup.Token);
+        }
+        // A duplicate is reached after the first valid artifact; it must not trigger a second read.
+        // Limit/empty-chunk rejection must likewise stop after its one attempted transfer.
+        Assert.Equal(new[] { "ready", "artifacts", "artifact", "stop", "wait" }, ReadProtocolOperations(fixture));
     }
 
     private static async Task<RootProtocolFixture?> RequireRootProtocolFixtureAsync(string scenario)
