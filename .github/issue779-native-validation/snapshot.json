@@ -1,18 +1,18 @@
 {
-  "batch_validation_sha256": "dfd67fc229bd866ecfc79aaac976ef659beba4c75933286133874bc576d4e8c6",
+  "batch_validation_sha256": "6fbe4a0ae65c802aee152536994f94e6c9f14c2e3d012950551ff6a1d147989e",
   "combined_source_compiler_executed": true,
   "comparison_base": "416b30919e6c4d03b634d9d3fe558884b02f0b91",
   "current_mac_focused_control_counts": {
-    "EvidenceRestrictedCoverageFailureTests": {
-      "Passed": 2
+    "EvidenceProtectedCliApplicationStagesTests": {
+      "Passed": 21
     },
-    "EvidenceWorkerExecutionTests": {
-      "Passed": 4
+    "EvidenceProtectedCliExecutionTests": {
+      "Passed": 26
     }
   },
-  "focused_control_count": 6,
+  "focused_control_count": 47,
   "gate_passed": false,
-  "historical_native_snapshot_sha256": "85f576d3eefa358e6aa44b8cd3249bcf0a8140e09745d957a717bb9a2cad038c",
+  "historical_native_snapshot_sha256": "692c43666697d0132417431cda3c87fdb4a56d44b7c73641236ac2936b5e3be7",
   "intentional_new_source_files": [
     ".github/workflows/evidencehost-runtime-proof.yml",
     "Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidenceAdmissionCallerTests.cs",
@@ -107,20 +107,21 @@
     "Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceRestrictedCoverageTransport.cs"
   ],
   "native_execution": false,
-  "owner_capture_receipt_sha256": "78171d785b74d348def7f764cbd1b9c0e829931d4b6e862f8458476d3a702b24",
-  "owner_source_binding_sha256": "78171d785b74d348def7f764cbd1b9c0e829931d4b6e862f8458476d3a702b24",
-  "previous_native_harness_head": "284be510d4a9069bac4b23b768dca461cb3a995f",
-  "previous_native_source_commit": "07b101085636239685bc1c2c17f7e086019bf098",
-  "previous_validation_commit": "07b101085636239685bc1c2c17f7e086019bf098",
+  "owner_capture_receipt_sha256": "40e0569d48eb9290dc74fbcd0c13508ca11725c2144487572171c48f28facadb",
+  "owner_source_binding_sha256": "976791f6f05dabd0c9544dc865e4a3ea36f42d9ee10d4c015aa1e8471a03e5c0",
+  "previous_native_harness_head": "ef95fb3007d713e43454169b17a34875c6270480",
+  "previous_native_source_commit": "d6e21b5c169948b1a48817a5ef028c72261ed0c8",
+  "previous_validation_commit": "d6e21b5c169948b1a48817a5ef028c72261ed0c8",
   "prior_focused_linux_receipt_verified": false,
   "qualification": false,
   "qualification_authorization": false,
-  "snapshot_kind": "verified-native21-procedure-source-preparation-only",
-  "source_commit": "d6e21b5c169948b1a48817a5ef028c72261ed0c8",
+  "snapshot_kind": "verified-native22-cli-resource-source-preparation-only",
+  "source_commit": "337f84fcc509313f1895b8f18752bf646ebd1dc0",
   "source_count": 2814,
-  "source_delta_from_native20": [
-    "Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidenceWorkerExecutionTests.cs",
-    "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceRestrictedCoverageFailureTests.cs"
+  "source_delta_from_native21": [
+    "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProtectedCliApplicationStagesTests.cs",
+    "Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceProtectedCliExecution.cs",
+    "Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md"
   ],
   "source_modes": {
     ".agent/rules.md": "0644",
@@ -2938,9 +2939,9 @@
     "troubleshooting/startup-and-modules.md": "0644",
     "troubleshooting/startup-and-modules.md.yml": "0644"
   },
-  "source_parent": "07b101085636239685bc1c2c17f7e086019bf098",
+  "source_parent": "d6e21b5c169948b1a48817a5ef028c72261ed0c8",
   "source_parents": [
-    "07b101085636239685bc1c2c17f7e086019bf098"
+    "d6e21b5c169948b1a48817a5ef028c72261ed0c8"
   ],
   "source_sha256": {
     ".agent/rules.md": "910b42379c6d9b3f914659993f64f3c698cbf36cc36aa80bc4ff36f71c54f9b9",
@@ -3248,7 +3249,7 @@
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxWorkerDescriptorTests.cs": "056ffc428ecd357061228e5de4f3654b6ba89cdd581f50208f76928dff0d879d",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidencePlannerTests.cs": "5aab7307789cf6e03522cce064f76d5726ecbaaf3bf12db6bf459f642c5feee0",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProcessOutputQuotaTests.cs": "a5b6de4003f158ec4ba8128a6e6703e24fe56d0e145eaee43cef92ad21eebd7b",
-    "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProtectedCliApplicationStagesTests.cs": "2104d3401be13abe344cb3ffa8c543d07729f375f8267e0610b66a28df51353c",
+    "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProtectedCliApplicationStagesTests.cs": "63baf71a2654f9b7ef490d2566f0a0ec3e03b54394f54ad15d60bc4e569f84da",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProtectedCliExecutionTests.cs": "d821f3847fd2eec83c19eda327024ad3b055e75d6b2dda079874b05bc57f97c2",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProtectedGateTests.cs": "2b25391cd692782597bdbdfbeedd2d40d43485a1c9da97e5074656efac8d8a5b",
     "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProtectedWorkerInputsTests.cs": "44482dd7d49a8292806b078a70e7bbe61383954795ab4a1ef7c584e839790148",
@@ -3952,9 +3953,9 @@
     "Evidence/ForgeTrust.AppSurface.Evidence.Aspire/packages.lock.json": "e7cbcda7f1317afb5cee720054797a128b1fc54d9f54a12b9d363820c9046f5e",
     "Evidence/ForgeTrust.AppSurface.Evidence.Cli/CoverageEvidenceProducer.cs": "175cec81d3fc74d63ab4e628019a2e55bbad3560097dbef816f28e5c65d412dc",
     "Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceCliWorkflow.cs": "dda92dfa04745c17070f55874d8f4bf13b9fbaccbe1e2d7c6875b37a75ad215b",
-    "Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceProtectedCliExecution.cs": "33c70ea0c6421ccb6a685d7416a665452ae4e7ac20727d93e3d4787330d1d5d2",
+    "Evidence/ForgeTrust.AppSurface.Evidence.Cli/EvidenceProtectedCliExecution.cs": "16b124c51358037262fdd9cd04c89ca1c70a841324e3e9e28ac919fd65f67981",
     "Evidence/ForgeTrust.AppSurface.Evidence.Cli/ForgeTrust.AppSurface.Evidence.Cli.csproj": "6a3a8355e6eafbad6c1b9094b82a86d07817e6daed525eca52ab7615bea3b21e",
-    "Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md": "13a2c3942ad3ffa9e9f0ec540a042032c8e7167d085aabb76cc115d17d795274",
+    "Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md": "0f174f2f0981bbc1a51d6f2903bb32201321709db02c602a76f9404f87d7720d",
     "Evidence/ForgeTrust.AppSurface.Evidence.Cli/packages.lock.json": "b768803d1927a446ae50e86ddc0cf4a66b1e35db6d5edb4c1c13184a9cd19151",
     "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceAdmission.cs": "1e4c45ff6e6a224c764b7424498bbd22bb5f6d907ef7b8515fc42197800235d2",
     "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceContracts.cs": "1e58ac53905d5461d8886937ecf4b190d82ae10a8fdfad70d7a5360bef0fdb61",
@@ -5759,5 +5760,5 @@
     "troubleshooting/startup-and-modules.md.yml": "8d74ab38ca0d2a61b8184173fd8413dbfefa056c05e2e9acd582bcfb4d1a1277"
   },
   "trust_claim": false,
-  "validation_commit": "d6e21b5c169948b1a48817a5ef028c72261ed0c8"
+  "validation_commit": "337f84fcc509313f1895b8f18752bf646ebd1dc0"
 }
