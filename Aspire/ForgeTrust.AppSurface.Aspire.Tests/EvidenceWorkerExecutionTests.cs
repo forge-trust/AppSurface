@@ -1180,6 +1180,152 @@ public sealed class EvidenceWorkerExecutionTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StopAndDisposeAsync_BlockedAdmissionClosureCannotSpendStoppingGrace(bool exhaustGrace)
+    {
+        var clock = new ManualTimeProvider();
+        var closeGate = new TimestampReadGate();
+        var closeSettled = NewSignal();
+        var closeCalls = 0;
+        var exitCalls = 0;
+        var disposerCalls = 0;
+        var supervisor = new TestSupervisor
+        {
+            OnClose = () =>
+            {
+                Interlocked.Increment(ref closeCalls);
+                try { closeGate.Pause(); }
+                finally { closeSettled.TrySetResult(); }
+            },
+            OnExit = () => Interlocked.Increment(ref exitCalls),
+        };
+        var execution = Create(supervisor, clock);
+        Assert.True(execution.RegisterDisposer(_ =>
+        {
+            Interlocked.Increment(ref disposerCalls);
+            return ValueTask.CompletedTask;
+        }));
+        Task<bool>? cleanup = null;
+        try
+        {
+            cleanup = execution.StopAndDisposeAsync().AsTask();
+            await closeGate.Reached.WaitAsync(BarrierTimeout);
+            // Capture both the stopping cancellation timer and the closure wait timer
+            // before advancing the actual allowance supplied to this lifecycle.
+            await clock.WaitForTimerCreationsAsync(2).WaitAsync(BarrierTimeout);
+            Assert.False(cleanup.IsCompleted);
+            Assert.Equal(0, supervisor.StopRequests);
+            Assert.Equal(0, Volatile.Read(ref exitCalls));
+            Assert.Equal(0, Volatile.Read(ref disposerCalls));
+
+            if (exhaustGrace)
+            {
+                clock.Advance(Grace);
+                var fatal = await Assert.ThrowsAsync<EvidenceWorkerTestInterruptionException>(
+                    () => cleanup.WaitAsync(BarrierTimeout));
+                Assert.Contains("admission did not close within its bounded stopping grace", fatal.Message, StringComparison.Ordinal);
+                Assert.Equal(0, supervisor.StopRequests);
+                Assert.Equal(0, Volatile.Read(ref exitCalls));
+                Assert.Equal(0, Volatile.Read(ref disposerCalls));
+                Assert.False(execution.OwnWorkStopped);
+                Assert.False(execution.CleanupCompleted);
+            }
+            else
+            {
+                closeGate.Release();
+                Assert.True(await cleanup.WaitAsync(BarrierTimeout));
+                Assert.Equal(1, supervisor.StopRequests);
+                Assert.Equal(1, Volatile.Read(ref exitCalls));
+                Assert.Equal(1, Volatile.Read(ref disposerCalls));
+                Assert.True(supervisor.ExitAcknowledged);
+                Assert.True(execution.OwnWorkStopped);
+                Assert.True(execution.CleanupCompleted);
+            }
+            Assert.Equal(1, Volatile.Read(ref closeCalls));
+        }
+        finally
+        {
+            closeGate.Release();
+            if (cleanup is not null)
+            {
+                await closeSettled.Task.WaitAsync(BarrierTimeout);
+                try { await cleanup.WaitAsync(BarrierTimeout); }
+                catch (EvidenceWorkerTestInterruptionException) { }
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StopAndDisposeAsync_FaultedOwnedExitAcknowledgementCannotPermitDisposal(bool faultAcknowledgement)
+    {
+        var closeCalls = 0;
+        var exitCalls = 0;
+        var disposerCalls = 0;
+        var exitEntered = NewSignal();
+        var exitAcknowledgement = NewSignal();
+        var supervisor = new TestSupervisor
+        {
+            OnClose = () => Interlocked.Increment(ref closeCalls),
+            OnWaitForExit = _ =>
+            {
+                Interlocked.Increment(ref exitCalls);
+                exitEntered.TrySetResult();
+                return new ValueTask(exitAcknowledgement.Task);
+            },
+        };
+        var execution = Create(supervisor, new ManualTimeProvider());
+        Assert.True(execution.RegisterDisposer(_ =>
+        {
+            Interlocked.Increment(ref disposerCalls);
+            return ValueTask.CompletedTask;
+        }));
+        Task<bool>? cleanup = null;
+        try
+        {
+            cleanup = execution.StopAndDisposeAsync().AsTask();
+            await exitEntered.Task.WaitAsync(BarrierTimeout);
+            Assert.Equal(1, Volatile.Read(ref closeCalls));
+            Assert.Equal(1, supervisor.StopRequests);
+            Assert.False(cleanup.IsCompleted);
+            Assert.False(execution.OwnWorkStopped);
+            Assert.Equal(0, Volatile.Read(ref disposerCalls));
+
+            if (faultAcknowledgement)
+            {
+                exitAcknowledgement.TrySetException(new InvalidOperationException("private-exit-ack-canary"));
+                var fatal = await Assert.ThrowsAsync<EvidenceWorkerTestInterruptionException>(
+                    () => cleanup.WaitAsync(BarrierTimeout));
+                Assert.Contains("failed to acknowledge owned-work exit", fatal.Message, StringComparison.Ordinal);
+                Assert.DoesNotContain("private-exit-ack-canary", fatal.Message, StringComparison.Ordinal);
+                Assert.Equal(0, Volatile.Read(ref disposerCalls));
+                Assert.False(execution.OwnWorkStopped);
+                Assert.False(execution.CleanupCompleted);
+            }
+            else
+            {
+                exitAcknowledgement.TrySetResult();
+                Assert.True(await cleanup.WaitAsync(BarrierTimeout));
+                Assert.Equal(1, Volatile.Read(ref disposerCalls));
+                Assert.True(execution.OwnWorkStopped);
+                Assert.True(execution.CleanupCompleted);
+            }
+            Assert.Equal(1, Volatile.Read(ref exitCalls));
+        }
+        finally
+        {
+            exitAcknowledgement.TrySetResult();
+            if (cleanup is not null)
+            {
+                try { await cleanup.WaitAsync(BarrierTimeout); }
+                catch (EvidenceWorkerTestInterruptionException) { }
+            }
+        }
+    }
+
     /// <summary>Gates one captured clock sample while the underlying monotonic clock advances.</summary>
     /// <remarks>Timer notifications remain under the existing ManualTimeProvider's independent control.</remarks>
     private sealed class TimestampGateTimeProvider(ManualTimeProvider inner) : TimeProvider
