@@ -1,7 +1,7 @@
 # Issue #765 completion audit
 
-Date: 2026-10-04  
-Worktree: `/Users/andrew/.codex/worktrees/issue-765-retry-deadlines/runnable__venus`  
+Date: 2026-10-04
+Worktree: `/Users/andrew/.codex/worktrees/issue-765-retry-deadlines/runnable__venus`
 Branch: `codex/make-it-so-765-retry-deadlines`
 
 This bounded audit maps the approved implementation plan, its A–X test matrix, current source/test paths, and the available receipts. No builds or tests were started and no production or test source was edited. The audit is not a replacement for gate output or the execution ledger.
