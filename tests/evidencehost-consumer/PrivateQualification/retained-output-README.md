@@ -299,3 +299,43 @@ names and oversize, symlink, hardlink and public-mode rejection or omission.
 These two added methods are source preparation only and have not been executed.
 The original qualification failure remains authoritative when sampling or archive
 retention is unavailable or fails; raw contents and canaries are not echoed.
+
+
+## Private failed CLI completion files
+
+The [private launcher](../../../scripts/evidencehost-linux-launcher.py) copies only
+`evidence-manifest.json` (at most 256 KiB) and `evidence-summary.json` (at most
+64 KiB) from the authenticated descriptor's exact output parent and slot. It
+performs this optional capture after physical owned exit and before broker handle
+and account cleanup. The existing locked ready/wait/exited/work-closed checkpoint,
+zero active operation counters, clean output quota and empty owned groups must
+hold before filesystem I/O. The existing five-second diagnostic allowance is
+shared with trace/sampler capture, rather than extended by this copy.
+
+Mandatory no-follow openat2 pins the descriptor-selected parent and slot. The
+parent must still match its original descriptor identity; both directories must
+be worker UID/GID `0700`. Both fixed files are opened before any destination is
+created, and must be worker UID/GID, regular, single-link `0600`. Reads retain at
+most 320 KiB in aggregate. Named parent/slot, held file metadata and byte lengths
+are rechecked through reads and writes. Root-only exclusive `0600` copies go
+through the borrowed diagnostic directory FD; failed writes remove only this
+attempt's unchanged destinations. Missing, unsafe, substituted or late files
+remain unavailable. Ordinary successful launch performs no new capture I/O.
+
+The [archive controller](run-qualification.py) whitelists exactly
+`failure-cli/evidence-manifest.json` and `failure-cli/evidence-summary.json` with
+those limits. Host-phase names are intentionally not added: this slice diagnoses
+the current failed CLI phase. The archive retains opaque bytes with its existing
+no-follow, root `0700`/`0600`, identity, five-second, 3 MiB payload and 4 MiB canonical
+USTAR bounds. An oversized member is unavailable with an oversize index entry.
+Raw bytes never enter safe failure JSON and are never echoed. No file or capture
+result changes the original exit/ASEVD211, qualification, admission, gate or proof.
+
+[Launcher controls](../test_linux_launcher.py) define real-FD exact-limit, malformed
+metadata, missing-file, growth, substitution, write-failure and closed-checkpoint
+checks. Root/group observations in portable procedure controls are doubles and
+owner overrides in the internal copy helper are data-only; the real call uses
+root defaults. [Archive controls](test_diagnostics.py) define exact two-name
+retention and bounds/link/mode rejection. These new controls are unexecuted at
+source-ready. This diagnostic fork claims no native success, qualification or
+coverage; production registries and private completion criteria are unchanged.

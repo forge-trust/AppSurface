@@ -158,6 +158,9 @@ def retain_diagnostics(workspace, output, *, expected_owner_uid=0):
     selected.extend((f"build-logs/command-{index:02d}.json", 16*1024, False) for index in range(1, 33))
     for entry in ("cli", "host"):
         selected.append((f"preflight-{entry}.json", 4096, False))
+        if entry == "cli":
+            selected.extend((f"failure-cli/"+name, maximum, False) for name, maximum in (
+                ("evidence-manifest.json", 256*1024), ("evidence-summary.json", 64*1024)))
         selected.extend((f"failure-{entry}/"+name, maximum, False) for name, maximum in (
             ("launcher-failure.json", 4096), ("launcher-owned-exit.json", 4096), ("launcher-worker-journal.log", 16*1024),
             ("subject-collector-startup.json", 64*1024),

@@ -121,6 +121,8 @@ FAILURE_DIAGNOSTIC_SCHEMA = "evidence-launcher-failure-v1"
 FAILURE_DIAGNOSTIC_FILE = "launcher-failure.json"
 FAILURE_DIAGNOSTIC_LIMIT = 4096
 WORKER_JOURNAL_LIMIT = 16 * 1024
+FAILED_COMPLETION_FILES = (("evidence-manifest.json", 256 * 1024),
+                           ("evidence-summary.json", 64 * 1024))
 WORKER_JOURNAL_FILE = "launcher-worker-journal.log"
 WORKER_JOURNAL_SECONDS = 5
 WORKER_JOURNAL_CODES = frozenset({"ASEVD211", "ASEVD401", "ASEVD402", "ASEVD403", "ASEVD404",
@@ -2717,6 +2719,185 @@ def _capture_retained_vstest_failure(broker, directory_fd, owned_exit_confirmed,
         return False
 
 
+def _copy_failed_completion_files(parent_fd, slot_fd, directory_fd, slot, worker_uid, worker_gid,
+                                  *, deadline, parent_anchor_fd, parent_relative, diagnostic_uid=0, diagnostic_gid=0):
+    """Copy two opaque fixed files through borrowed FDs; no execution authority.
+
+    The real root caller selects all inputs from its authenticated descriptor.
+    Owner overrides exercise physical data checks only in portable controls.
+    All source files are pinned and validated before any destination is created.
+    Failure removes only this attempt's still-identical exclusive destinations.
+    """
+    sources, destinations, payloads = [], [], []
+    committed = False
+    try:
+        if (type(parent_relative) is not str or len(os.fsencode(parent_relative)) > 4096
+                or any(part in ('', '.', '..') for part in parent_relative.split('/'))
+                or type(slot) is not str or len(slot) > 128 or not SAFE_NAME.fullmatch(slot)
+                or any(type(value) is not int or value < 0 for value in
+                       (parent_anchor_fd, parent_fd, slot_fd, directory_fd, worker_uid, worker_gid,
+                        diagnostic_uid, diagnostic_gid))
+                or time.monotonic() >= deadline):
+            return False
+        parent, child, destination = (os.fstat(fd) for fd in (parent_fd, slot_fd, directory_fd))
+        for info, uid, gid in ((parent, worker_uid, worker_gid), (child, worker_uid, worker_gid),
+                               (destination, diagnostic_uid, diagnostic_gid)):
+            if (not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o700
+                    or info.st_uid != uid or info.st_gid != gid):
+                return False
+        def recheck_directories():
+            if time.monotonic() >= deadline:
+                raise LauncherError("private-completion-diagnostic-unavailable")
+            named_parent_fd = openat2(parent_anchor_fd, parent_relative, os.O_RDONLY | os.O_DIRECTORY,
+                RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS)
+            try:
+                if _filesystem_identity(parent) != _filesystem_identity(os.fstat(named_parent_fd)):
+                    raise LauncherError("private-completion-diagnostic-unavailable")
+            finally:
+                os.close(named_parent_fd)
+            if (time.monotonic() >= deadline
+                    or _filesystem_identity(parent) != _filesystem_identity(os.fstat(parent_fd))
+                    or _filesystem_identity(child) != _filesystem_identity(os.fstat(slot_fd))
+                    or _filesystem_identity(child) != _filesystem_identity(os.stat(
+                        slot, dir_fd=parent_fd, follow_symlinks=False))
+                    or _identity_from_stat(destination) != _identity_from_stat(os.fstat(directory_fd))
+                    or stat.S_IMODE(os.fstat(directory_fd).st_mode) != 0o700):
+                raise LauncherError("private-completion-diagnostic-unavailable")
+        recheck_directories()
+        # Exactly two closed names, no directory listing or caller filename.
+        for name, maximum in FAILED_COMPLETION_FILES:
+            fd = openat2(slot_fd, name, os.O_RDONLY | os.O_NONBLOCK)
+            # Register the owned descriptor before any fallible metadata call.
+            sources.append((name, fd, None))
+            info = os.fstat(fd)
+            sources[-1] = (name, fd, info)
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                    or stat.S_IMODE(info.st_mode) != 0o600
+                    or info.st_uid != worker_uid or info.st_gid != worker_gid
+                    or info.st_size > maximum):
+                return False
+        for (name, fd, before), (_, maximum) in zip(sources, FAILED_COMPLETION_FILES):
+            data = bytearray()
+            while len(data) < before.st_size:
+                recheck_directories()
+                part = os.pread(fd, min(65536, before.st_size - len(data)), len(data))
+                if not part:
+                    return False
+                data.extend(part)
+            if (len(data) > maximum or sum(len(value) for value in payloads) + len(data) > 320 * 1024
+                    or _filesystem_identity(before) != _filesystem_identity(os.fstat(fd))
+                    or _filesystem_identity(before) != _filesystem_identity(os.stat(
+                        name, dir_fd=slot_fd, follow_symlinks=False))):
+                return False
+            payloads.append(bytes(data))
+        recheck_directories()
+        for (name, _, _), data in zip(sources, payloads):
+            recheck_directories()
+            fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                         0o600, dir_fd=directory_fd)
+            # Metadata failure must still reach descriptor close and safe rollback.
+            destinations.append((name, fd, None))
+            destinations[-1] = (name, fd, _identity_from_stat(os.fstat(fd)))
+            os.fchmod(fd, 0o600)
+            offset = 0
+            while offset < len(data):
+                recheck_directories()
+                count = os.write(fd, data[offset:offset+65536])
+                if count <= 0:
+                    return False
+                offset += count
+            info, named = os.fstat(fd), os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                    or stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != diagnostic_uid
+                    or info.st_gid != diagnostic_gid or info.st_size != len(data)
+                    or _filesystem_identity(info) != _filesystem_identity(named)):
+                return False
+        # Recheck both held source identities after every destination write.
+        for name, fd, before in sources:
+            if (_filesystem_identity(before) != _filesystem_identity(os.fstat(fd))
+                    or _filesystem_identity(before) != _filesystem_identity(os.stat(
+                        name, dir_fd=slot_fd, follow_symlinks=False))):
+                return False
+        recheck_directories()
+        committed = True
+        return True
+    except BaseException:
+        return False
+    finally:
+        if not committed:
+            for name, fd, identity in destinations:
+                try:
+                    held = os.fstat(fd)
+                    named = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                    # Even initial fstat failure permits rollback only after proving
+                    # this still-open exclusive file is the current named inode.
+                    if (stat.S_ISREG(held.st_mode) and held.st_nlink == 1
+                            and held.st_uid == diagnostic_uid and held.st_gid == diagnostic_gid
+                            and stat.S_IMODE(held.st_mode) == 0o600
+                            and (identity is None or identity == _identity_from_stat(held))
+                            and _filesystem_identity(held) == _filesystem_identity(named)):
+                        os.unlink(name, dir_fd=directory_fd)
+                except BaseException:
+                    pass
+        for _, fd, *_ in sources + destinations:
+            try: os.close(fd)
+            except BaseException: pass
+
+
+def _capture_failed_cli_completion(broker, directory_fd, owned_exit_confirmed, retained):
+    """Root-only failure hook before resource/account cleanup; borrow destination.
+
+    Pin only descriptor-selected output parent and slot after physical owned exit.
+    The pre-existing trace deadline bounds this additional raw capture too.
+    Missing, unsafe or late data cannot replace the original launcher failure.
+    """
+    descriptors = []
+    try:
+        if (os.geteuid() != 0 or type(broker) is not Broker or retained is None
+                or type(directory_fd) is not int or directory_fd < 0):
+            return False
+        _, checkpoint, deadline = retained
+        with broker.condition:
+            if checkpoint is None or _vstest_failure_checkpoint(broker, owned_exit_confirmed) != checkpoint:
+                return False
+            descriptor = dict(broker.descriptor)
+        if (time.monotonic() >= deadline or not broker._group_empty(descriptor['cgroup'])
+                or not broker._all_owned_work_stopped(inspection_deadline=deadline)):
+            return False
+        path, slot = descriptor.get('output_parent'), descriptor.get('output_slot')
+        if (type(path) is not str or len(os.fsencode(path)) > 4096 or not path.startswith('/')
+                or path == '/' or any(part in ('', '.', '..') for part in path[1:].split('/'))
+                or type(slot) is not str or len(slot) > 128 or not SAFE_NAME.fullmatch(slot)):
+            return False
+        root_fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        descriptors.append(root_fd)
+        parent_fd = openat2(root_fd, path[1:], os.O_RDONLY | os.O_DIRECTORY,
+                           RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS)
+        descriptors.append(parent_fd)
+        if _identity_from_stat(os.fstat(parent_fd)) != descriptor.get('output_parent_identity'):
+            return False
+        slot_fd = openat2(parent_fd, slot, os.O_RDONLY | os.O_DIRECTORY)
+        descriptors.append(slot_fd)
+        with broker.condition:
+            if (_vstest_failure_checkpoint(broker, owned_exit_confirmed) != checkpoint
+                    or time.monotonic() >= deadline):
+                return False
+            copied = _copy_failed_completion_files(parent_fd, slot_fd, directory_fd, slot,
+                broker.worker_uid, broker.worker_gid, deadline=deadline,
+                parent_anchor_fd=root_fd, parent_relative=path[1:])
+        named_fd = openat2(root_fd, path[1:], os.O_RDONLY | os.O_DIRECTORY,
+                          RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS)
+        descriptors.append(named_fd)
+        return (copied is True and time.monotonic() < deadline
+                and _identity_from_stat(os.fstat(named_fd)) == descriptor['output_parent_identity'])
+    except BaseException:
+        return False
+    finally:
+        for fd in reversed(descriptors):
+            try: os.close(fd)
+            except BaseException: pass
+
+
 def _close_failed_launch_resources(listener, handlers, broker, test_output_fd,
                                    directory_fd, owned_exit_confirmed, original_error):
     """Keep resource closure authoritative and close diagnostic duplicates always."""
@@ -2724,6 +2905,7 @@ def _close_failed_launch_resources(listener, handlers, broker, test_output_fd,
     try:
         if original_error is not None:
             retained = _retain_vstest_failure_input(broker, directory_fd, owned_exit_confirmed)
+            _capture_failed_cli_completion(broker, directory_fd, owned_exit_confirmed, retained)
         _close_launch_resources(listener, handlers, broker, test_output_fd)
         if original_error is not None and broker is not None:
             capture_subject_failure_prefixes(broker, directory_fd, owned_exit_confirmed)
