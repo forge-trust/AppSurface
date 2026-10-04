@@ -60,16 +60,37 @@ changes cannot alter the separately pinned deployment copy. Each trusted build c
 process group, disabled server reuse, finite kill/reap/group-absence checks and an exclusive durable command
 receipt. Nonzero exits, oversized logs, expired deadlines and incomplete ownership remain failures.
 
-Before these trusted builds, [`trusted_sdk.py`](trusted_sdk.py) audits and seals the fixed
-`/usr/share/dotnet` installation selected by the pinned workflow's trusted setup action. The root
-controller requires the NSS `runner` account to match the sudo invoker, and both its preparation PATH
-and the launcher's fixed `/usr/bin:/bin` PATH to resolve to that same canonical host. The `/usr`
-ancestor retains its strict root-owned, nonwritable guard. The fixed `/usr/share` ancestor is retained
-through a no-follow directory FD and must have root UID/GID, directory type, no special permission
-bits and all `0555` bits. Before opening the SDK tree, root may clear only its group/other write bits
-(`022`) through that FD. Its named identity, ownership, type and all other permission bits are
-rechecked. This private trusted-CI setup hardening accepts neither subject files nor a caller-selected
-SDK root and leaves the SDK tree's complete-audit-before-adoption ordering unchanged.
+Before these trusted builds, the private [`trusted_sdk_distribution.py`](trusted_sdk_distribution.py)
+installer selects the **complete .NET 10.0.401/linux-x64 distribution** at the literal publisher URL and
+SHA-512 documented in its [reference](trusted-sdk-distribution-README.md). It creates only the fresh
+`/usr/share/issue779-dotnet-10.0.401` root after archive authentication and exhaustive metadata checks.
+The preinstalled SDK remains in place. The workflow does not use a floating setup-dotnet version.
+The [workflow](workflow.yml.in) places that fixed SDK first in root preparation's PATH, followed only by
+the absolute executable directories selected by its existing pinned Node/pnpm setup actions and `/usr/bin:/bin`.
+It rejects colon/newline or non-executable selections before sudo. This preserves trusted build tooling without
+passing the entire ambient PATH. The [launcher's closed environment](../../../scripts/evidencehost-linux-launcher.py)
+remains `/usr/share/issue779-dotnet-10.0.401:/usr/bin:/bin`; subsequent .NET builds use the auditor's absolute host.
+
+[`prepare.bootstrap_sdk`](prepare.py) first creates an incomplete root-private binding without reading
+an absent future host. `protect_sdk_ancestors(deadline, diagnostic=...)` authenticates root and the NSS
+`runner` sudo invoker before retained-FD ancestor protection. `/usr` stays root:root, readable/searchable,
+ordinary and nonwritable by others. The retained, named `/usr/share` directory may lose only existing
+`022` bits through `seal_share_ancestor`; substitution or invalid metadata rejects before installation.
+
+The installer runs as the fixed `/usr/bin/python3 -B <frozen-module> --install` child under the existing
+`Runner.run` process group owner. Its absolute command deadline is 180 seconds, including output acceptance;
+on expiry the owner kills/reaps the group and prohibits every later build. The module's read/socket checks
+supplement this external owner. `validate_distribution_provenance(raw)` accepts at most 4096 bytes, exact
+fields and the fixed URL/hash/SDK/RID/root, bounded counts and a canonical tree digest. Provenance is data,
+not SDK audit, process ownership or admission. `record_installed_sdk_preflight` retains it and ancestor facts
+before reading the newly installed host's metadata. A failed install leaves preparation incomplete.
+
+Only then does [`trusted_sdk.seal_trusted_sdk`](trusted_sdk.py) audit the **entire** fresh installation with
+the existing cumulative 120-second/four-hash-pass contract. A fresh audit diagnostic clock excludes installer
+time. No archive inventory, prior hash or publisher receipt substitutes for this audit. Installation and
+sealing must both complete before metadata/app builds, and subject evaluation still waits for the actual
+supervisor to arm. `sdk_bootstrap.distribution` and `preinstallation_ancestors` remain in the completed
+private build binding. All original qualification gates, None/None claims and empty production registry remain.
 
 The internal `seal_share_ancestor(parent, share_fd, deadline, *, diagnostic=None)` FD procedure is
 called only with the bootstrap's pinned `/usr` and fixed `share` directory. It returns numeric
@@ -190,7 +211,8 @@ freezes copied aggregates. No paths, names, arguments, exception strings or raw 
 The existing incomplete-binding retention remains capped at4096 bytes. Three new portable real-FD/data
 controls define count/result/hash equivalence, clock failure with the same original EIO, diagnostic-only
 clamping, first-failure freezing and canary/frame bounds. Original23 SDK test bodies remain unchanged.
-No controls have run in this source-preparation packet; no system SDK or qualification is exercised.
+This describes the initial cost-diagnostic source handoff; later portable execution receipts are separate.
+These data/procedure controls do not represent a system SDK or qualification execution.
 
 The copied subject snapshot is separately sealed to `0555` directories and `0444` files before immutable
 preflight. Git tar entries may carry `0775`/`0664` modes; copying those modes does not satisfy the protected

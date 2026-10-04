@@ -16,7 +16,8 @@ import stat
 import subprocess
 import time
 
-from trusted_sdk import SDK_ROOT, SdkDiagnostic, identity as sdk_identity, metadata as sdk_metadata, seal_trusted_sdk
+from trusted_sdk import SDK_ROOT, SDK_PATH, SdkDiagnostic, identity as sdk_identity, metadata as sdk_metadata, protect_sdk_ancestors, seal_trusted_sdk
+from trusted_sdk_distribution import ARCHIVE_SHA512, ARCHIVE_URL, MAX_ARCHIVE_BYTES, MAX_NODES, MAX_TOTAL_BYTES, SDK_VERSION
 
 BASELINE = "5d325bb8c0f857eb37f0a736f39a0342b03e5c38"
 APP_ID = "issue779-qualified-native-http"
@@ -82,6 +83,7 @@ class Runner:
 
     def run(self, argv, cwd, *, input_bytes=None, capture=False, env=None):
         require(time.monotonic() < self.deadline)
+        command_deadline = min(self.deadline, time.monotonic() + 180)
         log = self.logs / f"build-{len(self.results)+1:02d}.log"
         process, output, code, error = None, None, None, None
         group_empty, timed_out, cleanup_failed = None, False, False
@@ -93,7 +95,7 @@ class Runner:
             try:
                 process = subprocess.Popen(argv, cwd=cwd, env=environment, stdin=subprocess.PIPE if input_bytes is not None else subprocess.DEVNULL,
                                            stdout=subprocess.PIPE if capture else stream, stderr=stream, start_new_session=True)
-                output, _ = process.communicate(input_bytes, timeout=min(180, self.deadline-time.monotonic()))
+                output, _ = process.communicate(input_bytes, timeout=max(.001, command_deadline-time.monotonic()))
                 code = process.returncode
             except subprocess.TimeoutExpired:
                 timed_out = True
@@ -130,7 +132,7 @@ class Runner:
         if category is None:
             category = ("output-limit" if log_size > 8*1024*1024 or capture and len(output or b"") > 1024*1024 else
                         "nonzero-exit" if code != 0 else "ownership-unconfirmed" if group_empty is not True else
-                        "deadline-expired" if time.monotonic() >= self.deadline else None)
+                        "deadline-expired" if time.monotonic() >= command_deadline else None)
         record = {"argv": argv, "exit_code": code, "timed_out": timed_out,
                   "owned_group_empty": group_empty, "failure_category": category, "log_bytes": log_size,
                   "cleanup_failed": cleanup_failed,
@@ -144,7 +146,7 @@ class Runner:
         if error is not None:
             raise error
         require(category is None)
-        require(code == 0 and group_empty and time.monotonic() < self.deadline)
+        require(code == 0 and group_empty and time.monotonic() < command_deadline)
         if capture:
             require(isinstance(output, bytes) and len(output) <= 1024*1024)
             return output
@@ -269,7 +271,7 @@ def archive(root, revision, destination, runner):
     tar_path.unlink()
 
 
-def retain_sdk_preflight_binding(workspace, source_commit):
+def retain_sdk_preflight_binding(workspace, source_commit, *, observe_host=True):
     """Persist data before reading host metadata; never build, seal or admit.
 
     ``prepare`` supplies its fresh root workspace. Portable controls select an
@@ -284,12 +286,97 @@ def retain_sdk_preflight_binding(workspace, source_commit):
         json.dump(incomplete, stream, sort_keys=True)
         stream.write("\n")
     os.chmod(binding_path, 0o600)
+    if not observe_host:
+        return
     try:
         sdk_initial["host_before"] = sdk_metadata((SDK_ROOT / "dotnet").lstat())
         sdk_initial["host_metadata_state"] = "observed"
     finally:
         # If lstat fails, preserve unavailable/null and propagate that failure.
         binding_path.write_text(json.dumps(incomplete, sort_keys=True) + "\n")
+
+
+def validate_distribution_provenance(raw):
+    """Parse only the fixed child installer's bounded complete provenance.
+
+    Exact URL, SHA-512, SDK/RID/root and closed fields bind the installer result.
+    This metadata is not the SDK audit, process ownership or qualification proof.
+    Runner.run must already have confirmed actual zero exit and group absence.
+    """
+    require(type(raw) is bytes and 0 < len(raw) <= 4096)
+    try:
+        value = unique_json(raw)
+    except (ValueError, UnicodeError):
+        raise PreparationFailure('qualification-preparation-rejected') from None
+    expected = {'schema', 'sdk_version', 'rid', 'root', 'archive_url', 'archive_sha512',
+                'compressed_bytes', 'expanded_bytes', 'node_count', 'explicit_member_count',
+                'tree_sha256', 'gnu_longname_headers', 'complete', 'sdk_audit_completed', 'qualification_claim'}
+    require(type(value) is dict and set(value) == expected)
+    require(value['schema'] == 'issue779-pinned-sdk-distribution-v1'
+            and value['sdk_version'] == SDK_VERSION and value['rid'] == 'linux-x64'
+            and value['root'] == str(SDK_ROOT) and value['archive_url'] == ARCHIVE_URL
+            and value['archive_sha512'] == ARCHIVE_SHA512
+            and value['complete'] is True and value['sdk_audit_completed'] is False
+            and value['qualification_claim'] is False)
+    for key, bound in (('compressed_bytes', MAX_ARCHIVE_BYTES), ('expanded_bytes', MAX_TOTAL_BYTES),
+                       ('node_count', MAX_NODES), ('explicit_member_count', MAX_NODES)):
+        require(type(value[key]) is int and 0 < value[key] <= bound)
+    require(value['explicit_member_count'] <= value['node_count']
+            and type(value['gnu_longname_headers']) is int
+            and 0 <= value['gnu_longname_headers'] <= value['explicit_member_count']
+            and type(value['tree_sha256']) is str
+            and re.fullmatch(r'[0-9a-f]{64}', value['tree_sha256']))
+    return value
+
+
+def record_installed_sdk_preflight(workspace, distribution, ancestors):
+    """Extend the fresh incomplete private record after the child actually joins.
+
+    Preserve publisher provenance and ancestor observations before the separate
+    full audit starts. Host lstat failure retains unavailable/null and propagates.
+    This file is owned by the root preparation workspace; no subject has run.
+    """
+    binding_path = workspace / 'build-binding.json'
+    binding = unique_json(binding_path.read_bytes())
+    require(binding.get('preparation_complete') is False)
+    initial = binding['sdk_bootstrap']
+    initial['distribution'] = distribution
+    initial['preinstallation_ancestors'] = ancestors
+    try:
+        initial['host_before'] = sdk_metadata((SDK_ROOT / 'dotnet').lstat())
+        initial['host_metadata_state'] = 'observed'
+    finally:
+        encoded = (json.dumps(binding, sort_keys=True) + '\n').encode()
+        require(len(encoded) <= 4096)
+        binding_path.write_bytes(encoded)
+
+
+def bootstrap_sdk(source, workspace, source_commit, runner):
+    """Own fixed installation, then audit the entire SDK before any build.
+
+    Retain incomplete metadata before ancestor checks. Install with the fixed
+    Python child argv under Runner's absolute 180-second group owner. Never call
+    install in this process: its DNS/TLS/read operations require external kill
+    and reap. Only accepted provenance and joined zero exit precede the unchanged
+    full 120-second SDK audit. All later .NET commands use its canonical host.
+    """
+    retain_sdk_preflight_binding(workspace, source_commit, observe_host=False)
+    diagnostic = SdkDiagnostic()
+    try:
+        ancestors = protect_sdk_ancestors(min(runner.deadline, time.monotonic() + 5), diagnostic=diagnostic)
+        installer = source / 'tests/evidencehost-consumer/PrivateQualification/trusted_sdk_distribution.py'
+        raw = runner.run(['/usr/bin/python3', '-B', str(installer), '--install'], source,
+                         capture=True, env=dict(os.environ, PATH=SDK_PATH))
+        distribution = validate_distribution_provenance(raw)
+        record_installed_sdk_preflight(workspace, distribution, ancestors)
+        diagnostic = SdkDiagnostic()
+        dotnet, binding = seal_trusted_sdk(min(runner.deadline, time.monotonic() + 120), diagnostic=diagnostic)
+        binding['distribution'] = distribution
+        binding['preinstallation_ancestors'] = ancestors
+        return dotnet, binding
+    except BaseException:
+        retain_sdk_failure_diagnostic(workspace, diagnostic)
+        raise
 
 
 def retain_sdk_failure_diagnostic(workspace, diagnostic):
@@ -363,19 +450,7 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
     logs = workspace / "build-logs"
     logs.mkdir(mode=0o700)
     runner = Runner(logs, time.monotonic()+1200)
-    # Retain initial host facts even if the closed bootstrap rejects preparation.
-    # This root-private partial record is not a completed build or admission binding.
-    retain_sdk_preflight_binding(workspace, source_commit)
-    sdk_diagnostic = SdkDiagnostic()
-    try:
-        dotnet, sdk_binding = seal_trusted_sdk(min(runner.deadline, time.monotonic() + 120),
-                                             diagnostic=sdk_diagnostic)
-    except BaseException:
-        try:
-            retain_sdk_failure_diagnostic(workspace, sdk_diagnostic)
-        except BaseException:
-            pass
-        raise
+    dotnet, sdk_binding = bootstrap_sdk(source, workspace, source_commit, runner)
     baseline, build = workspace / "baseline", workspace / "build"
     archive(source, BASELINE, baseline, runner)
     archive(source, source_commit, build, runner)
