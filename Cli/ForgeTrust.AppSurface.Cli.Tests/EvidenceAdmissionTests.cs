@@ -35,6 +35,36 @@ public sealed class EvidenceAdmissionTests
         Assert.Throws<EvidenceAdmissionException>(() => EvidenceManifestBuilder.Build(plan, [], admission));
     }
 
+    [Fact]
+    public async Task ObservationAdmissionRejectsSecondActivationWithoutConsumingValidFinalization()
+    {
+        var (plan, context) = Inputs();
+        var admission = await EvidenceAdmission.AdmitAsync(
+            EvidenceExecutionMode.Observation, plan, context, new Worker(), null, default);
+        admission.Activate("observation-output-first");
+
+        var error = Assert.Throws<EvidenceAdmissionException>(() =>
+            admission.Activate("observation-output-second-canary"));
+
+        Assert.Equal("ASEVD409", error.Code);
+        Assert.StartsWith("ASEVD409: Output activation is unavailable.", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("observation-output-second-canary", error.Message, StringComparison.Ordinal);
+        Assert.Null(error.InnerException);
+
+        admission.Complete(ownedWorkStopped: true, artifactsVerified: true, cleanupCompleted: true);
+        var manifest = EvidenceManifestBuilder.Build(plan, [], admission);
+
+        Assert.Equal(context.RunId, admission.RunId);
+        Assert.Equal(EvidenceExecutionVerdict.Passed, manifest.ExecutionVerdict);
+        Assert.Equal(EvidenceExecutionMode.Observation, manifest.Mode);
+        Assert.Equal(EvidenceClaimKind.ObservationOnly, manifest.ClaimKind);
+        Assert.Equal(EvidenceClaimEligibility.Informational, manifest.Eligibility);
+        Assert.Equal(EvidenceEnvelopeStatus.NotRequired, manifest.EnvelopeStatus);
+        Assert.Null(manifest.EnvelopeAssertion);
+        Assert.Equal(plan.PlanDigest, manifest.PlanDigest);
+        Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
+    }
+
     [Theory]
     [InlineData(false, "run/1", "ASEVD402")]
     [InlineData(true, "stale/1", "ASEVD402")]
