@@ -37,6 +37,7 @@ REPORT = (
 )
 MAX_LINE = 64 * 1024
 PROTOCOL_PRIVATE_CANARY = b"protocol-private-canary"
+ALLOCATION_SLOT_SENTINEL = b"issue779-cli-existing-slot-sentinel\n"
 SANDBOX_MARKER_ENVIRONMENT = ("CODEX_SANDBOX", "SANDBOX_MODE", "IN_SANDBOX", "IS_SANDBOX")
 SCENARIOS: dict[str, tuple[str, str, str]] = {
     "cli-coverage": ("observation", "coverage", "coverage"),
@@ -47,6 +48,8 @@ SCENARIOS: dict[str, tuple[str, str, str]] = {
     "cli-output-overflow": ("observation", "coverage", "overflow"),
     "cli-malformed": ("observation", "coverage", "malformed"),
     "cli-cancel": ("observation", "coverage", "none"),
+    "cli-budget-insufficient": ("observation", "coverage", "budget-insufficient"),
+    "cli-output-slot-exists": ("observation", "coverage", "slot-exists"),
     "protocol-negative-length": ("observation", "empty", "negative-length"),
     "protocol-declared-length": ("observation", "empty", "declared-length"),
     "protocol-encoded-limit": ("observation", "empty", "encoded-limit"),
@@ -59,6 +62,21 @@ SCENARIOS: dict[str, tuple[str, str, str]] = {
     "aspire-mode-conflict": ("observation", "empty", "none"),
     "aspire-policy-drift": ("observation", "empty", "none"),
 }
+
+
+def prepare_existing_output_slot(output_parent: Path, worker_uid: int, worker_gid: int) -> None:
+    """Precreate only the fixed collision control, with actual selected worker ownership."""
+    slot = output_parent / "evidence-output"
+    slot.mkdir(mode=0o700)
+    chown_mode(slot, worker_uid, worker_gid, 0o700)
+    sentinel = slot / "allocation-sentinel.bin"
+    fd = os.open(sentinel, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        if os.write(fd, ALLOCATION_SLOT_SENTINEL) != len(ALLOCATION_SLOT_SENTINEL):
+            fail("fixture-sentinel-write-incomplete")
+    finally:
+        os.close(fd)
+    chown_mode(sentinel, worker_uid, worker_gid, 0o600)
 
 
 def fixture_policy() -> dict[str, Any]:
@@ -166,6 +184,7 @@ class Scenario:
         self.output = output
         self.profile = profile
         self.behavior = behavior
+        self.job_remaining_seconds = 90.0 if behavior == "budget-insufficient" else 600.0
         self.mode = mode
         self.paths = ["src/Feature.cs"] if profile == "coverage" else ["docs/evidence/no-evidence.txt"]
         self.peer: tuple[int, int, int] | None = None
@@ -200,6 +219,7 @@ class Scenario:
             "dotnetPath": dotnet,
             "outputParent": str(output),
             "outputSlot": "evidence-output",
+            "jobRemainingSeconds": self.job_remaining_seconds,
             "outputDirectory": str(output / "evidence-output"),
             "operationsFile": str(log_file),
             "peerFile": str(log_file.with_suffix(".peer.json")),
@@ -241,7 +261,7 @@ class Scenario:
             "worker_pid": peer[0], "broker_pid": os.getpid(), "worker_uid": peer[1], "worker_gid": peer[2],
             "subject_uid": self.subject_uid, "subject_gid": self.subject_gid,
             "unit": unit, "cgroup": cgroup,
-            "job_deadline_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now + 600)),
+            "job_deadline_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now + self.job_remaining_seconds)),
             "tool_root": str(self.metadata["toolRoot"]),
             "subject_root": str(self.subject), "output_parent": str(self.output),
             "output_slot": "evidence-output", "dotnet_path": self.dotnet,
@@ -281,7 +301,7 @@ class Scenario:
         op = request.get("op")
         self.log(str(op), peer, request)
         if op == "ready":
-            return {"ok": True, "descriptor": self.descriptor, "job_remaining_seconds": 600.0}
+            return {"ok": True, "descriptor": self.descriptor, "job_remaining_seconds": self.job_remaining_seconds}
         if op == "run":
             if self.behavior == "coverage":
                 code, received = 0, 32
@@ -485,6 +505,8 @@ def main(argv: list[str]) -> int:
             scenario = Scenario(name, base, tool, subject, output, args.worker_uid, args.worker_gid,
                                 args.subject_uid, args.subject_gid, dotnet, policy_file, policy_digest,
                                 log_file, broker_root / "control.sock")
+            if scenario.behavior == "slot-exists":
+                prepare_existing_output_slot(output, args.worker_uid, args.worker_gid)
             server = scenario_server(scenario, args.worker_gid)
             metadata_file = socket_dir / f"{name}.json"
             write_root_file(metadata_file, json.dumps(scenario.metadata, separators=(",", ":")).encode() + b"\n", args.worker_gid)

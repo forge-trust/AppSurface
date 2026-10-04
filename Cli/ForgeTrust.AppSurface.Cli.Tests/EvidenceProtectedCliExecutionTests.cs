@@ -304,6 +304,65 @@ public sealed class EvidenceProtectedCliExecutionTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task RunAsync_RejectsInsufficientAuthenticatedAllowanceBeforeAllocationOrProducerIo()
+    {
+        var fixture = await RequireFixtureAsync("cli-budget-insufficient");
+        if (fixture is null) return;
+        var plan = ResolvePlan(fixture);
+        Assert.Equal(60, Assert.Single(plan.Profile.Producers).TimeoutSeconds);
+        using var metadata = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Combine(
+            Environment.GetEnvironmentVariable(BrokerEnvironmentVariable)!, "cli-budget-insufficient.json")));
+        Assert.Equal(90, metadata.RootElement.GetProperty("jobRemainingSeconds").GetDouble());
+        Assert.Empty(Directory.EnumerateFileSystemEntries(fixture.OutputParent));
+        var diagnostics = new List<EvidenceAllocationFailureDiagnostic>();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        var exception = await Assert.ThrowsAsync<EvidenceAdmissionException>(() =>
+            EvidenceProtectedCliExecution.RunAsync(fixture.Socket, cancellation.Token, diagnostics.Add));
+
+        Assert.Equal("ASEVD421", exception.Code);
+        Assert.StartsWith("ASEVD421: Declared work and collection/cleanup reserves exceed the protected job budget.", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(diagnostics);
+        Assert.False(Directory.Exists(fixture.OutputDirectory));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(fixture.OutputParent));
+        Assert.Equal(["ready", "stop", "wait"], ReadOperations(fixture));
+        AssertPeerMatchesTestHost(fixture);
+    }
+
+    [Fact]
+    public async Task RunAsync_RejectsExistingOutputSlotWithoutChangingSentinelOrStartingProducerIo()
+    {
+        var fixture = await RequireFixtureAsync("cli-output-slot-exists");
+        if (fixture is null || !OperatingSystem.IsLinux()) return;
+        var sentinelPath = TestPathUtils.PathUnder(fixture.OutputDirectory, "allocation-sentinel.bin");
+        var expectedBytes = "issue779-cli-existing-slot-sentinel\n"u8.ToArray();
+        var expectedMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        Assert.Equal(expectedBytes, await File.ReadAllBytesAsync(sentinelPath));
+        Assert.Equal(expectedMode, File.GetUnixFileMode(sentinelPath));
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+            File.GetUnixFileMode(fixture.OutputDirectory));
+        var diagnostics = new List<EvidenceAllocationFailureDiagnostic>();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        var exception = await Assert.ThrowsAsync<EvidenceAdmissionException>(() =>
+            EvidenceProtectedCliExecution.RunAsync(fixture.Socket, cancellation.Token, diagnostics.Add));
+
+        Assert.Equal("ASEVD409", exception.Code);
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(EvidenceAllocationPhase.Allocation, diagnostic.Phase);
+        Assert.Equal(EvidenceLinuxArtifactAllocationOperation.CreateSlot, diagnostic.Operation);
+        Assert.Equal(EvidenceAllocationErrorClass.Io, diagnostic.ErrorClass);
+        Assert.Equal(17, diagnostic.NativeErrno);
+        Assert.Equal(expectedBytes, await File.ReadAllBytesAsync(sentinelPath));
+        Assert.Equal(expectedMode, File.GetUnixFileMode(sentinelPath));
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+            File.GetUnixFileMode(fixture.OutputDirectory));
+        Assert.Equal([sentinelPath], Directory.EnumerateFileSystemEntries(fixture.OutputDirectory).ToArray());
+        Assert.Equal(["ready", "stop", "wait"], ReadOperations(fixture));
+        AssertPeerMatchesTestHost(fixture);
+    }
+
+    [Fact]
     public async Task RunAsync_RejectsTrustedModeWithoutConsumerProofBeforeAllocationOrSubjectRun()
     {
         var fixture = await RequireFixtureAsync("cli-trusted");

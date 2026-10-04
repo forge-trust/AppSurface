@@ -261,6 +261,69 @@ class ProtocolRejectionTests(unittest.TestCase):
         self.assertFalse(broker.join_broker_servers([server], [accept]))
 
 
+class CliAllocationFixtureTests(unittest.TestCase):
+    def test_short_allowance_changes_only_job_budget_with_a_legitimate_neighbor(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "output"
+            output.mkdir()
+            allowances = {}
+            for name in ("cli-coverage", "cli-budget-insufficient"):
+                log = root / (name + ".jsonl")
+                log.touch()
+                scenario = broker.Scenario(name, root, root / "tool", root / "subject", output,
+                                           1001, 1002, 1003, 1004, "/usr/bin/dotnet",
+                                           root / "policy.json", "a" * 64, log,
+                                           root / name / "broker" / "control.sock")
+                peer = (12345, 1001, 1002)
+                with patch.object(broker.time, "time", return_value=1700000000):
+                    scenario.descriptor = scenario.make_descriptor(peer)
+                ready = scenario.response({"op": "ready"}, peer)
+                allowances[name] = ready["job_remaining_seconds"]
+                self.assertTrue(ready["ok"])
+                self.assertEqual(scenario.metadata["jobRemainingSeconds"], allowances[name])
+                self.assertEqual(broker.time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                                      broker.time.gmtime(1700000000 + allowances[name])),
+                                 ready["descriptor"]["job_deadline_utc"])
+                self.assertEqual((10, 20, 30, 5), tuple(ready["descriptor"][key] for key in
+                                 ("admission_seconds", "collection_seconds", "cleanup_seconds", "stopping_seconds")))
+                self.assertEqual(["ready"], [json.loads(line)["op"] for line in log.read_text().splitlines()])
+            producer = broker.fixture_policy()["profiles"][0]["producers"][0]
+            required = 2 * 10 + producer["timeoutSeconds"] + 20 + 30
+            self.assertEqual(130, required)
+            self.assertEqual({"cli-coverage": 600.0, "cli-budget-insufficient": 90.0}, allowances)
+            self.assertLess(allowances["cli-budget-insufficient"], required)
+            self.assertGreater(allowances["cli-budget-insufficient"], 10 + 20 + 30)
+            self.assertGreater(allowances["cli-coverage"], required)
+            self.assertEqual([], list(output.iterdir()))
+
+    def test_collision_slot_is_fixed_worker_selected_and_never_overwrites_existing_bytes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            collision = root / "collision"
+            neighbor = root / "neighbor"
+            collision.mkdir(mode=0o700)
+            neighbor.mkdir(mode=0o700)
+            with patch.object(broker.os, "chown") as chown:
+                broker.prepare_existing_output_slot(collision, 1001, 1002)
+                sentinel = collision / "evidence-output" / "allocation-sentinel.bin"
+                before = sentinel.stat()
+                self.assertEqual(broker.ALLOCATION_SLOT_SENTINEL, sentinel.read_bytes())
+                self.assertEqual(0o600, stat.S_IMODE(before.st_mode))
+                self.assertEqual(0o700, stat.S_IMODE(sentinel.parent.stat().st_mode))
+                self.assertEqual([call(sentinel.parent, 1001, 1002, follow_symlinks=False),
+                                  call(sentinel, 1001, 1002, follow_symlinks=False)], chown.call_args_list)
+                with self.assertRaises(FileExistsError):
+                    broker.prepare_existing_output_slot(collision, 1001, 1002)
+                self.assertEqual(2, chown.call_count)
+            after = sentinel.stat()
+            self.assertEqual((before.st_dev, before.st_ino, before.st_mode),
+                             (after.st_dev, after.st_ino, after.st_mode))
+            self.assertEqual(broker.ALLOCATION_SLOT_SENTINEL, sentinel.read_bytes())
+            self.assertEqual([sentinel], list(sentinel.parent.iterdir()))
+            self.assertEqual([], list(neighbor.iterdir()))
+
+
 class BoundedOwnershipTests(unittest.TestCase):
     def test_owner_selected_budgets_preserve_full_lane_and_reject_unbounded_values(self):
         argv = ["--worker-uid", "65534", "--worker-gid", "65532", "--subject-uid", "65533",

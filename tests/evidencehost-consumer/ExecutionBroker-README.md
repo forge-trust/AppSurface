@@ -125,6 +125,36 @@ Actual Linux execution and any instrumented coverage must be measured separately
 artifact and cgroup metadata establish no systemd supervision, application admission, consumer
 qualification or Trusted acceptance.
 
+## CLI budget and fresh-slot controls (prepared)
+
+Two additional [direct CLI facts](../../Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProtectedCliExecutionTests.cs)
+use the same root-owned broker and actual non-root testhost credentials. `cli-budget-insufficient`
+selects the ordinary coverage plan (60-second producer), two 10-second admission stages, 20-second
+collection and 30-second cleanup reserves, but delivers a fresh authenticated 90-second job allowance.
+The unchanged caller must reject with `ASEVD421` and the declared-work/reserves diagnostic before output
+allocation. The ordinary 600-second scenario remains its valid budget neighbor; stopping's five seconds
+are included within cleanup, not added twice.
+
+`cli-output-slot-exists` keeps the ordinary 600-second budget and precreates exactly `evidence-output`
+beneath that scenario's actual worker-owned parent. The slot is worker-owned `0700`; its sole
+`allocation-sentinel.bin` is worker-owned `0600` with fixed known bytes. The caller must reach the
+allocator's exclusive `CreateSlot` operation and reject with `ASEVD409` / direct Linux `EEXIST` (17).
+The test rechecks the sentinel's exact bytes and mode, slot mode and sole file; no manifest can be added.
+Both facts require exactly `ready`, `stop`, `wait` after the caller's rejection cleanup, so neither a
+producer `run`, artifact declaration/read, nor a successful-finalization `exit` request can occur.
+The fixture independently joins its actual command process group, server and handler threads regardless
+of the synthetic wait acknowledgement.
+
+The [two new portable controls](test_execution_broker_fixture.py) check the finite allowance against
+the legitimate neighboring policy and use actual temporary filesystem bytes/modes with recorded
+ownership calls for the collision. They establish no actual root ownership or consumer execution.
+Source totals are 26 direct CLI cases, 21 broker scenarios and 18 portable methods; these additions
+are uncompiled and unexecuted at source preparation. Actual Linux peer authentication and filesystem
+rejection require the coordinated native run. This remains a root IPC/filesystem procedure with
+synthetic cgroup/SDK/report metadata, not systemd supervision, accepted admission, a lease, Trusted
+acceptance or measured coverage gain. The [consumer acceptance contract](../../docs/evidence/issue779-consumer-acceptance.md)
+continues to govern those claims.
+
 ## Production worker syscall compatibility
 
 The [production launcher's worker unit](../../scripts/evidencehost-linux-launcher.py) explicitly uses `RestrictSUIDSGID=no`; its subject units retain `RestrictSUIDSGID=yes`. In pinned [systemd v255 `seccomp_restrict_sxid`](https://github.com/systemd/systemd/blob/v255/src/shared/seccomp-util.c#L2148-L2164), the filter blocks `openat2` with `ENOSYS` because the syscall's flags are passed indirectly; [`RestrictSUIDSGID` installs that filter](https://github.com/systemd/systemd/blob/v255/src/shared/seccomp-util.c#L2179-L2205). The protected artifact allocator requires `openat2` and has no syscall fallback, so the worker must permit that syscall to allocate its retained output handles.
