@@ -8,6 +8,13 @@
 Runtime-provider and operator APIs live in
 [`ForgeTrust.AppSurface.Durable.Provider`](../ForgeTrust.AppSurface.Durable.Provider/README.md).
 
+For a new .NET 10 PostgreSQL-backed external-activation host, start with the
+[Durable worker template guide](../../start-here/durable-worker.md). It generates application-owned host and test
+projects that consume this package through coordinated preview references; the template itself is installed with
+`dotnet new install` and is not a runtime dependency. Use the
+[typed Work definition guide](../migrations/typed-work-definitions-v1.md) for the generated sample's contract and
+manual Work-version changes.
+
 ## Choose this package when
 
 - a reusable module needs to describe durable work without choosing storage;

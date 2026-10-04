@@ -1,0 +1,230 @@
+name: Durable Template Evidence
+
+on:
+  workflow_call:
+    inputs:
+      package_version:
+        required: true
+        type: string
+      source_commit:
+        required: true
+        type: string
+      producer_artifact_id:
+        required: true
+        type: string
+      artifact_manifest_file:
+        required: false
+        default: package-artifact-manifest.json
+        type: string
+    outputs:
+      receipt_artifact_ids:
+        description: Exact immutable IDs of three OS and two five-sample timing receipts.
+        value: ${{ jobs.collect.outputs.receipt_artifact_ids }}
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  native-template:
+    name: Durable template (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            rid: linux-x64
+          - os: macos-15
+            rid: osx-arm64
+          - os: windows-2025
+            rid: win-x64
+    env:
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
+      PACKAGE_VERSION: ${{ inputs.package_version }}
+      MANIFEST_FILE: ${{ inputs.artifact_manifest_file }}
+    steps:
+      - name: Preserve candidate source bytes across checkout
+        shell: bash
+        run: git config --global core.autocrlf false
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_commit }}
+          persist-credentials: false
+      - name: Download exact frozen producer
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ inputs.producer_artifact_id }}
+          path: ${{ runner.temp }}/durable-template-producer
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Resolve private native PostgreSQL tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($IsLinux) { $bin = '/usr/lib/postgresql/16/bin' }
+          elseif ($IsMacOS) {
+            & brew --prefix postgresql@16 *> $null
+            if ($LASTEXITCODE -ne 0) {
+              & brew install postgresql@16
+              if ($LASTEXITCODE -ne 0) { throw 'Native PostgreSQL acquisition failed.' }
+            }
+            $bin = Join-Path ((& brew --prefix postgresql@16).Trim()) 'bin'
+          } else { $bin = $env:PGBIN }
+          if ([string]::IsNullOrWhiteSpace($bin)) { throw 'Native PostgreSQL tool directory is missing.' }
+          foreach ($tool in @('initdb', 'postgres', 'pg_ctl', 'psql')) {
+            $name = if ($IsWindows) { "$tool.exe" } else { $tool }
+            if (!(Test-Path (Join-Path $bin $name) -PathType Leaf)) { throw 'Native PostgreSQL tool set is incomplete.' }
+          }
+          "NATIVE_PG_BIN=$bin" >> $env:GITHUB_ENV
+      - name: Verify installed candidate and ordinary native startup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:MANIFEST_FILE -notin @('package-artifact-manifest.json', 'package-artifact-manifest.unapproved.json')) {
+            throw 'Unexpected artifact manifest basename.'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:ImageOS) -or [string]::IsNullOrWhiteSpace($env:ImageVersion)) {
+            throw 'Hosted runner image identity is missing.'
+          }
+          & dotnet restore tools/ForgeTrust.AppSurface.PackageIndex --locked-mode
+          if ($LASTEXITCODE -ne 0) { throw 'Verifier restore failed.' }
+          & dotnet build tools/ForgeTrust.AppSurface.PackageIndex --no-restore -c Release /p:SourceRevisionId=$env:SOURCE_COMMIT
+          if ($LASTEXITCODE -ne 0) { throw 'Verifier build failed.' }
+          & dotnet tools/ForgeTrust.AppSurface.PackageIndex/bin/Release/net10.0/ForgeTrust.AppSurface.PackageIndex.dll verify-durable-template `
+            --repo-root $env:GITHUB_WORKSPACE --artifacts-input "$env:RUNNER_TEMP/durable-template-producer" `
+            --artifact-manifest "$env:RUNNER_TEMP/durable-template-producer/$env:MANIFEST_FILE" `
+            --package-version $env:PACKAGE_VERSION --source-commit $env:SOURCE_COMMIT `
+            --native-pg-bin $env:NATIVE_PG_BIN --report "$env:RUNNER_TEMP/durable-template-receipt/${{ matrix.rid }}.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Installed template proof failed; inspect safe receipt.' }
+      - name: Upload safe proof receipt
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: durable-template-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.rid }}
+          path: ${{ runner.temp }}/durable-template-receipt/${{ matrix.rid }}.json
+          if-no-files-found: error
+          retention-days: ${{ github.retention_days }}
+
+  template-timing:
+    name: Durable template timing (${{ matrix.clock }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      matrix:
+        clock: [primed, cold]
+    env:
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
+      PACKAGE_VERSION: ${{ inputs.package_version }}
+      MANIFEST_FILE: ${{ inputs.artifact_manifest_file }}
+    steps:
+      - name: Preserve candidate source bytes across checkout
+        shell: bash
+        run: git config --global core.autocrlf false
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_commit }}
+          persist-credentials: false
+      - name: Download exact frozen producer
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ inputs.producer_artifact_id }}
+          path: ${{ runner.temp }}/durable-template-producer
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Prepare verifier outside product clocks
+        run: |
+          set -euo pipefail
+          case "$MANIFEST_FILE" in package-artifact-manifest.json|package-artifact-manifest.unapproved.json) ;; *) exit 1 ;; esac
+          dotnet restore tools/ForgeTrust.AppSurface.PackageIndex --locked-mode
+          dotnet build tools/ForgeTrust.AppSurface.PackageIndex --no-restore -c Release /p:SourceRevisionId="$SOURCE_COMMIT"
+      - name: Create five private empty Docker daemons for cold samples
+        if: ${{ matrix.clock == 'cold' }}
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          image='docker:28.3.3-dind@sha256:a56b3bdde89315ed2cc0e4906e582b5033d93bf20d9cb9510c2cdd4e7f7690b1'
+          timeout 300 docker pull "$image"
+          : > "$RUNNER_TEMP/durable-cold-container-ids"
+          : > "$RUNNER_TEMP/durable-cold-hosts"
+          for ordinal in 1 2 3 4 5; do
+            id=$(docker create --privileged --network bridge --env DOCKER_TLS_CERTDIR= \
+              --label "appsurface.durable.timing=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+              --name "durable-cold-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$ordinal" "$image")
+            echo "$id" >> "$RUNNER_TEMP/durable-cold-container-ids"
+            docker start "$id"
+            timeout 60 bash -c 'until docker exec "$1" docker info >/dev/null 2>&1; do sleep 1; done' _ "$id"
+            ip=$(docker inspect --format '{{.NetworkSettings.IPAddress}}' "$id")
+            echo "tcp://$ip:2375" >> "$RUNNER_TEMP/durable-cold-hosts"
+          done
+          echo "DURABLE_COLD_HOSTS=$(paste -sd, "$RUNNER_TEMP/durable-cold-hosts")" >> "$GITHUB_ENV"
+      - name: Measure five serial install create FirstDurableWork samples
+        env:
+          CLOCK: ${{ matrix.clock }}
+        run: |
+          set -euo pipefail
+          cold_args=()
+          if [[ "$CLOCK" == cold ]]; then cold_args=(--docker-hosts "$DURABLE_COLD_HOSTS"); fi
+          dotnet tools/ForgeTrust.AppSurface.PackageIndex/bin/Release/net10.0/ForgeTrust.AppSurface.PackageIndex.dll verify-durable-template-timing \
+            --repo-root "$GITHUB_WORKSPACE" --artifacts-input "$RUNNER_TEMP/durable-template-producer" \
+            --artifact-manifest "$RUNNER_TEMP/durable-template-producer/$MANIFEST_FILE" \
+            --package-version "$PACKAGE_VERSION" --source-commit "$SOURCE_COMMIT" --clock "$CLOCK" \
+            --report "$RUNNER_TEMP/durable-template-receipt/timing-$CLOCK.json" "${cold_args[@]}"
+      - name: Stop only workflow-owned cold daemons and private volumes
+        if: ${{ always() && matrix.clock == 'cold' }}
+        run: |
+          set -euo pipefail
+          failed=0
+          if [[ -f "$RUNNER_TEMP/durable-cold-container-ids" ]]; then
+            while IFS= read -r id; do
+              owner=$(docker inspect --format '{{index .Config.Labels "appsurface.durable.timing"}}' "$id")
+              if [[ "$owner" != "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" ]]; then failed=1; continue; fi
+              timeout 20 docker rm --force --volumes "$id" || failed=1
+            done < "$RUNNER_TEMP/durable-cold-container-ids"
+          fi
+          exit "$failed"
+      - name: Upload all timing attempts and provenance
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: durable-template-${{ github.run_id }}-${{ github.run_attempt }}-timing-${{ matrix.clock }}
+          path: ${{ runner.temp }}/durable-template-receipt/timing-${{ matrix.clock }}.json
+          if-no-files-found: error
+          retention-days: ${{ github.retention_days }}
+
+  collect:
+    needs: [native-template, template-timing]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      receipt_artifact_ids: ${{ steps.ids.outputs.ids }}
+    steps:
+      - name: Resolve exact receipt IDs from this successful invocation
+        id: ids
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          prefix="durable-template-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-"
+          records=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+            --jq ".artifacts[] | select(.expired == false and (.name == (\"${prefix}linux-x64\") or .name == (\"${prefix}osx-arm64\") or .name == (\"${prefix}win-x64\") or .name == (\"${prefix}timing-primed\") or .name == (\"${prefix}timing-cold\"))) | [.name, (.id | tostring)] | @tsv")
+          ids=()
+          for suffix in linux-x64 osx-arm64 win-x64 timing-primed timing-cold; do
+            matches=()
+            while IFS=$'\t' read -r name id; do
+              if [[ "$name" == "${prefix}${suffix}" ]]; then matches+=("$id"); fi
+            done <<<"$records"
+            test "${#matches[@]}" = 1
+            [[ "${matches[0]}" =~ ^[1-9][0-9]*$ ]]
+            ids+=("${matches[0]}")
+          done
+          test "$(printf '%s\n' "${ids[@]}" | sort -u | wc -l | tr -d ' ')" = 5
+          echo "ids=$(printf '%s\n' "${ids[@]}" | sort -n | paste -sd, -)" >> "$GITHUB_OUTPUT"

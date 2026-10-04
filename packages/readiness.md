@@ -6,9 +6,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 
 ## Summary
 
-- Packages: 59
-- Evidence status: manifest evidence complete: 41; transitive package evidence complete: 7; proof-host evidence complete: 2; excluded by publish decision: 9
-- Product families: AppSurface: 39; Forge Trust: 2; Internal support: 15; RazorWire: 3
+- Packages: 62
+- Evidence status: manifest evidence complete: 42; transitive package evidence complete: 7; proof-host evidence complete: 2; excluded by publish decision: 11
+- Product families: AppSurface: 40; Forge Trust: 2; Internal support: 17; RazorWire: 3
 
 ## Package evidence matrix
 
@@ -42,7 +42,10 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | Internal support | `ForgeTrust.AppSurface.Durable.PostgreSql.V2WorkHarness` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Durable.Testing` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Durable`<br />`ForgeTrust.AppSurface.Durable.Provider` | `ForgeTrust.AppSurface.Durable`<br />`ForgeTrust.AppSurface.Durable.Provider` | [README](../Durable/ForgeTrust.AppSurface.Durable.Testing/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Console` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Console/ForgeTrust.AppSurface.Console/README.md) | [notes](../releases/current.md) |
+| AppSurface | `ForgeTrust.AppSurface.Durable.Templates` | public | publish | manifest evidence complete | None | None | None | [README](../Durable/ForgeTrust.AppSurface.Durable.Templates/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Dependency.Autofac` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Core` | `ForgeTrust.AppSurface.Core` | [README](../Dependency/ForgeTrust.AppSurface.Dependency.Autofac/README.md) | [notes](../releases/current.md) |
+| Internal support | `AppSurfaceDurableWorker` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
+| Internal support | `AppSurfaceDurableWorker` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Deployment` | public | publish | manifest evidence complete | None | None | None | [README](../Deployment/ForgeTrust.AppSurface.Deployment/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Deployment.GcpCloudRun` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Deployment` | `ForgeTrust.AppSurface.Deployment` | [README](../Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Evidence.Contracts` | public | publish | manifest evidence complete | None | None | None | [README](../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md) | [notes](../releases/current.md) |

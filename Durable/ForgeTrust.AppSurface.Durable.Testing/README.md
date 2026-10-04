@@ -12,6 +12,10 @@ call ordering, or how a host handles provider admission outcomes. Use the
 state, leases, crash recovery, transactions, or an ambiguous external effect. The
 [operational-assessment guide](../operational-assessments.md) defines the production meanings of health and admission.
 
+The [Durable worker template](../ForgeTrust.AppSurface.Durable.Templates/README.md) uses this package for generated
+host-contract and Work-scenario tests. Its package-only consumer proof remains independent of repository test projects;
+use the [canonical start guide](../../start-here/durable-worker.md) for its real PostgreSQL lifecycle boundary.
+
 ## Quick start
 
 The package has no test-framework or assertion-library dependency. Start with an xUnit project (or use an existing

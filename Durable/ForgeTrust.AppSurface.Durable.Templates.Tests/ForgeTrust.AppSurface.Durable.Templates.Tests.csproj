@@ -1,0 +1,65 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- Match the generated host's friend-test identity for internal host contract tests. -->
+    <AssemblyName>AppSurfaceDurableWorker.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="JunitXml.TestLogger" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="OpenTelemetry" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <!-- Match the ASP.NET Core Web SDK implicit usings used by the linked generated host sources. -->
+    <Using Include="Microsoft.AspNetCore.Builder" />
+    <Using Include="Microsoft.AspNetCore.Hosting" />
+    <Using Include="Microsoft.AspNetCore.Http" />
+    <Using Include="Microsoft.AspNetCore.Routing" />
+    <Using Include="Microsoft.Extensions.Configuration" />
+    <Using Include="Microsoft.Extensions.DependencyInjection" />
+    <Using Include="Microsoft.Extensions.Hosting" />
+    <Using Include="Microsoft.Extensions.Logging" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
+    <ProjectReference Include="../ForgeTrust.AppSurface.Durable.Templates.VerificationHost/ForgeTrust.AppSurface.Durable.Templates.VerificationHost.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/tests/AppSurfaceDurableWorker.Tests/HostContractTests.cs"
+             Condition="Exists('../ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/tests/AppSurfaceDurableWorker.Tests/HostContractTests.cs')"
+             Link="GeneratedTests/HostContractTests.cs" />
+    <Compile Include="../ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/tests/AppSurfaceDurableWorker.Tests/SetupOperationLifetime.cs"
+             Link="GeneratedTests/SetupOperationLifetime.cs" />
+    <Compile Include="../ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/tests/AppSurfaceDurableWorker.Tests/SetupOperationLifetimeTests.cs"
+             Link="GeneratedTests/SetupOperationLifetimeTests.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/tests/AppSurfaceDurableWorker.Tests/xunit.runner.json"
+          Condition="Exists('../ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/tests/AppSurfaceDurableWorker.Tests/xunit.runner.json')"
+          Link="xunit.runner.json"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

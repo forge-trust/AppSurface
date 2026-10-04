@@ -89,6 +89,7 @@ This approach aims to:
 
 ### [Durable](./Durable/README.md)
 
+- [**Durable worker start guide**](./start-here/durable-worker.md) – installs the public-preview ForgeTrust.AppSurface.Durable.Templates package, generates a standalone .NET 10 PostgreSQL external-activation host, and runs the four-checkpoint first-Work proof. The generated project is application-owned and requires manual upgrades.
 - [**ForgeTrust.AppSurface.Durable**](./Durable/ForgeTrust.AppSurface.Durable/README.md) – Public-preview contracts for portable Work, resumable Flow, schedules, payloads, registration, and clients without installing a runtime. Use [typed Work definitions](./Durable/migrations/typed-work-definitions-v1.md) to share contract facts between registration and requests.
 - [**ForgeTrust.AppSurface.Durable.Provider**](./Durable/ForgeTrust.AppSurface.Durable.Provider/README.md) – Public runtime-provider and operator SPI for claims, bounded activation, health, drain, recovery, controlled repair, and verified Flow-retention lifecycle contracts.
 - [**ForgeTrust.AppSurface.Durable.PostgreSql**](./Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) – Public-preview PostgreSQL provider for passive storage registration, explicit schema management, atomic Work acceptance, manually driven Flow persistence, [Work-first Schedule storage](./Durable/schedule-protocol-v1.md), and verified per-Flow retention; hosted processing requires an explicit `AddWorkerHost()` opt-in.
@@ -432,6 +433,7 @@ how to use this project.
 - [Flow approval local example](examples/flow-approval-local/README.md) – shows a typed
   flow that waits for an approval event and resumes through the in-memory runner.
 - [Durable PostgreSQL example](examples/durable-postgresql/README.md) – demonstrates disposable one-pair and complete two-pair manifests, distinct runtime preflight commands, and the boundary between local source proof and candidate/public package receipts.
+- [Durable external activation example](examples/durable-external-activation/README.md) – documents the public host/service contract and explicit PostgreSQL provisioning for an existing custom HTTP host; for a new standalone host, use the [Durable worker template guide](start-here/durable-worker.md).
 - [Product readiness lab](examples/product-readiness-lab/README.md) – runs a composed
   local evaluator with AppSurface Web, Auth.AspNetCore, Flow, DurableTask-facing
   host-shape guidance, and Postgres product-state proof. Use its AppHost `verify`

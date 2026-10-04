@@ -22,6 +22,7 @@ internal sealed class PackageArtifactWorkflow
     private readonly PackagePayloadInventoryLoader _payloadInventoryLoader;
     private readonly PackageArtifactManifestWriter _artifactManifestWriter;
     private readonly Func<string, string, CancellationToken, Task> _sourceIdentityVerifier;
+    private readonly Func<DurableTemplateConsumerProofRequest, IReadOnlyList<PackageArtifactValidationReportEntry>, CancellationToken, Task<DurableTemplateProofReceipt>> _templateProof;
 
     /// <summary>
     /// Creates a package artifact workflow.
@@ -42,13 +43,19 @@ internal sealed class PackageArtifactWorkflow
     /// tests may supply a deterministic verifier to exercise downstream producer-evidence behavior without creating
     /// a Git checkout whose commit must match the test assembly's build stamp.
     /// </param>
+    /// <param name="templateProof">
+    /// Optional installed-template proof seam. Production runs the bounded native consumer workflow and retains its
+    /// receipt; tests may supply a deterministic proof to verify packing, cleanup and manifest withholding. A failed
+    /// receipt prevents manifest creation. The delegate receives only validated archives and owns its proof cleanup.
+    /// </param>
     internal PackageArtifactWorkflow(
         PackagePublishPlanResolver planResolver,
         ICommandRunner commandRunner,
         PackageArtifactValidator validator,
         ICoverageCliConsumerProofWorkflow coverageProofWorkflow,
         IDocsPackageConsumerProofWorkflow docsProofWorkflow,
-        Func<string, string, CancellationToken, Task>? sourceIdentityVerifier = null)
+        Func<string, string, CancellationToken, Task>? sourceIdentityVerifier = null,
+        Func<DurableTemplateConsumerProofRequest, IReadOnlyList<PackageArtifactValidationReportEntry>, CancellationToken, Task<DurableTemplateProofReceipt>>? templateProof = null)
     {
         _planResolver = planResolver;
         _commandRunner = commandRunner;
@@ -58,6 +65,8 @@ internal sealed class PackageArtifactWorkflow
         _payloadInventoryLoader = new PackagePayloadInventoryLoader();
         _artifactManifestWriter = new PackageArtifactManifestWriter();
         _sourceIdentityVerifier = sourceIdentityVerifier ?? TailwindSourceIdentity.RequireAsync;
+        _templateProof = templateProof ?? ((request, artifacts, token) =>
+            new DurableTemplateConsumerProof(new CliWrapCommandRunner()).RunAsync(request, artifacts, cancellationToken: token));
     }
 
     /// <summary>
@@ -152,28 +161,45 @@ internal sealed class PackageArtifactWorkflow
 
         foreach (var entry in plan.Entries)
         {
-            await RunRepositoryCommandAsync(
+            string? templateStageRoot = null;
+            var packArguments = new List<string>
+            {
+                "pack", entry.ProjectPath, "--configuration", "Release", "--no-restore", "--no-build",
+                "--output", request.ArtifactsOutputPath, $"/p:Version={request.PackageVersion}",
+                $"/p:PackageVersion={request.PackageVersion}", $"/p:RepositoryCommit={request.SourceCommit ?? string.Empty}",
+                "/p:ContinuousIntegrationBuild=true"
+            };
+            try
+            {
+                if (string.Equals(entry.PackageId, DurableTemplateStaging.PackageId, StringComparison.OrdinalIgnoreCase))
+                {
+                    templateStageRoot = Path.Join(Path.GetTempPath(), "appsurface-template-stage-" + Guid.NewGuid().ToString("N"));
+                    if (OperatingSystem.IsMacOS() && templateStageRoot.StartsWith("/var/", StringComparison.Ordinal)) templateStageRoot = "/private" + templateStageRoot;
+                    if (OperatingSystem.IsMacOS() && templateStageRoot.StartsWith("/tmp/", StringComparison.Ordinal)) templateStageRoot = "/private" + templateStageRoot;
+                    Directory.CreateDirectory(templateStageRoot);
+                    var staged = DurableTemplateStaging.Stage(Path.Join(request.RepositoryRoot, DurableTemplateStaging.ContentPath),
+                        Path.Join(templateStageRoot, "content"), request.PackageVersion);
+                    packArguments.Add($"/p:TemplateContentRoot={staged}");
+                }
+                await RunRepositoryCommandAsync(
                 request,
-                [
-                    "pack",
-                    entry.ProjectPath,
-                    "--configuration",
-                    "Release",
-                    "--no-restore",
-                    "--no-build",
-                    "--output",
-                    request.ArtifactsOutputPath,
-                    $"/p:Version={request.PackageVersion}",
-                    $"/p:PackageVersion={request.PackageVersion}",
-                    $"/p:RepositoryCommit={request.SourceCommit ?? string.Empty}",
-                    "/p:ContinuousIntegrationBuild=true",
-                ],
+                packArguments,
                 "dotnet pack",
                 entry.ProjectPath,
                 "pack",
                 "packing",
                 PackTimeoutMilliseconds,
                 cancellationToken);
+            }
+            finally
+            {
+                if (templateStageRoot is not null)
+                {
+                    DurableTemplateStaging.RequireRegularPath(templateStageRoot);
+                    Directory.Delete(templateStageRoot, recursive: true);
+                }
+            }
+
         }
 
         var report = _validator.Validate(
@@ -268,6 +294,20 @@ internal sealed class PackageArtifactWorkflow
             }
 
             throw new PackageIndexException(string.Join(" ", failedProofs));
+        }
+
+        if (plan.Entries.Any(entry => string.Equals(entry.PackageId, DurableTemplateStaging.PackageId, StringComparison.OrdinalIgnoreCase)))
+        {
+            var templateReceipt = await _templateProof(
+                new DurableTemplateConsumerProofRequest(request.RepositoryRoot, request.ArtifactsOutputPath,
+                    request.PackageVersion, Path.Join(request.ArtifactsOutputPath, "durable-template-consumer-proof.json"),
+                    request.Source, request.SourceCommit, RunFirstWork: OperatingSystem.IsLinux()), report.Entries,
+                cancellationToken);
+            if (!templateReceipt.Succeeded)
+            {
+                DeleteArtifactManifest(request.ArtifactManifestPath);
+                throw new PackageIndexException("Durable template installed-artifact proof failed; inspect the safe phase receipt and retry before publication.");
+            }
         }
 
         await _artifactManifestWriter.WriteAsync(

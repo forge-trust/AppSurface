@@ -474,6 +474,10 @@ internal sealed class PackagePublishWorkflow
             RequirePreparedEntries(plannedEntries, artifactManifest, request.TailwindEvidence.PublicationDirectory);
         }
 
+        if (plan.Entries.Any(entry => string.Equals(entry.PackageId, DurableTemplateStaging.PackageId, StringComparison.OrdinalIgnoreCase)))
+            DurableTemplateReleaseEvidence.Require(request.DurableTemplateEvidenceDirectory, request.DurableTemplateSourceCommit,
+                artifactManifest, request.ArtifactsInputPath);
+
         var apiKey = _credentialProvider.Read(request.ApiKeyEnvironmentVariable);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
@@ -872,7 +876,8 @@ internal sealed class PackageSmokeInstallWorkflow
         await File.WriteAllTextAsync(nugetConfigPath, RenderNuGetConfig(request.Source), cancellationToken);
 
         var reportEntries = new List<PackageSmokeInstallReportEntry>(entries.Length);
-        var packageEntries = entries.Where(entry => !entry.ManifestEntry.IsTool).ToArray();
+        var packageEntries = entries.Where(entry => !entry.ManifestEntry.IsTool
+            && !string.Equals(entry.ManifestEntry.PackageId, DurableTemplateStaging.PackageId, StringComparison.OrdinalIgnoreCase)).ToArray();
         if (packageEntries.Length > 0)
         {
             var packageManifestEntries = packageEntries.Select(entry => entry.ManifestEntry).ToArray();
@@ -936,6 +941,13 @@ internal sealed class PackageSmokeInstallWorkflow
                 CombineOutput(result)));
         }
 
+        if (entries.Any(entry => string.Equals(entry.ManifestEntry.PackageId, DurableTemplateStaging.PackageId, StringComparison.OrdinalIgnoreCase)))
+        {
+            await DurableTemplatePublicReplay.RunAsync(request, manifest, sharedPackagesPath, _commandRunner, cancellationToken);
+            var templateEntry = entries.Single(entry => string.Equals(entry.ManifestEntry.PackageId, DurableTemplateStaging.PackageId, StringComparison.OrdinalIgnoreCase));
+            reportEntries.Add(new(DurableTemplateStaging.PackageId, templateEntry.ManifestEntry.ProjectPath, false,
+                PackageSmokeInstallStatus.Restored, 0, "Promoted native template and generated Work proof passed after owned cleanup."));
+        }
         var report = new PackageSmokeInstallReport(manifest.PackageVersion, request.Source, reportEntries);
         Directory.CreateDirectory(Path.GetDirectoryName(request.ReportPath)!);
         await File.WriteAllTextAsync(request.ReportPath, _reportRenderer.RenderMarkdown(report), cancellationToken);
@@ -1403,6 +1415,8 @@ internal sealed class PackageSmokeInstallReportRenderer
 /// <param name="PublishLogPath">Markdown publish ledger path.</param>
 /// <param name="Source">NuGet source URL.</param>
 /// <param name="ApiKeyEnvironmentVariable">Environment variable that supplies the NuGet API key.</param>
+/// <param name="DurableTemplateEvidenceDirectory">Trusted exact-ID OS receipt download required for template publication.</param>
+/// <param name="DurableTemplateSourceCommit">Expected full source revision supplied independently by the protected workflow.</param>
 /// <param name="TailwindEvidence">Original candidate and native evidence required when the resolved plan contains Tailwind; omitted for non-Tailwind plans.</param>
 internal sealed record PackagePublishRequest(
     string RepositoryRoot,
@@ -1412,7 +1426,8 @@ internal sealed record PackagePublishRequest(
     string PublishLogPath,
     string Source,
     string ApiKeyEnvironmentVariable,
-    TailwindPublicationRequest? TailwindEvidence = null);
+    TailwindPublicationRequest? TailwindEvidence = null,
+    string? DurableTemplateEvidenceDirectory = null, string? DurableTemplateSourceCommit = null);
 
 /// <summary>
 /// Trusted workflow identity and paths needed to validate a Tailwind publication. Values are supplied from protected

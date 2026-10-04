@@ -9,6 +9,7 @@ substitute for matched package proof.
 
 AppSurface Durable is a public-preview package family for portable durable contracts. It is split by audience:
 
+- The [Durable worker start guide](../start-here/durable-worker.md) is the application path for a new .NET 10 PostgreSQL-backed external-activation host. Its native template emits an application-owned Work-only host and test project; its disposable Docker proof does not perform production provisioning.
 - [`ForgeTrust.AppSurface.Durable`](ForgeTrust.AppSurface.Durable/README.md) is the application and reusable-module API
   for work, Flow, schedules, serialization, registration, and clients.
 - [`ForgeTrust.AppSurface.Durable.Provider`](ForgeTrust.AppSurface.Durable.Provider/README.md) is the runtime-provider and
@@ -19,8 +20,11 @@ AppSurface Durable is a public-preview package family for portable durable contr
 - [`ForgeTrust.AppSurface.Durable.Testing`](ForgeTrust.AppSurface.Durable.Testing/README.md) provides production-backed
   deterministic test builders, provider fakes, pump histories, host-scenario observations, and typed Work observations.
   It does not simulate persistence or replace real-provider conformance tests.
+- [`ForgeTrust.AppSurface.Durable.Templates`](ForgeTrust.AppSurface.Durable.Templates/README.md) provides a native `dotnet new` starter for a standalone external-activation host. The template package is not a runtime dependency; generated projects use coordinated Durable preview package references.
 
-All four packages participate in the coordinated prerelease publish plan. They remain preview contracts: adopt them
+The four runtime/API packages participate in the coordinated prerelease publish plan; the template package is a
+separately installed generation tool whose emitted projects use the coordinated package graph. These surfaces remain
+public previews: adopt them
 only with the reviewed schema, role, recovery, and operational evidence described below, and do not treat the preview
 as production support.
 

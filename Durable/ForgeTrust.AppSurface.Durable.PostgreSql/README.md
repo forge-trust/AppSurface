@@ -13,6 +13,13 @@ unbounded fan-out. PostgreSQL is this provider's sole durable truth.
 
 The verified database floor is PostgreSQL 16+; default verification and strict CI tests are pinned to PostgreSQL 16.5 via `postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877`.
 
+For a new .NET 10 application with an externally activated Work-only host, use the
+[Durable worker start guide](../../start-here/durable-worker.md) and
+[`ForgeTrust.AppSurface.Durable.Templates`](../ForgeTrust.AppSurface.Durable.Templates/README.md). The generated
+Docker-backed proof owns a disposable database and uses the pinned PostgreSQL 16.5 image; an ordinary host run still
+requires operator-owned schema, StoreId, epoch, and complete role-manifest setup. For continuous processing, retain
+the explicit `AddWorkerHost()` route in [Run a worker host](#run-a-worker-host).
+
 The package references the adopter-facing
 [`ForgeTrust.AppSurface.Durable`](../ForgeTrust.AppSurface.Durable/README.md) contracts and the
 [`ForgeTrust.AppSurface.Durable.Provider`](../ForgeTrust.AppSurface.Durable.Provider/README.md) SPI. Neither package

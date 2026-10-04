@@ -397,6 +397,22 @@ public sealed class TailwindPublishingTests
         Assert.Equal(PackagePublishStatus.Pushed, Assert.Single(ledger.Entries).Status);
     }
 
+    [Theory]
+    [InlineData("ForgeTrust.AppSurface.Durable.Templates")]
+    [InlineData("forgetrust.appsurface.durable.templates")]
+    [InlineData("FORGETRUST.APPSURFACE.DURABLE.TEMPLATES")]
+    public async Task TemplatePlanWithoutEvidenceRejectsBeforeCredentialReadOrPush(string packageId)
+    {
+        using var fixture = await PublishFixture.CreateAsync(packageId, includeWebPackage: true);
+        var credential = new RecordingCredentialProvider();
+        var runner = new RecordingPushRunner();
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.CreateWorkflow(runner, credential)
+            .RunAsync(fixture.Request, CancellationToken.None));
+        Assert.Contains("Durable template publication requires", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, credential.Reads);
+        Assert.Empty(runner.Requests);
+    }
+
     private sealed class RecordingCredentialProvider(string? value = "test-only-token") : IReleaseCredentialProvider
     {
         public int Reads { get; private set; }
@@ -496,14 +512,16 @@ public sealed class TailwindPublishingTests
         {
             var root = Path.Combine(Path.GetTempPath(), "tailwind-publishing-tests", Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(root);
-            var projectPath = packageId == "ForgeTrust.AppSurface.Web.Tailwind"
-                ? "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj"
-                : "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj";
+            var projectPath = string.Equals(packageId, DurableTemplateStaging.PackageId, StringComparison.OrdinalIgnoreCase)
+                ? "Durable/ForgeTrust.AppSurface.Durable.Templates/ForgeTrust.AppSurface.Durable.Templates.csproj"
+                : packageId == "ForgeTrust.AppSurface.Web.Tailwind"
+                    ? "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj"
+                    : "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj";
             var absoluteProject = TestPathUtils.PathUnder(root, projectPath);
             Directory.CreateDirectory(Path.GetDirectoryName(absoluteProject)!);
             await File.WriteAllTextAsync(absoluteProject, "<Project />");
             await File.WriteAllTextAsync(Path.Combine(Path.GetDirectoryName(absoluteProject)!, "README.md"), "# Fixture");
-            if (packageId == "ForgeTrust.AppSurface.Web.Tailwind")
+            if (packageId == "ForgeTrust.AppSurface.Web.Tailwind" || includeWebPackage)
             {
                 var webProject = Path.Combine(root, "Web", "ForgeTrust.AppSurface.Web", "ForgeTrust.AppSurface.Web.csproj");
                 Directory.CreateDirectory(Path.GetDirectoryName(webProject)!);
@@ -512,7 +530,7 @@ public sealed class TailwindPublishingTests
             }
             var manifestPath = Path.Combine(root, "packages", "package-index.yml");
             Directory.CreateDirectory(Path.GetDirectoryName(manifestPath)!);
-            var webRow = packageId == "ForgeTrust.AppSurface.Web.Tailwind"
+            var webRow = packageId == "ForgeTrust.AppSurface.Web.Tailwind" || includeWebPackage
                 ? includeWebPackage
                     ? """
                         - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj

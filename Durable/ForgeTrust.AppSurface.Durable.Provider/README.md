@@ -7,6 +7,12 @@
 [`ForgeTrust.AppSurface.Durable`](../ForgeTrust.AppSurface.Durable/README.md). It depends on that adopter package; the
 adopter package never depends on Provider. Production providers implement this public SPI without friend access.
 
+For a new PostgreSQL-backed external-activation application, see the
+[Durable worker start guide](../../start-here/durable-worker.md). The generated host uses the published
+`IDurableExternalActivationService` with a Work-only pump request; it does not add an endpoint, worker loop, or
+activation framework API to this package. For an existing custom host, use the
+[canonical external activation reference](../external-activation-v1.md).
+
 ## Choose this package when
 
 - implementing a storage/runtime provider;
