@@ -99,6 +99,21 @@ internal static void VerifyExecutionPolicyChooser()
 ```
 <!-- /appsurface:snippet -->
 
+## Validate the fixed schedule in the adopter
+
+The [main Durable guide's timeline and generated Core examples](README.md#deterministic-retry-plan-timeline) make the
+zero-based slot/one-based attempt mapping, late transaction commit, overdue next slot, and one-slot/no-retry validation
+concrete. The existing adopter entry point invokes these assertions through
+`TypedWorkDefinitionProof.Run()`; they validate public Core policy facts and schedule arithmetic only.
+
+Provider timing requires a real store. The
+[packed PostgreSQL consumer tests](packed-consumers/PostgreSqlPolicyConsumer/PlannedRetryPostgreSqlConsumerTests.cs)
+exercise all five accepted slots with the actual runtime pump and assert no early executor calls, deadline refusal before
+invocation, and read-only reconciliation without repeating the logical effect. The separate
+[caller-owned transaction test](ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableWorkExecutionPolicyTests.cs#L735)
+proves that a delayed commit consumes the accepted window. These tests establish admission and effect behavior; they do
+not claim punctual execution or that cooperative cancellation can stop arbitrary external code.
+
 The [API budget](api-budget.md#deterministic-execution-policy-v1-issue-765) and Core/Provider API snapshots list the additive constructors, factories, and nullable execution projections. `DurableWorkExecutionSnapshot` carries accepted facts through provider execution and inspection; it is descriptive and can become stale. It never grants a claim, permit, retry, or completion. PostgreSQL rechecks the current row, fence, effect permit, and cutoff under the authoritative lock.
 
 ## Validation and timing rules

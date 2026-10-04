@@ -222,6 +222,67 @@ public sealed class PostgreSqlDurableRuntimePumpExecutionPolicyTests
     }
 
     [Fact]
+    public async Task Deadline_elapsed_during_executor_entry_cancels_before_the_first_maintenance_wait()
+    {
+        var registration = new PumpPolicyRegistration(InvocationMode.WaitForCancellation);
+        var time = new MaintenanceWaitTimeProvider(Anchor);
+        await using var lab = await PumpLab.CreateAsync(registration);
+        var deadline = Anchor.AddMinutes(1);
+        registration.Execution.OnInvocation = () => time.Advance(deadline - Anchor);
+        var hook = new PostgreSqlDurableExecutionCheckpointHook(async (observation, _) =>
+        {
+            if (observation.Name == PostgreSqlDurableExecutionCheckpointName.BeforeCompletion)
+            {
+                await lab.Database.SetExecutionTimeAsync(deadline);
+            }
+        });
+        var accepted = await lab.EnqueueAsync("deadline-during-entry", deadline);
+
+        var result = await lab.CreatePump(hook, time).RunOnceAsync(
+            new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work))
+            .AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(1, registration.Execution.InvocationCount);
+        Assert.True(registration.Execution.CancellationObserved.Task.IsCompletedSuccessfully);
+        Assert.False(time.TimerCreated.Task.IsCompleted);
+        Assert.Equal(1, result.Failed);
+        var snapshot = await lab.GetAsync(accepted.WorkId);
+        Assert.Equal(DurableWorkState.Suspended, snapshot.State);
+        Assert.Equal(DurableProblemCodes.AmbiguousExternalOutcome, snapshot.TerminalCode);
+        Assert.Null(snapshot.Result);
+        var permit = await lab.ReadPermitAsync(accepted.WorkId);
+        Assert.Equal("ambiguous", permit.Status);
+        Assert.NotNull(permit.InvocationAdmittedAtUtc);
+        Assert.Equal("deadline_elapsed", await lab.ReadWorkTextAsync(accepted.WorkId, "execution_admission_closed_reason"));
+    }
+
+    [Fact]
+    public async Task Expired_ordinary_lease_cancels_admitted_executor_without_an_absolute_deadline()
+    {
+        var registration = new PumpPolicyRegistration(InvocationMode.WaitForCancellation);
+        var time = new MaintenanceWaitTimeProvider(Anchor.AddMinutes(31));
+        await using var lab = await PumpLab.CreateAsync(registration);
+        var accepted = await lab.EnqueueAsync("ordinary-lease-expired", deadline: null);
+        var running = lab.CreatePump(new PostgreSqlDurableExecutionCheckpointHook(), time).RunOnceAsync(
+            new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work)).AsTask();
+
+        await registration.Execution.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var result = await running.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(1, registration.Execution.InvocationCount);
+        Assert.Equal(1, result.Failed);
+        var snapshot = await lab.GetAsync(accepted.WorkId);
+        Assert.Equal(DurableWorkState.Suspended, snapshot.State);
+        Assert.Equal(DurableProblemCodes.AmbiguousExternalOutcome, snapshot.TerminalCode);
+        Assert.Null(snapshot.Result);
+        var permit = await lab.ReadPermitAsync(accepted.WorkId);
+        Assert.Equal("ambiguous", permit.Status);
+        Assert.NotNull(permit.InvocationAdmittedAtUtc);
+        Assert.Equal(0, await lab.ReadWorkLongAsync(accepted.WorkId,
+            "SELECT count(*) FROM appsurface_durable.work WHERE scope_id = @scope_id AND work_id = @work_id AND execution_admission_closed_at IS NOT NULL;"));
+    }
+
+    [Fact]
     public async Task Oversized_renewal_cadence_remains_deadline_bounded_without_abandoning_admitted_invocation()
     {
         var registration = new PumpPolicyRegistration(InvocationMode.WaitForCancellation);
@@ -616,6 +677,8 @@ public sealed class PostgreSqlDurableRuntimePumpExecutionPolicyTests
 
         internal TaskCompletionSource<DurableEncodedPayload> Complete { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        internal Action? OnInvocation { get; set; }
+
         internal int InvocationCount => Volatile.Read(ref _invocationCount);
 
         internal bool InvocationTokenWasCanceled => Volatile.Read(ref _invocationTokenWasCanceled) != 0;
@@ -633,6 +696,7 @@ public sealed class PostgreSqlDurableRuntimePumpExecutionPolicyTests
 
             _ = cancellationToken.Register(static state => ((PumpExecution)state!).CancellationObserved.TrySetResult(), this);
             Started.TrySetResult();
+            OnInvocation?.Invoke();
             return mode switch
             {
                 InvocationMode.Complete => ValueTask.FromResult(result),

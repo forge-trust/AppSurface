@@ -26,6 +26,28 @@ public sealed class PostgreSqlDurableInvocationBoundaryCoverageTests
     }
 
     [Fact]
+    public async Task ScopeDisabledAfterPermitCommitRefusesInvocationWithoutAddingEvidence()
+    {
+        await using var lab = await PolicyTests.Lab.CreateAsync();
+        var permit = await lab.AdmitReadyAsync(PolicyTests.Request("disabled-before-invocation"));
+        var disabled = await lab.Store.DisableScopeAsync(permit.Claim.ScopeId, "tests", "scope-access-revoked",
+            expectedGeneration: permit.Claim.ScopeGeneration);
+        Assert.Equal(PostgreSqlScopeMutationOutcome.Applied, disabled.Outcome);
+        Assert.Equal(permit.Claim.ScopeGeneration + 1, disabled.Generation);
+        var workBefore = await lab.ScalarAsync<string>("SELECT row_to_json(work)::text FROM appsurface_durable.work;");
+        var dispatchBefore = await lab.ScalarAsync<string>("SELECT row_to_json(dispatch)::text FROM appsurface_durable.dispatch;");
+        var historyCount = await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.work_history;");
+
+        Assert.False(await lab.Store.TryAdmitInvocationAsync(permit));
+
+        Assert.Equal(workBefore, await lab.ScalarAsync<string>("SELECT row_to_json(work)::text FROM appsurface_durable.work;"));
+        Assert.Equal(dispatchBefore, await lab.ScalarAsync<string>("SELECT row_to_json(dispatch)::text FROM appsurface_durable.dispatch;"));
+        Assert.Equal(historyCount, await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.work_history;"));
+        Assert.Equal(0, await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.effect_permit WHERE invocation_admitted_at IS NOT NULL;"));
+        Assert.Equal(0, await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.work_history WHERE event_type='invocation_admitted';"));
+    }
+
+    [Fact]
     public async Task LegacyInvocationAdmissionUsesThePersistedContractAndRejectsAnUnknownPermit()
     {
         await using var lab = await PolicyTests.Lab.CreateAsync();
