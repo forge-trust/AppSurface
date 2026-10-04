@@ -338,6 +338,107 @@ public sealed class EvidenceLinuxArtifactRootTests
         finally { Directory.Delete(parent, recursive: true); }
     }
 
+    [Fact]
+    public async Task Absolute_and_excessive_utf8_artifact_paths_reject_before_mutation_and_keep_the_root_usable()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Throws<PlatformNotSupportedException>(() => EvidenceLinuxArtifactRoot.Allocate("/tmp", default, "slot", 0, 0));
+            return;
+        }
+
+        var parent = NewPrivateDirectory();
+        try
+        {
+            var sentinel = TestPathUtils.PathUnder(parent, "sentinel.bin");
+            var sentinelBytes = "unchanged private parent sentinel"u8.ToArray();
+            File.WriteAllBytes(sentinel, sentinelBytes);
+            var sentinelMode = File.GetUnixFileMode(sentinel);
+            var identity = EvidenceLinuxArtifactRoot.InspectDirectoryIdentity(parent);
+            var rootPath = TestPathUtils.PathUnder(parent, "run");
+            var validReport = TestPathUtils.PathUnder(rootPath, "allowed.bin");
+            var absoluteRejected = TestPathUtils.PathUnder(parent, "absolute-rejected.bin");
+            // This malformed API input deliberately retains its UTF-8 byte length; it is never used to construct a fixture path.
+            var excessiveUtf8 = string.Join("/", Enumerable.Repeat(new string('é', 128), 16)) + "/rejected.bin";
+            Assert.True(excessiveUtf8.Length < 4096);
+            Assert.True(Encoding.UTF8.GetByteCount(excessiveUtf8) > 4096);
+            var payload = "valid adjacent artifact"u8.ToArray();
+
+            await using (var root = EvidenceLinuxArtifactRoot.Allocate(parent, identity, "run", identity.Uid, identity.Gid))
+            {
+                foreach (var invalidPath in new[] { absoluteRejected, excessiveUtf8 })
+                {
+                    var error = await Assert.ThrowsAsync<ArgumentException>(() => root.WriteAsync(invalidPath, payload, default).AsTask());
+                    Assert.Equal("path", error.ParamName);
+                    Assert.Empty(Directory.EnumerateFileSystemEntries(rootPath));
+                    Assert.False(File.Exists(absoluteRejected));
+                    Assert.Equal(sentinelBytes, File.ReadAllBytes(sentinel));
+                    Assert.Equal(sentinelMode, File.GetUnixFileMode(sentinel));
+                    Assert.Equal(new[] { "run", "sentinel.bin" }, Directory.EnumerateFileSystemEntries(parent).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+                }
+
+                await root.WriteAsync("allowed.bin", payload, default);
+                await root.VerifyAsync("allowed.bin", payload.Length, Convert.ToHexString(SHA256.HashData(payload)), default);
+                Assert.Equal(payload, File.ReadAllBytes(validReport));
+            }
+
+            Assert.DoesNotContain(Directory.EnumerateFileSystemEntries("/proc/self/fd"), descriptor =>
+                NamesDirectory(descriptor, parent) || NamesDirectory(descriptor, rootPath) || NamesDirectory(descriptor, validReport));
+            Assert.Equal(sentinelBytes, File.ReadAllBytes(sentinel));
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    [Fact]
+    public async Task Unsafe_absolute_parent_components_reject_before_slot_creation_and_keep_valid_allocation_usable()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Throws<PlatformNotSupportedException>(() => EvidenceLinuxArtifactRoot.Allocate("/tmp", default, "slot", 0, 0));
+            return;
+        }
+
+        var parent = NewPrivateDirectory();
+        try
+        {
+            var sentinel = TestPathUtils.PathUnder(parent, "sentinel.bin");
+            var sentinelBytes = "unchanged parent grammar sentinel"u8.ToArray();
+            File.WriteAllBytes(sentinel, sentinelBytes);
+            var sentinelMode = File.GetUnixFileMode(sentinel);
+            var identity = EvidenceLinuxArtifactRoot.InspectDirectoryIdentity(parent);
+            foreach (var component in new[] { "", ".", ".." })
+            {
+                // Deliberately malformed input: PathUnder would normalize or reject these components before the production API sees them.
+                var unsafeParent = $"{parent}/{component}/rejected-parent";
+                var operation = EvidenceLinuxArtifactAllocationOperation.None;
+                var error = Assert.Throws<ArgumentException>(() => EvidenceLinuxArtifactRoot.Allocate(
+                    unsafeParent, identity, "rejected-slot", identity.Uid, identity.Gid, out operation));
+                Assert.Equal("path", error.ParamName);
+                Assert.Equal(EvidenceLinuxArtifactAllocationOperation.OpenParent, operation);
+                var inspectionError = Assert.Throws<ArgumentException>(() => EvidenceLinuxArtifactRoot.InspectDirectoryIdentity(unsafeParent));
+                Assert.Equal("path", inspectionError.ParamName);
+                Assert.Equal(new[] { "sentinel.bin" }, Directory.EnumerateFileSystemEntries(parent).Select(Path.GetFileName));
+                Assert.Equal(sentinelBytes, File.ReadAllBytes(sentinel));
+                Assert.Equal(sentinelMode, File.GetUnixFileMode(sentinel));
+            }
+
+            var rootPath = TestPathUtils.PathUnder(parent, "allowed-run");
+            var validReport = TestPathUtils.PathUnder(rootPath, "allowed.bin");
+            var payload = "valid parent after grammar rejection"u8.ToArray();
+            await using (var root = EvidenceLinuxArtifactRoot.Allocate(parent, identity, "allowed-run", identity.Uid, identity.Gid))
+            {
+                await root.WriteAsync("allowed.bin", payload, default);
+                await root.VerifyAsync("allowed.bin", payload.Length, Convert.ToHexString(SHA256.HashData(payload)), default);
+                Assert.Equal(payload, File.ReadAllBytes(validReport));
+            }
+
+            Assert.DoesNotContain(Directory.EnumerateFileSystemEntries("/proc/self/fd"), descriptor =>
+                NamesDirectory(descriptor, parent) || NamesDirectory(descriptor, rootPath) || NamesDirectory(descriptor, validReport));
+            Assert.Equal(sentinelBytes, File.ReadAllBytes(sentinel));
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
     private static string NewPrivateDirectory()
     {
         var path = Path.Combine(Path.GetTempPath(), "evidence-linux-" + Guid.NewGuid().ToString("N"));

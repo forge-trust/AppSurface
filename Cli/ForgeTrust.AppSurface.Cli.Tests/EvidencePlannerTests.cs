@@ -7,6 +7,63 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 
 public sealed class EvidencePlannerTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ManifestBuilder_ObservationChecksAggregateArtifactsAcrossIndividuallyValidProducers(bool exceedsLimit)
+    {
+        // Metadata-only library control through the existing ordinary Observation fixture.
+        // This creates no artifact bytes, protected producer lease, Trusted grant, or native proof.
+        var maximum = EvidenceArtifactWriter.MaximumTotalArtifactBytes;
+        var firstLength = maximum / 2;
+        var secondLength = maximum - firstLength + (exceedsLimit ? 1 : 0);
+        var slotMaximum = Math.Max(firstLength, secondLength);
+        Assert.InRange(slotMaximum, 1L, maximum);
+        var declarations = new[]
+        {
+            new EvidenceProducerDeclaration("coverage-first", "coverage", "1.0.0", [], [],
+                [new EvidenceArtifactSlot("report", "coverage", "text/plain", Required: true, MaximumBytes: slotMaximum)], 60),
+            new EvidenceProducerDeclaration("coverage-second", "coverage", "1.0.0", [], [],
+                [new EvidenceArtifactSlot("report", "coverage", "text/plain", Required: true, MaximumBytes: slotMaximum)], 60),
+        };
+        var profile = new EvidenceProfile("aggregate-observation", EvidenceProfileScope.Targeted, [], declarations, []);
+        var policy = new EvidencePolicy("aggregate-policy", "1", profile.Id, [profile], []);
+        var plan = new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("src/AggregateArtifacts.cs")]);
+        var results = new[]
+        {
+            new EvidenceProducerResult("coverage-first", EvidenceProducerOutcome.Passed, [], Artifacts:
+                [new EvidenceArtifactResult("report", "coverage/first.txt", "text/plain", firstLength, new string('a', 64))]),
+            new EvidenceProducerResult("coverage-second", EvidenceProducerOutcome.Passed, [], Artifacts:
+                [new EvidenceArtifactResult("report", "coverage/second.txt", "text/plain", secondLength, new string('b', 64))]),
+        };
+        Assert.Equal(maximum + (exceedsLimit ? 1 : 0), results.Sum(result => Assert.Single(result.Artifacts!).LengthBytes));
+        foreach (var result in results)
+        {
+            var declaration = Assert.Single(plan.Profile.Producers, producer => producer.Id == result.ProducerId);
+            Assert.True(EvidenceArtifactValidation.AreValid(declaration, result.Artifacts));
+        }
+        Assert.Empty(plan.Profile.Resources);
+        Assert.Empty(plan.Profile.Obligations);
+
+        var admission = EvidenceAdmissionTestFixture.AdmitObservation(plan);
+        Assert.Equal(EvidenceExecutionMode.Observation, admission.Mode);
+        Assert.Null(admission.Assertion);
+        admission.Activate("metadata-only-aggregate-observation-root");
+        admission.Complete(ownedWorkStopped: true, artifactsVerified: true, cleanupCompleted: true);
+        var manifest = EvidenceManifestBuilder.Build(plan, results, admission,
+            metrics: new EvidenceExecutionMetrics(CleanupCompleted: true));
+
+        Assert.Equal(exceedsLimit ? EvidenceExecutionVerdict.Invalid : EvidenceExecutionVerdict.Passed, manifest.ExecutionVerdict);
+        Assert.Equal(exceedsLimit ? EvidenceClaimKind.None : EvidenceClaimKind.ObservationOnly, manifest.ClaimKind);
+        Assert.Equal(exceedsLimit ? EvidenceClaimEligibility.None : EvidenceClaimEligibility.Informational, manifest.Eligibility);
+        Assert.Equal(EvidenceExecutionMode.Observation, manifest.Mode);
+        Assert.Null(manifest.EnvelopeAssertion);
+        Assert.Empty(manifest.ClosedObligationIds);
+        Assert.True(manifest.Metrics.CleanupCompleted);
+        Assert.Null(manifest.Metrics.TerminalFailureCode);
+        Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
+    }
+
     [Fact]
     public void Resolve_ShouldSelectExplicitNoEvidenceProfileForDocumentationPath()
     {
