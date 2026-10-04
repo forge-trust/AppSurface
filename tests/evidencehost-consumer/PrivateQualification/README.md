@@ -165,6 +165,33 @@ first-expiry attribution/capping, counter rejection and equivalence of successfu
 call root bootstrap, system SDK paths, native commands or grant admission. Existing20 SDK methods
 remain intact; future execution belongs to a separately authorized focused validation.
 
+### Private cost measurement proposal
+
+The existing private frame adds `process_cpu_nanoseconds` (sampled process CPU span),
+`measurement_incomplete`, `measurement_clamped`, and `costs`. `costs` has exactly four closed rows:
+`read`, `sha-update`, `filesystem`, `projection`; each has `calls` and `nanoseconds`.
+The optional `_measure(diagnostic, kind, operation, *args, **kwargs)` executes the original operation
+exactly once and uses measurement-only `perf_counter_ns`/`process_time_ns` samples around it. No measured
+value influences a deadline, filesystem guard, admission or success result. There is no caching or
+change to the complete tree, four hash passes, 120-second allowance, bytes, identity or ancestor guards.
+
+`filesystem` measures existing open/stat/fstat/lseek/scandir-construction calls; it excludes iteration
+inside scandir and close/mutation syscalls. `read` and `sha-update` separately time actual read/update
+calls. `projection` includes diagnostic note/projection work, including notes without numeric metadata.
+CPU span runs from the first valid cost sample to the latest completed sample, not total job CPU.
+Categories and CPU/elapsed spans overlap and are not summed to reconstruct duration. Instrumentation
+adds its own overhead, so a future native measurement would identify sampled costs, not prove a remedy.
+
+Call counts cap at 32 times (the existing four-pass byte bound plus three-pass node bound); each duration
+and CPU span caps at 120000000000ns. Clamp sets both measurement flags without changing the operation's
+result. Failed/malformed/backwards timing marks incomplete and records null for that row's duration;
+missing CPU is null. Counts still describe attempted calls, including failures. First propagated failure
+freezes copied aggregates. No paths, names, arguments, exception strings or raw content enter the frame.
+The existing incomplete-binding retention remains capped at4096 bytes. Three new portable real-FD/data
+controls define count/result/hash equivalence, clock failure with the same original EIO, diagnostic-only
+clamping, first-failure freezing and canary/frame bounds. Original23 SDK test bodies remain unchanged.
+No controls have run in this source-preparation packet; no system SDK or qualification is exercised.
+
 The copied subject snapshot is separately sealed to `0555` directories and `0444` files before immutable
 preflight. Git tar entries may carry `0775`/`0664` modes; copying those modes does not satisfy the protected
 snapshot's no-write requirement. Sealing changes no bytes and evaluates no subject project. The launcher
