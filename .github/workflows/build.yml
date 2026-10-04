@@ -467,6 +467,17 @@ jobs:
           pnpm --dir Web run assets:build
           pnpm --dir Web run assets:verify
 
+      - name: Verify the Durable doctor report consumer
+        run: python3 -m unittest discover -s examples/durable-external-activation -p 'test_*.py'
+
+      - name: Verify the installed Durable doctor candidate
+        run: >-
+          dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj
+          --configuration Release
+          --no-restore
+          --filter "FullyQualifiedName~DurableDoctorInstalledToolTests"
+          --logger "console;verbosity=detailed"
+
       - name: Run solution coverage and gate
         env:
           BUILD_CONFIGURATION: Release
