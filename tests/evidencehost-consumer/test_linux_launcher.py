@@ -1387,9 +1387,9 @@ class SubjectUnitCompletionTests(unittest.TestCase):
         self.assertEqual("-i", argv[env_index + 1])
         dotnet_index = argv.index(dotnet, env_index + 2)
         assignments = argv[env_index + 2:dotnet_index]
-        self.assertEqual(["DOTNET_PROCESSOR_COUNT=2"],
+        self.assertEqual(["DOTNET_PROCESSOR_COUNT=1"],
                          [value for value in assignments if value.startswith("DOTNET_PROCESSOR_COUNT=")])
-        self.assertEqual(1, argv.count("DOTNET_PROCESSOR_COUNT=2"))
+        self.assertEqual(1, argv.count("DOTNET_PROCESSOR_COUNT=1"))
         self.assertEqual(["--property=TasksMax=64"],
                          [value for value in argv if value.startswith("--property=TasksMax=")])
         self.assertEqual(["--property=MemoryMax=1G"],
@@ -1419,7 +1419,7 @@ class SubjectUnitCompletionTests(unittest.TestCase):
         env_index = argv.index("/usr/bin/env")
         self.assertEqual("-i", argv[env_index + 1])
         dotnet_index = argv.index(dotnet, env_index + 2)
-        self.assertEqual(["DOTNET_PROCESSOR_COUNT=2"],
+        self.assertEqual(["DOTNET_PROCESSOR_COUNT=1"],
                          [value for value in argv[env_index + 2:dotnet_index]
                           if value.startswith("DOTNET_PROCESSOR_COUNT=")])
         self.assertNotIn("DOTNET_PROCESSOR_COUNT=4096", argv)
