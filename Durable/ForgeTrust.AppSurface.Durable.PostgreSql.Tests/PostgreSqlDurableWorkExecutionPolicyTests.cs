@@ -23,7 +23,9 @@ public sealed class PostgreSqlDurableWorkExecutionPolicyTests
             var claim = await lab.Store.TryClaimAsync(candidate, "offset-worker");
             Assert.NotNull(claim);
             Assert.Equal(index + 1, claim.AttemptNumber);
-            Assert.Equal(Anchor.AddMinutes(expectedOffsets[index]), claim.Execution!.NextEligibilityAtUtc);
+            Assert.Equal(Anchor.AddMinutes(expectedOffsets[index]).UtcDateTime, await lab.ScalarAsync<DateTime>("SELECT due_at FROM appsurface_durable.work;"));
+            DateTimeOffset? expectedNext = index + 1 < expectedOffsets.Length ? Anchor.AddMinutes(expectedOffsets[index + 1]) : null;
+            Assert.Equal(expectedNext, claim.Execution!.NextEligibilityAtUtc);
             var completion = await lab.Store.RecordCompletionAsync(claim,
                 new(PostgreSqlWorkCompletionKind.Retry, "retry", "{}"));
             if (index == 4)
@@ -325,7 +327,8 @@ public sealed class PostgreSqlDurableWorkExecutionPolicyTests
             Assert.NotNull(recovered);
             Assert.Equal(2, recovered.AttemptNumber);
             Assert.Equal(permit.Claim.ActivityId, recovered.ActivityId);
-            Assert.Equal(Anchor.AddMinutes(5), recovered.Execution!.NextEligibilityAtUtc);
+            Assert.Equal(Anchor.AddMinutes(5).UtcDateTime, await lab.ScalarAsync<DateTime>("SELECT due_at FROM appsurface_durable.work;"));
+            Assert.Equal(Anchor.AddMinutes(20), recovered.Execution!.NextEligibilityAtUtc);
         }
         else
         {
@@ -359,7 +362,8 @@ public sealed class PostgreSqlDurableWorkExecutionPolicyTests
         var recovered = await lab.Store.TryClaimAsync(next, "recovery-worker");
         Assert.NotNull(recovered);
         Assert.Equal(original.AttemptNumber + 1, recovered.AttemptNumber);
-        Assert.Equal(Anchor.AddMinutes(60), recovered.Execution!.NextEligibilityAtUtc);
+        Assert.Equal(Anchor.AddMinutes(60).UtcDateTime, await lab.ScalarAsync<DateTime>("SELECT due_at FROM appsurface_durable.work;"));
+        Assert.Null(recovered.Execution!.NextEligibilityAtUtc);
     }
 
     [Fact]

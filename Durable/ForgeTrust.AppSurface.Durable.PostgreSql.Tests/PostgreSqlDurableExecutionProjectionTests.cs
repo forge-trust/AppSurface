@@ -61,5 +61,29 @@ public sealed class PostgreSqlDurableExecutionProjectionTests
         Assert.NotNull(inspected.Value!.Execution);
         Assert.Equal(optedItem.Execution, inspected.Value.Execution);
         Assert.Null(inspectedLegacy.Value!.Execution);
+
+        // Value: protects=one next-unconsumed-slot projection across executor and inspection boundaries;
+        // fails_when=a consumed slot is exposed as the next retry; why_new=pending-only inspection missed claims; seam=none
+        for (var attempt = 1; attempt <= 2; attempt++)
+        {
+            await lab.Database.SetExecutionTimeAsync(Anchor.AddMinutes((attempt - 1) * 5));
+            var candidate = Assert.Single(await lab.Store.DiscoverAsync(10), item => item.WorkId == optIn.Value!.WorkId);
+            var claim = Assert.IsType<PostgreSqlDurableWorkClaim>(await lab.Store.TryClaimAsync(candidate, "projection-worker"));
+            DateTimeOffset? expectedNext = attempt == 1 ? Anchor.AddMinutes(5) : null;
+            Assert.Equal(expectedNext, claim.Execution!.NextEligibilityAtUtc);
+            Assert.Equal(claim.Execution, claim.ToProviderClaim().ToExecutionContext().Execution);
+
+            var permit = Assert.IsType<PostgreSqlEffectPermit>(await lab.Store.TryAcquireEffectPermitAsync(claim));
+            var replay = Assert.IsType<PostgreSqlEffectPermit>(await lab.Store.TryAcquireEffectPermitAsync(permit.Claim));
+            var renewed = Assert.IsType<PostgreSqlDurableWorkClaim>(await lab.Store.RenewLeaseAsync(replay.Claim));
+            Assert.Equal(claim.Execution, permit.Claim.Execution);
+            Assert.Equal(claim.Execution, replay.Claim.Execution);
+            Assert.Equal(claim.Execution, renewed.Execution);
+            var currentInspection = await control.GetAsync(new DurableWorkGetRequest(new("execution-tests"), optIn.Value!.WorkId));
+            Assert.True(currentInspection.IsSuccess, currentInspection.Problem?.Problem);
+            Assert.Equal(claim.Execution, currentInspection.Value!.Execution);
+
+            await lab.Store.RecordCompletionAsync(renewed, new(PostgreSqlWorkCompletionKind.Retry, "retry", "{}"));
+        }
     }
 }

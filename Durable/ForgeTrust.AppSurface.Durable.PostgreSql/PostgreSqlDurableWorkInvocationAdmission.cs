@@ -62,7 +62,7 @@ internal partial class PostgreSqlDurableWorkStore
                 key = reader.GetString(0); permitted = ReadUtc(reader, 1);
             }
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-            return new(existing, claim with { Revision = row.Revision, Execution = CreateExecutionSnapshot(row, row.DueAtUtc) }, key, permitted);
+            return new(existing, claim with { Revision = row.Revision, Execution = row.ExecutionSnapshot }, key, permitted);
         }
         var permitId = Guid.NewGuid();
         await using var command = new NpgsqlCommand("""
@@ -86,7 +86,7 @@ internal partial class PostgreSqlDurableWorkStore
         insert.Parameters.AddWithValue("activity", providerKey);
         insert.Parameters.AddWithValue("now", row.NowUtc.UtcDateTime);
         await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        var permittedClaim = claim with { Revision = revision, Execution = CreateExecutionSnapshot(row, row.DueAtUtc) };
+        var permittedClaim = claim with { Revision = revision, Execution = row.ExecutionSnapshot };
         await UpdateExecutionDispatchAsync(connection, transaction, row, "effect_permitted", row.DueAtUtc, row.LeaseExpiresAtUtc, revision, false, cancellationToken).ConfigureAwait(false);
         await InsertHistoryAsync(connection, transaction, permittedClaim, "effect_permitted", false, "{}", cancellationToken, row.NowUtc).ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -219,7 +219,7 @@ internal partial class PostgreSqlDurableWorkStore
         AddExecutionRowParameters(command, row); command.Parameters.AddWithValue("expiry", expiry.UtcDateTime);
         var revision = (long)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidDataException("The locked renewal lost its revision."));
-        var renewed = claim with { LeaseExpiresAtUtc = expiry, Revision = revision, CancellationRequested = row.CancellationRequested, Execution = CreateExecutionSnapshot(row, row.DueAtUtc) };
+        var renewed = claim with { LeaseExpiresAtUtc = expiry, Revision = revision, CancellationRequested = row.CancellationRequested, Execution = row.ExecutionSnapshot };
         await UpdateExecutionDispatchAsync(connection, transaction, row, row.State, row.DueAtUtc, expiry, revision, row.InvocationAdmittedAtUtc is not null, cancellationToken).ConfigureAwait(false);
         await InsertHistoryAsync(connection, transaction, renewed, "lease_renewed", false, "{}", cancellationToken, row.NowUtc).ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false); return renewed;

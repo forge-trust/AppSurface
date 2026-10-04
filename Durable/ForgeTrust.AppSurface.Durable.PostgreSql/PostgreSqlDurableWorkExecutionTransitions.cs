@@ -131,7 +131,7 @@ internal partial class PostgreSqlDurableWorkStore
             claim = new(row.DispatchId, row.ScopeId, row.WorkId, reader.GetString(0), reader.GetString(1), payload,
                 row.Safety, workerId, reader.GetString(8), reader.GetInt32(9), reader.GetInt64(10), row.ScopeGeneration,
                 row.RuntimeEpoch, row.NowUtc, leaseEnd, reader.GetInt64(11), row.CancellationRequested, reader.GetFieldValue<TimeSpan>(12))
-            { Execution = CreateExecutionSnapshot(row, dueAt) };
+            { Execution = (row with { AttemptNumber = reader.GetInt32(9) }).ExecutionSnapshot };
         }
         await UpdateExecutionDispatchAsync(connection, transaction, row, "leased", dueAt, leaseEnd, claim.Revision,
             admitted: false, cancellationToken).ConfigureAwait(false);
@@ -139,9 +139,6 @@ internal partial class PostgreSqlDurableWorkStore
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         return claim;
     }
-
-    private static DurableWorkExecutionSnapshot CreateExecutionSnapshot(PostgreSqlWorkExecutionRow row, DateTimeOffset? eligibility) =>
-        new(row.Policy, row.Deadline, row.AcceptedAtUtc, eligibility, row.CutoffUtc);
 
     private static void AddExecutionRowParameters(NpgsqlCommand command, PostgreSqlWorkExecutionRow row)
     {

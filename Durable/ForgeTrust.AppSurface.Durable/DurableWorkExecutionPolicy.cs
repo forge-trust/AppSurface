@@ -293,8 +293,8 @@ public sealed class DurableWorkExecutionSnapshot : IEquatable<DurableWorkExecuti
     public DateTimeOffset AcceptedAtUtc { get; }
 
     /// <summary>
-    /// Gets the current next eligibility timestamp. A deadline-only request may carry a due time earlier than
-    /// acceptance; null means no eligibility is scheduled or remains.
+    /// Gets the next unconsumed plan slot's eligibility timestamp, including during a claimed invocation.
+    /// A deadline-only request may carry a due time earlier than acceptance; null means no eligibility remains.
     /// </summary>
     public DateTimeOffset? NextEligibilityAtUtc { get; }
 

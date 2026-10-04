@@ -96,7 +96,7 @@ public sealed class PostgreSqlDurableWorkExecutionProcessTests
         Assert.Equal(report.ActivityId, recovered.ActivityId);
         Assert.Equal(2, recovered.AttemptNumber);
         Assert.NotNull(recovered.Execution);
-        Assert.Equal(Anchor.AddSeconds(1), recovered.Execution!.NextEligibilityAtUtc);
+        Assert.Equal(Anchor.AddSeconds(2), recovered.Execution!.NextEligibilityAtUtc);
 
         var registration = ExecutionCheckpointHost.CreateRegistration(safety, lab.Database.DataSource);
         var permit = await lab.Store.TryAcquireEffectPermitAsync(recovered);

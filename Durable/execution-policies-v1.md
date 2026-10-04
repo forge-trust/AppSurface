@@ -114,7 +114,7 @@ invocation, and read-only reconciliation without repeating the logical effect. T
 proves that a delayed commit consumes the accepted window. These tests establish admission and effect behavior; they do
 not claim punctual execution or that cooperative cancellation can stop arbitrary external code.
 
-The [API budget](api-budget.md#deterministic-execution-policy-v1-issue-765) and Core/Provider API snapshots list the additive constructors, factories, and nullable execution projections. `DurableWorkExecutionSnapshot` carries accepted facts through provider execution and inspection; it is descriptive and can become stale. It never grants a claim, permit, retry, or completion. PostgreSQL rechecks the current row, fence, effect permit, and cutoff under the authoritative lock.
+The [API budget](api-budget.md#deterministic-execution-policy-v1-issue-765) and Core/Provider API snapshots list the additive constructors, factories, and nullable execution projections. `DurableWorkExecutionSnapshot` carries accepted facts through provider execution and inspection; it is descriptive and can become stale. For a plan, `NextEligibilityAtUtc` describes the next unconsumed slot, including while the current attempt is claimed or permitted; it is `null` after the final slot is claimed. Work's persisted `due_at` and inspection `DueAtUtc` still identify the slot consumed by its current attempt. Claim, permit replay, renewal, execution context, and scoped inspection use this same next-slot meaning. The snapshot never grants a claim, permit, retry, or completion. PostgreSQL rechecks the current row, fence, effect permit, and cutoff under the authoritative lock.
 
 ## Validation and timing rules
 
