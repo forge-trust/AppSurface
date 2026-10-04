@@ -1,3 +1,4 @@
+using Npgsql;
 using PolicyTests = ForgeTrust.AppSurface.Durable.PostgreSql.Tests.PostgreSqlDurableWorkExecutionPolicyTests;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
@@ -22,6 +23,69 @@ public sealed class PostgreSqlDurableInvocationBoundaryCoverageTests
         Assert.Equal("effect_permitted", await lab.TextAsync("state"));
         Assert.Equal("granted", await lab.ScalarAsync<string>("SELECT status FROM appsurface_durable.effect_permit;"));
         Assert.Equal(0, await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.effect_permit WHERE invocation_admitted_at IS NOT NULL;"));
+    }
+
+    [Fact]
+    public async Task LegacyInvocationAdmissionUsesThePersistedContractAndRejectsAnUnknownPermit()
+    {
+        await using var lab = await PolicyTests.Lab.CreateAsync();
+        var planned = PolicyTests.Request("legacy-admission");
+        var legacy = new DurableWorkRequest(planned.ScopeId, planned.CommandId, planned.IdempotencyKey,
+            planned.WorkName, planned.WorkVersion, planned.Payload, planned.ProviderSafety, planned.RetryPolicy);
+        var permit = await lab.AdmitReadyAsync(legacy);
+
+        Assert.Null(permit.Claim.Execution);
+        Assert.False(await lab.Store.TryAdmitInvocationAsync(permit with { PermitId = Guid.NewGuid() }));
+        Assert.True(await lab.Store.TryAdmitInvocationAsync(permit));
+
+        Assert.Equal(1, await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.work WHERE execution_policy_schema IS NULL;"));
+        Assert.Equal("effect_permitted", await lab.TextAsync("state"));
+        Assert.Equal(0, await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.effect_permit WHERE invocation_admitted_at IS NOT NULL;"));
+        Assert.Equal(0, await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.work_history WHERE event_type='invocation_admitted';"));
+    }
+
+    [Fact]
+    public async Task InvocationHistoryFailureRollsBackTheMarkerAndDispatchBeforeAdmissionCanBeRetried()
+    {
+        await using var lab = await PolicyTests.Lab.CreateAsync();
+        var permit = await lab.AdmitReadyAsync(PolicyTests.Request("admission-history-failure"));
+        var revision = await lab.ScalarAsync<long>("SELECT revision FROM appsurface_durable.work;");
+        var historyCount = await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.work_history;");
+        var dispatchBefore = await lab.ScalarAsync<string>("SELECT row_to_json(dispatch)::text FROM appsurface_durable.dispatch;");
+        await using (var installFailure = lab.Database.DataSource.CreateCommand("""
+            CREATE FUNCTION public.issue765_fail_invocation_history() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                IF NEW.event_type = 'invocation_admitted' THEN
+                    RAISE EXCEPTION 'injected invocation history failure';
+                END IF;
+                RETURN NEW;
+            END; $$;
+            CREATE TRIGGER issue765_fail_invocation_history BEFORE INSERT ON appsurface_durable.work_history
+            FOR EACH ROW EXECUTE FUNCTION public.issue765_fail_invocation_history();
+            """))
+        {
+            await installFailure.ExecuteNonQueryAsync();
+        }
+
+        var failure = await Assert.ThrowsAsync<PostgresException>(async () => await lab.Store.TryAdmitInvocationAsync(permit));
+
+        Assert.Equal(PostgresErrorCodes.RaiseException, failure.SqlState);
+        Assert.Equal(revision, await lab.ScalarAsync<long>("SELECT revision FROM appsurface_durable.work;"));
+        Assert.Equal(historyCount, await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.work_history;"));
+        Assert.Equal(dispatchBefore, await lab.ScalarAsync<string>("SELECT row_to_json(dispatch)::text FROM appsurface_durable.dispatch;"));
+        Assert.Equal(0, await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.effect_permit WHERE invocation_admitted_at IS NOT NULL;"));
+        Assert.Equal("granted", await lab.ScalarAsync<string>("SELECT status FROM appsurface_durable.effect_permit;"));
+
+        await using (var removeFailure = lab.Database.DataSource.CreateCommand(
+            "DROP TRIGGER issue765_fail_invocation_history ON appsurface_durable.work_history;"))
+        {
+            await removeFailure.ExecuteNonQueryAsync();
+        }
+
+        Assert.True(await lab.Store.TryAdmitInvocationAsync(permit));
+        Assert.False(await lab.Store.TryAdmitInvocationAsync(permit));
+        Assert.Equal(1, await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.effect_permit WHERE invocation_admitted_at IS NOT NULL;"));
+        Assert.Equal(1, await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.work_history WHERE event_type='invocation_admitted';"));
     }
 
     [Fact]

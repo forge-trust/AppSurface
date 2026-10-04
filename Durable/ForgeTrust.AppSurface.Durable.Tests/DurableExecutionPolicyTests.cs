@@ -175,6 +175,7 @@ public sealed class DurableExecutionPolicyTests
 
         Assert.Equal(Accepted, first.NextEligibilityAtUtc);
         Assert.Equal(DurableWorkTimingDecision.Eligible, first.Decision);
+        Assert.Equal(Accepted.AddMinutes(40), first.AdmissionCutoffUtc);
         Assert.Equal(Accepted.AddMinutes(5), early.NextEligibilityAtUtc);
         Assert.Equal(DurableWorkTimingDecision.NotYetEligible, early.Decision);
         Assert.Equal(DurableWorkTimingDecision.Eligible, second.Decision);
@@ -257,6 +258,10 @@ public sealed class DurableExecutionPolicyTests
         Assert.Equal(snapshot.GetHashCode(), sameSnapshot.GetHashCode());
         Assert.False(snapshot.Equals((DurableWorkExecutionSnapshot?)null));
         Assert.False(snapshot.Equals(new object()));
+        var differentRetryPolicy = DurableWorkExecutionPolicy.ForAttemptPlan(
+            Retry(attempts: 2, maximumElapsed: TimeSpan.FromHours(2)), plan);
+        Assert.False(snapshot.Equals(new DurableWorkExecutionSnapshot(differentRetryPolicy, deadline,
+            Accepted, Accepted.AddMinutes(5), deadline.NotAfterUtc)));
         Assert.False(snapshot.Equals(new DurableWorkExecutionSnapshot(policy, deadline, Accepted, null, deadline.NotAfterUtc)));
         Assert.False(snapshot.Equals(new DurableWorkExecutionSnapshot(policy, deadline, Accepted.AddMinutes(1), Accepted.AddMinutes(6), deadline.NotAfterUtc)));
         Assert.False(snapshot.Equals(new DurableWorkExecutionSnapshot(policy, null, Accepted, Accepted.AddMinutes(5), Accepted.AddMinutes(10))));
