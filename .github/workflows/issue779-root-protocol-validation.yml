@@ -30,7 +30,7 @@ jobs:
       - name: Prepare and verify exact frozen source
         shell: bash
         env:
-          FROZEN_SOURCE: 65fdb774d259894e120f5eed16b34484e8b53c4a
+          FROZEN_SOURCE: 4a1aadd9b1843bcfebea42320c37e9b86c89b5f5
         run: |
           set -euo pipefail
           [[ "$FROZEN_SOURCE" =~ ^[0-9a-f]{40}$ ]] || exit 2

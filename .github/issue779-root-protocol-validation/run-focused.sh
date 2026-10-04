@@ -106,12 +106,12 @@ export UseSharedCompilation=false MSBUILDDISABLENODEREUSE=1 PYTHONDONTWRITEBYTEC
 ( umask 022; timeout --signal=TERM --kill-after=10s 180s dotnet build Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --no-restore ) > "$task_receipts/cli-build.log" 2>&1
 # Trusted prerequisites must preserve the pinned source before either test lane.
 python3 -B "$task_root/verify-snapshot.py" > "$task_receipts/source-after-prerequisites.json"
-# Run all 16 portable fixture controls exactly once on Linux, without root.
+# Run all 18 portable fixture controls exactly once on Linux, without root.
 timeout --signal=TERM --kill-after=5s 45s python3 -B tests/evidencehost-consumer/test_execution_broker_fixture.py -v > "$task_receipts/portable.log" 2>&1
 python3 - "$task_receipts/portable.log" <<'PY'
 import re,sys
 raw=open(sys.argv[1],encoding='utf-8').read()
-if not re.search(r'^Ran 16 tests in ',raw,re.M) or not re.search(r'^OK$',raw,re.M): raise SystemExit(1)
+if not re.search(r'^Ran 18 tests in ',raw,re.M) or not re.search(r'^OK$',raw,re.M): raise SystemExit(1)
 PY
 task_uid="$(id -u)"; task_gid="$(id -g)"; task_subject=65533
 task_dotnet="$(command -v dotnet)"; task_cache="${NUGET_PACKAGES:-$HOME/.nuget/packages}"
@@ -143,7 +143,7 @@ timeout --signal=TERM --kill-after=20s 630s sudo -n /usr/bin/env "${task_marker_
   --command-timeout-seconds 600 -- /usr/bin/env "PATH=$PATH" "NUGET_PACKAGES=$task_cache" \
   UseSharedCompilation=false MSBUILDDISABLENODEREUSE=1 \
   "$task_dotnet" test "$task_repo/Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj" \
-  --no-build --no-restore --filter 'FullyQualifiedName~EvidenceLinuxControlProtocolTests' \
+  --no-build --no-restore --filter 'FullyQualifiedName~EvidenceLinuxControlProtocolTests|FullyQualifiedName~EvidenceProtectedCliExecutionTests' \
   --results-directory "$task_receipts/trx" --logger 'trx;LogFileName=root-protocol.trx' \
   --logger 'console;verbosity=normal' > "$task_receipts/focused.log" 2>&1
 task_focus_exit="$?"
@@ -155,8 +155,11 @@ import json,sys,xml.etree.ElementTree as ET
 root=ET.parse(sys.argv[1]).getroot(); ns={'t':'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'}
 counters=root.find('t:ResultSummary/t:Counters',ns).attrib
 results=root.findall('t:Results/t:UnitTestResult',ns)
-if len(results)!=12 or any(r.attrib['outcome']!='Passed' for r in results): raise SystemExit(1)
-if any(int(counters[k])!=v for k,v in {'total':12,'executed':12,'passed':12,'failed':0,'notExecuted':0}.items()): raise SystemExit(1)
-with open(sys.argv[2],'x') as f: json.dump({'cli_counters':counters,'portable_passed':16,'coverage_credit':False,'systemd_acceptance':False,'qualification':False},f,sort_keys=True)
+if len(results)!=38 or any(r.attrib['outcome']!='Passed' for r in results): raise SystemExit(1)
+if any(int(counters[k])!=v for k,v in {'total':38,'executed':38,'passed':38,'failed':0,'notExecuted':0}.items()): raise SystemExit(1)
+class_counts={name:sum((name+'.') in r.attrib.get('testName','') for r in results) for name in ('EvidenceLinuxControlProtocolTests','EvidenceProtectedCliExecutionTests')}
+if class_counts!={'EvidenceLinuxControlProtocolTests':12,'EvidenceProtectedCliExecutionTests':26}: raise SystemExit(1)
+with open(sys.argv[2],'x') as f: json.dump({'cli_counters':counters,'class_counts':class_counts,'portable_passed':18,'coverage_credit':False,'systemd_acceptance':False,'qualification':False},f,sort_keys=True)
 PY
-# No XPlat collection is selected: this packet establishes IPC behavior only.
+# No XPlat collection is selected: root IPC/filesystem controls are not systemd or Trusted proof.
+# Expected Linux class38 is unmeasured; local class26 cannot establish this combined result.
