@@ -95,6 +95,7 @@ internal static void VerifyExecutionPolicyChooser()
     {
         throw new InvalidOperationException("Planned Work must preserve its named policy through request and registration.");
     }
+
 }
 ```
 <!-- /appsurface:snippet -->
