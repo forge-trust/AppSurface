@@ -280,7 +280,11 @@ public sealed class DurableDoctorRendererTests
             ("negative installed version", schema with { InstalledVersion = -1 }),
             ("missing installed version for a compatible schema", schema with { InstalledVersion = null }),
             ("missing minimum reader", schema with { MinimumReaderVersion = null }),
+            ("missing maximum reader", schema with { MaximumReaderVersion = null }),
+            ("negative minimum reader", schema with { MinimumReaderVersion = -1 }),
             ("inverted reader range", schema with { MaximumReaderVersion = 0 }),
+            ("missing minimum writer", schema with { MinimumWriterVersion = null }),
+            ("missing maximum writer", schema with { MaximumWriterVersion = null }),
             ("negative minimum writer", schema with { MinimumWriterVersion = -1 }),
             ("inverted writer range", schema with { MaximumWriterVersion = 0 }),
             ("missing applied versions", schema with { AppliedVersions = null }),
@@ -300,6 +304,16 @@ public sealed class DurableDoctorRendererTests
             }),
             ("compatible package outside reader range", schema with { MaximumReaderVersion = 10 }),
             ("compatible package outside writer range", schema with { MaximumWriterVersion = 10 }),
+            ("compatible package below reader range", schema with { MinimumReaderVersion = 12, MaximumReaderVersion = 12 }),
+            ("compatible package below writer range", schema with { MinimumWriterVersion = 12, MaximumWriterVersion = 12 }),
+            ("store too new with an older installed version", schema with
+            {
+                Compatibility = "store-too-new",
+                InstalledVersion = 10,
+                AppliedVersions = [.. Enumerable.Range(1, 10)],
+                PendingVersions = [11],
+            }),
+            ("store too new while the package is supported", schema with { Compatibility = "store-too-new" }),
         };
 
         foreach (var (caseName, malformedSchema) in malformedSchemas)
@@ -477,6 +491,7 @@ public sealed class DurableDoctorRendererTests
         {
             Copy(clean, credential: null, replaceCredential: true),
             Copy(clean, credential: clean.Credential! with { FailedChecks = ["role-ownership"] }),
+            Copy(clean, requestedChecks: ReplaceCheck(clean, 0, check => check with { Status = "finding" })),
             Copy(clean, schema: null, replaceSchema: true),
             Copy(clean, requestedChecks: ReplaceCheck(clean, 1, check => check with { Status = "finding" })),
             Copy(clean, requestedChecks: ReplaceCheck(clean, 4, check => check with { Status = "not-checked" })),
