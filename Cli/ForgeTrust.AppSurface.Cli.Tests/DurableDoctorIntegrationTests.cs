@@ -470,12 +470,14 @@ public sealed class DurableDoctorIntegrationTests
         Assert.Equal(row.ExpectedCodes, result.Findings.Select(finding => finding.Code));
         AssertAction(row, result.NextAction, staleAfter, "json");
 
-        if (row.Scenario.StartsWith("schema-", StringComparison.Ordinal))
+        var scenario = row.Scenario;
+        ArgumentNullException.ThrowIfNull(scenario);
+        if (scenario.StartsWith("schema-", StringComparison.Ordinal))
         {
             Assert.Null(result.Retention);
             Assert.Null(result.Worker);
             Assert.Null(result.ObservedAtUtc);
-            Assert.Equal(row.Scenario switch
+            Assert.Equal(scenario switch
             {
                 var value when value.StartsWith("schema-missing", StringComparison.Ordinal) => "missing",
                 var value when value.StartsWith("schema-upgrade-required", StringComparison.Ordinal) => "upgrade-required",
@@ -827,7 +829,11 @@ public sealed class DurableDoctorIntegrationTests
         return ids.Select(id => rows[id]).ToArray();
     }
 
-    private static string QuoteIdentifier(string value) => new NpgsqlCommandBuilder().QuoteIdentifier(value);
+    private static string QuoteIdentifier(string value)
+    {
+        using var commandBuilder = new NpgsqlCommandBuilder();
+        return commandBuilder.QuoteIdentifier(value);
+    }
 
     private sealed record LiveOutcome(DurableDoctorObservation? Observation, DurableDoctorResult Result);
 

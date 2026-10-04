@@ -89,6 +89,7 @@ public sealed class DurableDoctorInputTests
     [InlineData("Username=operator;Password=private")]
     [InlineData("Host= ;Username=operator")]
     [InlineData("Host=localhost;Port=65536;Username=operator")]
+    [InlineData("Host=localhost;Port=0;Username=operator")]
     [InlineData("Host=localhost;Port=invalid;Username=operator")]
     [InlineData("Host=localhost;UnsupportedDoctorSetting=private")]
     public void Create_rejects_unparseable_or_hostless_connection_settings_without_exposing_values(string connection)
@@ -212,6 +213,55 @@ public sealed class DurableDoctorInputTests
         foreach (var format in new[] { "JSON", " text", "json ", "yaml", "" })
         {
             Assert.Throws<DurableDoctorInputException>(() => CreateInput(format: format));
+        }
+    }
+
+    [Fact]
+    public void Every_ascii_worker_character_obeys_the_documented_identifier_alphabet()
+    {
+        const string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.:";
+        for (var code = 0; code < 128; code++)
+        {
+            var worker = ((char)code).ToString();
+            if (alphabet.IndexOf((char)code) >= 0)
+            {
+                Assert.Equal(worker, CreateInput(workerId: worker, staleAfter: "1s").Request.WorkerId);
+            }
+            else
+            {
+                Assert.Throws<DurableDoctorInputException>(() => CreateInput(workerId: worker, staleAfter: "1s"));
+            }
+        }
+    }
+
+    [Fact]
+    public void Input_helper_null_guards_reject_before_environment_or_service_access()
+    {
+        Assert.Throws<ArgumentNullException>(() => DurableDoctorInput.ParseDuration(null!, TimeSpan.Zero, TimeSpan.MaxValue));
+        Assert.Throws<ArgumentNullException>(() => DurableDoctorInput.ResolveEnvironmentName("ENV", null!));
+        Assert.Throws<ArgumentNullException>(() => DurableDoctorArgumentAdmission.Inspect(null!));
+        Assert.Throws<ArgumentNullException>(() => DurableDoctorArgumentAdmission.NormalizeJoinedValueOptions(null!));
+        Assert.Throws<ArgumentNullException>(() => CreateInput().InspectAsync(null!, CancellationToken.None));
+    }
+
+    [Fact]
+    public void Admission_distinguishes_partial_routes_repeated_help_and_option_like_joined_values()
+    {
+        foreach (var arguments in new string[][] { [], ["durable"], ["doctor"], ["durable", "schema"] })
+        {
+            var decision = DurableDoctorArgumentAdmission.Inspect(arguments);
+            Assert.False(decision.IsDoctor);
+            Assert.False(decision.IsMalformed);
+            Assert.Same(arguments, DurableDoctorArgumentAdmission.NormalizeJoinedValueOptions(arguments));
+        }
+
+        foreach (var tail in new string[][] { ["--help", "-h"], ["--worker-id="], ["--worker-id=-value"], ["--format", "yaml"] })
+        {
+            var decision = DurableDoctorArgumentAdmission.Inspect(["durable", "doctor", .. tail]);
+            Assert.True(decision.IsDoctor);
+            Assert.Equal(tail[0] != "--format", decision.IsMalformed);
+            Assert.False(decision.IsHelp);
+            Assert.Equal("text", decision.Format);
         }
     }
 
@@ -411,6 +461,35 @@ public sealed class DurableDoctorInputTests
         Assert.Equal("failed", document.RootElement.GetProperty("status").GetString());
         Assert.Equal("catalog-contract", Assert.Single(document.RootElement.GetProperty("findings")[0]
             .GetProperty("failedChecks").EnumerateArray()).GetString());
+    }
+
+    [Theory]
+    [InlineData((int)DurableDoctorFailureKind.Unavailable, "unavailable", "dependency", 4)]
+    [InlineData((int)DurableDoctorFailureKind.Canceled, "canceled", "caller-canceled", 1)]
+    [InlineData((int)DurableDoctorFailureKind.Failed, "failed", "catalog-contract", 1)]
+    public async Task Real_entrypoint_preserves_each_fixed_service_failure_family(
+        int kind, string status, string category, int expectedExit)
+    {
+        using var connectionEnvironment = new EnvironmentVariableScope(
+            DurableDoctorInput.DefaultConnectionEnvironmentName, DefaultConnection);
+        using var epochEnvironment = new EnvironmentVariableScope(
+            DurableDoctorInput.DefaultEpochEnvironmentName, RuntimeEpoch.ToString("D"));
+        using var console = new FakeInMemoryConsole();
+        var service = new SpyDoctorService(new DurableDoctorFailureException((DurableDoctorFailureKind)kind, category));
+
+        var run = await RunEntryPointAsync(["durable", "doctor", "--format=json"], console, service);
+
+        Assert.Equal(1, service.CallCount);
+        Assert.Equal(expectedExit, run.ExitCode);
+        Assert.Empty(run.Error);
+        Assert.Empty(run.RawError);
+        using var document = JsonDocument.Parse(run.Output);
+        Assert.Equal(status, document.RootElement.GetProperty("status").GetString());
+        Assert.Equal(expectedExit, document.RootElement.GetProperty("exitCode").GetInt32());
+        Assert.Equal(category, Assert.Single(document.RootElement.GetProperty("findings")[0]
+            .GetProperty("failedChecks").EnumerateArray()).GetString());
+        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("schema").ValueKind);
+        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("storeId").ValueKind);
     }
 
     [Fact]

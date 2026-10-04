@@ -38,8 +38,14 @@ public sealed class DurableDoctorLifetimeTests
     {
         var input = new NpgsqlConnectionStringBuilder
         {
-            Host = "localhost", Database = "doctor", Timeout = open, CommandTimeout = command,
-            Pooling = true, Multiplexing = true, Enlist = true, KeepAlive = 2
+            Host = "localhost",
+            Database = "doctor",
+            Timeout = open,
+            CommandTimeout = command,
+            Pooling = true,
+            Multiplexing = true,
+            Enlist = true,
+            KeepAlive = 2
         };
         var budget = new DurableDoctorBudget(TimeSpan.FromSeconds(total), TimeProvider.System);
         var settings = DurableDoctorService.CreateSessionSettings(input.ConnectionString, budget.WorkTimeout);

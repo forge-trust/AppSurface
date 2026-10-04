@@ -556,6 +556,153 @@ public sealed class DurableDoctorRendererTests
         }
     }
 
+    [Theory]
+    [InlineData("invalid-input", "input", DurableProblemCodes.DoctorInputInvalid, 3)]
+    [InlineData("unavailable", "session-affinity,dependency,deadline,cleanup", DurableProblemCodes.StoreUnavailable, 4)]
+    [InlineData("canceled", "caller-canceled", DurableProblemCodes.DoctorCanceled, 1)]
+    [InlineData("failed", "catalog-contract", DurableProblemCodes.DoctorContractFailed, 1)]
+    public void Renderer_preserves_each_canonical_terminal_envelope_and_action_identity(
+        string status,
+        string categoryList,
+        string expectedCode,
+        int expectedExitCode)
+    {
+        var request = status == "invalid-input"
+            ? null
+            : DurableDoctorClassificationTests.CreateRequest(workerPair: false);
+        var categories = categoryList.Split(',', StringSplitOptions.RemoveEmptyEntries);
+        var result = DurableDoctorClassifier.Terminal(request, status, categories);
+
+        var json = DurableDoctorRenderer.Render(result, request, "json");
+        var text = DurableDoctorRenderer.Render(result, request, "text");
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        var finding = Assert.Single(root.GetProperty("findings").EnumerateArray().ToArray());
+
+        Assert.Equal(status, root.GetProperty("status").GetString());
+        Assert.Equal(expectedExitCode, root.GetProperty("exitCode").GetInt32());
+        Assert.Equal(expectedCode, finding.GetProperty("code").GetString());
+        Assert.Equal(
+            categories,
+            finding.GetProperty("failedChecks").EnumerateArray().Select(static value => value.GetString()));
+        Assert.Equal(finding.GetProperty("nextAction").GetRawText(), root.GetProperty("nextAction").GetRawText());
+        Assert.Contains($"Diagnosis: {status} (exit {expectedExitCode})", text, StringComparison.Ordinal);
+        Assert.Contains($"Code: {expectedCode}", text, StringComparison.Ordinal);
+        Assert.Contains($"Failed checks: {string.Join(", ", categories)}", text, StringComparison.Ordinal);
+
+        var action = root.GetProperty("nextAction");
+        Assert.Equal("command", action.GetProperty("kind").GetString());
+        Assert.Equal("appsurface", action.GetProperty("command").GetProperty("executable").GetString());
+        Assert.Contains("  Next command:", text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("json")]
+    [InlineData("text")]
+    public void Renderer_fails_closed_for_null_unknown_and_mismatched_result_or_action_shapes(string format)
+    {
+        var request = DurableDoctorClassificationTests.CreateRequest(workerPair: false);
+        var clean = CreateCompatibleResult(request, ConfiguredEpoch, heartbeat: null);
+        var terminal = DurableDoctorClassifier.Terminal(request, "unavailable", ["dependency"]);
+        var finding = terminal.Findings.Single();
+        var malformed = new (string Case, DurableDoctorResult? Result, DurableDoctorRequest? Request)[]
+        {
+            ("null result", null, request),
+            ("unknown status", Copy(clean, status: "future-status", exitCode: 9), request),
+            ("status and exit-code mismatch", Copy(clean, status: "findings", exitCode: 2), request),
+            ("terminal action executable mismatch", Copy(terminal,
+                nextAction: terminal.NextAction with { Command = new("sh", terminal.NextAction.Command!.Arguments) }), request),
+            ("terminal action argument mismatch", Copy(terminal,
+                nextAction: terminal.NextAction with
+                {
+                    Command = terminal.NextAction.Command! with
+                    {
+                        Arguments = [.. terminal.NextAction.Command.Arguments.SkipLast(1), "text"],
+                    },
+                }), request),
+            ("finding action mismatch", Copy(terminal,
+                findings: [finding with { NextAction = finding.NextAction with { RequiredInputs = ["unexpected"] } }]), request),
+            ("valid checks without their request", clean, null),
+        };
+
+        foreach (var (caseName, candidate, candidateRequest) in malformed)
+        {
+            var exception = Assert.Throws<InvalidOperationException>(
+                () => DurableDoctorRenderer.Render(candidate!, candidateRequest, format));
+            Assert.Equal("Durable doctor result does not satisfy the v1 rendering contract.", exception.Message);
+            Assert.DoesNotContain("future-status", exception.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain("unexpected", exception.ToString(), StringComparison.Ordinal);
+            Assert.False(exception.Message.Contains(caseName, StringComparison.Ordinal));
+        }
+    }
+
+    [Theory]
+    [InlineData("json")]
+    [InlineData("text")]
+    public void Renderer_rejects_conflicting_verdicts_and_epoch_intent_even_without_database_facts(string format)
+    {
+        var request = DurableDoctorClassificationTests.CreateRequest(workerPair: false);
+        var clean = CreateCompatibleResult(request, ConfiguredEpoch, heartbeat: null);
+        var terminal = DurableDoctorClassifier.Terminal(request, "unavailable", ["dependency"]);
+        var invalidInput = DurableDoctorClassifier.Terminal(null, "invalid-input", ["input"]);
+        var malformed = new (DurableDoctorResult Result, DurableDoctorRequest? Request)[]
+        {
+            (Copy(clean, findings: terminal.Findings), request),
+            (Copy(clean, status: "findings", exitCode: 2), request),
+            (Copy(clean, requestedChecks: clean.RequestedChecks.Take(4).ToArray()), request),
+            (Copy(terminal, findings: []), request),
+            (Copy(terminal, requestedChecks: ReplaceCheck(terminal, 0, check => check with { Status = "passed" })), request),
+            (Copy(invalidInput, configuredRuntimeEpoch: ConfiguredEpoch), null),
+            (Copy(invalidInput, configuredRuntimeEpoch: ConfiguredEpoch), request with { Timeout = TimeSpan.Zero }),
+        };
+
+        foreach (var (candidate, candidateRequest) in malformed)
+        {
+            var exception = Assert.Throws<InvalidOperationException>(
+                () => DurableDoctorRenderer.Render(candidate, candidateRequest, format));
+            Assert.Equal("Durable doctor result does not satisfy the v1 rendering contract.", exception.Message);
+        }
+
+        Assert.NotEmpty(DurableDoctorRenderer.Render(clean, request, format));
+        Assert.NotEmpty(DurableDoctorRenderer.Render(terminal, request, format));
+        Assert.NotEmpty(DurableDoctorRenderer.Render(invalidInput, null, format));
+    }
+
+    [Theory]
+    [InlineData("json")]
+    [InlineData("text")]
+    public void Renderer_rejects_noncanonical_finding_fields_and_category_order(string format)
+    {
+        var request = DurableDoctorClassificationTests.CreateRequest(workerPair: false);
+        var valid = CreateCompatibleResult(request, ConfiguredEpoch, heartbeat: null,
+            ["function-signature", "function-owner"]);
+        var finding = Assert.Single(valid.Findings);
+        var malformed = new[]
+        {
+            finding with { Code = "unknown-code" },
+            finding with { Cause = "untrusted-cause" },
+            finding with { Fix = "untrusted-fix" },
+            finding with { DocumentationUrl = new Uri("https://example.test/untrusted") },
+            finding with { FailedChecks = [] },
+            finding with { FailedChecks = [null!] },
+            finding with { FailedChecks = ["unknown-category"] },
+            finding with { FailedChecks = ["function-signature", "function-signature"] },
+            finding with { FailedChecks = ["function-owner", "function-signature"] },
+        };
+
+        foreach (var candidateFinding in malformed)
+        {
+            var candidate = Copy(valid, findings: [candidateFinding]);
+            var exception = Assert.Throws<InvalidOperationException>(
+                () => DurableDoctorRenderer.Render(candidate, request, format));
+            Assert.Equal("Durable doctor result does not satisfy the v1 rendering contract.", exception.Message);
+            Assert.DoesNotContain("untrusted", exception.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain("unknown", exception.ToString(), StringComparison.Ordinal);
+        }
+
+        Assert.NotEmpty(DurableDoctorRenderer.Render(valid, request, format));
+    }
+
     private static DurableDoctorResult Copy(
         DurableDoctorResult value,
         string? status = null,

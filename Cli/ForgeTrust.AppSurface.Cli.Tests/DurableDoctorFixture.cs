@@ -150,10 +150,11 @@ internal sealed class DurableDoctorFixture : IAsyncDisposable
                     databaseName,
                     ownerRole, dispatcherRole, runtimeRole, retentionRole);
             }
-            catch (Exception cleanupFailure)
+            catch (NpgsqlException cleanupFailure)
             {
                 throw new InvalidOperationException(
-                    $"Durable doctor fixture setup failed and isolated database cleanup also failed ({cleanupFailure.GetType().Name}).");
+                    $"Durable doctor fixture setup failed and isolated database cleanup also failed ({cleanupFailure.GetType().Name}).",
+                    cleanupFailure);
             }
             throw;
         }
@@ -599,9 +600,10 @@ internal sealed class DurableDoctorFixture : IAsyncDisposable
             {
                 await container.DisposeAsync();
             }
-            catch
+            catch (Exception cleanupFailure) when (cleanupFailure is not StackOverflowException
+                and not OutOfMemoryException and not AccessViolationException)
             {
-                // Keep the bounded prerequisite or setup failure as the useful error.
+                // Disposal can fail through Docker, transport or container lifecycle errors. Preserve the setup failure.
             }
 
             if (exception is SkipException)
@@ -841,9 +843,11 @@ internal sealed class DurableDoctorFixture : IAsyncDisposable
                     await process.WaitForExitAsync().WaitAsync(ExternalProcessShutdownTimeout);
                 }
             }
-            catch
+            catch (Exception cleanupFailure) when (cleanupFailure is InvalidOperationException
+                or System.ComponentModel.Win32Exception or NotSupportedException
+                or IOException or OperationCanceledException or TimeoutException)
             {
-                // Report the bounded command timeout below; no child is allowed to outlive fixture setup.
+                // Preserve the bounded command timeout if process teardown itself fails.
             }
             throw new InvalidOperationException("The canonical Durable PostgreSQL role recipe exceeded its setup deadline.");
         }
@@ -897,7 +901,8 @@ internal sealed class DurableDoctorFixture : IAsyncDisposable
     private static string QuoteIdentifier(string value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        return new NpgsqlCommandBuilder().QuoteIdentifier(value);
+        using var commandBuilder = new NpgsqlCommandBuilder();
+        return commandBuilder.QuoteIdentifier(value);
     }
 }
 

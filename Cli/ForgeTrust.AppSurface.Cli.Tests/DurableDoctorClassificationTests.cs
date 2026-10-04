@@ -12,6 +12,16 @@ public sealed class DurableDoctorClassificationTests
     private static readonly Guid StoreId = Guid.Parse("88164257-2a2f-42b4-9832-18a649888802");
     private static readonly Guid OtherEpoch = Guid.Parse("88164257-2a2f-42b4-9832-18a649888803");
     private static readonly DateTimeOffset ObservedAt = DateTimeOffset.Parse("2026-10-03T12:00:00.0000000+00:00");
+    private const string ValidWorkerIdCharacters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.:";
+
+    public static IEnumerable<object[]> WorkerIdAsciiCharacters => Enumerable.Range(0, 128)
+        .Select(static value =>
+        {
+            var character = (char)value;
+            return new object[] { character.ToString(), ValidWorkerIdCharacters.Contains(character) };
+        })
+        .Append(new object[] { string.Empty, false })
+        .Append(new object[] { new string('a', 201), false });
 
     [Fact]
     public void All_28_shared_matrix_rows_match_checks_findings_exits_and_actions()
@@ -96,6 +106,19 @@ public sealed class DurableDoctorClassificationTests
             Assert.All(result.RequestedChecks, static check => Assert.False(check.Requested));
             Assert.Equal(["durable", "doctor", "--help"], result.NextAction.Command!.Arguments);
         }
+    }
+
+    [Theory]
+    [MemberData(nameof(WorkerIdAsciiCharacters))]
+    public void Classifier_accepts_only_the_explicit_ascii_worker_id_alphabet(string workerId, bool expectedValid)
+    {
+        var request = CreateRequest(workerPair: true) with { WorkerId = workerId };
+        var result = DurableDoctorClassifier.Classify(
+            request,
+            CreateCompatibleObservation(request, ConfiguredEpoch, FoundHeartbeat(ConfiguredEpoch, TimeSpan.Zero)));
+
+        Assert.Equal(expectedValid ? "passed" : "invalid-input", result.Status);
+        Assert.Equal(expectedValid ? workerId : null, result.Worker?.WorkerId);
     }
 
     [Fact]
@@ -251,6 +274,39 @@ public sealed class DurableDoctorClassificationTests
     }
 
     [Fact]
+    public void Credential_and_incompatible_schema_short_circuits_reject_each_kind_of_downstream_evidence()
+    {
+        var request = CreateRequest(workerPair: false);
+        var credentialEvidence = new[]
+        {
+            new DurableDoctorObservation(["role-ownership"], retentionFailures: []),
+            new DurableDoctorObservation(["role-ownership"], observedAtUtc: ObservedAt),
+            new DurableDoctorObservation(["role-ownership"], storeId: StoreId),
+            new DurableDoctorObservation(["role-ownership"], activeRuntimeEpoch: ConfiguredEpoch),
+            new DurableDoctorObservation(["role-ownership"], heartbeat: new(false, null, null, null)),
+        };
+        var schemaEvidence = new[]
+        {
+            new DurableDoctorObservation([], MissingSchema(), retentionFailures: []),
+            new DurableDoctorObservation([], MissingSchema(), observedAtUtc: ObservedAt),
+            new DurableDoctorObservation([], MissingSchema(), storeId: StoreId),
+            new DurableDoctorObservation([], MissingSchema(), activeRuntimeEpoch: ConfiguredEpoch),
+            new DurableDoctorObservation([], MissingSchema(), heartbeat: new(false, null, null, null)),
+        };
+
+        foreach (var observation in credentialEvidence.Concat(schemaEvidence))
+        {
+            var result = DurableDoctorClassifier.Classify(request, observation);
+
+            Assert.Equal("failed", result.Status);
+            Assert.Equal([DurableProblemCodes.DoctorContractFailed], result.Findings.Select(static finding => finding.Code));
+            Assert.Null(result.Schema);
+            Assert.Null(result.ObservedAtUtc);
+            Assert.Null(result.StoreId);
+        }
+    }
+
+    [Fact]
     public void Missing_schema_pending_versions_must_match_the_required_ordered_migration_set()
     {
         var request = CreateRequest(workerPair: false);
@@ -258,6 +314,15 @@ public sealed class DurableDoctorClassificationTests
         {
             CreateMissingSchema([]),
             CreateMissingSchema([1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12]),
+            CreateMissingSchema(Enumerable.Range(1, RequiredSchemaVersion).ToArray(), storeId: StoreId),
+            CreateMissingSchema(Enumerable.Range(1, RequiredSchemaVersion).ToArray(), activeEpoch: ConfiguredEpoch),
+            CreateMissingSchema(Enumerable.Range(1, RequiredSchemaVersion).ToArray(), installedVersion: 1),
+            CreateMissingSchema(Enumerable.Range(1, RequiredSchemaVersion).ToArray(), minimumReaderVersion: 1),
+            CreateMissingSchema(Enumerable.Range(1, RequiredSchemaVersion).ToArray(), maximumReaderVersion: 1),
+            CreateMissingSchema(Enumerable.Range(1, RequiredSchemaVersion).ToArray(), minimumWriterVersion: 1),
+            CreateMissingSchema(Enumerable.Range(1, RequiredSchemaVersion).ToArray(), maximumWriterVersion: 1),
+            CreateMissingSchema(Enumerable.Range(1, RequiredSchemaVersion).ToArray(), appliedVersions: [1]),
+            CreateMissingSchema([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]),
         };
 
         foreach (var schema in invalidSchemas)
@@ -279,6 +344,13 @@ public sealed class DurableDoctorClassificationTests
         var invalidSchemas = new[]
         {
             CreateSchema(storeId: Guid.Empty),
+            CreateSchema(requiredVersion: 0),
+            CreateSchema(installedVersion: -1, appliedVersions: []),
+            CreateSchema(minimumReaderVersion: -1),
+            CreateSchema(maximumReaderVersion: -1),
+            CreateSchema(minimumWriterVersion: -1),
+            CreateSchema(maximumWriterVersion: -1),
+            CreateSchema(activeEpoch: Guid.Empty),
             CreateSchema(minimumReaderVersion: 5, maximumReaderVersion: 4),
             CreateSchema(minimumWriterVersion: 5, maximumWriterVersion: 4),
             CreateSchema(appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12]),
@@ -408,7 +480,12 @@ public sealed class DurableDoctorClassificationTests
         var invalid = new[]
         {
             CreateCompatibleObservation(request, ConfiguredEpoch, new DurableDoctorHeartbeat(false, OtherEpoch, null, null)),
+            CreateCompatibleObservation(request, ConfiguredEpoch, new DurableDoctorHeartbeat(false, null, ObservedAt, null)),
+            CreateCompatibleObservation(request, ConfiguredEpoch, new DurableDoctorHeartbeat(false, null, null, false)),
             CreateCompatibleObservation(request, ConfiguredEpoch, new DurableDoctorHeartbeat(true, null, ObservedAt, false)),
+            CreateCompatibleObservation(request, ConfiguredEpoch, new DurableDoctorHeartbeat(true, Guid.Empty, ObservedAt, false)),
+            CreateCompatibleObservation(request, ConfiguredEpoch, new DurableDoctorHeartbeat(true, ConfiguredEpoch, null, false)),
+            CreateCompatibleObservation(request, ConfiguredEpoch, new DurableDoctorHeartbeat(true, ConfiguredEpoch, ObservedAt, null)),
             CreateCompatibleObservation(request, ConfiguredEpoch, new DurableDoctorHeartbeat(true, ConfiguredEpoch, DateTimeOffset.MaxValue, false)),
             CreateCompatibleObservation(request, Guid.Empty, new DurableDoctorHeartbeat(false, null, null, null)),
         };
@@ -447,6 +524,8 @@ public sealed class DurableDoctorClassificationTests
         {
             DurableDoctorClassifier.Terminal(request, "unavailable", ["dependency", "dependency"]),
             DurableDoctorClassifier.Terminal(request, "unavailable", []),
+            DurableDoctorClassifier.Terminal(request, "unavailable", ["caller-canceled"]),
+            DurableDoctorClassifier.Terminal(request, "unavailable", ["session-affinity", "dependency", "deadline", "cleanup", "caller-canceled"]),
             DurableDoctorClassifier.Terminal(request, "canceled", categories: null!),
             DurableDoctorClassifier.Terminal(request, "success", ["caller-canceled"]),
             DurableDoctorClassifier.Terminal(request, "invalid-input", ["input"]),
@@ -462,6 +541,28 @@ public sealed class DurableDoctorClassificationTests
             Assert.Null(result.StoreId);
             Assert.Equal("command", result.NextAction.Kind);
             Assert.Contains("--runtime-epoch-env", result.NextAction.Command!.Arguments);
+        }
+    }
+
+    [Fact]
+    public void Terminal_unavailable_accepts_each_category_count_from_one_through_the_exact_limit()
+    {
+        var request = CreateRequest(workerPair: false);
+        string[][] acceptedCategories =
+        [
+            ["session-affinity"],
+            ["dependency", "session-affinity"],
+            ["deadline", "dependency", "session-affinity"],
+            ["cleanup", "deadline", "dependency", "session-affinity"],
+        ];
+        string[] canonicalOrder = ["session-affinity", "dependency", "deadline", "cleanup"];
+
+        foreach (var categories in acceptedCategories)
+        {
+            var result = DurableDoctorClassifier.Terminal(request, "unavailable", categories);
+
+            Assert.Equal("unavailable", result.Status);
+            Assert.Equal(canonicalOrder.Where(categories.Contains), result.Findings.Single().FailedChecks);
         }
     }
 
@@ -615,35 +716,38 @@ public sealed class DurableDoctorClassificationTests
 
     private static DurableDoctorObservation CreateObservation(DurableDoctorMatrixRow row, DurableDoctorRequest request)
     {
-        if (row.Scenario.StartsWith("credential-unsafe", StringComparison.Ordinal))
+        var scenario = row.Scenario;
+        ArgumentNullException.ThrowIfNull(scenario);
+
+        if (scenario.StartsWith("credential-unsafe", StringComparison.Ordinal))
         {
             return new DurableDoctorObservation(["role-ownership"]);
         }
 
-        if (row.Scenario.StartsWith("schema-", StringComparison.Ordinal))
+        if (scenario.StartsWith("schema-", StringComparison.Ordinal))
         {
-            var compatibility = row.Scenario switch
+            var compatibility = scenario switch
             {
-                var scenario when scenario.StartsWith("schema-missing", StringComparison.Ordinal) => DurableRuntimeSchemaCompatibility.Missing,
-                var scenario when scenario.StartsWith("schema-upgrade-required", StringComparison.Ordinal) => DurableRuntimeSchemaCompatibility.UpgradeRequired,
-                var scenario when scenario.StartsWith("schema-store-too-new", StringComparison.Ordinal) => DurableRuntimeSchemaCompatibility.StoreTooNew,
+                var schemaScenario when schemaScenario.StartsWith("schema-missing", StringComparison.Ordinal) => DurableRuntimeSchemaCompatibility.Missing,
+                var schemaScenario when schemaScenario.StartsWith("schema-upgrade-required", StringComparison.Ordinal) => DurableRuntimeSchemaCompatibility.UpgradeRequired,
+                var schemaScenario when schemaScenario.StartsWith("schema-store-too-new", StringComparison.Ordinal) => DurableRuntimeSchemaCompatibility.StoreTooNew,
                 _ => DurableRuntimeSchemaCompatibility.Inconsistent,
             };
             return new DurableDoctorObservation([], IncompatibleSchema(compatibility));
         }
 
-        var activeEpoch = row.Scenario.StartsWith("store-epoch-mismatch", StringComparison.Ordinal)
+        var activeEpoch = scenario.StartsWith("store-epoch-mismatch", StringComparison.Ordinal)
             ? OtherEpoch
             : ConfiguredEpoch;
-        var heartbeat = row.WorkerPair ? CreateHeartbeat(row.Scenario, request) : null;
-        var retentionFailures = row.Scenario switch
+        var heartbeat = row.WorkerPair ? CreateHeartbeat(scenario, request) : null;
+        var retentionFailures = scenario switch
         {
             "retention-function-absent" => new[] { "function-signature" },
             "retention-index-absent-current" => new[] { "retention-index-presence" },
             "retention-index-invalid-heartbeat-missing" => new[] { "retention-index-shape" },
             _ => Array.Empty<string>(),
         };
-        var storeId = row.Scenario == "contradictory-store-identity" ? OtherEpoch : StoreId;
+        var storeId = scenario == "contradictory-store-identity" ? OtherEpoch : StoreId;
         return CreateCompatibleObservation(request, activeEpoch, heartbeat, retentionFailures, storeId);
     }
 
@@ -708,18 +812,27 @@ public sealed class DurableDoctorClassificationTests
             problem: null);
     }
 
-    private static DurableRuntimeSchemaStatus CreateMissingSchema(IReadOnlyList<int> pendingVersions) =>
+    private static DurableRuntimeSchemaStatus CreateMissingSchema(
+        IReadOnlyList<int> pendingVersions,
+        Guid? storeId = null,
+        Guid? activeEpoch = null,
+        int? installedVersion = null,
+        int? minimumReaderVersion = null,
+        int? maximumReaderVersion = null,
+        int? minimumWriterVersion = null,
+        int? maximumWriterVersion = null,
+        IReadOnlyList<int>? appliedVersions = null) =>
         new(
             DurableRuntimeSchemaCompatibility.Missing,
-            Guid.Empty,
-            null,
-            installedVersion: 0,
+            storeId ?? Guid.Empty,
+            activeEpoch,
+            installedVersion: installedVersion ?? 0,
             requiredVersion: RequiredSchemaVersion,
-            minimumReaderVersion: 0,
-            maximumReaderVersion: 0,
-            minimumWriterVersion: 0,
-            maximumWriterVersion: 0,
-            appliedVersions: [],
+            minimumReaderVersion: minimumReaderVersion ?? 0,
+            maximumReaderVersion: maximumReaderVersion ?? 0,
+            minimumWriterVersion: minimumWriterVersion ?? 0,
+            maximumWriterVersion: maximumWriterVersion ?? 0,
+            appliedVersions: appliedVersions ?? [],
             pendingVersions: pendingVersions,
             problem: null);
 

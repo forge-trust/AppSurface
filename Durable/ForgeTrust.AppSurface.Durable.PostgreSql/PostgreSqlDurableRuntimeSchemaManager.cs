@@ -636,12 +636,9 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
                 {
                     while (await reader.ReadAsync(effectiveToken).ConfigureAwait(false))
                     {
-                        if (doctorBounded)
+                        if (doctorBounded && (applied.Count >= DoctorMaximumAppliedMigrationCount || reader.GetBoolean(3)))
                         {
-                            if (applied.Count >= DoctorMaximumAppliedMigrationCount || reader.GetBoolean(3))
-                            {
-                                throw new InvalidOperationException(DoctorStatusContractFailureMessage);
-                            }
+                            throw new InvalidOperationException(DoctorStatusContractFailureMessage);
                         }
 
                         applied.Add(new AppliedMigration(reader.GetInt32(0), reader.GetString(1), reader.GetString(2)));

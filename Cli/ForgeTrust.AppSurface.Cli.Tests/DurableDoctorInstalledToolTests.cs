@@ -331,9 +331,10 @@ public sealed class DurableDoctorInstalledToolTests
             }
 
             var document = XDocument.Load(project);
-            foreach (var element in document.Descendants().Where(static element => element.Name.LocalName == "ProjectReference"))
+            foreach (var include in document.Descendants()
+                         .Where(static element => element.Name.LocalName == "ProjectReference")
+                         .Select(static element => (string?)element.Attribute("Include")))
             {
-                var include = (string?)element.Attribute("Include");
                 if (string.IsNullOrWhiteSpace(include) || include.Contains("$(", StringComparison.Ordinal))
                 {
                     continue;
@@ -518,10 +519,11 @@ public sealed class DurableDoctorInstalledToolTests
             entry.Key.StartsWith("lib/", StringComparison.OrdinalIgnoreCase)
             && string.Equals(Path.GetFileName(entry.Key), ProviderAssemblyName, StringComparison.Ordinal));
 
-        var builtProviderAssembly = Directory.GetFiles(
-                TestPathUtils.PathUnder(artifactsPath, "bin", "ForgeTrust.AppSurface.Durable.PostgreSql", "Release"),
-                ProviderAssemblyName,
-                SearchOption.AllDirectories)
+        // Match the SDK's lowercase artifact pivot exactly, even on a case-insensitive host filesystem.
+        var providerBuildRoot = TestPathUtils.PathUnder(artifactsPath, "bin", "ForgeTrust.AppSurface.Durable.PostgreSql");
+        var providerReleaseDirectory = Assert.Single(Directory.EnumerateDirectories(providerBuildRoot),
+            static directory => string.Equals(Path.GetFileName(directory), "release", StringComparison.Ordinal));
+        var builtProviderAssembly = Directory.GetFiles(providerReleaseDirectory, ProviderAssemblyName, SearchOption.AllDirectories)
             .Single();
         var builtProviderHash = HashFile(builtProviderAssembly);
         Assert.Equal(builtProviderHash, HashBytes(bundledProvider.Value));
@@ -569,9 +571,8 @@ public sealed class DurableDoctorInstalledToolTests
     {
         var nuspec = ReadNuspec(packagePath);
         XNamespace namespaceName = nuspec.Root?.Name.Namespace ?? XNamespace.None;
-        var metadata = nuspec.Root?.Element(namespaceName + "metadata");
-        Assert.NotNull(metadata);
-        Assert.Equal(expectedId, (string?)metadata!.Element(namespaceName + "id"));
+        var metadata = Assert.IsType<XElement>(nuspec.Root?.Element(namespaceName + "metadata"));
+        Assert.Equal(expectedId, (string?)metadata.Element(namespaceName + "id"));
         Assert.Equal(expectedVersion, (string?)metadata.Element(namespaceName + "version"));
     }
 
