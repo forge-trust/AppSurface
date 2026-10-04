@@ -211,7 +211,7 @@ public sealed class DurableTemplateReleaseEvidenceTests : IDisposable
                 _ => artifact
             }]
         };
-        if (fault == "missing-archive") File.Delete(Path.Join(_root, _manifest.Entries[0].ArtifactFileName));
+        if (fault == "missing-archive") File.Delete(TestPathUtils.PathUnder(_root, _manifest.Entries[0].ArtifactFileName));
 
         var error = Assert.Throws<PackageIndexException>(() => DurableTemplateReleaseEvidence.Validate(
             receipt, Source, _manifest, _root, "linux-x64", true));
