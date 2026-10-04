@@ -1364,6 +1364,69 @@ class SubjectUnitCompletionTests(unittest.TestCase):
         self.assertIn("physical-empty", [event[0] for event in events])
 
 
+    def test_subject_managed_processor_count_is_single_fixed_env_assignment_with_original_limits(self):
+        actual_run = launcher.Broker._run
+        emitted = []
+
+        def capture(broker, request):
+            response = actual_run(broker, request)
+            # exercise owns the existing Popen process double. Inspect the argv
+            # actually emitted by _run while that scoped double is still active.
+            call = launcher.subprocess.Popen.call_args
+            emitted.append((list(call.args[0]), str(broker.dotnet)))
+            return response
+
+        with patch.object(launcher.Broker, "_run", autospec=True, side_effect=capture):
+            response, _events, registered, receipts = self.exercise()
+        self.assertTrue(response["ok"])
+        self.assertTrue(registered)
+        self.assertEqual([(6, 3, 3)], receipts)
+        self.assertEqual(1, len(emitted))
+        argv, dotnet = emitted[0]
+        env_index = argv.index("/usr/bin/env")
+        self.assertEqual("-i", argv[env_index + 1])
+        dotnet_index = argv.index(dotnet, env_index + 2)
+        assignments = argv[env_index + 2:dotnet_index]
+        self.assertEqual(["DOTNET_PROCESSOR_COUNT=2"],
+                         [value for value in assignments if value.startswith("DOTNET_PROCESSOR_COUNT=")])
+        self.assertEqual(1, argv.count("DOTNET_PROCESSOR_COUNT=2"))
+        self.assertEqual(["--property=TasksMax=64"],
+                         [value for value in argv if value.startswith("--property=TasksMax=")])
+        self.assertEqual(["--property=MemoryMax=1G"],
+                         [value for value in argv if value.startswith("--property=MemoryMax=")])
+        self.assertEqual("test", argv[dotnet_index + 1])
+
+    def test_subject_fixed_processor_count_overrides_host_and_launcher_environment(self):
+        actual_run = launcher.Broker._run
+        emitted = []
+
+        def capture(broker, request):
+            response = actual_run(broker, request)
+            call = launcher.subprocess.Popen.call_args
+            emitted.append((list(call.args[0]), dict(call.kwargs["env"]), str(broker.dotnet)))
+            return response
+
+        with patch.dict(os.environ, {"DOTNET_PROCESSOR_COUNT": "4096"}), \
+             patch.dict(launcher.ENV, {"DOTNET_PROCESSOR_COUNT": "4096"}), \
+             patch.object(launcher.Broker, "_run", autospec=True, side_effect=capture):
+            response, _events, registered, receipts = self.exercise()
+        self.assertTrue(response["ok"])
+        self.assertTrue(registered)
+        self.assertEqual([(6, 3, 3)], receipts)
+        self.assertEqual(1, len(emitted))
+        argv, host_environment, dotnet = emitted[0]
+        self.assertEqual("4096", host_environment["DOTNET_PROCESSOR_COUNT"])
+        env_index = argv.index("/usr/bin/env")
+        self.assertEqual("-i", argv[env_index + 1])
+        dotnet_index = argv.index(dotnet, env_index + 2)
+        self.assertEqual(["DOTNET_PROCESSOR_COUNT=2"],
+                         [value for value in argv[env_index + 2:dotnet_index]
+                          if value.startswith("DOTNET_PROCESSOR_COUNT=")])
+        self.assertNotIn("DOTNET_PROCESSOR_COUNT=4096", argv)
+        self.assertEqual(1, argv.count("--property=TasksMax=64"))
+        self.assertEqual(1, argv.count("--property=MemoryMax=1G"))
+
+
 class ArtifactBrokerTests(unittest.TestCase):
     def test_listing_retains_descriptor_for_sequential_bounded_chunks_after_stop(self):
         content = bytes((index % 251 for index in range(launcher.MAX_ARTIFACT_CHUNK_BYTES + 19)))
