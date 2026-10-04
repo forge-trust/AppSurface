@@ -1,6 +1,6 @@
 # AppSurface evidence-gate diagnostics
 
-This guide maps the stable `ASEGC`, `ASEGG`, `ASEHB`, `ASEGH`, `ASEGS`, `ASESE`, `ASEPS`, `ASEPSCLI`, and `ASEVC` diagnostics emitted by the trusted cleanup checker, verifier I/O layer, private handoff, host, subject launcher, fixed offline entrypoint, policy-shadow validator and CLI, trusted verifier context resolver, and checked-in pilot workflow. `ASEGC` identifies downloaded cleanup-record verification, `ASEGG` identifies `verify-gate` command processing, `ASEHB` identifies the controller-to-subject handoff, `ASEGH` identifies host execution and a missing or inconsistent workflow verdict, `ASEGS` identifies the subject launcher, `ASESE` identifies the fixed offline entrypoint, `ASEPS` and `ASEPSCLI` identify non-claiming policy-shadow comparison and its CLI input/output layer, and `ASEVC` identifies attempt-specific verifier identity resolution. The controller capture script reports bounded plain-language errors; it does not currently emit these code families.
+This guide maps the stable `ASEGC`, `ASEGG`, `ASEGO`, `ASEHB`, `ASEGH`, `ASEGS`, `ASESE`, `ASEPS`, `ASEPSCLI`, and `ASEVC` diagnostics emitted by the trusted cleanup checker, verifier I/O layer, [subject observation builder](../tools/ForgeTrust.AppSurface.EvidenceGate/README.md#trusted-subject-observation), private handoff, host, subject launcher, fixed offline entrypoint, policy-shadow validator and CLI, trusted verifier context resolver, and checked-in pilot workflow. `ASEGC` identifies downloaded cleanup-record verification, `ASEGG` identifies `verify-gate` command processing, `ASEGO` identifies the bounded non-claiming observation, `ASEHB` identifies the controller-to-subject handoff, `ASEGH` identifies host execution and a missing or inconsistent workflow verdict, `ASEGS` identifies the subject launcher, `ASESE` identifies the fixed offline entrypoint, `ASEPS` and `ASEPSCLI` identify non-claiming policy-shadow comparison and its CLI input/output layer, and `ASEVC` identifies attempt-specific verifier identity resolution. The controller capture script reports bounded plain-language errors; it does not currently emit these code families.
 
 These codes report a failed or incomplete operation, except `ASEHB010`, which reports completed subject execution without a gate claim. None turns an observation into a gate pass. The separate `ASEVG` codes are final library-verdict results, documented in the planner's [trusted PR verdict reference](../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md#trusted-pr-verdict-boundary).
 
@@ -53,6 +53,12 @@ The [`appsurface evidence shadow-policy` command](../Cli/ForgeTrust.AppSurface.C
 | Code | Cause | Safe fix |
 | --- | --- | --- |
 | `ASEVC001` | The fresh controller identity, trusted workflow environment, attempt-specific GitHub run or subject job, API response, or create-new output is unavailable, malformed, stale, or ambiguous. | Keep the pilot failed. Recapture the current PR from the base-owned verifier job, confirm the run attempt and unique successful subject job through the [workflow run](https://docs.github.com/en/rest/actions/workflow-runs#get-a-workflow-run-attempt) and [workflow job](https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run-attempt) APIs, then rerun with a new output path. Do not infer the job ID from a downloaded artifact or `head_sha`. |
+
+## `ASEGO`: bounded trusted subject observation
+
+| Code | Cause | Safe fix |
+| --- | --- | --- |
+| `ASEGO001` | A verified plan, canonical verifier identity, completed subject result, required coverage cleanup/artifact/preflight input, or create-new output is missing, unsafe, inconsistent, or over its fixed limit. | Keep the pilot failed. Repeat the [trusted verifier handoff](../tools/ForgeTrust.AppSurface.EvidenceGate/README.md#trusted-subject-observation) from the same current run attempt with fresh output paths; investigate a mismatched fixed artifact or image digest rather than editing the observation or granting a claim. |
 
 ## `ASEGG`: verifier command and handoff processing
 

@@ -25,6 +25,8 @@ SPEC.loader.exec_module(context)
 class VerifierContextTests(unittest.TestCase):
     def setUp(self) -> None:
         self.identity = {
+            "BaseRevision": "a" * 40,
+            "HeadRevision": "b" * 40,
             "HeadRepositoryId": 321,
             "PullRequestNumber": 777,
             "RepositoryId": 321,
@@ -68,11 +70,29 @@ class VerifierContextTests(unittest.TestCase):
         self.assertEqual("1234", expected["WorkflowId"])
         self.assertEqual("5678", expected["SubjectJobId"])
         self.assertEqual("pull_request_target", expected["EventName"])
-        self.assertEqual(self.identity, expected["RunIdentity"])
+        self.assertEqual(
+            {key: self.identity[key] for key in context.EXPECTED_RUN_IDENTITY_KEYS},
+            expected["RunIdentity"],
+        )
         self.assertEqual(
             b'{"EventName":"pull_request_target","Repository":"forge-trust/AppSurface","RunIdentity":{"HeadRepositoryId":321,"PullRequestNumber":777,"RepositoryId":321,"TargetBranch":"main","WorkflowRunAttempt":2,"WorkflowRunId":654321},"SubjectJobId":"5678","WorkflowId":"1234"}',
             context._canonical(expected),
         )
+
+    def test_rejects_missing_or_malformed_captured_revisions(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="evidence-verifier-context-revisions-") as temporary:
+            path = Path(temporary) / "identity.json"
+            for base, head in ((None, "b" * 40), ("a" * 40, "B" * 40), ("a" * 40, "b" * 64)):
+                with self.subTest(base=base, head=head):
+                    identity = dict(self.identity)
+                    if base is None:
+                        del identity["BaseRevision"]
+                    else:
+                        identity["BaseRevision"] = base
+                    identity["HeadRevision"] = head
+                    path.write_bytes(context._canonical(identity))
+                    with self.assertRaises(context.VerifierContextError):
+                        context._read_identity(path)
 
     def test_rejects_stale_or_wrong_workflow_context_before_job_lookup(self) -> None:
         for field, value in (

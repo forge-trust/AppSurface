@@ -452,6 +452,53 @@ jobs:
             --output "$RUNNER_TEMP/evidence-gate-trusted-coverage-replay" \
             --no-github-summary
 
+      - name: Resolve current workflow and subject-job identity
+        if: ${{ needs.controller-capture.result == 'success' && needs.credentialless-subject.result == 'success' }}
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 "$GITHUB_WORKSPACE/trusted/scripts/evidence-gate-verifier-context.py" \
+            --fresh-identity "$RUNNER_TEMP/evidence-gate-verifier-capture/pull-request-run-identity.json" \
+            --output "$RUNNER_TEMP/evidence-gate-expected-identity.json"
+
+      - name: Record bounded non-claiming subject observation
+        id: observation
+        if: ${{ needs.controller-capture.result == 'success' && needs.credentialless-subject.result == 'success' }}
+        shell: bash
+        env:
+          EVIDENCE_PROFILE_ID: ${{ needs.controller-capture.outputs.profile_id }}
+          EXPECTED_SUBJECT_IMAGE: ${{ needs.subject-image-preflight.outputs.image }}
+        run: |
+          set -euo pipefail
+          inputs="$RUNNER_TEMP/evidence-gate-verifier-inputs"
+          args=(
+            --verified-plan "$RUNNER_TEMP/evidence-gate-verified-plan.json"
+            --verifier-identity "$RUNNER_TEMP/evidence-gate-expected-identity.json"
+            --subject-result "$inputs/evidence-gate-subject-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/evidence-gate-subject-result.json"
+            --output "$RUNNER_TEMP/evidence-gate-observation.json"
+          )
+          if [[ "$EVIDENCE_PROFILE_ID" == code-coverage ]]; then
+            args+=(
+              --cleanup-record "$inputs/evidence-gate-cleanup-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/evidence-gate-cleanup-attestation.json"
+              --subject-artifacts-directory "$inputs/evidence-gate-artifacts-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+              --expected-image-digest "$EXPECTED_SUBJECT_IMAGE"
+            )
+          fi
+          python3 "$GITHUB_WORKSPACE/trusted/scripts/evidence-gate-observation.py" "${args[@]}"
+
+      - name: Upload bounded non-claiming subject observation
+        if: ${{ steps.observation.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: evidence-gate-observation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence-gate-observation.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          include-hidden-files: false
+
       - name: Recompute the host manifest and independently verify the gate
         id: gate_verifier
         if: ${{ needs.controller-capture.result == 'success' && needs.credentialless-subject.result == 'success' }}
@@ -468,9 +515,6 @@ jobs:
           host="$RUNNER_TEMP/evidence-gate-host"
           verdict="$RUNNER_TEMP/evidence-gate-verdict"
 
-          python3 "$GITHUB_WORKSPACE/trusted/scripts/evidence-gate-verifier-context.py" \
-            --fresh-identity "$capture/pull-request-run-identity.json" \
-            --output "$identity"
           dotnet restore "$project" --locked-mode --verbosity quiet
           host_status=0
           dotnet run --no-restore --project "$project" -- run \

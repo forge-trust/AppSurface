@@ -29,8 +29,10 @@ SUBJECT_JOB_NAME = "Evidence gate subject (credentialless, non-claiming)"
 REPOSITORY_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\Z")
 DECIMAL_PATTERN = re.compile(r"[1-9][0-9]{0,18}\Z")
 RUN_IDENTITY_KEYS = frozenset(
-    {"HeadRepositoryId", "PullRequestNumber", "RepositoryId", "TargetBranch", "WorkflowRunAttempt", "WorkflowRunId"}
+    {"BaseRevision", "HeadRevision", "HeadRepositoryId", "PullRequestNumber", "RepositoryId", "TargetBranch", "WorkflowRunAttempt", "WorkflowRunId"}
 )
+EXPECTED_RUN_IDENTITY_KEYS = RUN_IDENTITY_KEYS - {"BaseRevision", "HeadRevision"}
+REVISION_PATTERN = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 
 
 class VerifierContextError(Exception):
@@ -94,8 +96,18 @@ def _read_identity(path: Path) -> dict[str, Any]:
     identity = _parse_object(raw, MAX_IDENTITY_BYTES, "The fresh controller identity")
     if set(identity) != RUN_IDENTITY_KEYS or _canonical(identity) != raw:
         raise VerifierContextError("The fresh controller identity is not a canonical run identity.")
-    for key in RUN_IDENTITY_KEYS - {"TargetBranch"}:
+    for key in RUN_IDENTITY_KEYS - {"BaseRevision", "HeadRevision", "TargetBranch"}:
         _positive(identity[key], f"The {key} value")
+    base_revision = identity["BaseRevision"]
+    head_revision = identity["HeadRevision"]
+    if (
+        not isinstance(base_revision, str)
+        or not isinstance(head_revision, str)
+        or REVISION_PATTERN.fullmatch(base_revision) is None
+        or REVISION_PATTERN.fullmatch(head_revision) is None
+        or len(base_revision) != len(head_revision)
+    ):
+        raise VerifierContextError("The fresh controller revisions are malformed.")
     branch = identity["TargetBranch"]
     if not isinstance(branch, str) or not branch or len(branch) > 128 or any(char.isspace() for char in branch):
         raise VerifierContextError("The fresh target branch is malformed.")
@@ -197,7 +209,10 @@ def resolve_identity(
     return {
         "EventName": "pull_request_target",
         "Repository": repository,
-        "RunIdentity": dict(captured),
+        # The captured revision-bound identity has two more fields than the
+        # canonical EvidencePullRequestRunIdentity consumed by the .NET host.
+        # The verified plan carries base/head revisions separately.
+        "RunIdentity": {key: captured[key] for key in EXPECTED_RUN_IDENTITY_KEYS},
         "SubjectJobId": str(job_id),
         "WorkflowId": str(workflow_id),
     }
