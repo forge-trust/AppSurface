@@ -68,15 +68,6 @@ internal sealed class ReleasePublishing
         var tag = projection.Tag;
         var tagCommit = projection.TagCommit;
         var tagObjectId = projection.TagObjectId;
-        if (options.GitHubOutputPath is not null && string.IsNullOrWhiteSpace(tagObjectId))
-        {
-            throw new ReleaseToolException(ReleaseDiagnostic.Error(
-                "release-tag-object-id-unavailable",
-                $"Annotated tag {tag} did not produce a captured tag object ID.",
-                "The release output must bind both the annotated tag object and its peeled commit.",
-                "Retry after tag identity validation succeeds; do not publish from an unbound tag projection.",
-                "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
-        }
 
         await ValidatePackagePublishingSucceededAsync(options.Version, tag, tagCommit, cancellationToken);
         await ValidateGitHubReleaseDraftSafeAsync(tag, cancellationToken);
