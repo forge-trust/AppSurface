@@ -478,6 +478,95 @@ public sealed class EvidenceRestrictedCoverageFailureTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunAsync_ShouldRejectAMergedReportFileLinkAfterTheNumericGate(bool linkMergedReport)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            // This procedure control requires ordinary Unix symbolic-link support.
+            return;
+        }
+
+        using var directory = TestDirectory.Create();
+        using var sentinel = TestDirectory.Create();
+        var sentinelPath = TestPathUtils.PathUnder(sentinel.Path, "sentinel.cobertura.xml");
+        // The shared merger serializes this same valid document before artifact export.
+        // Equal bytes do not assert that the merger performs no earlier file write.
+        XDocument.Parse(PassingCobertura).Save(sentinelPath, SaveOptions.DisableFormatting);
+        var sentinelBytes = await File.ReadAllBytesAsync(sentinelPath);
+        var sentinelMode = File.GetUnixFileMode(sentinelPath);
+        var transport = new FakeRestrictedRun([Report(PassingCobertura)]);
+        string? stagingRoot = null;
+        var reporter = new RecordingReportGenerator
+        {
+            MergeHandler = async (outputDirectory, token) =>
+            {
+                var mergeDirectory = Directory.GetParent(outputDirectory)!.FullName;
+                stagingRoot = Directory.GetParent(mergeDirectory)!.FullName;
+                var coveragePath = TestPathUtils.PathUnder(outputDirectory, "Cobertura.xml");
+                var summaryPath = TestPathUtils.PathUnder(outputDirectory, "Summary.txt");
+                await File.WriteAllTextAsync(coveragePath, PassingCobertura, token);
+                await File.WriteAllTextAsync(summaryPath, "Unit fixture merger output", token);
+                if (linkMergedReport)
+                {
+                    var canonicalPath = TestPathUtils.PathUnder(mergeDirectory, "coverage.cobertura.xml");
+                    File.CreateSymbolicLink(canonicalPath, sentinelPath);
+                    Assert.True((File.GetAttributes(canonicalPath) & FileAttributes.ReparsePoint) != 0);
+                }
+
+                return new CoverageRunMergeResult(0, coveragePath, summaryPath);
+            },
+        };
+        var declaration = CreateDeclaration(
+        [new EvidenceArtifactSlot("coverage-report", "coverage", "application/xml", Required: true, MaximumBytes: 1024 * 1024)]);
+        var writer = CreateWriter(directory.Path, declaration);
+        try
+        {
+            var result = await CreateProducer(transport, reporter).RunAsync(
+                declaration, TestPathUtils.PathUnder(directory.Path, "subject.slnx"), null, writer, CancellationToken.None);
+
+            Assert.Equal(linkMergedReport ? EvidenceProducerOutcome.Failed : EvidenceProducerOutcome.Passed, result.Outcome);
+            if (linkMergedReport)
+            {
+                // Merge and gate failures use CoverageExecutionException; this fixed
+                // IOException identifies the later ordinary-file artifact check.
+                Assert.Equal("The protected coverage procedure failed with IOException.", result.Diagnostic);
+                Assert.Empty(result.SatisfiedAssertionIds);
+                AssertNoArtifacts(result);
+                Assert.Empty(writer.WrittenArtifacts);
+            }
+            else
+            {
+                Assert.Equal(new[] { AssertionId }, result.SatisfiedAssertionIds);
+                var artifact = Assert.Single(writer.WrittenArtifacts);
+                Assert.Equal("coverage-report", artifact.LogicalName);
+                Assert.Equal(artifact, Assert.Single(result.Artifacts!));
+                var writtenPath = TestPathUtils.PathUnder(
+                    TestPathUtils.PathUnder(directory.Path, "artifacts"), artifact.RelativePath);
+                Assert.Equal(sentinelBytes, await File.ReadAllBytesAsync(writtenPath));
+            }
+
+            Assert.Equal(1, transport.RunCount);
+            Assert.Equal(1, transport.CollectCount);
+            Assert.Equal(1, reporter.MergeCount);
+            Assert.NotNull(stagingRoot);
+            Assert.False(Directory.Exists(stagingRoot));
+            Assert.Equal(sentinelBytes, await File.ReadAllBytesAsync(sentinelPath));
+            Assert.Equal(sentinelMode, File.GetUnixFileMode(sentinelPath));
+            Assert.Equal(new[] { sentinelPath }, Directory.GetFileSystemEntries(sentinel.Path));
+        }
+        finally
+        {
+            if (stagingRoot is not null && Directory.Exists(stagingRoot))
+            {
+                // Only the fresh root captured from this invocation's merger is owned.
+                Directory.Delete(stagingRoot, recursive: true);
+            }
+        }
+    }
+
     private static string CreateCoberturaWithPartialBranch(string fileName)
     {
         // Consistent unit report: twenty hit lines, nineteen of twenty branch outcomes.
