@@ -1354,4 +1354,182 @@ public sealed class EvidenceHostBootstrapTests
             return new EvidenceProducerResult(Id, EvidenceProducerOutcome.Passed, ["coverage/assertion@1"]);
         }
     }
+
+    [Fact]
+    public async Task RunSharedCore_ShouldVerifyArtifactHashesAfterProducerDisposalCompletes()
+    {
+        var plan = CreateDisposalArtifactObservationPlan();
+        using var run = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Observation, plan);
+        var artifactPath = TestPathUtils.PathUnder(run.ArtifactDirectory, "inventory", "inventory", "report.txt");
+        var producer = new DisposalBarrierArtifactProducer(artifactPath, mutateOnDispose: true);
+        await using var host = EvidenceHostBootstrap.Create(plan, registration => registration.AddProducer(producer));
+        var completionCount = 0;
+        var execution = run.RunAsync(host, completeWorker: token =>
+        {
+            Interlocked.Increment(ref completionCount);
+            Assert.True(producer.DisposalCompleted);
+            return run.Supervisor.CompleteWorkerAsync(token);
+        });
+        EvidenceManifest manifest;
+        try
+        {
+            await producer.DisposalStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(1, producer.RunCount);
+            Assert.Equal(1, producer.DisposeCount);
+            Assert.Equal(1, run.Supervisor.ExitAcknowledgements);
+            Assert.False(producer.DisposalCompleted);
+            Assert.Equal(EvidenceHostState.Cleaning, host.State);
+            Assert.Equal("written"u8.ToArray(), await File.ReadAllBytesAsync(artifactPath));
+            Assert.False(execution.IsCompleted);
+            Assert.Equal(0, Volatile.Read(ref completionCount));
+            Assert.Equal(0, run.Supervisor.CompletionAcknowledgements);
+
+            producer.ReleaseDisposal.TrySetResult();
+            manifest = await execution.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            producer.ReleaseDisposal.TrySetResult();
+            await execution.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        Assert.Equal("changed"u8.ToArray(), await File.ReadAllBytesAsync(artifactPath));
+        var result = Assert.Single(manifest.ProducerResults);
+        Assert.Equal(EvidenceProducerOutcome.Invalid, result.Outcome);
+        Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<EvidenceArtifactResult>>(result.Artifacts));
+        Assert.Contains("final verification", result.Diagnostic, StringComparison.Ordinal);
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, manifest.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+        Assert.Equal(EvidenceClaimEligibility.None, manifest.Eligibility);
+        Assert.True(manifest.Metrics.CleanupCompleted);
+        Assert.True(producer.DisposalCompleted);
+        Assert.Equal(1, producer.DisposeCount);
+        Assert.Equal(1, Volatile.Read(ref completionCount));
+        Assert.Equal(1, run.Supervisor.CompletionAcknowledgements);
+    }
+
+    [Fact]
+    public async Task RunSharedCore_ShouldFinishCollectionWithItsOwnTokenAfterCallerCancelsFollowingCleanup()
+    {
+        var plan = CreateDisposalArtifactObservationPlan();
+        using var run = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Observation, plan);
+        using var caller = new CancellationTokenSource();
+        var artifactPath = TestPathUtils.PathUnder(run.ArtifactDirectory, "inventory", "inventory", "report.txt");
+        var producer = new DisposalBarrierArtifactProducer(artifactPath, mutateOnDispose: false);
+        await using var host = EvidenceHostBootstrap.Create(plan, registration => registration.AddProducer(producer));
+        var completionStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completionCount = 0;
+        var collectionToken = CancellationToken.None;
+        var execution = run.RunAsync(host, caller.Token, async token =>
+        {
+            Interlocked.Increment(ref completionCount);
+            Assert.True(producer.DisposalCompleted);
+            Assert.Equal(1, producer.DisposeCount);
+            Assert.Equal(1, run.Supervisor.ExitAcknowledgements);
+            collectionToken = token;
+            completionStarted.TrySetResult();
+            await releaseCompletion.Task.WaitAsync(token);
+            token.ThrowIfCancellationRequested();
+            await run.Supervisor.CompleteWorkerAsync(token);
+        });
+        EvidenceManifest manifest;
+        try
+        {
+            await producer.DisposalStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            producer.ReleaseDisposal.TrySetResult();
+            await completionStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(EvidenceHostState.Collecting, host.State);
+            Assert.True(producer.DisposalCompleted);
+            Assert.Equal(1, run.Supervisor.ExitAcknowledgements);
+            Assert.True(collectionToken.CanBeCanceled);
+            Assert.False(collectionToken.IsCancellationRequested);
+            Assert.NotEqual(caller.Token, collectionToken);
+            Assert.False(execution.IsCompleted);
+            Assert.Equal(0, run.Supervisor.CompletionAcknowledgements);
+
+            caller.Cancel();
+            Assert.True(caller.IsCancellationRequested);
+            Assert.False(collectionToken.IsCancellationRequested);
+            Assert.False(execution.IsCompleted);
+            Assert.Equal(1, Volatile.Read(ref completionCount));
+            Assert.Equal(0, run.Supervisor.CompletionAcknowledgements);
+
+            releaseCompletion.TrySetResult();
+            manifest = await execution.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            producer.ReleaseDisposal.TrySetResult();
+            releaseCompletion.TrySetResult();
+            await execution.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        Assert.Equal(EvidenceExecutionVerdict.Passed, manifest.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.ObservationOnly, manifest.ClaimKind);
+        Assert.Equal(EvidenceClaimEligibility.Informational, manifest.Eligibility);
+        Assert.True(manifest.Metrics.CleanupCompleted);
+        Assert.Null(manifest.Metrics.TerminalFailureCode);
+        var result = Assert.Single(manifest.ProducerResults);
+        Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
+        var artifact = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<EvidenceArtifactResult>>(result.Artifacts));
+        Assert.Equal(EvidenceDigest.Sha256("written"u8), artifact.Sha256);
+        Assert.Equal("written"u8.ToArray(), await File.ReadAllBytesAsync(artifactPath));
+        Assert.Equal(1, producer.RunCount);
+        Assert.Equal(1, producer.DisposeCount);
+        Assert.Equal(1, Volatile.Read(ref completionCount));
+        Assert.Equal(1, run.Supervisor.CompletionAcknowledgements);
+        Assert.False(collectionToken.IsCancellationRequested);
+        Assert.Equal(EvidenceHostState.Completed, host.State);
+    }
+
+    private static EvidencePlan CreateDisposalArtifactObservationPlan()
+    {
+        var profile = EvidenceHostAdmissionTestRun.CreateObservationPlan().Profile;
+        return SealPlan(profile with
+        {
+            Producers =
+            [
+                profile.Producers.Single() with
+                {
+                    ArtifactSlots = [new EvidenceArtifactSlot("report", "inventory", "text/plain", Required: true, MaximumBytes: 16)],
+                },
+            ],
+        });
+    }
+
+    private sealed class DisposalBarrierArtifactProducer(string artifactPath, bool mutateOnDispose) : IEvidenceProducer, IAsyncDisposable
+    {
+        public string Id => "inventory";
+
+        public TaskCompletionSource DisposalStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource ReleaseDisposal { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int RunCount { get; private set; }
+
+        public int DisposeCount { get; private set; }
+
+        public bool DisposalCompleted { get; private set; }
+
+        public async ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
+        {
+            RunCount++;
+            var artifact = await context.Artifacts!.WriteAsync("report", "inventory/report.txt", "written"u8.ToArray(), cancellationToken);
+            return new EvidenceProducerResult(Id, EvidenceProducerOutcome.Passed, ["inventory/assertion@1"], Artifacts: [artifact]);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            DisposeCount++;
+            DisposalStarted.TrySetResult();
+            await ReleaseDisposal.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            if (mutateOnDispose)
+            {
+                await File.WriteAllBytesAsync(artifactPath, "changed"u8.ToArray());
+            }
+
+            DisposalCompleted = true;
+        }
+    }
 }
