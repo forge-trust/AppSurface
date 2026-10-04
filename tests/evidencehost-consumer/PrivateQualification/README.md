@@ -32,6 +32,22 @@ with the compile-only `EVIDENCE_PRIVATE_QUALIFICATION_HOST` constant calls the r
 Its metadata callback declares Aspire health resource names; the root-owned adapter establishes actual
 readiness. Neither binary installs an application factory or invokes a test-core entry.
 
+## Complete producer declarations for the public Host
+
+The private [`EvidencePrivateQualificationHostEntry`](../../../Cli/ForgeTrust.AppSurface.Cli/EvidencePrivateQualificationHostEntry.cs)
+must use the complete [restricted Host registration](../../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md):
+`registration.AddProducer(declaration, EvidenceRestrictedCoverageProducerFactory.Create(declaration))`.
+The two-argument overload records both the exact compiled declaration and its shared sealed producer.
+`AddProducer(producer)` records only the producer identity; it leaves the declaration map empty and
+`CaptureRestrictedProducers` rejects that registration with `ASEVD404`, even when the producer's ID
+matches the plan. This is an ordering requirement before the existing restricted registration audit;
+no Host implementation, admission guard, catalogue, capability bound or proof registry is changed.
+
+For historical V23, the parent-verified native evidence recorded CLI exit 0 with a Passed manifest and
+Host failure `ASEVD404` (protected producer registration unavailable). The private entry now supplies
+the missing complete declaration. This correction is source preparation only: it has not been compiled,
+built, tested or proven by a new native qualification run, and it grants no Trusted eligibility.
+
 ## Ordering and immutable bindings
 
 Only trusted metadata/build preparation precedes arming. Subject restore, MSBuild/assets evaluation,

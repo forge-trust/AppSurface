@@ -20,7 +20,7 @@ internal static class EvidencePrivateQualificationHostEntry
             foreach (var resource in plan.Profile.Resources)
                 registration.AddAspireHealthResource(resource, "native-http");
             foreach (var declaration in plan.Profile.Producers)
-                registration.AddProducer(EvidenceRestrictedCoverageProducerFactory.Create(declaration));
+                registration.AddProducer(declaration, EvidenceRestrictedCoverageProducerFactory.Create(declaration));
         });
         return await host.RunAsync(new EvidenceExecutionRequest(EvidenceExecutionMode.Observation, controlChannel),
             cancellationToken).ConfigureAwait(false);
