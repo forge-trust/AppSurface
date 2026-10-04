@@ -160,6 +160,7 @@ def retain_diagnostics(workspace, output, *, expected_owner_uid=0):
         selected.append((f"preflight-{entry}.json", 4096, False))
         selected.extend((f"failure-{entry}/"+name, maximum, False) for name, maximum in (
             ("launcher-failure.json", 4096), ("launcher-owned-exit.json", 4096), ("launcher-worker-journal.log", 16*1024),
+            ("subject-collector-startup.json", 64*1024),
             ("subject-failure-output/stdout.prefix", 519168), ("subject-failure-output/stderr.prefix", 519168)))
         selected.extend((f"failure-{entry}/vstest-diagnostics/"+name, maximum, False)
                         for name, maximum in (("runner.log", 128*1024), ("collector.log", 128*1024),

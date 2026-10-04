@@ -48,6 +48,10 @@ jobs:
             tests/evidencehost-consumer/test_private_vstest_diagnostics.py -v
           timeout --signal=TERM --kill-after=5s 30s python3 -B \
             tests/evidencehost-consumer/test_linux_launcher.py PrivateVstestDiagnosticOrchestrationControls -v
+          timeout --signal=TERM --kill-after=5s 30s python3 -B \
+            tests/evidencehost-consumer/test_private_collector_sample.py -v
+          timeout --signal=TERM --kill-after=5s 30s python3 -B \
+            tests/evidencehost-consumer/test_linux_launcher.py PrivateCollectorSamplingOrchestrationControls -v
       - name: Execute one compiled qualification variant through both actual entries
         shell: bash
         run: |

@@ -271,3 +271,31 @@ New [archive controls](test_diagnostics.py) cover both entries, exact binary byt
 limits, unknown names, links and private modes. All new controls are **defined but
 unexecuted** at this source-ready checkpoint. They prove no actual root, kernel
 owned exit, SDK, native compatibility, admission, qualification or coverage result.
+
+
+## Private subject collector startup observations
+
+The [private archive controller](run-qualification.py) also selects exactly
+`failure-cli/subject-collector-startup.json` and
+`failure-host/subject-collector-startup.json`. Each optional record is at most
+64 KiB, root-owned, regular, single-link and mode `0600`, under its root `0700`
+failure directory. The existing no-follow and file identity checks apply.
+The cumulative 3 MiB payload, 4 MiB canonical USTAR archive and five-second
+collection budget are unchanged. A 65,537-byte record is omitted with an
+`oversize` index entry; links and public modes reject retention. Unknown names
+cannot select additional records. Archive controls use caller-owned temporary
+files through the existing data-only ownership seam and establish no root origin.
+
+The private numeric sampler is bounded to five seconds of active observation,
+at most 16 samples and at most 16 PIDs in fixed closed roles. Numeric counters
+are observations; an unavailable or failed read is `null`/unknown, never an
+inferred zero. A missing record means unavailable diagnostics. Neither a sample,
+a role nor a filename authenticates a process or proves successful collection.
+The archive preserves opaque bytes and does not interpret them as admission,
+readiness, owned exit, accepted proof, coverage or qualification authority.
+
+[Data controls](test_diagnostics.py) define exact-limit retention for both entry
+names and oversize, symlink, hardlink and public-mode rejection or omission.
+These two added methods are source preparation only and have not been executed.
+The original qualification failure remains authoritative when sampling or archive
+retention is unavailable or fails; raw contents and canaries are not echoed.

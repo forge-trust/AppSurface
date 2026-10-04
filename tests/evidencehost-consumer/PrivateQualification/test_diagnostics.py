@@ -162,6 +162,62 @@ class DiagnosticDataControls(unittest.TestCase):
                 self.reject_without_archive(workspace, output, OSError if shape == "symlink" else module.PreparationFailure)
                 self.assertEqual(b"outside-journal-canary", outside.read_bytes())
 
+    def test_subject_collector_startup_exact_64k_is_private_complete_and_indexed(self):
+        for entry in ("cli", "host"):
+            with self.subTest(entry=entry):
+                workspace, output = self.roots()
+                name = f"failure-{entry}/subject-collector-startup.json"
+                data = b'{"numeric":null}' + b" " * (64*1024 - len(b'{"numeric":null}'))
+                path = self.write(workspace, name, data)
+                info = path.stat()
+                self.assertTrue(stat.S_ISREG(info.st_mode))
+                self.assertEqual((os.geteuid(), 0o600, 1),
+                                 (info.st_uid, stat.S_IMODE(info.st_mode), info.st_nlink))
+                self.assertEqual(0o700, stat.S_IMODE(path.parent.stat().st_mode))
+                console = io.StringIO()
+                with redirect_stdout(console), redirect_stderr(console):
+                    digest = self.retain(workspace, output)
+                raw, contents, index = self.archive(output)
+                self.assertEqual("", console.getvalue())
+                self.assertEqual({"index.json", name}, set(contents))
+                self.assertEqual(data, contents[name])
+                self.assertEqual(hashlib.sha256(raw).hexdigest(), digest)
+                self.assertEqual([{"name": name, "state": "complete", "length": 64*1024,
+                                   "retained_length": 64*1024,
+                                   "retained_sha256": hashlib.sha256(data).hexdigest()}], index)
+                self.assertEqual(data, path.read_bytes())
+
+    def test_subject_collector_startup_oversize_links_and_public_mode_cannot_upgrade_archive(self):
+        for entry in ("cli", "host"):
+            for shape in ("oversize", "symlink", "hardlink", "public-mode"):
+                with self.subTest(entry=entry, shape=shape):
+                    workspace, output = self.roots()
+                    name = f"failure-{entry}/subject-collector-startup.json"
+                    canary = b"startup-private-canary"
+                    outside = self.write(workspace, "outside-startup", canary)
+                    path = self.write(workspace, name, canary)
+                    if shape == "oversize":
+                        path.write_bytes(canary + b"x" * (65537 - len(canary)))
+                        console = io.StringIO()
+                        with redirect_stdout(console), redirect_stderr(console):
+                            self.retain(workspace, output)
+                        raw, contents, index = self.archive(output)
+                        self.assertEqual("", console.getvalue())
+                        self.assertEqual({"index.json"}, set(contents))
+                        self.assertEqual([{"name": name, "state": "oversize", "length": 65537}], index)
+                        self.assertNotIn(canary, raw)
+                        self.assertEqual(65537, path.stat().st_size)
+                    else:
+                        if shape == "public-mode":
+                            path.chmod(0o644)
+                        else:
+                            path.unlink()
+                            if shape == "symlink": path.symlink_to(outside)
+                            else: os.link(outside, path)
+                        self.reject_without_archive(workspace, output,
+                            OSError if shape == "symlink" else module.PreparationFailure)
+                    self.assertEqual(canary, outside.read_bytes())
+
     def test_selected_links_modes_and_wrong_owner_reject_before_archive(self):
         for shape in ("symlink", "hardlink", "file-mode", "directory-mode", "directory-link", "wrong-owner"):
             with self.subTest(shape=shape):
