@@ -102,6 +102,13 @@ _application = importlib.util.module_from_spec(_application_spec)
 sys.modules[_application_spec.name] = _application
 _application_spec.loader.exec_module(_application)
 
+# Private diagnostic reader: one adjacent root-selected module, no search fallback.
+_vstest_spec = importlib.util.spec_from_file_location(
+    "evidencehost_private_vstest_diagnostics", Path(__file__).with_name("evidencehost_private_vstest_diagnostics.py"))
+_vstest = importlib.util.module_from_spec(_vstest_spec)
+sys.modules[_vstest_spec.name] = _vstest
+_vstest_spec.loader.exec_module(_vstest)
+
 SCHEMA = "evidence-worker-linux-v1"
 APPLICATION_SCHEMA = "evidence-worker-linux-v2"
 FAILURE_DIAGNOSTIC_SCHEMA = "evidence-launcher-failure-v1"
@@ -2603,6 +2610,94 @@ def _completion_after_owned_exit(broker: Broker, output: Path, worker_name: str,
         _close_descriptors((output_fd, parent_fd))
 
 
+def _vstest_failure_checkpoint(broker, owned_exit_confirmed):
+    """Snapshot only root-broker registered result tokens after confirmed idle exit.
+
+    Caller holds the condition. This private diagnostic snapshot is not admission,
+    collection, readiness or completion authority; no pathname is discovered.
+    """
+    if (owned_exit_confirmed is not True
+            or any(value is not True for value in (broker.ready_seen, broker.wait_completed,
+                                                   broker.exited, broker.work_closed))
+            or any(type(value) is not int or value != 0 for value in (
+                broker.active_handlers, broker.active_runs, broker.active_artifact_operations,
+                broker.active_application_operations))
+            or broker.subject_output_failed is not False or broker.application_work_failed is not False
+            or broker.output_quota.exceeded.is_set()
+            or type(broker.allowed_results_roots) is not set or len(broker.allowed_results_roots) != 1):
+        return None
+    tokens = tuple(broker.allowed_results_roots)
+    if type(tokens[0]) is not str or not tokens[0]:
+        return None
+    return tokens, broker.subject_uid, broker.results_gid
+
+
+def _retain_vstest_failure_input(broker, directory_fd, owned_exit_confirmed):
+    """Root-only duplicate before resource close; caller owns every returned FD."""
+    retained = -1
+    try:
+        if (os.geteuid() != 0 or type(broker) is not Broker
+                or type(directory_fd) is not int or directory_fd < 0):
+            return None
+        deadline = time.monotonic() + 5
+        with broker.condition:
+            snapshot = _vstest_failure_checkpoint(broker, owned_exit_confirmed)
+        if (snapshot is None or not broker._group_empty(broker.descriptor['cgroup'])
+                or not broker._all_owned_work_stopped(inspection_deadline=deadline)):
+            return None
+        with broker.condition:
+            if (_vstest_failure_checkpoint(broker, owned_exit_confirmed) != snapshot
+                    or type(broker.test_output_fd) is not int or broker.test_output_fd < 0
+                    or time.monotonic() >= deadline):
+                return None
+            retained = os.dup(broker.test_output_fd)
+        return retained, snapshot, deadline
+    except BaseException:
+        if retained >= 0:
+            try: os.close(retained)
+            except BaseException: pass
+        return None
+
+
+def _capture_retained_vstest_failure(broker, directory_fd, owned_exit_confirmed, retained):
+    """Best-effort data capture only after successful launch-resource closure."""
+    try:
+        fd, snapshot, deadline = retained
+        if os.geteuid() != 0 or time.monotonic() >= deadline:
+            return False
+        with broker.condition:
+            if _vstest_failure_checkpoint(broker, owned_exit_confirmed) != snapshot:
+                return False
+        if (not broker._group_empty(broker.descriptor['cgroup'])
+                or not broker._all_owned_work_stopped(inspection_deadline=deadline)
+                or time.monotonic() >= deadline):
+            return False
+        tokens, subject_uid, results_gid = snapshot
+        return _vstest.capture_traces(fd, tokens, directory_fd, subject_uid, results_gid,
+                                     deadline=deadline) is True
+    except BaseException:
+        return False
+
+
+def _close_failed_launch_resources(listener, handlers, broker, test_output_fd,
+                                   directory_fd, owned_exit_confirmed, original_error):
+    """Keep resource closure authoritative and close diagnostic duplicates always."""
+    retained = None
+    try:
+        if original_error is not None:
+            retained = _retain_vstest_failure_input(broker, directory_fd, owned_exit_confirmed)
+        _close_launch_resources(listener, handlers, broker, test_output_fd)
+        if original_error is not None and broker is not None:
+            capture_subject_failure_prefixes(broker, directory_fd, owned_exit_confirmed)
+            if retained is not None:
+                _capture_retained_vstest_failure(broker, directory_fd, owned_exit_confirmed, retained)
+    finally:
+        if retained is not None:
+            try: os.close(retained[0])
+            except BaseException:
+                if original_error is None: raise
+
+
 def _close_launch_resources(listener, handlers, broker, test_output_fd: int) -> None:
     """Finish launcher-owned channels before retained completion ownership can transfer."""
     if listener is not None:
@@ -2708,6 +2803,7 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
     listener: socket.socket | None = None
     broker: Broker | None = None
     test_output_fd = -1
+    owned_exit_confirmed = False
     handlers: list[threading.Thread] = []
     completion: _LaunchCompletion | None = None
     application_workspace = None
@@ -2868,9 +2964,8 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
                 if units:
                     subprocess.run(["systemctl", "stop", *reversed(units)], capture_output=True, env=ENV,
                                    timeout=5, check=False)
-                _close_launch_resources(listener, handlers, broker, test_output_fd)
-                if original_error is not None and broker is not None:
-                    capture_subject_failure_prefixes(broker, diagnostic_directory_fd, owned_exit_confirmed)
+                _close_failed_launch_resources(listener, handlers, broker, test_output_fd,
+                                               diagnostic_directory_fd, owned_exit_confirmed, original_error)
             except BaseException:
                 if original_error is None:
                     raise

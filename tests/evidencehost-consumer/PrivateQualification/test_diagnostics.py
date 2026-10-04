@@ -341,6 +341,7 @@ class StartupArchiveControls(unittest.TestCase):
     write = DiagnosticDataControls.write
     retain = DiagnosticDataControls.retain
     archive = DiagnosticDataControls.archive
+    reject_without_archive = DiagnosticDataControls.reject_without_archive
     def test_startup_v2_private_bytes_preserved_for_both_entries_with_fixed_file_bound(self):
         for entry in ("cli", "host"):
             with self.subTest(entry=entry):
@@ -357,6 +358,65 @@ class StartupArchiveControls(unittest.TestCase):
                 workspace, output = self.roots(); self.write(workspace, name, b"x"*4097)
                 self.retain(workspace, output); _, contents, index = self.archive(output)
                 self.assertEqual({"index.json"}, set(contents)); self.assertEqual("oversize", index[0]["state"])
+
+
+    def test_vstest_fixed_four_binary_private_files_for_each_entry_are_retained_exactly(self):
+        workspace, output = self.roots()
+        expected = {}
+        for entry in ("cli", "host"):
+            for name in ("runner.log", "collector.log", "host.log", "index.json"):
+                relative = f"failure-{entry}/vstest-diagnostics/{name}"
+                expected[relative] = b"\x00\xffsynthetic-private-trace" if name != "index.json" else b"{}"
+                self.write(workspace, relative, expected[relative])
+            self.write(workspace, f"failure-{entry}/vstest-diagnostics/unknown.log", b"unknown-canary")
+        console = io.StringIO()
+        with redirect_stdout(console), redirect_stderr(console): digest = self.retain(workspace, output)
+        raw, contents, index = self.archive(output)
+        self.assertEqual("", console.getvalue())
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), digest)
+        self.assertEqual(set(expected) | {"index.json"}, set(contents))
+        self.assertNotIn(b"unknown-canary", raw)
+        self.assertEqual(set(expected), {item["name"] for item in index})
+        for name, data in expected.items(): self.assertEqual(data, contents[name])
+
+    def test_vstest_log_and_index_bounds_preserve_valid_neighbors_without_tail(self):
+        workspace, output = self.roots()
+        expected = {}
+        oversize = {}
+        for name, maximum in (("runner.log", 128*1024), ("collector.log", 128*1024),
+                              ("host.log", 128*1024), ("index.json", 4096)):
+            accepted = f"failure-cli/vstest-diagnostics/{name}"
+            rejected = f"failure-host/vstest-diagnostics/{name}"
+            expected[accepted] = b"x" * maximum
+            oversize[rejected] = maximum + 1
+            self.write(workspace, accepted, expected[accepted])
+            self.write(workspace, rejected, b"x" * (maximum + 1))
+        self.retain(workspace, output)
+        _, contents, index = self.archive(output)
+        self.assertEqual(set(expected) | {"index.json"}, set(contents))
+        for name, data in expected.items(): self.assertEqual(data, contents[name])
+        rows = {item["name"]: item for item in index}
+        for name, length in oversize.items():
+            self.assertEqual({"name": name, "state": "oversize", "length": length}, rows[name])
+
+    def test_vstest_selected_file_links_public_modes_and_directory_links_reject(self):
+        for shape in ("symlink", "hardlink", "public-mode", "directory-link"):
+            with self.subTest(shape=shape):
+                workspace, output = self.roots()
+                selected = self.write(workspace, "failure-cli/vstest-diagnostics/runner.log", b"private-canary")
+                outside = workspace / "outside"
+                outside.write_bytes(b"outside-canary")
+                outside.chmod(0o600)
+                if shape == "symlink":
+                    selected.unlink(); selected.symlink_to(outside)
+                elif shape == "hardlink":
+                    selected.unlink(); os.link(outside, selected)
+                elif shape == "public-mode": selected.chmod(0o644)
+                else:
+                    selected.unlink(); selected.parent.rmdir()
+                    selected.parent.symlink_to(workspace)
+                self.reject_without_archive(workspace, output, OSError if shape in ("symlink", "directory-link") else module.PreparationFailure)
+                self.assertEqual(b"outside-canary", outside.read_bytes())
 
 
 if __name__ == "__main__":

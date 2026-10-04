@@ -44,6 +44,10 @@ jobs:
           cd "$RUNNER_TEMP/issue779-private-qualification-source"
           timeout --signal=TERM --kill-after=5s 60s python3 -B -m unittest discover \
             -s tests/evidencehost-consumer/PrivateQualification -p 'test_*.py' -v
+          timeout --signal=TERM --kill-after=5s 45s python3 -B \
+            tests/evidencehost-consumer/test_private_vstest_diagnostics.py -v
+          timeout --signal=TERM --kill-after=5s 30s python3 -B \
+            tests/evidencehost-consumer/test_linux_launcher.py PrivateVstestDiagnosticOrchestrationControls -v
       - name: Execute one compiled qualification variant through both actual entries
         shell: bash
         run: |

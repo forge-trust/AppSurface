@@ -161,6 +161,9 @@ def retain_diagnostics(workspace, output, *, expected_owner_uid=0):
         selected.extend((f"failure-{entry}/"+name, maximum, False) for name, maximum in (
             ("launcher-failure.json", 4096), ("launcher-owned-exit.json", 4096), ("launcher-worker-journal.log", 16*1024),
             ("subject-failure-output/stdout.prefix", 519168), ("subject-failure-output/stderr.prefix", 519168)))
+        selected.extend((f"failure-{entry}/vstest-diagnostics/"+name, maximum, False)
+                        for name, maximum in (("runner.log", 128*1024), ("collector.log", 128*1024),
+                                              ("host.log", 128*1024), ("index.json", 4096)))
         names = ("evidence-plan.json", "evidence-manifest.json", "evidence-summary.json") if entry == "cli" else ("manifest.json",)
         selected.extend((f"collected-{entry}/"+name, 128*1024, False) for name in (*names, PRODUCER+"/merged/coverage.cobertura.xml"))
         selected.extend(((f"collected-{entry}/build-01.log", 16*1024, True),

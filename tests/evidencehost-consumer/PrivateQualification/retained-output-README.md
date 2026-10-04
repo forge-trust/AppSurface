@@ -225,3 +225,49 @@ negative wait ACK and no new successful-worker I/O. `StartupArchiveControls` cov
 both fixed entry names, exact opaque v2 bytes, the unchanged archive index and cap.
 All earlier controls remain intact. These new controls are defined but unexecuted
 at this fork's source-ready; no native or qualification result is inferred.
+
+
+## Private failed-launch VSTest trace retention
+
+The [private launcher](../../../scripts/evidencehost-linux-launcher.py) loads only
+its adjacent fixed `evidencehost_private_vstest_diagnostics.py` reader. The reader
+must be included in the same frozen source and reviewed before this wiring can
+be executed; this source-preparation fork does not supply or substitute it.
+
+After actual broker stop and confirmed owned wait, the launcher requires the
+locked `ready_seen`, `wait_completed`, `exited` and `work_closed` checkpoints,
+zero handler/run/artifact/application operation counts, no output/quota failure,
+and empty worker/subject/application groups. Exactly one result token must already
+be registered by the broker. It duplicates the retained test-output parent FD
+under the broker lock and root guard; caller paths and directory discovery cannot
+select an input. Resource close still joins handlers and closes broker artifact
+and original test-output handles. Only a successful close followed by the same
+checkpoint/group checks permits the private reader to run. The duplicate closes
+in `finally`, including close, inspection and capture failures. The diagnostic
+FD is borrowed and stays owned by the controller. No capture exception or Boolean
+can replace the original launch failure, acknowledge exit, complete collection,
+change quarantine or grant a lease.
+
+The root-selected VSTest `--diag` path is a controlled **sibling** of the recorded
+results directory: `TestOutputRoot/(resultsToken+'-qualification-vstest.log')`.
+The reader pins the recorded result directory and derives its fixed sibling names
+from that token through the retained parent FD. Traces do not enter the selected
+Cobertura directory; the producer still requires every selected artifact to be
+Cobertura, without filtering or a gate change.
+
+The [private archive controller](run-qualification.py) adds only these names for
+each of `failure-cli` and `failure-host`: `vstest-diagnostics/runner.log`,
+`collector.log`, `host.log` (each at most 128 KiB), and `index.json` (at most
+4096 bytes). The directory is root `0700`; each file is root `0600`, regular and
+single-link. Existing no-follow, retained/named identity, five-second archive,
+3 MiB payload, 4 MiB canonical USTAR and private index checks remain unchanged.
+Unknown files are ignored; oversized complete traces are unavailable rather than
+silently tailed. Raw binary traces stay private and are never echoed publicly.
+
+New [launcher procedure controls](../test_linux_launcher.py) exercise real FDs,
+locked duplication, close-before-capture ordering, rejection counters, duplicate
+closure and first-failure preservation with mocked root/group/reader observations.
+New [archive controls](test_diagnostics.py) cover both entries, exact binary bytes,
+limits, unknown names, links and private modes. All new controls are **defined but
+unexecuted** at this source-ready checkpoint. They prove no actual root, kernel
+owned exit, SDK, native compatibility, admission, qualification or coverage result.
