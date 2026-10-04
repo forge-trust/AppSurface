@@ -39,7 +39,7 @@ jobs:
           mkdir -p "$task_root"
           cp .github/issue779-native-validation/* "$task_root/"
           git clone --quiet --no-hardlinks "$GITHUB_WORKSPACE" "$task_root/repo"
-          git -C "$task_root/repo" checkout --quiet --detach 4a1aadd9b1843bcfebea42320c37e9b86c89b5f5
+          git -C "$task_root/repo" checkout --quiet --detach 07b101085636239685bc1c2c17f7e086019bf098
           git -C "$task_root/repo" remote set-url origin https://github.com/forge-trust/AppSurface.git
           git -C "$task_root/repo" update-ref refs/remotes/origin/main 416b30919e6c4d03b634d9d3fe558884b02f0b91
           python3 "$task_root/verify-snapshot.py"
