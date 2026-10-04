@@ -51,7 +51,7 @@ Provider I/O never occurs while a database transaction or connection is held.
 | Cancel | Short scoped transaction; canonical lock order | Fingerprint and current state | Before permit terminalizes canceled-before-effect; after permit records intent and follows safety. |
 | Disable scope | One scoped transaction; canonical lock order | Active generation and actor/reason | Permanent tombstone and atomic suspension of nonterminal Work. |
 | Recover expired permits | Payload-free discovery then scoped candidate transaction | Every expired permit and exact Work fence | Safe classes may reclaim; unsafe classes suspend without repeating effects. |
-| Reconcile/resolve/release | Short scoped transaction; canonical lock order | Host authorization, command fingerprint, state/evidence/audit | Applies only the safety transition supported by evidence and appends history; recovery release moves exact current ambiguous evidence with the authorized epoch, safely releases when the current attempt has none, and rolls back if an expected exact move fails. |
+| Reconcile/resolve/release | Short scoped transaction; canonical lock order | Host authorization, command fingerprint, state/evidence/audit | Applies only the safety transition supported by evidence and appends history; recovery release moves exact ambiguous evidence with the authorized epoch and rolls back if an expected exact move fails. Legacy Work selects its current attempt; opted-in Work selects the most recent unresolved admitted permit, including an earlier attempt. Recovery releases with no uncertain effect retain ordinary timing checks. |
 
 ## Acceptance identity matrix
 

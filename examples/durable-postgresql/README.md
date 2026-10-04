@@ -1,6 +1,6 @@
 # Durable PostgreSQL local tutorial
 
-The [schema-11 heartbeat retention guide](../../Durable/heartbeat-retention-operations.md) explains the feature's default settings and production rollout. The one-command proof below also verifies a single bounded stale-row cleanup, current-row survival, and healthy Work execution.
+The [historical schema-11 heartbeat retention guide](../../Durable/heartbeat-retention-operations.md) preserves that rollout's defaults and preflight. The one-command proof below verifies a single bounded stale-row cleanup, current-row survival, and healthy Work execution on the current schema.
 
 For the canonical choice between legacy backoff, an absolute execution deadline, and deterministic acceptance-relative attempt plans, start with the [Durable execution-policy guide](../../Durable/execution-policies-v1.md).
 
@@ -33,7 +33,7 @@ bash examples/durable-postgresql/run-local-proof.sh
 The script checks .NET 10 and Docker, asks Docker to atomically allocate a free loopback port, starts the pinned
 PostgreSQL 16.5 image with local container-only trust authentication, creates the migration owner, retention operator,
 and two restricted dispatcher/runtime pairs, builds with one MSBuild node and shared compilation disabled, explicitly
-runs schema 11 migrations, reconciles the forwarding pair, performs its single-pair structural preflight, enrolls the
+runs schema 12 migrations, reconciles the forwarding pair, performs its single-pair structural preflight, enrolls the
 complete two-pair manifest, verifies an identical rerun and omitted-pair refusal, and
 runs both example commands. It waits for the final server's TCP listener before creating roles; the image's temporary
 initialization server accepts Unix-socket connections and then shuts down. Set `APPSURFACE_DURABLE_LOCAL_PORT` only
@@ -312,7 +312,7 @@ the temporary passfile, never a password; `--connection-env` names a variable an
 export APPSURFACE_DURABLE_MIGRATION_CONNECTION="Host=127.0.0.1;Port=$APPSURFACE_DURABLE_LOCAL_PORT;Database=appsurface_durable_example;Username=appsurface_durable_owner;Passfile=$APPSURFACE_DURABLE_PASSFILE"
   dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
   durable schema apply --connection-env APPSURFACE_DURABLE_MIGRATION_CONNECTION --apply
-# Expected: Durable schema: 0 -> 11; applied: 0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0010, 0011.
+# Expected: Durable schema: 0 -> 12; applied: 0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0010, 0011, 0012.
 ```
 
 Apply the reviewed role recipe after migrations with the disposable container's bootstrap administrator. The local

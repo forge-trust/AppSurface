@@ -224,7 +224,8 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
             var snapshot = await ReadSnapshotAsync(
                 connection, transaction, request.ScopeId, request.WorkId, cancellationToken).ConfigureAwait(false);
             if (snapshot is null || snapshot.Revision != started.Revision
-                || snapshot.State != "suspended_reconciliation_required")
+                || snapshot.State != "suspended_reconciliation_required"
+                || snapshot.SelectedPermit != started.SelectedPermit)
             {
                 await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
                 return Failure(request.CommandId, DurableProblemCodes.WorkRevisionConflict,
@@ -438,7 +439,8 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
         CancellationToken cancellationToken)
     {
         var executionDecision = snapshot.Execution is { } execution
-            ? PostgreSqlExecutionOperatorDecision.Evaluate(execution, transition.State, transition.PermitProof) : null;
+            ? PostgreSqlExecutionOperatorDecision.Evaluate(execution, transition.State, transition.PermitProof,
+                execution.UnresolvedPermitCount > (snapshot.SelectedPermit is null ? 0 : 1)) : null;
         if (executionDecision is { } decision)
             transition = transition with
             {
@@ -503,10 +505,12 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
             WHERE (@permit_status IS NOT NULL OR @move_permit_epoch)
               AND permit.scope_id = updated_dispatch.scope_id
               AND permit.work_id = updated_dispatch.aggregate_id
-              AND permit.attempt_number = @attempt_number
-              AND permit.lease_generation = @lease_generation
-              AND permit.scope_generation = @scope_generation
-              AND permit.runtime_epoch = @work_epoch
+              AND permit.attempt_number = @permit_attempt_number
+              AND permit.lease_generation = @permit_lease_generation
+              AND permit.scope_generation = @permit_scope_generation
+              AND permit.runtime_epoch = @permit_epoch
+              AND (@execution_now IS NULL OR
+                   (permit.permit_id = @selected_permit_id AND permit.invocation_admitted_at IS NOT NULL))
               AND permit.status IN ('granted', 'ambiguous')
             RETURNING permit.scope_id, permit.work_id
             ), inserted_history AS
@@ -518,7 +522,9 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
                 @scope_id, @work_id, @revision, @event_type, @command_id, @actor_id, @reason_code,
                  @attempt_number, @lease_generation, @scope_generation,
                  CASE WHEN @replace_epoch THEN @runtime_epoch ELSE @work_epoch END,
-                 jsonb_strip_nulls(jsonb_build_object('resulting_state', @state, 'resolution_kind', @resolution_kind, 'code', @execution_code, 'timing_reason', @execution_reason)), COALESCE(@execution_now, pg_catalog.clock_timestamp())
+                 jsonb_strip_nulls(jsonb_build_object('resulting_state', @state, 'resolution_kind', @resolution_kind, 'code', @execution_code, 'timing_reason', @execution_reason,
+                     'proof_permit_id', @history_proof_permit_id, 'proof_attempt_number', @history_proof_attempt,
+                     'moved_permit_id', @history_moved_permit_id, 'moved_attempt_number', @history_moved_attempt)), COALESCE(@execution_now, pg_catalog.clock_timestamp())
             FROM updated_dispatch
             WHERE @permit_status IS NULL OR (SELECT count(*) FROM updated_permit) = 1
             RETURNING scope_id, work_id
@@ -560,6 +566,21 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
         sql.Parameters.AddWithValue("attempt_number", snapshot.AttemptNumber);
         sql.Parameters.AddWithValue("lease_generation", snapshot.LeaseGeneration);
         sql.Parameters.AddWithValue("scope_generation", snapshot.ScopeGeneration);
+        var selectedPermit = snapshot.SelectedPermit;
+        sql.Parameters.AddWithValue("permit_attempt_number", selectedPermit?.AttemptNumber ?? snapshot.AttemptNumber);
+        sql.Parameters.AddWithValue("permit_lease_generation", selectedPermit?.LeaseGeneration ?? snapshot.LeaseGeneration);
+        sql.Parameters.AddWithValue("permit_scope_generation", selectedPermit?.ScopeGeneration ?? snapshot.ScopeGeneration);
+        sql.Parameters.AddWithValue("permit_epoch", selectedPermit?.RuntimeEpoch ?? snapshot.RuntimeEpoch);
+        sql.Parameters.Add(new NpgsqlParameter("selected_permit_id", NpgsqlDbType.Uuid)
+        { Value = selectedPermit?.PermitId ?? (object)DBNull.Value });
+        sql.Parameters.Add(new NpgsqlParameter("history_proof_permit_id", NpgsqlDbType.Uuid)
+        { Value = transition.PermitProof is not null && selectedPermit is not null ? selectedPermit.PermitId : DBNull.Value });
+        sql.Parameters.Add(new NpgsqlParameter("history_proof_attempt", NpgsqlDbType.Integer)
+        { Value = transition.PermitProof is not null && selectedPermit is not null ? selectedPermit.AttemptNumber : DBNull.Value });
+        sql.Parameters.Add(new NpgsqlParameter("history_moved_permit_id", NpgsqlDbType.Uuid)
+        { Value = transition.MovePermitEpoch && selectedPermit is not null ? selectedPermit.PermitId : DBNull.Value });
+        sql.Parameters.Add(new NpgsqlParameter("history_moved_attempt", NpgsqlDbType.Integer)
+        { Value = transition.MovePermitEpoch && selectedPermit is not null ? selectedPermit.AttemptNumber : DBNull.Value });
         sql.Parameters.AddWithValue("command_id", command.CommandId.Value);
         sql.Parameters.Add(new NpgsqlParameter("resolution_kind", NpgsqlDbType.Text)
         {
@@ -689,7 +710,8 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
         {
             Execution = execution,
             HasAmbiguousPermit = execution.HasUncertainEffect,
-            HasExactAmbiguousPermit = execution.InvocationAdmittedAtUtc is not null && execution.PermitStatus is ("granted" or "ambiguous"),
+            HasExactAmbiguousPermit = execution.UnresolvedPermit is not null,
+            SelectedPermit = execution.UnresolvedPermit,
         };
 
         return snapshot;
@@ -1006,9 +1028,14 @@ internal sealed class PostgreSqlDurableWorkOperatorClient : IDurableWorkOperator
     {
         internal PostgreSqlWorkExecutionRow? Execution { get; init; }
 
+        /// <summary>Latest unresolved admitted permit selected under the Work lock for exact authorized proof.</summary>
+        /// <remarks>May refer to an earlier attempt. Work projections retain their current identity; legacy rows keep null.</remarks>
+        internal PostgreSqlExecutionPermitIdentity? SelectedPermit { get; init; }
+
         internal DurableClaimedWork ToProviderClaim(DurableEncodedPayload payload) => Execution is { } execution
             ? DurableClaimedWork.CreateWithExecution(ScopeId, WorkId, ActivityId, WorkName, WorkVersion, payload,
-                ProviderSafety, AttemptNumber, LeaseGeneration, ScopeGeneration, RuntimeEpoch.ToString("D"), execution.ExecutionSnapshot)
+                ProviderSafety, SelectedPermit?.AttemptNumber ?? AttemptNumber, SelectedPermit?.LeaseGeneration ?? LeaseGeneration,
+                SelectedPermit?.ScopeGeneration ?? ScopeGeneration, (SelectedPermit?.RuntimeEpoch ?? RuntimeEpoch).ToString("D"), execution.ExecutionSnapshot)
             : new(
             ScopeId,
             WorkId,

@@ -130,7 +130,8 @@ expose SQL, exception text, credentials, role names, payload identifiers, scope 
 For the #794 provider release, drain and stop every durable worker and Schedule writer, keep pre-`0009` workers
 stopped, generate and review the exact script, and verify that the configured migration owner owns the schema-9
 `runtime_due_dispatch_health(integer)` function. Repair owner drift with the #794 release's matching role recipe
-before migration if needed; do not use a current package recipe before migration 0011. Then apply migration
+before migration if needed; do not use the current package recipe before migration 0012 because it requires schema 12.
+For a schema-9 historical proof, use the matching historical recipe; apply migration
 `0010_runtime_health_observation` from schema 9 to 10 with that owner through the generated script or explicit CLI
 apply command, rerun the #794 release's matching role recipe
 for post-migration reconciliation, run status and preflight, smoke-test `v0.2.0-preview.8`, and deploy the new binary.
@@ -431,11 +432,13 @@ Use a separate store or a separately designed PostgreSQL partition when independ
 separate failure domain is required. The three operational choices and their costs are summarized in the
 [adoption guide](../operational-assessments.md#shared-store-role-pair-choice).
 
-With schema 11, the recipe grants heartbeat pruning to every manifest runtime and no dispatcher. Preflight consumes
-that complete reviewed set and checks every runtime, policy target, and function grantee; omission or an unexpected
-target fails closed. The [local walkthrough](../../examples/durable-postgresql/README.md#complete-manifest-preflight-walkthrough)
-illustrates one-pair and two-pair commands using disposable role names. Local source proof is not exact candidate or
-public package proof. Keep activation closed until the [four-stage evidence checklist](../heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist)
+The historical schema-11 recipe grants heartbeat pruning to every manifest runtime and no dispatcher. The current
+recipe also requires schema 12 for execution-policy functions; apply migration `0012` before using it, and use the
+matching historical package recipe when reconciling an older schema. Preflight consumes the complete reviewed set and
+checks every runtime, policy target, and function grantee; omission or an unexpected target fails closed. The
+[local walkthrough](../../examples/durable-postgresql/README.md#complete-manifest-preflight-walkthrough) illustrates
+one-pair and two-pair commands using disposable role names. Local source proof is not exact candidate or public package
+proof. Keep activation closed until the [four-stage evidence checklist](../heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist)
 is satisfied by actual matching artifacts and the deployment's continuous guard.
 
 Omitting an installed pair is an error, never retirement. The recipe preserves healthy policy OIDs, targets,

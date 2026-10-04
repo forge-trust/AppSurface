@@ -25,6 +25,12 @@ internal sealed record PostgreSqlWorkExecutionRow(
     /// <summary>Unresolved admitted effects from earlier attempts cannot be cleared by a current no-effect proof.</summary>
     internal bool HasUncertainPriorEffect { get; init; }
 
+    /// <summary>The latest unresolved admitted permit, kept separate from the current Work attempt.</summary>
+    internal PostgreSqlExecutionPermitIdentity? UnresolvedPermit { get; init; }
+
+    /// <summary>The number of admitted permits whose external effects remain unresolved under the Work lock.</summary>
+    internal int UnresolvedPermitCount { get; init; }
+
     /// <summary>Descriptive persisted timing facts for inspection; no authorization is conveyed.</summary>
     internal DurableWorkExecutionSnapshot ExecutionSnapshot => new(Policy, Deadline, AcceptedAtUtc,
         Policy.AttemptPlan is { } plan && AttemptNumber >= plan.ElapsedOffsets.Count ? null : NextEligibilityUtc, CutoffUtc);
@@ -62,6 +68,15 @@ internal sealed record PostgreSqlWorkExecutionRow(
         && string.Equals(LeaseOwner, claim.LeaseOwner, StringComparison.Ordinal);
 
 }
+
+/// <summary>Exact locked identity of an admitted permit selected for authorized proof, never invocation.</summary>
+/// <param name="PermitId">Persisted permit UUID for this exact admitted invocation.</param>
+/// <param name="AttemptNumber">Original consumed attempt number.</param>
+/// <param name="LeaseGeneration">Original claim lease generation.</param>
+/// <param name="ScopeGeneration">Scope generation captured by the permit.</param>
+/// <param name="RuntimeEpoch">Epoch recorded on the selected permit, including prior recovery epochs.</param>
+internal sealed record PostgreSqlExecutionPermitIdentity(Guid PermitId, int AttemptNumber, long LeaseGeneration,
+    long ScopeGeneration, Guid RuntimeEpoch);
 
 /// <summary>Post-lock clock and persistence helpers shared by the opted-in store and audited operator protocol.</summary>
 internal partial class PostgreSqlDurableWorkStore
@@ -161,7 +176,14 @@ internal partial class PostgreSqlDurableWorkStore
                 var current = reader.GetInt32(1) == row.AttemptNumber && reader.GetInt64(2) == row.LeaseGeneration
                     && reader.GetInt64(3) == row.ScopeGeneration && reader.GetGuid(4) == row.RuntimeEpoch;
                 if (admitted is not null && status is ("granted" or "ambiguous"))
-                    row = row with { HasUncertainEffect = true, HasUncertainPriorEffect = row.HasUncertainPriorEffect || !current };
+                    row = row with
+                    {
+                        HasUncertainEffect = true,
+                        HasUncertainPriorEffect = row.HasUncertainPriorEffect || !current,
+                        UnresolvedPermit = new(reader.GetGuid(0), reader.GetInt32(1), reader.GetInt64(2),
+                            reader.GetInt64(3), reader.GetGuid(4)),
+                        UnresolvedPermitCount = row.UnresolvedPermitCount + 1,
+                    };
                 if (current)
                     row = row with { PermitId = reader.GetGuid(0), InvocationAdmittedAtUtc = admitted, PermitStatus = status };
             }

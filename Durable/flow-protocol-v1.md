@@ -55,8 +55,8 @@ Schema management and epoch rotation take the same exclusive session advisory lo
 
 | Operation | Transaction and locks | Required validation | Result and durable effects |
 | --- | --- | --- | --- |
-| **Get schema status** | Read-only deployment connection | Migration hashes for the current forward catalog (`0001` through `0011`) | Reports compatibility (compatible, missing, inconsistent, old/new); includes `StoreId` and active epoch. |
-| **Apply migrations** | Migration owner; session advisory lock | Pre/post migration hashes for the current forward catalog, including `0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`, `0007_flow_retention`, `0008_flow_repair`, `0009_work_contract_discovery`, `0010_runtime_health_observation`, and `0011_runtime_heartbeat_retention` | Applies pending known migrations in sequence under lock; fails closed on SHA-256 mismatch. |
+| **Get schema status** | Read-only deployment connection | Migration hashes for the current forward catalog (`0001` through `0012`) | Reports compatibility (compatible, missing, inconsistent, old/new); includes `StoreId` and active epoch. |
+| **Apply migrations** | Migration owner; session advisory lock | Pre/post migration hashes for the current forward catalog, including `0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`, `0007_flow_retention`, `0008_flow_repair`, `0009_work_contract_discovery`, `0010_runtime_health_observation`, `0011_runtime_heartbeat_retention`, and `0012_work_execution_policy` | Applies pending known migrations in sequence under lock; fails closed on SHA-256 mismatch. |
 | **Start Flow** | Client-owned short transaction; scope -> flow_instance -> flow_command -> flow_dispatch -> flow_history | Target, StoreId, active epoch, registry, definition fingerprint, `start_idempotency_key` | Atomically creates `flow_instance` (state `ready`), records `flow_command`, appends `flow_history` event, or returns exact duplicate. |
 | **Deliver External Event** | Scoped transaction; scope -> flow_instance -> flow_command -> flow_wait -> flow_timer -> flow_dispatch -> flow_history | Target, StoreId, active epoch, unique `event_id`, matching active `waiting_event` | Records command, resolves active wait (`event_won`), supersedes timer if scheduled, updates `flow_instance` to `ready`, appends history. Exact re-delivery returns the original duplicate-stable outcome. |
 | **Fire Timer** | Payload-free discovery claim, then scoped transition; scope -> flow_instance -> flow_wait -> flow_timer -> flow_dispatch -> flow_history | StoreId, active epoch, `state = 'scheduled'`, `due_at <= clock_timestamp()` | Updates timer to `fired`, resolves event wait (`timer_won`), updates `flow_instance` to `ready`, appends history. |
@@ -125,8 +125,10 @@ PostgreSQL Flow schema requires applying migrations strictly in order:
 10. `0010_runtime_health_observation.sql`: Corrects due Schedule lease observation, adds the supporting partial index,
     and preserves the schema-9 health-function signature for mixed-version readers.
 11. `0011_runtime_heartbeat_retention.sql`: Adds bounded stale-heartbeat pruning and its supporting index.
+12. `0012_work_execution_policy.sql`: Adds opt-in Work execution-policy facts and raises the compatible reader/writer
+    floor to schema 12. See the [execution-policy reference](execution-policies-v1.md) and [migration checklist](migrations/execution-policies-v1.md).
 
-For current deployments, apply the forward catalog through 0011, then run the complete reviewed version-1 role-pair manifest. The current recipe references a function introduced by 0011 and cannot reconcile an earlier schema. Deployments use the matching released provider package's `contentFiles/any/any/configure-postgresql-roles.sql`; the packaged-consumer gate verifies that file is byte-identical to the canonical [role recipe](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql). See the [provider manifest and grant reference](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#role-recipe-contract) for the required `full`/`work_only` profile on every pair.
+For current deployments, apply the forward catalog through `0012`, then run the complete reviewed version-1 role-pair manifest with the matching released provider package's `contentFiles/any/any/configure-postgresql-roles.sql`. The current recipe requires schema 12 and cannot reconcile an older schema; for an older store, use the role recipe from its matching historical package until the coordinated migration. The packaged-consumer gate verifies that the current file is byte-identical to the canonical [role recipe](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql). See the [provider manifest and grant reference](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#role-recipe-contract) for the required `full`/`work_only` profile on every pair.
 
 ### Rollback posture
 
@@ -185,7 +187,7 @@ Flow operations emit append-only `ASDURxxx` codes. Safe error reporting excludes
 | `ASDUR218` | Repair descriptor upgrade required | The suspension lacks the complete V1 child-effect descriptor digest; upgrade compatible writers and obtain a fresh assessment. |
 | `ASDUR219` | Repair evidence mismatch | Locked Work, wait, result, history, or manual-resolution proof differs from the request; reload the assessment. |
 | `ASDUR220` | Repair action unsupported | The retained state is outside the two-action repair matrix; preserve evidence and use another documented recovery path. |
-| `ASDUR400`-`ASDUR403` | Schema manager errors | Apply every pending forward-only migration through `0011` using migration-owner credentials, then rerun the matching package's role recipe before enabling a worker host. |
+| `ASDUR400`-`ASDUR403` | Schema manager errors | Apply every pending forward-only migration through `0012` using migration-owner credentials, then rerun the matching package's role recipe before enabling a worker host. The current recipe requires schema 12; use a historical package's matching recipe on an older schema. |
 
 See the [diagnostics catalog](../troubleshooting/durable-diagnostics.md) for full error details.
 

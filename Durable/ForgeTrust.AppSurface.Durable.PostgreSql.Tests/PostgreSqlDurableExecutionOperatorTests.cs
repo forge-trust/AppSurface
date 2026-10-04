@@ -86,6 +86,146 @@ public sealed class PostgreSqlDurableExecutionOperatorTests
     }
 
     [Theory]
+    [InlineData(DurableProviderSafety.Idempotent, true)]
+    [InlineData(DurableProviderSafety.Idempotent, false)]
+    [InlineData(DurableProviderSafety.ProviderKeyed, true)]
+    [InlineData(DurableProviderSafety.ProviderKeyed, false)]
+    public async Task PriorAdmittedPermit_RemainsResolvableWhenCurrentAttemptNeverInvokes(DurableProviderSafety safety, bool applied)
+    {
+        await using var lab = await Lab.CreateAsync();
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var operators = new PostgreSqlDurableWorkOperatorClient(lab.Database.DataSource, lab.Registry,
+            services.GetRequiredService<IServiceScopeFactory>(), lab.Epoch);
+        var deadline = Anchor.AddMinutes(10);
+        var first = await lab.AdmitReadyAsync(Request("prior-permit", safety, deadline));
+        Assert.True(await lab.Store.TryAdmitInvocationAsync(first));
+        await lab.Store.RecordCompletionAsync(first.Claim,
+            new(PostgreSqlWorkCompletionKind.AmbiguousExternalOutcome, "unknown", "{}"));
+        var retry = new DurableWorkRetrySafeRequest(first.Claim.ScopeId, first.Claim.WorkId, new("prior-retry"),
+            "authorized-test", "repeat-safe", await lab.ScalarAsync<long>("SELECT revision FROM appsurface_durable.work;"));
+        Assert.True((await operators.RetrySafeAsync(retry)).IsSuccess);
+        await lab.Database.SetExecutionTimeAsync(Anchor.AddMinutes(5));
+        var claim = (await lab.Store.TryClaimAsync(Assert.Single(await lab.Store.DiscoverAsync(1)), "second-worker"))!;
+        var second = (await lab.Store.TryAcquireEffectPermitAsync(claim))!;
+        Assert.Equal(first.ProviderKey, second.ProviderKey);
+        await lab.Database.SetExecutionTimeAsync(deadline);
+        Assert.False(await lab.Store.TryAdmitInvocationAsync(second));
+        Assert.Equal("suspended_ambiguous_external_outcome", await lab.TextAsync("state"));
+        Assert.Equal(1, await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.effect_permit WHERE invocation_admitted_at IS NOT NULL;"));
+        var revision = await lab.ScalarAsync<long>("SELECT revision FROM appsurface_durable.work;");
+        var request = new DurableWorkManualResolutionRequest(first.Claim.ScopeId, first.Claim.WorkId, new("prior-proof"),
+            "authorized-test", "provider-proof", revision,
+            applied ? DurableManualResolutionKind.Applied : DurableManualResolutionKind.ProvenNotApplied,
+            applied ? Result() : null);
+        var resolved = await operators.ResolveAsync(request);
+        Assert.True(resolved.IsSuccess, resolved.Problem?.Problem);
+        Assert.Equal(applied ? DurableWorkState.Succeeded : DurableWorkState.FailedTerminal, resolved.Value!.State);
+        Assert.Equal(applied ? "known_succeeded" : "proven_no_effect",
+            await lab.ScalarAsync<string>("SELECT status FROM appsurface_durable.effect_permit WHERE attempt_number=1;"));
+        Assert.Equal("proven_no_effect", await lab.ScalarAsync<string>("SELECT status FROM appsurface_durable.effect_permit WHERE attempt_number=2;"));
+        Assert.Equal(1, await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.effect_permit WHERE invocation_admitted_at IS NOT NULL;"));
+        Assert.Equal(2, await lab.ScalarAsync<int>("SELECT attempt_number FROM appsurface_durable.work;"));
+        Assert.Equal("terminal", await lab.ScalarAsync<string>("SELECT state FROM appsurface_durable.dispatch;"));
+        Assert.Equal(resolved.Value.Revision, await lab.ScalarAsync<long>("SELECT expected_revision FROM appsurface_durable.dispatch;"));
+        Assert.Empty(await lab.Store.DiscoverAsync(10));
+        Assert.Equal(DurableWorkOperatorOutcome.Duplicate, (await operators.ResolveAsync(request)).Value!.Outcome);
+        Assert.Equal(1, await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.work_history WHERE event_type='operator_manual_resolve';"));
+    }
+
+    [Theory]
+    [InlineData(DurableProviderSafety.Idempotent)]
+    [InlineData(DurableProviderSafety.ProviderKeyed)]
+    public async Task MultiplePriorAdmittedPermits_NotAppliedResolvesOnlyOneUntilAllEffectsAreKnown(DurableProviderSafety safety)
+    {
+        await using var lab = await Lab.CreateAsync();
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var operators = new PostgreSqlDurableWorkOperatorClient(lab.Database.DataSource, lab.Registry,
+            services.GetRequiredService<IServiceScopeFactory>(), lab.Epoch);
+        var deadline = Anchor.AddMinutes(25);
+        var first = await lab.AdmitReadyAsync(Request("multiple-prior", safety, deadline));
+        var permit = first;
+        for (var index = 0; index < 2; index++)
+        {
+            Assert.True(await lab.Store.TryAdmitInvocationAsync(permit));
+            await lab.Store.RecordCompletionAsync(permit.Claim,
+                new(PostgreSqlWorkCompletionKind.AmbiguousExternalOutcome, "unknown", "{}"));
+            var revision = await lab.ScalarAsync<long>("SELECT revision FROM appsurface_durable.work;");
+            Assert.True((await operators.RetrySafeAsync(new(permit.Claim.ScopeId, permit.Claim.WorkId,
+                new("multiple-retry-" + index), "authorized-test", "repeat-safe", revision))).IsSuccess);
+            await lab.Database.SetExecutionTimeAsync(Anchor.AddMinutes(index == 0 ? 5 : 20));
+            var claim = (await lab.Store.TryClaimAsync(Assert.Single(await lab.Store.DiscoverAsync(1)), "next-worker"))!;
+            permit = (await lab.Store.TryAcquireEffectPermitAsync(claim))!;
+            Assert.Equal(first.ProviderKey, permit.ProviderKey);
+        }
+        await lab.Database.SetExecutionTimeAsync(deadline);
+        Assert.False(await lab.Store.TryAdmitInvocationAsync(permit));
+        Assert.Equal(2, await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.effect_permit WHERE invocation_admitted_at IS NOT NULL;"));
+        for (var attempt = 2; attempt >= 1; attempt--)
+        {
+            var revision = await lab.ScalarAsync<long>("SELECT revision FROM appsurface_durable.work;");
+            var proof = new DurableWorkManualResolutionRequest(first.Claim.ScopeId, first.Claim.WorkId,
+                new("multiple-proof-" + attempt), "authorized-test", "provider-proof", revision, DurableManualResolutionKind.ProvenNotApplied);
+            var resolved = await operators.ResolveAsync(proof);
+            Assert.True(resolved.IsSuccess, resolved.Problem?.Problem);
+            Assert.Equal(attempt == 2 ? DurableWorkState.Suspended : DurableWorkState.FailedTerminal, resolved.Value!.State);
+            Assert.Equal(attempt - 1, await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.effect_permit WHERE status IN ('granted','ambiguous');"));
+            Assert.Equal(attempt, await lab.ScalarAsync<int>("SELECT (details->>'proof_attempt_number')::integer FROM appsurface_durable.work_history WHERE command_id='multiple-proof-" + attempt + "';"));
+            Assert.Equal("proven_no_effect", await lab.ScalarAsync<string>("SELECT status FROM appsurface_durable.effect_permit WHERE attempt_number=3;"));
+            Assert.Equal(DurableWorkOperatorOutcome.Duplicate, (await operators.ResolveAsync(proof)).Value!.Outcome);
+            Assert.Empty(await lab.Store.DiscoverAsync(10));
+        }
+        Assert.Equal(3, await lab.ScalarAsync<int>("SELECT attempt_number FROM appsurface_durable.work;"));
+        Assert.Equal(2, await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.work_history WHERE event_type='invocation_admitted';"));
+        Assert.Equal(2, await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.work_history WHERE event_type='operator_manual_resolve';"));
+        Assert.Equal("terminal", await lab.ScalarAsync<string>("SELECT state FROM appsurface_durable.dispatch;"));
+    }
+
+    [Fact]
+    public async Task PriorPermitProof_HistoryFailureRollsBackAndStaleRevisionCannotSelectAnotherPermit()
+    {
+        await using var lab = await Lab.CreateAsync();
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var operators = new PostgreSqlDurableWorkOperatorClient(lab.Database.DataSource, lab.Registry,
+            services.GetRequiredService<IServiceScopeFactory>(), lab.Epoch);
+        var deadline = Anchor.AddMinutes(10);
+        var first = await lab.AdmitReadyAsync(Request("prior-rollback", deadline: deadline));
+        Assert.True(await lab.Store.TryAdmitInvocationAsync(first));
+        await lab.Store.RecordCompletionAsync(first.Claim,
+            new(PostgreSqlWorkCompletionKind.AmbiguousExternalOutcome, "unknown", "{}"));
+        Assert.True((await operators.RetrySafeAsync(new(first.Claim.ScopeId, first.Claim.WorkId,
+            new("rollback-prior-retry"), "authorized-test", "repeat-safe", await lab.ScalarAsync<long>("SELECT revision FROM appsurface_durable.work;")))).IsSuccess);
+        await lab.Database.SetExecutionTimeAsync(Anchor.AddMinutes(5));
+        var current = (await lab.Store.TryAcquireEffectPermitAsync(
+            (await lab.Store.TryClaimAsync(Assert.Single(await lab.Store.DiscoverAsync(1)), "second-worker"))!))!;
+        await lab.Database.SetExecutionTimeAsync(deadline);
+        Assert.False(await lab.Store.TryAdmitInvocationAsync(current));
+        var revision = await lab.ScalarAsync<long>("SELECT revision FROM appsurface_durable.work;");
+        var history = await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.work_history;");
+        var proof = new DurableWorkManualResolutionRequest(first.Claim.ScopeId, first.Claim.WorkId,
+            new("rollback-prior-proof"), "authorized-test", "provider-proof", revision, DurableManualResolutionKind.ProvenNotApplied);
+        var stale = await operators.ResolveAsync(new(first.Claim.ScopeId, first.Claim.WorkId,
+            new("stale-prior-proof"), "authorized-test", "provider-proof", revision - 1, DurableManualResolutionKind.ProvenNotApplied));
+        Assert.Equal(DurableProblemCodes.WorkRevisionConflict, stale.Problem!.Code);
+        await using (var failHistory = lab.Database.DataSource.CreateCommand("""
+            CREATE FUNCTION public.issue765_skip_prior_proof() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN IF NEW.event_type='operator_manual_resolve' THEN RETURN NULL; END IF; RETURN NEW; END; $$;
+            CREATE TRIGGER issue765_skip_prior_proof BEFORE INSERT ON appsurface_durable.work_history
+            FOR EACH ROW EXECUTE FUNCTION public.issue765_skip_prior_proof();
+            """))
+            await failHistory.ExecuteNonQueryAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await operators.ResolveAsync(proof));
+        Assert.Equal(revision, await lab.ScalarAsync<long>("SELECT revision FROM appsurface_durable.work;"));
+        Assert.Equal(history, await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.work_history;"));
+        Assert.Equal("ambiguous", await lab.ScalarAsync<string>("SELECT status FROM appsurface_durable.effect_permit WHERE attempt_number=1;"));
+        Assert.Equal("proven_no_effect", await lab.ScalarAsync<string>("SELECT status FROM appsurface_durable.effect_permit WHERE attempt_number=2;"));
+        Assert.Equal(0, await lab.ScalarAsync<long>("SELECT count(*) FROM appsurface_durable.work_operator_command WHERE command_id='rollback-prior-proof';"));
+        Assert.Equal(revision, await lab.ScalarAsync<long>("SELECT expected_revision FROM appsurface_durable.dispatch;"));
+        await using (var removeFailure = lab.Database.DataSource.CreateCommand("DROP TRIGGER issue765_skip_prior_proof ON appsurface_durable.work_history;"))
+            await removeFailure.ExecuteNonQueryAsync();
+        Assert.Equal(DurableWorkState.FailedTerminal, (await operators.ResolveAsync(proof)).Value!.State);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task RetrySafe_UsesNextAcceptedOffsetAndHonorsPermanentCutoff(bool closed)

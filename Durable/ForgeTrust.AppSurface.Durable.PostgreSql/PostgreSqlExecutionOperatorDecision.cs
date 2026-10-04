@@ -7,20 +7,26 @@ internal sealed record PostgreSqlExecutionOperatorDecision(string State, string 
     DateTimeOffset DueAtUtc, bool Terminal)
 {
     /// <summary>Checks immutable retry eligibility without granting authority or executing a projection.</summary>
-    /// <remarks>Applied establishes existing effect truth; NotApplied clears only its exact permit; Unknown never expires into absence.</remarks>
+    /// <remarks>Applied establishes existing effect truth; NotApplied clears only its selected exact permit; Unknown never expires into absence.</remarks>
+    /// <param name="row">Accepted timing and effect facts under the canonical Work lock.</param>
+    /// <param name="requestedState">Validated operator transition before timing classification.</param>
+    /// <param name="proof">Exact authorized effect proof, or null for retry/recovery.</param>
+    /// <param name="hasOtherUncertainEffect">For a selected operator permit, whether another admitted effect remains unresolved.
+    /// Null preserves current-attempt classification through HasUncertainPriorEffect.</param>
     internal static PostgreSqlExecutionOperatorDecision Evaluate(PostgreSqlWorkExecutionRow row, string requestedState,
-        DurableEffectReconciliationKind? proof)
+        DurableEffectReconciliationKind? proof, bool? hasOtherUncertainEffect = null)
     {
         var reason = row.AdmissionReason(consumesNextAttempt: requestedState == "retry_wait");
         if (proof == DurableEffectReconciliationKind.Applied)
             return new(row.CancellationRequested ? "succeeded_after_cancel_requested" : "succeeded",
                 "reconciled_applied", reason, row.DueAtUtc, true);
 
-        var uncertain = proof == DurableEffectReconciliationKind.NotApplied ? row.HasUncertainPriorEffect : row.HasUncertainEffect;
+        var otherUncertain = hasOtherUncertainEffect ?? row.HasUncertainPriorEffect;
+        var uncertain = proof == DurableEffectReconciliationKind.NotApplied ? otherUncertain : row.HasUncertainEffect;
         if (proof == DurableEffectReconciliationKind.Unknown)
             return new(PostgreSqlDurableWorkStore.ExecutionAmbiguousState(row.Safety), DurableProblemCodes.AmbiguousExternalOutcome,
                 reason, row.DueAtUtc, false);
-        if (proof == DurableEffectReconciliationKind.NotApplied && row.HasUncertainPriorEffect)
+        if (proof == DurableEffectReconciliationKind.NotApplied && otherUncertain)
             return new(PostgreSqlDurableWorkStore.ExecutionAmbiguousState(row.Safety), DurableProblemCodes.AmbiguousExternalOutcome,
                 reason, row.DueAtUtc, false);
         if (requestedState != "retry_wait")
