@@ -128,6 +128,43 @@ owned temporary inodes; it establishes no native ownership. Its success preserve
 and the incomplete state. Unsafe/oversized inputs or replace failure leave the original binding and
 exception intact and remove any diagnostic temporary file.
 
+### Bounded work diagnostics and exact-target mutation skip
+
+The private `seal_inventory` procedure independently skips `fchown` when the retained node already
+has root UID/GID, and skips `fchmod` when its retained mode already equals the target (the audited
+mode with only `022` cleared). A differing owner or mode still requires its respective operation.
+Skipping one operation does not skip the other operation's guard. Both file hashes, every
+named-FD/identity check, complete set check and deadline remain in place. The full bootstrap still
+reads every file four times: initial inventory, before adoption, after adoption, final inventory.
+The strict `/usr` and retained `/usr/share` guards are unchanged. This is a conservative work reduction,
+not a claim that an unchanged 120-second window will complete a particular installation.
+
+The existing private `issue779-trusted-sdk-diagnostic-v1` frame additionally records:
+
+- `phase_before_deadline`: the closed phase active before the first failed deadline predicate; null
+  until expiry. Existing `phase` still reports `deadline` or `final-deadline`.
+- `work_pass`: `unknown`, `initial-inventory`, `seal-before`, `seal-after` or `final-inventory`.
+  These are host-selected traversal/hash stages; no node names or paths are recorded.
+- `elapsed_milliseconds`: null before the first existing deadline sample, otherwise the nonnegative
+  interval between the first and latest such samples, capped at 120000. It is a sampled span, not
+  a measured duration for root/NSS/PATH work before the first sample. No additional clock read occurs.
+- `nodes_observed`: cumulative directory/file observations across the three traversals, capped at
+  300000 (three times the existing 100000-node bound).
+- `hashed_bytes`: successfully read, validated bytes across four hash passes, capped at 68719476736
+  (four times the existing 16GiB aggregate bound). It includes repeated reads; it is not unique file size.
+- `work_overflow`: false normally. A counter exceeding its bound is clamped and immediately fails
+  closed; reaching the bound alone never grants success. The first propagated failure freezes all facts.
+
+Internal `SdkDiagnostic.add_work`, `work_pass` and `observe_clock` update only this bounded data.
+The deadline uses its existing single monotonic sample and unchanged predicate. Observer/capture
+failure cannot replace an already propagating file or SDK error; raw exceptions and bytes remain
+excluded. The existing incomplete-binding retention still caps JSON at 4096 and preserves failure.
+Three [portable procedure controls](test_trusted_sdk.py) verify exact-target skipping versus needed
+mutations on real current-owned FDs with labelled root-stat projection, all four hash-pass byte totals,
+first-expiry attribution/capping, counter rejection and equivalence of successful guards. They do not
+call root bootstrap, system SDK paths, native commands or grant admission. Existing20 SDK methods
+remain intact; future execution belongs to a separately authorized focused validation.
+
 The copied subject snapshot is separately sealed to `0555` directories and `0444` files before immutable
 preflight. Git tar entries may carry `0775`/`0664` modes; copying those modes does not satisfy the protected
 snapshot's no-write requirement. Sealing changes no bytes and evaluates no subject project. The launcher

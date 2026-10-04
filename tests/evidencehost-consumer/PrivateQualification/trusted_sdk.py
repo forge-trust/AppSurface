@@ -7,6 +7,7 @@ existing installation. Portable helpers exercise filesystem procedures only.
 import hashlib
 from functools import wraps
 import json
+import math
 import os
 from pathlib import Path
 import pwd
@@ -19,6 +20,10 @@ MAX_NODES = 100_000
 MAX_FILE_BYTES = 256 * 1024 * 1024
 MAX_TOTAL_BYTES = 16 * 1024 * 1024 * 1024
 MAX_DEPTH = 32
+MAX_WORK_NODES = 3 * MAX_NODES
+MAX_HASHED_BYTES = 4 * MAX_TOTAL_BYTES
+MAX_ELAPSED_MILLISECONDS = 120_000
+SDK_WORK_PASSES = frozenset(('unknown', 'initial-inventory', 'seal-before', 'seal-after', 'final-inventory'))
 
 SDK_PHASES = frozenset(('unknown', 'root-identity', 'sudo-identity', 'path-binding',
     'usr-validation', 'share-validation', 'share-sealing', 'share-recheck', 'sdk-root-validation', 'inventory-directory',
@@ -40,7 +45,10 @@ class SdkDiagnostic:
         self.current = {'schema': 'issue779-trusted-sdk-diagnostic-v1',
             'phase': 'unknown', 'role': 'unknown', 'node': None,
             'runner_uid': None, 'runner_gid': None, 'sudo_uid': None, 'sudo_gid': None,
-            'ambient_path_match': None, 'fixed_path_match': None, 'error_class': None}
+            'ambient_path_match': None, 'fixed_path_match': None, 'error_class': None,
+            'phase_before_deadline': None, 'work_pass': 'unknown', 'elapsed_milliseconds': None,
+            'nodes_observed': 0, 'hashed_bytes': 0, 'work_overflow': False}
+        self.started_at = None
         self.failure = None
 
     def note(self, phase, role=None, info=None):
@@ -64,6 +72,38 @@ class SdkDiagnostic:
                     self.current['node'] = values
         except BaseException:
             pass
+
+    def work_pass(self, value):
+        if self.failure is None and type(value) is str and value in SDK_WORK_PASSES:
+            self.current['work_pass'] = value
+
+    def add_work(self, *, nodes=0, hashed_bytes=0):
+        """Bound cumulative observations; overflow clamps and aborts, never passes."""
+        if self.failure is not None:
+            return
+        require(type(nodes) is int and nodes >= 0 and type(hashed_bytes) is int and hashed_bytes >= 0)
+        overflow = False
+        for key, increment, limit in (('nodes_observed', nodes, MAX_WORK_NODES),
+                                      ('hashed_bytes', hashed_bytes, MAX_HASHED_BYTES)):
+            value = self.current[key] + increment
+            require(type(value) is int and value >= 0)
+            self.current[key] = min(value, limit)
+            overflow = overflow or value > limit
+        self.current['work_overflow'] = overflow
+        require(not overflow)
+
+    def observe_clock(self, now, expired):
+        """Use only the existing deadline sample; elapsed is a capped sampled span."""
+        if self.failure is not None:
+            return
+        require(type(now) in (int, float) and math.isfinite(now) and now >= 0 and type(expired) is bool)
+        if self.started_at is None:
+            self.started_at = now
+        require(now >= self.started_at)
+        self.current['elapsed_milliseconds'] = min(MAX_ELAPSED_MILLISECONDS,
+                                                  int(min(MAX_ELAPSED_MILLISECONDS / 1000, now - self.started_at) * 1000))
+        if expired and self.current['phase_before_deadline'] is None:
+            self.current['phase_before_deadline'] = self.current['phase']
 
     def identities(self, runner, uid, gid):
         if self.failure is not None:
@@ -109,6 +149,16 @@ def _note(diagnostic, phase, role=None, info=None):
         pass
 
 
+def _work(diagnostic, *, nodes=0, hashed_bytes=0):
+    if type(diagnostic) is SdkDiagnostic:
+        diagnostic.add_work(nodes=nodes, hashed_bytes=hashed_bytes)
+
+
+def _work_pass(diagnostic, value):
+    if type(diagnostic) is SdkDiagnostic:
+        diagnostic.work_pass(value)
+
+
 def _check(diagnostic, phase, role, value, info=None):
     _note(diagnostic, phase, role, info)
     return value
@@ -151,7 +201,10 @@ def require(value):
 
 @_observed
 def remaining(deadline, *, diagnostic=None):
-    within_deadline = time.monotonic() < deadline
+    now = time.monotonic()
+    within_deadline = now < deadline
+    if type(diagnostic) is SdkDiagnostic:
+        diagnostic.observe_clock(now, not within_deadline)
     if not within_deadline:
         _note(diagnostic, 'final-deadline' if type(diagnostic) is SdkDiagnostic
               and diagnostic.current['phase'] == 'final-deadline' else 'deadline')
@@ -194,6 +247,7 @@ def digest_fd(fd, deadline, *, diagnostic=None):
             prefix += block[:20 - len(prefix)]
         total += len(block)
         require(total <= before.st_size)
+        _work(diagnostic, hashed_bytes=len(block))
         digest.update(block)
     require(total == before.st_size and identity(os.fstat(fd)) == identity(before))
     return digest.hexdigest(), prefix
@@ -220,6 +274,8 @@ def bounded_names(directory, maximum, deadline, *, diagnostic=None):
 @_observed
 def inventory(root_fd, setup_uid, setup_gid, deadline, *, diagnostic=None):
     """Read a bounded SDK tree through retained directory FDs; never mutate it."""
+    if type(diagnostic) is SdkDiagnostic and diagnostic.current['work_pass'] == 'unknown':
+        _work_pass(diagnostic, 'initial-inventory')
     rows, total = {}, 0
     allowed_uids, allowed_gids = {0, setup_uid}, {0, setup_gid}
 
@@ -231,6 +287,7 @@ def inventory(root_fd, setup_uid, setup_gid, deadline, *, diagnostic=None):
         info = os.fstat(directory)
         mode = stat.S_IMODE(info.st_mode)
         _note(diagnostic, 'inventory-directory', 'sdk-root' if not relative else 'directory', info)
+        _work(diagnostic, nodes=1)
         require(stat.S_ISDIR(info.st_mode) and info.st_uid in allowed_uids
                 and info.st_gid in allowed_gids and not mode & 0o7000
                 and mode & 0o555 == 0o555)
@@ -243,6 +300,8 @@ def inventory(root_fd, setup_uid, setup_gid, deadline, *, diagnostic=None):
             observed = os.stat(name, dir_fd=directory, follow_symlinks=False)
             role = 'host' if not relative and name == 'dotnet' else 'directory' if stat.S_ISDIR(observed.st_mode) else 'file'
             _note(diagnostic, 'inventory-node', role, observed)
+            if not stat.S_ISDIR(observed.st_mode):
+                _work(diagnostic, nodes=1)
             mode = stat.S_IMODE(observed.st_mode)
             require(_check(diagnostic, 'inventory-owner', role, observed.st_uid in allowed_uids and observed.st_gid in allowed_gids, observed)
                     and _check(diagnostic, 'inventory-mode', role, not mode & 0o7000, observed))
@@ -289,6 +348,7 @@ def inventory(root_fd, setup_uid, setup_gid, deadline, *, diagnostic=None):
 @_observed
 def seal_inventory(root_fd, before, deadline, *, diagnostic=None):
     """Seal only a completely pre-audited tree, then require an identical file set."""
+    _work_pass(diagnostic, 'seal-before')
     seen = set()
     children = {name: [] for name, row in before.items() if row['directory']}
     for name in before:
@@ -304,10 +364,14 @@ def seal_inventory(root_fd, before, deadline, *, diagnostic=None):
         require(relative in before and before[relative]['directory'])
         row = before[relative]
         _note(diagnostic, 'sealing-directory', 'sdk-root' if not relative else 'directory')
-        require(metadata(os.fstat(directory)) == row['metadata'])
+        info = os.fstat(directory)
+        _work(diagnostic, nodes=1)
+        require(metadata(info) == row['metadata'])
         _note(diagnostic, 'sealing-adoption')
-        os.fchown(directory, 0, 0)
-        os.fchmod(directory, int(row['metadata']['mode'], 8) & ~0o022)
+        if info.st_uid != 0 or info.st_gid != 0:
+            os.fchown(directory, 0, 0)
+        if stat.S_IMODE(info.st_mode) != int(row['metadata']['mode'], 8) & ~0o022:
+            os.fchmod(directory, int(row['metadata']['mode'], 8) & ~0o022)
         seen.add(relative)
         expected = children[relative]
         _note(diagnostic, 'sealing-count')
@@ -322,15 +386,21 @@ def seal_inventory(root_fd, before, deadline, *, diagnostic=None):
             child = os.open(name, flags, dir_fd=directory)
             try:
                 named_matches(directory, name, child, diagnostic=diagnostic)
-                require(metadata(os.fstat(child)) == row['metadata'])
+                info = os.fstat(child)
+                require(metadata(info) == row['metadata'])
                 if row['directory']:
                     seal(child, child_relative)
                 else:
+                    _work(diagnostic, nodes=1)
+                    _work_pass(diagnostic, 'seal-before')
                     _note(diagnostic, 'sealing-hash')
                     require(digest_fd(child, deadline, diagnostic=diagnostic)[0] == row['sha256'])
                     _note(diagnostic, 'sealing-adoption')
-                    os.fchown(child, 0, 0)
-                    os.fchmod(child, int(row['metadata']['mode'], 8) & ~0o022)
+                    if info.st_uid != 0 or info.st_gid != 0:
+                        os.fchown(child, 0, 0)
+                    if stat.S_IMODE(info.st_mode) != int(row['metadata']['mode'], 8) & ~0o022:
+                        os.fchmod(child, int(row['metadata']['mode'], 8) & ~0o022)
+                    _work_pass(diagnostic, 'seal-after')
                     _note(diagnostic, 'sealing-hash')
                     require(digest_fd(child, deadline, diagnostic=diagnostic)[0] == row['sha256'])
                     seen.add(child_relative)
@@ -428,10 +498,12 @@ def seal_trusted_sdk(deadline, *, diagnostic=None):
         root = os.open('dotnet', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
         try:
             named_matches(parent, 'dotnet', root, diagnostic=diagnostic)
+            _work_pass(diagnostic, 'initial-inventory')
             before, total = inventory(root, runner.pw_uid, runner.pw_gid, deadline, diagnostic=diagnostic)
             initial_host = before['dotnet']
             seal_inventory(root, before, deadline, diagnostic=diagnostic)
             _note(diagnostic, 'recheck-inventory', 'sdk-root')
+            _work_pass(diagnostic, 'final-inventory')
             after, final_total = inventory(root, 0, 0, deadline, diagnostic=diagnostic)
             _note(diagnostic, 'recheck-binding')
             require(set(after) == set(before) and total == final_total)

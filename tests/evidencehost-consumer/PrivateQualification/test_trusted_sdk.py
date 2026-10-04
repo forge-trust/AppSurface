@@ -156,7 +156,7 @@ class TrustedSdkProcedureControls(unittest.TestCase):
                         sdk.seal_inventory(fd, before, time.monotonic() + 30)
                         after, final_total = sdk.inventory(fd, 0, 0, time.monotonic() + 30)
                         self.assertEqual(len(before), chown.call_count)
-                        self.assertEqual(len(before), chmod.call_count)
+                        self.assertEqual(len(before) if writable else 0, chmod.call_count)
                         self.assertEqual(set(before), set(after))
                         self.assertEqual(total, final_total)
                         for name, row in before.items():
@@ -695,6 +695,139 @@ class TrustedSdkProcedureControls(unittest.TestCase):
                     dispatch.assert_not_called()
                     self.assertEqual(0 if kind == "expired" else 1, len(calls))
                     self.assertNotIn("ancestor-private-canary", json.dumps(diagnostic.snapshot()))
+
+
+    def test_exact_target_skip_preserves_four_hash_passes_and_needed_mutations(self):
+        for kind in ("exact-target", "owner-needed", "mode-needed"):
+            with self.subTest(kind=kind):
+                root, contents = self.tree("work-" + kind, writable=kind == "mode-needed")
+                real_stat, real_fstat, real_fchmod = os.stat, os.fstat, os.fchmod
+                approved = {(p.stat().st_dev, p.stat().st_ino) for p in [root, *root.rglob("*")]}
+                adopted = set()
+                def projected(info):
+                    key = (info.st_dev, info.st_ino)
+                    if key not in approved:
+                        return info
+                    uid, gid = (12345, 12346) if kind == "owner-needed" and key not in adopted else (0, 0)
+                    return self.changed_stat(info, st_uid=uid, st_gid=gid)
+                def chown_data(fd, uid, gid):
+                    info = real_fstat(fd)
+                    self.assertIn((info.st_dev, info.st_ino), approved)
+                    self.assertEqual((0, 0), (uid, gid))
+                    adopted.add((info.st_dev, info.st_ino))
+                def chmod_owned(fd, mode):
+                    info = real_fstat(fd)
+                    self.assertIn((info.st_dev, info.st_ino), approved)
+                    real_fchmod(fd, mode)
+                diagnostic = sdk.SdkDiagnostic()
+                with self.directory(root) as fd, \
+                        patch.object(os, "fstat", side_effect=lambda fd: projected(real_fstat(fd))), \
+                        patch.object(os, "stat", side_effect=lambda *a, **kw: projected(real_stat(*a, **kw))), \
+                        patch.object(os, "fchown", side_effect=chown_data) as chown, \
+                        patch.object(os, "fchmod", side_effect=chmod_owned) as chmod:
+                    before, total = sdk.inventory(fd, 12345, 12346, time.monotonic() + 30,
+                                                  diagnostic=diagnostic)
+                    sdk.seal_inventory(fd, before, time.monotonic() + 30, diagnostic=diagnostic)
+                    sdk._work_pass(diagnostic, "final-inventory")
+                    after, final_total = sdk.inventory(fd, 0, 0, time.monotonic() + 30, diagnostic=diagnostic)
+                    expected_chown = len(before) if kind == "owner-needed" else 0
+                    expected_chmod = len(before) if kind == "mode-needed" else 0
+                    self.assertEqual(expected_chown, chown.call_count)
+                    self.assertEqual(expected_chmod, chmod.call_count)
+                    self.assertEqual(set(before), set(after))
+                    self.assertEqual(total, final_total)
+                    self.assertEqual(4 * total, diagnostic.snapshot()["hashed_bytes"])
+                    self.assertEqual(3 * len(before), diagnostic.snapshot()["nodes_observed"])
+                    self.assertFalse(diagnostic.snapshot()["work_overflow"])
+                    self.assertEqual("final-inventory", diagnostic.snapshot()["work_pass"])
+                    for name, row in before.items():
+                        self.assertEqual(row.get("sha256"), after[name].get("sha256"))
+                        self.assertEqual(int(row["metadata"]["mode"], 8) & ~0o022,
+                                         int(after[name]["metadata"]["mode"], 8))
+                self.assertEqual(contents, {name: (root / name).read_bytes() for name in contents})
+                self.assertTrue(all(p.stat().st_uid == os.geteuid() and p.stat().st_gid == os.getegid()
+                                    for p in [root, *root.rglob("*")]))
+
+    def test_deadline_freezes_prior_phase_pass_elapsed_and_actual_hashed_bytes(self):
+        for work_pass, phase in (("initial-inventory", "inventory-hash"), ("seal-before", "sealing-hash"),
+                                 ("seal-after", "sealing-hash"), ("final-inventory", "inventory-hash")):
+            with self.subTest(work_pass=work_pass):
+                path = self.base / ("deadline-work-" + work_pass)
+                payload = b"work-private-canary\x00\xff"
+                path.write_bytes(payload)
+                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+                diagnostic = sdk.SdkDiagnostic()
+                diagnostic.note(phase, "file", os.fstat(fd))
+                sdk._work_pass(diagnostic, work_pass)
+                try:
+                    with patch.object(sdk.time, "monotonic", side_effect=(0.0, 2000.0)) as clock:
+                        self.reject(lambda: sdk.digest_fd(fd, 1.0, diagnostic=diagnostic))
+                        self.assertEqual(2, clock.call_count)
+                    frame = diagnostic.snapshot()
+                    self.assertEqual("deadline", frame["phase"])
+                    self.assertEqual(phase, frame["phase_before_deadline"])
+                    self.assertEqual(work_pass, frame["work_pass"])
+                    self.assertEqual(len(payload), frame["hashed_bytes"])
+                    self.assertEqual(120000, frame["elapsed_milliseconds"])
+                    self.assertEqual("sdk", frame["error_class"])
+                    diagnostic.note("final-deadline")
+                    diagnostic.work_pass("unknown")
+                    diagnostic.add_work(hashed_bytes=1)
+                    diagnostic.capture(OSError(errno.EIO, "late-work-canary"))
+                    self.assertEqual(frame, diagnostic.snapshot())
+                    encoded = json.dumps(frame).encode()
+                    self.assertLessEqual(len(encoded), 4096)
+                    self.assertNotIn(b"canary", encoded)
+                    self.assertEqual(payload, path.read_bytes())
+                finally:
+                    os.close(fd)
+
+    def test_work_counter_bounds_fail_closed_and_success_samples_preserve_existing_guard(self):
+        root, contents = self.tree("work-guard-equivalence")
+        with self.directory(root) as fd:
+            baseline = self.inventory(fd)
+            diagnostic = sdk.SdkDiagnostic()
+            observed = sdk.inventory(fd, os.geteuid(), os.getegid(), time.monotonic() + 30,
+                                     diagnostic=diagnostic)
+            self.assertEqual(baseline, observed)
+            self.assertEqual(len(observed[0]), diagnostic.snapshot()["nodes_observed"])
+            self.assertEqual(observed[1], diagnostic.snapshot()["hashed_bytes"])
+            with patch.object(sdk, "MAX_WORK_NODES", 0):
+                rejected = sdk.SdkDiagnostic()
+                self.reject(lambda: sdk.inventory(fd, os.geteuid(), os.getegid(), time.monotonic() + 30,
+                                                  diagnostic=rejected))
+            self.assertEqual(0, rejected.snapshot()["nodes_observed"])
+            self.assertTrue(rejected.snapshot()["work_overflow"])
+            self.assertEqual("sdk", rejected.snapshot()["error_class"])
+        path = root / "sdk/version/sdk.bin"
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            diagnostic = sdk.SdkDiagnostic()
+            with patch.object(sdk, "MAX_HASHED_BYTES", 2):
+                self.reject(lambda: sdk.digest_fd(fd, time.monotonic() + 30, diagnostic=diagnostic))
+            self.assertEqual(2, diagnostic.snapshot()["hashed_bytes"])
+            self.assertTrue(diagnostic.snapshot()["work_overflow"])
+            original = OSError(errno.EIO, "original-work-canary")
+            diagnostic = sdk.SdkDiagnostic()
+            with patch.object(os, "read", side_effect=original), self.assertRaises(OSError) as caught:
+                sdk.digest_fd(fd, time.monotonic() + 30, diagnostic=diagnostic)
+            self.assertIs(original, caught.exception)
+            self.assertEqual("os", diagnostic.snapshot()["error_class"])
+            self.assertEqual(0, diagnostic.snapshot()["hashed_bytes"])
+        finally:
+            os.close(fd)
+        for now, accepted in ((0.0, True), (2.0, False)):
+            diagnostic = sdk.SdkDiagnostic()
+            diagnostic.note("inventory-node")
+            with patch.object(sdk.time, "monotonic", return_value=now) as clock:
+                if accepted:
+                    sdk.remaining(1.0, diagnostic=diagnostic)
+                    self.assertEqual("inventory-node", diagnostic.snapshot()["phase"])
+                    self.assertIsNone(diagnostic.snapshot()["phase_before_deadline"])
+                else:
+                    self.reject(lambda: sdk.remaining(1.0, diagnostic=diagnostic))
+                clock.assert_called_once_with()
+        self.assertEqual(contents, {name: (root / name).read_bytes() for name in contents})
 
 
 if __name__ == "__main__":
