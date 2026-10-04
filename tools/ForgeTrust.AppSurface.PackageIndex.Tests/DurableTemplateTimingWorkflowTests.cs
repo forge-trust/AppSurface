@@ -343,6 +343,118 @@ public sealed class DurableTemplateTimingWorkflowTests : IDisposable
         Assert.Throws<PackageIndexException>(() => DurableTemplateTimingWorkflow.HashCache(cache));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void CacheOperationsRejectMissingOrNonDirectoryRootBeforeChangingDestination(bool useNonDirectoryRoot)
+    {
+        var cache = TestPathUtils.PathUnder(_root, useNonDirectoryRoot ? "cache-root-file" : "missing-cache-root");
+        const string sourceSentinel = "caller-owned cache file";
+        if (useNonDirectoryRoot) File.WriteAllText(cache, sourceSentinel);
+
+        var destination = TestPathUtils.PathUnder(_root, "existing-cache-copy");
+        Directory.CreateDirectory(destination);
+        var destinationSentinel = TestPathUtils.PathUnder(destination, "caller-owned.txt");
+        File.WriteAllText(destinationSentinel, "preserve destination");
+
+        var hashException = Assert.Throws<PackageIndexException>(() => DurableTemplateTimingWorkflow.HashCache(cache));
+        Assert.Contains("NuGet cache root is missing or is not a directory", hashException.Message, StringComparison.Ordinal);
+
+        var copyException = Assert.Throws<PackageIndexException>(() => DurableTemplateTimingWorkflow.CopyTree(cache, destination));
+        Assert.Contains("NuGet cache root is missing or is not a directory", copyException.Message, StringComparison.Ordinal);
+        Assert.Equal("preserve destination", File.ReadAllText(destinationSentinel));
+        Assert.Single(Directory.EnumerateFileSystemEntries(destination));
+        if (useNonDirectoryRoot)
+            Assert.Equal(sourceSentinel, File.ReadAllText(cache));
+        else
+            Assert.False(File.Exists(cache));
+    }
+
+    [Fact]
+    public void CacheOperationsRejectCumulativeBytesOverOneGiBBeforeCopyingOrChangingCallerData()
+    {
+        var cache = TestPathUtils.PathUnder(_root, "cache-over-one-gib");
+        Directory.CreateDirectory(cache);
+        var paths = Enumerable.Range(0, 5)
+            .Select(index => TestPathUtils.PathUnder(cache, $"sparse-package-{index}.nupkg"))
+            .ToArray();
+        foreach (var path in paths)
+        {
+            using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            stream.SetLength(DurableTemplateTimingWorkflow.MaximumCacheEntryBytes);
+        }
+
+        var lengths = paths.Select(path => new FileInfo(path).Length).ToArray();
+        Assert.All(lengths, length => Assert.InRange(length, 0, DurableTemplateTimingWorkflow.MaximumCacheEntryBytes));
+        Assert.True(lengths.Sum() > DurableTemplateTimingWorkflow.MaximumCacheTreeBytes);
+
+        var destination = TestPathUtils.PathUnder(_root, "existing-cache-copy-over-one-gib");
+        Directory.CreateDirectory(destination);
+        var destinationSentinel = TestPathUtils.PathUnder(destination, "caller-owned.txt");
+        File.WriteAllText(destinationSentinel, "preserve destination");
+
+        var hashException = Assert.Throws<PackageIndexException>(() => DurableTemplateTimingWorkflow.HashCache(cache));
+        Assert.Contains("bounded file-read policy", hashException.Message, StringComparison.Ordinal);
+
+        var copyException = Assert.Throws<PackageIndexException>(() => DurableTemplateTimingWorkflow.CopyTree(cache, destination));
+        Assert.Contains("bounded file-read policy", copyException.Message, StringComparison.Ordinal);
+        Assert.Equal("preserve destination", File.ReadAllText(destinationSentinel));
+        Assert.Single(Directory.EnumerateFileSystemEntries(destination));
+        Assert.Equal(lengths, paths.Select(path => new FileInfo(path).Length).ToArray());
+    }
+
+    [Fact]
+    public void CacheOperationsRejectMoreThanMaximumEntriesWithoutChangingSourceOrDestination()
+    {
+        var cache = TestPathUtils.PathUnder(_root, "cache-over-entry-limit");
+        Directory.CreateDirectory(cache);
+        for (var index = 0; index <= DurableTemplateTimingWorkflow.MaximumCacheTreeEntries; index++)
+            Directory.CreateDirectory(TestPathUtils.PathUnder(cache, $"empty-directory-{index:D5}"));
+
+        var expectedEntries = DurableTemplateTimingWorkflow.MaximumCacheTreeEntries + 1;
+        Assert.Equal(expectedEntries, Directory.EnumerateFileSystemEntries(cache).Count());
+
+        var destination = TestPathUtils.PathUnder(_root, "existing-cache-copy-over-entry-limit");
+        Directory.CreateDirectory(destination);
+        var destinationSentinel = TestPathUtils.PathUnder(destination, "caller-owned.txt");
+        File.WriteAllText(destinationSentinel, "preserve destination");
+
+        var hashException = Assert.Throws<PackageIndexException>(() => DurableTemplateTimingWorkflow.HashCache(cache));
+        Assert.Contains("entry-count limit", hashException.Message, StringComparison.Ordinal);
+
+        var copyException = Assert.Throws<PackageIndexException>(() => DurableTemplateTimingWorkflow.CopyTree(cache, destination));
+        Assert.Contains("entry-count limit", copyException.Message, StringComparison.Ordinal);
+        Assert.Equal(expectedEntries, Directory.EnumerateFileSystemEntries(cache).Count());
+        Assert.Equal("preserve destination", File.ReadAllText(destinationSentinel));
+        Assert.Single(Directory.EnumerateFileSystemEntries(destination));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CacheOperationsRejectNullOrEmptySourcePathWithoutChangingDestination(bool useEmptyPath)
+    {
+        string? cache = useEmptyPath ? string.Empty : null;
+        var destination = TestPathUtils.PathUnder(_root, "existing-cache-copy-for-invalid-source");
+        Directory.CreateDirectory(destination);
+        var destinationSentinel = TestPathUtils.PathUnder(destination, "caller-owned.txt");
+        File.WriteAllText(destinationSentinel, "preserve destination");
+
+        if (useEmptyPath)
+        {
+            Assert.Throws<ArgumentException>(() => DurableTemplateTimingWorkflow.HashCache(cache!));
+            Assert.Throws<ArgumentException>(() => DurableTemplateTimingWorkflow.CopyTree(cache!, destination));
+        }
+        else
+        {
+            Assert.Throws<ArgumentNullException>(() => DurableTemplateTimingWorkflow.HashCache(cache!));
+            Assert.Throws<ArgumentNullException>(() => DurableTemplateTimingWorkflow.CopyTree(cache!, destination));
+        }
+
+        Assert.Equal("preserve destination", File.ReadAllText(destinationSentinel));
+        Assert.Single(Directory.EnumerateFileSystemEntries(destination));
+    }
+
     [Fact]
     public void HashCacheRejectsNestedSymbolicLinkWithoutFollowingIt()
     {

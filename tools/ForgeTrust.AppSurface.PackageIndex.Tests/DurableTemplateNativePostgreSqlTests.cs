@@ -1,5 +1,6 @@
 using System.Data.Common;
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
@@ -15,6 +16,11 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
     {
         using var fixture = new NativeClusterFixture(_root);
         var cluster = await fixture.StartAsync();
+        var expectedPsqlPath = Path.Join(fixture.BinDirectory, "psql" + (OperatingSystem.IsWindows() ? ".exe" : string.Empty));
+        Assert.Equal(Path.GetFullPath(fixture.BinDirectory), cluster.BinDirectory);
+        Assert.Equal(expectedPsqlPath, cluster.PsqlPath);
+        Assert.Equal(cluster.ToolIdentity.BinDirectory, cluster.BinDirectory);
+        Assert.Equal(cluster.ToolIdentity.PsqlPath, cluster.PsqlPath);
         var bootstrap = Assert.IsType<NativePostgreSqlBootstrapRequest>(fixture.Bootstrap.Request);
         var secret = bootstrap.StandardInput.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)[0];
 
@@ -49,6 +55,8 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
             && string.Equals(request.Environment!["PGPASSWORD"], secret, StringComparison.Ordinal));
         Assert.Contains(fixture.Runner.Requests, request => request.OperationName == "psql authentication probe"
             && string.Equals(request.Environment!["PGPASSWORD"], "wrong-password", StringComparison.Ordinal));
+        Assert.All(fixture.Runner.Requests.Where(request => request.OperationName is "psql authentication probe" or "psql server version probe"),
+            request => Assert.Equal(cluster.PsqlPath, request.FileName));
         Assert.DoesNotContain(fixture.Runner.Requests.SelectMany(request => request.Arguments), argument => argument.Contains(secret, StringComparison.Ordinal));
 
         var identityJson = JsonSerializer.Serialize(cluster.ToolIdentity);
@@ -724,13 +732,15 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         Assert.False(runtime.HasControllingTerminal);
 
         var port = runtime.ReserveLoopbackPort();
-        Assert.False(runtime.IsLoopbackPortListening(port));
-        using (var listener = new TcpListener(IPAddress.Loopback, port))
+        Assert.InRange(port, 1, 65_535);
+        using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
         {
-            listener.Start();
-            Assert.True(runtime.IsLoopbackPortListening(port));
+            socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+            var probePort = Assert.IsType<IPEndPoint>(socket.LocalEndPoint).Port;
+            Assert.False(runtime.IsLoopbackPortListening(probePort));
+            socket.Listen(1);
+            Assert.True(runtime.IsLoopbackPortListening(probePort));
         }
-        Assert.False(runtime.IsLoopbackPortListening(port));
 
         var executablePath = CreatePostgresNamedSleepProcessImage(_root);
         var dataDirectory = Path.Join(_root, "runtime-data");
@@ -1004,6 +1014,705 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
     }
 
     [Fact]
+    public async Task OwnershipRacePreservesForeignMarkerAndSentinelWithoutStartingCluster()
+    {
+        using var fixture = new NativeClusterFixture(_root);
+        var markerPath = Path.Join(fixture.OwnedRoot, ".appsurface-native-postgresql-owner");
+        var sentinelPath = Path.Join(fixture.OwnedRoot, "foreign-sentinel.txt");
+        fixture.Runtime.OnReserveLoopbackPort = () =>
+        {
+            Directory.CreateDirectory(fixture.OwnedRoot);
+            File.WriteAllText(markerPath, "foreign-owner-token");
+            File.WriteAllText(sentinelPath, "preserve foreign contents");
+        };
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.StartAsync());
+
+        Assert.Contains("could not verify cleanup", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(Directory.Exists(fixture.OwnedRoot));
+        Assert.Equal("foreign-owner-token", File.ReadAllText(markerPath));
+        Assert.Equal("preserve foreign contents", File.ReadAllText(sentinelPath));
+        Assert.Null(fixture.Bootstrap.Request);
+        Assert.False(fixture.Runtime.ServerRunning);
+        Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl start");
+        Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("oversized")]
+    public async Task SuccessfulInitdbWithMissingOrOversizedAutoConfigurationNeverStartsCluster(string failure)
+    {
+        using var fixture = new NativeClusterFixture(_root);
+        var outsideSentinel = Path.Join(fixture.Root, "outside-auto-configuration-sentinel.txt");
+        File.WriteAllText(outsideSentinel, "preserve caller contents");
+        fixture.Bootstrap.AfterInitialize = dataDirectory =>
+        {
+            var settingsPath = Path.Join(dataDirectory, "postgresql.auto.conf");
+            if (failure == "missing")
+            {
+                File.Delete(settingsPath);
+            }
+            else
+            {
+                using var stream = new FileStream(settingsPath, FileMode.Open, FileAccess.Write, FileShare.None);
+                stream.SetLength(64 * 1024 + 1);
+            }
+        };
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.StartAsync());
+
+        Assert.NotNull(fixture.Bootstrap.Request);
+        Assert.Contains("post-initdb validation and configuration", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(fixture.Runtime.ServerRunning);
+        Assert.False(Directory.Exists(fixture.OwnedRoot));
+        Assert.Equal("preserve caller contents", File.ReadAllText(outsideSentinel));
+        Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl start");
+        Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+        Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "psql authentication probe");
+    }
+
+    [Theory]
+    [InlineData("rejected")]
+    [InlineData("truncated")]
+    [InlineData("exception")]
+    public async Task AuthenticationFailureCleansOwnedClusterAndSuppressesSecretDiagnostics(string failure)
+    {
+        using var fixture = new NativeClusterFixture(_root);
+        fixture.Runner.RejectAuthentication = failure == "rejected";
+        if (failure != "rejected")
+        {
+            fixture.Runner.AuthenticationProbeHandler = request => failure == "truncated"
+                ? new ExternalCommandResult(
+                    0,
+                    "1\n",
+                    $"sensitive-auth-output {request.Environment!["PGPASSWORD"]}",
+                    StandardOutputTruncated: true)
+                : throw new InvalidOperationException($"sensitive-auth-output {request.Environment!["PGPASSWORD"]}");
+        }
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.StartAsync());
+
+        var bootstrap = Assert.IsType<NativePostgreSqlBootstrapRequest>(fixture.Bootstrap.Request);
+        var secret = bootstrap.StandardInput.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)[0];
+        Assert.Contains("SCRAM authentication", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("sensitive-auth-output", error.ToString(), StringComparison.Ordinal);
+        Assert.Single(fixture.Runner.Requests, request => request.OperationName == "psql authentication probe");
+        Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "psql server version probe");
+        Assert.Single(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+        Assert.False(fixture.Runtime.ServerRunning);
+        Assert.False(Directory.Exists(fixture.OwnedRoot));
+
+        if (failure == "exception")
+        {
+            var failingProbe = fixture.Runner.AuthenticationProbeHandler;
+            fixture.Runner.AuthenticationProbeHandler = null;
+            var cluster = await fixture.StartAsync();
+            fixture.Runner.AuthenticationProbeHandler = failingProbe;
+
+            Assert.False(await cluster.TryAuthenticateAsync("standalone-auth-probe-secret"));
+            Assert.True(fixture.Runtime.ServerRunning);
+
+            await cluster.DisposeWithBudgetAsync(2_000);
+            Assert.False(Directory.Exists(cluster.OwnedRoot));
+        }
+    }
+
+    [Theory]
+    [InlineData("failed")]
+    [InlineData("truncated")]
+    [InlineData("malformed")]
+    [InlineData("below-floor")]
+    public async Task UnusableServerVersionEvidenceStopsClusterAndSuppressesDiagnostics(string failure)
+    {
+        using var fixture = new NativeClusterFixture(_root);
+        fixture.Runner.ServerVersionResult = failure switch
+        {
+            "failed" => new ExternalCommandResult(1, "16.5|160005\n", "sensitive-server-version-output"),
+            "truncated" => new ExternalCommandResult(
+                0,
+                "16.5|160005\n",
+                "sensitive-server-version-output",
+                StandardOutputTruncated: true),
+            "malformed" => new ExternalCommandResult(0, "16.5|invalid\n", "sensitive-server-version-output"),
+            _ => new ExternalCommandResult(0, "15.8|150008\n", "sensitive-server-version-output")
+        };
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.StartAsync());
+
+        var bootstrap = Assert.IsType<NativePostgreSqlBootstrapRequest>(fixture.Bootstrap.Request);
+        var secret = bootstrap.StandardInput.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)[0];
+        Assert.Contains("server version verification", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("sensitive-server-version-output", error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
+        Assert.Single(fixture.Runner.Requests, request => request.OperationName == "psql authentication probe");
+        Assert.Single(fixture.Runner.Requests, request => request.OperationName == "psql server version probe");
+        Assert.Single(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+        Assert.False(fixture.Runtime.ServerRunning);
+        Assert.False(Directory.Exists(fixture.OwnedRoot));
+    }
+
+    [Theory]
+    [InlineData("pg_ctl")]
+    [InlineData("collector")]
+    public async Task OversizedOwnedLogRetainsStoppedRootAndCanBeRecoveredAtMaximumSize(string logName)
+    {
+        using var fixture = new NativeClusterFixture(_root);
+        var cluster = await fixture.StartAsync();
+        var outsideSentinel = Path.Join(fixture.Root, "outside-log-sentinel.txt");
+        File.WriteAllText(outsideSentinel, "preserve caller contents");
+        var logPath = logName == "pg_ctl"
+            ? Path.Join(cluster.OwnedRoot, "pg_ctl.log")
+            : Path.Join(cluster.OwnedRoot, "data", "log", "appsurface-native.log");
+        using (var stream = new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            stream.SetLength(1024 * 1024 + 1);
+        }
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => cluster.DisposeWithBudgetAsync(2_000).AsTask());
+
+        Assert.Contains("oversized private log", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(fixture.Runtime.ServerRunning);
+        Assert.True(Directory.Exists(cluster.OwnedRoot));
+        Assert.Equal(1024L * 1024 + 1, new FileInfo(logPath).Length);
+        Assert.Single(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+        Assert.Equal("preserve caller contents", File.ReadAllText(outsideSentinel));
+
+        using (var stream = new FileStream(logPath, FileMode.Open, FileAccess.Write, FileShare.None))
+        {
+            stream.SetLength(1024 * 1024);
+        }
+        await cluster.DisposeWithBudgetAsync(2_000);
+
+        Assert.False(Directory.Exists(cluster.OwnedRoot));
+        Assert.Single(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+        Assert.Equal("preserve caller contents", File.ReadAllText(outsideSentinel));
+    }
+
+    [Fact]
+    public async Task MissingOwnershipMarkerBlocksStopAndDeletionUntilRestored()
+    {
+        using var fixture = new NativeClusterFixture(_root);
+        var cluster = await fixture.StartAsync();
+        var markerPath = Path.Join(cluster.OwnedRoot, ".appsurface-native-postgresql-owner");
+        var ownerToken = File.ReadAllText(markerPath);
+        var sentinelPath = Path.Join(cluster.OwnedRoot, "retained-sentinel.txt");
+        File.WriteAllText(sentinelPath, "preserve owned contents until verified");
+        File.Delete(markerPath);
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => cluster.DisposeWithBudgetAsync(500).AsTask());
+
+        Assert.Contains("owner marker is missing or unsafe", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(fixture.Runtime.ServerRunning);
+        Assert.True(Directory.Exists(cluster.OwnedRoot));
+        Assert.False(File.Exists(markerPath));
+        Assert.Equal("preserve owned contents until verified", File.ReadAllText(sentinelPath));
+        Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+
+        File.WriteAllText(markerPath, ownerToken);
+        await cluster.DisposeWithBudgetAsync(2_000);
+
+        Assert.False(fixture.Runtime.ServerRunning);
+        Assert.False(Directory.Exists(cluster.OwnedRoot));
+        Assert.Single(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+    }
+
+    [Theory]
+    [InlineData("relative")]
+    [InlineData("missing-parent")]
+    public async Task UnsafeOwnedRootIsRejectedBeforeInitdbWithDefaultBudgets(string failure)
+    {
+        using var fixture = new NativeClusterFixture(_root);
+        var ownedRoot = failure == "relative"
+            ? "relative-native-cluster"
+            : Path.Join(fixture.Root, "missing-parent", "cluster");
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => DurableTemplateNativePostgreSql.StartAsync(
+            ownedRoot,
+            fixture.Runner,
+            toolDirectoryResolver: new FixedNativePostgreSqlToolDirectoryResolver(fixture.BinDirectory),
+            bootstrapRunner: fixture.Bootstrap,
+            runtime: fixture.Runtime));
+
+        Assert.Contains(failure == "relative" ? "absolute path" : "existing private temporary directory",
+            error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(fixture.Bootstrap.Request);
+        Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl start");
+        Assert.False(Directory.Exists(Path.Join(fixture.Root, "missing-parent")));
+    }
+
+    [Fact]
+    public async Task FileCreatedAtOwnedRootAfterValidationIsPreservedWithoutRunningInitdb()
+    {
+        using var fixture = new NativeClusterFixture(_root);
+        fixture.Runtime.OnReserveLoopbackPort = () => File.WriteAllText(fixture.OwnedRoot, "foreign root file");
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.StartAsync());
+
+        Assert.Contains("could not create its private root", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("foreign root file", File.ReadAllText(fixture.OwnedRoot));
+        Assert.Null(fixture.Bootstrap.Request);
+        Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl start");
+        Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+    }
+
+    [Fact]
+    public async Task FilesystemRootIsRejectedByTheExplicitOwnershipBoundaryBeforeClusterInitialization()
+    {
+        using var fixture = new NativeClusterFixture(_root);
+        var root = Path.GetPathRoot(Path.GetFullPath(fixture.Root))!;
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => DurableTemplateNativePostgreSql.StartAsync(
+            root, fixture.Runner,
+            toolDirectoryResolver: new FixedNativePostgreSqlToolDirectoryResolver(fixture.BinDirectory),
+            bootstrapRunner: fixture.Bootstrap, runtime: fixture.Runtime));
+
+        Assert.Contains("cannot be a filesystem root", error.Message, StringComparison.Ordinal);
+        Assert.Equal(4, fixture.Runner.Requests.Count);
+        Assert.All(fixture.Runner.Requests, request => Assert.Equal(["--version"], request.Arguments));
+        Assert.Null(fixture.Bootstrap.Request);
+        Assert.True(Directory.Exists(root));
+    }
+
+    [Fact]
+    public async Task PartialRootWithMarkerDirectoryAndForeignContentsIsRetainedWithoutInitdb()
+    {
+        using var fixture = new NativeClusterFixture(_root);
+        var markerPath = Path.Join(fixture.OwnedRoot, ".appsurface-native-postgresql-owner");
+        var sentinelPath = Path.Join(fixture.OwnedRoot, "foreign-contents.txt");
+        fixture.Runtime.OnReserveLoopbackPort = () =>
+        {
+            Directory.CreateDirectory(markerPath);
+            File.WriteAllText(sentinelPath, "preserve unowned contents");
+        };
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.StartAsync());
+
+        Assert.Contains("could not verify cleanup", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(Directory.Exists(markerPath));
+        Assert.Equal("preserve unowned contents", File.ReadAllText(sentinelPath));
+        Assert.Null(fixture.Bootstrap.Request);
+        Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl start");
+        Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+    }
+
+    [Fact]
+    public async Task StartWaitsForBothOwnedPostmasterAndListeningPortBeforeAuthenticating()
+    {
+        using var fixture = new NativeClusterFixture(_root);
+        fixture.Runtime.MissingPostmasterProbesRemaining = 1;
+        fixture.Runtime.ClosedPostmasterPortProbesRemaining = 1;
+        fixture.Runner.AuthenticationProbeHandler = _ =>
+        {
+            Assert.True(fixture.Runtime.OwnedPostmasterObserved);
+            Assert.True(fixture.Runtime.PostmasterListenerObserved);
+            return new ExternalCommandResult(0, "1\n", string.Empty);
+        };
+
+        var cluster = await fixture.StartAsync();
+
+        Assert.True(fixture.Runtime.ServerRunning);
+        Assert.Single(fixture.Runner.Requests, request => request.OperationName == "psql authentication probe");
+        await cluster.DisposeWithBudgetAsync(2_000);
+        Assert.False(Directory.Exists(cluster.OwnedRoot));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SuccessfulStartCommandWithoutVerifiedReadinessExpiresBeforeAuthentication(bool hideIdentity)
+    {
+        using var fixture = new NativeClusterFixture(_root, setupMilliseconds: 1_000, cleanupMilliseconds: 1_000);
+        fixture.Runtime.HidePostmasterFromLookup = hideIdentity;
+        fixture.Runtime.ClosedPostmasterPortProbesRemaining = hideIdentity ? 0 : int.MaxValue;
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.StartAsync());
+
+        Assert.Contains("postmaster verification", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Single(fixture.Runner.Requests, request => request.OperationName == "pg_ctl start");
+        Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "psql authentication probe");
+        Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "psql server version probe");
+        if (hideIdentity)
+        {
+            Assert.Contains("retained", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.True(fixture.Runtime.ServerRunning);
+            Assert.True(Directory.Exists(fixture.OwnedRoot));
+            Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+        }
+        else
+        {
+            Assert.False(fixture.Runtime.ServerRunning);
+            Assert.False(Directory.Exists(fixture.OwnedRoot));
+            Assert.Single(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AuthenticationCancellationPropagatesAndCleanupUsesAnIndependentToken(bool duringStartup)
+    {
+        using var fixture = new NativeClusterFixture(_root);
+        using var cancellation = new CancellationTokenSource();
+        DurableTemplateNativePostgreSql? cluster = duringStartup ? null : await fixture.StartAsync();
+        fixture.Runner.AuthenticationProbeHandler = _ =>
+        {
+            cancellation.Cancel();
+            cancellation.Token.ThrowIfCancellationRequested();
+            throw new InvalidOperationException("The cancelled authentication probe must not return.");
+        };
+
+        var error = duringStartup
+            ? await Assert.ThrowsAnyAsync<OperationCanceledException>(() => fixture.StartAsync(cancellation.Token))
+            : await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                cluster!.TryAuthenticateAsync(ExtractPassword(cluster!.ConnectionString), cancellation.Token));
+
+        Assert.Equal(cancellation.Token, error.CancellationToken);
+        if (duringStartup)
+        {
+            Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "psql server version probe");
+        }
+        else
+        {
+            Assert.True(fixture.Runtime.ServerRunning);
+            Assert.True(Directory.Exists(fixture.OwnedRoot));
+            await cluster!.DisposeWithBudgetAsync(2_000);
+        }
+        Assert.Single(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+        Assert.False(fixture.Runtime.ServerRunning);
+        Assert.False(Directory.Exists(fixture.OwnedRoot));
+    }
+
+    [Theory]
+    [InlineData(0, "not-a-process-id")]
+    [InlineData(2, "not-a-start-time")]
+    [InlineData(3, "not-a-port")]
+    public void NativeRuntimeRejectsMalformedNumericPidFieldsBeforeProcessLookup(int field, string malformedValue)
+    {
+        var dataDirectory = Path.Join(_root, "malformed-runtime-data");
+        Directory.CreateDirectory(dataDirectory);
+        var pidPath = Path.Join(dataDirectory, "postmaster.pid");
+        var lines = new[] { "12345", dataDirectory, "1800000000", "54321", "0", "0", string.Empty };
+        lines[field] = malformedValue;
+        File.WriteAllLines(pidPath, lines);
+
+        var error = Assert.Throws<PackageIndexException>(() =>
+            NativePostgreSqlRuntime.Instance.FindOwnedPostmaster(dataDirectory, "unused-postgres", 54_321));
+
+        Assert.Contains("identity did not match", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(lines, File.ReadAllLines(pidPath));
+    }
+
+    [Fact]
+    public async Task BootstrapLaunchFailureSuppressesExecutableAndCredentialDiagnostics()
+    {
+        var secret = "bootstrap-launch-failure-secret";
+        var executablePath = Path.Join(_root, "missing-bootstrap-" + secret);
+        var request = new NativePostgreSqlBootstrapRequest(executablePath, ["--pwprompt"], _root, secret, 1_000);
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
+            new NativePostgreSqlBootstrapRunner().RunAsync(request, CancellationToken.None));
+
+        Assert.Contains("process could not start", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(executablePath, error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ThrowingBootstrapTerminationFailsClosedAndSuppressesPrivateFailureDetails()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var executablePath = Path.Join(_root, "throwing-termination.sh");
+        var startedPath = Path.Join(_root, "throwing-termination.started");
+        var sleepPath = File.Exists("/bin/sleep") ? "/bin/sleep" : "/usr/bin/sleep";
+        WriteExecutableScript(executablePath,
+            "#!/bin/sh\n" + "echo ready > \"" + startedPath + "\"\n"
+            + "exec \"" + sleepPath + "\" 60\n");
+        const string secret = "bootstrap-termination-private-secret";
+        var terminationObserved = false;
+        int? childId = null;
+        DateTime childStartTime = default;
+        var runner = new NativePostgreSqlBootstrapRunner(async process =>
+        {
+            childId = process.Id;
+            childStartTime = process.StartTime;
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(3));
+            terminationObserved = process.HasExited;
+            throw new InvalidOperationException(secret);
+        });
+
+        using var cancellation = new CancellationTokenSource();
+        var runTask = runner.RunAsync(
+            new NativePostgreSqlBootstrapRequest(executablePath, [], _root, string.Empty, 3_000),
+            cancellation.Token);
+        try
+        {
+            Assert.True(await WaitForFileAsync(startedPath, runTask, TimeSpan.FromSeconds(3)),
+                "The bootstrap child must acknowledge startup before cancellation exercises termination.");
+            cancellation.Cancel();
+            var error = await Assert.ThrowsAsync<NativePostgreSqlBootstrapTerminationException>(() => runTask);
+
+            Assert.True(terminationObserved);
+            Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            cancellation.Cancel();
+            if (childId is int processId)
+            {
+                try
+                {
+                    using var child = Process.GetProcessById(processId);
+                    if (!child.HasExited && child.StartTime == childStartTime)
+                    {
+                        child.Kill(entireProcessTree: true);
+                        await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(3));
+                    }
+                }
+                catch (ArgumentException)
+                {
+                    // The specifically identified bootstrap child has already exited.
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public async Task BootstrapClearsInheritedPostgreSqlEnvironmentAndDrainsBothSecretBearingStreams()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var suffix = Guid.NewGuid().ToString("N");
+        var upperKey = "PG_APPSURFACE_NATIVE_TEST_" + suffix;
+        var lowerKey = "pg_APPSURFACE_NATIVE_TEST_" + suffix;
+        var scriptPath = Path.Join(_root, "bootstrap-child-protocol.sh");
+        const string secret = "bootstrap-protocol-private-secret";
+        WriteExecutableScript(scriptPath,
+            "#!/bin/sh\n"
+            + "[ \"${" + upperKey + "+present}\" != present ] || exit 20\n"
+            + "[ \"${" + lowerKey + "+present}\" != present ] || exit 21\n"
+            + "[ \"$1\" = 'argument with spaces' ] || exit 22\n"
+            + "[ \"$2\" = 'literal;argument' ] || exit 23\n"
+            + "IFS= read -r first || exit 24\n"
+            + "IFS= read -r second || exit 25\n"
+            + "[ \"$first\" = \"$second\" ] || exit 26\n"
+            + "i=0\nwhile [ \"$i\" -lt 5000 ]; do\n"
+            + "printf '%s\\n' \"$first\"\nprintf '%s\\n' \"$second\" >&2\n"
+            + "i=$((i + 1))\ndone\nexit 7\n");
+        var previousUpper = Environment.GetEnvironmentVariable(upperKey);
+        var previousLower = Environment.GetEnvironmentVariable(lowerKey);
+        try
+        {
+            Environment.SetEnvironmentVariable(upperKey, secret);
+            Environment.SetEnvironmentVariable(lowerKey, secret);
+
+            var result = await new NativePostgreSqlBootstrapRunner().RunAsync(
+                new NativePostgreSqlBootstrapRequest(scriptPath, ["argument with spaces", "literal;argument"], _root,
+                    $"{secret}{Environment.NewLine}{secret}{Environment.NewLine}", 5_000),
+                CancellationToken.None);
+
+            Assert.Equal(7, result.ExitCode);
+            Assert.False(result.TimedOut);
+            Assert.True(result.ProcessTerminationVerified);
+            Assert.DoesNotContain(secret, result.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(upperKey, previousUpper);
+            Environment.SetEnvironmentVariable(lowerKey, previousLower);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DefaultBootstrapTerminationVerifiesTheOwnedChildOnTimeoutOrCancellation(bool cancelCaller)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var scriptPath = Path.Join(_root, "default-termination.sh");
+        var pidPath = Path.Join(_root, "default-termination.pid");
+        var sleepPath = File.Exists("/bin/sleep") ? "/bin/sleep" : "/usr/bin/sleep";
+        WriteExecutableScript(scriptPath,
+            "#!/bin/sh\n" + "echo $$ > \"" + pidPath + ".tmp\"\n"
+            + "mv \"" + pidPath + ".tmp\" \"" + pidPath + "\"\n"
+            + "exec \"" + sleepPath + "\" 60\n");
+        using var cancellation = new CancellationTokenSource();
+        var task = new NativePostgreSqlBootstrapRunner().RunAsync(
+            new NativePostgreSqlBootstrapRequest(scriptPath, [], _root, string.Empty, cancelCaller ? 30_000 : 5_000), cancellation.Token);
+        Process? child = null;
+        DateTime start = default;
+        try
+        {
+            Assert.True(await WaitForFileAsync(pidPath, task, TimeSpan.FromSeconds(3)));
+            try
+            {
+                child = Process.GetProcessById(int.Parse(File.ReadAllText(pidPath).Trim(), CultureInfo.InvariantCulture));
+                start = child.StartTime;
+            }
+            catch (Exception exception) when (!cancelCaller && exception is
+                ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                // Accept a disappearing process only after the real runner verifies its timed-out termination.
+                var result = await task.WaitAsync(TimeSpan.FromSeconds(12));
+                Assert.True(result.TimedOut);
+                Assert.True(result.ProcessTerminationVerified);
+                if (child is not null)
+                {
+                    Assert.True(child.HasExited);
+                    child.Dispose();
+                    child = null;
+                }
+            }
+            if (cancelCaller)
+            {
+                cancellation.Cancel();
+                var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+                Assert.True(cancellation.IsCancellationRequested);
+                Assert.True(error.CancellationToken.IsCancellationRequested);
+            }
+            else
+            {
+                var result = await task.WaitAsync(TimeSpan.FromSeconds(12));
+                Assert.True(result.TimedOut);
+                Assert.True(result.ProcessTerminationVerified);
+                Assert.Equal(-1, result.ExitCode);
+            }
+            if (child is not null) Assert.True(child.HasExited);
+        }
+        finally
+        {
+            cancellation.Cancel();
+            if (child is not null)
+            {
+                if (!child.HasExited && child.StartTime == start)
+                {
+                    child.Kill(entireProcessTree: true);
+                    await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(3));
+                }
+                child.Dispose();
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NativeRuntimeRejectsMissingOrForeignProcessesEvenWithValidPidFileShape(bool missingProcess)
+    {
+        using var current = Process.GetCurrentProcess();
+        var directory = Path.Join(_root, "unowned-runtime-data");
+        Directory.CreateDirectory(directory);
+        var identity = new NativePostgreSqlProcessIdentity(missingProcess ? int.MaxValue : current.Id,
+            new DateTimeOffset(current.StartTime.ToUniversalTime()).ToUnixTimeSeconds());
+        var pidPath = Path.Join(directory, "postmaster.pid");
+        var contents = RenderPostmasterPid(identity, directory, 54_321);
+        File.WriteAllText(pidPath, contents);
+
+        Assert.Null(NativePostgreSqlRuntime.Instance.FindOwnedPostmaster(directory, "unused-postgres", 54_321));
+        Assert.False(NativePostgreSqlRuntime.Instance.IsSameProcessAlive(identity, "unused-postgres"));
+        Assert.Equal(contents, File.ReadAllText(pidPath));
+        Assert.False(current.HasExited);
+    }
+
+    [Fact]
+    public async Task DefaultToolResolverSelectsTheCurrentHostAcquisitionPath()
+    {
+        using var fixture = new NativeClusterFixture(_root);
+        fixture.Runner.BrewPrefix = fixture.Root;
+        var resolver = new NativePostgreSqlToolDirectoryResolver(windowsPgBin: fixture.BinDirectory);
+
+        var result = await resolver.ResolveAsync(fixture.Runner, 3_000, CancellationToken.None);
+
+        if (OperatingSystem.IsMacOS())
+        {
+            Assert.Equal(fixture.BinDirectory, result);
+            Assert.Equal(["--prefix", "postgresql@16"], Assert.Single(fixture.Runner.Requests).Arguments);
+        }
+        else
+        {
+            Assert.Equal(OperatingSystem.IsLinux() ? "/usr/lib/postgresql/16/bin" : fixture.BinDirectory, result);
+            Assert.Empty(fixture.Runner.Requests);
+        }
+        Assert.Null(fixture.Bootstrap.Request);
+    }
+
+    [Fact]
+    public async Task MacToolResolverUsesTheCanonicalInstalledKegBehindASymlink()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var fixture = new NativeClusterFixture(_root);
+        var keg = Path.Join(fixture.Root, "installed-keg");
+        Directory.CreateDirectory(Path.Join(keg, "bin"));
+        var link = Path.Join(fixture.Root, "linked-keg");
+        Directory.CreateSymbolicLink(link, keg);
+        fixture.Runner.BrewPrefix = link;
+
+        var result = await new NativePostgreSqlToolDirectoryResolver(NativePostgreSqlHostPlatform.MacOS)
+            .ResolveAsync(fixture.Runner, 3_000, CancellationToken.None);
+
+        Assert.Equal(Path.Join(keg, "bin"), result);
+        Assert.Equal(["--prefix", "postgresql@16"], Assert.Single(fixture.Runner.Requests).Arguments);
+        Assert.True(Directory.Exists(link));
+        Assert.Null(fixture.Bootstrap.Request);
+    }
+
+    [Fact]
+    public async Task OwnedRootDeletionFailureReportsStoppedClusterAndRetainsBlockedContents()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        Assert.False(NativePostgreSqlRuntime.Instance.IsRunningAsRoot);
+        using var fixture = new NativeClusterFixture(_root);
+        var cluster = await fixture.StartAsync();
+        var secret = ExtractPassword(cluster.ConnectionString);
+        var blockedDirectory = Path.Join(cluster.OwnedRoot, "blocked-cleanup");
+        Directory.CreateDirectory(blockedDirectory);
+        var sentinelPath = Path.Join(blockedDirectory, "retained-contents.txt");
+        File.WriteAllText(sentinelPath, "preserve contents when deletion is denied");
+        var originalMode = File.GetUnixFileMode(blockedDirectory);
+        try
+        {
+            File.SetUnixFileMode(blockedDirectory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+
+            var error = await Assert.ThrowsAsync<PackageIndexException>(() => cluster.DisposeWithBudgetAsync(2_000).AsTask());
+
+            Assert.Contains("stopped, but its owned root could not be removed", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("manual cleanup may be required", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
+            Assert.False(fixture.Runtime.ServerRunning);
+            Assert.Single(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+            Assert.True(Directory.Exists(cluster.OwnedRoot));
+            Assert.Equal("preserve contents when deletion is denied", File.ReadAllText(sentinelPath));
+        }
+        finally
+        {
+            if (Directory.Exists(blockedDirectory))
+            {
+                File.SetUnixFileMode(blockedDirectory, originalMode);
+            }
+        }
+    }
+
+    [Fact]
     public async Task BudgetsCannotExceedProductionCeilings()
     {
         Assert.Throws<PackageIndexException>(() => new NativePostgreSqlBudgets(0, 1).Validate());
@@ -1175,6 +1884,7 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
     {
         internal NativePostgreSqlBootstrapRequest? Request { get; private set; }
         internal NativePostgreSqlBootstrapResult Result { get; set; } = new(0, TimedOut: false);
+        internal Action<string>? AfterInitialize { get; set; }
 
         public Task<NativePostgreSqlBootstrapResult> RunAsync(
             NativePostgreSqlBootstrapRequest request,
@@ -1191,6 +1901,7 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
                 File.WriteAllText(
                     Path.Join(dataDirectory, "postgresql.auto.conf"),
                     "# initdb baseline owned by PostgreSQL\n# settings added by initdb\n\n");
+                AfterInitialize?.Invoke(dataDirectory);
             }
             return Task.FromResult(Result);
         }
@@ -1209,9 +1920,11 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         internal bool StopSucceeds { get; set; } = true;
         internal bool ThrowOnStop { get; set; }
         internal bool RejectAuthentication { get; set; }
+        internal Func<ExternalCommandRequest, ExternalCommandResult>? AuthenticationProbeHandler { get; set; }
         internal int StartExitCode { get; set; }
         internal bool LateListenerOnly { get; set; }
         internal string ServerVersionOutput { get; set; } = "16.5|160005\n";
+        internal ExternalCommandResult? ServerVersionResult { get; set; }
         internal string? BrewPrefix { get; set; }
 
         public Task<ExternalCommandResult> RunAsync(ExternalCommandRequest request, CancellationToken cancellationToken)
@@ -1270,12 +1983,16 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
                 var command = request.Arguments[Array.IndexOf(request.Arguments.ToArray(), "-c") + 1];
                 if (command == "SELECT 1")
                 {
+                    if (AuthenticationProbeHandler is not null)
+                    {
+                        return Task.FromResult(AuthenticationProbeHandler(request));
+                    }
                     var password = request.Environment!["PGPASSWORD"];
                     return Task.FromResult(!RejectAuthentication && password == runtime.BootstrapPassword
                         ? new ExternalCommandResult(0, "1\n", string.Empty)
                         : new ExternalCommandResult(2, string.Empty, password ?? "missing"));
                 }
-                return Task.FromResult(new ExternalCommandResult(0, ServerVersionOutput, string.Empty));
+                return Task.FromResult(ServerVersionResult ?? new ExternalCommandResult(0, ServerVersionOutput, string.Empty));
             }
 
             return Task.FromResult(new ExternalCommandResult(1, string.Empty, "unexpected command"));
@@ -1292,9 +2009,14 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         internal bool RunningAsRoot { get; set; }
         internal bool ControllingTerminal { get; set; }
         internal bool FailPortReservation { get; set; }
+        internal Action? OnReserveLoopbackPort { get; set; }
         internal bool LateServerOnNextPostmasterProbe { get; set; }
         internal bool LateListenerOnNextPortProbe { get; set; }
         internal bool HidePostmasterFromLookup { get; set; }
+        internal int MissingPostmasterProbesRemaining { get; set; }
+        internal int ClosedPostmasterPortProbesRemaining { get; set; }
+        internal bool OwnedPostmasterObserved { get; private set; }
+        internal bool PostmasterListenerObserved { get; private set; }
         internal bool FailPostmasterLookup { get; set; }
         internal bool ThrowOnPostmasterLookupUnexpectedly { get; set; }
         public bool IsRunningAsRoot => RunningAsRoot;
@@ -1305,19 +2027,32 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
             {
                 throw new InvalidOperationException("No loopback port was available.");
             }
+            OnReserveLoopbackPort?.Invoke();
             return 54_321;
         }
         public bool IsLoopbackPortListening(int port)
         {
+            if (ServerRunning && ClosedPostmasterPortProbesRemaining > 0)
+            {
+                ClosedPostmasterPortProbesRemaining--;
+                return false;
+            }
             if (LateListenerOnNextPortProbe)
             {
                 LateListenerOnNextPortProbe = false;
                 Listening = true;
             }
-            return Listening || ServerRunning;
+            var listening = Listening || ServerRunning;
+            PostmasterListenerObserved |= ServerRunning && listening;
+            return listening;
         }
         public NativePostgreSqlProcessIdentity? FindOwnedPostmaster(string dataDirectory, string postgresPath, int port)
         {
+            if (ServerRunning && MissingPostmasterProbesRemaining > 0)
+            {
+                MissingPostmasterProbesRemaining--;
+                return null;
+            }
             if (FailPostmasterLookup)
             {
                 throw new PackageIndexException("Native PostgreSQL ownership probe failed.");
@@ -1331,7 +2066,9 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
                 LateServerOnNextPostmasterProbe = false;
                 ServerRunning = true;
             }
-            return ServerRunning && !HidePostmasterFromLookup ? _identity : null;
+            var identity = ServerRunning && !HidePostmasterFromLookup ? _identity : null;
+            OwnedPostmasterObserved |= identity is not null;
+            return identity;
         }
         public bool IsSameProcessAlive(NativePostgreSqlProcessIdentity identity, string postgresPath) => ServerRunning;
     }

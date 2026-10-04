@@ -150,6 +150,109 @@ public sealed class DurableTemplateReleaseEvidenceTests : IDisposable
     }
 
     [Theory]
+    [InlineData("missing")]
+    [InlineData("old-major")]
+    [InlineData("missing-server-number")]
+    [InlineData("old-server")]
+    [InlineData("empty-server")]
+    [InlineData("null-hashes")]
+    [InlineData("missing-tool")]
+    [InlineData("wrong-tool")]
+    [InlineData("null-hash")]
+    [InlineData("short-hash")]
+    [InlineData("non-hex-hash")]
+    public void UnsupportedOrIncompleteNativeIdentityCannotAuthorizePublication(string fault)
+    {
+        var tools = _receipt.NativeTools!;
+        var hashes = new Dictionary<string, string>(tools.Sha256!);
+        if (fault == "missing-tool") hashes.Remove("psql");
+        if (fault == "wrong-tool")
+        {
+            hashes.Remove("psql");
+            hashes["untrusted-tool"] = new string('a', 64);
+        }
+        if (fault == "null-hash") hashes["psql"] = null!;
+        if (fault == "short-hash") hashes["psql"] = "abc";
+        if (fault == "non-hex-hash") hashes["psql"] = new string('z', 64);
+        var invalidTools = fault switch
+        {
+            "missing" => null,
+            "old-major" => tools with { MajorVersion = 15 },
+            "missing-server-number" => tools with { ServerVersionNumber = null },
+            "old-server" => tools with { ServerVersionNumber = 150005 },
+            "empty-server" => tools with { ServerVersion = " " },
+            "null-hashes" => tools with { Sha256 = null! },
+            _ => tools with { Sha256 = hashes }
+        };
+
+        var error = Assert.Throws<PackageIndexException>(() => DurableTemplateReleaseEvidence.Validate(
+            _receipt with { NativeTools = invalidTools }, Source, _manifest, _root, "linux-x64", true));
+
+        Assert.Equal("Native PostgreSQL tool/server identity is missing or unsupported.", error.Message);
+    }
+
+    [Theory]
+    [InlineData("wrong-id")]
+    [InlineData("wrong-version")]
+    [InlineData("wrong-hash")]
+    [InlineData("null-entry")]
+    [InlineData("missing-archive")]
+    public void WellFormedReceiptMustStillBindTheExactProducerArchive(string fault)
+    {
+        var artifact = _receipt.Artifacts[0];
+        var receipt = _receipt with
+        {
+            Artifacts = [fault switch
+            {
+                "wrong-id" => artifact with { PackageId = "Other" },
+                "wrong-version" => artifact with { Version = "0.2.0-preview.807" },
+                "wrong-hash" => artifact with { Sha512 = new string('a', 128) },
+                "null-entry" => null!,
+                _ => artifact
+            }]
+        };
+        if (fault == "missing-archive") File.Delete(Path.Join(_root, _manifest.Entries[0].ArtifactFileName));
+
+        var error = Assert.Throws<PackageIndexException>(() => DurableTemplateReleaseEvidence.Validate(
+            receipt, Source, _manifest, _root, "linux-x64", true));
+
+        Assert.Equal("Durable template receipt archive identity differs from the producer.", error.Message);
+    }
+
+    [Theory]
+    [InlineData("schema")]
+    [InlineData("failure-phase")]
+    [InlineData("failure-code")]
+    [InlineData("non-hex-content")]
+    [InlineData("null-phases")]
+    [InlineData("null-phase")]
+    [InlineData("infinite-duration")]
+    [InlineData("null-artifacts")]
+    public void NonPublishableReceiptFailsBeforeArchiveVerification(string fault)
+    {
+        var phases = _receipt.Phases.ToArray();
+        if (fault == "null-phase") phases[0] = null!;
+        if (fault == "infinite-duration") phases[0] = phases[0] with { ElapsedSeconds = double.PositiveInfinity };
+        var receipt = fault switch
+        {
+            "schema" => _receipt with { SchemaVersion = 2 },
+            "failure-phase" => _receipt with { FailurePhase = "native-smoke" },
+            "failure-code" => _receipt with { FailureCode = "failed" },
+            "non-hex-content" => _receipt with { GeneratedContentSha256 = new string('z', 64) },
+            "null-phases" => _receipt with { Phases = null! },
+            "null-artifacts" => _receipt with { Artifacts = null! },
+            _ => _receipt with { Phases = phases }
+        };
+
+        var error = Assert.Throws<PackageIndexException>(() => DurableTemplateReleaseEvidence.Validate(
+            receipt, Source, _manifest, _root, "linux-x64", true));
+
+        Assert.Equal(fault == "null-artifacts"
+            ? "Durable template receipt does not bind the complete candidate archive set."
+            : "Durable template evidence is failed, stale, incomplete or bound to a different source/platform.", error.Message);
+    }
+
+    [Theory]
     [InlineData("null")]
     [InlineData("{")]
     [InlineData("{\"SchemaVersion\":1,\"SchemaVersion\":1}")]

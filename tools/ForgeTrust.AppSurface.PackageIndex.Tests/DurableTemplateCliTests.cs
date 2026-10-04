@@ -76,6 +76,91 @@ public sealed class DurableTemplateCliTests : IDisposable
         Assert.Contains("Durable template source, candidate and three-OS evidence validated before credentials.", stdout.ToString(), StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("version")]
+    [InlineData("missing-archive")]
+    [InlineData("changed-archive")]
+    public async Task VerifyDurableTemplate_RejectsProducerSubstitutionBeforeLaunchingCommands(string fault)
+    {
+        var candidate = await CreateCandidateAsync();
+        if (fault == "version")
+        {
+            var manifest = await File.ReadAllTextAsync(candidate.Manifest);
+            await File.WriteAllTextAsync(candidate.Manifest, manifest.Replace(Version, "0.2.0-preview.807", StringComparison.Ordinal));
+        }
+        else if (fault == "missing-archive") File.Delete(candidate.TemplateArchive);
+        else await File.AppendAllTextAsync(candidate.TemplateArchive, "substituted bytes");
+        var runner = new ProofCommandRunner(candidate);
+        var report = TestPathUtils.PathUnder(_root, "failed-receipt.json");
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await Program.RunAsync(
+            ["verify-durable-template", .. candidate.TimingArguments(report)],
+            stdout, stderr, _repositoryRoot, preflightCommandRunner: runner);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(stdout.ToString());
+        Assert.Contains(fault == "version" ? "version differs from the producer manifest" : "archive differs from the producer manifest",
+            stderr.ToString(), StringComparison.Ordinal);
+        Assert.Empty(runner.Requests);
+        Assert.False(File.Exists(report));
+    }
+
+    [Fact]
+    public async Task VerifyDurableTemplate_ReportsFailedReceiptAndRecoveryAfterOwnedCleanup()
+    {
+        var candidate = await CreateCandidateAsync();
+        var runner = new ProofCommandRunner(candidate, failOperation: "sdk");
+        var report = TestPathUtils.PathUnder(_root, "failed-receipt.json");
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await Program.RunAsync(
+            ["verify-durable-template", .. candidate.TimingArguments(report)],
+            stdout, stderr, _repositoryRoot, preflightCommandRunner: runner);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(stderr.ToString());
+        Assert.Contains("proof failed", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Contains("start-here/durable-worker.md", stdout.ToString(), StringComparison.Ordinal);
+        using var receipt = JsonDocument.Parse(await File.ReadAllTextAsync(report));
+        Assert.False(receipt.RootElement.GetProperty("Succeeded").GetBoolean());
+        Assert.True(receipt.RootElement.GetProperty("CleanupComplete").GetBoolean());
+        Assert.DoesNotContain("private-child-detail", await File.ReadAllTextAsync(report), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VerifyDurableTemplate_BindsRealNativeClusterIdentityThroughTheCommandBoundary()
+    {
+        var bin = Environment.GetEnvironmentVariable("APPSURFACE_TEMPLATE_TEST_NATIVE_PG_BIN");
+        if (string.IsNullOrWhiteSpace(bin)) return;
+        Assert.True(Path.IsPathFullyQualified(bin));
+        var candidate = await CreateCandidateAsync();
+        // Native PostgreSQL operations are real; generated command results are deterministic orchestration fixtures.
+        var runner = new ProofCommandRunner(candidate, nativeRunner: new CliWrapCommandRunner());
+        var report = TestPathUtils.PathUnder(_root, "native-command-receipt.json");
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await Program.RunAsync(
+            ["verify-durable-template", .. candidate.TimingArguments(report), "--native-pg-bin", bin],
+            stdout, stderr, _repositoryRoot, preflightCommandRunner: runner);
+
+        Assert.True(exitCode == 0, stderr.ToString() + stdout.ToString());
+        using var receipt = JsonDocument.Parse(await File.ReadAllTextAsync(report));
+        Assert.True(receipt.RootElement.GetProperty("NativeSmoke").GetBoolean());
+        Assert.True(receipt.RootElement.GetProperty("CleanupComplete").GetBoolean());
+        var tools = receipt.RootElement.GetProperty("NativeTools");
+        Assert.Equal(Path.GetFullPath(bin), tools.GetProperty("BinDirectory").GetString());
+        Assert.InRange(tools.GetProperty("ServerVersionNumber").GetInt32(), 160005, 169999);
+        var smoke = Assert.Single(runner.Requests, request => request.OperationName == "native-smoke");
+        Assert.Equal(bin, smoke.Environment!["APPSURFACE_TEMPLATE_NATIVE_PG_BIN"]);
+        var stop = Assert.Single(runner.Requests, request => request.OperationName == "pg_ctl stop");
+        Assert.False(Directory.Exists(stop.WorkingDirectory));
+        Assert.Contains(runner.Requests, request => request.OperationName == "psql server version probe");
+    }
+
     [Fact]
     public async Task VerifyDurableTemplateEvidence_RejectsMissingTrustedInputsAtTheCliBoundary()
     {
@@ -413,7 +498,8 @@ public sealed class DurableTemplateCliTests : IDisposable
                 "--report", report];
     }
 
-    private sealed class ProofCommandRunner(CandidateBundle? candidate, string timingSdkOutput = "10.0.102\n") : IExternalCommandRunner
+    private sealed class ProofCommandRunner(CandidateBundle? candidate, string timingSdkOutput = "10.0.102\n",
+        IExternalCommandRunner? nativeRunner = null, string? failOperation = null) : IExternalCommandRunner
     {
         private readonly Dictionary<string, string> _candidateArchives = candidate is null
             ? new(StringComparer.Ordinal)
@@ -430,9 +516,12 @@ public sealed class DurableTemplateCliTests : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             Requests.Add(request);
+            if (request.OperationName == failOperation) return Task.FromResult(new ExternalCommandResult(1, "", "private-child-detail"));
             if (request.FileName == "git") return Result(0, SourceCommit + Environment.NewLine);
 
             var toolName = Path.GetFileNameWithoutExtension(request.FileName);
+            if (nativeRunner is not null && new[] { "initdb", "postgres", "pg_ctl", "psql" }.Contains(toolName, StringComparer.Ordinal))
+                return nativeRunner.RunAsync(request, cancellationToken);
             if (new[] { "initdb", "postgres", "pg_ctl", "psql" }.Contains(toolName, StringComparer.Ordinal)
                 && request.Arguments.SequenceEqual(["--version"]))
                 return Result(0, $"{toolName} (PostgreSQL) 16.5{Environment.NewLine}");
@@ -441,6 +530,8 @@ public sealed class DurableTemplateCliTests : IDisposable
                 throw new InvalidOperationException($"Unexpected external command '{request.FileName}'.");
 
             if (request.Arguments.SequenceEqual(["--version"])) return Result(0, timingSdkOutput);
+            if (nativeRunner is not null && request.OperationName == "native-smoke")
+                return Result(0, "[native-cleanup] elapsed-ms=0\n[native-smoke] read-only ordinary startup passed\n");
             if (request.OperationName is "acquisition-create" or "archive-create" or "feed-create")
             {
                 MaterializeTemplate(Path.Join(request.WorkingDirectory, "FirstDurableWorker"));

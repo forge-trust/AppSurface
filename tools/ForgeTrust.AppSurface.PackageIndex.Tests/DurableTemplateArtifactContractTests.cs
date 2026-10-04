@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Text;
@@ -562,6 +563,33 @@ public sealed partial class DurableTemplateArtifactContractTests : IDisposable
         var entry = archive.CreateEntry(path, CompressionLevel.Optimal);
         using var output = entry.Open();
         output.Write(content);
+    }
+
+    private static void RewriteDeclaredZipLength(string archivePath, string entryPath, uint declaredLength)
+    {
+        // The fixture writer emits classic ZIP with no archive comment. Change only the central-directory
+        // declaration so the original compressed bytes exercise rejection of a mismatched inflated length.
+        var bytes = File.ReadAllBytes(archivePath);
+        var end = bytes.Length - 22;
+        Assert.Equal(0x06054B50u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(end, 4)));
+        var entryCount = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(end + 10, 2));
+        var position = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(end + 16, 4)));
+        for (var index = 0; index < entryCount; index++)
+        {
+            Assert.Equal(0x02014B50u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(position, 4)));
+            var nameLength = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(position + 28, 2));
+            var extraLength = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(position + 30, 2));
+            var commentLength = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(position + 32, 2));
+            var name = Encoding.UTF8.GetString(bytes.AsSpan(position + 46, nameLength));
+            if (name == entryPath)
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(position + 24, 4), declaredLength);
+                File.WriteAllBytes(archivePath, bytes);
+                return;
+            }
+            position += 46 + nameLength + extraLength + commentLength;
+        }
+        throw new InvalidOperationException("The fixture ZIP does not contain the requested entry.");
     }
 
     public void Dispose()

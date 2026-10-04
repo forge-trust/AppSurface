@@ -913,8 +913,10 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Contains("dotnet tool install --global ForgeTrust.RazorWire.Cli --prerelease", markdown, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task GenerateAsync_RendersTemplateInstallCommandWithExplicitReleasedVersion()
+    [Theory]
+    [InlineData("Template")]
+    [InlineData(" Dependency ; tEmPlAtE ; ")]
+    public async Task GenerateAsync_RendersTemplateInstallCommandWithExplicitReleasedVersion(string packageType)
     {
         await WriteCommonChooserFilesAsync(includeUnreleased: true);
         var manifestPath = TestPathUtils.PathUnder(_repositoryRoot, "packages", "package-index.yml");
@@ -961,7 +963,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             ["Durable/ForgeTrust.AppSurface.Durable.Templates/ForgeTrust.AppSurface.Durable.Templates.csproj"] = CreateMetadata(
                 "Durable/ForgeTrust.AppSurface.Durable.Templates/ForgeTrust.AppSurface.Durable.Templates.csproj",
                 "ForgeTrust.AppSurface.Durable.Templates",
-                packageType: "Template")
+                packageType: packageType)
         });
 
         var markdown = await generator.GenerateAsync(CreateRequest());
@@ -2323,6 +2325,8 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
     [Theory]
     [InlineData("--manifest")]
+    [InlineData("--native-pg-bin")]
+    [InlineData("--durable-template-evidence")]
     [InlineData("--coverage-proof-work-dir")]
     [InlineData("--coverage-proof-report")]
     [InlineData("--docs-proof-work-dir")]
@@ -2332,6 +2336,26 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         var error = Assert.Throws<PackageIndexException>(() => CommandLineOptions.Parse([option], _repositoryRoot));
 
         Assert.Contains("requires a value", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CommandLineOptions_ResolvesNativeToolsAndTrustedTemplateEvidenceAgainstTheChosenRepository()
+    {
+        var defaults = CommandLineOptions.Parse([], _repositoryRoot);
+        Assert.Null(defaults.NativePgBin);
+        Assert.Null(defaults.DurableTemplateEvidenceDirectory);
+        var evidence = Path.Join(_repositoryRoot, "downloaded-evidence");
+
+        var parsed = CommandLineOptions.Parse([
+            "--repo-root", "consumer-repository",
+            "--native-pg-bin", "native-tools/bin",
+            "--durable-template-evidence", evidence
+        ], _repositoryRoot);
+
+        Assert.Equal(Path.Join(_repositoryRoot, "consumer-repository", "native-tools", "bin"), parsed.NativePgBin);
+        Assert.Equal(evidence, parsed.DurableTemplateEvidenceDirectory);
+        Assert.False(Directory.Exists(parsed.NativePgBin));
+        Assert.False(Directory.Exists(evidence));
     }
 
     [Fact]
@@ -3403,6 +3427,59 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal("Library", metadata.OutputType);
         Assert.Single(metadata.ProjectReferences);
         Assert.Equal("/repo/src/Dependency/Dependency.csproj", metadata.ProjectReferences[0]);
+    }
+
+    [Theory]
+    [InlineData(null, false, false, "dotnet package add Candidate")]
+    [InlineData(null, true, false, "dotnet tool install --global Candidate --prerelease")]
+    [InlineData(" Dependency ; tEmPlAtE ; ", true, true, "dotnet new install Candidate@<version>")]
+    [InlineData("TemplateExtension", false, false, "dotnet package add Candidate")]
+    public void ParseMetadataJson_ResolvesOptionalPackageTypeWithoutMisclassifyingTheInstallCommand(
+        string? packageType, bool isTool, bool isTemplate, string expectedCommand)
+    {
+        var standardOutput = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            Properties = new
+            {
+                PackageId = "Candidate",
+                TargetFramework = "net10.0",
+                IsPackable = "true",
+                PackAsTool = isTool ? "true" : "false",
+                PackageType = packageType,
+                OutputType = "Library"
+            }
+        });
+
+        var metadata = DotNetProjectMetadataProvider.ParseMetadataJson("src/Candidate/Candidate.csproj", standardOutput);
+
+        Assert.Equal(packageType ?? string.Empty, metadata.PackageType);
+        Assert.Equal(isTemplate, metadata.IsTemplate);
+        Assert.Equal(expectedCommand, metadata.InstallCommand);
+    }
+
+    [Theory]
+    [InlineData("42")]
+    [InlineData("[]")]
+    [InlineData("{}")]
+    public void ParseMetadataJson_RejectsPackageTypeValuesThatAreNotStrings(string packageTypeJson)
+    {
+        var standardOutput = $$"""
+            {
+              "Properties": {
+                "PackageId": "Candidate",
+                "TargetFramework": "net10.0",
+                "IsPackable": "true",
+                "PackAsTool": "false",
+                "PackageType": {{packageTypeJson}},
+                "OutputType": "Library"
+              }
+            }
+            """;
+
+        var error = Assert.Throws<PackageIndexException>(() =>
+            DotNetProjectMetadataProvider.ParseMetadataJson("src/Candidate/Candidate.csproj", standardOutput));
+
+        Assert.Contains("malformed JSON", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]

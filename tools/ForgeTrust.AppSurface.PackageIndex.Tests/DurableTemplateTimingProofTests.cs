@@ -171,6 +171,117 @@ public sealed class DurableTemplateTimingProofTests
             Assert.All(result.Sample!.Commands, command => Assert.Matches("^[0-9a-f]{64}$", command.ArgumentsSha256)));
     }
 
+    [Theory]
+    [InlineData("ordinal", "sample-order")]
+    [InlineData("series", "series-id")]
+    [InlineData("mode", "mode")]
+    [InlineData("undefined-mode", "mode")]
+    [InlineData("feed-kind", "mode")]
+    [InlineData("undefined-feed-kind", "mode")]
+    [InlineData("feed-identity", "feed-identity")]
+    [InlineData("version", "package-version")]
+    [InlineData("artifact-set", "artifact-set")]
+    [InlineData("missing-artifact-set", "artifact-set")]
+    [InlineData("runtime", "runtime-identifier")]
+    [InlineData("runner", "runner-image")]
+    [InlineData("unsupported-sdk", "sdk-version")]
+    [InlineData("missing-sdk", "sdk-version")]
+    public void SampleProvenanceDriftInvalidatesTheSeriesWithoutDroppingTheAttempt(string fault, string failureCode)
+    {
+        var samples = Samples(DurableTemplateTimingMode.Primed, [100, 110, 115, 125, 130]);
+        samples[0] = fault switch
+        {
+            "ordinal" => samples[0] with { Ordinal = 0 },
+            "series" => samples[0] with { SeriesId = "different-series" },
+            "mode" => samples[0] with { Mode = DurableTemplateTimingMode.Cold },
+            "undefined-mode" => samples[0] with { Mode = (DurableTemplateTimingMode)42 },
+            "feed-kind" => samples[0] with { FeedKind = DurableTemplateTimingFeedKind.PromotedPublic },
+            "undefined-feed-kind" => samples[0] with { FeedKind = (DurableTemplateTimingFeedKind)42 },
+            "feed-identity" => samples[0] with { FeedIdentity = "different-feed" },
+            "version" => samples[0] with { PackageVersion = "0.2.0-preview.12" },
+            "artifact-set" => samples[0] with { ArtifactSetSha256 = Hash("different-artifact-set") },
+            "missing-artifact-set" => samples[0] with { ArtifactSetSha256 = null! },
+            "runtime" => samples[0] with { RuntimeIdentifier = "linux-arm64" },
+            "runner" => samples[0] with { RunnerImage = "ubuntu-24.04" },
+            "unsupported-sdk" => samples[0] with { SdkVersion = "9.0.100" },
+            "missing-sdk" => samples[0] with { SdkVersion = null! },
+            _ => throw new ArgumentOutOfRangeException(nameof(fault))
+        };
+
+        var receipt = DurableTemplateTimingProof.Evaluate(Request(DurableTemplateTimingMode.Primed), samples);
+
+        AssertRetainedRejectedSample(samples, receipt, 0, failureCode);
+    }
+
+    [Theory]
+    [InlineData("cache-root", null, "cache-root-identity")]
+    [InlineData("cache-root", "not-a-sha256", "cache-root-identity")]
+    [InlineData("project", null, "project-identity")]
+    [InlineData("project", "not-a-sha256", "project-identity")]
+    [InlineData("database", null, "database-identity")]
+    [InlineData("database", "not-a-sha256", "database-identity")]
+    [InlineData("daemon", null, "docker-identity")]
+    [InlineData("daemon", "not-a-sha256", "docker-identity")]
+    [InlineData("cache-closure", null, "cache-closure-hash")]
+    [InlineData("cache-closure", "not-a-sha256", "cache-closure-hash")]
+    public void SampleResourceIdentitiesRequireHashEvidence(string identity, string? value, string failureCode)
+    {
+        var samples = Samples(DurableTemplateTimingMode.Primed, [100, 110, 115, 125, 130]);
+        samples[0] = identity switch
+        {
+            "cache-root" => samples[0] with { PackageCacheRootIdentity = value! },
+            "project" => samples[0] with { ProjectIdentity = value! },
+            "database" => samples[0] with { DatabaseIdentity = value! },
+            "daemon" => samples[0] with { DockerDaemonIdentity = value! },
+            "cache-closure" => samples[0] with { PackageCacheClosureSha256 = value! },
+            _ => throw new ArgumentOutOfRangeException(nameof(identity))
+        };
+
+        var receipt = DurableTemplateTimingProof.Evaluate(Request(DurableTemplateTimingMode.Primed), samples);
+
+        AssertRetainedRejectedSample(samples, receipt, 0, failureCode);
+    }
+
+    [Theory]
+    [InlineData(-0.001)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(double.NegativeInfinity)]
+    public void InvalidSetupDurationCannotBecomeSuccessfulTimingEvidence(double setupSeconds)
+    {
+        var samples = Samples(DurableTemplateTimingMode.Primed, [100, 110, 115, 125, 130]);
+        samples[0] = samples[0] with { PackageSetupRestoreBuildSeconds = setupSeconds };
+
+        var receipt = DurableTemplateTimingProof.Evaluate(Request(DurableTemplateTimingMode.Primed), samples);
+
+        AssertRetainedRejectedSample(samples, receipt, 0, "setup-restore-build-duration");
+    }
+
+    [Fact]
+    public void SharedCachePurgeInvalidatesAnOtherwisePassingSample()
+    {
+        var samples = Samples(DurableTemplateTimingMode.Primed, [100, 110, 115, 125, 130]);
+        samples[0] = samples[0] with { SharedCachePurged = true };
+
+        var receipt = DurableTemplateTimingProof.Evaluate(Request(DurableTemplateTimingMode.Primed), samples);
+
+        Assert.True(receipt.PerformanceGatePassed);
+        AssertRetainedRejectedSample(samples, receipt, 0, "shared-cache-purged");
+    }
+
+    [Fact]
+    public void OverlappingSampleClockRangesCannotClaimASerialSeries()
+    {
+        var samples = Samples(DurableTemplateTimingMode.Primed, [100, 110, 115, 125, 130]);
+        var duration = samples[1].EndTimestamp - samples[1].StartTimestamp;
+        var overlappingStart = samples[0].EndTimestamp - 1;
+        samples[1] = samples[1] with { StartTimestamp = overlappingStart, EndTimestamp = overlappingStart + duration };
+
+        var receipt = DurableTemplateTimingProof.Evaluate(Request(DurableTemplateTimingMode.Primed), samples);
+
+        AssertRetainedRejectedSample(samples, receipt, 1, "samples-overlap");
+    }
+
     [Fact]
     public void ColdSamplesRequireDistinctDaemonAndPrivateRoots()
     {
@@ -504,6 +615,23 @@ public sealed class DurableTemplateTimingProofTests
             DurableTemplateTimingProof.ComputeCommandArgumentsSha256("dotnet", ["test", "FirstDurableWorker", "--filter", "FullyQualifiedName~FirstDurableWork", "--logger", "console;verbosity=detailed"]),
             20, 0, false)
     ];
+
+    private static void AssertRetainedRejectedSample(
+        IReadOnlyList<DurableTemplateTimingSample> samples,
+        DurableTemplateTimingProofReceipt receipt,
+        int rejectedIndex,
+        string failureCode)
+    {
+        Assert.False(receipt.Succeeded);
+        Assert.Equal(5, receipt.Samples.Count);
+        Assert.Same(samples[rejectedIndex], receipt.Samples[rejectedIndex].Sample);
+        Assert.Contains(failureCode, receipt.Samples[rejectedIndex].ValidationFailures);
+        Assert.Contains(failureCode, receipt.FailureCode.Split(','));
+        Assert.All(receipt.Samples.Where((_, index) => index != rejectedIndex), result =>
+            Assert.Empty(result.ValidationFailures));
+        Assert.Equal(115, receipt.MedianSeconds);
+        Assert.Equal(130, receipt.NearestRankP95Seconds);
+    }
 
     private static string Hash(string value) => Convert.ToHexStringLower(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(value)));
 }

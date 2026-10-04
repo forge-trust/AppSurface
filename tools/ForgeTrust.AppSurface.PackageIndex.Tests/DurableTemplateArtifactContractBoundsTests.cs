@@ -43,6 +43,137 @@ public sealed partial class DurableTemplateArtifactContractTests
         Assert.DoesNotContain("private-invalid-archive-sentinel", error.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void MissingArchiveAndProjectGraphReportContractFailures()
+    {
+        var archiveError = Assert.Throws<PackageIndexException>(() =>
+            DurableTemplateArtifactContract.ValidateArchive(NewArchivePath(), Version));
+        Assert.Contains("candidate archive is missing", archiveError.Message, StringComparison.Ordinal);
+
+        var graphError = Assert.Throws<PackageIndexException>(() =>
+            DurableTemplateArtifactContract.ValidateProjectVersions(TestPathUtils.PathUnder(_root, "missing-graph"), Version));
+        Assert.Contains("root does not exist", graphError.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TemplateArchiveAcceptsEmptyAuthoredTextAndStillComputesGeneratedIdentity()
+    {
+        var archive = NewArchivePath();
+        WriteArchive(archive, contentOverrides: new Dictionary<string, byte[]> { [".gitignore"] = [] });
+
+        DurableTemplateArtifactContract.ValidateArchive(archive, Version);
+        var digest = DurableTemplateArtifactContract.ComputeGeneratedContentSha256(archive, GeneratedName);
+
+        Assert.Matches("^[0-9a-f]{64}$", digest);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(128)]
+    public void TemplateArchiveRejectsOverstatedInflatedLengths(int actualLength)
+    {
+        var archive = NewArchivePath();
+        var payload = Encoding.UTF8.GetBytes(new string(' ', actualLength));
+        WriteArchive(archive, contentOverrides: new Dictionary<string, byte[]> { [".gitignore"] = payload });
+        RewriteDeclaredZipLength(archive, "content/durable-worker/.gitignore", (uint)actualLength + 1);
+
+        var error = Assert.Throws<PackageIndexException>(() => DurableTemplateArtifactContract.ValidateArchive(archive, Version));
+
+        Assert.Contains("different from its ZIP declaration", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TemplateArchiveEnforcesCumulativeInflationAcrossAllowedContentEntries()
+    {
+        var payload = Encoding.UTF8.GetBytes(new string(' ', 2 * 1024 * 1024));
+        var overrides = Directory.EnumerateFiles(_templateRoot, "*", SearchOption.AllDirectories)
+            .Where(file => !IsBuildOutput(file))
+            .Order(StringComparer.Ordinal)
+            .Take(9)
+            .ToDictionary(file => Path.GetRelativePath(_templateRoot, file).Replace(Path.DirectorySeparatorChar, '/'),
+                _ => payload);
+        Assert.Equal(9, overrides.Count);
+        var archive = NewArchivePath();
+        WriteArchive(archive, contentOverrides: overrides);
+
+        var error = Assert.Throws<PackageIndexException>(() => DurableTemplateArtifactContract.ValidateArchive(archive, Version));
+
+        Assert.Contains("actual inflation limit", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TemplateManifestHasItsOwnJsonByteLimitBelowTheArchiveEntryLimit()
+    {
+        var manifest = File.ReadAllText(TestPathUtils.PathUnder(_templateRoot, ".template.config", "template.json"));
+        var archive = NewArchivePath();
+        WriteArchive(archive, contentOverrides: new Dictionary<string, byte[]>
+        {
+            [".template.config/template.json"] = Encoding.UTF8.GetBytes(manifest + new string(' ', 1024 * 1024))
+        });
+
+        var error = Assert.Throws<PackageIndexException>(() => DurableTemplateArtifactContract.ValidateArchive(archive, Version));
+
+        Assert.Contains("manifest exceeds the 1-MiB JSON limit", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false, 0, false)]
+    [InlineData(false, unchecked((int)0x80000000), false)]
+    [InlineData(false, (int)FileAttributes.Directory, true)]
+    [InlineData(false, 0x40000000, true)]
+    [InlineData(false, 0x10000000, true)]
+    [InlineData(true, 0, false)]
+    [InlineData(true, 0x40000000 | (int)FileAttributes.Directory, false)]
+    [InlineData(true, unchecked((int)0x80000000), true)]
+    public void TemplateArchiveEntryAttributesMustMatchTheDeclaredFileShape(bool directory, int attributes, bool rejected)
+    {
+        var archive = NewArchivePath();
+        WriteArchive(archive, extraDirectories: directory ? ["content/"] : null);
+        using (var zip = ZipFile.Open(archive, ZipArchiveMode.Update))
+        {
+            zip.GetEntry(directory ? "content/" : "content/durable-worker/.gitignore")!.ExternalAttributes = attributes;
+        }
+
+        if (rejected)
+        {
+            var error = Assert.Throws<PackageIndexException>(() => DurableTemplateArtifactContract.ValidateArchive(archive, Version));
+            Assert.Contains("link or unsupported special file", error.Message, StringComparison.Ordinal);
+        }
+        else
+        {
+            DurableTemplateArtifactContract.ValidateArchive(archive, Version);
+        }
+    }
+
+    [Theory]
+    [InlineData("docs")]
+    [InlineData("src/AppSurfaceDurableWorker/Work")]
+    [InlineData("tests/AppSurfaceDurableWorker.Tests")]
+    public void TemplateArchiveRejectsKnownDirectoryRecordsWithoutRemainingContent(string relativeDirectory)
+    {
+        var archive = NewArchivePath();
+        var directoryPath = "content/durable-worker/" + relativeDirectory + "/";
+        WriteArchive(archive, extraDirectories: [directoryPath]);
+        DurableTemplateArtifactContract.ValidateArchive(archive, Version);
+
+        using (var zip = ZipFile.Open(archive, ZipArchiveMode.Update))
+        {
+            var descendants = zip.Entries.Where(entry => entry.FullName != directoryPath
+                && entry.FullName.StartsWith(directoryPath, StringComparison.Ordinal)).ToArray();
+            Assert.NotEmpty(descendants);
+            foreach (var entry in descendants) entry.Delete();
+        }
+
+        var candidateError = Assert.Throws<PackageIndexException>(() =>
+            DurableTemplateArtifactContract.ValidateArchive(archive, Version));
+        var hashError = Assert.Throws<PackageIndexException>(() =>
+            DurableTemplateArtifactContract.ComputeGeneratedContentSha256(archive, GeneratedName));
+
+        var expectedDiagnostic = $"unexpected directory '{directoryPath.TrimEnd('/')}'";
+        Assert.Contains(expectedDiagnostic, candidateError.Message, StringComparison.Ordinal);
+        Assert.Contains(expectedDiagnostic, hashError.Message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("missing-nuspec")]
     [InlineData("missing-core-properties")]
@@ -52,6 +183,7 @@ public sealed partial class DurableTemplateArtifactContractTests
     [InlineData("missing-metadata")]
     [InlineData("missing-id")]
     [InlineData("missing-version")]
+    [InlineData("missing-package-types")]
     [InlineData("multiple-package-types")]
     [InlineData("invalid-semver")]
     [InlineData("prohibited-dtd")]
@@ -63,6 +195,7 @@ public sealed partial class DurableTemplateArtifactContractTests
             "missing-metadata" => "<package />",
             "missing-id" => $"<package><metadata><version>{Version}</version><packageTypes><packageType name=\"Template\" /></packageTypes></metadata></package>",
             "missing-version" => $"<package><metadata><id>{DurableTemplateArtifactContract.PackageId}</id><packageTypes><packageType name=\"Template\" /></packageTypes></metadata></package>",
+            "missing-package-types" => $"<package><metadata><id>{DurableTemplateArtifactContract.PackageId}</id><version>{Version}</version></metadata></package>",
             "multiple-package-types" => $"<package><metadata><id>{DurableTemplateArtifactContract.PackageId}</id><version>{Version}</version><packageTypes><packageType name=\"Template\" /><packageType name=\"Dependency\" /></packageTypes></metadata></package>",
             "invalid-semver" => $"<package><metadata><id>{DurableTemplateArtifactContract.PackageId}</id><version>latest</version><packageTypes><packageType name=\"Template\" /></packageTypes></metadata></package>",
             "prohibited-dtd" => $"<!DOCTYPE package [<!ENTITY name \"unsafe\">]><package><metadata><id>&name;</id><version>{Version}</version><packageTypes><packageType name=\"Template\" /></packageTypes></metadata></package>",
@@ -158,6 +291,10 @@ public sealed partial class DurableTemplateArtifactContractTests
     [InlineData("<TOKEN>>", true)]
     [InlineData("$" + "{{TOKEN}}", true)]
     [InlineData("<A<B>>", true)]
+    [InlineData("$" + "{TOKEN", true)]
+    [InlineData("<TOKEN", true)]
+    [InlineData("$" + "{TO{KEN}", true)]
+    [InlineData("<TO<KEN>", true)]
     public void TemplateSettingsAcceptOnlyCompleteSecretPlaceholders(string value, bool rejected)
     {
         var settings = $"{{\"ActivationToken\":{System.Text.Json.JsonSerializer.Serialize(value)}}}";
@@ -278,6 +415,10 @@ public sealed partial class DurableTemplateArtifactContractTests
     [InlineData("extra-coordinated-pin")]
     [InlineData("duplicate-pin")]
     [InlineData("dynamic-pin")]
+    [InlineData("missing-pin-id")]
+    [InlineData("missing-pin-version")]
+    [InlineData("pin-update")]
+    [InlineData("semicolon-pin-id")]
     [InlineData("conditional-pin")]
     [InlineData("pin-child-version")]
     [InlineData("invalid-third-party-version")]
@@ -339,6 +480,18 @@ public sealed partial class DurableTemplateArtifactContractTests
                     break;
                 case "dynamic-pin":
                     durablePin.SetAttributeValue("Include", "$(PackageId)");
+                    break;
+                case "missing-pin-id":
+                    durablePin.Attribute("Include")!.Remove();
+                    break;
+                case "missing-pin-version":
+                    durablePin.Attribute("Version")!.Remove();
+                    break;
+                case "pin-update":
+                    durablePin.SetAttributeValue("Update", "ForgeTrust.AppSurface.Durable");
+                    break;
+                case "semicolon-pin-id":
+                    durablePin.SetAttributeValue("Include", "ForgeTrust.AppSurface.Durable;Other.Package");
                     break;
                 case "conditional-pin":
                     durablePin.SetAttributeValue("Condition", "'$(Pin)' == 'true'");
@@ -464,6 +617,27 @@ public sealed partial class DurableTemplateArtifactContractTests
         DurableTemplateArtifactContract.ValidateProjectVersions(graph, Version);
     }
 
+    [Fact]
+    public void ProjectGraphAcceptsNonVersionPackageMetadataAndRootLevelProjectReferences()
+    {
+        var graph = CopyAuthoredTree();
+        var centralPath = TestPathUtils.PathUnder(graph, "Directory.Packages.props");
+        var central = XDocument.Load(centralPath);
+        central.Descendants().First(element => element.Name.LocalName == "PackageVersion")
+            .Add(new XElement("PrivateAssets", "all"));
+        central.Save(centralPath);
+
+        var nestedProject = TestPathUtils.PathUnder(graph, "tests", "AppSurfaceDurableWorker.Tests", "AppSurfaceDurableWorker.Tests.csproj");
+        var document = XDocument.Load(nestedProject);
+        document.Descendants().Single(element => element.Name.LocalName == "ProjectReference")
+            .SetAttributeValue("Include", "src/AppSurfaceDurableWorker/AppSurfaceDurableWorker.csproj");
+        var rootProject = TestPathUtils.PathUnder(graph, "Root.Tests.csproj");
+        document.Save(rootProject);
+        File.Delete(nestedProject);
+
+        DurableTemplateArtifactContract.ValidateProjectVersions(graph, Version);
+    }
+
     [Theory]
     [InlineData("rooted")]
     [InlineData("backslash")]
@@ -474,6 +648,8 @@ public sealed partial class DurableTemplateArtifactContractTests
     [InlineData("missing-target")]
     [InlineData("semicolon")]
     [InlineData("wildcard")]
+    [InlineData("missing-include")]
+    [InlineData("single-character-wildcard")]
     public void ProjectGraphRejectsMalformedOrUnresolvedProjectReferences(string fault)
     {
         var graph = CopyAuthoredTree();
@@ -482,6 +658,9 @@ public sealed partial class DurableTemplateArtifactContractTests
         var reference = document.Descendants().Single(element => element.Name.LocalName == "ProjectReference");
         switch (fault)
         {
+            case "missing-include":
+                reference.Attribute("Include")!.Remove();
+                break;
             case "rooted":
                 reference.SetAttributeValue("Include", "/outside/Other.csproj");
                 break;
@@ -499,6 +678,9 @@ public sealed partial class DurableTemplateArtifactContractTests
                 break;
             case "wildcard":
                 reference.SetAttributeValue("Include", "../../src/AppSurfaceDurableWorker/*.csproj");
+                break;
+            case "single-character-wildcard":
+                reference.SetAttributeValue("Include", "../../src/AppSurfaceDurableWorker/AppSurfaceDurableWorke?.csproj");
                 break;
             case "condition":
                 reference.SetAttributeValue("Condition", "'$(IncludeProject)' == 'true'");

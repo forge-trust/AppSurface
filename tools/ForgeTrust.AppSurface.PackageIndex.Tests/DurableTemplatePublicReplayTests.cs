@@ -75,6 +75,46 @@ public sealed class DurableTemplatePublicReplayTests : IDisposable
     }
 
     [Fact]
+    public void PublicPayloadInventoryCannotExceedTheReplayBound()
+    {
+        var candidate = Archive("candidate", [("payload", "same")]);
+        var published = Path.Join(_root, "excess-inventory.nupkg");
+        using (var archive = ZipFile.Open(published, ZipArchiveMode.Create))
+        {
+            for (var index = 0; index < 4097; index++) archive.CreateEntry($"payload/{index:D4}");
+        }
+
+        var error = Assert.Throws<PackageIndexException>(() =>
+            DurableTemplatePublicReplay.RequirePayloadIdentity(candidate, published));
+
+        Assert.Contains("inventory exceeds", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PublicPayloadEnforcesIndividualAndCumulativeInflationBounds(bool cumulative)
+    {
+        var candidate = Archive("candidate", [("payload", "same")]);
+        var published = Path.Join(_root, "excess-inflation.nupkg");
+        var buffer = new byte[64 * 1024];
+        using (var archive = ZipFile.Open(published, ZipArchiveMode.Create))
+        {
+            for (var index = 0; index < (cumulative ? 5 : 1); index++)
+            {
+                using var output = archive.CreateEntry($"payload/{index}", CompressionLevel.Fastest).Open();
+                for (var block = 0; block < 2048; block++) output.Write(buffer);
+                if (!cumulative) output.WriteByte(0);
+            }
+        }
+
+        var error = Assert.Throws<PackageIndexException>(() =>
+            DurableTemplatePublicReplay.RequirePayloadIdentity(candidate, published));
+
+        Assert.Contains("inflation exceeds", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PublicReplayUsesNativeInstallAndCompletesTheBoundPublicConsumerProof()
     {
         var fixture = new ReplayFixture(_root, _repositoryRoot);

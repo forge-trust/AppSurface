@@ -936,7 +936,7 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
         }
 
         var fullPath = Path.GetFullPath(root);
-        if (Path.GetPathRoot(fullPath) == fullPath.TrimEnd(Path.DirectorySeparatorChar))
+        if (Path.GetPathRoot(fullPath) == fullPath)
         {
             throw new PackageIndexException("Native PostgreSQL owned root cannot be a filesystem root.");
         }

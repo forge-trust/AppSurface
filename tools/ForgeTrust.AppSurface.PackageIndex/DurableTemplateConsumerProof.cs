@@ -425,6 +425,10 @@ internal sealed class DurableTemplateConsumerProof(IExternalCommandRunner comman
             ["DOTNET_NOLOGO"] = "1",
             ["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1",
             ["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1",
+            // Proof children must terminate with their owned workspace, rather than leaving reusable build servers.
+            ["MSBUILDDISABLENODEREUSE"] = "1",
+            ["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0",
+            ["UseSharedCompilation"] = "false",
             ["MSBuildSDKsPath"] = null,
             ["MSBUILD_EXE_PATH"] = null,
             ["NuGetPackageRoot"] = null,

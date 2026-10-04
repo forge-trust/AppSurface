@@ -116,6 +116,9 @@ public sealed class DurableTemplateConsumerProofTests : IDisposable
             Assert.Null(environment["APPSURFACE_TEMPLATE_ACTIVATION_TOKEN"]);
             Assert.Null(environment["MSBuildSDKsPath"]);
             Assert.Null(environment["MSBUILD_EXE_PATH"]);
+            Assert.Equal("1", environment["MSBUILDDISABLENODEREUSE"]);
+            Assert.Equal("0", environment["DOTNET_CLI_USE_MSBUILD_SERVER"]);
+            Assert.Equal("false", environment["UseSharedCompilation"]);
             Assert.Null(environment["NuGetPackageRoot"]);
             Assert.Equal(proofRoot, Directory.GetParent(environment["DOTNET_CLI_HOME"]!)!.FullName);
             Assert.Equal(proofRoot, Directory.GetParent(environment["NUGET_PACKAGES"]!)!.FullName);
@@ -314,6 +317,94 @@ public sealed class DurableTemplateConsumerProofTests : IDisposable
         Assert.DoesNotContain(SecretSentinel, File.ReadAllText(receiptPath), StringComparison.Ordinal);
         Assert.Contains(runner.Requests, command => command.OperationName == "uninstall");
         Assert.False(Directory.Exists(runner.ProofRoot));
+    }
+
+    [Fact]
+    public async Task AllowedGeneratedFileSubstitutionFailsContentIdentityAndStillCleansTheOwnedRoot()
+    {
+        var runner = new DeterministicRunner(_stagedTemplate, _providerArchive, afterCommand: command =>
+        {
+            if (command.OperationName == "feed-tests")
+                File.AppendAllText(Path.Join(command.WorkingDirectory, "README.md"), "\nchanged allowed content\n");
+        });
+        var receiptPath = Path.Join(_root, "substituted-content.json");
+
+        var receipt = await new DurableTemplateConsumerProof(runner).RunAsync(CreateRequest(receiptPath), CandidateArtifacts());
+
+        Assert.False(receipt.Succeeded);
+        Assert.True(receipt.CleanupComplete);
+        Assert.Equal("feed-tests", receipt.FailurePhase);
+        Assert.False(receipt.SampleReplacement);
+        Assert.False(receipt.NativeSmoke);
+        Assert.False(Directory.Exists(runner.ProofRoot));
+        Assert.Contains(runner.Requests, command => command.OperationName == "uninstall");
+        Assert.DoesNotContain(runner.Requests, command => command.OperationName == "replacement-build");
+    }
+
+    [UnixFileSystemFact]
+    public async Task CleanupRefusesALinkedChildAndPreservesItsExternalTarget()
+    {
+        var outside = Path.Join(_root, "outside-cleanup-sentinel.txt");
+        File.WriteAllText(outside, "preserve target");
+        string? link = null;
+        var runner = new DeterministicRunner(_stagedTemplate, _providerArchive, afterCommand: command =>
+        {
+            if (command.OperationName == "uninstall" && Path.GetFileName(command.WorkingDirectory) == "feed-install")
+            {
+                link = Path.Join(Path.GetDirectoryName(command.WorkingDirectory)!, "linked-cleanup-child");
+                File.CreateSymbolicLink(link, outside);
+            }
+        });
+        try
+        {
+            var receipt = await new DurableTemplateConsumerProof(runner).RunAsync(
+                CreateRequest(Path.Join(_root, "linked-cleanup.json")), CandidateArtifacts());
+
+            Assert.False(receipt.Succeeded);
+            Assert.False(receipt.CleanupComplete);
+            Assert.Equal("TemplateCleanupFailed", receipt.FailureCode);
+            Assert.True(Directory.Exists(runner.ProofRoot));
+            Assert.NotNull(link);
+            Assert.Equal("preserve target", File.ReadAllText(outside));
+            Assert.True(File.Exists(link));
+        }
+        finally
+        {
+            if (link is not null) File.Delete(link);
+            if (Directory.Exists(runner.ProofRoot)) Directory.Delete(runner.ProofRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ProofEnvironmentScrubsEveryInheritedSecretFamilyWithoutChangingTheParent()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var sensitive = new[]
+        {
+            "pG_" + suffix, "aPpSuRfAcE_" + suffix, suffix + "pAsSwOrD", suffix + "sEcReT",
+            suffix + "tOkEn", suffix + "cReDeNtIaL", suffix + "aPi_KeY"
+        };
+        var benign = "DURABLE_ENV_PROBE_" + suffix;
+        var names = sensitive.Append(benign).ToArray();
+        var previous = names.ToDictionary(name => name, Environment.GetEnvironmentVariable, StringComparer.Ordinal);
+        try
+        {
+            foreach (var name in names) Environment.SetEnvironmentVariable(name, "parent-sentinel");
+
+            var environment = DurableTemplateConsumerProof.EnvironmentFor(_root, "environment-guard");
+
+            Assert.All(sensitive, name =>
+            {
+                Assert.True(environment.ContainsKey(name));
+                Assert.Null(environment[name]);
+            });
+            Assert.False(environment.ContainsKey(benign));
+            Assert.All(names, name => Assert.Equal("parent-sentinel", Environment.GetEnvironmentVariable(name)));
+        }
+        finally
+        {
+            foreach (var name in names) Environment.SetEnvironmentVariable(name, previous[name]);
+        }
     }
 
     [Fact]
@@ -651,7 +742,8 @@ public sealed class DurableTemplateConsumerProofTests : IDisposable
         string sourceRevisionOutput = SourceCommit + "\n",
         string? omittedReplacementCheckpoint = null,
         string graphFaultOperation = "authored-restore",
-        bool addUnexpectedGeneratedFile = false) : IExternalCommandRunner
+        bool addUnexpectedGeneratedFile = false,
+        Action<ExternalCommandRequest>? afterCommand = null) : IExternalCommandRunner
     {
         private const string ProjectName = "FirstDurableWorker";
         private static readonly string[] FirstWorkCheckpoints =
@@ -676,6 +768,7 @@ public sealed class DurableTemplateConsumerProofTests : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             _requests.Add(request);
+            afterCommand?.Invoke(request);
             if (request.OperationName == failOperation)
             {
                 return Task.FromResult(failedResult ?? new ExternalCommandResult(1, "", SecretSentinel));

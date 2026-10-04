@@ -261,6 +261,54 @@ public sealed class HostContractTests
         Assert.False(schemaReaderCalled);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Authentication_composition_requires_both_default_schemes(bool missingChallenge)
+    {
+        var services = CreateAuthenticationServices(addSecondScheme: true);
+        services.Configure<AuthenticationOptions>(options =>
+        {
+            if (missingChallenge)
+            {
+                options.DefaultChallengeScheme = null;
+            }
+            else
+            {
+                options.DefaultAuthenticateScheme = null;
+            }
+        });
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => WorkerApplication.ValidateAuthenticationComposition(services));
+
+        Assert.Contains("Register default authenticate and challenge schemes", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Public_startup_schema_reader_preserves_preexisting_caller_cancellation()
+    {
+        var builder = CreateStartupBuilder(Environments.Development);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => WorkerApplication.BuildAsync(builder, cancellation.Token));
+    }
+
+    [Fact]
+    public async Task Production_startup_rejects_development_token_reloaded_after_settings_validation()
+    {
+        var builder = CreateStartupBuilder(Environments.Production);
+        ((IConfigurationBuilder)builder.Configuration).Add(new DevelopmentTokenReloadSource());
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => WorkerApplication.BuildAsync(builder));
+
+        Assert.Contains("allowed only in Development", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(SensitiveMarker, exception.ToString(), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Startup_is_passive_until_started_and_application_disposal_owns_both_sources()
     {
@@ -459,6 +507,7 @@ public sealed class HostContractTests
     public void Development_bearer_validation_covers_header_shape_utf8_bounds_and_exact_matching()
     {
         Assert.False(DevelopmentBearerHandler.IsValidBearerHeader(StringValues.Empty, ValidToken));
+        Assert.False(DevelopmentBearerHandler.IsValidBearerHeader(new StringValues(new string?[] { null }), ValidToken));
         Assert.False(DevelopmentBearerHandler.IsValidBearerHeader(
             new StringValues(["Bearer " + ValidToken, "Bearer " + ValidToken]),
             ValidToken));
@@ -1019,12 +1068,91 @@ public sealed class HostContractTests
         Assert.DoesNotContain(SensitiveMarker, exception.ToString(), StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task Data_source_disposal_attempts_both_sources_and_preserves_password_provider_failures(
+        bool dispatcherFails,
+        bool runtimeFails)
+    {
+        var dispatcherFailure = new InvalidOperationException("dispatcher password-provider cancellation failed");
+        var runtimeFailure = new InvalidOperationException("runtime password-provider cancellation failed");
+        var (dispatcher, dispatcherRegistration) = await CreateDisposalTestSourceAsync("dispatcher", dispatcherFails ? dispatcherFailure : null);
+        var (runtime, runtimeRegistration) = await CreateDisposalTestSourceAsync("runtime", runtimeFails ? runtimeFailure : null);
+        using var dispatcherCallback = dispatcherRegistration;
+        using var runtimeCallback = runtimeRegistration;
+        var sources = new WorkerDataSources(dispatcher, runtime, "runtime");
+
+        var exception = await Assert.ThrowsAsync<AggregateException>(async () => await sources.DisposeAsync());
+
+        if (dispatcherFails && runtimeFails)
+        {
+            Assert.Contains("Both restricted PostgreSQL data sources failed", exception.Message, StringComparison.Ordinal);
+            Assert.Collection(exception.InnerExceptions,
+                failure => Assert.Same(dispatcherFailure, Assert.IsType<AggregateException>(failure).InnerException),
+                failure => Assert.Same(runtimeFailure, Assert.IsType<AggregateException>(failure).InnerException));
+        }
+        else
+        {
+            Assert.Same(dispatcherFails ? dispatcherFailure : runtimeFailure, exception.InnerException);
+        }
+
+        await AssertDataSourcesDisposedAsync(sources);
+        await sources.DisposeAsync();
+    }
+
+    private static async Task<(NpgsqlDataSource Source, CancellationTokenRegistration Registration)> CreateDisposalTestSourceAsync(
+        string role,
+        Exception? disposalFailure)
+    {
+        var builder = new NpgsqlDataSourceBuilder($"Host=127.0.0.1;Database=app;Username={role}");
+        if (disposalFailure is null)
+        {
+            return (builder.Build(), default);
+        }
+
+        // Npgsql cancels this supported provider token when disposing the source.
+        // A failing credential-provider cleanup must not prevent the other pool from being disposed.
+        var ready = new TaskCompletionSource<CancellationTokenRegistration>(TaskCreationOptions.RunContinuationsAsynchronously);
+        builder.UsePeriodicPasswordProvider((_, cancellationToken) =>
+        {
+            ready.TrySetResult(cancellationToken.Register(() => throw disposalFailure));
+            return ValueTask.FromResult("unused");
+        }, TimeSpan.FromDays(1), TimeSpan.FromDays(1));
+        var source = builder.Build();
+        var registration = await ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        return (source, registration);
+    }
+
     private static WorkerHostSettings ReadSettings(
         Dictionary<string, string?>? overrides = null,
         string environmentName = "Development")
     {
         var builder = CreateStartupBuilder(environmentName, overrides);
         return WorkerHostSettings.Read(builder.Configuration, builder.Environment);
+    }
+
+    private sealed class DevelopmentTokenReloadSource : IConfigurationSource
+    {
+        public IConfigurationProvider Build(IConfigurationBuilder builder) => new DevelopmentTokenReloadProvider();
+    }
+
+    private sealed class DevelopmentTokenReloadProvider : ConfigurationProvider
+    {
+        private int _tokenReads;
+
+        public override bool TryGet(string key, out string? value)
+        {
+            if (!string.Equals(key, WorkerApplication.DevelopmentTokenKey, StringComparison.Ordinal))
+            {
+                return base.TryGet(key, out value);
+            }
+
+            // Model a provider reload between the settings snapshot and authentication composition.
+            value = Interlocked.Increment(ref _tokenReads) == 1 ? null : SensitiveMarker;
+            return true;
+        }
     }
 
     private static WebApplicationBuilder CreateStartupBuilder(

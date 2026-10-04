@@ -86,6 +86,22 @@ public sealed class DurableTemplateSampleReplacementTests : IDisposable
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ContentHashRejectsAbsentAndMisnamedRootsBeforeReadingWorkFiles(bool rootExists)
+    {
+        var root = TestPathUtils.PathUnder(_root, "untrusted", "DifferentWorker");
+        if (rootExists) Directory.CreateDirectory(root);
+
+        var error = Assert.Throws<PackageIndexException>(() =>
+            DurableTemplateSampleReplacement.ComputeContentSha256(root, ExpectedChangedPaths()));
+
+        Assert.Contains("generated FirstDurableWorker root", error.Message, StringComparison.Ordinal);
+        Assert.Equal(rootExists, Directory.Exists(root));
+        Assert.True(File.Exists(WorkPath("SampleWork.cs")));
+    }
+
+    [Theory]
     [InlineData("missing-final-file")]
     [InlineData("invalid-utf8")]
     [InlineData("wrong-namespace")]
