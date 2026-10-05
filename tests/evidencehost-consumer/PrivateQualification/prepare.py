@@ -6,10 +6,12 @@ actual worker and collects through the launcher's retained handles.
 """
 import base64
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 import re
+import selectors
 import shutil
 import signal
 import stat
@@ -80,10 +82,47 @@ class Runner:
     def __init__(self, logs, deadline):
         self.logs, self.deadline = logs, deadline
         self.results = []
+        self._state = "ready"
 
-    def run(self, argv, cwd, *, input_bytes=None, capture=False, env=None):
+    def run(self, argv, cwd, *, input_bytes=None, capture=False, capture_limit=1024*1024, env=None, maximum_seconds=180):
+        """Return bounded captured bytes only after EOF, exit and owned-group cleanup.
+
+        Captured stdout defaults to 1 MiB; a root-selected exact integer may raise
+        that limit to 32 MiB plus one overflow-detection byte. Input is None or
+        at most 1 MiB of bytes. Capture pumps stdin/stdout in nonblocking 64 KiB
+        chunks. I/O reserves up to three seconds inside the original command end
+        for cleanup; leader reap, group absence and publication use that same end.
+        A real stream-close error rejects success even when the command exited zero.
+        Accepted arguments latch pending before any log open or spawn. Reentry
+        rejects; every later failure latches failed permanently, even if cleanup
+        leaves cumulative time available. Only fully validated durable receipt,
+        capture and final deadline checks restore ready. Invalid argument guards
+        reject before consuming the ready state.
+        Root-selected maximum_seconds defaults to 180 and may only shorten a
+        command to an integer from 1 through 180; it cannot extend the original
+        cumulative deadline. Ordinary command logs and receipts remain private.
+        """
+        require(type(maximum_seconds) is int and 1 <= maximum_seconds <= 180
+                and type(capture_limit) is int and 0 < capture_limit <= 32*1024*1024+1
+                and (input_bytes is None or type(input_bytes) is bytes and len(input_bytes) <= 1024*1024))
+        require(self._state == "ready")
+        self._state = "pending"
+        try:
+            result = self._run_owned(argv, cwd, input_bytes=input_bytes, capture=capture,
+                capture_limit=capture_limit, env=env, maximum_seconds=maximum_seconds)
+        except BaseException:
+            self._state = "failed"
+            raise
+        self._state = "ready"
+        return result
+
+    def _run_owned(self, argv, cwd, *, input_bytes, capture, capture_limit, env, maximum_seconds):
+        """Pending owner; only complete valid publication permits ready state."""
         require(time.monotonic() < self.deadline)
-        command_deadline = min(self.deadline, time.monotonic() + 180)
+        started = time.monotonic()
+        command_deadline = min(self.deadline, started + maximum_seconds)
+        io_deadline = command_deadline-min(3, (command_deadline-started)/2)
+        require(started < io_deadline < command_deadline)
         log = self.logs / f"build-{len(self.results)+1:02d}.log"
         process, output, code, error = None, None, None, None
         group_empty, timed_out, cleanup_failed = None, False, False
@@ -95,7 +134,13 @@ class Runner:
             try:
                 process = subprocess.Popen(argv, cwd=cwd, env=environment, stdin=subprocess.PIPE if input_bytes is not None else subprocess.DEVNULL,
                                            stdout=subprocess.PIPE if capture else stream, stderr=stream, start_new_session=True)
-                output, _ = process.communicate(input_bytes, timeout=max(.001, command_deadline-time.monotonic()))
+                if capture:
+                    output = self._capture(process, input_bytes, io_deadline, capture_limit)
+                else:
+                    remaining = io_deadline-time.monotonic()
+                    if remaining <= 0:
+                        raise subprocess.TimeoutExpired(argv, 0)
+                    output, _ = process.communicate(input_bytes, timeout=remaining)
                 code = process.returncode
             except subprocess.TimeoutExpired:
                 timed_out = True
@@ -107,35 +152,34 @@ class Runner:
                     pass
                 except Exception:
                     cleanup_failed = True
-                try:
-                    process.communicate(timeout=2)
-                except Exception:
-                    cleanup_failed = True
-                    for pipe in (process.stdin, process.stdout, process.stderr):
-                        if pipe is not None:
-                            try:
-                                pipe.close()
-                            except Exception:
-                                cleanup_failed = True
             except Exception as failure:
                 error = failure
                 category = "process-start-failed" if process is None else "process-communication-failed"
             finally:
                 if process is not None:
                     try:
-                        group_empty = join_process_group(process, time.monotonic()+3)
+                        group_empty = join_process_group(process, command_deadline)
                     except Exception:
                         cleanup_failed, group_empty = True, False
                     if code is None:
                         code = process.returncode
+                    for pipe in (process.stdin, process.stdout, process.stderr):
+                        if pipe is not None:
+                            try:
+                                pipe.close()
+                            except Exception:
+                                cleanup_failed = True
         log_size = log.stat().st_size
         if category is None:
-            category = ("output-limit" if log_size > 8*1024*1024 or capture and len(output or b"") > 1024*1024 else
+            category = ("output-limit" if log_size > 8*1024*1024 or capture and len(output or b"") > capture_limit else
+                        "cleanup-failed" if cleanup_failed else
                         "nonzero-exit" if code != 0 else "ownership-unconfirmed" if group_empty is not True else
                         "deadline-expired" if time.monotonic() >= command_deadline else None)
         record = {"argv": argv, "exit_code": code, "timed_out": timed_out,
+                  "command_deadline": command_deadline, "io_deadline": io_deadline,
                   "owned_group_empty": group_empty, "failure_category": category, "log_bytes": log_size,
-                  "cleanup_failed": cleanup_failed,
+                  "cleanup_failed": cleanup_failed, "capture_limit": capture_limit if capture else None,
+                  "captured_bytes": len(output) if isinstance(output, bytes) else None,
                   "log_sha256": sha(log.read_bytes()) if log_size <= 8*1024*1024 else None}
         self.results.append(record)
         receipt_path = self.logs / f"command-{len(self.results):02d}.json"
@@ -146,11 +190,55 @@ class Runner:
         if error is not None:
             raise error
         require(category is None)
-        require(code == 0 and group_empty and time.monotonic() < command_deadline)
+        require(code == 0 and group_empty and not cleanup_failed and time.monotonic() < command_deadline)
         if capture:
-            require(isinstance(output, bytes) and len(output) <= 1024*1024)
+            require(isinstance(output, bytes) and len(output) <= capture_limit)
             return output
         return b""
+
+    @staticmethod
+    def _capture(process, input_bytes, deadline, cap):
+        """Bound stdout before append; nonblocking stdin, EOF and reap share one deadline."""
+        output, written = bytearray(), 0
+        with selectors.DefaultSelector() as selected:
+            os.set_blocking(process.stdout.fileno(), False)
+            selected.register(process.stdout, selectors.EVENT_READ, "stdout")
+            if process.stdin is not None:
+                os.set_blocking(process.stdin.fileno(), False)
+                if input_bytes:
+                    selected.register(process.stdin, selectors.EVENT_WRITE, "stdin")
+                else:
+                    process.stdin.close()
+            while selected.get_map():
+                remaining = deadline-time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(process.args, 0)
+                for key, _ in selected.select(min(.1, remaining)):
+                    if key.data == "stdin":
+                        try:
+                            count = os.write(key.fileobj.fileno(), input_bytes[written:written+65536])
+                        except BlockingIOError:
+                            continue
+                        require(count > 0)
+                        written += count
+                        if written == len(input_bytes):
+                            selected.unregister(key.fileobj)
+                            key.fileobj.close()
+                    else:
+                        try:
+                            block = os.read(key.fileobj.fileno(), 65536)
+                        except BlockingIOError:
+                            continue
+                        if not block:
+                            selected.unregister(key.fileobj)
+                        else:
+                            require(len(output)+len(block) <= cap)
+                            output.extend(block)
+            remaining = deadline-time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(process.args, 0)
+            process.wait(timeout=remaining)
+        return bytes(output)
 
 
 def join_process_group(process, deadline):
@@ -170,7 +258,10 @@ def join_process_group(process, deadline):
         # check can establish cleanup after this error.
         pass
     try:
-        process.wait(timeout=max(.01, deadline-time.monotonic()))
+        remaining = deadline-time.monotonic()
+        if remaining <= 0:
+            return False
+        process.wait(timeout=remaining)
     except (subprocess.TimeoutExpired, OSError, ValueError):
         return False
     while time.monotonic() < deadline:
@@ -180,7 +271,10 @@ def join_process_group(process, deadline):
             return True
         except OSError:
             return False
-        time.sleep(.02)
+        remaining = deadline-time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(.02, remaining))
     return False
 
 
@@ -440,6 +534,43 @@ def retain_sdk_failure_diagnostic(workspace, diagnostic):
                 pass
 
 
+def write_complete_build_binding(workspace, result, deadline):
+    """Atomically replace incomplete private build data; reject expiry after close.
+
+    This data writer has no runtime completion or admission authority. It verifies
+    the existing root-procedure preflight record before replacing it. Late close
+    retains diagnostic bytes but propagates failure to the owning preparation;
+    filesystem blocking still requires the controller's external process owner.
+    """
+    require(time.monotonic() < deadline)
+    raw = (json.dumps(result, sort_keys=True, indent=2)+"\n").encode()
+    require(len(raw) <= 1024*1024)
+    target = workspace / "build-binding.json"
+    selected = target.lstat()
+    require(stat.S_ISREG(selected.st_mode) and selected.st_uid == os.geteuid()
+            and selected.st_nlink == 1 and stat.S_IMODE(selected.st_mode) == 0o600
+            and selected.st_size <= 4096)
+    fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    try:
+        require(sdk_identity(os.fstat(fd)) == sdk_identity(selected))
+        before = os.read(fd, 4097)
+        require(len(before) == selected.st_size and not os.read(fd, 1)
+                and unique_json(before).get("preparation_complete") is False
+                and sdk_identity(os.fstat(fd)) == sdk_identity(selected)
+                == sdk_identity(target.stat(follow_symlinks=False)))
+    finally:
+        os.close(fd)
+    require(time.monotonic() < deadline)
+    temporary = workspace / ".build-binding-complete.tmp"
+    with temporary.open("xb") as stream:
+        os.fchmod(stream.fileno(), 0o600)
+        stream.write(raw)
+    require(time.monotonic() < deadline)
+    require(sdk_identity(target.stat(follow_symlinks=False)) == sdk_identity(selected))
+    os.replace(temporary, target)
+    require(time.monotonic() < deadline)
+
+
 def prepare(source, workspace, source_commit, run_id, workflow_identity):
     """Build both actual entries from the same frozen variant and exact compiled bindings."""
     require(os.geteuid() == 0 and re.fullmatch(r"[0-9a-f]{40}", source_commit)
@@ -454,6 +585,23 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
     baseline, build = workspace / "baseline", workspace / "build"
     archive(source, BASELINE, baseline, runner)
     archive(source, source_commit, build, runner)
+    # Root selects one fixed physical helper; no uploaded source, callback, or
+    # path participates in product preparation or runtime authority.
+    helper_path = build / "tests/evidencehost-consumer/PrivateQualification/prepare-product.py"
+    helper_spec = importlib.util.spec_from_file_location("qualification_product_preparation", helper_path)
+    product_helper = importlib.util.module_from_spec(helper_spec)
+    helper_spec.loader.exec_module(product_helper)
+    product = product_helper.build_product_inputs(source, workspace, runner, dotnet,
+        source.parent / "issue779-product-source",
+        source / "tests/evidencehost-consumer/PrivateQualification/product-source-manifest.json")
+    inspector_project = build / "tests/evidencehost-consumer/ProductAbiInspector/ProductAbiInspector.csproj"
+    runner.run([str(dotnet), "restore", str(inspector_project), "--locked-mode"], build)
+    runner.run([str(dotnet), "build", str(inspector_project), "--no-restore", "-p:UseSharedCompilation=false"], build)
+    inspector = inspector_project.parent / "bin/Debug/net10.0/ProductAbiInspector.dll"
+    inspector_sha256 = product_helper.sha(product_helper.read_regular(inspector,
+        product_helper.MAXIMUM_FILE, deadline=runner.deadline))
+    package_root, package_binding = product_helper.prepare_coverlet_package(workspace, runner)
+    taskhost_binding = product_helper.build_product_taskhost(build, workspace, runner, dotnet, package_root)
     metadata_project = build / "tests/evidencehost-consumer/PrivateQualificationMetadata/PrivateQualificationMetadata.csproj"
     prop = "-p:QualificationBaselineRoot="+str(baseline)
     runner.run([str(dotnet), "restore", str(metadata_project), "--locked-mode", prop], build)
@@ -504,7 +652,7 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
     root_module.write_text(original.replace(marker, registration))
     cli_project = build / CLI_PROJECT
     runner.run([str(dotnet), "restore", str(cli_project), "--locked-mode"], build)
-    tools = {}
+    tools, product_binary_bindings = {}, {}
     for entry in ("cli", "host"):
         tool = workspace / ("tool-"+entry)
         argv = [str(dotnet), "publish", str(cli_project), "--no-restore", "--configuration", "Debug", "--output", str(tool), "-p:UseSharedCompilation=false"]
@@ -523,7 +671,12 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
         shutil.copytree(bundle, deployment)
         shutil.copyfile(tool / "ForgeTrust.AppSurface.Evidence.Contracts.dll", tool / "protected-tool.dll")
         (tool / "qualification-policy.json").write_bytes(base64.b64decode(metadata["policybase64"], validate=True))
+        product_binary_bindings[entry] = product_helper.replace_and_inspect(tool, product,
+            runner, dotnet, inspector, workspace / ("product-binary-"+entry+".json"),
+            inspector_sha256=inspector_sha256, inspector_contract_confirmed=True)
+        require(time.monotonic() < runner.deadline)
         for path in tool.rglob("*"):
+            require(time.monotonic() < runner.deadline)
             require(not path.is_symlink())
             if path.is_dir() and not path.is_relative_to(deployment):
                 os.chmod(path, 0o755)
@@ -532,12 +685,19 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
         os.chmod(tool, 0o755)
         tools[entry] = {"path": str(tool), "sha256": {p.relative_to(tool).as_posix(): sha(p.read_bytes())
             for p in sorted(tool.rglob("*")) if p.is_file()}}
+    require(time.monotonic() < runner.deadline)
     require(source_inventory(source) == before)
+    require(time.monotonic() < runner.deadline)
     result = {"source_commit": source_commit, "source_files": before, "run_id": run_id, "workflow_identity": workflow_identity,
         "subject_revision": subject_revision, "subject_sha256": subject_map, "metadata": metadata, "bundle_files": files,
         "generated_sha256": {str(p.relative_to(build)): sha(p.read_bytes()) for p in (generated_contracts, generated_planner, root_module)},
         "preparation_complete": True, "sdk_bootstrap": sdk_binding,
+        "product_coverage_inputs": {"source_commit": product["source_commit"],
+            "source_manifest_sha256": sha((source / "tests/evidencehost-consumer/PrivateQualification/product-source-manifest.json").read_bytes()),
+            "candidates": product["candidates"], "inspector_sha256": inspector_sha256,
+            "coverlet_package": package_binding, "taskhost": taskhost_binding,
+            "binary_bindings": product_binary_bindings, "runtime_compatibility_claim": False},
         "tools": tools, "build_commands": runner.results, "dotnet": str(dotnet), "build_root": str(build), "subject_root": str(subject)}
-    (workspace / "build-binding.json").write_text(json.dumps(result, sort_keys=True, indent=2)+"\n")
-    os.chmod(workspace / "build-binding.json", 0o600)
+    write_complete_build_binding(workspace, result, runner.deadline)
+    require(time.monotonic() < runner.deadline)
     return result

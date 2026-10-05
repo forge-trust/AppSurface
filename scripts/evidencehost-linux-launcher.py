@@ -115,6 +115,18 @@ _collector = importlib.util.module_from_spec(_collector_spec)
 sys.modules[_collector_spec.name] = _collector
 _collector_spec.loader.exec_module(_collector)
 
+# One physical, root-selected private implementation; no caller loader or fallback.
+_product_spec = importlib.util.spec_from_file_location(
+    "evidencehost_private_product_coverage",
+    Path(__file__).resolve().parents[1] / "tests" / "evidencehost-consumer" /
+    "PrivateQualification" / "product-coverage.py")
+_product = importlib.util.module_from_spec(_product_spec)
+sys.modules[_product_spec.name] = _product
+_product_spec.loader.exec_module(_product)
+
+PRODUCT_CLOSE_SCHEMA = "issue779-private-product-coverage-close-v1"
+PRODUCT_EXECUTION_MAP_LIMIT = 1024 * 1024
+
 SCHEMA = "evidence-worker-linux-v1"
 APPLICATION_SCHEMA = "evidence-worker-linux-v2"
 FAILURE_DIAGNOSTIC_SCHEMA = "evidence-launcher-failure-v1"
@@ -1401,7 +1413,7 @@ class Broker:
                  subject_gid: int, results_gid: int, subject_root: Path, protected_paths: tuple[Path, ...],
                  scratch: Path, dotnet: Path, unit_prefix: str, deadline: float,
                  job_seconds: int, stopping_seconds: int, cleanup_seconds: int,
-                 test_output_fd: int, *, application=None):
+                 test_output_fd: int, *, application=None, product_coverage_owner=None):
         self.descriptor = descriptor
         self.worker_uid = worker_uid
         self.worker_pid = worker_pid
@@ -1423,6 +1435,10 @@ class Broker:
         if application is not None and type(application) is not _application.RootApplicationLease:
             raise LauncherError("application-owner-invalid")
         self.application = application
+        if (product_coverage_owner is not None
+                and type(product_coverage_owner) is not _product.ProductCoverageOwner):
+            raise LauncherError("product-coverage-owner-invalid")
+        self.product_coverage_owner = product_coverage_owner
         self.output_quota = OutputQuota() if application is None else application.job_counter
         self.lock = threading.Lock()
         self.condition = threading.Condition(self.lock)
@@ -1455,6 +1471,18 @@ class Broker:
         self.active_application_operations = 0
         self.owned_exit_deadline: float | None = None
 
+    def _before_product_dispatch(self, unit: str) -> None:
+        """Register a generated unit outside the broker lock before its existing spawn gate.
+
+        Registration is ownership bookkeeping, not a dispatch permit. The independent
+        owner must settle late starts and parent death; the broker's existing closed
+        gate and locked Popen remain required.
+        """
+        if self.product_coverage_owner is not None:
+            self.product_coverage_owner.register_owned_unit(unit)
+            if self.product_coverage_owner.live_abort() is True:
+                raise LauncherError("product-coverage-aborted")
+
     def _close_work_gate(self) -> float:
         """Freeze one aggregate stop/join deadline; repeated requests cannot extend it."""
         with self.condition:
@@ -1476,6 +1504,7 @@ class Broker:
             self.active_application_operations += 1
         try:
             if request["op"] == "application-start":
+                self._before_product_dispatch(self.application.unit)
                 return self.application.start(request["application_id"], request["entry_digest"], self.deadline)
             return self.application.resource_wait(request["lease_id"], request["resource_id"], self.deadline)
         except Exception:
@@ -1790,6 +1819,7 @@ class Broker:
             except Exception:
                 # Diagnostic preparation cannot change the subject command or its result.
                 pass
+        self._before_product_dispatch(unit)
         with self.lock:
             if self.work_closed:
                 raise LauncherError("job-not-active")
@@ -2476,6 +2506,22 @@ def _close_descriptors(descriptors) -> None:
         raise failure
 
 
+def _product_close_receipt_allows_accounts(receipt) -> bool:
+    """Check closed root-owner data; this predicate cannot create ownership authority.
+
+    Only the retained exact owner supplies the operational receipt. Identity checks
+    reject truthy numbers, missing fields and an unsafe or incomplete settlement.
+    Extra diagnostic fields are not used to authorize account release.
+    """
+    return (type(receipt) is dict and receipt.get("schema") == PRODUCT_CLOSE_SCHEMA
+            and receipt.get("account_cleanup_allowed") is True
+            and receipt.get("cleanup_complete") is True
+            and receipt.get("consumer_exit_confirmed") is True
+            and receipt.get("workspace_quarantined") is False
+            and receipt.get("mount_retained") is False
+            and "failure_category" in receipt and receipt["failure_category"] is None)
+
+
 class _LaunchCompletion:
     """In-process root completion; owns retained directories and run accounts until closed.
 
@@ -2497,6 +2543,52 @@ class _LaunchCompletion:
         self._run_accounts = None
         self._closed = False
         self._close_error = None
+        self._product_coverage_owner = None
+        self._execution_map_bytes = None
+
+    def _retain_product_coverage(self, owner, execution_map: dict) -> None:
+        """Attach only the actual root owner before transferring account reservations."""
+        if type(owner) is not _product.ProductCoverageOwner or type(execution_map) is not dict:
+            raise LauncherError("product-coverage-owner-invalid")
+        encoded = json.dumps(execution_map, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+        if len(encoded) > PRODUCT_EXECUTION_MAP_LIMIT:
+            raise LauncherError("product-coverage-map-invalid")
+        with self._lock:
+            if self._closed or self._product_coverage_owner is not None or self._run_accounts is not None:
+                raise LauncherError("completion-ownership-unconfirmed")
+            self._product_coverage_owner = owner
+            self._execution_map_bytes = encoded
+
+    @property
+    def execution_map(self) -> dict | None:
+        """Return a defensive execution-byte map; None means no product owner was attached."""
+        with self._lock:
+            return None if self._execution_map_bytes is None else json.loads(self._execution_map_bytes)
+
+    @property
+    def product_coverage_report_directory(self) -> Path:
+        """Expose only the retained exact owner's root report directory before close.
+
+        The controller still owns bounded no-follow report copying. A pathname is
+        not evidence of successful collection or permission to read another root.
+        """
+        with self._lock:
+            if (self._closed
+                    or type(self._product_coverage_owner) is not _product.ProductCoverageOwner):
+                raise LauncherError("completion-ownership-unconfirmed")
+            return self._product_coverage_owner.reports
+
+    def collect_product_coverage(self):
+        """Delegate real hit consumption and official restoration before account closure.
+
+        The parent must first collect declared artifacts and close its duplicate FDs.
+        The same owner enforces the original deadline and real physical settlement.
+        A returned report is data, not admission, qualification or coverage-gate proof.
+        """
+        with self._lock:
+            if self._closed or self._close_error is not None or self._product_coverage_owner is None:
+                raise LauncherError("completion-ownership-unconfirmed")
+            return self._product_coverage_owner.collect_and_restore()
 
     def _retain_run_accounts(self, users: list[str], groups: list[str]) -> None:
         """Transfer this launch's account cleanup only after pre-transfer cleanup succeeds."""
@@ -2532,10 +2624,12 @@ class _LaunchCompletion:
             return os.dup(self._parent_fd)
 
     def close(self) -> None:
-        """Close both handles, then delete retained accounts before any gate invocation.
+        """Close both handles and the retained owner before releasing run accounts.
 
         Cleanup is attempted once. Failure is latched and propagated on every close;
         repeated calls cannot hide failed cleanup or repeat account deletion.
+        A bad owner receipt or any FD cleanup failure retains the account reservation.
+        Owner cleanup is still attempted after an FD error; the first error wins.
         Caller-owned duplicates must already be closed before this method is called.
         """
         with self._lock:
@@ -2548,7 +2642,15 @@ class _LaunchCompletion:
                 except BaseException as error:
                     self._close_error = error
                 try:
-                    if self._run_accounts is not None:
+                    if self._product_coverage_owner is not None:
+                        receipt = self._product_coverage_owner.close()
+                        if not _product_close_receipt_allows_accounts(receipt):
+                            raise LauncherError("product-coverage-cleanup-unconfirmed")
+                except BaseException as error:
+                    if self._close_error is None:
+                        self._close_error = error
+                try:
+                    if self._close_error is None and self._run_accounts is not None:
                         _delete_run_accounts(*self._run_accounts, strict=True)
                 except BaseException as error:
                     if self._close_error is None:
@@ -3021,19 +3123,38 @@ def _capture_private_collector_snapshot(broker, directory_fd, owned_exit_confirm
 
 def _close_launch_resources(listener, handlers, broker, test_output_fd: int) -> None:
     """Finish launcher-owned channels before retained completion ownership can transfer."""
+    failure = None
     if listener is not None:
-        listener.close()
+        try:
+            listener.close()
+        except BaseException as error:
+            failure = error
     for handler in handlers:
-        handler.join()
+        try:
+            handler.join()
+        except BaseException as error:
+            if failure is None:
+                failure = error
     if broker is not None:
-        broker.close_artifact_handles()
+        try:
+            broker.close_artifact_handles()
+        except BaseException as error:
+            if failure is None:
+                failure = error
     if test_output_fd >= 0:
-        os.close(test_output_fd)
+        try:
+            os.close(test_output_fd)
+        except BaseException as error:
+            if failure is None:
+                failure = error
+    if failure is not None:
+        raise failure
 
 
 def _finish_launch_transfer(completion: _LaunchCompletion, users: list[str], groups: list[str],
                             listener, handlers, broker, test_output_fd: int, root: Path, scratch: Path,
-                            application_workspace=None) -> _LaunchCompletion:
+                            application_workspace=None, *, product_coverage_owner=None,
+                            execution_map=None) -> _LaunchCompletion:
     """Transfer only after cleanup; any exception closes both retained directories.
 
     Failed transfer retains run accounts and the output quarantine. The successful
@@ -3047,9 +3168,18 @@ def _finish_launch_transfer(completion: _LaunchCompletion, users: list[str], gro
             application_workspace.close_after_owned_exit()
         shutil.rmtree(root)
         shutil.rmtree(scratch)
+        if product_coverage_owner is not None:
+            completion._retain_product_coverage(product_coverage_owner, execution_map)
         completion._retain_run_accounts(users, groups)
         return completion
     except BaseException:
+        # Even errors before attachment must settle the actual owner. A failed
+        # inspection inside abort cannot skip retained-FD closure below.
+        if product_coverage_owner is not None:
+            try:
+                product_coverage_owner.abort_after_owned_exit()
+            except BaseException:
+                pass
         try:
             completion.close()
         except BaseException:
@@ -3129,6 +3259,8 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
     completion: _LaunchCompletion | None = None
     application_workspace = None
     application = None
+    product_coverage_owner = None
+    execution_map = None
     try:
         _create_run_accounts(worker_name, subject_name, results_group, users, groups)
         wu, su = pwd.getpwnam(worker_name), pwd.getpwnam(subject_name)
@@ -3160,11 +3292,30 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
         if selected_application is not None:
             application_workspace = _ApplicationWorkspaceOwner(selected_application, identities, tool,
                 parent, root, scratch, source_subject, job_deadline_monotonic)
+        dotnet = Path(shutil.which("dotnet", path=ENV["PATH"]) or "").resolve(strict=True)
+        worker_unit = f"evidencehost-{tag}-worker.service"
+        # Fixed protected sibling input and root-only report output. No worker
+        # path, unit property, descriptor field or caller-selected callback is added.
+        product_reports = parent / f"product-coverage-{tag}"
+        os.mkdir(product_reports, 0o700)
+        report_fd = os.open(product_reports, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            if os.fstat(report_fd).st_uid != 0:
+                raise LauncherError("product-coverage-report-invalid")
+            os.fchmod(report_fd, 0o700)
+            if _identity_from_stat(os.fstat(report_fd)) != _identity_from_stat(product_reports.lstat()):
+                raise LauncherError("product-coverage-report-invalid")
+        finally:
+            os.close(report_fd)
+        product_coverage_owner = _product.ProductCoverageOwner(
+            tool, output_parent, wu.pw_uid, wu.pw_gid, job_deadline_monotonic, dotnet,
+            tool.parent / "product-coverage-taskhost", product_reports, worker_unit)
+        execution_map = product_coverage_owner.prepare()
         prepare_tool_root(tool, wu.pw_gid)
+        product_coverage_owner.bind_tool_pin()
         sock_path = worker_socket_dir / "control.sock"
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         listener.bind(str(sock_path)); os.chown(sock_path, 0, wu.pw_gid); os.chmod(sock_path, 0o660); listener.listen(8); listener.settimeout(0.25)
-        dotnet = Path(shutil.which("dotnet", path=ENV["PATH"] ) or "").resolve(strict=True)
         if selected_application is not None:
             application = _application.RootApplicationLease(selected_application, identities,
                 application_workspace.workspace, application_workspace.bundle, dotnet,
@@ -3173,11 +3324,15 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
         if not cli.is_file(): raise LauncherError("trusted-cli-missing")
         worker_command = ["/usr/bin/env", "-i", *[f"{key}={value}" for key, value in WORKER_ENV.items()],
                           str(dotnet), str(cli), "evidence", "worker", "--control", str(sock_path)]
-        worker_unit = f"evidencehost-{tag}-worker.service"; units.append(worker_unit)
+        units.append(worker_unit)
         worker_argv = ["systemd-run", "--quiet", "--unit="+worker_unit, "--expand-environment=no",
                        *[f"--property={k}={v}" for k,v in worker_unit_properties(
                            worker_name, tool, subject, scratch / "test-output", output_parent,
                            args.job_seconds, worker_gid=wu.pw_gid).items()], *worker_command]
+        product_coverage_owner.register_owned_unit(worker_unit)
+        if product_coverage_owner.live_abort() is True:
+            raise LauncherError("product-coverage-aborted")
+        product_coverage_owner.mark_worker_dispatch()
         _start_worker_unit(worker_argv, worker_unit)
         props = {}
         deadline = job_deadline_monotonic
@@ -3187,6 +3342,7 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
             time.sleep(.03)
         worker_pid = int(props.get("MainPID", "0"))
         if not worker_pid: raise LauncherError("worker-start-failed")
+        product_coverage_owner.verify_live_worker(worker_pid)
         desc = {"schema": SCHEMA, "run_id": args.run_id, "worker_pid": worker_pid,
                 "broker_pid": os.getpid(), "worker_uid": wu.pw_uid,
                 "worker_gid": wu.pw_gid, "subject_uid": su.pw_uid, "subject_gid": su.pw_gid,
@@ -3220,8 +3376,9 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
                         (tool, output_parent, root, policy), scratch, dotnet,
                         f"evidencehost-{tag}", deadline, args.job_seconds,
                         budgets["stopping_seconds"], budgets["cleanup_seconds"], test_output_fd,
-                        application=application)
+                        application=application, product_coverage_owner=product_coverage_owner)
         test_output_fd = -1  # Broker owns this pinned directory descriptor until all handlers have joined.
+        product_coverage_owner.bind_broker(broker)
         # The socket exists before worker start; ready returns this complete root-created descriptor.
         while time.monotonic() < deadline:
             try:
@@ -3272,31 +3429,66 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
             raise LauncherError("output-parent-identity-changed")
         completion = _completion_after_owned_exit(broker, output, worker_name, wprops)
         _stop_completed_worker(broker, wprops)
+        product_coverage_owner.confirm_owned_exit()
         completion_ready = True
     finally:
         if not completion_ready:
             original_error = sys.exc_info()[1]
-            try:
-                if broker is not None:
+            cleanup_error = None
+            if broker is not None:
+                try:
                     broker.stop()
+                except BaseException as error:
+                    cleanup_error = error
+                try:
                     owned_exit_confirmed = broker._wait_for_owned_exit()
-                if units:
-                    subprocess.run(["systemctl", "stop", *reversed(units)], capture_output=True, env=ENV,
-                                   timeout=5, check=False)
+                except BaseException as error:
+                    if cleanup_error is None:
+                        cleanup_error = error
+            if units:
+                try:
+                    _systemd(["systemctl", "stop", *reversed(units)], timeout=5)
+                except BaseException as error:
+                    if cleanup_error is None:
+                        cleanup_error = error
+            try:
+                if product_coverage_owner is not None and broker is not None and owned_exit_confirmed is True:
+                    remaining = broker.deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise LauncherError("completion-ownership-unconfirmed")
+                    failed_properties = broker._unit_properties(worker_unit, timeout=min(5, remaining))
+                    if (not _worker_group_empty(broker, failed_properties)
+                            or not broker._all_owned_work_stopped(inspection_deadline=broker.deadline)):
+                        raise LauncherError("completion-ownership-unconfirmed")
+                    product_coverage_owner.confirm_owned_exit()
+            except BaseException as error:
+                if cleanup_error is None:
+                    cleanup_error = error
+            finally:
+                # A failed query never confirms exit and must not skip owner abort.
+                if product_coverage_owner is not None:
+                    try:
+                        product_coverage_owner.abort_after_owned_exit()
+                    except BaseException as error:
+                        if cleanup_error is None:
+                            cleanup_error = error
+            try:
                 _close_failed_launch_resources(listener, handlers, broker, test_output_fd,
                                                diagnostic_directory_fd, owned_exit_confirmed, original_error)
-            except BaseException:
-                if original_error is None:
-                    raise
-            finally:
-                if completion is not None:
-                    try:
-                        completion.close()
-                    except BaseException:
-                        if original_error is None:
-                            raise
+            except BaseException as error:
+                if cleanup_error is None:
+                    cleanup_error = error
+            if completion is not None:
+                try:
+                    completion.close()
+                except BaseException as error:
+                    if cleanup_error is None:
+                        cleanup_error = error
+            if original_error is None and cleanup_error is not None:
+                raise cleanup_error
     return _finish_launch_transfer(completion, users, groups, listener, handlers, broker,
-                                   test_output_fd, root, scratch, application_workspace)
+                                   test_output_fd, root, scratch, application_workspace,
+                                   product_coverage_owner=product_coverage_owner, execution_map=execution_map)
 
 
 def parser() -> argparse.ArgumentParser:

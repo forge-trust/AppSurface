@@ -257,13 +257,68 @@ single-link `0600` files beneath retained `0700` diagnostic directories. It incl
 command receipts, closed early import/tool/subject preflight stages, at most 16 KiB per log tail, bounded launcher journal and subject prefixes, and complete
 small collected plan/manifest/report copies. The index distinguishes tails, complete files and oversized
 omissions; capture failure cannot change the original execution result. Archive data is canonical USTAR,
-at most 4 MiB with 3 MiB retained payload, copied to a runner `0700` directory with `0600` files. It supplies
+at most 18 MiB with 16 MiB retained payload including its index, copied to a runner `0700` directory with `0600` files. It supplies
 diagnosis, not acceptance. Private portable controls use actual file/process data and metadata seams; they
 do not fabricate admission, kernel observations or a protected positive result.
 
 The [workflow template](workflow.yml.in) must be expanded with the frozen source commit in a subsequent
 normal harness commit before push. Native execution remains unverified until its exact run, head, workflow,
-source/tool/bundle bindings, receipts and artifacts are independently checked. This first qualification
-attempt is uninstrumented. External CLI/Host execution is not automatically included in VSTest collection;
-future honest measurement must preserve PDB document/line/branch correspondence and feed actual shards
-before the unchanged solution coverage gate. Passing qualification alone does not establish that gate.
+source/tool/bundle bindings, receipts and artifacts are independently checked. The initial qualification
+attempt was uninstrumented. External CLI/Host execution is not automatically included in VSTest collection.
+The separately reviewed product coverage procedure below is still pending actual mixed execution; passing
+qualification alone does not establish the unchanged solution coverage gate.
+
+## Product coverage within existing worker permissions
+
+The private [coverage owner](product-coverage-README.md) and [launcher integration](product-integration-README.md)
+use the worker's existing writable anchor. They add no writable unit path and preserve the artifact
+allocator's mount-crossing guard. An independently owned root watchdog controls the official Coverlet
+provider, its lifetime, private state, restoration, and mount quarantine. The real worker still receives
+its original identities, sandbox properties, and deadline.
+
+[`prepare.py`](prepare.py) loads one fixed physical [product preparation helper](prepare-product.py)
+from its authenticated build tree. It verifies the complete [pinned product inventory](product-source-manifest.json)
+for commit `171f53911c7c1fec08bf0676b321539567f97c5d`, builds the three pristine Evidence Cli/Aspire/Coverage
+libraries with locked dependencies, and checks an actual five-pair [ABI metadata report](../ProductAbiInspector/README.md)
+before replacing exactly those three DLL/PDB pairs in each private consumer deployment. Contracts, Planner,
+the entry executable, the protected probe, the compiled catalogue, and proof registry remain private variant
+inputs. The metadata report supplies no runtime compatibility or coverage verdict. Missing definitions,
+unresolved access, source checksums, debug identities, or bounds reject preparation before replacement.
+
+The [partition contract](product-partition-preparation-README.md) keeps inventory and comparison
+results separate. An exact shared-image reference avoids serializing the same verified Coverage
+DLL/PDB inventory twice. Common completeness and definition/dependency checks each have a
+100,000-work limit, share one 32 MiB byte account, and use the same 30-second reconciliation
+command and original preparation deadline. These are trusted preparation limits; the worker
+keeps its existing permissions and resource limits.
+
+The root-owned public [task host](../PrivateProductCoverageTaskHost/README.md) lives at
+`workspace/product-coverage-taskhost`; it is built from authenticated Coverlet 10.0.1 bytes. Each consumer
+has separate provider state, hit data, report directory, and restoration receipt. The root controller collects
+declared artifacts first, joins consumers, collects genuine provider hits, verifies restored hashes and
+metadata, copies five fixed private report files, then closes completion and accounts. Instrumented execution
+hashes and restored product hashes are recorded separately. Failure preserves its original category and
+cannot become a coverage or qualification success through diagnostic collection.
+
+Build binding is capped at 1 MiB and references the full product manifest by its hash. Per-entry binary
+receipts are capped at 512 KiB. Product Cobertura and JSON reports are capped at 2 MiB and 4 MiB; provider
+stdout/stderr caps are 64 KiB and 128 KiB. The private archive includes those fixed files within its
+16 MiB payload and 18 MiB archive limits. The actual product shards must be checked against the pinned
+sources and merged through the unchanged reporter/gate before any measured patch-coverage claim.
+
+
+## Trusted Runner failure latch and current retention controls
+
+[`Runner.run`](prepare.py) owns one cumulative deadline and one command at a time. Valid arguments set an internal pending latch before any log open or process spawn; reentrant calls reject before process work. Any later exception, nonzero exit, timeout, uncertain cleanup, receipt failure, capture failure or final deadline rejection permanently marks that Runner failed. Remaining cumulative time cannot permit another dispatch. Only a complete zero-exit durable receipt, actual group absence, successful pipe cleanup and final deadline/capture checks restore ready. Invalid argument guards reject before consuming ready. Use a fresh Runner only for a separately owned preparation operation; it cannot resume a failed build chain.
+
+Captured stdout defaults to1MiB, with root-selected integer cap1..32MiB+1; input is None or bytes<=1MiB. Selector I/O and reap use the original command allowance, including reserved cleanup, and no second communicate is used for capture. `maximum_seconds` defaults180 and accepts only integer1..180 inside the unchanged global deadline. Close failures reject output; timeout remains code124/process-timeout even when cleanup also fails. Private receipts exclude raw exception canaries.
+
+The current [private retention controller](run-qualification.py) selects build log/receipt numbers01..64, with65 outside the whitelist. Overall limits remain16MiB payload (including index) and18MiB canonical archive, not the historical3MiB/4MiB limits. The refreshed data control uses actual legal fixed-name files below each individual cap, verifies a valid adjacent aggregate, then adds one legal file to exceed16MiB and requires no archive. Runtime retention code and limits are unchanged.
+
+Historical portable-final-validation attempts1 and2 remain failed receipts: attempt1 used unsupported systemPython3.9; corrected Homebrew attempt2 reported195 tests/five failures. The focused regression controls described here are new evidence only after their own supervised receipt; they do not replace those failures or establish native qualification/ABI/coverage.
+
+## Current existing-permissions preparation validation
+
+The [product metadata stages](product-partition-preparation-README.md) now split mixed Contracts into complete inventory and private inspector's C# Comparisons.Common comparison jobs, as already done for Coverage. Three ordinary pairs plus those four jobs precede one Python reconciliation child. Seven native100K limits and two independent Python100K limits produce a maximum aggregate900K across eight processes. The original cumulative deadline, per-command30 seconds, shared32MiB metadata ledger,512KiB receipt and actual worker permissions are unchanged. A combined mixed Contracts job exceeded100K and remains a failed historical receipt.
+
+All seven local metadata jobs and full mixed-data reconciliation passed. Corrected full portable discovery passed198 tests with zero failures, errors, skips or warnings. Root receipt publication, actual Linux execution, product instrumentation/restoration, source attribution and the unchanged coverage gate remain mandatory before a product coverage claim. The [CLI coverage gate reference](../../../Cli/ForgeTrust.AppSurface.Cli/README.md) describes policy; use the actual authenticated product build root and exact base-to-product diff for this separately compiled variant. Numeric gate success must be reconciled with genuine normalized filenames and measured changed lines; missing attribution is not coverage evidence.

@@ -266,14 +266,16 @@ class SdkBootstrapControls(unittest.TestCase):
                 process.wait(timeout=3)
 
         self.addCleanup(cleanup)
-        runner = prepare.Runner(logs, time.monotonic() + .2)
+        runner = prepare.Runner(logs, time.monotonic() + 10)
         argv = [sys.executable, "-c", "import time; time.sleep(60)"]
         with patch.object(prepare.subprocess, "Popen", side_effect=launch) as popen:
             with self.assertRaises(prepare.PreparationFailure):
-                runner.run(argv, self.root)
+                runner.run(argv, self.root, maximum_seconds=1)
             with self.assertRaises(prepare.PreparationFailure):
                 runner.run([sys.executable, "-c", "raise SystemExit(0)"], self.root)
             popen.assert_called_once()
+        # Cleanup reserve leaves live global time; failure itself blocks dispatch.
+        self.assertLess(time.monotonic(), runner.deadline)
         self.assertEqual(1, len(processes))
         self.assertIsNotNone(processes[0].returncode)
         with self.assertRaises(ProcessLookupError):

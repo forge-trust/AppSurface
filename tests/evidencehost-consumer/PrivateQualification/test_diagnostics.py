@@ -90,7 +90,7 @@ class DiagnosticDataControls(unittest.TestCase):
         path = output / "private-diagnostics.tar"
         raw = path.read_bytes()
         self.assertEqual(0o600, stat.S_IMODE(path.stat().st_mode))
-        self.assertLessEqual(len(raw), 4*1024*1024)
+        self.assertLessEqual(len(raw), 18*1024*1024)
         with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as archive:
             members = archive.getmembers()
             self.assertEqual(sorted(member.name for member in members), [member.name for member in members])
@@ -153,7 +153,7 @@ class DiagnosticDataControls(unittest.TestCase):
         workspace, output = self.roots()
         canary = b"unknown-private-data\x00\xff"
         self.write(workspace, "build-logs/build-00.log", canary)
-        self.write(workspace, "build-logs/build-33.log", canary)
+        self.write(workspace, "build-logs/build-65.log", canary)
         self.write(workspace, "collected-host/evidence-plan.json", canary)
         (workspace / "unknown-link").symlink_to("missing-target")
         console = io.StringIO()
@@ -323,12 +323,27 @@ class DiagnosticDataControls(unittest.TestCase):
         self.assertEqual({"index.json"}, set(contents))
         self.assertEqual({name: {"name": name, "state": "oversize", "length": maximum+1} for name, maximum in limits.items()},
                          {item["name"]: item for item in index})
-        workspace, output = self.roots()
-        self.write(workspace, "build-binding.json", b"x"*(1024*1024))
+        # Current fixed whitelist: legal individual files near the 16MiB sum.
+        selected = {"build-binding.json": 1024*1024}
         for entry in ("cli", "host"):
-            for name in ("stdout.prefix", "stderr.prefix"):
-                self.write(workspace, f"failure-{entry}/subject-failure-output/{name}", b"x"*519168)
-        self.write(workspace, "collected-host/manifest.json", b"x"*(128*1024))
+            selected.update({f"product-binary-{entry}.json":512*1024,
+                f"product-coverage-{entry}/receipt.json":256*1024,
+                f"product-coverage-{entry}/coverage.cobertura.xml":2*1024*1024,
+                f"product-coverage-{entry}/coverage.json":4*1024*1024})
+        prefixes = [f"failure-{entry}/subject-failure-output/{name}"
+                    for entry in ("cli", "host") for name in ("stdout.prefix", "stderr.prefix")]
+        for name in prefixes[:3]: selected[name] = 519168
+        workspace, output = self.roots()
+        for name, maximum in selected.items(): self.write(workspace,name,b"x"*maximum)
+        self.retain(workspace,output)
+        _, contents, index = self.archive(output)
+        self.assertEqual(set(selected)|{"index.json"},set(contents))
+        self.assertTrue(all(row["state"] == "complete" for row in index))
+        self.assertLessEqual(sum(selected.values())+len(contents["index.json"]),16*1024*1024)
+        workspace, output = self.roots()
+        selected[prefixes[3]] = 519168
+        self.assertGreater(sum(selected.values()),16*1024*1024)
+        for name, maximum in selected.items(): self.write(workspace,name,b"x"*maximum)
         self.reject_without_archive(workspace, output)
 
     def test_deadline_and_existing_or_symlinked_destination_cannot_upgrade_retention(self):

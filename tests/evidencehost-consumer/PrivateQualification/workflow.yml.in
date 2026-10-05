@@ -2,7 +2,7 @@ name: Issue 779 private resource-backed qualification
 
 on:
   push:
-    branches: [codex/issue779-private-qualification-20261003]
+    branches: [codex/issue779-product-existing-permissions-recovery-20261005]
 
 permissions:
   contents: read
@@ -17,6 +17,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout immutable product coverage candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 171f53911c7c1fec08bf0676b321539567f97c5d
+          path: product-candidate-source
           persist-credentials: false
       - name: Setup pnpm 11.1.3
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
@@ -36,7 +42,12 @@ jobs:
           git -C "$task_source" checkout --quiet --detach __QUALIFICATION_FROZEN_SOURCE_COMMIT__
           test "$(git -C "$task_source" rev-parse HEAD)" = __QUALIFICATION_FROZEN_SOURCE_COMMIT__
           test -z "$(git -C "$task_source" status --porcelain)"
-          sudo chown -R root:root "$task_source"
+          product_source="$RUNNER_TEMP/issue779-product-source"
+          git clone --quiet --no-hardlinks "$GITHUB_WORKSPACE/product-candidate-source" "$product_source"
+          git -C "$product_source" checkout --quiet --detach 171f53911c7c1fec08bf0676b321539567f97c5d
+          test "$(git -C "$product_source" rev-parse HEAD)" = 171f53911c7c1fec08bf0676b321539567f97c5d
+          test -z "$(git -C "$product_source" status --porcelain)"
+          sudo chown -R root:root "$task_source" "$product_source"
       - name: Verify private data and process ownership controls
         shell: bash
         run: |

@@ -143,6 +143,56 @@ def entry_preflight(binding, workspace, entry):
         raise
 
 
+def retain_product_reports(completion, workspace, entry):
+    """Copy only the exact closed report names from the retained root owner.
+
+    These private files are diagnostic/coverage inputs, not uploaded authority.
+    Collection has already joined the actual provider; account cleanup follows.
+    """
+    require(entry in ('cli', 'host'))
+    source = completion.product_coverage_report_directory
+    require(isinstance(source, Path) and source.is_absolute())
+    limits = {'coverage.cobertura.xml': 2 << 20, 'coverage.json': 4 << 20,
+              'receipt.json': 256 << 10, 'taskhost-stdout.log': 64 << 10,
+              'taskhost-stderr.log': 128 << 10}
+    deadline = time.monotonic()+5
+    source_fd = os.open(source, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    destination = workspace / ('product-coverage-' + entry)
+    destination.mkdir(mode=0o700)
+    os.chmod(destination, 0o700)
+    result = {}
+    try:
+        info = os.fstat(source_fd)
+        require(info.st_uid == 0 and stat.S_IMODE(info.st_mode) == 0o700
+                and set(os.listdir(source_fd)) == set(limits))
+        for name, maximum in limits.items():
+            require(time.monotonic() < deadline)
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=source_fd)
+            try:
+                before = os.fstat(fd)
+                require(stat.S_ISREG(before.st_mode) and before.st_uid == 0 and before.st_nlink == 1
+                        and stat.S_IMODE(before.st_mode) == 0o600 and 0 <= before.st_size <= maximum)
+                data = bytearray()
+                while len(data) < before.st_size:
+                    require(time.monotonic() < deadline)
+                    part = os.read(fd, min(65536, before.st_size-len(data)))
+                    require(bool(part))
+                    data.extend(part)
+                identity = lambda value: (value.st_dev, value.st_ino, value.st_mode, value.st_uid, value.st_gid,
+                    value.st_nlink, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+                require(not os.read(fd, 1) and identity(before) == identity(os.fstat(fd))
+                        == identity(os.stat(name, dir_fd=source_fd, follow_symlinks=False)))
+            finally: os.close(fd)
+            with (destination/name).open('xb') as stream:
+                os.fchmod(stream.fileno(), 0o600)
+                stream.write(data)
+            require(time.monotonic() < deadline)
+            result[name] = sha(data)
+    finally: os.close(source_fd)
+    require(time.monotonic() < deadline)
+    return result
+
+
 def retain_diagnostics(workspace, output, *, expected_owner_uid=0):
     """Retain a bounded private archive from closed root-owned diagnostic names only.
 
@@ -154,10 +204,14 @@ def retain_diagnostics(workspace, output, *, expected_owner_uid=0):
     v1 bytes are never converted or used as a schema-v2 success substitute.
     """
     selected = [("build-binding.json", 1024*1024, False)]
-    selected.extend((f"build-logs/build-{index:02d}.log", 16*1024, True) for index in range(1, 33))
-    selected.extend((f"build-logs/command-{index:02d}.json", 16*1024, False) for index in range(1, 33))
+    selected.extend((f"build-logs/build-{index:02d}.log", 16*1024, True) for index in range(1, 65))
+    selected.extend((f"build-logs/command-{index:02d}.json", 16*1024, False) for index in range(1, 65))
     for entry in ("cli", "host"):
         selected.append((f"preflight-{entry}.json", 4096, False))
+        selected.append((f"product-binary-{entry}.json", 512*1024, False))
+        selected.extend((f"product-coverage-{entry}/"+name, maximum, False) for name, maximum in (
+            ('receipt.json', 256*1024), ('coverage.cobertura.xml', 2*1024*1024),
+            ('coverage.json', 4*1024*1024), ('taskhost-stdout.log', 64*1024), ('taskhost-stderr.log', 128*1024)))
         if entry == "cli":
             selected.extend((f"failure-cli/"+name, maximum, False) for name, maximum in (
                 ("evidence-manifest.json", 256*1024), ("evidence-summary.json", 64*1024)))
@@ -203,7 +257,7 @@ def retain_diagnostics(workspace, output, *, expected_owner_uid=0):
                     value.st_nlink, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
                 require(len(data) == before.st_size-start and identity(before) == identity(after) == identity(named))
                 total += len(data)
-                require(total <= 3*1024*1024 and time.monotonic() < deadline)
+                require(total <= 16*1024*1024 and time.monotonic() < deadline)
                 contents.append((relative, data))
                 index.append({"name": relative, "state": "tail" if start else "complete", "length": before.st_size,
                               "retained_length": len(data), "retained_sha256": sha(data)})
@@ -214,7 +268,9 @@ def retain_diagnostics(workspace, output, *, expected_owner_uid=0):
                 for directory_fd in reversed(directories): os.close(directory_fd)
     finally:
         os.close(root_fd)
-    contents.append(("index.json", json.dumps(index, sort_keys=True, separators=(",", ":")).encode()))
+    index_bytes = json.dumps(index, sort_keys=True, separators=(",", ":")).encode()
+    require(total + len(index_bytes) <= 16*1024*1024 and time.monotonic() < deadline)
+    contents.append(("index.json", index_bytes))
     path = output/"private-diagnostics.tar"
     with path.open("xb") as stream:
         with tarfile.open(fileobj=stream, mode="w", format=tarfile.USTAR_FORMAT) as archive:
@@ -223,8 +279,10 @@ def retain_diagnostics(workspace, output, *, expected_owner_uid=0):
                 info.uid = info.gid = info.mtime = 0; info.uname = info.gname = ""
                 archive.addfile(info, io.BytesIO(data))
     os.chmod(path, 0o600)
-    require(path.stat().st_size <= 4*1024*1024)
-    return sha(path.read_bytes())
+    require(path.stat().st_size <= 18*1024*1024 and time.monotonic() < deadline)
+    digest = sha(path.read_bytes())
+    require(time.monotonic() < deadline)
+    return digest
 
 
 def prepare_entry_output_parent(workspace, entry):
@@ -241,6 +299,18 @@ def prepare_entry_output_parent(workspace, entry):
     output.mkdir(mode=0o711)
     os.chmod(output, 0o711)
     return output
+
+
+def close_entry_resources(diagnostic_fd, completion, original_error):
+    """Attempt both closes; cleanup cannot replace an existing execution failure."""
+    cleanup_error = None
+    try: os.close(diagnostic_fd)
+    except BaseException as error: cleanup_error = error
+    if completion is not None:
+        try: completion.close()
+        except BaseException as error:
+            if cleanup_error is None: cleanup_error = error
+    if original_error is None and cleanup_error is not None: raise cleanup_error
 
 
 def one_entry(binding, workspace, entry):
@@ -269,12 +339,17 @@ def one_entry(binding, workspace, entry):
         require(type(completion) is launcher._LaunchCompletion)
         descriptor = completion.descriptor
         require(descriptor["run_id"] == binding["run_id"] and descriptor["base_revision"] == binding["source_commit"]
-                and descriptor["entry_sha256"] == binding["tools"][entry]["sha256"]["ForgeTrust.AppSurface.Cli.dll"]
                 and descriptor["policy_sha256"] == metadata["policy_sha256"] and completion.application_output_receipt is not None
                 and len(completion.subject_output_receipts) == 1)
         artifacts = collector.collect(completion, plan, deadline=min(started+900, time.monotonic()+60), entry=entry)
         kernel_output = {"application": completion.application_output_receipt, "producer": completion.subject_output_receipts}
-        # Account cleanup must finish before even the private structural data evaluation.
+        execution_map = completion.execution_map
+        require(type(execution_map) is dict and set(execution_map) == set(binding['tools'][entry]['sha256'])
+                and descriptor['entry_sha256'] == execution_map['ForgeTrust.AppSurface.Cli.dll'])
+        product_coverage = completion.collect_product_coverage()
+        product_report_sha256 = retain_product_reports(completion, workspace, entry)
+        # Account cleanup follows physical coverage join/restoration. Structural
+        # verification then uses the original fully restored immutable tree.
         completion.close()
         completion = None
         copies, manifest = persist_and_validate(workspace, entry, artifacts, plan, metadata)
@@ -291,7 +366,9 @@ def one_entry(binding, workspace, entry):
                 "claim": "None", "eligibility": "None", "execution_verdict": manifest["ExecutionVerdict"],
                 "manifest_digest": manifest["ManifestDigest"], "plan_digest": manifest["PlanDigest"],
                 "output_receipts": kernel_output, "artifacts_sha256": {name: sha(data) for name, data in artifacts.items()},
-                "structural_commands": verifier.results, "cleanup_complete": True}
+                "structural_commands": verifier.results, "cleanup_complete": True,
+                "product_execution_map": execution_map, "product_coverage": product_coverage,
+                "product_report_sha256": product_report_sha256}
     except Exception as error:
         try:
             launcher.write_failure_diagnostic(diag_fd, error)
@@ -299,9 +376,7 @@ def one_entry(binding, workspace, entry):
             pass
         raise
     finally:
-        os.close(diag_fd)
-        if completion is not None:
-            completion.close()
+        close_entry_resources(diag_fd, completion, sys.exc_info()[1])
 
 
 def main():

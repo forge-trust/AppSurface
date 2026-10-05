@@ -26,6 +26,6 @@ The private qualification variant must execute the real shared CLI/Aspire covera
 
 Qualification output must retain Eligibility=None and Claim=None and must not authorize Trusted execution or publication. This permission would authorize implementation and review of that narrow bootstrap rule, not automatic enrollment of the measured result into a production registry. A later immutable proof/registry decision remains separate if required by the final accepted-proof design.
 
-## Current status
+## Status at the initial proposal
 
-No qualification implementation or positive resource-backed claim has been made. The separate resource-free collector diagnostic is already authorized and uses unchanged limits/timeouts; it grants no qualification or Trusted authority. A human answer to the qualification proposal is still pending.
+At the initial proposal, no qualification implementation or positive resource-backed claim had been made and the human answer was pending. The separate resource-free collector diagnostic was already authorized with unchanged limits/timeouts. This is the historical decision text. Later approved implementation and current limitations are documented in the [private qualification procedure](README.md); this proposal itself grants no measured result or Trusted authority.
