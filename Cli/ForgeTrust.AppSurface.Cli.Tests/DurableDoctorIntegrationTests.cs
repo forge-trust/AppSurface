@@ -571,6 +571,9 @@ public sealed class DurableDoctorIntegrationTests
         {
             Assert.Equal("application-verifier", action.Kind);
             Assert.Null(action.Command);
+            Assert.Equal(["consumer verifier command"], action.RequiredInputs);
+            Assert.Equal("https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md",
+                action.DocumentationUrl.AbsoluteUri);
             return;
         }
 
@@ -611,6 +614,10 @@ public sealed class DurableDoctorIntegrationTests
         if (row.NextAction == "verify")
         {
             Assert.Equal(JsonValueKind.Null, command.ValueKind);
+            Assert.Equal(["consumer verifier command"],
+                action.GetProperty("requiredInputs").EnumerateArray().Select(static input => input.GetString()));
+            Assert.Equal("https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md",
+                action.GetProperty("documentationUrl").GetString());
             return;
         }
         Assert.Equal("appsurface", command.GetProperty("executable").GetString());
@@ -623,6 +630,9 @@ public sealed class DurableDoctorIntegrationTests
         if (row.NextAction == "verify")
         {
             Assert.Contains("Next action: Run the application's composition verifier", output, StringComparison.Ordinal);
+            Assert.Contains("  Required input: consumer verifier command\n", output, StringComparison.Ordinal);
+            Assert.Contains("  Documentation: https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md\n",
+                output, StringComparison.Ordinal);
         }
         else if (row.NextAction == "status")
         {

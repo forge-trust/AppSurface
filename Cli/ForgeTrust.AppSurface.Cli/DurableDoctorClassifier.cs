@@ -14,7 +14,7 @@ internal static partial class DurableDoctorClassifier
 {
     private const int MaximumSchemaVersions = 64;
     private const string ApplicationVerifierUrl =
-        "https://github.com/forge-trust/AppSurface/blob/main/examples/durable-external-activation/README.md";
+        "https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md";
     private static readonly string[] CheckNames = ["credential", "schema", "epoch", "retention", "worker"];
     private static readonly string[] TerminalUnavailableCategories = ["session-affinity", "dependency", "deadline", "cleanup"];
     private static readonly Uri ApplicationVerifierDocumentation = new(ApplicationVerifierUrl, UriKind.Absolute);

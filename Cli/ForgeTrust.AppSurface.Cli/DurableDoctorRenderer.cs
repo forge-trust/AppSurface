@@ -797,7 +797,7 @@ internal static class DurableDoctorRenderer
             "application-verifier",
             null,
             ["consumer verifier command"],
-            new Uri("https://github.com/forge-trust/AppSurface/blob/main/examples/durable-external-activation/README.md", UriKind.Absolute));
+            new Uri("https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md", UriKind.Absolute));
 
     private static bool ActionsEqual(DurableDoctorAction? actual, DurableDoctorAction expected)
     {

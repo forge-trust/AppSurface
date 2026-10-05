@@ -16,7 +16,7 @@ public sealed class DurableDoctorRendererTests
     private static readonly Guid StoreId = Guid.Parse("88164257-2a2f-42b4-9832-18a649888802");
     private static readonly Guid OtherEpoch = Guid.Parse("88164257-2a2f-42b4-9832-18a649888803");
     private static readonly DateTimeOffset ObservedAt = DateTimeOffset.Parse("2026-10-03T12:00:00.0000000+00:00");
-    private const string StoreOnlyJsonSnapshot = "{\"schemaVersion\":1,\"status\":\"passed\",\"exitCode\":0,\"requestedChecks\":[{\"name\":\"credential\",\"requested\":true,\"status\":\"passed\"},{\"name\":\"schema\",\"requested\":true,\"status\":\"passed\"},{\"name\":\"epoch\",\"requested\":true,\"status\":\"passed\"},{\"name\":\"retention\",\"requested\":true,\"status\":\"passed\"},{\"name\":\"worker\",\"requested\":false,\"status\":\"not-requested\"}],\"observedAtUtc\":\"2026-10-03T12:00:00.0000000+00:00\",\"schema\":{\"compatibility\":\"compatible\",\"installedVersion\":11,\"requiredVersion\":11,\"minimumReaderVersion\":1,\"maximumReaderVersion\":11,\"minimumWriterVersion\":1,\"maximumWriterVersion\":11,\"appliedVersions\":[1,2,3,4,5,6,7,8,9,10,11],\"pendingVersions\":[]},\"storeId\":\"88164257-2a2f-42b4-9832-18a649888802\",\"configuredRuntimeEpoch\":\"88164257-2a2f-42b4-9832-18a649888801\",\"activeRuntimeEpoch\":\"88164257-2a2f-42b4-9832-18a649888801\",\"credential\":{\"restricted\":true,\"failedChecks\":[]},\"retention\":{\"available\":true,\"failedChecks\":[]},\"worker\":null,\"findings\":[],\"nextAction\":{\"kind\":\"application-verifier\",\"command\":null,\"requiredInputs\":[\"consumer verifier command\"],\"documentationUrl\":\"https://github.com/forge-trust/AppSurface/blob/main/examples/durable-external-activation/README.md\"}}\n";
+    private const string StoreOnlyJsonSnapshot = "{\"schemaVersion\":1,\"status\":\"passed\",\"exitCode\":0,\"requestedChecks\":[{\"name\":\"credential\",\"requested\":true,\"status\":\"passed\"},{\"name\":\"schema\",\"requested\":true,\"status\":\"passed\"},{\"name\":\"epoch\",\"requested\":true,\"status\":\"passed\"},{\"name\":\"retention\",\"requested\":true,\"status\":\"passed\"},{\"name\":\"worker\",\"requested\":false,\"status\":\"not-requested\"}],\"observedAtUtc\":\"2026-10-03T12:00:00.0000000+00:00\",\"schema\":{\"compatibility\":\"compatible\",\"installedVersion\":11,\"requiredVersion\":11,\"minimumReaderVersion\":1,\"maximumReaderVersion\":11,\"minimumWriterVersion\":1,\"maximumWriterVersion\":11,\"appliedVersions\":[1,2,3,4,5,6,7,8,9,10,11],\"pendingVersions\":[]},\"storeId\":\"88164257-2a2f-42b4-9832-18a649888802\",\"configuredRuntimeEpoch\":\"88164257-2a2f-42b4-9832-18a649888801\",\"activeRuntimeEpoch\":\"88164257-2a2f-42b4-9832-18a649888801\",\"credential\":{\"restricted\":true,\"failedChecks\":[]},\"retention\":{\"available\":true,\"failedChecks\":[]},\"worker\":null,\"findings\":[],\"nextAction\":{\"kind\":\"application-verifier\",\"command\":null,\"requiredInputs\":[\"consumer verifier command\"],\"documentationUrl\":\"https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md\"}}\n";
     private const string StoreOnlyTextSnapshot =
         "Diagnosis: passed (exit 0)\n" +
         "Observed at (UTC): 2026-10-03T12:00:00.0000000+00:00\n" +
@@ -31,7 +31,7 @@ public sealed class DurableDoctorRendererTests
         "Boundary: These checks passed only for this captured observation; they do not prove deployment authorization, process ownership, future readiness, or successful application execution.\n" +
         "Next action: Run the application's composition verifier; this standalone doctor cannot infer its command.\n" +
         "  Required input: consumer verifier command\n" +
-        "  Documentation: https://github.com/forge-trust/AppSurface/blob/main/examples/durable-external-activation/README.md\n" +
+        "  Documentation: https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md\n" +
         "Store ID: 88164257-2a2f-42b4-9832-18a649888802\n" +
         "Configured runtime epoch: 88164257-2a2f-42b4-9832-18a649888801\n" +
         "Active runtime epoch: 88164257-2a2f-42b4-9832-18a649888801\n" +
@@ -95,6 +95,8 @@ public sealed class DurableDoctorRendererTests
             && workerIntentIndex < boundaryIndex && boundaryIndex < verifierIndex && verifierIndex < factsIndex,
             "Clean text must state the verdict, worker scope, boundary, and verifier handoff before facts.");
         Assert.Equal(1, pairedText.Split("Worker check:", StringSplitOptions.None).Length - 1);
+        Assert.Contains("  Documentation: https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md\n",
+            pairedText, StringComparison.Ordinal);
     }
 
     [Fact]
