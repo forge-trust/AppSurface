@@ -1,23 +1,29 @@
-# Issue859 implementation evidence
+# Issue #859 implementation checkpoint
 
 Case: https://github.com/forge-trust/AppSurface/issues/859
 Base: 3bce0bdbef5e7ae3137f0bb90dbd3d0ff9f08183
 Branch: codex/make-it-so-859-evidencehost-cleanup
 
-## Scope
+This checkpoint precedes final solution verification and draft publication. The PR records the final gate result.
 
-Consumer runs Evidence.Aspire host and receives bounded terminal output or the original execution failure with a safe cleanup diagnostic. Execution and cleanup budgets, callback join, explicit stop/join, dependency retention, persistent direct disposal failure, and enrolledprocess exit are implemented. Startup, upload, detached discovery and runner recovery remain independently supervised consumer responsibilities. No Skoolit changes or deployment; draftPR delivery only. Public package publication is release-owner work.
+## Scope and implementation
 
-## Validation
+The consumer receives bounded terminal output or the original execution failure with a safe cleanup diagnostic. Separate execution and cleanup budgets, tracked callback joins, explicit stop/join, dependency retention, persistent direct-disposal failure and enrolled-process exit are implemented. One reference-identity ownership graph combines producer and resource dependencies, preserves intermediary readiness-only registrations, orders dependents before prerequisites, and retains cycles and their prerequisites while allowing unrelated cleanup.
 
-- Baseline controlled diagnostic reproduced RunAsync pending after caller cancellation during gated disposal; allfixturegates were released and joined. Not a red regression claim.
-- Enhance cycles1-2 found six lifecycle/process issues corrected; cycle3 reviewed lifecycle paths with no new findings, broader review scope incomplete. Adversarial review subsequently identified hidden error-unwind cleanup failure, corrected with public CleanupDiagnostic and join of already-failed callbacks while preserving the primary exception.
-- Two cycle2 regressions failed on the pre-fix implementation and passed after correction. Diagnostic property-only implementation failed its nonnull cleanup assertion; the joined-callback correction passed.
-- Current Aspire project:105passed,0failed,0skipped. Four process integration tests pass on macOS. Supplemental Linux proof pending prerequisite installation.
-- Full solution build:0warnings/errors. Initial concurrent fulltest had auth timing failure, release screenshot drift and6path-collision leak assertions. Auth passed in serial coverage; five release baselines deliberately refreshed for upstreammain's existing navigation heading, and6leakchecks passed with distinctive canaries.
-- Packed candidate initial current proof:3passingarms; diagnostic/fourtharm added afterward, final repeat pending. Candidate proof establishes packed artifact, not publicNuGet release.
-- First coverageattempt cancelled and superseded after production repair; not valid gate evidence. Required unchangedgate ./scripts/coverage-solution.sh is running on committed candidate8d7ffbf6, 95/85 aggregate and95/85 patch againstorigin/main, no threshold or selection changes.
+Startup, upload, detached-process discovery and runner recovery remain consumer responsibilities. Delivery is scoped to a validated draft PR and a locally packed candidate proof. Public NuGet publication and released-package consumer adoption remain release-owner work. Skoolit PR #1213 stays separate; no deployment is requested.
 
-## Remaining
+## Validation at this checkpoint
 
-Final packedconsumer QA; current code/adversarial and documentation audits; fullcoveragegate and scopedfixes ifneeded; draftPR withFixes859 afterallrequiredgatespass.
+- Controlled baseline: caller cancellation during gated disposal left RunAsync pending until the fixture released the gate. All fixture work was subsequently released and joined. This is diagnostic evidence, not a base-green regression claim.
+- Focused current suite: 114 Aspire tests passed, no failures or skips, after the ownership and intermediary corrections, including the cycle-prerequisite retention assertion.
+- Regression controls: two earlier lifecycle failures, two shared-role ordering/cycle cases, and the readiness-only intermediary retention assertion failed before their respective corrections and passed after. New APIs have no base-green control claim.
+- The final packed candidate passed all four consumer scenarios after the intermediary correction. The standalone consumer uses one direct Aspire PackageReference, with no source or project references. This does not establish a public package release.
+- Four real process tests passed on macOS arm64. A supplemental Linux arm64 run passed 25 cleanup/process tests before the final ownership correction; it is not final Linux verification.
+- Six doctor leak assertions used generic canaries colliding with the checkout path; distinct synthetic canaries corrected that fixture. Five release screenshot baselines lacked an existing upstream navigation heading and were deliberately refreshed. Production UI was not changed.
+- Formatting and matching-input Markdown/generated-package-doc checks passed. Final matching-input checks and the unchanged full gate remain required.
+
+## Remaining verification and publication gate
+
+Run the exact unchanged ./scripts/coverage-solution.sh on one frozen commit and clean tree: aggregate and patch line/branch targets are 95/85, against origin/main. Prior changing-HEAD, canceled, and overlapping coverage attempts are not final verification. A private single-owner guard prevents concurrent report writers without changing the gate command or thresholds.
+
+Finish bound native code and adversarial reviews. The documentation audit used both permitted attempts and was current at 45344b2f; later tests, the consumer nullable annotation, and the host/README ownership correction make its selected-input snapshot stale. No third documentation audit was run. The ship workflow requires an explicit operator decision about that exact documentation freshness risk before publication. No exception has been inferred.

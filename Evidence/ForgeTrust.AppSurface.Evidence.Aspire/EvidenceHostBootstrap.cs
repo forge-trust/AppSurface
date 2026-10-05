@@ -529,13 +529,17 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
 
         State = EvidenceHostState.Cleaning;
         _cleaned = true;
-        var owned = _registration.Producers.Values.Reverse().Select(value => new OwnedRegistration(value, value.Id, "producer"))
+        var started = BeginCleanupClock();
+        var registrations = _registration.Producers.Values.Reverse().Select(value => new OwnedRegistration(value, value.Id, "producer"))
             .Concat(ResourcesInCleanupOrder().Select(value => new OwnedRegistration(value, value.Id, "resource")))
             .Concat(_registration.EnvelopeVerifier is { } verifier ? [new OwnedRegistration(verifier, "envelope", "verifier")] : [])
             .DistinctBy(value => value.Value, ReferenceEqualityComparer.Instance)
+            .ToArray();
+        var dependencies = OwnedDependencies(registrations);
+        // Readiness-only owners still carry transitive edges even when there is nothing to clean directly.
+        var owned = OrderOwnedCleanup(registrations, dependencies)
             .Where(value => value.Value is IDisposable or IAsyncDisposable or IEvidenceExecutionLifetime || _callbacks.ContainsKey(value.Value))
             .ToArray();
-        var started = BeginCleanupClock();
         for (var index = 0; index < owned.Length; index++)
         {
             var remaining = _options.CleanupTimeout - _timeProvider.GetElapsedTime(started);
@@ -549,9 +553,9 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
             var slice = TimeSpan.FromTicks(Math.Max(1, remaining.Ticks / (owned.Length - index)));
             using var deadline = new CancellationTokenSource(slice, _timeProvider);
             var entry = owned[index];
-            if (entry.Kind == "resource" && HasUnsettledDependent(entry.Id))
+            if (HasUnsettledDependent(entry.Value, dependencies))
             {
-                _cleanupFailure ??= $"Evidence cleanup retained resource '{SafeId(entry.Id)}' because dependent owned work did not settle.";
+                _cleanupFailure ??= $"Evidence cleanup retained {entry.Kind} '{SafeId(entry.Id)}' because dependent owned work did not settle.";
                 _unsettledOwners.Add(entry.Value);
                 continue;
             }
@@ -596,22 +600,68 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
             .Concat(_registration.Resources.Values.Reverse().Where(resource => !declaredIds.Contains(resource.Id)));
     }
 
-    private bool HasUnsettledDependent(string resourceId)
+    private Dictionary<object, HashSet<object>> OwnedDependencies(OwnedRegistration[] registrations)
     {
-        var requiredResources = _plan.Profile.Producers
-            .Where(producer => _registration.Producers.TryGetValue(producer.Id, out var owner) && _unsettledOwners.Contains(owner))
-            .SelectMany(producer => producer.RequiredResources)
-            .Concat(_plan.Profile.Resources
-                .Where(resource => _registration.Resources.TryGetValue(resource.Id, out var owner) && _unsettledOwners.Contains(owner))
-                .SelectMany(resource => resource.Requires));
-        var pending = new Stack<string>(requiredResources);
-        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var dependencies = new Dictionary<object, HashSet<object>>(ReferenceEqualityComparer.Instance);
+        foreach (var entry in registrations) dependencies.Add(entry.Value, new HashSet<object>(ReferenceEqualityComparer.Instance));
+
+        foreach (var producer in _plan.Profile.Producers)
+            if (_registration.Producers.TryGetValue(producer.Id, out var owner)) AddDependencies(owner, producer.RequiredResources);
+        foreach (var resource in _plan.Profile.Resources)
+            if (_registration.Resources.TryGetValue(resource.Id, out var owner)) AddDependencies(owner, resource.Requires);
+        return dependencies;
+
+        void AddDependencies(object owner, IReadOnlyList<string> requiredResources)
+        {
+            if (!dependencies.TryGetValue(owner, out var required)) return;
+            foreach (var id in requiredResources)
+                if (_registration.Resources.TryGetValue(id, out var dependency)
+                    && !ReferenceEquals(owner, dependency) && dependencies.ContainsKey(dependency)) required.Add(dependency);
+        }
+    }
+
+    private OwnedRegistration[] OrderOwnedCleanup(OwnedRegistration[] registrations, Dictionary<object, HashSet<object>> dependencies)
+    {
+        // One object may have several roles. Order its combined ownership edges before deduplicated disposal.
+        var dependentCounts = new Dictionary<object, int>(ReferenceEqualityComparer.Instance);
+        var indices = new Dictionary<object, int>(ReferenceEqualityComparer.Instance);
+        for (var index = 0; index < registrations.Length; index++)
+        {
+            dependentCounts.Add(registrations[index].Value, 0);
+            indices.Add(registrations[index].Value, index);
+        }
+        foreach (var required in dependencies.Values)
+            foreach (var dependency in required) dependentCounts[dependency]++;
+        var available = new SortedSet<int>(indices.Where(pair => dependentCounts[pair.Key] == 0).Select(pair => pair.Value));
+        var ordered = new List<OwnedRegistration>();
+        while (available.Count > 0)
+        {
+            var index = available.Min;
+            available.Remove(index);
+            var next = registrations[index];
+            ordered.Add(next);
+            foreach (var dependency in dependencies[next.Value])
+                if (--dependentCounts[dependency] == 0) available.Add(indices[dependency]);
+        }
+        if (ordered.Count != registrations.Length)
+        {
+            // Cyclic owners and their prerequisites cannot be safely disposed; unrelated owners still settle.
+            foreach (var owner in dependentCounts.Where(pair => pair.Value > 0)) _unsettledOwners.Add(owner.Key);
+            var entry = registrations.First(value => dependentCounts[value.Value] > 0);
+            _cleanupFailure ??= $"Evidence cleanup retained {entry.Kind} '{SafeId(entry.Id)}' because an ownership cycle prevents safe disposal.";
+        }
+        return ordered.ToArray();
+    }
+
+    private bool HasUnsettledDependent(object owner, Dictionary<object, HashSet<object>> dependencies)
+    {
+        var pending = new Stack<object>(_unsettledOwners.SelectMany(value => dependencies[value]));
+        var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
         while (pending.TryPop(out var dependency))
         {
             if (!visited.Add(dependency)) continue;
-            if (dependency == resourceId) return true;
-            var resource = _plan.Profile.Resources.FirstOrDefault(value => value.Id == dependency);
-            if (resource is not null) foreach (var required in resource.Requires) pending.Push(required);
+            if (ReferenceEquals(dependency, owner)) return true;
+            foreach (var required in dependencies[dependency]) pending.Push(required);
         }
         return false;
     }

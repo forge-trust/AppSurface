@@ -295,6 +295,120 @@ public sealed class EvidenceHostCleanupTests
         Assert.Equal(1, owner.DisposeCount);
     }
 
+    // Value: protects=shared roles obey resource ownership and fail closed on cycles; fails_when=producer-first deduplication disposes a resource before its dependent; why_new=existing shared-owner test has no dependent resource; seam=none
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunAsync_ShouldOrderSharedOwnerDependenciesOrRetainOwnershipCycle(bool cyclic)
+    {
+        var disposals = new List<string>();
+        var owner = new SharedResourceProducer(() => disposals.Add("shared"));
+        var dependent = new DisposableReadyResource("dependent", () => disposals.Add("dependent"));
+        var prerequisite = new DisposableReadyResource("prerequisite");
+        var unrelated = new DisposableReadyResource("unrelated");
+        var plan = CreatePlanWithResources([owner.Id],
+            [new EvidenceResourceDeclaration(owner.Id, "completion", 30, [prerequisite.Id]),
+             new EvidenceResourceDeclaration(dependent.Id, "completion", 30, [owner.Id]),
+             new EvidenceResourceDeclaration(prerequisite.Id, "completion", 30, []),
+             new EvidenceResourceDeclaration(unrelated.Id, "completion", 30, [])],
+            cyclic ? [dependent.Id] : []);
+        await using var host = EvidenceHostBootstrap.Create(plan, registration =>
+        {
+            registration.AddProducer(owner);
+            registration.AddResource(owner);
+            registration.AddResource(dependent);
+            registration.AddResource(prerequisite);
+            registration.AddResource(unrelated);
+        }, Options(cleanupTimeout: TimeSpan.FromSeconds(1)));
+
+        var manifest = await host.RunAsync().WaitAsync(TimeSpan.FromSeconds(3));
+
+        Assert.Equal(1, unrelated.DisposeCount);
+        if (cyclic)
+        {
+            Assert.False(manifest.Metrics.CleanupCompleted);
+            Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+            Assert.Contains("ownership cycle", manifest.Metrics.CleanupDiagnostic!);
+            Assert.Equal(0, owner.DisposeCount);
+            Assert.Equal(0, dependent.DisposeCount);
+            Assert.Equal(0, prerequisite.DisposeCount);
+        }
+        else
+        {
+            Assert.True(manifest.Metrics.CleanupCompleted);
+            Assert.Equal(["dependent", "shared"], disposals);
+            Assert.Equal(1, owner.DisposeCount);
+            Assert.Equal(1, dependent.DisposeCount);
+            Assert.Equal(1, prerequisite.DisposeCount);
+        }
+    }
+
+    // Value: protects=shared prerequisite survives unfinished dependent cleanup; fails_when=retention checks only the deduplicated producer role; why_new=existing resource retention has distinct owners; seam=none
+    [Fact]
+    public async Task RunAsync_ShouldRetainSharedOwnerWhenResourceDependentDoesNotSettle()
+    {
+        var owner = new SharedResourceProducer();
+        var dependent = new GatedResource("dependent");
+        var unrelated = new DisposableReadyResource("unrelated");
+        var plan = CreatePlanWithResources([owner.Id],
+            [new EvidenceResourceDeclaration(owner.Id, "completion", 30, []),
+             new EvidenceResourceDeclaration(dependent.Id, "completion", 30, [owner.Id]),
+             new EvidenceResourceDeclaration(unrelated.Id, "completion", 30, [])], []);
+        var host = EvidenceHostBootstrap.Create(plan, registration =>
+        {
+            registration.AddProducer(owner);
+            registration.AddResource(owner);
+            registration.AddResource(dependent);
+            registration.AddResource(unrelated);
+        }, Options(cleanupTimeout: TimeSpan.FromSeconds(1)));
+        try
+        {
+            var manifest = await host.RunAsync().WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.False(manifest.Metrics.CleanupCompleted);
+            Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+            Assert.Equal(0, owner.DisposeCount);
+            Assert.Equal(1, unrelated.DisposeCount);
+        }
+        finally
+        {
+            dependent.Gate.TrySetResult();
+            await dependent.Finished.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            await host.DisposeAsync();
+        }
+    }
+
+    // Value: protects=direct disposal retains prerequisites through readiness-only owners; fails_when=cleanup graph drops a non-disposable intermediary; why_new=run-based retention tracks every readiness callback; seam=none
+    [Fact]
+    public async Task DisposeAsync_ShouldRetainDependencyThroughReadinessOnlyResource()
+    {
+        var producer = new GatedProducer("coverage");
+        var prerequisite = new DisposableReadyResource("prerequisite");
+        var unrelated = new DisposableReadyResource("unrelated");
+        var plan = CreatePlanWithResources([producer.Id],
+            [new EvidenceResourceDeclaration("bridge", "completion", 30, [prerequisite.Id]),
+             new EvidenceResourceDeclaration(prerequisite.Id, "completion", 30, []),
+             new EvidenceResourceDeclaration(unrelated.Id, "completion", 30, [])], ["bridge"]);
+        var host = EvidenceHostBootstrap.Create(plan, registration =>
+        {
+            registration.AddProducer(producer);
+            registration.AddResource(new ReadinessOnlyResource("bridge"));
+            registration.AddResource(prerequisite);
+            registration.AddResource(unrelated);
+        }, Options(cleanupTimeout: TimeSpan.FromSeconds(1)));
+        try
+        {
+            var failure = await Assert.ThrowsAsync<EvidenceHostException>(() => host.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3)));
+            Assert.Equal("ASEVD306", failure.Code);
+            Assert.Equal(0, prerequisite.DisposeCount);
+            Assert.Equal(1, unrelated.DisposeCount);
+        }
+        finally
+        {
+            producer.ReleaseCleanup();
+            await producer.CleanupFinished.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        }
+    }
+
     // Value: protects=direct disposal cannot wait indefinitely for an active run; fails_when=execution semaphore is awaited without its deadline; why_new=existing active-run disposal succeeds; seam=existing TimeProvider
     [Fact]
     public async Task DisposeAsync_ShouldBoundJoiningActiveRunWithoutDisposingUnsettledCallback()
@@ -678,7 +792,7 @@ public sealed class EvidenceHostCleanupTests
         }
     }
 
-    private sealed class SharedResourceProducer() : PassingProducer("shared"), IEvidenceResourceReadiness, IDisposable
+    private sealed class SharedResourceProducer(Action? onDispose = null) : PassingProducer("shared"), IEvidenceResourceReadiness, IDisposable
     {
         public int ReadinessCount { get; private set; }
         public int ProductionCount { get; private set; }
@@ -693,7 +807,11 @@ public sealed class EvidenceHostCleanupTests
             ProductionCount++;
             return base.ProduceAsync(context, cancellationToken);
         }
-        public void Dispose() => DisposeCount++;
+        public void Dispose()
+        {
+            DisposeCount++;
+            onDispose?.Invoke();
+        }
     }
 
     private sealed class GatedProducer(string id) : PassingProducer(id), IAsyncDisposable
@@ -820,7 +938,13 @@ public sealed class EvidenceHostCleanupTests
         }
     }
 
-    private sealed class DisposableReadyResource(string id) : IEvidenceResourceReadiness, IDisposable
+    private sealed class ReadinessOnlyResource(string id) : IEvidenceResourceReadiness
+    {
+        public string Id { get; } = id;
+        public Task WaitUntilReadyAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class DisposableReadyResource(string id, Action? onDispose = null) : IEvidenceResourceReadiness, IDisposable
     {
         public string Id { get; } = id;
 
@@ -828,7 +952,11 @@ public sealed class EvidenceHostCleanupTests
 
         public Task WaitUntilReadyAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-        public void Dispose() => DisposeCount++;
+        public void Dispose()
+        {
+            DisposeCount++;
+            onDispose?.Invoke();
+        }
     }
 
     private sealed class StopCapableGatedProducer(string id, bool releaseOnStop = true) : PassingProducer(id), IEvidenceExecutionLifetime, IAsyncDisposable
