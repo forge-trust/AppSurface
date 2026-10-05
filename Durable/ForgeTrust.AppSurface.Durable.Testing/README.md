@@ -1,5 +1,7 @@
 # ForgeTrust.AppSurface.Durable.Testing
 
+The [runtime doctor contract](../runtime-doctor.md) has separate fixed-observation, real PostgreSQL and installed-candidate proofs. These builders verify host interpretation; they cannot substitute for the doctor's persisted catalog and package evidence.
+
 `ForgeTrust.AppSurface.Durable.Testing` is a .NET 10 test-support package for consumers of
 [`ForgeTrust.AppSurface.Durable`](../ForgeTrust.AppSurface.Durable/README.md) and
 [`ForgeTrust.AppSurface.Durable.Provider`](../ForgeTrust.AppSurface.Durable.Provider/README.md). It provides deterministic,
