@@ -39,8 +39,8 @@ jobs:
           set -euo pipefail
           task_source="$RUNNER_TEMP/issue779-private-qualification-source"
           git clone --quiet --no-hardlinks "$GITHUB_WORKSPACE" "$task_source"
-          git -C "$task_source" checkout --quiet --detach efe2fbb38fea6d74415cb5b3591c87f60f69e7a3
-          test "$(git -C "$task_source" rev-parse HEAD)" = efe2fbb38fea6d74415cb5b3591c87f60f69e7a3
+          git -C "$task_source" checkout --quiet --detach 8379ed27652e4add1bf28bf2803c62d450cf4b30
+          test "$(git -C "$task_source" rev-parse HEAD)" = 8379ed27652e4add1bf28bf2803c62d450cf4b30
           test -z "$(git -C "$task_source" status --porcelain)"
           product_source="$RUNNER_TEMP/issue779-product-source"
           git clone --quiet --no-hardlinks "$GITHUB_WORKSPACE/product-candidate-source" "$product_source"
@@ -76,7 +76,7 @@ jobs:
           done
           preparation_path="/usr/share/issue779-dotnet-10.0.401:$(dirname "$node_tool"):$(dirname "$pnpm_tool"):/usr/bin:/bin"
           sudo env "PATH=$preparation_path" /usr/bin/python3 -B "$task_source/tests/evidencehost-consumer/PrivateQualification/run-qualification.py" \
-            --source-commit efe2fbb38fea6d74415cb5b3591c87f60f69e7a3 \
+            --source-commit 8379ed27652e4add1bf28bf2803c62d450cf4b30 \
             --workflow-head "$GITHUB_SHA" \
             --run-id "$GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT" \
             --workflow-file .github/workflows/issue779-private-qualification.yml \
