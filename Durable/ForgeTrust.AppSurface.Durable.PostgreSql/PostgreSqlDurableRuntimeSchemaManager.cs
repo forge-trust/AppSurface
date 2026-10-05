@@ -16,6 +16,10 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchemaManager
 {
     internal const int ExecutionPolicyCompatibilityFloorVersion = 12;
+    private const int DoctorMaximumAppliedMigrationCount = 64;
+    private const string DoctorStatusContractFailureMessage =
+        "The durable doctor schema status exceeded its bounded contract.";
+
     internal const long MigrationAdvisoryLock = 0x415344555241424C;
 
     /// <summary>Bounds programmatic and generated-script waits for the migration session lock.</summary>
@@ -196,6 +200,51 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
 
         // Npgsql validates that the transaction is still active when each command is bound and executed.
         return ReadStatusAsync(connection, cancellationToken, transaction);
+    }
+
+    /// <summary>
+    /// Reads the authoritative schema status for the non-mutating doctor with bounded migration-history capture.
+    /// </summary>
+    /// <param name="connection">The open connection that owns <paramref name="transaction"/>.</param>
+    /// <param name="transaction">The caller-owned transaction whose snapshot must include the status read.</param>
+    /// <param name="cancellationToken">Cancels status queries; cancellation is propagated to the caller.</param>
+    /// <returns>The same authoritative schema status used by <see cref="ReadStatusInTransactionAsync"/>.</returns>
+    /// <remarks>
+    /// This internal reuse seam does not open a connection or begin, commit, roll back, or dispose the supplied
+    /// transaction or connection. The executing migration catalog, pending-version projection, and retained
+    /// migration history are each bounded to 64 versions; a 65th history row is detected before retention. It also
+    /// requires migration names and digests to have canonical, package-bounded ASCII shapes. A history or scalar
+    /// that violates this doctor contract throws an <see cref="InvalidOperationException"/> with fixed,
+    /// non-data-bearing text. Compatibility, contiguity, and checksum mismatches continue through the same
+    /// authoritative algorithm as <see cref="ReadStatusInTransactionAsync"/>.
+    /// </remarks>
+    internal ValueTask<DurableRuntimeSchemaStatus> ReadDoctorStatusInTransactionAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(transaction);
+
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            throw new InvalidOperationException("The status-read connection must be open.");
+        }
+
+        if (!ReferenceEquals(transaction.Connection, connection))
+        {
+            throw new ArgumentException("The status-read transaction must belong to the supplied connection.", nameof(transaction));
+        }
+
+        var maximumCanonicalNameBytes = GetDoctorMaximumCanonicalNameBytes();
+
+        // Npgsql validates that the transaction is still active when each command is bound and executed.
+        return ReadStatusAsync(
+            connection,
+            cancellationToken,
+            transaction,
+            doctorBounded: true,
+            maximumCanonicalNameBytes: maximumCanonicalNameBytes);
     }
 
     /// <inheritdoc />
@@ -502,7 +551,9 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
     private async ValueTask<DurableRuntimeSchemaStatus> ReadStatusAsync(
         NpgsqlConnection connection,
         CancellationToken cancellationToken,
-        NpgsqlTransaction? transaction = null)
+        NpgsqlTransaction? transaction = null,
+        bool doctorBounded = false,
+        int maximumCanonicalNameBytes = 0)
     {
         await using var existence = new NpgsqlCommand(
             """
@@ -542,17 +593,55 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
         }
 
         var applied = new List<AppliedMigration>();
+        var historySql = doctorBounded
+            ? """
+              SELECT version,
+                     CASE
+                         WHEN name IS NOT NULL
+                          AND pg_catalog.octet_length(name) BETWEEN 1 AND @maximum_name_bytes
+                          AND (name COLLATE "C") !~ '[^a-z0-9_]'
+                         THEN name
+                     END AS name,
+                     CASE
+                         WHEN sha256 IS NOT NULL
+                          AND pg_catalog.octet_length(sha256) = 64
+                          AND (sha256 COLLATE "C") !~ '[^0-9a-f]'
+                         THEN sha256
+                     END AS sha256,
+                     (
+                         name IS NULL
+                         OR pg_catalog.octet_length(name) NOT BETWEEN 1 AND @maximum_name_bytes
+                         OR (name COLLATE "C") ~ '[^a-z0-9_]'
+                         OR sha256 IS NULL
+                         OR pg_catalog.octet_length(sha256) <> 64
+                         OR (sha256 COLLATE "C") ~ '[^0-9a-f]'
+                     ) AS invalid_projection
+              FROM appsurface_durable.schema_migration
+              ORDER BY version
+              LIMIT 65;
+              """
+            : "SELECT version, name, sha256 FROM appsurface_durable.schema_migration ORDER BY version;";
         await using (var command = new NpgsqlCommand(
-            "SELECT version, name, sha256 FROM appsurface_durable.schema_migration ORDER BY version;",
+            historySql,
             connection,
             transaction))
         {
+            if (doctorBounded)
+            {
+                command.Parameters.AddWithValue("maximum_name_bytes", maximumCanonicalNameBytes);
+            }
+
             _ = await PostgreSqlDurableControlPlaneCommand.ExecuteReaderAsync(
                 command,
                 async (reader, effectiveToken) =>
                 {
                     while (await reader.ReadAsync(effectiveToken).ConfigureAwait(false))
                     {
+                        if (doctorBounded && (applied.Count >= DoctorMaximumAppliedMigrationCount || reader.GetBoolean(3)))
+                        {
+                            throw new InvalidOperationException(DoctorStatusContractFailureMessage);
+                        }
+
                         applied.Add(new AppliedMigration(reader.GetInt32(0), reader.GetString(1), reader.GetString(2)));
                     }
 
@@ -626,6 +715,31 @@ public sealed class PostgreSqlDurableRuntimeSchemaManager : IDurableRuntimeSchem
             _ => "Upgrade to a package that supports the installed store version.",
         };
         return CreateStatus(compatibility, installed, applied.Select(item => item.Version).ToArray(), problem, storeId, activeEpoch, range);
+    }
+
+    private int GetDoctorMaximumCanonicalNameBytes()
+    {
+        if (_migrations.Count is < 1 or > DoctorMaximumAppliedMigrationCount)
+        {
+            throw new InvalidOperationException(DoctorStatusContractFailureMessage);
+        }
+
+        var maximumNameBytes = 0;
+        foreach (var migration in _migrations)
+        {
+            if (migration.Name.Length == 0
+                || migration.Name.Any(static character => !(
+                    character is >= 'a' and <= 'z'
+                    || character is >= '0' and <= '9'
+                    || character == '_')))
+            {
+                throw new InvalidOperationException(DoctorStatusContractFailureMessage);
+            }
+
+            maximumNameBytes = Math.Max(maximumNameBytes, Encoding.UTF8.GetByteCount(migration.Name));
+        }
+
+        return maximumNameBytes;
     }
 
     private DurableRuntimeSchemaStatus CreateStatus(

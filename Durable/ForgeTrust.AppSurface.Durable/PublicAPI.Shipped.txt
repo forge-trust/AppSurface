@@ -86,6 +86,14 @@ type public sealed class ForgeTrust.AppSurface.Durable.DurableCronSchedule : For
 type public enum ForgeTrust.AppSurface.Durable.DurableDataClassification : System.Int32
   enum-member ApprovedApplication = 1
   enum-member Operational = 0
+type public static class ForgeTrust.AppSurface.Durable.DurableDiagnosticCatalog
+  method public static System.Boolean TryGet(System.String code, out ForgeTrust.AppSurface.Durable.DurableDiagnosticDescriptor? descriptor)
+type public sealed class ForgeTrust.AppSurface.Durable.DurableDiagnosticDescriptor
+  property public System.String Cause { get: public; }
+  property public System.String Code { get: public; }
+  property public System.String Fix { get: public; }
+  property public System.String Problem { get: public; }
+  property public System.Uri DocumentationUrl { get: public; }
 type public sealed class ForgeTrust.AppSurface.Durable.DurableEffectReconciliation<TResult> : System.IEquatable<ForgeTrust.AppSurface.Durable.DurableEffectReconciliation<TResult>>
   method public ForgeTrust.AppSurface.Durable.DurableEffectReconciliation<TResult> <Clone>$()
   method public System.Boolean Equals(ForgeTrust.AppSurface.Durable.DurableEffectReconciliation<TResult>? other)
@@ -518,6 +526,9 @@ type public static class ForgeTrust.AppSurface.Durable.DurableProblemCodes
   field public const System.String AttemptPlanExhausted = "ASDUR120"
   field public const System.String ClaimLost = "ASDUR104"
   field public const System.String CommandConflict = "ASDUR102"
+  field public const System.String DoctorCanceled = "ASDUR414"
+  field public const System.String DoctorContractFailed = "ASDUR415"
+  field public const System.String DoctorInputInvalid = "ASDUR413"
   field public const System.String ExecutionDeadlineReached = "ASDUR121"
   field public const System.String ExternalActivationFailed = "ASDUR407"
   field public const System.String FlowAccessDenied = "ASDUR205"
@@ -535,11 +546,13 @@ type public static class ForgeTrust.AppSurface.Durable.DurableProblemCodes
   field public const System.String FlowRepairDescriptorUpgradeRequired = "ASDUR218"
   field public const System.String FlowRepairEvidenceMismatch = "ASDUR219"
   field public const System.String FlowStartConflict = "ASDUR206"
+  field public const System.String HeartbeatRetentionUnavailable = "ASDUR409"
   field public const System.String LeaseLost = "ASDUR105"
   field public const System.String OperatorCommandInProgress = "ASDUR118"
   field public const System.String OperatorProofRequired = "ASDUR117"
   field public const System.String OperatorTransitionRejected = "ASDUR116"
   field public const System.String RecoveryEpochRequired = "ASDUR108"
+  field public const System.String RestrictedRuntimeCredentialRequired = "ASDUR408"
   field public const System.String RetentionLifecycleConflict = "ASDUR216"
   field public const System.String RetentionLifecycleRejected = "ASDUR217"
   field public const System.String RetentionManifestNotFound = "ASDUR214"
@@ -561,6 +574,9 @@ type public static class ForgeTrust.AppSurface.Durable.DurableProblemCodes
   field public const System.String WorkDiscoveryContractSelectionUnavailable = "ASDUR119"
   field public const System.String WorkNotFound = "ASDUR111"
   field public const System.String WorkRevisionConflict = "ASDUR112"
+  field public const System.String WorkerDraining = "ASDUR411"
+  field public const System.String WorkerHeartbeatEpochMismatch = "ASDUR412"
+  field public const System.String WorkerHeartbeatMissing = "ASDUR410"
   field public const System.String WorkerIdentityConflict = "ASDUR405"
 type public enum ForgeTrust.AppSurface.Durable.DurableProviderSafety : System.Int32
   enum-member Idempotent = 0

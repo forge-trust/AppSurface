@@ -1,5 +1,7 @@
 using System.Text;
+using ForgeTrust.AppSurface.Durable;
 using ForgeTrust.AppSurface.Durable.Provider;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 
 namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
@@ -174,6 +176,41 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
         Assert.False(snapshot.WasStoreObserved);
         Assert.Equal(0, snapshot.InstalledSchemaVersion);
         Assert.Equal(PostgreSqlDurableRuntimeSchemaManager.RequiredVersion, snapshot.RequiredSchemaVersion);
+    }
+
+    [Fact]
+    public async Task GetAsync_LogsCanonicalStoreUnavailableGuidanceWithoutExceptionDetails()
+    {
+        using var dataSource = NpgsqlDataSource.Create(
+            "Host=localhost;Port=5432;Database=durable_health;Username=durable;Password=not-opened");
+        var logger = new CapturingLogger<PostgreSqlDurableRuntimeHealth>();
+        var health = new PostgreSqlDurableRuntimeHealth(
+            CreateRegistration(
+                dataSource,
+                new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+                CreateOptions("runtime-health-canonical-diagnostic-worker"),
+                Guid.NewGuid()),
+            new StubSchemaManager(_ => ValueTask.FromException<DurableRuntimeSchemaStatus>(
+                new TimeoutException("private-timeout-detail"))),
+            logger);
+
+        var snapshot = await health.GetAsync();
+
+        Assert.Equal(DurableRuntimeHealthState.Unavailable, snapshot.State);
+        Assert.Equal(DurableProblemCodes.StoreUnavailable, snapshot.ProblemCode);
+        var entry = Assert.Single(logger.Entries);
+        var descriptor = Assert.IsType<DurableDiagnosticDescriptor>(
+            GetDiagnostic(DurableProblemCodes.StoreUnavailable));
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Equal(4110, entry.EventId.Id);
+        Assert.Equal(descriptor.Code, entry.Properties["ProblemCode"]);
+        Assert.Equal(descriptor.Problem, entry.Properties["DiagnosticProblem"]);
+        Assert.Equal(descriptor.Cause, entry.Properties["DiagnosticCause"]);
+        Assert.Equal(descriptor.Fix, entry.Properties["DiagnosticFix"]);
+        Assert.Equal(descriptor.DocumentationUrl.AbsoluteUri, entry.Properties["DocumentationUrl"]);
+        Assert.Equal(PostgreSqlDurableUnavailableCause.ProviderDeadline, entry.Properties["Cause"]);
+        Assert.Null(entry.Exception);
+        Assert.DoesNotContain("private-timeout-detail", entry.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1429,6 +1466,39 @@ public sealed class PostgreSqlDurableRuntimeHealthTests
         appliedVersions: [],
         pendingVersions: [],
         problem: null);
+
+    private static DurableDiagnosticDescriptor? GetDiagnostic(string problemCode) =>
+        DurableDiagnosticCatalog.TryGet(problemCode, out var descriptor) ? descriptor : null;
+
+    private sealed record CapturedLog(
+        LogLevel Level,
+        EventId EventId,
+        string Message,
+        IReadOnlyDictionary<string, object?> Properties,
+        Exception? Exception);
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        internal List<CapturedLog> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            var properties = state is IEnumerable<KeyValuePair<string, object?>> values
+                ? values.ToDictionary(value => value.Key, value => value.Value, StringComparer.Ordinal)
+                : new Dictionary<string, object?>(StringComparer.Ordinal);
+            Entries.Add(new CapturedLog(logLevel, eventId, formatter(state, exception), properties, exception));
+        }
+    }
 
     private sealed class StubSchemaManager(
         Func<CancellationToken, ValueTask<DurableRuntimeSchemaStatus>> getStatus) : IDurableRuntimeSchemaManager
