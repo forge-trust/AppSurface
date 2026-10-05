@@ -137,6 +137,15 @@ shared proof receipt hashes. These raw archive hashes may differ after signing. 
 NuGet restore owns signature validation, and the carrier receipt makes no independent signature-authenticity claim.
 Retain both receipts and the original manifest; a whole-archive public hash must never replace a candidate manifest hash.
 
+The smoke workflow obtains library archives from its isolated `NUGET_PACKAGES` cache. Tool archives come from the
+fresh `dotnet tool install --tool-path` store at
+`<tool-path>/.store/<lowercase-id>/<version>/<lowercase-id>/<version>/<lowercase-id>.<version>.nupkg`;
+the SDK does not put those archives in `NUGET_PACKAGES`. After each tool's help and exact-version checks pass, the
+workflow copies that installed public archive into the proof cache without rewriting any bytes. It replaces a stale
+cache copy and rejects a missing or linked store archive or linked staging destination. This copy only locates the
+public bytes: the carrier still compares every payload entry before invoking the shared proof. A candidate archive
+or an existing cache entry cannot substitute for a missing installed tool archive.
+
 Each canonical CLI result row carries a `Scenario` identity. The one-pair scenario proves forwarder Work, Flow, and
 Schedule before and after; the installed `work_only` pair scenarios also prove Work succeeds while Flow, Schedule,
 and All are denied. Each before/after lane record binds its scenario, store, epoch, guard backend, and runtime-role
