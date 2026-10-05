@@ -376,5 +376,59 @@ class MountEvidenceControls(unittest.TestCase):
             m.mount_evidence('x' * ((1 << 20) + 1), path, dev)
 
 
+    def test_selected_kernel_mount_id_rejects_stacked_ambiguity_and_wrong_selected_facts(self):
+        path = Path('/run/probe/output/run-selected/coverage-session')
+        dev = os.makedev(0, 123)
+        first_bad = f'408 405 0:999 / {path} ro - ext4 /dev/unknown ro'
+        selected = f'414 413 0:123 / {path} rw,nosuid,nodev,noexec - tmpfs tmpfs rw'
+        expected = {'visible': True, 'tmpfs': True, 'nosuid': True, 'nodev': True, 'noexec': True}
+        stacked = first_bad + '\n' + selected
+        self.assertEqual(expected, m.mount_data(stacked, path, dev, selected_mount_id=414))
+        self.assertEqual(expected, m.mount_data(selected + '\n' + first_bad, path, dev, selected_mount_id=414))
+        self.assertEqual(expected, m.mount_data(selected, path, dev))
+        with self.assertRaisesRegex(m.Failure, '^mount-visible$'):
+            m.mount_data(stacked, path, dev)
+        rejected = [
+            ('wrong-id', stacked, 999, 'mount-visible'),
+            ('duplicate-selected-id', first_bad.replace('408 405', '414 405') + '\n' + selected,
+             414, 'mount-visible'),
+            ('wrong-device', first_bad + '\n' + selected.replace('0:123', '0:124'),
+             414, 'mount-type-device'),
+            ('wrong-filesystem', first_bad + '\n' + selected.replace(' - tmpfs ', ' - ext4 '),
+             414, 'mount-type-device')
+        ]
+        for flag in ('nosuid', 'nodev', 'noexec'):
+            rejected.append(('missing-' + flag, first_bad + '\n' + selected.replace(',' + flag, ''),
+                             414, 'mount-flags'))
+        for selector in (0, -1, True, False, '414'):
+            rejected.append(('invalid-selector-' + repr(selector), stacked, selector, 'mount-id'))
+        for name, text, selector, diagnostic in rejected:
+            with self.subTest(case=name), self.assertRaisesRegex(m.Failure, '^' + diagnostic + '$'):
+                m.mount_data(text, path, dev, selected_mount_id=selector)
+
+    def test_fdinfo_mount_id_requires_single_positive_bounded_kernel_value(self):
+        valid = b'pos:\t0\nflags:\t0200000\nmnt_id:\t414\nino:\t123\n'
+        value = m.mount_id_data(valid)
+        self.assertEqual(414, value)
+        self.assertIs(type(value), int)
+        exact_bound = valid + b'ignored:' + b'x' * (4096 - len(valid) - len(b'ignored:'))
+        self.assertEqual(4096, len(exact_bound))
+        self.assertEqual(414, m.mount_id_data(exact_bound))
+        rejected = [
+            ('empty', b'', 'mount-fdinfo'),
+            ('missing', b'pos:\t0\nflags:\t0200000\nino:\t123\n', 'mount-fdinfo'),
+            ('duplicate-same', valid + b'mnt_id:\t414\n', 'mount-fdinfo'),
+            ('duplicate-different', valid + b'mnt_id:\t408\n', 'mount-fdinfo'),
+            ('zero', b'mnt_id:\t0\n', 'mount-fdinfo'),
+            ('negative', b'mnt_id:\t-414\n', 'mount-fdinfo'),
+            ('boolean-true', b'mnt_id:\tTrue\n', 'mount-fdinfo'),
+            ('boolean-false', b'mnt_id:\tFalse\n', 'mount-fdinfo'),
+            ('over-bound', exact_bound + b'x', 'mount-fdinfo-size')
+        ]
+        for name, data, diagnostic in rejected:
+            with self.subTest(case=name), self.assertRaisesRegex(m.Failure, '^' + diagnostic + '$'):
+                m.mount_id_data(data)
+
+
 if __name__ == '__main__':
     unittest.main()

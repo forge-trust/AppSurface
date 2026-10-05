@@ -11266,7 +11266,7 @@
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/README.md": {
       "mode": "0644",
-      "sha256": "2c4b3bbabd8735d37d3864b14dea1451aa477573a6f5151b332e95228f41fc33"
+      "sha256": "47327dc933435849a7df816efdace65b4c2af0cabd9186e15300fd79f9469f1c"
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/build-native-probe.py": {
       "mode": "0644",
@@ -11306,7 +11306,7 @@
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/run-native-probe.py": {
       "mode": "0644",
-      "sha256": "473857446640d2dfcf9c6a06f2a1adc221962a03c9b886f88c7f92bb6885a8c9"
+      "sha256": "d7b86f112f5ef54d6269a6195466999c994073abdbdc18c8fb0d30a856f94ef3"
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/sealed-runtime.py": {
       "mode": "0644",
@@ -11322,7 +11322,7 @@
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/test_native_probe.py": {
       "mode": "0644",
-      "sha256": "629a20573f7c5c860b3441f652d9fb7147e61689785e36976d60154acd6e96cd"
+      "sha256": "876a640f6cfabccb72be1a9f77b83bf54bf101cbce2795a992534a9a9db03e9d"
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/test_sealed_runtime.py": {
       "mode": "0644",

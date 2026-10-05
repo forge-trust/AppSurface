@@ -81,3 +81,13 @@ missing from stacked exact entries without echoing raw mount paths or lines.
 Verified UID/GID tuples, zero capabilities, NNP and the generated cgroup are
 recorded before that check. The existing unique selected-mount requirement is
 unchanged; these diagnostics cannot release the worker or establish a pass.
+
+Attempt6 measured two stacked exact session mounts, both with the expected
+tmpfs device and safety flags. The controller now opens the selected path through
+the verified worker's kernel `/proc/PID/root`, requires its device/inode/owner/
+group/mode to equal the retained controller mount, and reads that FD's kernel
+`mnt_id`. Only the exact path-and-ID row may establish the visible mount;
+wrong or repeated selected IDs, devices, filesystem or flags reject. The worker
+PID start time is rechecked after validation. Root-side checks without an actual
+worker FD retain the unique-entry requirement. No unit property or path grant
+changes, and successful denials/hit collection remain to be measured.

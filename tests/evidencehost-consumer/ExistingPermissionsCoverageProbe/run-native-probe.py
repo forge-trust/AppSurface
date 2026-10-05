@@ -85,16 +85,35 @@ def confirmed_unit_stop(stop_exit, query_exit, facts):
     require(facts['MainPID']=='0' and facts['ActiveState']=='inactive' and facts['SubState']=='dead','stop-state')
     if stop_exit==0: require(facts['LoadState'] in ('loaded','not-found'),'stop-load'); return 'checked-stop'
     require(facts['LoadState']=='not-found','stop-unconfirmed'); return 'checked-absent-unit'
-def mount_data(text, path, dev):
+def mount_data(text, path, dev,selected_mount_id=None):
     """Exact selected mountpoint, actual tmpfs/device and private mount flags."""
     require(len(text)<=LIMIT,'mountinfo-size'); rows=[]
     for line in text.splitlines():
         a,sep,b=line.partition(' - '); x,y=a.split(),b.split()
         if sep and len(x)>=6 and x[4]==str(path): rows.append((x,y))
+    if selected_mount_id is not None:
+        require(type(selected_mount_id) is int and selected_mount_id>0,'mount-id')
+        rows=[(x,y)for x,y in rows if x[0]==str(selected_mount_id)]
     require(len(rows)==1,'mount-visible'); x,y=rows[0]
     require(len(y)>=3 and y[0]=='tmpfs' and x[2]==f'{os.major(dev)}:{os.minor(dev)}','mount-type-device')
     require({'nosuid','nodev','noexec'}<=set(x[5].split(','))|set(y[2].split(',')),'mount-flags')
     return {'visible':True,'tmpfs':True,'nosuid':True,'nodev':True,'noexec':True}
+def mount_id_data(data):
+    """Parse only the actual opened FD's kernel mount identifier."""
+    require(len(data)<=4096,'mount-fdinfo-size'); values=[]
+    for line in data.decode('ascii').splitlines():
+        key,sep,value=line.partition(':')
+        if key=='mnt_id': require(sep and value.strip().isdigit(),'mount-fdinfo'); values.append(int(value.strip()))
+    require(len(values)==1 and values[0]>0,'mount-fdinfo'); return values[0]
+def worker_mount(pid,session,expected,d):
+    """Use the kernel's target process root; pin its selected path to our mount FD."""
+    left(d); f=os.open(f'/proc/{pid}/root'+str(session),os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    try:
+        s=os.fstat(f); identity=(s.st_dev,s.st_ino,s.st_uid,s.st_gid,stat.S_IMODE(s.st_mode))
+        require(identity==expected and stat.S_ISDIR(s.st_mode),'worker-session-identity')
+        selected=mount_id_data(kernel(f'/proc/self/fdinfo/{f}',d,4096)); left(d)
+        return selected,{'mount_id':selected,'directory_identity_matches':True,'root_owner':s.st_uid==0,'worker_group':s.st_gid==GID,'mode':format(stat.S_IMODE(s.st_mode),'04o')}
+    finally: os.close(f)
 def mount_evidence(text,path,dev):
     """Bounded selected-path diagnostics only; does not change mount acceptance."""
     require(len(text)<=LIMIT,'mountinfo-size'); selected=[]; covering=[]
@@ -114,7 +133,7 @@ def mount_evidence(text,path,dev):
 def proc_start(pid, deadline):
     d=kernel(f'/proc/{pid}/stat',deadline,8192).decode('ascii'); fields=d[d.rfind(')')+2:].split()
     require(len(fields)>=20 and fields[19].isdigit(),'proc-stat'); return int(fields[19])
-def live(pid, cg, session, dev, deadline,evidence=None):
+def live(pid, cg, session, dev, deadline,evidence=None,session_identity=None):
     first=proc_start(pid,deadline); d={}
     for line in kernel(f'/proc/{pid}/status',deadline,16384).decode('ascii').splitlines():
         k,sep,v=line.partition(':')
@@ -130,9 +149,12 @@ def live(pid, cg, session, dev, deadline,evidence=None):
         evidence.update({'pid':pid,'starttime':first,'uid4':[UID]*4,'gid4':[GID]*4,
                          'cap_eff':0,'no_new_privs':1,'cgroup_exact':True,
                          'mount_inspection':mount_evidence(text,session,dev)})
-    m=mount_data(text,session,dev)
+    require(session_identity is not None,'worker-session-binding')
+    selected,opened=worker_mount(pid,session,session_identity,deadline)
+    if evidence is not None: evidence['opened_session']=opened
+    m=mount_data(text,session,dev,selected)
     require(proc_start(pid,deadline)==first,'proc-replaced')
-    return {'pid':pid,'starttime':first,'uid4':[UID]*4,'gid4':[GID]*4,'supplementary_groups':[int(x) for x in d['Groups'].split()],'cap_eff':0,'no_new_privs':1,'cgroup_exact':True,'session_mount':m}
+    return {'pid':pid,'starttime':first,'uid4':[UID]*4,'gid4':[GID]*4,'supplementary_groups':[int(x) for x in d['Groups'].split()],'cap_eff':0,'no_new_privs':1,'cgroup_exact':True,'session_mount':m,'opened_session':opened}
 class Process:
     """Owned child process with bounded memory and EOF, explicit stdin commands."""
     def __init__(self, argv, env):
@@ -391,7 +413,8 @@ def run(source,build,output,selected_dotnet,tag):
             if row['MainPID']>0 and row['ActiveState']=='active' and row['SubState']=='running': require(row['ControlGroup']==cg,'unit-cgroup'); break
             require(worker.p.poll() is None,'worker-start-exit'); worker.pump(deadline)
         result['worker_pre_mount']={}
-        result['live_worker']=live(row['MainPID'],cg,session,device,deadline,result['worker_pre_mount']); s=os.lstat(cpath); require(stat.S_ISDIR(s.st_mode),'cgroup-type'); identity=(s.st_dev,s.st_ino)
+        ss=os.fstat(sf); session_identity=(ss.st_dev,ss.st_ino,ss.st_uid,ss.st_gid,stat.S_IMODE(ss.st_mode))
+        result['live_worker']=live(row['MainPID'],cg,session,device,deadline,result['worker_pre_mount'],session_identity); s=os.lstat(cpath); require(stat.S_ISDIR(s.st_mode),'cgroup-type'); identity=(s.st_dev,s.st_ino)
         worker.send(b'continue\n',deadline); worker.receive('completed',deadline)
         while True:
             row=inspect(); require(row['LoadState']=='loaded' and row['User']==account.name and row['Group']==account.name and row['Type']=='exec' and row['ControlGroup'] in ('',cg),'unit-terminal-identity')
