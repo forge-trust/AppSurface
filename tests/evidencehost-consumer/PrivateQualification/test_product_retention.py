@@ -19,7 +19,7 @@ SPEC.loader.exec_module(M)
 
 class ProductRetentionControls(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(dir='/private/tmp')
+        self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.workspace, self.output = self.root/'workspace', self.root/'output'
