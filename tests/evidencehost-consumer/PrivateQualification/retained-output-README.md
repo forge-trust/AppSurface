@@ -341,6 +341,31 @@ source-ready. This diagnostic fork claims no native success, qualification or
 coverage; production registries and private completion criteria are unchanged.
 
 
+## Fresh product publish directories
+
+[prepare.py](prepare.py) calls the internal
+`prepare_product_tool_directory(workspace, entry, deadline, *, expected_owner_uid=0)`
+before publishing either entry. It returns the fresh `tool-cli` or `tool-host`
+path below the root-selected workspace. The production default requires UID0;
+the optional UID is a portable file-data test seam and grants no execution or
+worker authority. The original Runner deadline covers creation, verification and
+descriptor closure without a new allowance.
+
+The helper pins the existing workspace directory, requires its expected owner and
+no group/other write bits, and creates the selected name exclusively. Existing
+directories, files and links are rejected without chmod or reuse. The newly
+created directory is pinned and explicitly set to mode 0700, including under a
+restrictive umask. This ensures the image-replacement guard receives a private
+publish parent. Root publishing, ABI checks and replacement run before the
+existing final mode 0755 sealing step. Worker path grants and replacement guards
+are unchanged.
+
+The [portable controls](test_preparation.py) exercise actual directory modes,
+fresh-name rejection, unsafe metadata and the original deadline. They do not run
+MSBuild or prove native qualification. A native failure snapshot that records a
+tool directory with group/other write bits is a preparation failure; it cannot
+be repaired by accepting that unsafe directory during image replacement.
+
 ## Closed product preparation failure diagnostics
 
 [prepare-product.py](prepare-product.py) provides the internal

@@ -571,6 +571,74 @@ def write_complete_build_binding(workspace, result, deadline):
     require(time.monotonic() < deadline)
 
 
+def prepare_product_tool_directory(workspace, entry, deadline, *, expected_owner_uid=0):
+    """Create one fresh private publish directory under the retained workspace.
+
+    Production selects UID0 and the original Runner deadline. Explicit fd chmod
+    makes mode 0700 independent of umask before any publish can create output.
+    Existing names, links and unsafe workspace metadata are rejected, never fixed.
+    The optional UID is file-data testing only; it supplies no worker authority.
+    Final mode 0755 remains the later sealing step after replacement and auditing.
+    All retained descriptors close before return, within the original deadline.
+    """
+    require(type(expected_owner_uid) is int and expected_owner_uid >= 0
+            and type(entry) is str and entry in ("cli", "host")
+            and type(deadline) in (int, float) and 0 < deadline < float("inf"))
+    workspace = Path(workspace)
+    require(workspace.is_absolute() and ".." not in workspace.parts
+            and time.monotonic() < deadline)
+    selected = workspace.lstat()
+    require(stat.S_ISDIR(selected.st_mode) and selected.st_uid == expected_owner_uid
+            and not selected.st_mode & 0o022)
+    directory_identity = lambda row: (row.st_dev, row.st_ino, row.st_mode, row.st_uid, row.st_gid)
+    owned, error, result = [], None, None
+    try:
+        parent_fd = os.open(workspace, os.O_RDONLY | os.O_DIRECTORY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC)
+        owned.append(parent_fd)
+        require(directory_identity(selected) == directory_identity(os.fstat(parent_fd))
+                and time.monotonic() < deadline)
+        name = "tool-"+entry
+        os.mkdir(name, mode=0o700, dir_fd=parent_fd)
+        created = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        require(stat.S_ISDIR(created.st_mode) and created.st_uid == expected_owner_uid
+                and time.monotonic() < deadline)
+        # A restrictive umask can remove even owner read/search. Set the mode
+        # through the retained protected parent before opening the new child;
+        # no existing or followed link is eligible for this chmod.
+        os.chmod(name, 0o700, dir_fd=parent_fd, follow_symlinks=False)
+        named = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        require(stat.S_ISDIR(named.st_mode) and named.st_uid == expected_owner_uid
+                and named.st_dev == created.st_dev and named.st_ino == created.st_ino
+                and stat.S_IMODE(named.st_mode) == 0o700 and time.monotonic() < deadline)
+        tool_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
+                          dir_fd=parent_fd)
+        owned.append(tool_fd)
+        require(directory_identity(named) == directory_identity(os.fstat(tool_fd))
+                and time.monotonic() < deadline)
+        os.fchmod(tool_fd, 0o700)
+        final = os.fstat(tool_fd)
+        require(stat.S_ISDIR(final.st_mode) and final.st_uid == expected_owner_uid
+                and final.st_dev == created.st_dev and final.st_ino == created.st_ino
+                and stat.S_IMODE(final.st_mode) == 0o700
+                and directory_identity(final) == directory_identity(os.stat(name, dir_fd=parent_fd, follow_symlinks=False))
+                and directory_identity(selected) == directory_identity(os.fstat(parent_fd))
+                == directory_identity(workspace.lstat()) and time.monotonic() < deadline)
+        result = workspace / name
+    except BaseException as failure:
+        error = failure
+    finally:
+        for fd in reversed(owned):
+            try:
+                os.close(fd)
+            except BaseException as failure:
+                if error is None:
+                    error = failure
+    if error is not None:
+        raise error
+    require(time.monotonic() < deadline)
+    return result
+
+
 def prepare(source, workspace, source_commit, run_id, workflow_identity):
     """Build both actual entries from the same frozen variant and exact compiled bindings."""
     require(os.geteuid() == 0 and re.fullmatch(r"[0-9a-f]{40}", source_commit)
@@ -654,7 +722,7 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
     runner.run([str(dotnet), "restore", str(cli_project), "--locked-mode"], build)
     tools, product_binary_bindings = {}, {}
     for entry in ("cli", "host"):
-        tool = workspace / ("tool-"+entry)
+        tool = prepare_product_tool_directory(workspace, entry, runner.deadline)
         argv = [str(dotnet), "publish", str(cli_project), "--no-restore", "--configuration", "Debug", "--output", str(tool), "-p:UseSharedCompilation=false"]
         if entry == "host":
             # A full rebuild prevents reuse of the first entry's compile-time branch.

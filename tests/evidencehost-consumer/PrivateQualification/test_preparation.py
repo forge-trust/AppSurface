@@ -360,5 +360,260 @@ class PreparationDataControls(unittest.TestCase):
         self.assertEqual(0o600, stat.S_IMODE(path.stat().st_mode))
 
 
+class ProductToolDirectoryControls(unittest.TestCase):
+    """Real temporary directory metadata only; no root, publish or worker proof."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="product-tool-directory-")
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.owner_uid = os.getuid()
+        self.command_guards = []
+        for owner, name in ((prepare.subprocess, "Popen"),
+                            (prepare.subprocess, "check_output"),
+                            (prepare.Runner, "run")):
+            guard = patch.object(owner, name, side_effect=AssertionError("command-path-not-allowed"))
+            self.command_guards.append(guard.start())
+            self.addCleanup(guard.stop)
+
+    def tearDown(self):
+        for guard in self.command_guards:
+            guard.assert_not_called()
+
+    def workspace(self, name):
+        path = self.root / name
+        path.mkdir()
+        path.chmod(0o711)
+        return path
+
+    def create(self, workspace, entry="cli", deadline=None, owner_uid=None):
+        return prepare.prepare_product_tool_directory(
+            workspace, entry,
+            prepare.time.monotonic()+5 if deadline is None else deadline,
+            expected_owner_uid=self.owner_uid if owner_uid is None else owner_uid)
+
+    def assert_closed(self, descriptors):
+        self.assertEqual(2, len(descriptors))
+        self.assertEqual(2, len(set(descriptors)))
+        for fd in descriptors:
+            with self.assertRaises(OSError) as error:
+                os.fstat(fd)
+            self.assertEqual(9, error.exception.errno)
+
+    def test_both_entries_are_private_under_each_actual_umask_without_changing_parent(self):
+        for entry in ("cli", "host"):
+            for mask in (0o000, 0o077, 0o777):
+                with self.subTest(entry=entry, umask=oct(mask)):
+                    workspace = self.workspace(f"{entry}-{mask:03o}")
+                    before = workspace.lstat()
+                    previous = os.umask(mask)
+                    try:
+                        result = self.create(workspace, entry)
+                    finally:
+                        os.umask(previous)
+                    self.assertEqual(workspace / ("tool-"+entry), result)
+                    self.assertFalse(result.is_symlink())
+                    info = result.lstat()
+                    self.assertTrue(stat.S_ISDIR(info.st_mode))
+                    self.assertEqual(self.owner_uid, info.st_uid)
+                    self.assertEqual(0o700, stat.S_IMODE(info.st_mode))
+                    self.assertEqual([], list(result.iterdir()))
+                    after = workspace.lstat()
+                    self.assertEqual((before.st_dev, before.st_ino, before.st_uid, before.st_gid, before.st_mode),
+                                     (after.st_dev, after.st_ino, after.st_uid, after.st_gid, after.st_mode))
+                    self.assertEqual(0o711, stat.S_IMODE(after.st_mode))
+                    self.assertEqual([result], list(workspace.iterdir()))
+
+    def test_existing_directory_file_and_links_reject_without_chmod_or_canary_change(self):
+        canary = self.root / "outside-canary"
+        canary.write_bytes(b"outside bytes must stay unchanged")
+        canary.chmod(0o644)
+        directory_canary = self.root / "outside-directory"
+        directory_canary.mkdir()
+        directory_canary.chmod(0o755)
+        for shape in ("directory", "file", "file-link", "directory-link", "dangling-link"):
+            with self.subTest(shape=shape):
+                workspace = self.workspace(shape)
+                target = workspace / "tool-cli"
+                if shape == "directory":
+                    target.mkdir()
+                    target.chmod(0o777)
+                    (target / "owned-canary").write_bytes(b"existing child bytes")
+                elif shape == "file":
+                    target.write_bytes(b"existing file bytes")
+                    target.chmod(0o777)
+                elif shape == "file-link":
+                    target.symlink_to(canary)
+                elif shape == "directory-link":
+                    target.symlink_to(directory_canary, target_is_directory=True)
+                else:
+                    target.symlink_to(self.root / "missing-canary")
+                before = target.lstat()
+                original_chmod, original_fchmod = os.chmod, os.fchmod
+                with patch.object(prepare.os, "chmod", wraps=original_chmod) as chmod, patch.object(
+                        prepare.os, "fchmod", wraps=original_fchmod) as fchmod:
+                    with self.assertRaises(FileExistsError):
+                        self.create(workspace)
+                chmod.assert_not_called()
+                fchmod.assert_not_called()
+                after = target.lstat()
+                self.assertEqual((before.st_dev, before.st_ino, before.st_mode, before.st_uid, before.st_gid),
+                                 (after.st_dev, after.st_ino, after.st_mode, after.st_uid, after.st_gid))
+                self.assertEqual(b"outside bytes must stay unchanged", canary.read_bytes())
+                self.assertEqual(0o644, stat.S_IMODE(canary.lstat().st_mode))
+                self.assertEqual(0o755, stat.S_IMODE(directory_canary.lstat().st_mode))
+                self.assertEqual([], list(directory_canary.iterdir()))
+                if shape == "directory":
+                    self.assertEqual(b"existing child bytes", (target / "owned-canary").read_bytes())
+                elif shape == "file":
+                    self.assertEqual(b"existing file bytes", target.read_bytes())
+                else:
+                    self.assertTrue(target.is_symlink())
+                self.assertFalse((self.root / "missing-canary").exists())
+                self.assertEqual(0o711, stat.S_IMODE(workspace.lstat().st_mode))
+
+    def test_malformed_entry_or_path_rejects_before_mkdir(self):
+        workspace = self.workspace("valid-input-parent")
+        cases = [(workspace, entry) for entry in ("", "CLI", "host/other", "../host", None, 1)]
+        cases.extend(((Path("relative-parent"), "cli"),
+                      (workspace / ".." / workspace.name, "host")))
+        original_mkdir = os.mkdir
+        for path, entry in cases:
+            with self.subTest(entry=entry, absolute=path.is_absolute()):
+                with patch.object(prepare.os, "mkdir", wraps=original_mkdir) as mkdir:
+                    with self.assertRaises(prepare.PreparationFailure):
+                        self.create(path, entry)
+                mkdir.assert_not_called()
+        self.assertEqual([], list(workspace.iterdir()))
+        self.assertEqual(0o711, stat.S_IMODE(workspace.lstat().st_mode))
+
+    def test_unsafe_workspace_or_wrong_owner_rejects_before_mkdir(self):
+        unsafe = self.workspace("unsafe-workspace")
+        unsafe.chmod(0o777)
+        valid = self.workspace("wrong-owner-workspace")
+        link = self.root / "workspace-link"
+        link.symlink_to(valid, target_is_directory=True)
+        file = self.root / "workspace-file"
+        file.write_bytes(b"workspace canary")
+        file.chmod(0o600)
+        cases = ((unsafe, self.owner_uid), (valid, self.owner_uid+1),
+                 (link, self.owner_uid), (file, self.owner_uid))
+        original_mkdir = os.mkdir
+        for workspace, owner_uid in cases:
+            before = workspace.lstat()
+            with self.subTest(owner_matches=owner_uid == self.owner_uid,
+                              kind=stat.S_IFMT(before.st_mode)):
+                with patch.object(prepare.os, "mkdir", wraps=original_mkdir) as mkdir:
+                    with self.assertRaises(prepare.PreparationFailure):
+                        self.create(workspace, owner_uid=owner_uid)
+                mkdir.assert_not_called()
+                after = workspace.lstat()
+                self.assertEqual((before.st_dev, before.st_ino, before.st_mode, before.st_uid, before.st_gid),
+                                 (after.st_dev, after.st_ino, after.st_mode, after.st_uid, after.st_gid))
+        self.assertEqual([], list(unsafe.iterdir()))
+        self.assertEqual([], list(valid.iterdir()))
+        self.assertEqual(b"workspace canary", file.read_bytes())
+        self.assertTrue(link.is_symlink())
+
+    def test_expired_deadline_rejects_before_any_filesystem_mutation(self):
+        workspace = self.workspace("expired-workspace")
+        before = workspace.lstat()
+        with patch.object(prepare.os, "mkdir", wraps=os.mkdir) as mkdir, patch.object(
+                prepare.os, "fchmod", wraps=os.fchmod) as fchmod:
+            with self.assertRaises(prepare.PreparationFailure):
+                self.create(workspace, deadline=prepare.time.monotonic()-1)
+        mkdir.assert_not_called()
+        fchmod.assert_not_called()
+        after = workspace.lstat()
+        self.assertEqual(before, after)
+        self.assertEqual([], list(workspace.iterdir()))
+
+    def test_named_chmod_failure_preserves_error_and_closes_only_retained_parent(self):
+        workspace = self.workspace("named-chmod-failure")
+        descriptors, closed = [], []
+        original_open, original_close = os.open, os.close
+        first_error = OSError("controlled-named-chmod-error")
+
+        def tracked_open(*args, **kwargs):
+            fd = original_open(*args, **kwargs)
+            descriptors.append(fd)
+            return fd
+
+        def tracked_close(fd):
+            original_close(fd)
+            closed.append(fd)
+
+        with patch.object(prepare.os, "open", tracked_open), patch.object(
+                prepare.os, "chmod", side_effect=first_error) as chmod, patch.object(
+                prepare.os, "fchmod", wraps=os.fchmod) as fchmod, patch.object(
+                prepare.os, "close", tracked_close):
+            with self.assertRaises(OSError) as error:
+                self.create(workspace)
+        self.assertIs(first_error, error.exception)
+        self.assertEqual(1, len(descriptors))
+        self.assertEqual(descriptors, closed)
+        chmod.assert_called_once_with("tool-cli", 0o700, dir_fd=descriptors[0], follow_symlinks=False)
+        fchmod.assert_not_called()
+        with self.assertRaises(OSError) as closed_error:
+            os.fstat(descriptors[0])
+        self.assertEqual(9, closed_error.exception.errno)
+        self.assertEqual(0o711, stat.S_IMODE(workspace.lstat().st_mode))
+
+    def test_chmod_failure_preserves_first_error_and_attempts_every_owned_close(self):
+        workspace = self.workspace("chmod-failure")
+        descriptors, closed = [], []
+        original_open, original_close = os.open, os.close
+        first_error = OSError("controlled-fchmod-error")
+        close_error = OSError("controlled-later-close-error")
+
+        def tracked_open(*args, **kwargs):
+            fd = original_open(*args, **kwargs)
+            descriptors.append(fd)
+            return fd
+
+        def failing_close(fd):
+            original_close(fd)
+            closed.append(fd)
+            if len(closed) == 1:
+                raise close_error
+
+        with patch.object(prepare.os, "open", tracked_open), patch.object(
+                prepare.os, "fchmod", side_effect=first_error), patch.object(
+                prepare.os, "close", failing_close):
+            with self.assertRaises(OSError) as error:
+                self.create(workspace)
+        self.assertIs(first_error, error.exception)
+        self.assertEqual(list(reversed(descriptors)), closed)
+        self.assert_closed(descriptors)
+        self.assertEqual(0o711, stat.S_IMODE(workspace.lstat().st_mode))
+
+    def test_close_failure_rejects_success_and_attempts_every_owned_close(self):
+        workspace = self.workspace("close-failure")
+        descriptors, closed = [], []
+        original_open, original_close = os.open, os.close
+        close_error = OSError("controlled-close-error-after-real-close")
+
+        def tracked_open(*args, **kwargs):
+            fd = original_open(*args, **kwargs)
+            descriptors.append(fd)
+            return fd
+
+        def failing_close(fd):
+            original_close(fd)
+            closed.append(fd)
+            if len(closed) == 1:
+                raise close_error
+
+        with patch.object(prepare.os, "open", tracked_open), patch.object(
+                prepare.os, "close", failing_close):
+            with self.assertRaises(OSError) as error:
+                self.create(workspace, "host")
+        self.assertIs(close_error, error.exception)
+        self.assertEqual(list(reversed(descriptors)), closed)
+        self.assert_closed(descriptors)
+        self.assertEqual(0o700, stat.S_IMODE((workspace / "tool-host").lstat().st_mode))
+        self.assertEqual(0o711, stat.S_IMODE(workspace.lstat().st_mode))
+
+
 if __name__ == "__main__":
     unittest.main()
