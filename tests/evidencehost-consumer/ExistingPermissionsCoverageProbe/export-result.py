@@ -17,6 +17,8 @@ deadline = time.monotonic() + 5
 assert os.geteuid() == 0 and uid > 0 and gid > 0
 fixed = {
     'build/supervision-receipt.json': (build / 'supervision-receipt.json', 128 * 1024, uid),
+    'build/supervisor.stdout': (build / 'supervisor.stdout', 65536, uid),
+    'build/supervisor.stderr': (build / 'supervisor.stderr', 65536, uid),
     'build/build-receipt.json': (build / 'build-receipt.json', 128 * 1024, uid),
     'native/receipt.json': (native / 'receipt.json', 128 * 1024, 0),
     'native/supervision-receipt.json': (native / 'supervision-receipt.json', 128 * 1024, 0),

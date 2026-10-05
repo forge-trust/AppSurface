@@ -41,7 +41,7 @@ with zipfile.ZipFile(io.BytesIO(chunks)) as archive:
         if not item.filename.startswith('tasks/net10.0/') or item.is_dir():
             continue
         path = Path(item.filename)
-        assert len(path.parts) == 3 and '..' not in path.parts and not path.is_absolute()
+        assert 3 <= len(path.parts) <= 8 and all(part not in ('.', '..') for part in path.parts) and not path.is_absolute()
         assert item.file_size <= 16 * 1024 * 1024 and stat.S_IFMT(item.external_attr >> 16) in (0, stat.S_IFREG)
         content = archive.read(item)
         dest = package / path

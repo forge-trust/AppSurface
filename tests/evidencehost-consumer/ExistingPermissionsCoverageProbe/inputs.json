@@ -11270,11 +11270,11 @@
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/build-native-probe.py": {
       "mode": "0644",
-      "sha256": "538dc61dbc5e029cd17827c71dbe87466b9baea07491f8d7ccb53b66bf726dcb"
+      "sha256": "fa96b431bd7884b6bef3279e07fed6cde6440a7e5352b0d0e3ca58c2ece05a0b"
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/export-result.py": {
       "mode": "0644",
-      "sha256": "626e02d25dbeb46621ebacc1549a2cc7767bfc30087a2a7c72f4079c37fc88a6"
+      "sha256": "19f88c56f0f7892a13e8d894c32f80ba79007fd4c1b34c052603f9655769f69e"
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/programs/CounterFixture.cs": {
       "mode": "0644",
