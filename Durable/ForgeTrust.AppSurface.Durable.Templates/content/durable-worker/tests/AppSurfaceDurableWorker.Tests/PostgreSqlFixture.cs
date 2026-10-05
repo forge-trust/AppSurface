@@ -313,38 +313,18 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
 
         var failures = new List<string>();
         var startedAt = Stopwatch.GetTimestamp();
-        var setupOperationsSettled = await StopAndObservePendingSetupOperationsAsync(startedAt, totalBudget, failures)
-            .ConfigureAwait(false);
-
-        foreach (var source in _dataSources.AsEnumerable().Reverse())
-        {
-            await AttemptCleanupAsync(
-                () => source.DisposeAsync().AsTask(),
-                "data-source",
-                startedAt,
-                totalBudget,
-                failures).ConfigureAwait(false);
-        }
-
-        if (_ownsNativeDatabase && setupOperationsSettled)
-        {
-            await AttemptCleanupAsync(
-                DropOwnedNativeDatabaseAndRolesAsync,
-                "native-database-and-roles",
-                startedAt,
-                totalBudget,
-                failures)
-                .ConfigureAwait(false);
-        }
-        else if (_ownsNativeDatabase)
-        {
-            failures.Add("native-database-retained-while-setup-operation-remains-active");
-        }
-
-        if (_ownsContainer && _container is not null && Volatile.Read(ref _containerForceRemoved) == 0)
-        {
-            await DisposeOwnedContainerAsync(startedAt, totalBudget, failures).ConfigureAwait(false);
-        }
+        await CleanupOwnedResourcesAsync(
+            _setupOperations,
+            _dataSources.AsEnumerable().Reverse().Select(source => (Func<Task>)(() => source.DisposeAsync().AsTask())),
+            _ownsNativeDatabase ? DropOwnedNativeDatabaseAndRolesAsync : null,
+            _ownsContainer && _container is not null && Volatile.Read(ref _containerForceRemoved) == 0
+                ? remaining => ForceRemoveOwnedContainerAsync(_container.Id, remaining)
+                : null,
+            _ownsContainer && _container is not null && Volatile.Read(ref _containerForceRemoved) == 0
+                ? () => DisposeOwnedContainerAsync(() => _container.DisposeAsync().AsTask(), () => _container.Id,
+                    ForceRemoveOwnedContainerAsync, startedAt, totalBudget, failures)
+                : null,
+            startedAt, totalBudget, failures).ConfigureAwait(false);
 
         if (failures.Count != 0)
         {
@@ -516,123 +496,216 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
         return remaining;
     }
 
-    private async Task<bool> StopAndObservePendingSetupOperationsAsync(
-        long startedAt,
-        TimeSpan totalBudget,
-        ICollection<string> failures)
+    /// <summary>Walks the fixture's owned resources without abandoning later teardown after a fault or exhausted clock.</summary>
+    /// <param name="setupOperations">The actual provisioning lifetime; pending native setup forbids concurrent destructive DDL.</param>
+    /// <param name="dataSourceDisposals">Owned data-source factories, already ordered from newest to oldest.</param>
+    /// <param name="dropNativeDatabase">Owned database/role teardown, or null for a container fixture.</param>
+    /// <param name="stopOwnedContainer">Stops only this fixture's container to settle pending setup; null for native PostgreSQL.</param>
+    /// <param name="disposeOwnedContainer">Bounded SDK/fallback orchestration, or null when no container is owned.</param>
+    /// <param name="startedAt">Original monotonic cleanup timestamp, shared by every resource.</param>
+    /// <param name="totalBudget">Positive total cleanup allowance, never renewed by this resource walk.</param>
+    /// <param name="failures">Receives bounded phase/type failures; existing primary failures are preserved.</param>
+    /// <returns>Completion of bounded observation, not proof that abandoned external tasks finished.</returns>
+    /// <remarks>This intentionally internal orchestration seam lets deterministic tests exercise the real fixture order.
+    /// Factories remain owned by the caller. Expired observation still schedules teardown, but never permits success;
+    /// native objects remain intact while provisioning is unsettled to avoid a create/drop race.</remarks>
+    internal static async Task CleanupOwnedResourcesAsync(
+        SetupOperationLifetime setupOperations,
+        IEnumerable<Func<Task>> dataSourceDisposals,
+        Func<Task>? dropNativeDatabase,
+        Func<TimeSpan, Task<bool>>? stopOwnedContainer,
+        Func<Task>? disposeOwnedContainer,
+        long startedAt, TimeSpan totalBudget, ICollection<string> failures)
     {
+        ArgumentNullException.ThrowIfNull(setupOperations);
+        ArgumentNullException.ThrowIfNull(dataSourceDisposals);
+        ArgumentNullException.ThrowIfNull(failures);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(totalBudget, TimeSpan.Zero);
         var remaining = totalBudget - Stopwatch.GetElapsedTime(startedAt);
-        Func<TimeSpan, Task<bool>>? stopOwnerAsync =
-            _ownsContainer && _container is not null && Volatile.Read(ref _containerForceRemoved) == 0
-                ? _ => ForceRemoveOwnedContainerAsync(startedAt, totalBudget, failures)
-                : null;
-        return await _setupOperations.StopAndObservePendingAsync(
-            stopOwnerAsync,
-            remaining,
-            FixtureBudgets.ChildTermination,
-            failures).ConfigureAwait(false);
-    }
-
-    private async Task<bool> ForceRemoveOwnedContainerAsync(
-        long startedAt,
-        TimeSpan totalBudget,
-        ICollection<string> failures)
-    {
-        var remaining = totalBudget - Stopwatch.GetElapsedTime(startedAt);
-        var processBudget = remaining - FixtureBudgets.ChildTermination;
-        if (processBudget <= TimeSpan.Zero)
+        var setupSettled = setupOperations.PendingCount == 0;
+        if (remaining <= TimeSpan.Zero)
         {
-            failures.Add("container-force-remove-not-attempted-within-cleanup-budget");
-            return false;
+            failures.Add("setup-operation-observation-budget-exhausted");
+            if (!setupSettled && stopOwnedContainer is not null)
+            {
+                var stopOperations = new SetupOperationLifetime();
+                await stopOperations.AwaitCleanupAsync("setup-owner-stop", async attempt =>
+                {
+                    if (!await stopOwnedContainer(attempt).ConfigureAwait(false))
+                    {
+                        throw new InvalidOperationException("Owned container setup stop failed.");
+                    }
+                }, startedAt, totalBudget, failures).ConfigureAwait(false);
+            }
+        }
+        else
+        {
+            try
+            {
+                setupSettled = await setupOperations.StopAndObservePendingAsync(
+                    stopOwnedContainer, remaining, FixtureBudgets.ChildTermination, failures).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                failures.Add($"setup-operation-observation-{exception.GetType().Name}");
+                setupSettled = false;
+            }
         }
 
+        var cleanupOperations = new SetupOperationLifetime();
+        foreach (var dispose in dataSourceDisposals)
+        {
+            await cleanupOperations.AwaitCleanupAsync("data-source", _ => dispose(),
+                startedAt, totalBudget, failures).ConfigureAwait(false);
+        }
+        if (dropNativeDatabase is not null && setupSettled)
+        {
+            await cleanupOperations.AwaitCleanupAsync("native-database-and-roles", _ => dropNativeDatabase(),
+                startedAt, totalBudget, failures).ConfigureAwait(false);
+        }
+        else if (dropNativeDatabase is not null)
+        {
+            failures.Add("native-database-retained-while-setup-operation-remains-active");
+        }
+        if (disposeOwnedContainer is not null)
+        {
+            // This is our bounded orchestration, not a raw SDK adapter. It owns its off-thread invocation
+            // and writes failures only while awaited, so late adapters never mutate this shared list.
+            try
+            {
+                await disposeOwnedContainer().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                failures.Add($"owned-container-{exception.GetType().Name}");
+            }
+        }
+        if (cleanupOperations.PendingCount != 0 || Stopwatch.GetElapsedTime(startedAt) > totalBudget)
+        {
+            failures.Add("fixture-cleanup-unsettled-or-budget-exhausted");
+        }
+    }
+
+    /// <summary>Removes only the fixture's acquired container through the bounded Docker command runner.</summary>
+    /// <param name="containerId">The exact identity supplied by the owned Testcontainers instance.</param>
+    /// <param name="remaining">Original remaining attempt allowance, capped at two seconds.</param>
+    /// <returns>True only after complete successful removal output; the caller still verifies SDK settlement.</returns>
+    private async Task<bool> ForceRemoveOwnedContainerAsync(string containerId, TimeSpan remaining)
+    {
+        var processBudget = remaining > TimeSpan.Zero ? remaining : TimeSpan.FromMilliseconds(1);
         if (processBudget > TimeSpan.FromSeconds(2))
         {
             processBudget = TimeSpan.FromSeconds(2);
         }
-
-        try
+        var result = await BoundedProcessRunner.RunAsync(
+            "docker", ["rm", "--force", containerId], environment: null, processBudget).ConfigureAwait(false);
+        if (result.ExitCode != 0 || result.StandardOutputTruncated || result.StandardErrorTruncated)
         {
-            var result = await BoundedProcessRunner.RunAsync(
-                "docker",
-                ["rm", "--force", _container!.Id],
-                environment: null,
-                processBudget).ConfigureAwait(false);
-            if (result.ExitCode != 0 || result.StandardOutputTruncated || result.StandardErrorTruncated)
-            {
-                failures.Add("container-force-remove-failed");
-                return false;
-            }
-
-            Volatile.Write(ref _containerForceRemoved, 1);
-            return true;
-        }
-        catch (Exception exception)
-        {
-            failures.Add($"container-force-remove-{exception.GetType().Name}");
             return false;
         }
+        Volatile.Write(ref _containerForceRemoved, 1);
+        return true;
     }
 
-    private async Task DisposeOwnedContainerAsync(long startedAt, TimeSpan totalBudget, ICollection<string> failures)
+    /// <summary>Attempts owned SDK disposal off-thread, followed by exact-identity removal when SDK disposal fails.</summary>
+    /// <param name="dispose">SDK factory; synchronous invocation and late faults are bounded and observed.</param>
+    /// <param name="ownedContainerId">Reads only the already-owned container identity, and only when fallback is required.</param>
+    /// <param name="forceRemove">Removes that exact owned ID using a positive remaining attempt allowance.</param>
+    /// <param name="startedAt">Original fixture cleanup clock, also used by SDK and fallback observation.</param>
+    /// <param name="totalBudget">Original positive fixture budget; the SDK gets at most two seconds of it.</param>
+    /// <param name="failures">Receives safe diagnostics; exhausted or unsettled cleanup cannot certify a passing proof.</param>
+    /// <returns>Bounded observation of SDK disposal and, if needed, the owned fallback.</returns>
+    /// <remarks>A one-millisecond API allowance after expiry grants no new observation window. Never pass foreign IDs
+    /// or a shared Docker cleanup delegate. A successful removal is insufficient while the SDK task remains unsettled.</remarks>
+    internal static async Task DisposeOwnedContainerAsync(
+        Func<Task> dispose, Func<string> ownedContainerId, Func<string, TimeSpan, Task<bool>> forceRemove,
+        long startedAt, TimeSpan totalBudget, ICollection<string> failures)
     {
-        var remaining = totalBudget - Stopwatch.GetElapsedTime(startedAt);
-        if (remaining <= TimeSpan.Zero)
+        ArgumentNullException.ThrowIfNull(dispose);
+        ArgumentNullException.ThrowIfNull(ownedContainerId);
+        ArgumentNullException.ThrowIfNull(forceRemove);
+        ArgumentNullException.ThrowIfNull(failures);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(totalBudget, TimeSpan.Zero);
+        var disposeTask = Task.Run(dispose, CancellationToken.None);
+        ObserveLateCompletion(disposeTask);
+        var operations = new SetupOperationLifetime();
+        var sdkFailures = new List<string>();
+        var sdkBudget = Stopwatch.GetElapsedTime(startedAt) + TimeSpan.FromSeconds(2);
+        if (sdkBudget > totalBudget)
         {
-            failures.Add("container-not-disposed-after-total-budget");
+            sdkBudget = totalBudget;
+        }
+        await operations.AwaitCleanupAsync("container-sdk-dispose", _ => disposeTask,
+            startedAt, sdkBudget, sdkFailures).ConfigureAwait(false);
+        if (sdkFailures.Count == 0)
+        {
+            if (Stopwatch.GetElapsedTime(startedAt) > totalBudget)
+            {
+                failures.Add("container-dispose-budget-exhausted");
+            }
             return;
         }
 
-        var disposeTask = _container!.DisposeAsync().AsTask();
-        var sdkDisposeBudget = remaining < TimeSpan.FromSeconds(2)
-            ? remaining
-            : TimeSpan.FromSeconds(2);
-
-        try
+        var removed = false;
+        await operations.AwaitCleanupAsync("container-force-remove", async remaining =>
         {
-            await disposeTask.WaitAsync(sdkDisposeBudget).ConfigureAwait(false);
-            return;
-        }
-        catch (TimeoutException)
-        {
-            ObserveLateCompletion(disposeTask);
-        }
-        catch (Exception) when (disposeTask.IsCompleted)
-        {
-            ObserveLateCompletion(disposeTask);
-        }
-
-        var removed = await ForceRemoveOwnedContainerAsync(startedAt, totalBudget, failures).ConfigureAwait(false);
+            var id = ownedContainerId();
+            ArgumentException.ThrowIfNullOrWhiteSpace(id);
+            var attempt = remaining - FixtureBudgets.ChildTermination;
+            removed = await forceRemove(id, attempt > TimeSpan.Zero ? attempt : TimeSpan.FromMilliseconds(1))
+                .ConfigureAwait(false);
+            if (!removed)
+            {
+                throw new InvalidOperationException("Owned container force removal failed.");
+            }
+        }, startedAt, totalBudget, failures).ConfigureAwait(false);
         if (!removed)
         {
             failures.Add("container-dispose-unfinished-after-force-remove-failed");
-            ObserveLateCompletion(disposeTask);
             return;
         }
+        await ObserveRemovedContainerDisposalAsync(disposeTask, startedAt, totalBudget, failures).ConfigureAwait(false);
+    }
 
-        var afterRemoval = totalBudget - Stopwatch.GetElapsedTime(startedAt);
-        if (afterRemoval <= TimeSpan.Zero)
+    /// <summary>Observes SDK settlement after the caller has verified removal of its exact owned container.</summary>
+    /// <param name="disposeTask">The already-started SDK disposal operation; terminal faults are expected after removal.</param>
+    /// <param name="startedAt">Original fixture cleanup timestamp, never renewed for settlement.</param>
+    /// <param name="totalBudget">Original positive fixture allowance shared with prior teardown.</param>
+    /// <param name="failures">Receives unfinished or exhausted observation failures.</param>
+    /// <returns>Bounded settlement observation; completed SDK faults are observed without invalidating verified removal.</returns>
+    /// <remarks>Call only after successful owned removal. This seam tests both SDK settlement schedules without
+    /// sleeping through the SDK attempt window; it never makes an unverified removal successful.</remarks>
+    internal static async Task ObserveRemovedContainerDisposalAsync(Task disposeTask,
+        long startedAt, TimeSpan totalBudget, ICollection<string> failures)
+    {
+        ArgumentNullException.ThrowIfNull(disposeTask);
+        ArgumentNullException.ThrowIfNull(failures);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(totalBudget, TimeSpan.Zero);
+        ObserveLateCompletion(disposeTask);
+        var operations = new SetupOperationLifetime();
+        if (disposeTask.IsCompleted)
         {
-            failures.Add("container-dispose-observation-budget-exhausted");
-            ObserveLateCompletion(disposeTask);
-            return;
+            // An already-removed container may fault SDK disposal after confirmed owned removal.
+            _ = disposeTask.Exception;
         }
-
-        try
+        else
         {
-            var observationBudget = afterRemoval < FixtureBudgets.ChildTermination
-                ? afterRemoval
-                : FixtureBudgets.ChildTermination;
-            await disposeTask.WaitAsync(observationBudget).ConfigureAwait(false);
+            await operations.AwaitCleanupAsync("container-dispose-observation", async remainingBudget =>
+            {
+                try
+                {
+                    await disposeTask.ConfigureAwait(false);
+                }
+                catch (Exception) when (disposeTask.IsCompleted)
+                {
+                    // Confirmed owned removal makes a settled SDK fault safe in either schedule.
+                    _ = disposeTask.Exception;
+                }
+            }, startedAt, totalBudget, failures).ConfigureAwait(false);
         }
-        catch (TimeoutException)
+        if (!disposeTask.IsCompleted || Stopwatch.GetElapsedTime(startedAt) > totalBudget)
         {
-            failures.Add("container-dispose-task-unfinished-after-force-remove");
-            ObserveLateCompletion(disposeTask);
-        }
-        catch (Exception) when (disposeTask.IsCompleted)
-        {
-            // Force removal succeeded; the SDK may report the already-removed container as absent.
+            failures.Add("container-dispose-unsettled-or-budget-exhausted");
         }
     }
 
@@ -808,47 +881,4 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
 
     private static string NewPassword() => Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
 
-    private static async Task AttemptCleanupAsync(
-        Func<Task> cleanup,
-        string phase,
-        long startedAt,
-        TimeSpan totalBudget,
-        ICollection<string> failures)
-    {
-        var remaining = totalBudget - Stopwatch.GetElapsedTime(startedAt);
-        if (remaining <= TimeSpan.Zero)
-        {
-            failures.Add($"{phase}-not-attempted-after-total-budget");
-            return;
-        }
-
-        Task operation;
-        try
-        {
-            operation = cleanup();
-        }
-        catch (Exception exception)
-        {
-            failures.Add($"{phase}-{exception.GetType().Name}");
-            return;
-        }
-
-        try
-        {
-            await operation.WaitAsync(remaining).ConfigureAwait(false);
-        }
-        catch (TimeoutException)
-        {
-            ObserveLateCompletion(operation);
-            failures.Add($"{phase}-unfinished");
-        }
-        catch (Exception exception)
-        {
-            failures.Add($"{phase}-{exception.GetType().Name}");
-            if (!operation.IsCompleted)
-            {
-                ObserveLateCompletion(operation);
-            }
-        }
-    }
 }

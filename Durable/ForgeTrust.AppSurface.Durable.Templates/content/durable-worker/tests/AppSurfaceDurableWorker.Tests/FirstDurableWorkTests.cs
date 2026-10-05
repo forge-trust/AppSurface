@@ -247,36 +247,25 @@ public sealed class FirstDurableWorkTests
         finally
         {
             cleanupStartedAt = Stopwatch.GetTimestamp();
+            var cleanupOperations = new SetupOperationLifetime();
             if (app is not null)
             {
-                try
-                {
-                    await app.DisposeAsync().AsTask().WaitAsync(FixtureBudgets.Cleanup);
-                }
-                catch (Exception exception)
-                {
-                    cleanupFailures.Add($"host-{exception.GetType().Name}");
-                }
+                await cleanupOperations.AwaitCleanupAsync("host", _ => app.DisposeAsync().AsTask(),
+                    cleanupStartedAt, FixtureBudgets.Cleanup, cleanupFailures);
             }
 
             if (fixture is not null)
             {
-                var remaining = FixtureBudgets.Cleanup - Stopwatch.GetElapsedTime(cleanupStartedAt);
-                if (remaining <= TimeSpan.Zero)
-                {
-                    cleanupFailures.Add("fixture-budget-exhausted");
-                }
-                else
-                {
-                    try
-                    {
-                        await fixture.DisposeWithinBudgetAsync(remaining);
-                    }
-                    catch (Exception exception)
-                    {
-                        cleanupFailures.Add($"fixture-{exception.GetType().Name}");
-                    }
-                }
+                await cleanupOperations.AwaitCleanupAsync("fixture", fixture.DisposeWithinBudgetAsync,
+                    cleanupStartedAt, FixtureBudgets.Cleanup, cleanupFailures);
+            }
+            if (cleanupOperations.PendingCount != 0)
+            {
+                cleanupFailures.Add("owned-cleanup-unfinished");
+            }
+            if (Stopwatch.GetElapsedTime(cleanupStartedAt) >= FixtureBudgets.Cleanup)
+            {
+                cleanupFailures.Add("owned-cleanup-total-budget-exhausted");
             }
         }
 

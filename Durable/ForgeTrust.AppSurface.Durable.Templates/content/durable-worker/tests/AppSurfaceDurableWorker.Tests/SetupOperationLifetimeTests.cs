@@ -182,6 +182,114 @@ public sealed class SetupOperationLifetimeTests
         }
     }
 
+    [Fact]
+    public async Task Expired_cleanup_still_enters_every_owned_factory_and_observes_late_faults()
+    {
+        var lifetime = new SetupOperationLifetime();
+        var firstEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var received = new List<TimeSpan>();
+        var failures = new List<string>();
+        var expiredAt = Stopwatch.GetTimestamp() - Stopwatch.Frequency;
+
+        try
+        {
+            await lifetime.AwaitCleanupAsync("host", remaining =>
+            {
+                lock (received) received.Add(remaining);
+                firstEntered.TrySetResult();
+                return firstRelease.Task;
+            }, expiredAt, TimeSpan.FromMilliseconds(100), failures);
+            await lifetime.AwaitCleanupAsync("fixture", remaining =>
+            {
+                lock (received) received.Add(remaining);
+                secondEntered.TrySetResult();
+                return secondRelease.Task;
+            }, expiredAt, TimeSpan.FromMilliseconds(100), failures);
+
+            await Task.WhenAll(firstEntered.Task, secondEntered.Task).WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.Equal(2, lifetime.PendingCount);
+            Assert.Contains("host-cleanup-budget-exhausted", failures);
+            Assert.Contains("fixture-cleanup-budget-exhausted", failures);
+            Assert.All(received, remaining => Assert.Equal(TimeSpan.FromMilliseconds(1), remaining));
+        }
+        finally
+        {
+            firstRelease.TrySetException(new IOException("private late host fault"));
+            secondRelease.TrySetException(new IOException("private late fixture fault"));
+        }
+        await WaitForPendingCountAsync(lifetime, 0);
+        Assert.DoesNotContain(failures, failure => failure.Contains("private", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Cleanup_bounds_synchronous_host_disposal_and_continues_to_fixture_after_expiry()
+    {
+        var lifetime = new SetupOperationLifetime();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fixtureEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var failures = new List<string>();
+        var startedAt = Stopwatch.GetTimestamp();
+        var budget = TimeSpan.FromMilliseconds(100);
+
+        try
+        {
+            var host = lifetime.AwaitCleanupAsync("host", _ =>
+            {
+                entered.TrySetResult();
+                release.Task.GetAwaiter().GetResult();
+                return Task.CompletedTask;
+            }, startedAt, budget, failures);
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            await host.WaitAsync(TimeSpan.FromSeconds(1));
+            while (Stopwatch.GetElapsedTime(startedAt) < budget)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(1));
+            }
+            await lifetime.AwaitCleanupAsync("fixture", _ =>
+            {
+                fixtureEntered.TrySetResult();
+                return Task.CompletedTask;
+            }, startedAt, budget, failures);
+
+            await fixtureEntered.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.Contains(failures, failure => failure is "host-OperationCanceledException" or "host-TaskCanceledException");
+            Assert.Contains("fixture-cleanup-budget-exhausted", failures);
+            Assert.True(lifetime.PendingCount > 0);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+        await WaitForPendingCountAsync(lifetime, 0);
+    }
+
+    [Fact]
+    public async Task Faulted_cleanup_does_not_skip_the_next_resource_or_refresh_its_allowance()
+    {
+        var lifetime = new SetupOperationLifetime();
+        var failures = new List<string>();
+        var startedAt = Stopwatch.GetTimestamp() - Stopwatch.Frequency;
+        var budget = TimeSpan.FromSeconds(2);
+        var subsequentInvocations = 0;
+
+        await lifetime.AwaitCleanupAsync("host", _ => Task.FromException(new IOException("private host detail")),
+            startedAt, budget, failures);
+        await lifetime.AwaitCleanupAsync("fixture", remaining =>
+        {
+            Assert.InRange(remaining, TimeSpan.FromMilliseconds(1), TimeSpan.FromSeconds(1));
+            Interlocked.Increment(ref subsequentInvocations);
+            return Task.CompletedTask;
+        }, startedAt, budget, failures);
+
+        Assert.Equal(1, subsequentInvocations);
+        Assert.Equal(new[] { "host-IOException" }, failures);
+        await WaitForPendingCountAsync(lifetime, 0);
+    }
+
     private static async Task WaitForPendingCountAsync(SetupOperationLifetime lifetime, int expected)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));

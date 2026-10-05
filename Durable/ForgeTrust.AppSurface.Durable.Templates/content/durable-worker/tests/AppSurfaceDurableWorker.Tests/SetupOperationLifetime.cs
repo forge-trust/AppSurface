@@ -31,6 +31,47 @@ internal sealed class SetupOperationLifetime
         await operation.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>Attempts one owned cleanup operation under the caller's original monotonic deadline.</summary>
+    /// <param name="phase">Safe resource label used in bounded failure diagnostics.</param>
+    /// <param name="operationFactory">Owned teardown factory invoked off-thread, even after observation expires.</param>
+    /// <param name="startedAt">The original cleanup timestamp from <see cref="Stopwatch.GetTimestamp"/>.</param>
+    /// <param name="totalBudget">Positive total allowance shared by every operation in this cleanup.</param>
+    /// <param name="failures">Receives safe exhaustion or exception-type diagnostics; failures never end the resource walk.</param>
+    /// <returns>A task completing when observation ends; unfinished operations remain tracked and cannot certify cleanup.</returns>
+    /// <remarks>The factory receives only the original remaining allowance, with a one-millisecond minimum for APIs
+    /// requiring a positive attempt. That minimum grants no new observation window; callers must reject pending work.</remarks>
+    internal async Task AwaitCleanupAsync(string phase, Func<TimeSpan, Task> operationFactory,
+        long startedAt, TimeSpan totalBudget, ICollection<string> failures)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(phase);
+        ArgumentNullException.ThrowIfNull(operationFactory);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(totalBudget, TimeSpan.Zero);
+        ArgumentNullException.ThrowIfNull(failures);
+        var remaining = totalBudget - Stopwatch.GetElapsedTime(startedAt);
+        using var observation = new CancellationTokenSource();
+        if (remaining <= TimeSpan.Zero)
+        {
+            failures.Add($"{phase}-cleanup-budget-exhausted");
+            observation.Cancel();
+        }
+        else
+        {
+            observation.CancelAfter(remaining);
+        }
+        try
+        {
+            await AwaitAsync(phase, () =>
+            {
+                var originalRemaining = totalBudget - Stopwatch.GetElapsedTime(startedAt);
+                return operationFactory(originalRemaining > TimeSpan.Zero ? originalRemaining : TimeSpan.FromMilliseconds(1));
+            }, observation.Token).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            failures.Add($"{phase}-{exception.GetType().Name}");
+        }
+    }
+
     internal async Task<bool> StopAndObservePendingAsync(
         Func<TimeSpan, Task<bool>>? stopOwnerAsync,
         TimeSpan totalBudget,
