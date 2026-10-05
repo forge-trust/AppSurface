@@ -46,10 +46,13 @@ internal static class DurableTemplateCommand
     /// <param name="startClusterAsync">Optional test seam that returns an owned cluster. Production uses
     /// <see cref="DurableTemplateNativePostgreSql.StartAsync(string, IExternalCommandRunner, CancellationToken, INativePostgreSqlToolDirectoryResolver?, INativePostgreSqlBootstrapRunner?, INativePostgreSqlRuntime?, NativePostgreSqlBudgets?)"/>
     /// with the fixed resolver for <paramref name="bin"/>.</param>
+    /// <param name="disposeClusterAsync">Optional test seam observing the owned cluster's exact shared cleanup
+    /// allowance. Production disposes the cluster using that allowance; the callback must also dispose its cluster.</param>
     /// <exception cref="PackageIndexException">Thrown when the generated smoke or its required output markers fail validation.</exception>
     internal static async Task RunNativeSmokeAsync(string bin, string root, IReadOnlyDictionary<string, string?> environment,
         IExternalCommandRunner runner, Action<NativePostgreSqlToolIdentity> identitySink, CancellationToken cancellationToken,
-        Func<string, IExternalCommandRunner, CancellationToken, Task<DurableTemplateNativePostgreSql>>? startClusterAsync = null)
+        Func<string, IExternalCommandRunner, CancellationToken, Task<DurableTemplateNativePostgreSql>>? startClusterAsync = null,
+        Func<DurableTemplateNativePostgreSql, int, ValueTask>? disposeClusterAsync = null)
     {
         // macOS user temp paths can exceed PostgreSQL's Unix-domain socket path limit.
         var temporary = OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetFullPath(Path.GetTempPath());
@@ -73,6 +76,9 @@ internal static class DurableTemplateCommand
                 ["test", root, "--no-build", "--no-restore", "--filter", "FullyQualifiedName~NativePostgreSqlSmoke", "--logger", "console;verbosity=detailed"],
                 root, "native-smoke", "verifying ordinary generated host startup", cluster.SetupBudgetRemainingMilliseconds + 35_000, childEnvironment,
                 ExternalCapturePolicy.ReleaseProof), cancellationToken);
+            // A completed child result cannot renew cleanup when its observation fails validation.
+            // Preserve the initial allowance only for runner failures before a result exists.
+            cleanupRemaining = 1;
             cleanupRemaining = ReadCleanupRemaining(result.StandardOutput);
             DurableTemplateConsumerProof.RequireResult(result);
             if (!result.StandardOutput.Contains("[native-smoke] read-only ordinary startup passed", StringComparison.Ordinal))
@@ -80,7 +86,10 @@ internal static class DurableTemplateCommand
         }
         finally
         {
-            await cluster.DisposeWithBudgetAsync(Math.Max(1, cleanupRemaining));
+            if (disposeClusterAsync is null)
+                await cluster.DisposeWithBudgetAsync(Math.Max(1, cleanupRemaining));
+            else
+                await disposeClusterAsync(cluster, Math.Max(1, cleanupRemaining));
         }
     }
 

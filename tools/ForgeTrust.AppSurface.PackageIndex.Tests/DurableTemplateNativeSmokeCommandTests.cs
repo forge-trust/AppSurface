@@ -38,6 +38,7 @@ public sealed class DurableTemplateNativeSmokeCommandTests
         Assert.Equal("preserved", request.Environment["KEEP_FOR_CONSUMER"]);
         Assert.Equal(cluster.ToolIdentity, fixture.ReceivedIdentity);
         Assert.Equal(originalEnvironment, environment);
+        Assert.Equal(19_750, Assert.Single(fixture.CleanupBudgets));
         AssertClusterWasCleaned(fixture, cluster);
     }
 
@@ -59,6 +60,7 @@ public sealed class DurableTemplateNativeSmokeCommandTests
         var error = await Assert.ThrowsAsync<PackageIndexException>(() => RunSmokeAsync(fixture, CreateEnvironment()));
 
         Assert.Contains("failed or its bounded capture was truncated", error.Message, StringComparison.Ordinal);
+        Assert.Equal(19_750, Assert.Single(fixture.CleanupBudgets));
         AssertClusterWasCleaned(fixture, Assert.IsType<DurableTemplateNativePostgreSql>(fixture.StartedCluster));
     }
 
@@ -73,6 +75,7 @@ public sealed class DurableTemplateNativeSmokeCommandTests
         var error = await Assert.ThrowsAsync<PackageIndexException>(() => RunSmokeAsync(fixture, CreateEnvironment()));
 
         Assert.Contains("ordinary-startup assertion checkpoint is missing", error.Message, StringComparison.Ordinal);
+        Assert.Equal(19_750, Assert.Single(fixture.CleanupBudgets));
         AssertClusterWasCleaned(fixture, Assert.IsType<DurableTemplateNativePostgreSql>(fixture.StartedCluster));
     }
 
@@ -80,6 +83,8 @@ public sealed class DurableTemplateNativeSmokeCommandTests
     [InlineData("missing")]
     [InlineData("duplicate")]
     [InlineData("exhausted")]
+    [InlineData("over-limit")]
+    [InlineData("overflow")]
     [InlineData("malformed")]
     public async Task RejectsInvalidCleanupMarkerAndCleansCluster(string markerCase)
     {
@@ -88,6 +93,8 @@ public sealed class DurableTemplateNativeSmokeCommandTests
             "missing" => $"{SmokeMarker}\n",
             "duplicate" => $"{CleanupMarker}\n{CleanupMarker}\n{SmokeMarker}\n",
             "exhausted" => "[native-cleanup] elapsed-ms=20000\n" + SmokeMarker + "\n",
+            "over-limit" => "[native-cleanup] elapsed-ms=20001\n" + SmokeMarker + "\n",
+            "overflow" => "[native-cleanup] elapsed-ms=9999999999999\n" + SmokeMarker + "\n",
             "malformed" => "[native-cleanup] elapsed-ms=not-a-number\n" + SmokeMarker + "\n",
             _ => throw new ArgumentOutOfRangeException(nameof(markerCase))
         };
@@ -99,6 +106,7 @@ public sealed class DurableTemplateNativeSmokeCommandTests
         var error = await Assert.ThrowsAsync<PackageIndexException>(() => RunSmokeAsync(fixture, CreateEnvironment()));
 
         Assert.Contains("cleanup observation is missing, ambiguous or exhausted", error.Message, StringComparison.Ordinal);
+        Assert.Equal(1, Assert.Single(fixture.CleanupBudgets));
         AssertClusterWasCleaned(fixture, Assert.IsType<DurableTemplateNativePostgreSql>(fixture.StartedCluster));
     }
 
@@ -113,6 +121,61 @@ public sealed class DurableTemplateNativeSmokeCommandTests
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => RunSmokeAsync(fixture, CreateEnvironment()));
 
         Assert.Equal("private runner detail", error.Message);
+        Assert.Equal(20_000, Assert.Single(fixture.CleanupBudgets));
+        AssertClusterWasCleaned(fixture, Assert.IsType<DurableTemplateNativePostgreSql>(fixture.StartedCluster));
+    }
+
+    [Theory]
+    [InlineData(0, 20_000)]
+    [InlineData(19_999, 1)]
+    public async Task PassesOnlyObservedRemainderToClusterDisposal(int elapsed, int expectedBudget)
+    {
+        using var fixture = new NativeSmokeFixture
+        {
+            SmokeResult = new ExternalCommandResult(0,
+                $"[native-cleanup] elapsed-ms={elapsed}\n{SmokeMarker}\n", string.Empty)
+        };
+
+        await RunSmokeAsync(fixture, CreateEnvironment());
+
+        Assert.Equal(expectedBudget, Assert.Single(fixture.CleanupBudgets));
+        AssertClusterWasCleaned(fixture, Assert.IsType<DurableTemplateNativePostgreSql>(fixture.StartedCluster));
+    }
+
+    [Fact]
+    public async Task AttemptsClusterCleanupWhenSmokeRunnerCancelsBeforeReturningAResult()
+    {
+        using var fixture = new NativeSmokeFixture { SmokeException = new OperationCanceledException() };
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => RunSmokeAsync(fixture, CreateEnvironment()));
+
+        Assert.Equal(20_000, Assert.Single(fixture.CleanupBudgets));
+        AssertClusterWasCleaned(fixture, Assert.IsType<DurableTemplateNativePostgreSql>(fixture.StartedCluster));
+    }
+
+    [Fact]
+    public async Task DefaultDisposerStopsAndRemovesTheOwnedCluster()
+    {
+        using var fixture = new NativeSmokeFixture();
+
+        await RunSmokeAsync(fixture, CreateEnvironment(), observeCleanup: false);
+
+        Assert.Empty(fixture.CleanupBudgets);
+        AssertClusterWasCleaned(fixture, Assert.IsType<DurableTemplateNativePostgreSql>(fixture.StartedCluster));
+    }
+
+    [Fact]
+    public async Task CleanupFailureCannotCompleteAnOtherwiseSuccessfulSmoke()
+    {
+        using var fixture = new NativeSmokeFixture
+        {
+            CleanupException = new PackageIndexException("owned cluster cleanup was not verified")
+        };
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => RunSmokeAsync(fixture, CreateEnvironment()));
+
+        Assert.Equal("owned cluster cleanup was not verified", error.Message);
+        Assert.Equal(19_750, Assert.Single(fixture.CleanupBudgets));
         AssertClusterWasCleaned(fixture, Assert.IsType<DurableTemplateNativePostgreSql>(fixture.StartedCluster));
     }
 
@@ -125,7 +188,8 @@ public sealed class DurableTemplateNativeSmokeCommandTests
         ["APPSURFACE_TEMPLATE_NATIVE_ADMIN_CONNECTION_OVERRIDE"] = "caller-owned"
     };
 
-    private static Task RunSmokeAsync(NativeSmokeFixture fixture, IReadOnlyDictionary<string, string?> environment)
+    private static Task RunSmokeAsync(NativeSmokeFixture fixture, IReadOnlyDictionary<string, string?> environment,
+        bool observeCleanup = true)
     {
         fixture.Runner.SmokeResult = fixture.SmokeResult;
         fixture.Runner.SmokeException = fixture.SmokeException;
@@ -136,7 +200,8 @@ public sealed class DurableTemplateNativeSmokeCommandTests
             fixture.Runner,
             identity => fixture.ReceivedIdentity = identity,
             CancellationToken.None,
-            fixture.StartClusterAsync);
+            fixture.StartClusterAsync,
+            observeCleanup ? fixture.DisposeClusterAsync : null);
     }
 
     private static void AssertClusterWasCleaned(
@@ -173,8 +238,20 @@ public sealed class DurableTemplateNativeSmokeCommandTests
         internal FakeBootstrapRunner Bootstrap { get; }
         internal ExternalCommandResult SmokeResult { get; init; } = new(0, ValidSmokeOutput, string.Empty);
         internal Exception? SmokeException { get; init; }
+        internal Exception? CleanupException { get; init; }
         internal DurableTemplateNativePostgreSql? StartedCluster { get; private set; }
         internal NativePostgreSqlToolIdentity? ReceivedIdentity { get; set; }
+        internal List<int> CleanupBudgets { get; } = [];
+
+        internal async ValueTask DisposeClusterAsync(DurableTemplateNativePostgreSql cluster, int remainingMilliseconds)
+        {
+            Assert.Same(StartedCluster, cluster);
+            CleanupBudgets.Add(remainingMilliseconds);
+            // This simulated disposer records the command allocation independently of filesystem scheduling.
+            // The fake cluster's real teardown is separately checked by AssertClusterWasCleaned.
+            await cluster.DisposeWithBudgetAsync(1_000);
+            if (CleanupException is not null) throw CleanupException;
+        }
 
         internal async Task<DurableTemplateNativePostgreSql> StartClusterAsync(
             string ownedRoot,
