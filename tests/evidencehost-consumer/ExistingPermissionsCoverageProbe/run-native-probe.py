@@ -95,10 +95,26 @@ def mount_data(text, path, dev):
     require(len(y)>=3 and y[0]=='tmpfs' and x[2]==f'{os.major(dev)}:{os.minor(dev)}','mount-type-device')
     require({'nosuid','nodev','noexec'}<=set(x[5].split(','))|set(y[2].split(',')),'mount-flags')
     return {'visible':True,'tmpfs':True,'nosuid':True,'nodev':True,'noexec':True}
+def mount_evidence(text,path,dev):
+    """Bounded selected-path diagnostics only; does not change mount acceptance."""
+    require(len(text)<=LIMIT,'mountinfo-size'); selected=[]; covering=[]
+    for line in text.splitlines():
+        a,sep,b=line.partition(' - '); x,y=a.split(),b.split()
+        if not sep or len(x)<6 or len(y)<3: continue
+        exact=x[4]==str(path); contains=str(path).startswith(x[4].rstrip('/')+'/')
+        if not exact and not contains: continue
+        require(len(selected)+len(covering)<64,'mount-diagnostic-count')
+        options=set(x[5].split(','))|set(y[2].split(','))
+        row={'mount_id':int(x[0]),'parent_id':int(x[1]),'exact_path':exact,
+             'device_expected':x[2]==f'{os.major(dev)}:{os.minor(dev)}',
+             'tmpfs':y[0]=='tmpfs','read_write':'rw' in x[5].split(','),
+             'nosuid':'nosuid' in options,'nodev':'nodev' in options,'noexec':'noexec' in options}
+        (selected if exact else covering).append(row)
+    return {'exact_count':len(selected),'exact_mounts':selected,'covering_mounts':covering}
 def proc_start(pid, deadline):
     d=kernel(f'/proc/{pid}/stat',deadline,8192).decode('ascii'); fields=d[d.rfind(')')+2:].split()
     require(len(fields)>=20 and fields[19].isdigit(),'proc-stat'); return int(fields[19])
-def live(pid, cg, session, dev, deadline):
+def live(pid, cg, session, dev, deadline,evidence=None):
     first=proc_start(pid,deadline); d={}
     for line in kernel(f'/proc/{pid}/status',deadline,16384).decode('ascii').splitlines():
         k,sep,v=line.partition(':')
@@ -109,7 +125,12 @@ def live(pid, cg, session, dev, deadline):
     require(d['Groups'].split() in ([],[str(GID)]),'proc-supplements')
     require(re.fullmatch('[0-9a-fA-F]+',d['CapEff']) and int(d['CapEff'],16)==0 and d['NoNewPrivs']=='1','proc-privileges')
     require(kernel(f'/proc/{pid}/cgroup',deadline,4096).decode('ascii').splitlines()==['0::'+cg],'proc-cgroup')
-    m=mount_data(kernel(f'/proc/{pid}/mountinfo',deadline).decode('ascii'),session,dev)
+    text=kernel(f'/proc/{pid}/mountinfo',deadline).decode('ascii')
+    if evidence is not None:
+        evidence.update({'pid':pid,'starttime':first,'uid4':[UID]*4,'gid4':[GID]*4,
+                         'cap_eff':0,'no_new_privs':1,'cgroup_exact':True,
+                         'mount_inspection':mount_evidence(text,session,dev)})
+    m=mount_data(text,session,dev)
     require(proc_start(pid,deadline)==first,'proc-replaced')
     return {'pid':pid,'starttime':first,'uid4':[UID]*4,'gid4':[GID]*4,'supplementary_groups':[int(x) for x in d['Groups'].split()],'cap_eff':0,'no_new_privs':1,'cgroup_exact':True,'session_mount':m}
 class Process:
@@ -369,7 +390,8 @@ def run(source,build,output,selected_dotnet,tag):
             row=inspect(); require(row['LoadState']=='loaded' and row['User']==account.name and row['Group']==account.name and row['Type']=='exec','unit-identity')
             if row['MainPID']>0 and row['ActiveState']=='active' and row['SubState']=='running': require(row['ControlGroup']==cg,'unit-cgroup'); break
             require(worker.p.poll() is None,'worker-start-exit'); worker.pump(deadline)
-        result['live_worker']=live(row['MainPID'],cg,session,device,deadline); s=os.lstat(cpath); require(stat.S_ISDIR(s.st_mode),'cgroup-type'); identity=(s.st_dev,s.st_ino)
+        result['worker_pre_mount']={}
+        result['live_worker']=live(row['MainPID'],cg,session,device,deadline,result['worker_pre_mount']); s=os.lstat(cpath); require(stat.S_ISDIR(s.st_mode),'cgroup-type'); identity=(s.st_dev,s.st_ino)
         worker.send(b'continue\n',deadline); worker.receive('completed',deadline)
         while True:
             row=inspect(); require(row['LoadState']=='loaded' and row['User']==account.name and row['Group']==account.name and row['Type']=='exec' and row['ControlGroup'] in ('',cg),'unit-terminal-identity')

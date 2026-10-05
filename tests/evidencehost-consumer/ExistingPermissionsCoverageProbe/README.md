@@ -74,3 +74,10 @@ An operation that succeeds always fails the probe. These source-backed classifie
 corrections do not identify an errno from an earlier native run. See the
 [Unix directory implementation](https://github.com/dotnet/runtime/blob/v10.0.12/src/libraries/System.Private.CoreLib/src/System/IO/FileSystem.Unix.cs#L409-L422)
 and [Unix I/O error mapping](https://github.com/dotnet/runtime/blob/v10.0.12/src/libraries/Common/src/Interop/Unix/Interop.IOErrors.cs#L179-L184).
+
+Worker mount inspection now retains bounded selected-path mount counts and
+numeric/boolean facts before the strict acceptance check. This distinguishes
+missing from stacked exact entries without echoing raw mount paths or lines.
+Verified UID/GID tuples, zero capabilities, NNP and the generated cgroup are
+recorded before that check. The existing unique selected-mount requirement is
+unchanged; these diagnostics cannot release the worker or establish a pass.

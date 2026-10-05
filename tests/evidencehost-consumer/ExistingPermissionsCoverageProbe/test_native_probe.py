@@ -311,5 +311,70 @@ class BuildCopyControls(unittest.TestCase):
                 self.assertEqual(b'outside-unchanged', (outside / 'sentinel').read_bytes())
 
 
+class MountEvidenceControls(unittest.TestCase):
+    """Kernel-shaped data only; diagnostics never substitute for acceptance."""
+
+    def test_zero_exact_mount_retains_covering_facts_without_accepting_visibility(self):
+        path = Path('/run/probe/output/run-selected/coverage-session')
+        dev = os.makedev(0, 123)
+        root_row = '1 0 8:1 / / rw,relatime - ext4 /dev/root rw'
+        covering_row = '20 1 0:123 / /run/probe/output rw,nosuid,nodev - tmpfs tmpfs rw,noexec'
+        ignored = 'unknown-line-canary\n2 1 8:1 / /unrelated rw - ext4 /dev/root rw\nmalformed - x'
+        evidence = m.mount_evidence(root_row + '\n' + covering_row + '\n' + ignored, path, dev)
+        self.assertEqual({'exact_count', 'exact_mounts', 'covering_mounts'}, set(evidence))
+        self.assertEqual(0, evidence['exact_count'])
+        self.assertEqual([], evidence['exact_mounts'])
+        self.assertEqual([
+            {'mount_id': 1, 'parent_id': 0, 'exact_path': False, 'device_expected': False,
+             'tmpfs': False, 'read_write': True, 'nosuid': False, 'nodev': False, 'noexec': False},
+            {'mount_id': 20, 'parent_id': 1, 'exact_path': False, 'device_expected': True,
+             'tmpfs': True, 'read_write': True, 'nosuid': True, 'nodev': True, 'noexec': True}
+        ], evidence['covering_mounts'])
+        serialized = json.dumps(evidence)
+        self.assertNotIn(str(path), serialized)
+        self.assertNotIn('/dev/root', serialized)
+        self.assertNotIn('unknown-line-canary', serialized)
+        with self.assertRaisesRegex(m.Failure, '^mount-visible$'):
+            m.mount_data(root_row + '\n' + covering_row, path, dev)
+        rows = [f'{index + 1} 0 0:123 / /run/probe/output rw,nosuid,nodev,noexec - tmpfs tmpfs rw'
+                for index in range(64)]
+        bounded = m.mount_evidence('\n'.join(rows), path, dev)
+        self.assertEqual(0, bounded['exact_count'])
+        self.assertEqual(64, len(bounded['covering_mounts']))
+        with self.assertRaisesRegex(m.Failure, '^mount-diagnostic-count$'):
+            m.mount_evidence('\n'.join(rows + [rows[0]]), path, dev)
+
+    def test_duplicate_exact_mount_retains_each_closed_row_but_strict_visibility_rejects(self):
+        path = Path('/run/probe/output/run-selected/coverage-session')
+        dev = os.makedev(0, 123)
+        first = f'42 20 0:123 / {path} rw,nosuid,nodev,noexec - tmpfs tmpfs rw'
+        second = f'43 42 0:124 / {path} ro,noexec - ext4 /dev/unknown ro'
+        covering = '20 1 0:123 / /run/probe/output rw,nosuid,nodev - tmpfs tmpfs rw,noexec'
+        text = first + '\n' + second + '\n' + covering + '\nunknown-line-canary'
+        evidence = m.mount_evidence(text, path, dev)
+        self.assertEqual(2, evidence['exact_count'])
+        self.assertEqual([
+            {'mount_id': 42, 'parent_id': 20, 'exact_path': True, 'device_expected': True,
+             'tmpfs': True, 'read_write': True, 'nosuid': True, 'nodev': True, 'noexec': True},
+            {'mount_id': 43, 'parent_id': 42, 'exact_path': True, 'device_expected': False,
+             'tmpfs': False, 'read_write': False, 'nosuid': False, 'nodev': False, 'noexec': True}
+        ], evidence['exact_mounts'])
+        self.assertEqual([
+            {'mount_id': 20, 'parent_id': 1, 'exact_path': False, 'device_expected': True,
+             'tmpfs': True, 'read_write': True, 'nosuid': True, 'nodev': True, 'noexec': True}
+        ], evidence['covering_mounts'])
+        for row in evidence['exact_mounts'] + evidence['covering_mounts']:
+            self.assertIs(type(row['mount_id']), int)
+            self.assertIs(type(row['parent_id']), int)
+            for key in ('exact_path', 'device_expected', 'tmpfs', 'read_write', 'nosuid', 'nodev', 'noexec'):
+                self.assertIs(type(row[key]), bool)
+        self.assertNotIn('/dev/unknown', json.dumps(evidence))
+        self.assertNotIn(str(path), json.dumps(evidence))
+        with self.assertRaisesRegex(m.Failure, '^mount-visible$'):
+            m.mount_data(text, path, dev)
+        with self.assertRaisesRegex(m.Failure, '^mountinfo-size$'):
+            m.mount_evidence('x' * ((1 << 20) + 1), path, dev)
+
+
 if __name__ == '__main__':
     unittest.main()
