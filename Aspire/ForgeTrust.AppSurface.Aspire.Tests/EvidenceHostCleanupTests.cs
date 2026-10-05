@@ -226,6 +226,7 @@ public sealed class EvidenceHostCleanupTests
         Assert.Equal(1, producer.DisposeCount);
     }
 
+    // Value: protects=the cleanup allowance is shared by all owners; fails_when=each owner gets a fresh full budget; why_new=existing fair-slice test does not exhaust the total clock; seam=existing TimeProvider
     [Fact]
     public async Task DisposeAsync_ShouldReportExhaustedTotalBudgetBeforeStartingAnotherOwner()
     {
@@ -255,6 +256,7 @@ public sealed class EvidenceHostCleanupTests
         Assert.Equal(0, remainingDisposals);
     }
 
+    // Value: protects=bounded payload-free cleanup diagnostics; fails_when=raw identifiers or exception payloads are emitted; why_new=existing safe-error test uses a short plain identifier; seam=none
     [Fact]
     public async Task DisposeAsync_ShouldBoundAndSanitizeRegistrationDiagnosticWithoutExceptionPayload()
     {
@@ -272,6 +274,7 @@ public sealed class EvidenceHostCleanupTests
         Assert.DoesNotContain('\n', host.CleanupDiagnostic!);
     }
 
+    // Value: protects=one owner registered in two roles is disposed once after both callbacks; fails_when=cleanup deduplicates by role or loses a callback; why_new=existing repeated-dispose test uses one role; seam=none
     [Fact]
     public async Task RunAsync_ShouldJoinBothCallbacksAndDisposeSharedRegistrationOnce()
     {
@@ -290,6 +293,40 @@ public sealed class EvidenceHostCleanupTests
         Assert.Equal(1, owner.ReadinessCount);
         Assert.Equal(1, owner.ProductionCount);
         Assert.Equal(1, owner.DisposeCount);
+    }
+
+    // Value: protects=direct disposal cannot wait indefinitely for an active run; fails_when=execution semaphore is awaited without its deadline; why_new=existing active-run disposal succeeds; seam=existing TimeProvider
+    [Fact]
+    public async Task DisposeAsync_ShouldBoundJoiningActiveRunWithoutDisposingUnsettledCallback()
+    {
+        var allowance = TimeSpan.FromMinutes(4);
+        var clock = new CapturedTimerTimeProvider(allowance);
+        var producer = new StopCapableGatedProducer("coverage", releaseOnStop: false);
+        var host = EvidenceHostBootstrap.Create(CreatePlan(producer.Id), registration => registration.AddProducer(producer),
+            Options(executionTimeout: TimeSpan.FromMinutes(5), cleanupTimeout: allowance), clock);
+        var run = host.RunAsync();
+        try
+        {
+            await producer.Started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            var disposal = host.DisposeAsync().AsTask();
+            var expireDisposalDeadline = await clock.FirstDeadline.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            await producer.StopStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.Equal(EvidenceHostState.Cleaning, host.State);
+            expireDisposalDeadline();
+            var failure = await Assert.ThrowsAsync<EvidenceHostException>(() => disposal.WaitAsync(TimeSpan.FromSeconds(3)));
+
+            Assert.Equal("ASEVD306", failure.Code);
+            Assert.Contains("could not join", failure.Message, StringComparison.Ordinal);
+            Assert.False(run.IsCompleted);
+            Assert.Equal(0, producer.DisposeCount);
+        }
+        finally
+        {
+            producer.ReleaseCallback();
+            await producer.CallbackFinished.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            await run.WaitAsync(TimeSpan.FromSeconds(3));
+            await host.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3));
+        }
     }
 
     [Fact]
@@ -339,15 +376,18 @@ public sealed class EvidenceHostCleanupTests
     {
         var dependent = new GatedResource("dependent");
         var prerequisite = new DisposableReadyResource("prerequisite");
+        var transitive = new DisposableReadyResource("transitive");
         var unrelated = new DisposableReadyResource("unrelated");
         var plan = CreatePlanWithResources(["coverage"],
             [new EvidenceResourceDeclaration("dependent", "completion", 30, ["prerequisite"]),
-             new EvidenceResourceDeclaration("prerequisite", "completion", 30, []),
+             new EvidenceResourceDeclaration("prerequisite", "completion", 30, ["transitive"]),
+             new EvidenceResourceDeclaration("transitive", "completion", 30, []),
              new EvidenceResourceDeclaration("unrelated", "completion", 30, [])], ["dependent"]);
         var host = EvidenceHostBootstrap.Create(plan, registration =>
         {
             registration.AddResource(dependent);
             registration.AddResource(prerequisite);
+            registration.AddResource(transitive);
             registration.AddResource(unrelated);
             registration.AddProducer(new CountingProducer("coverage"));
         }, Options(cleanupTimeout: TimeSpan.FromSeconds(1)));
@@ -357,6 +397,7 @@ public sealed class EvidenceHostCleanupTests
             Assert.False(manifest.Metrics.CleanupCompleted);
             Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
             Assert.Equal(0, prerequisite.DisposeCount);
+            Assert.Equal(0, transitive.DisposeCount);
             Assert.Equal(1, unrelated.DisposeCount);
         }
         finally
@@ -395,6 +436,27 @@ public sealed class EvidenceHostCleanupTests
             await run.WaitAsync(TimeSpan.FromSeconds(3));
             await host.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3));
         }
+    }
+
+    // Value: protects=failed stop cannot claim cleanup or start disposal; fails_when=stop errors are swallowed or disposal runs anyway; why_new=existing lifetime test stops successfully; seam=none
+    [Fact]
+    public async Task RunAsync_ShouldInvalidateCleanupAndSkipDisposalWhenExplicitStopFails()
+    {
+        var producer = new FailingStopProducer();
+        await using var host = EvidenceHostBootstrap.Create(CreatePlan(producer.Id), registration => registration.AddProducer(producer));
+
+        var manifest = await host.RunAsync().WaitAsync(TimeSpan.FromSeconds(3));
+
+        Assert.Equal(EvidenceProducerOutcome.Passed, Assert.Single(manifest.ProducerResults).Outcome);
+        Assert.False(manifest.Metrics.CleanupCompleted);
+        Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+        Assert.Contains("InvalidOperationException", manifest.Metrics.CleanupDiagnostic!, StringComparison.Ordinal);
+        Assert.DoesNotContain("private-stop-payload", manifest.Metrics.CleanupDiagnostic!, StringComparison.Ordinal);
+        Assert.Equal(1, producer.StopCount);
+        Assert.Equal(0, producer.DisposeCount);
+        await host.DisposeAsync();
+        Assert.Equal(1, producer.StopCount);
+        Assert.Equal(0, producer.DisposeCount);
     }
 
     [Theory]
@@ -585,12 +647,35 @@ public sealed class EvidenceHostCleanupTests
         public void Dispose() => dispose();
     }
 
+    private sealed class FailingStopProducer() : PassingProducer("coverage"), IEvidenceExecutionLifetime, IDisposable
+    {
+        public int StopCount { get; private set; }
+        public int DisposeCount { get; private set; }
+        public ValueTask StopAsync(CancellationToken cancellationToken)
+        {
+            StopCount++;
+            return ValueTask.FromException(new InvalidOperationException("private-stop-payload"));
+        }
+        public void Dispose() => DisposeCount++;
+    }
+
     private sealed class AdvancingTimeProvider : TimeProvider
     {
         private long _timestamp;
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
         public override long GetTimestamp() => Interlocked.Read(ref _timestamp);
         public void Advance(TimeSpan elapsed) => Interlocked.Add(ref _timestamp, elapsed.Ticks);
+    }
+
+    private sealed class CapturedTimerTimeProvider(TimeSpan dueTimeToCapture) : TimeProvider
+    {
+        public TaskCompletionSource<Action> FirstDeadline { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = System.CreateTimer(callback, state, dueTime, period);
+            if (dueTime == dueTimeToCapture) FirstDeadline.TrySetResult(() => callback(state));
+            return timer;
+        }
     }
 
     private sealed class SharedResourceProducer() : PassingProducer("shared"), IEvidenceResourceReadiness, IDisposable
@@ -746,13 +831,15 @@ public sealed class EvidenceHostCleanupTests
         public void Dispose() => DisposeCount++;
     }
 
-    private sealed class StopCapableGatedProducer(string id) : PassingProducer(id), IEvidenceExecutionLifetime, IAsyncDisposable
+    private sealed class StopCapableGatedProducer(string id, bool releaseOnStop = true) : PassingProducer(id), IEvidenceExecutionLifetime, IAsyncDisposable
     {
         private readonly TaskCompletionSource _callbackGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public TaskCompletionSource CallbackFinished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource StopStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public int StopCount { get; private set; }
 
@@ -775,7 +862,8 @@ public sealed class EvidenceHostCleanupTests
         public async ValueTask StopAsync(CancellationToken cancellationToken)
         {
             StopCount++;
-            _callbackGate.TrySetResult();
+            StopStarted.TrySetResult();
+            if (releaseOnStop) _callbackGate.TrySetResult();
             await CallbackFinished.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
 
