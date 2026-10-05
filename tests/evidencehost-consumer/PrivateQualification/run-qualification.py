@@ -209,6 +209,7 @@ def retain_diagnostics(workspace, output, *, expected_owner_uid=0):
     for entry in ("cli", "host"):
         selected.append((f"preflight-{entry}.json", 4096, False))
         selected.append((f"product-binary-{entry}.json", 512*1024, False))
+        selected.append((f"product-preparation-failure-{entry}.json", 4096, False))
         selected.extend((f"product-coverage-{entry}/"+name, maximum, False) for name, maximum in (
             ('receipt.json', 256*1024), ('coverage.cobertura.xml', 2*1024*1024),
             ('coverage.json', 4*1024*1024), ('taskhost-stdout.log', 64*1024), ('taskhost-stderr.log', 128*1024)))
