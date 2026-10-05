@@ -368,12 +368,13 @@ not ready, including `NotStarted`, `Stale`, `Draining`, `Incompatible`, and `Una
 scope, aggregate, connection, or trace values. At shutdown, local admission closes synchronously before the host
 persists drain; already-permitted Work follows its ordinary cancellation/recovery path rather than inventing a result.
 
-For a cold path, first drain and stop every pre-`0009` worker because the role recipe intentionally removes its raw
-`dispatch` access. Apply every pending forward-only migration through `0012_work_execution_policy.sql` with the migration owner, then use the matching released provider package's
+For a cold path, stop new submissions and drain and stop every producer, reader, dispatcher, operator tool, runtime,
+and scheduled activator that cannot read/write schema 12. Follow the [execution-policy migration checklist](../migrations/execution-policies-v1.md#adoption-and-rollback).
+Apply every pending forward-only migration through `0012_work_execution_policy.sql` with the migration owner, then use the matching released provider package's
 `contentFiles/any/any/configure-postgresql-roles.sql` with the complete reviewed manifest. Verify the active epoch and StoreId, deploy with `AddWorkerHost()` disabled, then enable it. Never destructively roll
-back a migration. After the role recipe runs, a pre-`0009` worker is not a compatible application rollback target because its dispatcher
-credential no longer has raw `dispatch` access; keep that worker stopped and roll forward to a `0009`-compatible binary instead. Do not
-restore the broad grant as a rollback shortcut.
+back a migration. After migration `0012`, recovery and application rollback require schema-12-compatible packages;
+keep every pre-floor package stopped. A pre-`0009` worker also loses raw `dispatch` access when the role recipe runs.
+Do not restore the broad grant as a rollback shortcut.
 
 ### Role recipe contract
 

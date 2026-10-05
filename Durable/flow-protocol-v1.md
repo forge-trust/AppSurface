@@ -134,9 +134,11 @@ For current deployments, apply the forward catalog through `0012`, then run the 
 
 - Applied migrations are **forward-only**. The package provides no destructive down-migration scripts.
 - Rolling back application binaries does **not** authorize rolling back database schema.
-- Strict `./Durable/verify-postgresql.sh --ci --flow` builds the pinned v2 Work binary from
-  `0e57477bab00b1951192c82ca28fdda977da2092` and runs it concurrently with current Work/Flow operations against v3.
-  The rolling claim is limited to that Work-only path; v2 cannot process Flow.
+- Strict `./Durable/verify-postgresql.sh --ci --flow` restores the exact historical
+  `ForgeTrust.AppSurface.Durable.PostgreSql` `0.2.0-preview.8` package, verifies its SHA-256, and builds the Work compatibility harness against that package.
+  The proof runs the historical Work hosts on schema 11, drains them before upgrading, and verifies that the package refuses schema 12.
+  It does not authorize a pre-floor package as a rollback target after migration `0012`; follow the
+  [execution-policy migration checklist](migrations/execution-policies-v1.md#adoption-and-rollback) and retain schema-12-compatible packages.
 - Manual DDL execution requires using `psql` with `-v ON_ERROR_STOP=1`.
 
 ## Security and Row-Level Security (RLS)
