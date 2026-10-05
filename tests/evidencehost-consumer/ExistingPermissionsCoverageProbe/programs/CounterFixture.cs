@@ -13,6 +13,7 @@ internal static class Program
 
     public static int Main(string[] args)
     {
+        string operation = "arguments";
         try
         {
             if (!ValidateArguments(args))
@@ -24,6 +25,7 @@ internal static class Program
             string sibling = session + "-worker-rename-probe";
             Console.WriteLine(JsonSerializer.Serialize(new { stage = "role-ready" }));
             Console.Out.Flush();
+            operation = "continue";
             if (Console.ReadLine() != "continue")
             {
                 return Fail("continue-not-received");
@@ -32,19 +34,32 @@ internal static class Program
             for (int i = 1; i < args.Length; i++)
             {
                 string path = Path.Combine(session, args[i]);
+                operation = "root-file-exists";
                 if (!File.Exists(path))
                 {
                     return Fail("selected-file-missing");
                 }
 
-                if (!Denied(() => { _ = File.ReadAllBytes(path); })
-                    || !Denied(() => { using FileStream stream = File.Open(path, FileMode.Open, FileAccess.Write); })
-                    || !Denied(() => File.Delete(path)))
+                operation = "root-file-read";
+                if (!Denied(() => { _ = File.ReadAllBytes(path); }))
+                {
+                    return Fail("required-file-denial-not-observed");
+                }
+
+                operation = "root-file-write";
+                if (!Denied(() => { using FileStream stream = File.Open(path, FileMode.Open, FileAccess.Write); }))
+                {
+                    return Fail("required-file-denial-not-observed");
+                }
+
+                operation = "root-file-delete";
+                if (!Denied(() => File.Delete(path)))
                 {
                     return Fail("required-file-denial-not-observed");
                 }
             }
 
+            operation = "session-rename";
             if (!RenameDenied(session, sibling))
             {
                 return Fail("required-session-denial-not-observed");
@@ -52,6 +67,7 @@ internal static class Program
 
             // The controller selects this fixed assembly and independently pins its inode.
             // No reflective lookup or private Coverlet interface is used.
+            operation = "assembly-write";
             string assemblyPath = Path.Combine(AppContext.BaseDirectory, "CounterFixture.dll");
             if (!File.Exists(assemblyPath)
                 || !ReadOnlyAssemblyDenied(() => { using FileStream stream = File.Open(assemblyPath, FileMode.Open, FileAccess.Write); }))
@@ -59,6 +75,7 @@ internal static class Program
                 return Fail("required-assembly-denial-not-observed");
             }
 
+            operation = "calculate";
             int value = Calculate(1) + Calculate(-1);
             if (value != 3)
             {
@@ -69,9 +86,9 @@ internal static class Program
             Console.Out.Flush();
             return 0;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
-            return Fail("probe-failure");
+            return Fail("probe-failure", operation, exception);
         }
     }
 
@@ -205,11 +222,27 @@ internal static class Program
         return true;
     }
 
-    private static int Fail(string category)
+    private static int Fail(string category, string? operation = null, Exception? exception = null)
     {
         try
         {
-            Console.WriteLine(JsonSerializer.Serialize(new { stage = "failed", category }));
+            if (exception is null)
+            {
+                Console.WriteLine(JsonSerializer.Serialize(new { stage = "failed", category }));
+            }
+            else
+            {
+                string exceptionClass = exception switch
+                {
+                    UnauthorizedAccessException => "unauthorized",
+                    IOException => "io",
+                    InvalidOperationException => "invalid-operation",
+                    _ => "unknown",
+                };
+                int? nativeErrno = exception is IOException && exception.HResult is 1 or 13 or 16 or 18 or 30
+                    ? exception.HResult : null;
+                Console.WriteLine(JsonSerializer.Serialize(new { stage = "failed", category, operation, exception_class = exceptionClass, native_errno = nativeErrno }));
+            }
             Console.Out.Flush();
         }
         catch (Exception)

@@ -96,3 +96,13 @@ property; the scoped formatter then completed with empty stderr. The source byte
 were unchanged. The generated dependency-free lock is committed and native restores
 use locked mode. Linux execution, account separation, mountpoint denial, and native
 coverage remain pending until an actual mechanism receipt is retained.
+
+## Diagnostic-only unexpected exception packet
+
+An unexpected exception still exits1 and cannot satisfy the completed packet.
+The private worker packet additionally records its fixed operation label, a closed
+exception class (unauthorized/io/invalid-operation/unknown), and only direct
+IOException raw errno1/13/16/18/30; all other values are null. It includes no
+exception text, path or arbitrary value. The separate read/write/delete checks
+retain the same required denial outcomes. This diagnostic establishes no denial
+or hit/report/restoration success.
