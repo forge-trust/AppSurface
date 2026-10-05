@@ -71,7 +71,7 @@ public sealed class EvidenceHostBootstrapTests
             {
                 registration.AddResource(new BlockingResource("postgres"));
                 registration.AddProducer(new PassingProducer("coverage", "coverage/assertion@1"));
-            });
+            }, new EvidenceHostOptions { CleanupTimeout = TimeSpan.FromMilliseconds(100) });
 
         var manifest = await host.RunAsync();
 
@@ -90,7 +90,7 @@ public sealed class EvidenceHostBootstrapTests
             {
                 registration.AddResource(new ReadyResource("postgres"));
                 registration.AddProducer(new IgnoringCancellationProducer("coverage"));
-            });
+            }, new EvidenceHostOptions { CleanupTimeout = TimeSpan.FromMilliseconds(100) });
 
         var manifest = await host.RunAsync();
 

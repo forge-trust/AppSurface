@@ -63,6 +63,8 @@ await using var host = EvidenceHostBootstrap.Create(plan, registration =>
 var manifest = await host.RunAsync();
 ```
 
+The explicit host has a one-hour execution budget and a separate 30-second cleanup allowance by default. Configure these through [the lifecycle options](../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#execution-and-cleanup-budgets). Timed-out or failed cleanup yields no complete claim; non-cooperative managed work still requires independent process supervision.
+
 There is no assembly scanning, ambient resource discovery, hidden Docker provisioner, or automatic E2E selection. The policy is the control plane; the consumer's code owns what “ready” and “asserted” mean.
 
 ## What v1 deliberately does not decide
