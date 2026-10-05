@@ -51,3 +51,14 @@ unit path grant is introduced. A failed copy retains only its fixed private erro
 cleanup follows physical exit of
 both worker and task host. Portable marker files test copying, not executable
 runtime validity; native execution remains the required check.
+
+The official MSBuild utility reference emits thirteen culture directories. The
+private build copy accepts only that closed culture set, each containing exactly
+`Microsoft.Build.Utilities.Core.resources.dll`, with the same no-follow,
+single-link, per-file and aggregate byte checks as top-level files. Each copied
+culture directory is0555 and each file0444. The receipt records the exact copied
+relative inventory and hashes; cleanup removes those exact files/directories.
+Unknown directories, nested layouts or additional resource files fail closed.
+Attempt3 measured runtime sealing and the root mount but failed before worker
+start; its exact rejected build filename was not retained. The satellite layout
+explanation comes from the actual local build and remains separate evidence.

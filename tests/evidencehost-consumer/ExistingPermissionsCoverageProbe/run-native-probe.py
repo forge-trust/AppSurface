@@ -15,6 +15,8 @@ LAUNCHER_SHA = 'e1f6ca67cadbcc510213dcc3f31f8cf8a1caf478bda89f77e1738aeffb367b6c
 UID, GID, LIMIT, LOG_LIMIT = 65010, 65011, 1048576, 65536
 FIELDS = ('LoadState','User','Group','Type','ActiveState','SubState','MainPID','ExecMainCode','ExecMainStatus','ControlGroup')
 REPORTS = ('coverage.cobertura.xml','coverage.json')
+BUILD_CULTURES = frozenset(('cs','de','es','fr','it','ja','ko','pl','pt-BR','ru','tr','zh-Hans','zh-Hant'))
+BUILD_RESOURCE = 'Microsoft.Build.Utilities.Core.resources.dll'
 class Failure(Exception):
     """Only fixed categories, never native exception text, leave the controller."""
 def require(ok, category):
@@ -278,16 +280,37 @@ def copy_build(build,tool,d):
     source=os.open(build,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW); target=os.open(tool,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
     try:
         ns=names(source,d,128); required={'CounterFixture.dll','CounterFixture.pdb','CounterFixture.runtimeconfig.json','CounterFixture.deps.json','OfficialTaskHost.dll','OfficialTaskHost.runtimeconfig.json','OfficialTaskHost.deps.json'}
-        require(required<=set(ns),'build-shape'); total=0
-        for n in ns:
-            b,_=read_file(source,n,d,os.stat(n,dir_fd=source,follow_symlinks=False).st_uid,cap=32<<20); total+=len(b); require(total<=128<<20,'build-total')
-            f=os.open(n,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600,dir_fd=target)
+        require(required<=set(ns),'build-shape'); total=0; files=[]; dirs=[]; inventory=[]
+        def copy_file(from_fd,to_fd,n,relative):
+            nonlocal total
+            observed=os.stat(n,dir_fd=from_fd,follow_symlinks=False)
+            b,_=read_file(from_fd,n,d,observed.st_uid,cap=min(32<<20,(128<<20)-total)); total+=len(b); require(total<=128<<20,'build-total')
+            f=os.open(n,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600,dir_fd=to_fd)
             try:
                 view=memoryview(b)
                 while view: left(d); written=os.write(f,view); require(written>0,'copy-write'); view=view[written:]
                 os.fchmod(f,0o444)
             finally: os.close(f)
-        return ns
+            files.append(relative); inventory.append({'name':relative,'kind':'file','bytes':len(b),'sha256':hashlib.sha256(b).hexdigest()})
+        for n in ns:
+            s=os.stat(n,dir_fd=source,follow_symlinks=False)
+            if not stat.S_ISDIR(s.st_mode): copy_file(source,target,n,n); continue
+            require(n in BUILD_CULTURES,'build-directory')
+            child=os.open(n,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=source); dest=None
+            try:
+                require(snap(s)==snap(os.fstat(child)),'build-directory-changed')
+                require(names(child,d,2)==[BUILD_RESOURCE],'build-resource-inventory')
+                os.mkdir(n,mode=0o700,dir_fd=target); dirs.append(n)
+                dest=os.open(n,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=target)
+                ds=os.fstat(dest); require(ds.st_uid==os.geteuid() and stat.S_IMODE(ds.st_mode)==0o700,'build-created-directory')
+                copy_file(child,dest,BUILD_RESOURCE,n+'/'+BUILD_RESOURCE)
+                require(names(child,d,2)==[BUILD_RESOURCE] and snap(s)==snap(os.fstat(child))==snap(os.stat(n,dir_fd=source,follow_symlinks=False)),'build-directory-changed')
+                os.fchmod(dest,0o555); require(snap(os.fstat(dest))==snap(os.stat(n,dir_fd=target,follow_symlinks=False)),'build-target-directory-changed')
+            finally:
+                if dest is not None: os.close(dest)
+                os.close(child)
+        require(names(source,d,128)==ns,'build-inventory-changed')
+        return {'files':files,'directories':dirs,'inventory':inventory,'total_bytes':total}
     finally: os.close(source); os.close(target)
 def dotnet(selected):
     require(selected.is_absolute() and str(selected)==str(selected.resolve(strict=True)) and not str(selected).startswith(('/home/','/root/','/run/user/')),'dotnet-path')
@@ -300,7 +323,7 @@ def save(output,n,b):
     with os.fdopen(f,'wb') as stream: stream.write(b)
 def run(source,build,output,selected_dotnet,tag):
     require(re.fullmatch('[0-9a-f]{32}',tag) is not None,'tag'); start=time.monotonic(); deadline=start+90; unit=f'issue779-existing-permissions-{tag}.service'; cg='/system.slice/'+unit; cpath=Path('/sys/fs/cgroup'+cg)
-    account=Accounts('i779p'+tag[:12]); owner=None; runtime=None; sf=tf=None; mounted=False; unmount_safe=False; created=False; copied=[]; failure=None; roles={}
+    account=Accounts('i779p'+tag[:12]); owner=None; runtime=None; sf=tf=None; mounted=False; unmount_safe=False; created=False; copied=[]; copied_dirs=[]; failure=None; roles={}
     work=Path('/run/issue779-existing-permissions-'+tag)
     result={'schema':'issue779-existing-permissions-coverlet-mechanism-v1','mechanism_passed':False,'evidence_admission':False,'trusted_claim':False,'qualification_claim':False,'coverage_gate_claim':False,'launcher_sha256':LAUNCHER_SHA,'guard_seconds':90,'cleanup_guard_seconds':5}
     try:
@@ -326,7 +349,8 @@ def run(source,build,output,selected_dotnet,tag):
         owner.command(['mount','-t','tmpfs','-o','size=32M,nr_inodes=64,nosuid,nodev,noexec,uid=0,gid=65011,mode=1770','tmpfs',str(session)],deadline); mounted=True
         sf=directory(session,0,GID,0o1770); device=os.fstat(sf).st_dev; v=os.fstatvfs(sf); require(0<v.f_blocks*v.f_frsize<=32<<20 and 0<v.f_files<=64,'tmpfs-bounds')
         result['root_session_mount']=mount_data(kernel('/proc/self/mountinfo',deadline).decode('ascii'),session,device)
-        copied=copy_build(build,tool,deadline); tf=directory(tool,0,0,0o555); originals={}
+        build_copy=copy_build(build,tool,deadline); copied=build_copy['files']; copied_dirs=build_copy['directories']; result['build_copy']=build_copy
+        tf=directory(tool,0,0,0o555); originals={}
         for n in ('CounterFixture.dll','CounterFixture.pdb'):
             b,s=read_file(tf,n,deadline,0,mode=0o444); originals[n]={'sha256':hashlib.sha256(b).hexdigest(),'mode':s[4]}
         env={'PATH':f'{executable.parent}:/usr/bin:/bin','TMPDIR':str(session),'DOTNET_EnableDiagnostics':'0','DOTNET_NOLOGO':'1','DOTNET_CLI_TELEMETRY_OPTOUT':'1','HOME':'/nonexistent'}
@@ -411,6 +435,7 @@ def run(source,build,output,selected_dotnet,tag):
             try:
                 if runtime is not None: runtime.cleanup(end)
                 for n in copied: left(end); os.unlink(tool/n)
+                for n in copied_dirs: left(end); (tool/n).rmdir()
                 for p in (tool,subject,inaccessible,session,anchor,outer,work): left(end); p.rmdir()
             except BaseException: clean=False
         # Record only closed categories and facts; all failures permanently fail.

@@ -1,5 +1,6 @@
 """Portable data/real-FD controls only; never invoke the native root entry."""
 import importlib.util
+import hashlib
 import json
 import os
 import tempfile
@@ -133,6 +134,137 @@ class ProbeDataControls(unittest.TestCase):
         for name in ('../file', 'a/b', '.', '..', 'bad\x00name'):
             with self.subTest(name=name), self.assertRaises(m.Failure):
                 m.name(name)
+
+
+class BuildCopyControls(unittest.TestCase):
+    """Actual small FD copies under caller ownership; no root/runtime claim."""
+
+    RESOURCE = 'Microsoft.Build.Utilities.Core.resources.dll'
+    REQUIRED = ('CounterFixture.dll', 'CounterFixture.pdb', 'CounterFixture.runtimeconfig.json',
+                'CounterFixture.deps.json', 'OfficialTaskHost.dll',
+                'OfficialTaskHost.runtimeconfig.json', 'OfficialTaskHost.deps.json')
+
+    def fixture(self, root):
+        build, tool = root / 'build', root / 'tool'
+        build.mkdir(mode=0o700); tool.mkdir(mode=0o700)
+        expected = {name: b'tiny-metadata-' + name.encode() for name in self.REQUIRED}
+        expected['cs/' + self.RESOURCE] = b'\x00tiny-culture-marker\xff'
+        for relative, content in expected.items():
+            path = build / relative
+            if path.parent != build:
+                path.parent.mkdir(mode=0o700, exist_ok=True)
+            path.write_bytes(content)
+        outside = root / 'outside'
+        outside.mkdir(mode=0o700)
+        (outside / 'sentinel').write_bytes(b'outside-unchanged')
+        return build, tool, expected, outside
+
+    def test_closed_culture_copy_preserves_exact_bytes_modes_and_manifest_cleanup(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            build, tool, expected, outside = self.fixture(root)
+            result = m.copy_build(build, tool, time.monotonic() + 5)
+            self.assertEqual({'files', 'directories', 'inventory', 'total_bytes'}, set(result))
+            self.assertEqual(sorted(expected), sorted(result['files']))
+            self.assertEqual(['cs'], result['directories'])
+            self.assertIsInstance(result['inventory'], list)
+            self.assertEqual(len(expected), len(result['inventory']))
+            self.assertEqual(sum(len(content) for content in expected.values()), result['total_bytes'])
+            inventory = {row['name']: row for row in result['inventory']}
+            self.assertEqual(set(expected), set(inventory))
+            for relative, content in expected.items():
+                self.assertEqual({'name': relative, 'kind': 'file', 'bytes': len(content),
+                                  'sha256': hashlib.sha256(content).hexdigest()}, inventory[relative])
+            self.assertEqual({'cs', *self.REQUIRED}, {path.name for path in tool.iterdir()})
+            self.assertEqual([self.RESOURCE], [path.name for path in (tool / 'cs').iterdir()])
+            self.assertEqual(0o555, (tool / 'cs').stat().st_mode & 0o777)
+            for relative, content in expected.items():
+                path = tool / relative
+                self.assertEqual(content, path.read_bytes())
+                self.assertEqual(0o444, path.stat().st_mode & 0o777)
+                self.assertEqual(os.getuid(), path.stat().st_uid)
+                self.assertEqual(content, (build / relative).read_bytes())
+            # Portable caller needs directory write permission to exercise exact
+            # manifest removal; actual controller cleanup is root-owned.
+            (tool / 'cs').chmod(0o700)
+            for relative in result['files']:
+                (tool / relative).unlink()
+            for relative in result['directories']:
+                (tool / relative).rmdir()
+            tool.rmdir()
+            self.assertFalse(tool.exists())
+            self.assertEqual(b'outside-unchanged', (outside / 'sentinel').read_bytes())
+
+    def test_unknown_or_unsafe_culture_entries_never_supply_external_bytes(self):
+        for case in ('unknown-culture', 'extra-resource', 'nested-directory', 'culture-symlink',
+                     'child-symlink', 'hardlink', 'fifo'):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp).resolve()
+                build, tool, expected, outside = self.fixture(root)
+                culture = build / 'cs'; child = culture / self.RESOURCE
+                if case == 'unknown-culture':
+                    culture.rename(build / 'unknown-Culture')
+                elif case == 'extra-resource':
+                    (culture / 'unexpected.resources.dll').write_bytes(b'not-selected')
+                elif case == 'nested-directory':
+                    child.unlink(); child.mkdir()
+                    (child / 'nested').write_bytes(b'not-selected')
+                elif case == 'culture-symlink':
+                    culture.rename(outside / 'held-culture'); culture.symlink_to(outside / 'held-culture', target_is_directory=True)
+                elif case == 'child-symlink':
+                    child.unlink(); child.symlink_to(outside / 'sentinel')
+                elif case == 'hardlink':
+                    os.link(child, outside / 'second-link')
+                elif case == 'fifo':
+                    child.unlink(); os.mkfifo(child)
+                with self.assertRaises((m.Failure, OSError)):
+                    m.copy_build(build, tool, time.monotonic() + 5)
+                self.assertFalse((tool / 'cs' / self.RESOURCE).exists())
+                self.assertEqual(b'outside-unchanged', (outside / 'sentinel').read_bytes())
+
+    def test_source_child_substitution_and_write_fault_fail_without_touching_outside(self):
+        for case in ('directory-substitution', 'substitution', 'write-fault'):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp).resolve()
+                build, tool, expected, outside = self.fixture(root)
+                child = build / 'cs' / self.RESOURCE
+                real_open, real_write = os.open, os.write
+                triggered = False
+
+                def substituted_open(path, flags, *args, **kwargs):
+                    nonlocal triggered
+                    if case == 'directory-substitution' and not triggered and path == 'cs':
+                        triggered = True
+                        (build / 'cs').rename(outside / 'held-directory')
+                        (build / 'cs').mkdir()
+                        child.write_bytes(expected['cs/' + self.RESOURCE])
+                    if case == 'substitution' and not triggered and path == self.RESOURCE and not flags & (os.O_CREAT | os.O_WRONLY | os.O_RDWR):
+                        triggered = True
+                        child.rename(outside / 'held-original')
+                        child.write_bytes(b'actual-replacement')
+                    return real_open(path, flags, *args, **kwargs)
+
+                def faulted_write(fd, content):
+                    nonlocal triggered
+                    if case == 'write-fault':
+                        triggered = True
+                        raise OSError('portable-injected-write-fault')
+                    return real_write(fd, content)
+
+                with mock.patch.object(m.os, 'open', side_effect=substituted_open), mock.patch.object(m.os, 'write', side_effect=faulted_write):
+                    if case == 'directory-substitution':
+                        with self.assertRaisesRegex(m.Failure, 'build-directory-changed'):
+                            m.copy_build(build, tool, time.monotonic() + 5)
+                    else:
+                        with self.assertRaises((m.Failure, OSError)):
+                            m.copy_build(build, tool, time.monotonic() + 5)
+                self.assertTrue(triggered)
+                self.assertEqual(b'outside-unchanged', (outside / 'sentinel').read_bytes())
+                if case == 'substitution':
+                    self.assertEqual(expected['cs/' + self.RESOURCE], (outside / 'held-original').read_bytes())
+                if case == 'directory-substitution':
+                    self.assertFalse((tool / 'cs').exists())
+                    self.assertEqual(expected['cs/' + self.RESOURCE], (outside / 'held-directory' / self.RESOURCE).read_bytes())
 
 
 if __name__ == '__main__':
