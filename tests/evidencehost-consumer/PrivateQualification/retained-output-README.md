@@ -339,3 +339,48 @@ root defaults. [Archive controls](test_diagnostics.py) define exact two-name
 retention and bounds/link/mode rejection. These new controls are unexecuted at
 source-ready. This diagnostic fork claims no native success, qualification or
 coverage; production registries and private completion criteria are unchanged.
+
+
+## Closed product preparation failure diagnostics
+
+[prepare-product.py](prepare-product.py) provides the internal
+`capture_product_preparation_failure(tool, receipt_path, phase, error, *, deadline, expected_owner_uid=0)`
+file-data helper. Production passes the original Runner deadline and UID0. The UID
+argument is an ordinary portable metadata-control seam, with no root capability.
+It returns a Boolean capture result; callers retain and re-raise their original
+failure regardless of capture success. The helper never renews the operation budget.
+
+The root-selected workspace may contain only the fixed
+`product-preparation-failure-cli.json` and `product-preparation-failure-host.json`
+records, each exclusive, single-link, owner-only mode 0600 and at most 4096 bytes.
+The record `parent` describes the actual DLL/PDB parent (the tool directory);
+`workspace` separately records the protected diagnostic-output parent. Unsafe
+tool kind/owner/mode is observed by lstat but never opened or traversed. In that
+case all six target rows are unavailable with null metadata and errno, because
+no child lookup occurred. This does not relax the runtime swap parent guard.
+
+Tool/receipt names must be `tool-cli` / `product-binary-cli.json` or the host
+equivalent, sharing the same protected parent. The safe workspace is pinned without following its final link; a tool directory
+is opened and pinned only when its observed owner/mode/kind are eligible. Six fixed Cli/Aspire/Coverage DLL/PDB
+rows use lstat only: closed file kind, UID/GID, four-digit octal mode, nlink, or
+null fields with a direct numeric errno. No image bytes are opened for inspection.
+
+The schema is `issue779-private-product-preparation-failure-v1`. Its phase is one
+of `reconciliation-owner-finalization`, `reconciliation-receipt-validation`,
+`image-replacement`, or `tool-sealing`. Error classes are closed; unknown classes
+become `OtherException`. Direct numeric errno is nullable. Remaining seconds are
+measured against the original deadline, not a new allowance. Completed replacement
+count is null because the outer failure boundary cannot infer partial writes from
+modes. These are snapshots, not a successful preparation, ABI, runtime or coverage
+proof. No path, message, stack, argv or environment content is recorded.
+
+[run-qualification.py](run-qualification.py) retains these two opaque fixed files
+alongside product-binary receipts in the existing private archive. Public safe JSON,
+archive totals and all other bounds are unchanged. Existing diagnostics are never
+replaced: later capture attempts fail closed, preserving the first retained file.
+An unsafe parent, exhausted deadline, existing file or capture I/O failure may
+leave no complete diagnostic; absence cannot identify a native cause.
+
+The new [portable controls](test_product_preparation_diagnostics.py) use real tiny
+files and current-user metadata. Their execution receipt is separate; source
+existence alone proves neither a test pass nor root/native qualification.

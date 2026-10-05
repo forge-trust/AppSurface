@@ -674,17 +674,25 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
         product_binary_bindings[entry] = product_helper.replace_and_inspect(tool, product,
             runner, dotnet, inspector, workspace / ("product-binary-"+entry+".json"),
             inspector_sha256=inspector_sha256, inspector_contract_confirmed=True)
-        require(time.monotonic() < runner.deadline)
-        for path in tool.rglob("*"):
+        try:
             require(time.monotonic() < runner.deadline)
-            require(not path.is_symlink())
-            if path.is_dir() and not path.is_relative_to(deployment):
-                os.chmod(path, 0o755)
-            elif not path.is_relative_to(deployment):
-                os.chmod(path, 0o444)
-        os.chmod(tool, 0o755)
-        tools[entry] = {"path": str(tool), "sha256": {p.relative_to(tool).as_posix(): sha(p.read_bytes())
-            for p in sorted(tool.rglob("*")) if p.is_file()}}
+            for path in tool.rglob("*"):
+                require(time.monotonic() < runner.deadline)
+                require(not path.is_symlink())
+                if path.is_dir() and not path.is_relative_to(deployment):
+                    os.chmod(path, 0o755)
+                elif not path.is_relative_to(deployment):
+                    os.chmod(path, 0o444)
+            os.chmod(tool, 0o755)
+            tools[entry] = {"path": str(tool), "sha256": {p.relative_to(tool).as_posix(): sha(p.read_bytes())
+                for p in sorted(tool.rglob("*")) if p.is_file()}}
+        except BaseException as error:
+            try:
+                product_helper.capture_product_preparation_failure(tool, workspace / ("product-binary-"+entry+".json"),
+                    "tool-sealing", error, deadline=runner.deadline)
+            except BaseException:
+                pass
+            raise
     require(time.monotonic() < runner.deadline)
     require(source_inventory(source) == before)
     require(time.monotonic() < runner.deadline)

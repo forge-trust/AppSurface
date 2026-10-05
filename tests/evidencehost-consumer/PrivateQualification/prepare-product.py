@@ -1296,6 +1296,131 @@ def swap_product_pairs(tool, candidates, deadline, *, expected_owner_uid=0):
     return result
 
 
+PRODUCT_PREPARATION_FAILURE_PHASES = (
+    "reconciliation-owner-finalization", "reconciliation-receipt-validation",
+    "image-replacement", "tool-sealing")
+
+
+def capture_product_preparation_failure(tool, receipt_path, phase, error, *,
+                                        deadline, expected_owner_uid=0):
+    """Best-effort closed stat data, never a replacement for the original failure.
+
+    The original Runner deadline is mandatory and is never renewed. Production
+    uses UID0; the optional UID is ordinary portable file-data validation only.
+    No target content is read. Existing diagnostics are never replaced; False
+    means capture was unavailable/incomplete and conveys no preparation success.
+    """
+    owned, complete = [], False
+    try:
+        require(type(expected_owner_uid) is int and expected_owner_uid >= 0
+                and type(deadline) in (int, float) and 0 < deadline < float("inf")
+                and phase in PRODUCT_PREPARATION_FAILURE_PHASES)
+        tool, receipt_path = Path(tool), Path(receipt_path)
+        entry = "cli" if tool.name == "tool-cli" else "host" if tool.name == "tool-host" else None
+        require(entry is not None and tool.is_absolute() and receipt_path.is_absolute()
+                and tool.parent == receipt_path.parent
+                and receipt_path.name == "product-binary-"+entry+".json"
+                and ".." not in tool.parts and ".." not in receipt_path.parts)
+        remaining(deadline)
+        parent = tool.parent
+        before = parent.lstat()
+        require(stat.S_ISDIR(before.st_mode) and before.st_uid == expected_owner_uid
+                and not before.st_mode & 0o022)
+        parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC)
+        owned.append(parent_fd)
+        directory_identity = lambda row: (row.st_dev, row.st_ino, row.st_mode, row.st_uid, row.st_gid)
+        require(directory_identity(before) == directory_identity(os.fstat(parent_fd)))
+
+        def facts(info=None, errno=None):
+            if info is None:
+                return {"kind": "missing" if errno == 2 else "unavailable", "uid": None,
+                        "gid": None, "mode": None, "nlink": None, "errno": errno}
+            kind = ("regular-file" if stat.S_ISREG(info.st_mode) else
+                    "directory" if stat.S_ISDIR(info.st_mode) else
+                    "symlink" if stat.S_ISLNK(info.st_mode) else
+                    "fifo" if stat.S_ISFIFO(info.st_mode) else
+                    "socket" if stat.S_ISSOCK(info.st_mode) else
+                    "block-device" if stat.S_ISBLK(info.st_mode) else
+                    "character-device" if stat.S_ISCHR(info.st_mode) else "other")
+            return {"kind": kind, "uid": info.st_uid, "gid": info.st_gid,
+                    "mode": format(stat.S_IMODE(info.st_mode), "04o"), "nlink": info.st_nlink, "errno": None}
+
+        def direct_errno(value):
+            number = value.errno if isinstance(value, OSError) else None
+            return number if type(number) is int and -(2**31) <= number < 2**31 else None
+
+        tool_fd, tool_errno, selected = None, None, None
+        try:
+            remaining(deadline)
+            selected = os.lstat(tool.name, dir_fd=parent_fd)
+            # Observe an unsafe tool parent without opening/traversing it. The
+            # protected workspace alone owns diagnostic output authorization.
+            if (stat.S_ISDIR(selected.st_mode) and selected.st_uid == expected_owner_uid
+                    and not selected.st_mode & 0o022):
+                tool_fd = os.open(tool.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
+                                  dir_fd=parent_fd)
+                owned.append(tool_fd)
+                require(directory_identity(selected) == directory_identity(os.fstat(tool_fd)))
+        except OSError as failure:
+            tool_errno = direct_errno(failure)
+        rows = []
+        for library in LIBRARIES:
+            for extension in ("dll", "pdb"):
+                remaining(deadline)
+                info, number = None, None
+                if tool_fd is not None:
+                    try:
+                        info = os.lstat("ForgeTrust.AppSurface.Evidence."+library+"."+extension, dir_fd=tool_fd)
+                    except OSError as failure:
+                        number = direct_errno(failure)
+                rows.append({"target": library+"."+extension, **facts(info, number)})
+        known_errors = ("ValueError", "OSError", "FileNotFoundError", "PermissionError", "TimeoutError",
+                        "RuntimeError", "KeyError", "TypeError", "AssertionError")
+        error_class = type(error).__name__
+        record = {"schema": "issue779-private-product-preparation-failure-v1", "entry": entry, "phase": phase,
+                  "error_class": error_class if error_class in known_errors else "OtherException",
+                  "errno": direct_errno(error), "remaining_seconds": round(deadline-time.monotonic(), 6),
+                  "completed_replacement_count": None, "parent": facts(selected, tool_errno),
+                  "workspace": facts(before), "targets": rows,
+                  "snapshot_only": True, "runtime_compatibility_claim": False, "native_execution": False}
+        raw = (json.dumps(record, sort_keys=True, separators=(",", ":"))+"\n").encode()
+        require(len(raw) <= 4096)
+        remaining(deadline)
+        require(directory_identity(before) == directory_identity(os.fstat(parent_fd))
+                == directory_identity(parent.lstat()))
+        filename = "product-preparation-failure-"+entry+".json"
+        fd = os.open(filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+                     0o600, dir_fd=parent_fd)
+        owned.append(fd)
+        os.fchmod(fd, 0o600)
+        selected_output = os.fstat(fd)
+        require(stat.S_ISREG(selected_output.st_mode) and selected_output.st_uid == expected_owner_uid
+                and selected_output.st_nlink == 1 and stat.S_IMODE(selected_output.st_mode) == 0o600)
+        written = 0
+        while written < len(raw):
+            remaining(deadline)
+            count = os.write(fd, raw[written:])
+            require(count > 0)
+            written += count
+        remaining(deadline)
+        after = os.fstat(fd)
+        require(after.st_size == len(raw) and after.st_nlink == 1 and after.st_uid == expected_owner_uid
+                and stat.S_IMODE(after.st_mode) == 0o600
+                and identity(after) == identity(os.lstat(filename, dir_fd=parent_fd))
+                and directory_identity(before) == directory_identity(os.fstat(parent_fd))
+                == directory_identity(parent.lstat()))
+        complete = True
+    except BaseException:
+        complete = False
+    finally:
+        for fd in reversed(owned):
+            try:
+                os.close(fd)
+            except BaseException:
+                complete = False
+    return complete and time.monotonic() < deadline
+
+
 def write_private_json_bytes(path, raw, deadline):
     """Exclusive selected JSON bytes; no success publication after FD close deadline."""
     remaining(deadline)
@@ -1390,22 +1515,32 @@ def replace_and_inspect(tool, product, runner, dotnet, inspector, receipt_path, 
     spec_raw = (json.dumps(spec, sort_keys=True, separators=(",", ":"))+"\n").encode()
     require(len(spec_raw) <= 1024*1024)
     write_private_json_bytes(spec_path, spec_raw, original_deadline)
-    runner.run([sys.executable, "-B", str(Path(__file__).resolve()), "--reconcile", str(spec_path),
-                sha(spec_raw), str(receipt_path)], tool, maximum_seconds=30)
-    raw_receipt = read_regular(receipt_path, 512*1024, deadline=original_deadline)
-    receipt = unique_json(raw_receipt)
-    require(receipt["schema"] == "issue779-private-product-binary-input-v1"
-            and receipt["input_sha256"] == manifest_sha256
-            and receipt["reconciliation_input_sha256"] == sha(spec_raw)
-            and receipt["source_commit"] == PRODUCT_COMMIT
-            and receipt["runtime_compatibility_claim"] is False and receipt["native_execution"] is False
-            and receipt["metadata_mode"] == METADATA_MODE
-            and [row["name"] for row in receipt["partition_reports"]] == list(PARTITION_STAGES)
-            and all(row["report_sha256"] == record["report_sha256"] and row["input_sha256"] == record["input_sha256"]
-                    for row, record in zip(receipt["partition_reports"], records)))
-    receipt_sha256 = sha(raw_receipt)
-    swap_product_pairs(tool, product["candidates"], original_deadline)
-    remaining(original_deadline)
+    phase = "reconciliation-owner-finalization"
+    try:
+        runner.run([sys.executable, "-B", str(Path(__file__).resolve()), "--reconcile", str(spec_path),
+                    sha(spec_raw), str(receipt_path)], tool, maximum_seconds=30)
+        phase = "reconciliation-receipt-validation"
+        raw_receipt = read_regular(receipt_path, 512*1024, deadline=original_deadline)
+        receipt = unique_json(raw_receipt)
+        require(receipt["schema"] == "issue779-private-product-binary-input-v1"
+                and receipt["input_sha256"] == manifest_sha256
+                and receipt["reconciliation_input_sha256"] == sha(spec_raw)
+                and receipt["source_commit"] == PRODUCT_COMMIT
+                and receipt["runtime_compatibility_claim"] is False and receipt["native_execution"] is False
+                and receipt["metadata_mode"] == METADATA_MODE
+                and [row["name"] for row in receipt["partition_reports"]] == list(PARTITION_STAGES)
+                and all(row["report_sha256"] == record["report_sha256"] and row["input_sha256"] == record["input_sha256"]
+                        for row, record in zip(receipt["partition_reports"], records)))
+        receipt_sha256 = sha(raw_receipt)
+        phase = "image-replacement"
+        swap_product_pairs(tool, product["candidates"], original_deadline)
+        remaining(original_deadline)
+    except BaseException as error:
+        try:
+            capture_product_preparation_failure(tool, receipt_path, phase, error, deadline=original_deadline)
+        except BaseException:
+            pass
+        raise
     return {"receipt_sha256": receipt_sha256, "source_commit": PRODUCT_COMMIT,
             "binary_inputs": product["candidates"], "runtime_compatibility_claim": False,
             "native_execution": False}
