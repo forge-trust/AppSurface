@@ -35,6 +35,8 @@ The four checkpoint lines are expected contract output, not captured output from
 
 `Completed` from the activation service does not prove all Work succeeded. The generated proof inspects persisted terminal Work, the Healthy readiness transition, and an activity actually exported after SDK flush. See the canonical guide for the full four-checkpoint meaning and for evidence that remains independently required.
 
+For read-only checks of an already provisioned store, use the [Durable runtime doctor guide](../runtime-doctor.md) with a coordinated CLI/provider version that includes the command. Follow it with the application's composition verifier; a clean doctor result does not establish the four first-Work checkpoints.
+
 ## Generated source ownership
 
 The generated files are application-owned after creation. An installed template update affects future projects only; it does not patch existing source. The output allowlist and exact v1 inventory are recorded in the [shape guide](../../releases/durable-worker-template-shape-v1.md). For new Work, replace the typed definition/executor, binding, and producer request in the three documented locations; retain the activation, authentication, and host plumbing.

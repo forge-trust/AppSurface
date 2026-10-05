@@ -43,6 +43,8 @@ Every built host gets a new privacy-safe `template:<random GUID>` worker identit
 
 The proof's 5-second default body-read deadline is independent of the 2-second pump discovery and 10-second cooperative service request budgets. See the start guide for all accepted bounds, body semantics, health status rules, production ownership, and the difference between this Docker proof and the all-OS native PostgreSQL smoke. A successful template test is not a production deployment certificate.
 
+For an already provisioned store, follow the [Durable runtime doctor guide](https://github.com/forge-trust/AppSurface/blob/main/Durable/runtime-doctor.md) with a coordinated CLI/provider version that includes the command. Doctor performs read-only store/runtime checks; run your application's composition verifier afterward. Its clean result does not establish this proof's authorization, terminal Work, readiness transition, or exported activity.
+
 ## Manual upgrades
 
 Installing a newer template never changes this generated directory. Compare your application with the versioned [generated shape v1 inventory and manual upgrade checklist](https://github.com/forge-trust/AppSurface/blob/main/releases/durable-worker-template-shape-v1.md). Preserve application-owned edits, merge reviewed host or configuration changes manually, and keep all direct AppSurface package versions coordinated.
