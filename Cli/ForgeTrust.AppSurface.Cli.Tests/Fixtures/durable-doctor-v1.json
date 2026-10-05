@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "checkOrder": ["credential", "schema", "epoch", "retention", "worker"],
+  "checkStates": {
+    "P": "passed",
+    "F": "finding",
+    "NC": "not-checked",
+    "NR": "not-requested"
+  },
+  "rows": [
+    { "id": "D01", "workerPair": false, "scenario": "compatible-store-only", "expectedChecks": "P/P/P/P/NR", "expectedCodes": [], "exitCode": 0, "nextAction": "verify" },
+    { "id": "D02", "workerPair": true, "scenario": "heartbeat-missing", "expectedChecks": "P/P/P/P/F", "expectedCodes": ["ASDUR410"], "exitCode": 2, "nextAction": "retry" },
+    { "id": "D03", "workerPair": true, "scenario": "heartbeat-current-10s", "expectedChecks": "P/P/P/P/P", "expectedCodes": [], "exitCode": 0, "nextAction": "verify" },
+    { "id": "D04", "workerPair": true, "scenario": "heartbeat-at-threshold", "expectedChecks": "P/P/P/P/P", "expectedCodes": [], "exitCode": 0, "nextAction": "verify" },
+    { "id": "D05", "workerPair": true, "scenario": "heartbeat-one-tick-stale", "expectedChecks": "P/P/P/P/F", "expectedCodes": ["ASDUR404"], "exitCode": 2, "nextAction": "retry" },
+    { "id": "D06", "workerPair": true, "scenario": "heartbeat-draining", "expectedChecks": "P/P/P/P/F", "expectedCodes": ["ASDUR411"], "exitCode": 2, "nextAction": "retry" },
+    { "id": "D07", "workerPair": true, "scenario": "store-epoch-mismatch-with-row", "expectedChecks": "P/P/F/P/F", "expectedCodes": ["ASDUR108"], "exitCode": 2, "nextAction": "retry" },
+    { "id": "D08", "workerPair": false, "scenario": "store-epoch-mismatch-store-only", "expectedChecks": "P/P/F/P/NR", "expectedCodes": ["ASDUR108"], "exitCode": 2, "nextAction": "retry" },
+    { "id": "D09", "workerPair": true, "scenario": "row-epoch-mismatch", "expectedChecks": "P/P/P/P/F", "expectedCodes": ["ASDUR412"], "exitCode": 2, "nextAction": "retry" },
+    { "id": "D10", "workerPair": true, "scenario": "heartbeat-future-dated", "expectedChecks": "P/P/P/P/P", "expectedCodes": [], "exitCode": 0, "nextAction": "verify" },
+    { "id": "D11", "workerPair": false, "scenario": "schema-missing-store-only", "expectedChecks": "P/F/NC/NC/NR", "expectedCodes": ["ASDUR400"], "exitCode": 2, "nextAction": "status" },
+    { "id": "D12", "workerPair": true, "scenario": "schema-missing-paired", "expectedChecks": "P/F/NC/NC/NC", "expectedCodes": ["ASDUR400"], "exitCode": 2, "nextAction": "status" },
+    { "id": "D13", "workerPair": false, "scenario": "schema-upgrade-required-store-only", "expectedChecks": "P/F/NC/NC/NR", "expectedCodes": ["ASDUR401"], "exitCode": 2, "nextAction": "status" },
+    { "id": "D14", "workerPair": true, "scenario": "schema-upgrade-required-paired", "expectedChecks": "P/F/NC/NC/NC", "expectedCodes": ["ASDUR401"], "exitCode": 2, "nextAction": "status" },
+    { "id": "D15", "workerPair": false, "scenario": "schema-store-too-new-store-only", "expectedChecks": "P/F/NC/NC/NR", "expectedCodes": ["ASDUR402"], "exitCode": 2, "nextAction": "status" },
+    { "id": "D16", "workerPair": true, "scenario": "schema-store-too-new-paired", "expectedChecks": "P/F/NC/NC/NC", "expectedCodes": ["ASDUR402"], "exitCode": 2, "nextAction": "status" },
+    { "id": "D17", "workerPair": false, "scenario": "schema-inconsistent-store-only", "expectedChecks": "P/F/NC/NC/NR", "expectedCodes": ["ASDUR403"], "exitCode": 2, "nextAction": "status" },
+    { "id": "D18", "workerPair": true, "scenario": "schema-inconsistent-paired", "expectedChecks": "P/F/NC/NC/NC", "expectedCodes": ["ASDUR403"], "exitCode": 2, "nextAction": "status" },
+    { "id": "D19", "workerPair": false, "scenario": "retention-function-absent", "expectedChecks": "P/P/P/F/NR", "expectedCodes": ["ASDUR409"], "exitCode": 2, "nextAction": "retry" },
+    { "id": "D20", "workerPair": true, "scenario": "retention-index-absent-current", "expectedChecks": "P/P/P/F/P", "expectedCodes": ["ASDUR409"], "exitCode": 2, "nextAction": "retry" },
+    { "id": "D21", "workerPair": true, "scenario": "retention-index-invalid-heartbeat-missing", "expectedChecks": "P/P/P/F/F", "expectedCodes": ["ASDUR409", "ASDUR410"], "exitCode": 2, "nextAction": "retry" },
+    { "id": "D22", "workerPair": false, "scenario": "credential-unsafe-store-only", "expectedChecks": "F/NC/NC/NC/NR", "expectedCodes": ["ASDUR408"], "exitCode": 2, "nextAction": "retry" },
+    { "id": "D23", "workerPair": true, "scenario": "credential-unsafe-paired", "expectedChecks": "F/NC/NC/NC/NC", "expectedCodes": ["ASDUR408"], "exitCode": 2, "nextAction": "retry" },
+    { "id": "D24", "workerPair": false, "scenario": "unavailable-store-only", "terminalCategories": ["session-affinity", "dependency", "deadline", "cleanup"], "expectedChecks": "NC/NC/NC/NC/NR", "expectedCodes": ["ASDUR103"], "exitCode": 4, "nextAction": "retry" },
+    { "id": "D25", "workerPair": true, "scenario": "unavailable-paired", "terminalCategories": ["session-affinity", "dependency", "deadline", "cleanup"], "expectedChecks": "NC/NC/NC/NC/NC", "expectedCodes": ["ASDUR103"], "exitCode": 4, "nextAction": "retry" },
+    { "id": "D26", "workerPair": false, "scenario": "caller-canceled", "terminalCategories": ["caller-canceled"], "expectedChecks": "NC/NC/NC/NC/NR", "expectedCodes": ["ASDUR414"], "exitCode": 1, "nextAction": "retry" },
+    { "id": "D27", "workerPair": false, "scenario": "unexpected-contract-failure", "terminalCategories": ["catalog-contract"], "expectedChecks": "NC/NC/NC/NC/NR", "expectedCodes": ["ASDUR415"], "exitCode": 1, "nextAction": "retry" },
+    { "id": "D28", "workerPair": false, "scenario": "invalid-input", "terminalCategories": ["input"], "expectedChecks": "NR/NR/NR/NR/NR", "expectedCodes": ["ASDUR413"], "exitCode": 3, "nextAction": "help" }
+  ]
+}

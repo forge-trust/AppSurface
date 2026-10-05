@@ -667,7 +667,7 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
 
-        await ScrollMainContentToBottomAsync(page);
+        await page.EvaluateAsync(ScrollMainContentToBottomScript);
         var scrollState = await page.EvaluateAsync<DetailsScrollState>(
             """
             () => {
@@ -720,14 +720,15 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             "() => getComputedStyle(document.getElementById('main-content')).overflowAnchor");
         Assert.Equal("none", overflowAnchor);
 
-        await ScrollMainContentToBottomAsync(page);
+        await page.EvaluateAsync(ScrollMainContentToBottomScript);
         await page.EvaluateAsync(
             """
             () => {
+              window.__rwDelayedScrollCompleted = false;
               window.setTimeout(() => {
                 const main = document.getElementById('main-content');
                 main?.scrollTo(0, main.scrollHeight);
-                window.__rwDelayedScrollApplied = true;
+                window.__rwDelayedScrollCompleted = true;
               }, 60);
             }
             """);
@@ -742,7 +743,7 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
         await page.WaitForFunctionAsync(
             """
             () => window.__rwFrameNavigationSentinel === 'alive'
-              && window.__rwDelayedScrollApplied === true
+              && window.__rwDelayedScrollCompleted === true
               && window.location.pathname === '/docs/Namespaces/ForgeTrust.AppSurface.Aspire.html'
               && document.querySelector('#doc-content h1')?.textContent?.trim() === 'Aspire'
               && (document.getElementById('main-content')?.scrollTop ?? Number.MAX_SAFE_INTEGER) <= 8
@@ -764,7 +765,7 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
 
-        await ScrollMainContentToBottomAsync(page);
+        await page.EvaluateAsync(ScrollMainContentToBottomScript);
         var scrollState = await page.EvaluateAsync<DetailsScrollState>(
             """
             () => {
@@ -1698,20 +1699,6 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
         await AssertSectionCopyDidNotMutateHistoryAsync(page);
     }
 
-    private static async Task ScrollMainContentToBottomAsync(IPage page)
-    {
-        await page.EvaluateAsync(ScrollMainContentToBottomScript);
-        await page.WaitForFunctionAsync(
-            """
-            () => {
-              const main = document.getElementById('main-content');
-              return main && Math.max(0, main.scrollHeight - main.clientHeight) - main.scrollTop <= 8;
-            }
-            """,
-            null,
-            new PageWaitForFunctionOptions { Timeout = 15_000 });
-    }
-
     private const string ScrollMainContentToBottomScript =
         """
         () => {
@@ -1721,8 +1708,7 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
           }
 
           main.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true }));
-          // Cancel any in-flight smooth outline navigation before checking the bottom.
-          main.scrollTo({ top: main.scrollHeight, behavior: 'instant' });
+          main.scrollTo(0, main.scrollHeight);
         }
         """;
 }

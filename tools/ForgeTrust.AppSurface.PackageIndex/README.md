@@ -81,6 +81,8 @@ remains authored content; after that, retain the markers exactly.
 
 ## Tailwind artifact provenance (#798)
 
+The reusable [native evidence workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/tailwind-native-host-evidence.yml) selects the frozen inventory through `artifact_manifest_file`. Its optional string default is `package-artifact-manifest.json` for manual rehearsal; both release publishers pass `package-artifact-manifest.unapproved.json`. Only those two basenames are accepted, and all native proof, mutation and aggregate commands use the selected file without discovery or aliasing. The [provenance reference](../../docs/tailwind-artifact-provenance.md#shared-bundle-and-producer-identity) explains the stage boundary: native proof validates the original manifest bytes; protected publication still validates the separate PostgreSQL candidate receipt before consuming the byte-identical approved copy.
+
 The approved [#798 design](../../docs/designs/issue-798-tailwind-artifact-provenance.md) and [implementation plan](../../docs/plans/issue-798-tailwind-artifact-provenance.md) define a release proof binding native Tailwind consumer tests to the exact package bundle passed to NuGet. See the canonical [API and operator reference](../../docs/tailwind-artifact-provenance.md) for the implemented CLI flags, evidence schemas, and release workflow.
 
 Authority flows through four stages: the validated tag checkout and package plan establish source and allowed identities; `pack-and-verify` creates one immutable bundle with the package manifest and producer subject; each native job proves it restored and built from that bundle; then aggregation and publication validate the exact host set and candidate again. Protected workflow outputs establish artifact transport identity. Receipt contents cannot select their own authority. The aggregate has its own immutable ID and JSON digest, separate from the producer bundle's ID and subject digest.
@@ -134,6 +136,15 @@ hash binding. The version-2 `.carrier.json` uses `ProofKind: issue845-public-fee
 shared proof receipt hashes. These raw archive hashes may differ after signing. The carrier proves payload identity;
 NuGet restore owns signature validation, and the carrier receipt makes no independent signature-authenticity claim.
 Retain both receipts and the original manifest; a whole-archive public hash must never replace a candidate manifest hash.
+
+The smoke workflow obtains library archives from its isolated `NUGET_PACKAGES` cache. Tool archives come from the
+fresh `dotnet tool install --tool-path` store at
+`<tool-path>/.store/<lowercase-id>/<version>/<lowercase-id>/<version>/<lowercase-id>.<version>.nupkg`;
+the SDK does not put those archives in `NUGET_PACKAGES`. After each tool's help and exact-version checks pass, the
+workflow copies that installed public archive into the proof cache without rewriting any bytes. It replaces a stale
+cache copy and rejects a missing or linked store archive or linked staging destination. This copy only locates the
+public bytes: the carrier still compares every payload entry before invoking the shared proof. A candidate archive
+or an existing cache entry cannot substitute for a missing installed tool archive.
 
 Each canonical CLI result row carries a `Scenario` identity. The one-pair scenario proves forwarder Work, Flow, and
 Schedule before and after; the installed `work_only` pair scenarios also prove Work succeeds while Flow, Schedule,

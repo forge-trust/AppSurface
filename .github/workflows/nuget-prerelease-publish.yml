@@ -128,6 +128,7 @@ jobs:
       source_commit: ${{ needs.validate-tag.outputs.tag-commit }}
       producer_artifact_id: ${{ needs.pack-and-verify.outputs.producer_artifact_id }}
       expected_subject_sha256: ${{ needs.pack-and-verify.outputs.expected_subject_sha256 }}
+      artifact_manifest_file: package-artifact-manifest.unapproved.json
 
   validate-source-ci:
     needs: validate-tag

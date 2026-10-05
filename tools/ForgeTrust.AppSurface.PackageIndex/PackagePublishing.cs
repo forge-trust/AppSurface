@@ -953,6 +953,12 @@ internal sealed class PackageSmokeInstallWorkflow
                 throw new PackageIndexException("Public-feed runtime-preflight proof requires candidate and published receipt paths.");
             }
 
+            foreach (var entry in entries.Where(entry => entry.ManifestEntry.IsTool))
+            {
+                var toolPath = Path.Join(request.WorkDirectory, SanitizeFileName(entry.ManifestEntry.PackageId), "tools");
+                StageInstalledToolArchive(toolPath, entry.ManifestEntry, manifest.PackageVersion, sharedPackagesPath);
+            }
+
             await _preflightArtifactProof.RunPublishedAsync(
                 request.PreflightProof,
                 request.CandidatePreflightReceiptPath,
@@ -1219,6 +1225,73 @@ internal sealed class PackageSmokeInstallWorkflow
     {
         var invalidCharacters = Path.GetInvalidFileNameChars().ToHashSet();
         return new string(value.Select(character => invalidCharacters.Contains(character) ? '_' : character).ToArray());
+    }
+
+    /// <summary>
+    /// Copies the freshly installed tool's raw NuGet archive from its isolated SDK store to the public proof cache.
+    /// </summary>
+    /// <remarks>
+    /// <c>dotnet tool install --tool-path</c> stores its package below <c>tools/.store/id/version/id/version</c>,
+    /// independently of <c>NUGET_PACKAGES</c>. Call only after installation, help and exact-version checks pass.
+    /// Preserve the public archive bytes, including its signature, and replace any stale cache copy; the published
+    /// carrier must still compare every payload entry against the approved candidate before running the shared proof.
+    /// A missing or linked archive closes the gate, even when another cache already contains this package identity.
+    /// </remarks>
+    private static void StageInstalledToolArchive(
+        string toolPath,
+        PackageArtifactManifestEntry entry,
+        string packageVersion,
+        string sharedPackagesPath)
+    {
+        var id = entry.PackageId.ToLowerInvariant();
+        var version = packageVersion.ToLowerInvariant();
+        var archiveName = $"{id}.{version}.nupkg";
+        var sourceDirectory = RequireRegularToolArchiveDirectory(toolPath, [".store", id, version, id, version],
+            create: false, entry.PackageId);
+        var source = new FileInfo(Path.Combine(sourceDirectory, archiveName));
+        if (!source.Exists || (source.Attributes & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new PackageIndexException($"Public-feed installed tool '{entry.PackageId}' is missing its regular NuGet archive.");
+        }
+
+        var destinationDirectory = RequireRegularToolArchiveDirectory(sharedPackagesPath, [id, version],
+            create: true, entry.PackageId);
+        var destination = Path.Combine(destinationDirectory, archiveName);
+        if (new FileInfo(destination).LinkTarget is not null)
+        {
+            throw new PackageIndexException($"Public-feed tool '{entry.PackageId}' archive staging rejects linked cache paths.");
+        }
+
+        File.Copy(source.FullName, destination, overwrite: true);
+    }
+
+    /// <summary>Checks each owned store or cache directory before reading, creating or copying below it.</summary>
+    private static string RequireRegularToolArchiveDirectory(
+        string root,
+        IReadOnlyList<string> components,
+        bool create,
+        string packageId)
+    {
+        var current = root;
+        foreach (var component in components.Prepend(string.Empty))
+        {
+            current = Path.Join(current, component);
+            var directory = new DirectoryInfo(current);
+            if (directory.LinkTarget is not null
+                || directory.Exists && (directory.Attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new PackageIndexException($"Public-feed tool '{packageId}' archive staging rejects linked directories.");
+            }
+
+            if (!directory.Exists)
+            {
+                if (!create)
+                    throw new PackageIndexException($"Public-feed installed tool '{packageId}' is missing its NuGet store directory.");
+                Directory.CreateDirectory(current);
+            }
+        }
+
+        return current;
     }
 
     /// <summary>

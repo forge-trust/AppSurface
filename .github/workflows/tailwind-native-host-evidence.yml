@@ -19,6 +19,11 @@ on:
         description: SHA-256 of tailwind-proof-subject.json.
         required: true
         type: string
+      artifact_manifest_file:
+        description: Exact manifest basename in the immutable producer bundle.
+        required: false
+        default: package-artifact-manifest.json
+        type: string
       rehearsal:
         description: Enables only the protected main-branch manual rehearsal.
         required: false
@@ -57,9 +62,14 @@ jobs:
           REF: ${{ github.ref }}
           REPOSITORY: ${{ github.repository }}
           RETENTION_DAYS: ${{ github.retention_days }}
+          ARTIFACT_MANIFEST_FILE: ${{ inputs.artifact_manifest_file }}
         shell: bash
         run: |
           set -euo pipefail
+          case "$ARTIFACT_MANIFEST_FILE" in
+            package-artifact-manifest.json|package-artifact-manifest.unapproved.json) ;;
+            *) echo "Unsupported producer artifact manifest basename." >&2; exit 1 ;;
+          esac
           if [[ "$REHEARSAL" == true && ( "$EVENT_NAME" != workflow_dispatch || "$REF" != refs/heads/main || "$REPOSITORY" != forge-trust/AppSurface ) ]]; then
             echo "Manual native rehearsal is permitted only for workflow_dispatch on refs/heads/main in forge-trust/AppSurface." >&2
             exit 1
@@ -100,6 +110,7 @@ jobs:
       PACKAGE_VERSION: ${{ inputs.package_version }}
       PRODUCER_ARTIFACT_ID: ${{ inputs.producer_artifact_id }}
       EXPECTED_SUBJECT_SHA256: ${{ inputs.expected_subject_sha256 }}
+      ARTIFACT_MANIFEST_FILE: ${{ inputs.artifact_manifest_file }}
       NATIVE_INVOCATION_ID: ${{ inputs.producer_artifact_id }}-${{ github.run_id }}-${{ github.run_attempt }}-tailwind-native
       PRODUCER_RUN_ID: ${{ github.run_id }}
       PRODUCER_ATTEMPT: ${{ github.run_attempt }}
@@ -150,7 +161,7 @@ jobs:
           dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" verify-tailwind-consumer \
             --repo-root "$GITHUB_WORKSPACE" --mode release \
             --artifacts-input "$RUNNER_TEMP/tailwind-producer" \
-            --artifact-manifest "$RUNNER_TEMP/tailwind-producer/package-artifact-manifest.json" \
+            --artifact-manifest "$RUNNER_TEMP/tailwind-producer/$ARTIFACT_MANIFEST_FILE" \
             --producer-subject "$RUNNER_TEMP/tailwind-producer/tailwind-proof-subject.json" \
             --producer-artifact-id "$PRODUCER_ARTIFACT_ID" \
             --expected-subject-sha256 "$EXPECTED_SUBJECT_SHA256" \
@@ -174,7 +185,7 @@ jobs:
           if dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" verify-tailwind-consumer \
             --repo-root "$GITHUB_WORKSPACE" --mode release \
             --artifacts-input "$MUTATED_PRODUCER_ROOT" \
-            --artifact-manifest "$MUTATED_PRODUCER_ROOT/package-artifact-manifest.json" \
+            --artifact-manifest "$MUTATED_PRODUCER_ROOT/$ARTIFACT_MANIFEST_FILE" \
             --producer-subject "$MUTATED_PRODUCER_ROOT/tailwind-proof-subject.json" \
             --producer-artifact-id "$PRODUCER_ARTIFACT_ID" \
             --expected-subject-sha256 "$EXPECTED_SUBJECT_SHA256" \
@@ -221,6 +232,7 @@ jobs:
       PACKAGE_VERSION: ${{ inputs.package_version }}
       PRODUCER_ARTIFACT_ID: ${{ inputs.producer_artifact_id }}
       EXPECTED_SUBJECT_SHA256: ${{ inputs.expected_subject_sha256 }}
+      ARTIFACT_MANIFEST_FILE: ${{ inputs.artifact_manifest_file }}
       NATIVE_INVOCATION_ID: ${{ inputs.producer_artifact_id }}-${{ github.run_id }}-${{ github.run_attempt }}-tailwind-native
     steps:
       - name: Initialize aggregate paths
@@ -297,7 +309,7 @@ jobs:
           set -euo pipefail
           dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" verify-tailwind-evidence \
             --repo-root "$GITHUB_WORKSPACE" --mode aggregate \
-            --artifacts-input "$PRODUCER_ROOT" --artifact-manifest "$PRODUCER_ROOT/package-artifact-manifest.json" \
+            --artifacts-input "$PRODUCER_ROOT" --artifact-manifest "$PRODUCER_ROOT/$ARTIFACT_MANIFEST_FILE" \
             --producer-subject "$PRODUCER_ROOT/tailwind-proof-subject.json" \
             --producer-artifact-id "$PRODUCER_ARTIFACT_ID" \
             --expected-subject-sha256 "$EXPECTED_SUBJECT_SHA256" \

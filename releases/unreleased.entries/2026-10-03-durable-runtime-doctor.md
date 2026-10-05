@@ -1,0 +1,6 @@
+<!-- appsurface:unreleased-entry section="included" -->
+### Diagnose a connected Durable runtime
+
+- The [CLI runtime doctor](../../Durable/runtime-doctor.md) gives adopters a bounded, non-mutating store/runtime diagnosis with canonical problem, cause, fix, documentation and next-action fields in text or version-one JSON. Optional worker observation uses the caller's actual configured stale threshold; store-only mode makes no heartbeat claim.
+- The [Durable contracts catalog](../../Durable/ForgeTrust.AppSurface.Durable/README.md) adds immutable shared diagnostic descriptors and append-only codes while preserving existing `DurableProblem` and caller correlation behavior. Doctor checks migration 0011 retention structure and requires a restricted runtime credential and matching coordinated CLI/provider dependencies. The first supporting published version is determined by the release evidence, not this source candidate.
+- Clean output means requested store/runtime checks passed at the captured observation. [Complete deployment preflight](../../Durable/heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist) and the [application composition verifier](../../examples/durable-external-activation/README.md) retain their separate responsibilities. Reinstalling the prior compatible CLI needs no database/epoch rollback.

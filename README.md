@@ -23,6 +23,8 @@ For portable configuration, start with the [logical-key quickstart](Config/Forge
 [executable provider proof](examples/config-key-contract/README.md), and
 [coordinated upgrade guide](guides/config-key-migration.md).
 
+For a connected Durable store, use the [non-mutating runtime doctor](./Durable/runtime-doctor.md) to inspect schema, epoch, retention capability and an optional selected heartbeat. Its clean result hands off to application composition verification.
+
 ## Vision
 
 The primary vision of AppSurface is to simplify application bootstrapping by encouraging **composition through small, focused modules**. Instead of monolithic startup classes or scattered configuration logic, AppSurface allows developers to encapsulate features into reusable modules that handle:

@@ -200,6 +200,15 @@ public sealed class ExternalActivationContractsTests
         {
             AssertRejected(DurableExternalActivationOutcomeKind.Completed, state, "ASDUR999", pumpResult);
         }
+
+        foreach (var code in new[] { DurableProblemCodes.DoctorCanceled, DurableProblemCodes.DoctorContractFailed })
+        {
+            AssertRejected(DurableExternalActivationOutcomeKind.Unavailable, DurableRuntimeHealthState.Unavailable, code, null);
+            AssertRejected(DurableExternalActivationOutcomeKind.Incompatible, DurableRuntimeHealthState.Healthy, code, null);
+            AssertRejected(DurableExternalActivationOutcomeKind.Busy, DurableRuntimeHealthState.Stale, code, null);
+            AssertRejected(DurableExternalActivationOutcomeKind.ActivationFailed, null, code, null);
+            AssertRejected(DurableExternalActivationOutcomeKind.PumpFailed, DurableRuntimeHealthState.Healthy, code, null);
+        }
     }
 
     private static void AssertConstructs(

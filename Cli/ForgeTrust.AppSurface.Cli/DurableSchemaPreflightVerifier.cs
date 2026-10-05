@@ -297,7 +297,15 @@ internal static class DurableSchemaPreflightVerifier
         }
     }
 
-    private static async ValueTask VerifyFenceAffinityAsync(
+    /// <summary>Verifies that the connection still owns the existing migration fence on its original backend.</summary>
+    /// <param name="connection">The session whose backend identity and granted shared fence are checked.</param>
+    /// <param name="transaction">The optional caller-owned snapshot transaction.</param>
+    /// <param name="cancellationToken">Cancels the verification query.</param>
+    /// <remarks>
+    /// This shared seam performs no lock acquisition or cleanup. Failure keeps the existing preflight
+    /// <c>cleanup</c> category; the doctor adapter maps that fixed failure to its session-affinity category.
+    /// </remarks>
+    internal static async ValueTask VerifyFenceAffinityAsync(
         NpgsqlConnection connection, NpgsqlTransaction? transaction, CancellationToken cancellationToken)
     {
         await using var command = new NpgsqlCommand(
@@ -425,22 +433,7 @@ internal static class DurableSchemaPreflightVerifier
           JOIN pg_catalog.pg_index index_meta ON index_meta.indrelid = heartbeat.oid
           JOIN pg_catalog.pg_class index_class ON index_class.oid = index_meta.indexrelid
           JOIN pg_catalog.pg_am method ON method.oid = index_class.relam
-          WHERE index_class.relname = 'ix_runtime_heartbeat_retention' AND method.amname = 'btree'
-            AND index_meta.indisvalid AND index_meta.indisready AND NOT index_meta.indisunique
-            AND index_meta.indnkeyatts = 2 AND index_meta.indnatts = 2
-            AND index_meta.indpred IS NULL AND index_meta.indexprs IS NULL
-            AND index_meta.indoption[0] = 0 AND index_meta.indoption[1] = 0
-            AND (SELECT array_agg(attribute.attname ORDER BY key.ordinality)
-              FROM unnest(index_meta.indkey) WITH ORDINALITY key(attnum,ordinality)
-              JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = heartbeat.oid AND attribute.attnum = key.attnum)
-              = ARRAY['last_heartbeat_at','worker_id']::name[]
-            AND (SELECT array_agg(opclass.opcname ORDER BY key.ordinality)
-              FROM unnest(index_meta.indclass) WITH ORDINALITY key(opclass_oid,ordinality)
-              JOIN pg_catalog.pg_opclass opclass ON opclass.oid = key.opclass_oid
-              JOIN pg_catalog.pg_am method ON method.oid = opclass.opcmethod
-              JOIN pg_catalog.pg_namespace opnamespace ON opnamespace.oid = opclass.opcnamespace
-              WHERE method.amname = 'btree' AND opnamespace.nspname = 'pg_catalog')
-              = ARRAY['timestamptz_ops','text_ops']::name[]
+          WHERE ({DurableRetentionCatalog.RetentionIndexShapePredicateSql})
         ), global_checks AS (
           SELECT array_remove(ARRAY[
             CASE WHEN NOT (SELECT count(*) = cardinality(@runtime_names::text[]) AND count(oid) = count(*) FROM runtime_roles)
@@ -454,10 +447,16 @@ internal static class DurableSchemaPreflightVerifier
             CASE WHEN (SELECT count(*) FROM prune) <> 1 THEN 'function_signature' END,
             CASE WHEN NOT (SELECT count(*) = 1 FROM namespace WHERE nspowner = (SELECT oid FROM reviewed_owner))
               OR NOT (SELECT count(*) = 1 FROM heartbeat WHERE relowner = (SELECT oid FROM reviewed_owner))
-              OR NOT (SELECT count(*) = 1 FROM prune WHERE proowner = (SELECT oid FROM reviewed_owner))
-              OR NOT (SELECT count(*) = 1 FROM due WHERE proowner = (SELECT oid FROM reviewed_owner)) THEN 'function_owner' END,
-            CASE WHEN NOT (SELECT count(*) = 1 FROM prune WHERE prosecdef) THEN 'security_definer' END,
-            CASE WHEN NOT (SELECT count(*) = 1 FROM prune WHERE proconfig = ARRAY['search_path=pg_catalog, appsurface_durable, pg_temp']::text[]) THEN 'search_path' END,
+              OR NOT (SELECT count(*) = 1 FROM prune routine CROSS JOIN namespace
+                WHERE routine.proowner = (SELECT oid FROM reviewed_owner)
+                  AND ({DurableRetentionCatalog.FunctionOwnerShapePredicateSql}))
+              OR NOT (SELECT count(*) = 1 FROM due routine CROSS JOIN namespace
+                WHERE routine.proowner = (SELECT oid FROM reviewed_owner)
+                  AND ({DurableRetentionCatalog.FunctionOwnerShapePredicateSql})) THEN 'function_owner' END,
+            CASE WHEN NOT (SELECT count(*) = 1 FROM prune routine
+              WHERE {DurableRetentionCatalog.FunctionSecurityDefinerPredicateSql}) THEN 'security_definer' END,
+            CASE WHEN NOT (SELECT count(*) = 1 FROM prune routine
+              WHERE {DurableRetentionCatalog.FunctionSearchPathPredicateSql}) THEN 'search_path' END,
             CASE WHEN (SELECT count(*) FROM pg_catalog.pg_policy policy WHERE policy.polrelid = (SELECT oid FROM heartbeat)) <> 2
               OR NOT EXISTS (SELECT 1 FROM pg_catalog.pg_policy policy CROSS JOIN runtimes
                 WHERE policy.polrelid = (SELECT oid FROM heartbeat) AND policy.polname = 'runtime_heartbeat_runtime_role'

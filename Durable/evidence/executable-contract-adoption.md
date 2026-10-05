@@ -1,5 +1,78 @@
 # Executable-contract adoption evidence
 
+## Runtime-doctor operator comparison
+
+The [runtime doctor](../runtime-doctor.md) addresses the repeated health
+interpretation recorded below. Previously, an operator combined schema status,
+[runtime health assessments](../operational-assessments.md#health-predicates),
+process logs and application tests to decide which prerequisite failed. Doctor
+returns the connected store's diagnosis and its next action in one report;
+[deployment preflight](../heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist)
+and application verification still require their own evidence.
+
+On October 3, 2026 UTC, the
+[operator workflow test](../../Cli/ForgeTrust.AppSurface.Cli.Tests/DurableDoctorIntegrationTests.cs)
+executed two isolated workflows through `AppSurfaceCliApp.RunAsync` against one
+disposable PostgreSQL store. It used the same runtime connection throughout,
+selected by `ISSUE801_PRIVATE_CONNECTION`, and the same configured epoch variable,
+`ISSUE801_PRIVATE_RUNTIME_EPOCH`. Each command's before/after state fingerprint
+matched, and a pruning-function trap was never invoked.
+
+| Workflow | Observed diagnosis and next action | Recovery evidence | Measured time |
+| --- | --- | --- | --- |
+| Store epoch mismatch | Exit 2, `ASDUR108`; retry doctor with the original selected environment names | The fixture restored its active epoch on the same StoreId; JSON and text doctor reruns returned exit 0 | 17:01:10.928387–17:01:11.079591 UTC; 151.20 ms including fixture changes, 49.65 ms across CLI calls |
+| Incompatible schema | Exit 2, `ASDUR401`; `appsurface durable schema status --connection-env ISSUE801_PRIVATE_CONNECTION` | Status reported installed 10 / required 11. The fixture restored its captured schema-11 history and metadata on the same StoreId; JSON and text reruns returned exit 0 | 17:01:11.085856–17:01:11.268244 UTC; 182.39 ms including fixture changes, 53.47 ms across CLI calls |
+
+These timings cover commands on an existing host with .NET and Docker already
+available. Fixture provisioning, package installation, builds and cold-host setup
+were outside the measured intervals. The implementation-task clock began at
+14:41:51 UTC; that elapsed engineering time is not adopter onboarding time.
+Recovery used synthetic fixture edits, not a claim that a deployment migration or
+epoch-rotation procedure was executed. The test can write a fresh local timing
+record when `APPSURFACE_DOCTOR_WORKFLOW_EVIDENCE_PATH` names an owned output file;
+timing values are observations, not performance thresholds.
+
+The maintainer inspected the actual clean text: it says “Store/runtime checks
+passed,” states that worker observation was not requested, and asks for the
+consumer's composition verifier command. The displayed boundary explicitly
+excludes deployment authorization, process ownership, future readiness and
+successful application execution. This records the intended interpretation of
+observed output; it is not a human comprehension study. Cold-host time to first
+diagnosis, adopter comprehension and a comparison of elapsed manual-triage time
+remain unmeasured.
+
+### Existing-host quick-start rehearsal
+
+The agent implementer completed a separate operator rehearsal on October 3, 2026,
+from opening the [doctor quick-start](../runtime-doctor.md#start-with-the-store)
+and its linked installation and disposable-reference instructions at
+18:07:26.826303 UTC to inspecting and interpreting the first diagnosis at
+18:10:55.835186 UTC: **209.01 seconds**. This was a familiar maintainer's
+existing-host rehearsal, not an independent adopter or human comprehension study.
+The .NET SDK, Docker and pinned PostgreSQL image were already available.
+
+| Checklist step | Actual observation |
+| --- | --- |
+| Read and choose the installation | Read the doctor reference, CLI README and external-activation setup. Built and installed private source candidate `0.0.0-issue801.dx.1` into an isolated temporary tool directory; no published supporting version was assumed. |
+| Restore, package and install | 18:08:03–18:08:52 UTC, 49 seconds, including locked restore and a Release pack. Source build dependencies used the existing host cache; no separate network delay was observed. |
+| Provision the disposable reference | 18:09:37–18:09:50 UTC, 13 seconds, including reference-host restore/build, a loopback PostgreSQL container, four distinct restricted roles, explicit schema apply, the canonical role recipe and epoch bootstrap. |
+| Select the environment | Selected `APPSURFACE_DURABLE_RUNTIME_CONNECTION` and `APPSURFACE_DURABLE_RUNTIME_EPOCH`; the connection named the restricted runtime role. No literal connection or epoch value was passed on the command line. |
+| First understood diagnosis | The installed process returned exit 0 at 18:10:31 UTC with empty stderr. Credential, schema, epoch and retention passed; worker was not requested. The implementer read the explicit no-heartbeat statement and application-verifier handoff before ending the clock. |
+| Epoch action targeting | A deliberately incorrect configured epoch returned `ASDUR108` and exit 2. Its retry retained both selected environment names. Correcting that fixture environment value returned exit 0 on the same StoreId; no store epoch rotation was needed or claimed. |
+| Schema action targeting | Synthetic schema-10 history/metadata returned `ASDUR401` and exit 2. The displayed schema-status command retained the selected connection and reported installed 10, required 11 and pending 0011. Restoring the captured fixture metadata/history returned exit 0 on the same StoreId; this did not execute a deployment migration. |
+| Clean-result interpretation | The captured observation passed its requested store/runtime checks. It established neither a heartbeat nor application registration, authorization, routing, effect truth, exporter delivery, deployment approval or future readiness. Application verification remained the next action. |
+
+The epoch/schema calls ran at 18:12:48–18:12:50 UTC, after the first-diagnosis
+clock. Their before/after store metadata and migration-history fingerprints
+matched. The stronger table, sequence and pruning-trap checks remain in the
+[automated workflow evidence](#runtime-doctor-operator-comparison). The local
+rehearsal retained separate stdout, stderr, process exits and timing receipts,
+then stopped its owned container. Cold-host setup and independent adopter
+comprehension remain unknown; this observed interval is not a release threshold
+or a guarantee of a five-minute first start.
+
+## Original adoption-rail filing evidence
+
 This evidence closes the filing gate in
 [case #793](https://github.com/forge-trust/AppSurface/issues/793). It compares
 one representative Skoolit durable-worker lane with the three-touchpoint

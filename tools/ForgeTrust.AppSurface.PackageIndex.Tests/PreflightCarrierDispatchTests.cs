@@ -167,11 +167,14 @@ public sealed class PreflightCarrierDispatchTests : IDisposable
         Assert.False(Directory.Exists(scratch));
     }
 
-    [Fact]
-    public async Task SmokeWorkflow_RestoredPackagesReachTheActualPublishedCarrier()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("signature")]
+    [InlineData("stale-cache")]
+    public async Task SmokeWorkflow_InstalledToolStoreArchiveReachesTheActualPublishedCarrier(string? toolArchiveMutation)
     {
         var fixture = await CarrierFixture.CreateAsync(_root);
-        var smoke = await SmokeFixture.CreateAsync(fixture, _root);
+        var smoke = await SmokeFixture.CreateAsync(fixture, _root, toolArchiveMutation: toolArchiveMutation);
         await fixture.WriteCompleteReceiptAsync(fixture.Request.ReceiptPath);
 
         var report = await smoke.Workflow.RunAsync(
@@ -188,6 +191,41 @@ public sealed class PreflightCarrierDispatchTests : IDisposable
         Assert.Contains(smoke.Runner.Requests, request => request.OperationName == "PostgreSQL preflight artifact proof");
         Assert.True(File.Exists(smoke.PublishedReceiptPath));
         Assert.True(File.Exists(smoke.PublishedReceiptPath + ".carrier.json"));
+        var install = Assert.Single(smoke.Runner.Requests, request => request.Arguments.Take(2).SequenceEqual(["tool", "install"]));
+        var installedArchive = ToolStoreArchivePath(ValueAfter(install.Arguments, "--tool-path"));
+        var stagedArchive = TestPathUtils.PathUnder(ValueAfter(restore.Arguments, "--packages"),
+            "forgetrust.appsurface.cli", PackageVersion, $"forgetrust.appsurface.cli.{PackageVersion}.nupkg");
+        Assert.Equal(await File.ReadAllBytesAsync(installedArchive), await File.ReadAllBytesAsync(stagedArchive));
+        using var carrier = JsonDocument.Parse(await File.ReadAllTextAsync(smoke.PublishedReceiptPath + ".carrier.json"));
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(await File.ReadAllBytesAsync(installedArchive))),
+            carrier.RootElement.GetProperty("PublicPackageSha256").GetProperty("ForgeTrust.AppSurface.Cli").GetString());
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("missing-directory")]
+    [InlineData("missing-with-cache")]
+    [InlineData("payload")]
+    [InlineData("linked-store")]
+    [InlineData("linked-store-parent")]
+    [InlineData("linked-cache-file")]
+    [InlineData("linked-cache-directory")]
+    [InlineData("linked-cache-parent")]
+    public async Task SmokeWorkflow_MissingOrChangedInstalledToolArchiveWithholdsPublicProof(string toolArchiveMutation)
+    {
+        if (OperatingSystem.IsWindows() && toolArchiveMutation.StartsWith("linked-", StringComparison.Ordinal))
+            return; // Creating symbolic links requires elevated Windows permissions.
+        var fixture = await CarrierFixture.CreateAsync(_root);
+        var smoke = await SmokeFixture.CreateAsync(fixture, _root, toolArchiveMutation: toolArchiveMutation);
+        await fixture.WriteCompleteReceiptAsync(fixture.Request.ReceiptPath);
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => smoke.Workflow.RunAsync(
+            smoke.Request(fixture.Request.ReceiptPath, smoke.PublishedReceiptPath), CancellationToken.None));
+
+        Assert.Contains("ForgeTrust.AppSurface.Cli", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(smoke.Runner.Requests, request => request.OperationName == "PostgreSQL preflight artifact proof");
+        Assert.False(File.Exists(smoke.PublishedReceiptPath));
+        Assert.False(File.Exists(smoke.PublishedReceiptPath + ".carrier.json"));
     }
 
     [Fact]
@@ -416,19 +454,71 @@ public sealed class PreflightCarrierDispatchTests : IDisposable
                 return new ExternalCommandResult(exit, output, string.Empty);
             });
 
-        public RecordingCommandRunner CreateSmokeRunner(int restoreExitCode, int controllerExitCode = 0)
+        public RecordingCommandRunner CreateSmokeRunner(int restoreExitCode, int controllerExitCode = 0,
+            string? toolArchiveMutation = null)
             => new RecordingCommandRunner(async (request, token) =>
             {
                 if (request.Arguments.FirstOrDefault() == "restore")
                 {
                     if (restoreExitCode == 0)
                     {
-                        await CreateRestoredPackagesAsync(ValueAfter(request.Arguments, "--packages"));
+                        var packagesRoot = ValueAfter(request.Arguments, "--packages");
+                        await CreateRestoredPackagesAsync(packagesRoot, includeTools: false);
+                        if (toolArchiveMutation is "stale-cache" or "missing-with-cache" or "linked-cache-file"
+                            or "linked-cache-directory" or "linked-cache-parent")
+                        {
+                            var stale = TestPathUtils.PathUnder(packagesRoot, "forgetrust.appsurface.cli", PackageVersion,
+                                $"forgetrust.appsurface.cli.{PackageVersion}.nupkg");
+                            Directory.CreateDirectory(Path.GetDirectoryName(stale)!);
+                            if (toolArchiveMutation.StartsWith("linked-cache-", StringComparison.Ordinal))
+                            {
+                                var redirected = TestPathUtils.PathUnder(_root, "redirected-cache");
+                                Directory.CreateDirectory(redirected);
+                                if (toolArchiveMutation == "linked-cache-file")
+                                    File.CreateSymbolicLink(stale, TestPathUtils.PathUnder(redirected, "archive.nupkg"));
+                                else
+                                {
+                                    var linkedPath = toolArchiveMutation == "linked-cache-parent"
+                                        ? Path.GetDirectoryName(Path.GetDirectoryName(stale))!
+                                        : Path.GetDirectoryName(stale)!;
+                                    Directory.Delete(linkedPath, recursive: true);
+                                    Directory.CreateSymbolicLink(linkedPath, redirected);
+                                }
+                            }
+                            else
+                                await File.WriteAllTextAsync(stale, "stale tool cache", token);
+                        }
                     }
                     return new ExternalCommandResult(restoreExitCode, "restore output", string.Empty);
                 }
                 if (request.Arguments.Take(2).SequenceEqual(["tool", "install"]))
+                {
+                    if (toolArchiveMutation != "missing-directory")
+                    {
+                        var installedArchive = ToolStoreArchivePath(ValueAfter(request.Arguments, "--tool-path"));
+                        Directory.CreateDirectory(Path.GetDirectoryName(installedArchive)!);
+                        var cli = Entries.Single(entry => entry.IsTool);
+                        if (toolArchiveMutation == "linked-store")
+                            File.CreateSymbolicLink(installedArchive, TestPathUtils.PathUnder(ArtifactDirectory, cli.ArtifactFileName));
+                        else if (toolArchiveMutation is not ("missing" or "missing-with-cache"))
+                            File.Copy(TestPathUtils.PathUnder(ArtifactDirectory, cli.ArtifactFileName), installedArchive);
+                        if (toolArchiveMutation == "linked-store-parent")
+                        {
+                            var store = TestPathUtils.PathUnder(ValueAfter(request.Arguments, "--tool-path"), ".store");
+                            var redirected = TestPathUtils.PathUnder(_root, "redirected-store");
+                            Directory.Move(store, redirected);
+                            Directory.CreateSymbolicLink(store, redirected);
+                        }
+                        if (toolArchiveMutation is "payload" or "signature")
+                        {
+                            using var archive = ZipFile.Open(installedArchive, ZipArchiveMode.Update);
+                            await using var added = archive.CreateEntry(toolArchiveMutation == "signature"
+                                ? ".signature.p7s" : "unexpected-payload.txt").Open();
+                            await added.WriteAsync(Encoding.UTF8.GetBytes("public tool archive change"), token);
+                        }
+                    }
                     return new ExternalCommandResult(0, "installed", string.Empty);
+                }
                 if (request.Arguments.SequenceEqual(["--help"]))
                     return new ExternalCommandResult(0, "appsurface commands", string.Empty);
                 if (request.Arguments.SequenceEqual(["--version"]))
@@ -554,9 +644,9 @@ public sealed class PreflightCarrierDispatchTests : IDisposable
             return path;
         }
 
-        private async Task CreateRestoredPackagesAsync(string root)
+        private async Task CreateRestoredPackagesAsync(string root, bool includeTools = true)
         {
-            foreach (var entry in Entries)
+            foreach (var entry in Entries.Where(entry => includeTools || !entry.IsTool))
             {
                 var packageDirectory = TestPathUtils.PathUnder(root, entry.PackageId.ToLowerInvariant(), PackageVersion.ToLowerInvariant());
                 Directory.CreateDirectory(packageDirectory);
@@ -713,7 +803,8 @@ public sealed class PreflightCarrierDispatchTests : IDisposable
             CarrierFixture carrier,
             string root,
             int restoreExitCode = 0,
-            int controllerExitCode = 0)
+            int controllerExitCode = 0,
+            string? toolArchiveMutation = null)
         {
             var smokeRoot = TestPathUtils.PathUnder(root, "smoke-repository");
             var projectMetadata = new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase);
@@ -752,7 +843,7 @@ public sealed class PreflightCarrierDispatchTests : IDisposable
             }
             await WriteFileAsync(smokeRoot, "packages/package-index.yml", string.Join(Environment.NewLine, packageRows));
             var metadataProvider = new TestMetadataProvider(projectMetadata);
-            var runner = carrier.CreateSmokeRunner(restoreExitCode, controllerExitCode);
+            var runner = carrier.CreateSmokeRunner(restoreExitCode, controllerExitCode, toolArchiveMutation);
             var workflow = new PackageSmokeInstallWorkflow(
                 new PackageArtifactManifestReader(),
                 new PackagePublishPlanResolver(new PackageProjectScanner(), metadataProvider, new PackageManifestLoader()),
@@ -804,4 +895,8 @@ public sealed class PreflightCarrierDispatchTests : IDisposable
 
     private static string ValueAfter(IReadOnlyList<string> arguments, string option)
         => arguments[Array.IndexOf(arguments.ToArray(), option) + 1];
+
+    private static string ToolStoreArchivePath(string toolPath)
+        => TestPathUtils.PathUnder(toolPath, ".store", "forgetrust.appsurface.cli", PackageVersion,
+            "forgetrust.appsurface.cli", PackageVersion, $"forgetrust.appsurface.cli.{PackageVersion}.nupkg");
 }

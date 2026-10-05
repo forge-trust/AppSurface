@@ -29,7 +29,7 @@ The planned endpoint and sample test extensions were split into focused companio
 and [fixture activation HTTP contracts](../../examples/auth-aspnetcore-dev-auth.tests/PersonaScopedFixtureActivationHttpTests.cs).
 Existing admission cases remain in the original endpoint file. The sample's rendering lives in
 [LocalCandidatePages](../../examples/auth-aspnetcore-dev-auth/LocalCandidatePages.cs), and the actual
-[unreleased entry](../../releases/unreleased.entries/2026-10-01-dev-auth-persona-activation.md) supplies the approved release guidance.
+[release entry at the published feature revision](https://github.com/forge-trust/AppSurface/blob/269b635b801742e67bea4df8f261a85926656534/releases/unreleased.entries/2026-10-01-dev-auth-persona-activation.md) supplies the approved release guidance. The immutable source link remains reachable after [release preparation archives the entry](../../tools/ForgeTrust.AppSurface.Release/README.md#append-only-unreleased-entries).
 
 | Command or check | Observed result |
 | --- | --- |
