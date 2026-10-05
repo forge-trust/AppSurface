@@ -56,14 +56,20 @@ allowance, cap or timeout is added. The sticky session protects root-owned0600 s
 while genuine official hit files can be freshly created by the actual worker. Mount identity and
 account/namespace/policy checks belong to the root controller, not this managed data fixture.
 
-The worker attempts Directory.Move(session, derived sibling). Only UnauthorizedAccessException or
-IOException with raw Unix HResult16 (EBUSY) is accepted. No generic IOException or
-missing path is accepted as denial proof. After the exception the original session must still exist
-at its same pathname and the sibling must remain absent. This managed same-path check does not prove
-inode identity: root retained-FD and mountpoint identity must independently remain equal afterward.
-The mounted-child EBUSY behavior and actual .NET errno/HResult mapping require Linux measurement.
-Unexpected successful movement fails; controller cleanup must account for both fixed original and
-sibling names under its fresh anchor rather than overlooking a moved object.
+The worker calls the fixed Linux libc rename entry point on the selected session
+and derived sibling. It requires return-1 and immediately captured native errno16
+(EBUSY), then requires the original pathname to exist and the sibling to remain
+absent. This is the actual worker syscall; no injected transport, syscall fake,
+additional unit property, path grant or capability is used. Generated LibraryImport
+marshalling requires AllowUnsafeBlocks in this tiny fixture only. Linux's
+[mountpoint rename check](https://github.com/torvalds/linux/blob/v6.8/fs/namei.c#L4580-L4582)
+returns EBUSY for a mounted source. The kernel version here explains the mechanism;
+the actual runner's syscall result must still be measured. Root retained-FD and
+mountpoint identity must independently remain equal afterward. An unexpected
+success or any other error fails, and no managed IOException is accepted as
+mount-denial proof. The previous Directory.Move classification failed in native
+attempt9 with HResult203; its underlying runtime mapping remains undetermined.
+This change verifies the kernel operation directly rather than accepting203.
 
 Worker also requires UnauthorizedAccessException or IOException with raw Unix HResult30 (EROFS)
 opening the fixed running CounterFixture.dll for write, selected from AppContext.BaseDirectory without reflection. Root independently pins that

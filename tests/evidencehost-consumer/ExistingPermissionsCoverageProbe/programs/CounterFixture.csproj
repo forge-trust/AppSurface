@@ -9,6 +9,7 @@
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
         <DebugType>portable</DebugType>
         <UseSharedCompilation>false</UseSharedCompilation>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
     <ItemGroup>
         <Compile Include="CounterFixture.cs" />

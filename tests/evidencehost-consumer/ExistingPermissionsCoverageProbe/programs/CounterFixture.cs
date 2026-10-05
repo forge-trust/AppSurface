@@ -1,14 +1,14 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 
-internal static class Program
+internal static partial class Program
 {
     private const int MaximumSessionBytes = 4096;
     private const int MaximumBasenameBytes = 255;
-    // .NET 10 Unix IOException preserves raw EBUSY, not HRESULT_FROM_WIN32.
-    private const int BusyErrnoHResult = 16;
+    private const int BusyNativeErrno = 16;
     private const int ReadOnlyFileSystemErrnoHResult = 30;
 
     public static int Main(string[] args)
@@ -115,33 +115,22 @@ internal static class Program
         }
     }
 
+    [LibraryImport("libc.so.6", EntryPoint = "rename", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int LinuxRename(string source, string destination);
+
     private static bool RenameDenied(string session, string sibling)
     {
-        if (!Directory.Exists(session) || Directory.Exists(sibling) || File.Exists(sibling))
+        if (!OperatingSystem.IsLinux() || !Directory.Exists(session)
+            || Directory.Exists(sibling) || File.Exists(sibling))
         {
             return false;
         }
 
-        bool denied;
-        try
-        {
-            Directory.Move(session, sibling);
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            denied = true;
-        }
-        catch (IOException exception) when (exception.HResult == BusyErrnoHResult)
-        {
-            // Exact raw Linux EBUSY from the .NET 10 Unix rename error path.
-            denied = true;
-        }
-
-        // Same-path existence is checked here; actual mounted-inode identity is
-        // checked separately by the root controller's retained descriptors.
-        return denied && Directory.Exists(session)
-            && !Directory.Exists(sibling) && !File.Exists(sibling);
+        int result = LinuxRename(session, sibling);
+        int nativeErrno = Marshal.GetLastPInvokeError();
+        // Require the actual Linux mountpoint error, not a managed HResult mapping.
+        return result == -1 && nativeErrno == BusyNativeErrno
+            && Directory.Exists(session) && !Directory.Exists(sibling) && !File.Exists(sibling);
     }
 
     private static bool ReadOnlyAssemblyDenied(Action operation)

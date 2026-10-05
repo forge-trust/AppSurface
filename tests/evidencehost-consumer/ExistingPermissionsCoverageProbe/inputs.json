@@ -11278,11 +11278,11 @@
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/programs/CounterFixture.cs": {
       "mode": "0644",
-      "sha256": "6ecbba83413b6c2455847081ccf70cd2ea2b203d05aee5934c5bfc7a1ee007d8"
+      "sha256": "ec3b6df5feeecc0219546bc4974084172347bbe59a456486cb36a8c221b906b8"
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/programs/CounterFixture.csproj": {
       "mode": "0644",
-      "sha256": "dc15e4433e28de852d7a49f85d6add269ad6003f3b3feb880491bd7095cf0d4c"
+      "sha256": "6946310d3a6b24a2fc98204b6edd3dd210f780f4d0a1946cc036b7be0cf1486a"
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/programs/Directory.Build.props": {
       "mode": "0644",
@@ -11290,7 +11290,7 @@
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/programs/README.md": {
       "mode": "0644",
-      "sha256": "16314b31710408f0ddd02602b26e5a81aa22a60588a96f71a1b9ace086f81e22"
+      "sha256": "02d9c9ac515c4169e0b781ce3f27a79675f087e01d20077a3d97542651d0cdf0"
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/programs/TaskHost.cs": {
       "mode": "0644",
