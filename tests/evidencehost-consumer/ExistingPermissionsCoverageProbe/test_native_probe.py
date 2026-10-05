@@ -5,6 +5,7 @@ import os
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 p = Path(__file__).with_name('run-native-probe.py')
@@ -14,6 +15,50 @@ spec.loader.exec_module(m)
 
 
 class ProbeDataControls(unittest.TestCase):
+    def test_fresh_private_directory_has_explicit_owner_and_mode_under_parent_bits(self):
+        with tempfile.TemporaryDirectory() as temp:
+            parent=Path(temp); os.chmod(parent,0o2750); previous=os.umask(0o077)
+            try:
+                facts=m.create_private_directory(parent/'owned',os.getuid(),os.getgid())
+            finally:
+                os.umask(previous)
+            self.assertEqual({'uid':os.getuid(),'gid':os.getgid(),'mode':'0700',
+                              'directory':True,'symlink':False},facts['after'])
+            fd=m.directory(parent/'owned',os.getuid(),os.getgid(),0o700)
+            os.close(fd)
+
+    def test_private_directory_creation_never_reowns_existing_directory_or_link(self):
+        with tempfile.TemporaryDirectory() as temp:
+            parent=Path(temp); owned=parent/'existing'; owned.mkdir(mode=0o750)
+            (owned/'sentinel').write_bytes(b'unchanged'); (parent/'link').symlink_to(owned)
+            before=m.directory_facts(owned.lstat())
+            for path in (owned,parent/'link'):
+                with self.subTest(path=path),self.assertRaises(FileExistsError):
+                    m.create_private_directory(path,os.getuid(),os.getgid())
+            self.assertEqual(before,m.directory_facts(owned.lstat()))
+            self.assertEqual(b'unchanged',(owned/'sentinel').read_bytes())
+
+    def test_directory_substitution_or_writable_parent_never_changes_metadata(self):
+        with tempfile.TemporaryDirectory() as temp:
+            parent=Path(temp); replacement=parent/'replacement'; replacement.mkdir(mode=0o700)
+            (replacement/'sentinel').write_bytes(b'unchanged'); real_open=os.open
+            def substitute(path,flags,*args,**kwargs):
+                if path=='owned':
+                    (parent/'owned').rename(parent/'created-held'); replacement.rename(parent/'owned')
+                return real_open(path,flags,*args,**kwargs)
+            with mock.patch.object(m.os,'open',side_effect=substitute),mock.patch.object(m.os,'fchown')as chown,mock.patch.object(m.os,'fchmod')as chmod:
+                with self.assertRaisesRegex(m.Failure,'directory-created'):
+                    m.create_private_directory(parent/'owned',os.getuid(),os.getgid())
+                chown.assert_not_called(); chmod.assert_not_called()
+            self.assertEqual(b'unchanged',(parent/'owned'/'sentinel').read_bytes())
+            self.assertEqual(0o700,(parent/'owned').stat().st_mode&0o777)
+            os.chmod(parent,0o777)
+            with mock.patch.object(m.os,'fchown')as chown,mock.patch.object(m.os,'fchmod')as chmod:
+                with self.assertRaisesRegex(m.Failure,'directory-parent'):
+                    m.create_private_directory(parent/'never-created',os.getuid(),os.getgid())
+                chown.assert_not_called(); chmod.assert_not_called()
+            self.assertFalse((parent/'never-created').exists())
+
     def test_failed_stop_requires_explicit_absent_unit_not_current_empty_cgroup(self):
         inactive = dict(LoadState='loaded', ActiveState='inactive', SubState='dead', MainPID='0')
         self.assertEqual('checked-stop', m.confirmed_unit_stop(0, 0, inactive))

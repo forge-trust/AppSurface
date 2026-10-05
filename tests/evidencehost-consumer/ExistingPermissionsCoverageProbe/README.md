@@ -30,3 +30,24 @@ Portable `test_native_probe.py` controls parse data and read actual temporary
 files; they do not run the root controller or prove kernel isolation. Local C#
 format/build evidence is a separate source-validation result. Native success
 requires both the root-controller and external-owner receipts to pass.
+
+The controller explicitly sets its fresh private result directory to root:root
+0700 through retained parent/leaf descriptors. The parent must be creator-owned
+without group/other write, and the leaf's creator ownership and fresh identity are
+checked before either metadata write. Private receipts and the isolated workspace
+use `/run`, whose strict root:root0755 parent check remains required. Closed numeric
+preflight facts record the result directory before/after sealing and parent metadata.
+The worker still receives only its generated run-anchor write grant. Portable
+substitution/collision controls supply no worker-isolation result.
+
+The hosted image's .NET installation is a build input, not a root-sealed execution
+location. `sealed-runtime.py` copies only the selected host, the highest stable
+10.0 hostfxr and the highest stable 10.0 `Microsoft.NETCore.App` files into a
+fresh root-owned runtime directory under the private workspace. It retains file
+hashes/identities and seals directories0755, ordinary files0444 and the host0755.
+The copy is bounded to256MiB and excludes SDKs. The worker executes that immutable
+copy through its existing readable filesystem; no writable runtime or additional
+unit path grant is introduced. A failed copy retains only its fixed private error category. Exact manifest
+cleanup follows physical exit of
+both worker and task host. Portable marker files test copying, not executable
+runtime validity; native execution remains the required check.

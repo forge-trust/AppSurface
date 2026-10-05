@@ -214,6 +214,31 @@ def directory(path,uid,gid,mode):
         s=os.fstat(f); n=os.lstat(path)
         require((s.st_uid,s.st_gid,stat.S_IMODE(s.st_mode))==(uid,gid,mode) and (s.st_dev,s.st_ino)==(n.st_dev,n.st_ino),'directory'); return f
     except BaseException: os.close(f); raise
+def directory_facts(s):
+    """Closed setup metadata only; these facts never replace the pinned checks."""
+    return {'uid':s.st_uid,'gid':s.st_gid,'mode':format(stat.S_IMODE(s.st_mode),'04o'),
+            'directory':stat.S_ISDIR(s.st_mode),'symlink':stat.S_ISLNK(s.st_mode)}
+def create_private_directory(path,uid,gid):
+    """Own one fresh directory explicitly, including inherited parent group bits."""
+    parent=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW); f=None
+    try:
+        ps=os.fstat(parent); pn=os.lstat(path.parent)
+        require(ps.st_uid==uid and not ps.st_mode&0o022 and stat.S_ISDIR(pn.st_mode)
+                and (ps.st_dev,ps.st_ino)==(pn.st_dev,pn.st_ino),'directory-parent')
+        leaf=name(path.name); os.mkdir(leaf,mode=0o700,dir_fd=parent)
+        made=os.stat(leaf,dir_fd=parent,follow_symlinks=False)
+        f=os.open(leaf,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=parent); before=os.fstat(f)
+        require(before.st_uid==uid and stat.S_IMODE(before.st_mode)&0o777==0o700
+                and snap(made)==snap(before),'directory-created')
+        os.fchown(f,uid,gid); os.fchmod(f,0o700); after=os.fstat(f)
+        named=os.stat(leaf,dir_fd=parent,follow_symlinks=False); pn=os.lstat(path.parent)
+        require((after.st_uid,after.st_gid,stat.S_IMODE(after.st_mode))==(uid,gid,0o700)
+                and stat.S_ISDIR(named.st_mode) and (after.st_dev,after.st_ino)==(named.st_dev,named.st_ino)
+                and (ps.st_dev,ps.st_ino)==(pn.st_dev,pn.st_ino),'directory')
+        return {'before':directory_facts(before),'after':directory_facts(after)}
+    finally:
+        if f is not None: os.close(f)
+        os.close(parent)
 def cg_empty(path,identity,d):
     left(d)
     try: f=os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
@@ -239,6 +264,11 @@ def freeze(fd,ready,session,d):
 def helper(root):
     p=root/'scripts/evidencehost-linux-launcher.py'; require(hashlib.sha256(p.read_bytes()).hexdigest()==LAUNCHER_SHA,'source-pin')
     spec=importlib.util.spec_from_file_location('issue779_frozen_native_probe',p); require(spec is not None and spec.loader is not None,'import-spec')
+    m=importlib.util.module_from_spec(spec); sys.modules[spec.name]=m; spec.loader.exec_module(m); return m
+def runtime_helper():
+    """Load only the committed private runtime-copy helper, never caller code."""
+    p=Path(__file__).with_name('sealed-runtime.py')
+    spec=importlib.util.spec_from_file_location('issue779_sealed_runtime',p); require(spec is not None and spec.loader is not None,'runtime-import')
     m=importlib.util.module_from_spec(spec); sys.modules[spec.name]=m; spec.loader.exec_module(m); return m
 
 def baseline(n,t,s,i,a):
@@ -270,18 +300,27 @@ def save(output,n,b):
     with os.fdopen(f,'wb') as stream: stream.write(b)
 def run(source,build,output,selected_dotnet,tag):
     require(re.fullmatch('[0-9a-f]{32}',tag) is not None,'tag'); start=time.monotonic(); deadline=start+90; unit=f'issue779-existing-permissions-{tag}.service'; cg='/system.slice/'+unit; cpath=Path('/sys/fs/cgroup'+cg)
-    account=Accounts('i779p'+tag[:12]); owner=None; sf=tf=None; mounted=False; unmount_safe=False; created=False; copied=[]; failure=None; roles={}
-    work=Path('/opt/issue779-existing-permissions-'+tag)
+    account=Accounts('i779p'+tag[:12]); owner=None; runtime=None; sf=tf=None; mounted=False; unmount_safe=False; created=False; copied=[]; failure=None; roles={}
+    work=Path('/run/issue779-existing-permissions-'+tag)
     result={'schema':'issue779-existing-permissions-coverlet-mechanism-v1','mechanism_passed':False,'evidence_admission':False,'trusted_claim':False,'qualification_claim':False,'coverage_gate_claim':False,'launcher_sha256':LAUNCHER_SHA,'guard_seconds':90,'cleanup_guard_seconds':5}
     try:
-        require(os.geteuid()==0 and platform.system()=='Linux','root-linux'); os.umask(0o077); require(not os.path.lexists(output),'output-exists'); output.mkdir(mode=0o700)
-        f=directory(output,0,0,0o700); os.close(f); f=directory(Path('/opt'),0,0,0o755); os.close(f)
+        require(os.geteuid()==0 and platform.system()=='Linux','root-linux'); os.umask(0o077); require(not os.path.lexists(output),'output-exists')
+        result['directory_preflight']={'output':create_private_directory(output,0,0)}
+        result['directory_preflight']['host_parent']=directory_facts(os.lstat('/run'))
+        f=directory(output,0,0,0o700); os.close(f); f=directory(Path('/run'),0,0,0o755); os.close(f)
         release=kernel('/usr/lib/os-release',deadline,8192); require(b'ID=ubuntu' in release and b'VERSION_ID="24.04"' in release,'ubuntu')
         owner=Owner(deadline,unit); version=owner.command(['systemctl','--version'],deadline); require(re.match(rb'systemd 255(?:\s|\.)',version),'systemd-version')
-        launcher=helper(source); executable=dotnet(selected_dotnet); account.create(owner,deadline)
+        launcher=helper(source)
         work.mkdir(mode=0o711); os.chmod(work,0o711); created=True
         tool,subject,inaccessible,outer=(work/x for x in ('tool','source','test-output','output'))
         for p,mode in ((tool,0o555),(subject,0o555),(inaccessible,0o700),(outer,0o711)): p.mkdir(mode=mode); os.chmod(p,mode)
+        sealing=runtime_helper()
+        try: runtime=sealing.seal_runtime(selected_dotnet,work/'runtime',deadline)
+        except sealing.SealError as error:
+            # The helper supplies only its closed category, never native text/path.
+            result['runtime_copy_failure_category']=error.category
+            raise Failure('runtime-copy') from None
+        executable=dotnet(runtime.dotnet); result['sealed_runtime']=runtime.record; account.create(owner,deadline)
         anchor=outer/('run-'+tag[:12]); anchor.mkdir(mode=0o700); os.chown(anchor,UID,GID); os.chmod(anchor,0o700)
         session=anchor/'coverage-session'; session.mkdir(mode=0o700)
         owner.command(['mount','-t','tmpfs','-o','size=32M,nr_inodes=64,nosuid,nodev,noexec,uid=0,gid=65011,mode=1770','tmpfs',str(session)],deadline); mounted=True
@@ -370,6 +409,7 @@ def run(source,build,output,selected_dotnet,tag):
             except BaseException: clean=False
         if created and not mounted and clean:
             try:
+                if runtime is not None: runtime.cleanup(end)
                 for n in copied: left(end); os.unlink(tool/n)
                 for p in (tool,subject,inaccessible,session,anchor,outer,work): left(end); p.rmdir()
             except BaseException: clean=False

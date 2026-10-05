@@ -23,14 +23,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo /usr/bin/python3 -B tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/supervise-native.py --source-root "$GITHUB_WORKSPACE" --probe-build "$RUNNER_TEMP/issue779-probe-build/probe-build" --output "$RUNNER_TEMP/issue779-probe-result" --dotnet "$(readlink -f "$DOTNET_ROOT/dotnet")"
+          sudo /usr/bin/python3 -B tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/supervise-native.py --source-root "$GITHUB_WORKSPACE" --probe-build "$RUNNER_TEMP/issue779-probe-build/probe-build" --output /run/issue779-probe-result --dotnet "$(readlink -f "$DOTNET_ROOT/dotnet")"
       - name: Retain bounded mechanism receipts
         if: always()
         shell: bash
         run: |
           set -euo pipefail
           python3 -B tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/verify-inputs.py "$GITHUB_WORKSPACE"
-          sudo /usr/bin/python3 -B tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/export-result.py "$RUNNER_TEMP/issue779-probe-result" "$RUNNER_TEMP/issue779-probe-build" "$RUNNER_TEMP/issue779-probe-artifact.tar" "$(id -u)" "$(id -g)"
+          sudo /usr/bin/python3 -B tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/export-result.py /run/issue779-probe-result "$RUNNER_TEMP/issue779-probe-build" "$RUNNER_TEMP/issue779-probe-artifact.tar" "$(id -u)" "$(id -g)"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

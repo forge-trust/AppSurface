@@ -11262,11 +11262,11 @@
   "probe_files": {
     ".github/workflows/issue779-existing-permissions-coverage.yml": {
       "mode": "0644",
-      "sha256": "b145c3062c600c99fb4b3ee87f63ac28cea3461682e0cbf93af238e494c003e3"
+      "sha256": "ad57bdfa13d0eda97a3bfcdb79c0363831ca4c8d3aa4635e987f03e7cbf63387"
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/README.md": {
       "mode": "0644",
-      "sha256": "5d935083f03c86233760940e2998b962b3cb98de3bcd1261ac30e31e05a20a87"
+      "sha256": "9d37703c69c8f982b1700a426d84e86821c568fa6e25ed35e8a3b1a4047be9c0"
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/build-native-probe.py": {
       "mode": "0644",
@@ -11306,7 +11306,11 @@
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/run-native-probe.py": {
       "mode": "0644",
-      "sha256": "f65690442add96cdd88ae2d9a596e15bbd33fce6a91fcb4ddd71f8ef97e304fa"
+      "sha256": "d0779871d16e0655e1a0e3002e293c7ddb7327fd622438359d12642355529c36"
+    },
+    "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/sealed-runtime.py": {
+      "mode": "0644",
+      "sha256": "4dd0c3d9309918c54eec286c97d013597a0ca59c9452dc9d156b7a8fe7f9c438"
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/supervise-build.py": {
       "mode": "0644",
@@ -11318,7 +11322,11 @@
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/test_native_probe.py": {
       "mode": "0644",
-      "sha256": "c42bddf03c3ddc1caa8a0304d6fe8a33d3558d1ea44c0e4a875a2a256f9abc78"
+      "sha256": "367686d105a9aa8a7735618bb2a5af33a4d43d401d9579bc115498cd151ab06b"
+    },
+    "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/test_sealed_runtime.py": {
+      "mode": "0644",
+      "sha256": "9c7ebb9ddd334f617f4a64660dd68d144c44e6b83096ae08b726c7865e9ed069"
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/verify-inputs.py": {
       "mode": "0644",
