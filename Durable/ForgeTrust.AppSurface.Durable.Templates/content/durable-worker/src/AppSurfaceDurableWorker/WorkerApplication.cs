@@ -23,7 +23,9 @@ namespace AppSurfaceDurableWorker;
 /// followed by <see cref="StartAsync(WebApplication, CancellationToken)"/>. Build validates authentication before
 /// opening a database connection; startup then performs read-only schema, StoreId, and epoch checks before listening.
 /// The returned application owns the restricted data sources and OpenTelemetry provider and must be disposed by its
-/// caller. No worker service, migration, grant, or epoch mutation is started here.
+/// caller. Each built host receives a fresh privacy-safe worker identity so concurrent hosts have independent
+/// heartbeat and claim ownership, including when they share one process. No worker service, migration, grant,
+/// or epoch mutation is started here.
 /// </remarks>
 public static class WorkerApplication
 {
@@ -140,7 +142,8 @@ public static class WorkerApplication
                 dataSources.Dispatcher,
                 dataSources.Runtime,
                 new PostgreSqlDurableWorkOptions(settings.RuntimeEpoch, settings.StoreId),
-                new PostgreSqlDurableScheduleOptions(dataSources.RuntimeRole));
+                new PostgreSqlDurableScheduleOptions(dataSources.RuntimeRole),
+                options => options.WorkerId = $"template:{Guid.NewGuid():N}");
             builder.Services.AddDurableExternalActivation();
             TemplateTelemetry.Configure(builder.Services, settings.OtlpEndpoint);
 

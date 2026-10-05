@@ -47,6 +47,8 @@ Normal host startup validates authentication composition and settings before cre
 
 The wake route carries no Work, scope, lane, or effect identity in its body. Accept typed Work through the separate application-owned producer path, retain the acceptance receipt and authorized scope, then use the empty authenticated wake to ask the provider to attempt one Work-only pass. `Completed` describes a completed pump invocation and aggregate, not success of every Work item. Inspect persisted Work and effect evidence before deciding whether a retry is safe; Durable does not guarantee exactly-once external effects.
 
+Each built host assigns a new privacy-safe `template:<random GUID>` worker identity through the PostgreSQL registration options. This keeps concurrent hosts' heartbeat and claim ownership distinct even when they share one process. Restarting creates a new identity; it is neither a credential nor a stable application identifier. Stale rows remain subject to the existing [heartbeat retention procedure](../Durable/heartbeat-retention-operations.md); the template does not change that policy.
+
 ## Host routes and authorization
 
 | Route | Contract |

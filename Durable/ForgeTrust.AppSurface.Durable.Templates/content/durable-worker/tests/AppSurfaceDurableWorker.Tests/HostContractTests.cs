@@ -2,6 +2,7 @@ using AppSurfaceDurableWorker;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
+using System.Net.Sockets;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -11,11 +12,14 @@ using AppSurfaceDurableWorker.Work;
 using ForgeTrust.AppSurface.Durable;
 using ForgeTrust.AppSurface.Durable.PostgreSql;
 using ForgeTrust.AppSurface.Durable.Provider;
+using ForgeTrust.AppSurface.Observability;
 using ForgeTrust.AppSurface.Workers;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
@@ -28,6 +32,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
 using OpenTelemetry.Trace;
+using OpenTelemetry;
+using OpenTelemetry.Exporter;
 using Npgsql;
 
 namespace DurableWorkerTemplate.Tests;
@@ -627,6 +633,62 @@ public sealed class HostContractTests
         Assert.Equal(0, service.Calls);
     }
 
+    // Value: protects=real transport wake-body deadline before Durable access;
+    // fails_when=idle or unfinished chunked bodies bypass the configured deadline;
+    // why_new=direct contexts and TestServer cannot exercise Kestrel body reads; seam=none.
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData(null, true)]
+    [InlineData(1, false)]
+    [InlineData(1, true)]
+    public async Task Kestrel_idle_and_incomplete_chunked_bodies_obey_default_and_configured_deadlines(
+        int? bodyBudgetSeconds,
+        bool incompleteChunk)
+    {
+        var settings = bodyBudgetSeconds is null
+            ? ReadSettings().Activation
+            : ReadSettings(new Dictionary<string, string?>
+            {
+                ["DurableActivation:BodyReadBudgetSeconds"] = bodyBudgetSeconds.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            }).Activation;
+        var health = new MutableRuntimeHealth(HealthSnapshot(DurableRuntimeHealthState.Healthy));
+        await using var server = await CreateHttpServerAsync(health: health, settings: settings, useKestrel: true);
+        var address = server.Client.BaseAddress!;
+        using var deadline = new CancellationTokenSource(settings.BodyReadBudget + TimeSpan.FromSeconds(5));
+        using var socket = new TcpClient();
+        await socket.ConnectAsync(address.Host, address.Port, deadline.Token);
+        await using var stream = socket.GetStream();
+        var request = $"POST {ActivationPath} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {ValidToken}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+            + (incompleteChunk ? "10\r\n" : "");
+        var elapsed = Stopwatch.StartNew();
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(request), deadline.Token);
+        using var reader = new StreamReader(stream, Encoding.ASCII, leaveOpen: true);
+        var status = await reader.ReadLineAsync(deadline.Token);
+        Assert.Equal("HTTP/1.1 504 Gateway Timeout", status);
+        Assert.InRange(elapsed.Elapsed, settings.BodyReadBudget - TimeSpan.FromMilliseconds(500), settings.BodyReadBudget + TimeSpan.FromSeconds(5));
+        var response = new StringBuilder(status);
+        var buffer = new char[256];
+        while (!response.ToString().Contains("WakeBodyReadTimeout", StringComparison.Ordinal))
+        {
+            var count = await reader.ReadAsync(buffer.AsMemory(), deadline.Token);
+            Assert.True(count > 0, "Kestrel closed without the safe wake-body timeout response.");
+            response.Append(buffer, 0, count);
+            Assert.InRange(response.Length, 1, 2048);
+        }
+        Assert.DoesNotContain(SensitiveMarker, response.ToString(), StringComparison.Ordinal);
+        Assert.Equal(0, server.State.ActivationCalls);
+        Assert.Equal(0, health.Calls);
+        socket.Close();
+
+        // A subsequent empty wake still works: the stalled sender never acquired admission.
+        using var valid = new HttpRequestMessage(HttpMethod.Post, ActivationPath) { Content = new ByteArrayContent([]) };
+        valid.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", ValidToken);
+        using var control = await server.Client.SendAsync(valid, deadline.Token);
+        Assert.Equal(HttpStatusCode.OK, control.StatusCode);
+        Assert.Equal(1, server.State.ActivationCalls);
+        Assert.Equal(0, health.Calls);
+    }
+
     [Fact]
     public async Task Unknown_body_caller_abort_and_read_fault_map_to_fixed_safe_host_failure()
     {
@@ -966,6 +1028,83 @@ public sealed class HostContractTests
         }
     }
 
+    // Value: protects=template-owned canonical activity subscription and OTLP destination;
+    // fails_when=the source is removed or the configured destination is ignored;
+    // why_new=provider existence and fixture-added subscriptions mask these regressions; seam=none.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Template_telemetry_registration_exports_only_the_canonical_source(bool enableOtlp)
+    {
+        var services = new ServiceCollection();
+        var endpoint = enableOtlp ? new Uri("https://otel.example.test:4318/v1/traces") : null;
+        using var transport = new RecordingOtlpHandler();
+        services.Configure<OtlpExporterOptions>(options =>
+        {
+            options.Protocol = OtlpExportProtocol.HttpProtobuf;
+            options.ExportProcessorType = ExportProcessorType.Simple;
+            options.HttpClientFactory = () => new HttpClient(transport, disposeHandler: false);
+        });
+        TemplateTelemetry.Configure(services, endpoint);
+        var exporter = new SourceSubscriptionExporter();
+        services.AddOpenTelemetry().WithTracing(tracing => tracing.AddProcessor(new SimpleActivityExportProcessor(exporter)));
+        using var provider = services.BuildServiceProvider();
+        var tracing = provider.GetRequiredService<TracerProvider>();
+        using var canonical = new ActivitySource(AppSurfaceTelemetrySources.ActivitySourceName);
+        using var unrelated = new ActivitySource("unrelated-template-contract-source");
+        using (var activity = canonical.StartActivity("template-registration-contract"))
+        {
+            Assert.NotNull(activity);
+            Assert.True(activity.IsAllDataRequested);
+            Assert.True(activity.Recorded);
+        }
+        using (var ignored = unrelated.StartActivity("unrelated-registration-contract"))
+        {
+            Assert.Null(ignored);
+        }
+        Assert.True(tracing.ForceFlush(1000));
+        Assert.Equal((AppSurfaceTelemetrySources.ActivitySourceName, "template-registration-contract"), Assert.Single(exporter.Activities));
+        if (enableOtlp)
+        {
+            Assert.Equal(endpoint, Assert.Single(transport.Destinations));
+        }
+        else
+        {
+            Assert.Empty(transport.Destinations);
+        }
+    }
+
+    private sealed class RecordingOtlpHandler : HttpMessageHandler
+    {
+        internal ConcurrentQueue<Uri> Destinations { get; } = new();
+
+        protected override HttpResponseMessage Send(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Destinations.Enqueue(request.RequestUri!);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent([])
+            };
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(Send(request, cancellationToken));
+    }
+
+    private sealed class SourceSubscriptionExporter : BaseExporter<Activity>
+    {
+        internal ConcurrentQueue<(string Source, string Operation)> Activities { get; } = new();
+
+        public override ExportResult Export(in Batch<Activity> batch)
+        {
+            foreach (var activity in batch)
+            {
+                Activities.Enqueue((activity.Source.Name, activity.OperationName));
+            }
+            return ExportResult.Success;
+        }
+    }
+
     [Fact]
     public async Task Sample_work_executor_and_producer_validate_inputs_and_use_the_registered_typed_contract()
     {
@@ -1180,14 +1319,22 @@ public sealed class HostContractTests
         return builder;
     }
 
-    private static WebApplicationBuilder CreateBareTestBuilder(string environmentName = "Development")
+    private static WebApplicationBuilder CreateBareTestBuilder(string environmentName = "Development", bool useKestrel = false)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
             EnvironmentName = environmentName,
             ContentRootPath = AppContext.BaseDirectory,
         });
-        builder.WebHost.UseTestServer();
+        if (useKestrel)
+        {
+            builder.WebHost.UseKestrel(options => options.Limits.MinRequestBodyDataRate = null)
+                .UseUrls("http://127.0.0.1:0");
+        }
+        else
+        {
+            builder.WebHost.UseTestServer();
+        }
         return builder;
     }
 
@@ -1408,9 +1555,11 @@ public sealed class HostContractTests
 
     private static async Task<HttpTestServer> CreateHttpServerAsync(
         RecordingActivationService? activation = null,
-        MutableRuntimeHealth? health = null)
+        MutableRuntimeHealth? health = null,
+        ActivationSettings? settings = null,
+        bool useKestrel = false)
     {
-        var builder = CreateBareTestBuilder();
+        var builder = CreateBareTestBuilder(useKestrel: useKestrel);
         builder.Services.AddLogging();
         builder.Services
             .AddAuthentication(options =>
@@ -1437,7 +1586,7 @@ public sealed class HostContractTests
         app.UseAuthentication();
         app.Use(async (context, next) =>
         {
-            if (context.Request.Path.Equals(ActivationPath, StringComparison.Ordinal))
+            if (!useKestrel && context.Request.Path.Equals(ActivationPath, StringComparison.Ordinal))
             {
                 context.Request.Body = new TrackingReadStream(
                     [],
@@ -1458,9 +1607,16 @@ public sealed class HostContractTests
             await next();
         });
         app.UseAuthorization();
-        ActivationEndpoints.Map(app, TestActivationSettings());
+        ActivationEndpoints.Map(app, settings ?? TestActivationSettings());
         await app.StartAsync();
-        return new HttpTestServer(app, app.GetTestClient(), state);
+        var client = useKestrel
+            ? new HttpClient
+            {
+                BaseAddress = new Uri(Assert.Single(app.Services.GetRequiredService<IServer>()
+                    .Features.Get<IServerAddressesFeature>()!.Addresses)),
+            }
+            : app.GetTestClient();
+        return new HttpTestServer(app, client, state);
     }
 
     private sealed class HttpTestServer(WebApplication app, HttpClient client, HttpTestState state) : IAsyncDisposable

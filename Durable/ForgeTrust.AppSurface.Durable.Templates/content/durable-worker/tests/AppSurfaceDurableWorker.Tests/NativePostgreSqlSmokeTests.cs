@@ -7,7 +7,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using AppSurfaceDurableWorker;
+using ForgeTrust.AppSurface.Durable;
 using Npgsql;
+using NpgsqlTypes;
 using Xunit.Abstractions;
 using Microsoft.Extensions.Hosting;
 
@@ -31,7 +33,7 @@ public sealed class NativePostgreSqlSmokeTests
     [Trait("Category", "NativePostgreSql")]
     public async Task NativePostgreSqlSmoke()
     {
-        long cleanupStartedAt;
+        long cleanupStartedAt = 0;
         PostgreSqlFixture? fixture = null;
         NativeWorkerProcess? worker = null;
         string? primaryFailure = null;
@@ -79,6 +81,11 @@ public sealed class NativePostgreSqlSmokeTests
             Assert.Equal(
                 fixture.RoleCatalogBeforeHost,
                 await fixture.ReadRoleCatalogAsync(observation.Token));
+
+            // From the first possible outage mutation, restoration and teardown share the original cleanup bound.
+            cleanupStartedAt = Stopwatch.GetTimestamp();
+            await AssertOwnedStoreOutageAndRecoveryAsync(
+                fixture, adminConnection, worker, client, port, cleanupStartedAt, observation.Token);
             success = true;
         }
         catch (Exception exception)
@@ -87,7 +94,10 @@ public sealed class NativePostgreSqlSmokeTests
         }
         finally
         {
-            cleanupStartedAt = Stopwatch.GetTimestamp();
+            if (cleanupStartedAt == 0)
+            {
+                cleanupStartedAt = Stopwatch.GetTimestamp();
+            }
             List<Exception> cleanupFailures;
             try
             {
@@ -123,6 +133,7 @@ public sealed class NativePostgreSqlSmokeTests
         }
 
         Assert.True(success, "Native smoke reached neither a passing nor a failing terminal state.");
+        _output.WriteLine("[native-store-outage] unavailable readiness and restricted recovery passed");
         _output.WriteLine("[native-smoke] read-only ordinary startup passed");
     }
 
@@ -132,47 +143,105 @@ public sealed class NativePostgreSqlSmokeTests
         long cleanupStartedAt)
     {
         var failures = new List<Exception>();
+        var cleanupOperations = new SetupOperationLifetime();
         if (worker is not null)
         {
-            var remaining = FixtureBudgets.Cleanup - Stopwatch.GetElapsedTime(cleanupStartedAt);
-            if (remaining > TimeSpan.Zero)
-            {
-                try
-                {
-                    await worker.DisposeWithinBudgetAsync(remaining).ConfigureAwait(false);
-                }
-                catch (Exception exception)
-                {
-                    failures.Add(new InvalidOperationException($"ordinary-host-process-cleanup-{exception.GetType().Name}"));
-                }
-            }
-            else
-            {
-                failures.Add(new TimeoutException("ordinary-host-process-cleanup-budget-exhausted"));
-            }
+            await AttemptCleanupAsync("ordinary-host-process", worker.DisposeWithinBudgetAsync).ConfigureAwait(false);
         }
 
         if (fixture is not null)
         {
-            var remaining = FixtureBudgets.Cleanup - Stopwatch.GetElapsedTime(cleanupStartedAt);
-            if (remaining <= TimeSpan.Zero)
-            {
-                failures.Add(new TimeoutException("native-fixture-cleanup-budget-exhausted"));
-            }
-            else
-            {
-                try
-                {
-                    await fixture.DisposeWithinBudgetAsync(remaining).ConfigureAwait(false);
-                }
-                catch (Exception exception)
-                {
-                    failures.Add(new InvalidOperationException($"native-fixture-cleanup-{exception.GetType().Name}"));
-                }
-            }
+            await AttemptCleanupAsync("native-fixture", fixture.DisposeWithinBudgetAsync).ConfigureAwait(false);
+        }
+
+        if (cleanupOperations.PendingCount != 0)
+        {
+            failures.Add(new InvalidOperationException("native-owned-cleanup-unfinished"));
+        }
+        if (Stopwatch.GetElapsedTime(cleanupStartedAt) >= FixtureBudgets.Cleanup)
+        {
+            failures.Add(new TimeoutException("native-owned-cleanup-budget-exhausted"));
         }
 
         return failures;
+
+        async Task AttemptCleanupAsync(string resource, Func<TimeSpan, Task> dispose)
+        {
+            var remaining = FixtureBudgets.Cleanup - Stopwatch.GetElapsedTime(cleanupStartedAt);
+            using var observation = new CancellationTokenSource();
+            if (remaining <= TimeSpan.Zero)
+            {
+                failures.Add(new TimeoutException($"{resource}-cleanup-budget-exhausted"));
+                // Invoke disposal even after expiry, without renewing the caller's observation window.
+                observation.Cancel();
+            }
+            else
+            {
+                observation.CancelAfter(remaining);
+            }
+
+            try
+            {
+                // Bound factory invocation too, and retain observation of any late cleanup fault.
+                await cleanupOperations.AwaitAsync(resource, () =>
+                {
+                    var sharedRemaining = FixtureBudgets.Cleanup - Stopwatch.GetElapsedTime(cleanupStartedAt);
+                    // The minimum satisfies the disposal API; the outer observation still uses the original deadline.
+                    return dispose(TimeSpan.FromMilliseconds(Math.Max(1, sharedRemaining.TotalMilliseconds)));
+                }, observation.Token).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                failures.Add(new InvalidOperationException($"{resource}-cleanup-{exception.GetType().Name}"));
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Expired_cleanup_observation_invokes_each_factory_and_retains_late_faults()
+    {
+        var lifetime = new SetupOperationLifetime();
+        var workerEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fixtureEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var workerCleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fixtureCleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var observation = new CancellationTokenSource();
+        observation.Cancel();
+
+        try
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => lifetime.AwaitAsync(
+                "ordinary-host-process", () =>
+                {
+                    workerEntered.TrySetResult();
+                    return workerCleanup.Task;
+                }, observation.Token));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => lifetime.AwaitAsync(
+                "native-fixture", () =>
+                {
+                    fixtureEntered.TrySetResult();
+                    return fixtureCleanup.Task;
+                }, observation.Token));
+
+            await Task.WhenAll(workerEntered.Task, fixtureEntered.Task).WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.Equal(2, lifetime.PendingCount);
+            workerCleanup.SetException(new IOException("late owned worker cleanup failure"));
+            fixtureCleanup.SetException(new IOException("late owned fixture cleanup failure"));
+            var failures = new List<string>();
+            Assert.True(await lifetime.StopAndObservePendingAsync(
+                stopOwnerAsync: null, TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(100), failures));
+            Assert.Empty(failures);
+            using var settled = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+            while (lifetime.PendingCount != 0)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(1), settled.Token);
+            }
+        }
+        finally
+        {
+            workerCleanup.TrySetResult();
+            fixtureCleanup.TrySetResult();
+        }
     }
 
     private static async Task<JsonDocument> ReadJsonAsync(HttpResponseMessage response, CancellationToken cancellationToken)
@@ -180,6 +249,169 @@ public sealed class NativePostgreSqlSmokeTests
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         Assert.InRange(Encoding.UTF8.GetByteCount(body), 1, 1024);
         return JsonDocument.Parse(body);
+    }
+
+    private static async Task AssertOwnedStoreOutageAndRecoveryAsync(
+        PostgreSqlFixture fixture,
+        string bootstrapConnectionString,
+        NativeWorkerProcess worker,
+        HttpClient client,
+        int port,
+        long cleanupStartedAt,
+        CancellationToken observationToken)
+    {
+        var bootstrap = new NpgsqlConnectionStringBuilder(bootstrapConnectionString);
+        var owned = new NpgsqlConnectionStringBuilder(fixture.Administrator.ConnectionString);
+        var runtime = new NpgsqlConnectionStringBuilder(fixture.RuntimeConnectionString);
+        var dispatcher = new NpgsqlConnectionStringBuilder(fixture.DispatcherConnectionString);
+        var database = owned.Database;
+        if (database is null || !database.StartsWith("appsurface_", StringComparison.Ordinal)
+            || !Guid.TryParseExact(database["appsurface_".Length..], "N", out _)
+            || database == bootstrap.Database || bootstrap.Database != "postgres"
+            || bootstrap.Host != "127.0.0.1" || bootstrap.Username != "postgres"
+            || owned.Host != bootstrap.Host || owned.Port != bootstrap.Port || owned.Username != bootstrap.Username
+            || runtime.Host != owned.Host || runtime.Port != owned.Port || runtime.Database != database
+            || dispatcher.Host != owned.Host || dispatcher.Port != owned.Port || dispatcher.Database != database
+            || !string.Equals(fixture.DatabaseIdentitySha256,
+                Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(database))), StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Native outage requires the exact fixture-owned database and loopback owner identity.");
+        }
+
+        await using var owner = await fixture.Administrator.OpenConnectionAsync(observationToken).ConfigureAwait(false);
+        uint databaseOid;
+        int originalConnectionLimit;
+        await using (var identity = new NpgsqlCommand("""
+            SELECT d.oid, d.datconnlimit, current_database(), current_user, session_user,
+                   current_setting('port')::integer, d.datdba = r.oid AND r.rolsuper
+            FROM pg_catalog.pg_database d
+            JOIN pg_catalog.pg_roles r ON r.rolname = current_user
+            WHERE d.datname = current_database() AND d.datname = @database_name;
+            """, owner))
+        {
+            identity.Parameters.AddWithValue("database_name", database);
+            await using var reader = await identity.ExecuteReaderAsync(observationToken).ConfigureAwait(false);
+            Assert.True(await reader.ReadAsync(observationToken).ConfigureAwait(false));
+            databaseOid = reader.GetFieldValue<uint>(0);
+            originalConnectionLimit = reader.GetInt32(1);
+            Assert.Equal(database, reader.GetString(2));
+            Assert.Equal(owned.Username, reader.GetString(3));
+            Assert.Equal(owned.Username, reader.GetString(4));
+            Assert.Equal(owned.Port, reader.GetInt32(5));
+            Assert.True(reader.GetBoolean(6), "Native outage connection must own the exact isolated fixture database.");
+            Assert.InRange(originalConnectionLimit, -1, int.MaxValue);
+            Assert.NotEqual(0, originalConnectionLimit);
+            Assert.False(await reader.ReadAsync(observationToken).ConfigureAwait(false));
+        }
+
+        try
+        {
+            // The dedicated superuser connection remains available for restoration. Only this database is denied.
+            await SetOwnedDatabaseConnectionLimitAsync(owner, database, databaseOid, 0, observationToken);
+            await using (var terminate = new NpgsqlCommand("""
+                SELECT COALESCE(bool_and(pg_terminate_backend(pid)), true)
+                FROM pg_catalog.pg_stat_activity
+                WHERE datid = @database_oid AND pid <> pg_backend_pid();
+                """, owner))
+            {
+                terminate.Parameters.AddWithValue("database_oid", NpgsqlDbType.Oid, databaseOid);
+                Assert.True(Assert.IsType<bool>(await terminate.ExecuteScalarAsync(observationToken).ConfigureAwait(false)));
+            }
+
+            await using (var restricted = new NpgsqlConnection(fixture.RuntimeConnectionString))
+            {
+                var failure = await Assert.ThrowsAsync<PostgresException>(() => restricted.OpenAsync(observationToken));
+                Assert.Equal(PostgresErrorCodes.TooManyConnections, failure.SqlState);
+            }
+
+            worker.ThrowIfExited();
+            await AssertLiveAsync(client, port, observationToken);
+            using var readiness = await client.GetAsync($"http://127.0.0.1:{port}/ready", observationToken);
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, readiness.StatusCode);
+            using var readinessJson = await ReadJsonAsync(readiness, observationToken);
+            var assessment = readinessJson.RootElement;
+            Assert.Equal("Assessment", assessment.GetProperty("outcome").GetString());
+            Assert.Equal("Unavailable", assessment.GetProperty("observedHealthState").GetString());
+            Assert.Equal(DurableProblemCodes.StoreUnavailable, assessment.GetProperty("problemCode").GetString());
+            Assert.False(assessment.GetProperty("canEnableActivation").GetBoolean());
+            Assert.False(assessment.GetProperty("isReady").GetBoolean());
+            await AssertLiveAsync(client, port, observationToken);
+        }
+        finally
+        {
+            // Do not use the canceled observation token: restore even when an outage assertion failed.
+            var remaining = FixtureBudgets.Cleanup - Stopwatch.GetElapsedTime(cleanupStartedAt);
+            if (remaining <= TimeSpan.Zero)
+            {
+                throw new TimeoutException("native-outage-restoration-budget-exhausted");
+            }
+            using var restoration = new CancellationTokenSource(
+                remaining < FixtureBudgets.NativeObservation ? remaining : FixtureBudgets.NativeObservation);
+            // A canceled database command can break its connection. Reconnect as the verified fixture owner,
+            // which is exempt from the restricted-client limit, rather than relying on that connection's state.
+            await using var restoringOwner = await fixture.Administrator.OpenConnectionAsync(restoration.Token).ConfigureAwait(false);
+            await SetOwnedDatabaseConnectionLimitAsync(
+                restoringOwner, database, databaseOid, originalConnectionLimit, restoration.Token);
+
+            remaining = FixtureBudgets.Cleanup - Stopwatch.GetElapsedTime(cleanupStartedAt);
+            if (remaining <= TimeSpan.Zero)
+            {
+                throw new TimeoutException("native-outage-recovery-budget-exhausted");
+            }
+            using var recovery = new CancellationTokenSource(
+                remaining < FixtureBudgets.NativeObservation ? remaining : FixtureBudgets.NativeObservation);
+            await using (var restricted = new NpgsqlConnection(fixture.RuntimeConnectionString))
+            {
+                await restricted.OpenAsync(recovery.Token).ConfigureAwait(false);
+                await using var probe = new NpgsqlCommand("SELECT current_database(), current_user;", restricted);
+                await using var reader = await probe.ExecuteReaderAsync(recovery.Token).ConfigureAwait(false);
+                Assert.True(await reader.ReadAsync(recovery.Token).ConfigureAwait(false));
+                Assert.Equal(database, reader.GetString(0));
+                Assert.Equal(fixture.RuntimeRole, reader.GetString(1));
+            }
+
+            worker.ThrowIfExited();
+            await AssertLiveAsync(client, port, recovery.Token);
+            using var readiness = await client.GetAsync($"http://127.0.0.1:{port}/ready", recovery.Token);
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, readiness.StatusCode);
+            using var readinessJson = await ReadJsonAsync(readiness, recovery.Token);
+            AssertAssessment(readinessJson.RootElement, canEnableActivation: true);
+            Assert.NotEqual(DurableProblemCodes.StoreUnavailable,
+                readinessJson.RootElement.GetProperty("problemCode").GetString());
+            Assert.Equal(fixture.DurableCatalogBeforeHost, await fixture.ReadDurableCatalogAsync(recovery.Token));
+            Assert.Equal(fixture.RoleCatalogBeforeHost, await fixture.ReadRoleCatalogAsync(recovery.Token));
+        }
+    }
+
+    private static async Task SetOwnedDatabaseConnectionLimitAsync(
+        NpgsqlConnection owner, string database, uint databaseOid, int connectionLimit, CancellationToken cancellationToken)
+    {
+        await using var format = new NpgsqlCommand("""
+            SELECT format('ALTER DATABASE %I CONNECTION LIMIT %s', datname, @connection_limit)
+            FROM pg_catalog.pg_database
+            WHERE oid = @database_oid AND datname = @database_name AND datname = current_database();
+            """, owner);
+        format.Parameters.AddWithValue("connection_limit", connectionLimit);
+        format.Parameters.AddWithValue("database_oid", NpgsqlDbType.Oid, databaseOid);
+        format.Parameters.AddWithValue("database_name", database);
+        var sql = Assert.IsType<string>(await format.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
+        await using var alter = new NpgsqlCommand(sql, owner);
+        await alter.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await using var verify = new NpgsqlCommand("""
+            SELECT datconnlimit FROM pg_catalog.pg_database
+            WHERE oid = @database_oid AND datname = @database_name AND datname = current_database();
+            """, owner);
+        verify.Parameters.AddWithValue("database_oid", NpgsqlDbType.Oid, databaseOid);
+        verify.Parameters.AddWithValue("database_name", database);
+        Assert.Equal(connectionLimit, Assert.IsType<int>(await verify.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)));
+    }
+
+    private static async Task AssertLiveAsync(HttpClient client, int port, CancellationToken cancellationToken)
+    {
+        using var live = await client.GetAsync($"http://127.0.0.1:{port}/live", cancellationToken);
+        Assert.Equal(HttpStatusCode.OK, live.StatusCode);
+        using var liveJson = await ReadJsonAsync(live, cancellationToken);
+        Assert.Equal("Live", liveJson.RootElement.GetProperty("status").GetString());
     }
 
     private static void AssertAssessment(JsonElement response, bool canEnableActivation)
