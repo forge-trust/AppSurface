@@ -26,7 +26,7 @@ static async Task CleanupTimeoutShouldInvalidateClaimWithoutLeakingDiagnosticAsy
         Require(manifest.ClaimKind == EvidenceClaimKind.None, "An incomplete cleanup retained an evidence claim.");
         Require(!manifest.Metrics.CleanupCompleted, "The manifest reported incomplete cleanup as completed.");
         Require(manifest.Metrics.CleanupDiagnostic == "Evidence cleanup timed out stopping/joining/disposing producer 'cleanup-hang'; owned work may remain active.", "The cleanup diagnostic was not the expected safe, bounded message.");
-        Require(!manifest.Metrics.CleanupDiagnostic.Contains("private-payload", StringComparison.Ordinal), "The cleanup diagnostic leaked producer data.");
+        Require(!manifest.Metrics.CleanupDiagnostic!.Contains("private-payload", StringComparison.Ordinal), "The cleanup diagnostic leaked producer data.");
         Require(timer.Elapsed <= TimeSpan.FromSeconds(3), "The run did not reach terminal output within three seconds.");
         Console.WriteLine("PASS manifest: producer passed, claim none, cleanup incomplete, safe diagnostic, terminal <= 3s");
     }

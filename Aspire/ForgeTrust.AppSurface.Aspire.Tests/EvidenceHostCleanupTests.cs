@@ -227,6 +227,72 @@ public sealed class EvidenceHostCleanupTests
     }
 
     [Fact]
+    public async Task DisposeAsync_ShouldReportExhaustedTotalBudgetBeforeStartingAnotherOwner()
+    {
+        var clock = new AdvancingTimeProvider();
+        var remainingDisposals = 0;
+        var completedDisposals = 0;
+        var allowance = TimeSpan.FromSeconds(1);
+        var host = EvidenceHostBootstrap.Create(CreatePlan("remaining", "completed"), registration =>
+        {
+            registration.AddProducer(new DisposableProducer("remaining", () => remainingDisposals++));
+            registration.AddProducer(new DisposableProducer("completed", () =>
+            {
+                completedDisposals++;
+                clock.Advance(allowance);
+            }));
+        }, Options(cleanupTimeout: allowance), clock);
+
+        var failure = await Assert.ThrowsAsync<EvidenceHostException>(() => host.DisposeAsync().AsTask());
+
+        Assert.Equal("ASEVD306", failure.Code);
+        Assert.Contains("before all registrations settled", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(1, completedDisposals);
+        Assert.Equal(0, remainingDisposals);
+        var repeated = await Assert.ThrowsAsync<EvidenceHostException>(() => host.DisposeAsync().AsTask());
+        Assert.Equal("ASEVD306", repeated.Code);
+        Assert.Equal(1, completedDisposals);
+        Assert.Equal(0, remainingDisposals);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_ShouldBoundAndSanitizeRegistrationDiagnosticWithoutExceptionPayload()
+    {
+        var id = "AZaz09-_.\n/é" + new string('x', 90) + "private-id-tail";
+        var safeId = "AZaz09-_.___" + new string('x', 68);
+        var host = EvidenceHostBootstrap.Create(CreatePlan(id), registration =>
+            registration.AddProducer(new DisposableProducer(id, () => throw new InvalidOperationException("private-error-payload"))));
+
+        var failure = await Assert.ThrowsAsync<EvidenceHostException>(() => host.DisposeAsync().AsTask());
+
+        Assert.Equal("ASEVD306", failure.Code);
+        Assert.Equal($"Evidence cleanup failed for producer '{safeId}' with InvalidOperationException.", host.CleanupDiagnostic);
+        Assert.DoesNotContain("private-id-tail", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("private-error-payload", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain('\n', host.CleanupDiagnostic!);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldJoinBothCallbacksAndDisposeSharedRegistrationOnce()
+    {
+        var owner = new SharedResourceProducer();
+        var plan = CreatePlanWithResources([owner.Id], [new EvidenceResourceDeclaration(owner.Id, "completion", 30, [])], [owner.Id]);
+        await using var host = EvidenceHostBootstrap.Create(plan, registration =>
+        {
+            registration.AddResource(owner);
+            registration.AddProducer(owner);
+        });
+
+        var manifest = await host.RunAsync();
+
+        Assert.True(manifest.Metrics.CleanupCompleted);
+        Assert.Equal(EvidenceProducerOutcome.Passed, Assert.Single(manifest.ProducerResults).Outcome);
+        Assert.Equal(1, owner.ReadinessCount);
+        Assert.Equal(1, owner.ProductionCount);
+        Assert.Equal(1, owner.DisposeCount);
+    }
+
+    [Fact]
     public async Task CleanAsync_ShouldRetainDependencyOfFailedOwnerAndStillDisposeUnrelatedResource()
     {
         var dependent = new DisposableReadyResource("dependent");
@@ -512,6 +578,37 @@ public sealed class EvidenceHostCleanupTests
 
         public virtual ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken) =>
             ValueTask.FromResult(new EvidenceProducerResult(Id, EvidenceProducerOutcome.Passed, [$"{Id}/assertion@1"]));
+    }
+
+    private sealed class DisposableProducer(string id, Action dispose) : PassingProducer(id), IDisposable
+    {
+        public void Dispose() => dispose();
+    }
+
+    private sealed class AdvancingTimeProvider : TimeProvider
+    {
+        private long _timestamp;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => Interlocked.Read(ref _timestamp);
+        public void Advance(TimeSpan elapsed) => Interlocked.Add(ref _timestamp, elapsed.Ticks);
+    }
+
+    private sealed class SharedResourceProducer() : PassingProducer("shared"), IEvidenceResourceReadiness, IDisposable
+    {
+        public int ReadinessCount { get; private set; }
+        public int ProductionCount { get; private set; }
+        public int DisposeCount { get; private set; }
+        public Task WaitUntilReadyAsync(CancellationToken cancellationToken)
+        {
+            ReadinessCount++;
+            return Task.CompletedTask;
+        }
+        public override ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
+        {
+            ProductionCount++;
+            return base.ProduceAsync(context, cancellationToken);
+        }
+        public void Dispose() => DisposeCount++;
     }
 
     private sealed class GatedProducer(string id) : PassingProducer(id), IAsyncDisposable
