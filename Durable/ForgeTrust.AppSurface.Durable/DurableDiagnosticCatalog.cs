@@ -22,7 +22,7 @@ public static class DurableDiagnosticCatalog
         DurableProblemCodes.RecoveryEpochRequired,
         "Recovery epoch required",
         "The configured runtime epoch differs from the active store epoch.",
-        "Perform authorized epoch initialization or rotation before enabling the worker host.",
+        "Compare the configured runtime epoch with the deployed host configuration and correct an unintended mismatch. Initialize or rotate the store epoch only when reviewed recovery requires it, before enabling the worker host.",
         Documentation("asdur108-recovery-epoch-required"));
 
     private static readonly DurableDiagnosticDescriptor SchemaMissing = new(

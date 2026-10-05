@@ -6,6 +6,7 @@ Run: python3 -m unittest discover -s examples/durable-external-activation -p 'te
 import contextlib
 import copy
 import io
+import json
 from pathlib import Path
 import runpy
 import unittest
@@ -76,11 +77,45 @@ class DoctorReportConsumerTests(unittest.TestCase):
         self.report.update(status="unavailable", exitCode=4)
         self.report["requestedChecks"][0]["status"] = "not-checked"
         self.report["findings"] = [{"code": "ASDUR414"}]
-        self.report["nextAction"] = {"kind": "command", "command": {"argv": ["durable", "doctor"]}}
+        self.report["nextAction"] = {
+            "kind": "command",
+            "command": {"executable": "appsurface", "arguments": ["durable", "doctor"]},
+        }
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             self.assertEqual(4, consume(self.report, 4))
-        self.assertIn("ASDUR414", output.getvalue())
+        self.assertEqual({"codes": ["ASDUR414"], "nextAction": self.report["nextAction"]}, json.loads(output.getvalue()))
+
+    def test_nonzero_result_rejects_malformed_command_before_printing(self):
+        malformed_commands = [
+            None,
+            [],
+            {},
+            {"argv": ["durable", "doctor"]},
+            {"executable": "appsurface"},
+            {"executable": None, "arguments": []},
+            {"executable": 1, "arguments": []},
+            {"executable": "other", "arguments": []},
+            {"arguments": ["durable", "doctor"]},
+            {"executable": "appsurface", "arguments": None},
+            {"executable": "appsurface", "arguments": "durable doctor"},
+            {"executable": "appsurface", "arguments": ["durable", 1]},
+            {"executable": "appsurface", "arguments": ["durable", None]},
+            {"executable": "appsurface", "arguments": ["durable", True]},
+            {"executable": "appsurface", "arguments": ["durable", []]},
+            {"executable": "appsurface", "arguments": ["durable", {}]},
+            {"executable": "appsurface", "arguments": ["argument"] * 15},
+        ]
+        for command in malformed_commands:
+            with self.subTest(command=command):
+                report = copy.deepcopy(self.report)
+                report.update(status="unavailable", exitCode=4, findings=[{"code": "ASDUR103"}])
+                report["nextAction"] = {"kind": "command", "command": command}
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    with self.assertRaisesRegex(ValueError, "command"):
+                        consume(report, 4)
+                self.assertEqual("", output.getvalue())
 
     def test_exit_mismatch_and_unsupported_version_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "exit disagree"):

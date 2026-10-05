@@ -31,7 +31,7 @@ Problem: Recovery epoch required
 
 Cause: The configured runtime epoch differs from the active store epoch.
 
-Fix: Perform authorized epoch initialization or rotation before enabling the worker host.
+Fix: Compare the configured runtime epoch with the deployed host configuration and correct an unintended mismatch. Initialize or rotate the store epoch only when reviewed recovery requires it, before enabling the worker host.
 
 ### ASDUR400 Durable schema is missing
 
@@ -355,7 +355,7 @@ before any bounded retry.
 | `ASDUR104` | Claim lost | Read current Work truth; never execute or complete with the stale claim. |
 | `ASDUR105` | Lease lost | Stop the attempt; it cannot acquire a permit or change current Work. |
 | `ASDUR107` | Scope disabled | Treat the scope as a permanent tombstone; do not recreate it. |
-| [`ASDUR108`](#asdur108-recovery-epoch-required) | Recovery epoch required | Perform authorized epoch initialization or rotation before enabling the worker host. |
+| [`ASDUR108`](#asdur108-recovery-epoch-required) | Recovery epoch required | Compare the configured runtime epoch with the deployed host configuration and correct an unintended mismatch. Initialize or rotate the store epoch only when reviewed recovery requires it, before enabling the worker host. |
 | `ASDUR119` | Work discovery contract selection unavailable | Worker activation could not snapshot complete custom registry contracts | Correct `RegisteredContracts` and restart the host |
 | `ASDUR200` | Flow definition unavailable | Register required flow definition and version before starting or resuming instance. |
 | `ASDUR201` | Flow history incompatible | Definition fingerprint or step code changed; suspend instance and perform explicit migration. |
@@ -404,7 +404,7 @@ five-character SQLSTATE. Never log or serialize inner message text, detail, hint
 | [`ASDUR404`](#asdur404-initial-heartbeat-not-observed-or-activator-stale) | Initial heartbeat not observed or activator stale | NotStarted may mean the first worker heartbeat is absent; Stale means the observed heartbeat or sweep exceeded HeartbeatStaleAfter. | For NotStarted, treat it as a compatible initial assessment and follow the host's activation policy. For Stale, inspect the configured runtime and role/schema prerequisites. The health probe preserves the observed code; activation results retain it only for Stale. |
 | `ASDUR405` | Worker identity conflict | Another live process owns the configured `WorkerId`, an old generation updated after takeover, or the same runtime instance already has an active pass | Assign a unique worker ID per replica, wait for stale/drain takeover rules, avoid overlapping local activation, and never edit the heartbeat row manually. |
 | [`ASDUR400`](#asdur400-durable-schema-is-missing)–[`ASDUR403`](#asdur403-durable-schema-history-is-inconsistent) | Incompatible runtime store | Missing, pending, unsupported, or inconsistent migration state | Apply reviewed migrations with the migration owner, rerun the role recipe, and deploy compatible code; startup intentionally performs no DDL. See each code's canonical entry for its specific action. |
-| [`ASDUR108`](#asdur108-recovery-epoch-required) | Recovery epoch required | The configured runtime epoch differs from the active store epoch. | Perform authorized epoch initialization or rotation before enabling the worker host. |
+| [`ASDUR108`](#asdur108-recovery-epoch-required) | Recovery epoch required | The configured runtime epoch differs from the active store epoch. | Compare the configured runtime epoch with the deployed host configuration and correct an unintended mismatch. Initialize or rotate the store epoch only when reviewed recovery requires it, before enabling the worker host. |
 | [`ASDUR408`](#asdur408-restricted-runtime-credential-required) | Restricted runtime credential required | The connected role has a prohibited attribute, membership, ownership, grant option, or heartbeat-table privilege. | Use a dedicated restricted LOGIN runtime credential and complete the reviewed runtime-role preflight; do not use a migration owner. |
 | [`ASDUR409`](#asdur409-heartbeat-retention-capability-unavailable) | Heartbeat-retention capability unavailable | The retention function, its required permissions or configuration, or the retention index is missing or does not meet the schema 0011 contract. | Review the schema 0011 retention function and index contract, apply an authorized repair, then rerun doctor and complete runtime preflight. |
 | [`ASDUR410`](#asdur410-no-retained-heartbeat-for-the-selected-worker) | No retained heartbeat for the selected worker | No retained heartbeat matches the selected worker ID; the worker may not have started, the ID may differ, or retention may have removed the row. | Verify the configured worker ID and host activation policy; rerun doctor after the worker records a heartbeat. |

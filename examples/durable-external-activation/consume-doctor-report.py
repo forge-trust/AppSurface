@@ -54,8 +54,13 @@ def consume(report, process_exit):
             raise ValueError("Invalid application verifier handoff.")
         print("Store/runtime checks passed. Supply and run your application's composition verifier.")
     else:
-        if action.get("kind") != "command" or type(action.get("command")) is not dict:
+        command = action.get("command")
+        if action.get("kind") != "command" or type(command) is not dict:
             raise ValueError("A doctor finding must supply its next command.")
+        if command.get("executable") != "appsurface" or type(command.get("arguments")) is not list:
+            raise ValueError("Invalid doctor command shape.")
+        if len(command["arguments"]) > 14 or any(type(argument) is not str for argument in command["arguments"]):
+            raise ValueError("Invalid doctor command arguments.")
         for finding in findings:
             if type(finding) is not dict or type(finding.get("code")) is not str:
                 raise ValueError("Invalid doctor finding.")

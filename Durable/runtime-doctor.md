@@ -41,7 +41,7 @@ Use your actual host threshold and a non-secret operator-chosen worker label in 
 | `--timeout` | `10s`; inclusive 1 second–2 minutes, including connection, fence wait, reads and cleanup. |
 | `--format` | `text`; only `text` or `json`. |
 
-Durations use positive decimal numbers with lowercase `ms`, `s`, `m`, `h`, invariant culture, exact TimeSpan ticks and at most 64 characters. Signs, exponents, overflow, sub-tick values, controls and nonfinite numbers fail. Duplicate or unknown flags, missing values and positional arguments fail before database access. There are no literal connection/epoch arguments, file fallbacks or prompts. Environment values are resolved once and are never printed. Custom names replace the defaults and remain in retry/status actions so the next command targets the same selected store.
+Durations use positive decimal numbers with lowercase `ms`, `s`, `m`, `h`, invariant culture, exact TimeSpan ticks and at most 64 characters. Signs, exponents, overflow, sub-tick values, controls and nonfinite numbers fail. Duplicate or unknown flags, missing values and positional arguments fail before database access. There are no literal connection/epoch arguments, file fallbacks or prompts. Environment values are resolved once. The connection value is never printed; the selected runtime epoch appears in the report as a GUID. Custom names replace the defaults and remain in retry/status actions so the next command targets the same selected store.
 
 | Exit | Meaning | Next step |
 | --- | --- | --- |

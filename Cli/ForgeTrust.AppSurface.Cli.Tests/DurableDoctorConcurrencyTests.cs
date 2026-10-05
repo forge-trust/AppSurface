@@ -13,6 +13,37 @@ public sealed class DurableDoctorConcurrencyTests
     private static readonly TimeSpan TestLimit = TimeSpan.FromSeconds(20);
 
     [Theory]
+    [InlineData(long.MinValue)]
+    [InlineData(-1L)]
+    [InlineData(0L)]
+    [InlineData(long.MaxValue)]
+    [InlineData(DurableDoctorService.MigrationAdvisoryLock)]
+    public async Task Release_check_observes_signed_bigint_keys_and_ignores_two_integer_keys(long key)
+    {
+        await using var fixture = await DurableDoctorFixture.CreateAsync();
+        await using var connection = new NpgsqlConnection(fixture.AdministrativeConnectionString);
+        await connection.OpenAsync();
+        using var deadline = new CancellationTokenSource(TestLimit);
+        await using var acquire = new NpgsqlCommand("SELECT pg_catalog.pg_advisory_lock(@key)", connection);
+        acquire.Parameters.AddWithValue("key", key);
+        await acquire.ExecuteNonQueryAsync(deadline.Token);
+        await using var released = CreateReleaseCheckCommand(connection, "doctor-release-probe", key);
+        Assert.False((bool)(await released.ExecuteScalarAsync(deadline.Token))!);
+
+        await using var unlock = new NpgsqlCommand("SELECT pg_catalog.pg_advisory_unlock(@key)", connection);
+        unlock.Parameters.AddWithValue("key", key);
+        Assert.True((bool)(await unlock.ExecuteScalarAsync(deadline.Token))!);
+        Assert.True((bool)(await released.ExecuteScalarAsync(deadline.Token))!);
+
+        // The same halves in the two-integer namespace must not look like a retained bigint fence.
+        await using var pair = new NpgsqlCommand("SELECT pg_catalog.pg_advisory_lock(@high, @low)", connection);
+        pair.Parameters.AddWithValue("high", unchecked((int)(key >> 32)));
+        pair.Parameters.AddWithValue("low", unchecked((int)key));
+        await pair.ExecuteNonQueryAsync(deadline.Token);
+        Assert.True((bool)(await released.ExecuteScalarAsync(deadline.Token))!);
+    }
+
+    [Theory]
     [InlineData((int)DurableDoctorStage.Open)]
     [InlineData((int)DurableDoctorStage.Fence)]
     [InlineData((int)DurableDoctorStage.Credential)]
@@ -413,18 +444,24 @@ public sealed class DurableDoctorConcurrencyTests
         using var deadline = new CancellationTokenSource(TestLimit);
         while (true)
         {
-            await using var command = new NpgsqlCommand("""
-                SELECT NOT EXISTS(SELECT 1 FROM pg_catalog.pg_stat_activity WHERE application_name=@name)
-                  AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_locks
-                      WHERE locktype='advisory'
-                        AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
-                        AND classid::bigint=(@key >> 32) AND objid::bigint=(@key & 4294967295))
-                """, connection);
-            command.Parameters.AddWithValue("name", applicationName);
-            command.Parameters.AddWithValue("key", DurableDoctorService.MigrationAdvisoryLock);
+            await using var command = CreateReleaseCheckCommand(connection, applicationName, DurableDoctorService.MigrationAdvisoryLock);
             if (await command.ExecuteScalarAsync(deadline.Token) is true) return;
             await Task.Delay(TimeSpan.FromMilliseconds(10), deadline.Token);
         }
+    }
+
+    private static NpgsqlCommand CreateReleaseCheckCommand(NpgsqlConnection connection, string applicationName, long key)
+    {
+        var command = new NpgsqlCommand("""
+            SELECT NOT EXISTS(SELECT 1 FROM pg_catalog.pg_stat_activity WHERE application_name=@name)
+              AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_locks
+                  WHERE locktype='advisory' AND objsubid=1
+                    AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+                    AND classid::bigint=((@key >> 32) & 4294967295) AND objid::bigint=(@key & 4294967295))
+            """, connection);
+        command.Parameters.AddWithValue("name", applicationName);
+        command.Parameters.AddWithValue("key", key);
+        return command;
     }
 
     /// <summary>Uses the repository's manual-timer pattern to expire owned deadlines deterministically.</summary>
