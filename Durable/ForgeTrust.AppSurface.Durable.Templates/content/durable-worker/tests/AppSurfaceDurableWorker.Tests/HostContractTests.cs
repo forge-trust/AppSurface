@@ -1,12 +1,12 @@
-using AppSurfaceDurableWorker;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Claims;
 using System.Text;
-using System.Text.Json;
 using System.Text.Encodings.Web;
+using System.Text.Json;
+using AppSurfaceDurableWorker;
 using AppSurfaceDurableWorker.Hosting;
 using AppSurfaceDurableWorker.Work;
 using ForgeTrust.AppSurface.Durable;
@@ -31,10 +31,10 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
-using OpenTelemetry.Trace;
+using Npgsql;
 using OpenTelemetry;
 using OpenTelemetry.Exporter;
-using Npgsql;
+using OpenTelemetry.Trace;
 
 namespace DurableWorkerTemplate.Tests;
 
@@ -601,19 +601,40 @@ public sealed class HostContractTests
     {
         foreach (var contentLength in new long?[] { 0, null })
         {
-            var service = new RecordingActivationService(CompletedResult());
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var service = new RecordingActivationService(CompletedResult(), completion: completion.Task);
             var context = CreateEndpointContext(service, contentLength);
-            context.Request.Body = new TrackingReadStream([]);
+            using var callerCancellation = new CancellationTokenSource();
+            context.RequestAborted = callerCancellation.Token;
+            var bodyReadToken = CancellationToken.None;
+            context.Request.Body = new TrackingReadStream((_, token) =>
+            {
+                bodyReadToken = token;
+                return ValueTask.FromResult(0);
+            });
+            var bodyReadBudget = TimeSpan.FromMilliseconds(50);
 
-            var result = await ActivationEndpoints.ActivateAsync(context, TestActivationSettings());
+            var activation = ActivationEndpoints.ActivateAsync(context, TestActivationSettings(bodyReadBudget: bodyReadBudget));
 
-            Assert.Equal(StatusCodes.Status200OK, await ExecuteAsync(result, context));
             Assert.Equal(1, service.Calls);
             Assert.Equal(contentLength is null ? 1 : 0, ((TrackingReadStream)context.Request.Body).ReadCalls);
+            Assert.Equal(contentLength is null, bodyReadToken.CanBeCanceled);
             Assert.Equal(17, service.LastRequest!.PumpRequest.MaximumItems);
             Assert.Equal(TimeSpan.FromSeconds(3), service.LastRequest.PumpRequest.TimeBudget);
             Assert.Equal(DurableRuntimeSurface.Work, service.LastRequest.PumpRequest.Surfaces);
             Assert.Equal(TimeSpan.FromSeconds(9), service.LastRequest.RequestBudget);
+            Assert.Equal(context.RequestAborted, service.CallerCancellation);
+
+            // Hold the service beyond the body deadline. The completed EOF read's
+            // timer must be disposed before admission to the longer service phase.
+            await Task.Delay(bodyReadBudget * 3);
+            Assert.False(bodyReadToken.IsCancellationRequested);
+            Assert.False(service.CallerCancellation.IsCancellationRequested);
+            Assert.False(activation.IsCompleted);
+
+            completion.SetResult();
+            var result = await activation.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(StatusCodes.Status200OK, await ExecuteAsync(result, context));
         }
     }
 
@@ -1071,6 +1092,214 @@ public sealed class HostContractTests
         else
         {
             Assert.Empty(transport.Destinations);
+        }
+    }
+
+    [Theory]
+    [InlineData(16, ExportResult.Success)]
+    [InlineData(17, ExportResult.Failure)]
+    public void Activity_exporter_reports_capacity_failure_and_retains_only_the_completed_prefix(int count, ExportResult expected)
+    {
+        using var exporter = new ActivityExporter();
+        var initiallyEmpty = exporter.Activities;
+        var activities = Enumerable.Range(0, count).Select(index => new Activity($"bounded-export-{index}")).ToArray();
+        try
+        {
+            foreach (var activity in activities)
+            {
+                activity.Start().Stop();
+            }
+            using var batch = new Batch<Activity>(activities, activities.Length);
+
+            Assert.Equal(expected, exporter.Export(batch));
+            Assert.Equal(count, exporter.ExportCount);
+            Assert.Equal(0, exporter.FlushCount);
+            Assert.Empty(initiallyEmpty);
+            Assert.Equal(Enumerable.Range(0, 16).Select(index => $"bounded-export-{index}"),
+                exporter.Activities.Select(snapshot => snapshot.OperationName));
+
+            if (expected == ExportResult.Failure)
+            {
+                using var fresh = new ActivityExporter();
+                Assert.Empty(fresh.Activities);
+                Assert.Equal(0, fresh.ExportCount);
+                Assert.Equal(0, fresh.FlushCount);
+                using var recovery = new Activity("fresh-export-after-rejection");
+                recovery.Start().Stop();
+                using var recoveryBatch = new Batch<Activity>(recovery);
+                Assert.Equal(ExportResult.Success, fresh.Export(recoveryBatch));
+                Assert.True(fresh.ForceFlush(1000));
+                Assert.Equal(1, fresh.ExportCount);
+                Assert.Equal(1, fresh.FlushCount);
+                Assert.Equal("fresh-export-after-rejection", Assert.Single(fresh.Activities).OperationName);
+                Assert.Equal(count, exporter.ExportCount);
+                Assert.Equal(0, exporter.FlushCount);
+            }
+        }
+        finally
+        {
+            foreach (var activity in activities)
+            {
+                activity.Dispose();
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(32, ExportResult.Success)]
+    [InlineData(33, ExportResult.Failure)]
+    public void Activity_exporter_rejects_excess_tags_without_a_partial_or_stale_snapshot(int count, ExportResult expected)
+    {
+        using var exporter = new ActivityExporter();
+        using var activity = new Activity("tag-capacity");
+        for (var index = 0; index < count; index++)
+        {
+            activity.AddTag($"tag-{index}", index);
+        }
+        activity.Start().Stop();
+        using var batch = new Batch<Activity>(activity);
+
+        Assert.Equal(expected, exporter.Export(batch));
+        Assert.Equal(1, exporter.ExportCount);
+        if (expected == ExportResult.Success)
+        {
+            var snapshot = Assert.Single(exporter.Activities);
+            Assert.Equal(32, snapshot.Tags.Count);
+            Assert.Equal(31, snapshot.Tags["tag-31"]);
+        }
+        else
+        {
+            Assert.Empty(exporter.Activities);
+            Assert.True(exporter.ForceFlush(1000));
+            Assert.Empty(exporter.Activities);
+            Assert.Equal(1, exporter.ExportCount);
+            Assert.Equal(1, exporter.FlushCount);
+        }
+    }
+
+    [Fact]
+    public void Activity_exporter_stops_a_failed_batch_after_its_valid_prefix()
+    {
+        using var exporter = new ActivityExporter();
+        using var prefix = new Activity("accepted-prefix");
+        using var rejected = new Activity("rejected-tags");
+        using var suffix = new Activity("must-not-be-observed");
+        for (var index = 0; index < 33; index++)
+        {
+            rejected.AddTag($"tag-{index}", index);
+        }
+        prefix.Start().Stop();
+        rejected.Start().Stop();
+        suffix.Start().Stop();
+        using var batch = new Batch<Activity>([prefix, rejected, suffix], 3);
+
+        Assert.Equal(ExportResult.Failure, exporter.Export(batch));
+        Assert.Equal(2, exporter.ExportCount);
+        Assert.Equal("accepted-prefix", Assert.Single(exporter.Activities).OperationName);
+    }
+
+    [Theory]
+    [InlineData(512)]
+    [InlineData(513)]
+    public void Activity_exporter_bounds_text_and_detaches_snapshots_from_later_activity_mutation(int length)
+    {
+        using var exporter = new ActivityExporter();
+        using var activity = new Activity("detached-export");
+        var text = new string('x', length);
+        activity.AddTag("bounded-text", text);
+        activity.AddTag("primitive", 7);
+        activity.SetStatus(ActivityStatusCode.Error, text);
+        activity.Start().Stop();
+        using var batch = new Batch<Activity>(activity);
+
+        Assert.Equal(ExportResult.Success, exporter.Export(batch));
+        var observations = exporter.Activities;
+        var snapshot = Assert.Single(observations);
+        var expected = length == 512 ? text : "<tag-text-over-limit>";
+        Assert.Equal(expected, snapshot.Tags["bounded-text"]);
+        Assert.Equal(expected, snapshot.StatusDescription);
+        Assert.Equal(ActivityStatusCode.Error, snapshot.Status);
+        Assert.Equal(0, snapshot.EventCount);
+
+        activity.SetTag("bounded-text", "changed");
+        activity.SetTag("primitive", 9);
+        activity.SetStatus(ActivityStatusCode.Ok);
+        activity.AddEvent(new ActivityEvent("later-event"));
+        Assert.Equal(expected, snapshot.Tags["bounded-text"]);
+        Assert.Equal(7, snapshot.Tags["primitive"]);
+        Assert.Equal(expected, snapshot.StatusDescription);
+        Assert.Equal(ActivityStatusCode.Error, snapshot.Status);
+        Assert.Equal(0, snapshot.EventCount);
+
+        using var later = new Activity("later-export");
+        later.Start().Stop();
+        using var laterBatch = new Batch<Activity>(later);
+        Assert.Equal(ExportResult.Success, exporter.Export(laterBatch));
+        Assert.Single(observations);
+        Assert.Equal(2, exporter.Activities.Count);
+        Assert.Equal(2, exporter.ExportCount);
+    }
+
+    [Fact]
+    public void Activity_exporter_retains_primitive_and_null_tags_without_formatting_arbitrary_objects()
+    {
+        using var exporter = new ActivityExporter();
+        using var activity = new Activity("tag-values");
+        object[] primitives = [true, (byte)1, (sbyte)-1, (short)-2, (ushort)2, -3, 3u, -4L, 4UL, 1.5f, 2.5d];
+        for (var index = 0; index < primitives.Length; index++)
+        {
+            activity.AddTag($"primitive-{index}", primitives[index]);
+        }
+        var arbitrary = new UnformattableTagValue();
+        activity.AddTag("null", (object?)null);
+        activity.AddTag("arbitrary", arbitrary);
+        activity.AddTag("decimal", 1m);
+        activity.AddTag("character", 'a');
+        activity.Start().Stop();
+        using var batch = new Batch<Activity>(activity);
+
+        Assert.Equal(ExportResult.Success, exporter.Export(batch));
+        var snapshot = Assert.Single(exporter.Activities);
+        for (var index = 0; index < primitives.Length; index++)
+        {
+            Assert.Equal(primitives[index], snapshot.Tags[$"primitive-{index}"]);
+        }
+        Assert.True(snapshot.Tags.ContainsKey("null"));
+        Assert.Null(snapshot.Tags["null"]);
+        Assert.Null(snapshot.StatusDescription);
+        Assert.Equal("<UnformattableTagValue>", snapshot.Tags["arbitrary"]);
+        Assert.Equal("<Decimal>", snapshot.Tags["decimal"]);
+        Assert.Equal("<Char>", snapshot.Tags["character"]);
+        Assert.Equal(0, arbitrary.FormattingAttempts);
+    }
+
+    [Fact]
+    public void Activity_exporter_empty_batch_and_flush_report_delivery_without_inventing_observations()
+    {
+        using var exporter = new ActivityExporter();
+        using var empty = new Batch<Activity>([], 0);
+
+        Assert.Equal(ExportResult.Success, exporter.Export(empty));
+        Assert.Equal(0, exporter.ExportCount);
+        Assert.Equal(0, exporter.FlushCount);
+        Assert.True(exporter.ForceFlush(1));
+        Assert.False(exporter.ForceFlush(0));
+        Assert.False(exporter.ForceFlush(Timeout.Infinite));
+        Assert.Equal(3, exporter.FlushCount);
+        Assert.Throws<ArgumentOutOfRangeException>(() => exporter.ForceFlush(-2));
+        Assert.Equal(3, exporter.FlushCount);
+        Assert.Equal(0, exporter.ExportCount);
+        Assert.Empty(exporter.Activities);
+    }
+
+    private sealed class UnformattableTagValue
+    {
+        internal int FormattingAttempts { get; private set; }
+
+        public override string ToString()
+        {
+            FormattingAttempts++;
+            throw new InvalidOperationException("Tag formatting must not be invoked by export.");
         }
     }
 
@@ -1673,7 +1902,8 @@ public sealed class HostContractTests
     private sealed class RecordingActivationService(
         DurableExternalActivationResult? result = null,
         Exception? exception = null,
-        CancellationToken cancellationToken = default) : IDurableExternalActivationService
+        CancellationToken cancellationToken = default,
+        Task? completion = null) : IDurableExternalActivationService
     {
         private int _calls;
 
@@ -1681,23 +1911,31 @@ public sealed class HostContractTests
 
         internal DurableExternalActivationRequest? LastRequest { get; private set; }
 
-        public ValueTask<DurableExternalActivationResult> ActivateAsync(
+        internal CancellationToken CallerCancellation { get; private set; }
+
+        public async ValueTask<DurableExternalActivationResult> ActivateAsync(
             DurableExternalActivationRequest request,
             CancellationToken callerCancellation = default)
         {
             Interlocked.Increment(ref _calls);
             LastRequest = request;
+            CallerCancellation = callerCancellation;
+            if (completion is not null)
+            {
+                await completion.WaitAsync(callerCancellation);
+            }
+
             if (exception is not null)
             {
-                return ValueTask.FromException<DurableExternalActivationResult>(exception);
+                throw exception;
             }
 
             if (cancellationToken.IsCancellationRequested)
             {
-                return ValueTask.FromCanceled<DurableExternalActivationResult>(cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
             }
 
-            return ValueTask.FromResult(result ?? CompletedResult());
+            return result ?? CompletedResult();
         }
     }
 
