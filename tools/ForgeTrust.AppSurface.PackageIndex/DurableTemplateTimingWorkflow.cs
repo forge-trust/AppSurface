@@ -145,7 +145,9 @@ internal sealed class DurableTemplateTimingWorkflow(IExternalCommandRunner runne
         var setupSeconds = 0d;
         var cleanup = false;
         var failure = string.Empty;
-        var childCleanupMs = 0;
+        var cleanupAllowanceMs = 20_000;
+        Stopwatch? cleanupClock = null;
+        var cleanupEvidenceValid = false;
         var started = Stopwatch.GetTimestamp();
         var maximumMs = mode == DurableTemplateTimingMode.Primed ? 180_000 : 900_000;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -186,9 +188,6 @@ internal sealed class DurableTemplateTimingWorkflow(IExternalCommandRunner runne
                 throw new PackageIndexException("Timed generated payload differs from its candidate.");
             DurableTemplateConsumerProof.VerifyRestoredGraph(generated, cache, input.Artifacts, input.PackageVersion);
             after = await InspectImage(root, environment, deadline.Token);
-            var cleanupMatch = Regex.Matches(result.StandardOutput, @"\[first-work-cleanup\] elapsed-ms=([0-9]+)(?:\r?\n|$)", RegexOptions.CultureInvariant);
-            if (cleanupMatch.Count != 1 || !int.TryParse(cleanupMatch[0].Groups[1].Value, out childCleanupMs) || childCleanupMs >= 20_000)
-                throw new PackageIndexException("Timing fixture cleanup observation is missing or exhausted.");
         }
         catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
         {
@@ -196,21 +195,37 @@ internal sealed class DurableTemplateTimingWorkflow(IExternalCommandRunner runne
         }
         finally
         {
-            using var cleanupDeadline = new CancellationTokenSource(TimeSpan.FromMilliseconds(Math.Max(1, 20_000 - childCleanupMs)));
+            // No returned FirstWork result retains the independent full allowance. Once a result returns,
+            // evidence checks and every subsequent cleanup stage consume its original remaining clock.
+            cleanupClock ??= Stopwatch.StartNew();
+            using var cleanupDeadline = new CancellationTokenSource();
+            var remaining = RemainingCleanupMilliseconds();
+            if (remaining == 0) cleanupDeadline.Cancel();
+            else cleanupDeadline.CancelAfter(remaining);
+            int CleanupCommandTimeout()
+            {
+                var remainingMilliseconds = RemainingCleanupMilliseconds();
+                if (remainingMilliseconds == 0) cleanupDeadline.Cancel();
+                return Math.Max(1, remainingMilliseconds);
+            }
             try
             {
                 await Command("dotnet", ["new", "uninstall", DurableTemplateStaging.PackageId], root, environment,
-                    Math.Max(1, 20_000 - childCleanupMs), cleanupDeadline.Token);
+                    CleanupCommandTimeout(), cleanupDeadline.Token);
                 var absence = await Command("dotnet", ["new", "list"], root, environment,
-                    Math.Max(1, 20_000 - childCleanupMs), cleanupDeadline.Token);
+                    CleanupCommandTimeout(), cleanupDeadline.Token);
                 if (absence.StandardOutput.Contains(DurableTemplateArtifactContract.ShortName, StringComparison.Ordinal))
                     throw new PackageIndexException("Timed template remained installed after cleanup.");
                 foreach (var owned in new[] { root, environment["NUGET_PACKAGES"]!, environment["DOTNET_CLI_HOME"]!, environment["NUGET_HTTP_CACHE_PATH"]! })
                 {
+                    if (RemainingCleanupMilliseconds() == 0) cleanupDeadline.Cancel();
+                    cleanupDeadline.Token.ThrowIfCancellationRequested();
                     RequireTree(owned);
                     Directory.Delete(owned, recursive: true);
                 }
-                cleanup = !cleanupDeadline.IsCancellationRequested;
+                if (RemainingCleanupMilliseconds() == 0) throw new TimeoutException();
+                cleanupDeadline.Token.ThrowIfCancellationRequested();
+                cleanup = true;
             }
             catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
             { failure = "sample-cleanup-failed"; }
@@ -223,6 +238,21 @@ internal sealed class DurableTemplateTimingWorkflow(IExternalCommandRunner runne
             Hash(Path.Join(root, "FirstDurableWorker")), database, started, ended, setupSeconds, commands,
             new(flags[0], flags[1], flags[2], flags[3]), cleanup, failure.Length == 0 && flags.All(flag => flag), failure);
 
+        int RemainingCleanupMilliseconds() => Math.Max(0, cleanupAllowanceMs
+            - (int)Math.Min(int.MaxValue, cleanupClock?.Elapsed.TotalMilliseconds ?? 0));
+
+        async Task<ExternalCommandResult> ObserveFirstWorkCompletion(Task<ExternalCommandResult> execution)
+        {
+            var result = await execution;
+            // Capture at the completed child boundary, including a result later rejected by RequireResult
+            // or ready-file/proof validation. Untrusted evidence never grants another full cleanup budget.
+            cleanupClock = Stopwatch.StartNew();
+            cleanupAllowanceMs = 1;
+            cleanupEvidenceValid = TryReadChildCleanupMilliseconds(result, out var elapsed);
+            if (cleanupEvidenceValid) cleanupAllowanceMs = 20_000 - elapsed;
+            return result;
+        }
+
         async Task<ExternalCommandResult> Timed(DurableTemplateTimingCommandPhase phase, string[] args)
         {
             var phaseStarted = Stopwatch.GetTimestamp();
@@ -230,6 +260,8 @@ internal sealed class DurableTemplateTimingWorkflow(IExternalCommandRunner runne
             if (remaining <= 0) throw new TimeoutException();
             var execution = runner.RunAsync(new ExternalCommandRequest("dotnet", args, root, phase.ToString(),
                 "running the three-command Durable timing workload", remaining, environment, ExternalCapturePolicy.ReleaseProof), group.Token);
+            if (phase == DurableTemplateTimingCommandPhase.FirstDurableWorkTest)
+                execution = ObserveFirstWorkCompletion(execution);
             try
             {
                 if (mode == DurableTemplateTimingMode.Primed && phase == DurableTemplateTimingCommandPhase.FirstDurableWorkTest)
@@ -257,6 +289,8 @@ internal sealed class DurableTemplateTimingWorkflow(IExternalCommandRunner runne
                 var result = await execution;
                 commands.Add(new(phase, DurableTemplateTimingProof.ComputeCommandArgumentsSha256("dotnet", args),
                     Stopwatch.GetElapsedTime(phaseStarted).TotalSeconds, result.ExitCode, result.StandardOutputTruncated || result.StandardErrorTruncated));
+                if (phase == DurableTemplateTimingCommandPhase.FirstDurableWorkTest && !cleanupEvidenceValid)
+                    throw new PackageIndexException("Timing fixture cleanup observation is missing, unsafe or exhausted.");
                 DurableTemplateConsumerProof.RequireResult(result);
                 return result;
             }
@@ -267,6 +301,21 @@ internal sealed class DurableTemplateTimingWorkflow(IExternalCommandRunner runne
                 throw;
             }
         }
+    }
+
+    /// <summary>Reads one complete, unambiguous child cleanup observation within the original 20-second ceiling.</summary>
+    /// <param name="result">Completed FirstWork result; either truncated stream invalidates the observation.</param>
+    /// <param name="elapsedMilliseconds">Observed nonnegative elapsed cleanup time when the observation is valid.</param>
+    /// <returns>Whether one exact marker supplies a non-exhausted allowance; invalid evidence permits only a minimal attempt.</returns>
+    private static bool TryReadChildCleanupMilliseconds(ExternalCommandResult result, out int elapsedMilliseconds)
+    {
+        elapsedMilliseconds = 0;
+        if (result.StandardOutputTruncated || result.StandardErrorTruncated) return false;
+        var matches = Regex.Matches(result.StandardOutput, @"^\[first-work-cleanup\] elapsed-ms=([^\r\n]*)\r?$",
+            RegexOptions.Multiline | RegexOptions.CultureInvariant);
+        return matches.Count == 1
+            && int.TryParse(matches[0].Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out elapsedMilliseconds)
+            && elapsedMilliseconds < 20_000;
     }
 
     private async Task<string> InspectImage(string root, IReadOnlyDictionary<string, string?> environment, CancellationToken token)

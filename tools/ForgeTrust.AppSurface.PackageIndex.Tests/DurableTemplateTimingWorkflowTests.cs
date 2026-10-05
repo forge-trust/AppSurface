@@ -262,8 +262,10 @@ public sealed class DurableTemplateTimingWorkflowTests : IDisposable
 
         Assert.False(receipt.Succeeded);
         var failed = Assert.IsType<DurableTemplateTimingSample>(receipt.Samples[0].Sample);
-        Assert.Equal("sample-failed", failed.FailureCode);
-        Assert.True(failed.CleanupComplete);
+        Assert.NotEmpty(failed.FailureCode);
+        if (fault == "missing-cleanup-marker")
+            Assert.All(FirstSampleCleanupRequests(runner), request => Assert.Equal(1, request.TimeoutMilliseconds));
+        else Assert.True(failed.CleanupComplete);
         Assert.All(runner.PrivateRoots, path => Assert.False(Directory.Exists(path)));
     }
 
@@ -279,9 +281,175 @@ public sealed class DurableTemplateTimingWorkflowTests : IDisposable
         var failed = Assert.IsType<DurableTemplateTimingSample>(receipt.Samples[0].Sample);
         Assert.NotEmpty(failed.FailureCode);
         Assert.Contains(failed.Commands, command => command.Phase == DurableTemplateTimingCommandPhase.FirstDurableWorkTest && command.OutputTruncated);
-        Assert.True(failed.CleanupComplete);
+        Assert.Equal(1, FirstSampleCleanupRequests(runner)[0].TimeoutMilliseconds);
         Assert.DoesNotContain(SecretSentinel, File.ReadAllText(_reportPath), StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(1_000)]
+    [InlineData(19_998)]
+    [InlineData(19_999)]
+    public async Task CompletedFirstWorkCleanupMarkerLimitsEveryParentCleanupRequest(int elapsedMilliseconds)
+    {
+        var runner = new TimingRunner(this, cleanupElapsedMilliseconds: elapsedMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        var receipt = await new DurableTemplateTimingWorkflow(runner, () => true)
+            .RunAsync(_input, DurableTemplateTimingMode.Primed, [], CancellationToken.None);
+
+        var requests = FirstSampleCleanupRequests(runner);
+        Assert.NotEmpty(requests);
+        Assert.All(requests, request => Assert.InRange(request.TimeoutMilliseconds, 1, 20_000 - elapsedMilliseconds));
+        if (elapsedMilliseconds <= 1_000) Assert.True(receipt.Succeeded, receipt.FailureCode);
+        Assert.Equal(0, runner.ActiveCommands);
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("duplicate")]
+    [InlineData("invalid")]
+    [InlineData("-1")]
+    [InlineData("2147483648")]
+    [InlineData("20000")]
+    [InlineData("20001")]
+    public async Task UnsafeCompletedFirstWorkCleanupMarkerCannotRenewTheCleanupBudget(string elapsedMilliseconds)
+    {
+        var runner = new TimingRunner(this, cleanupElapsedMilliseconds: elapsedMilliseconds);
+
+        var receipt = await new DurableTemplateTimingWorkflow(runner, () => true)
+            .RunAsync(_input, DurableTemplateTimingMode.Primed, [], CancellationToken.None);
+
+        Assert.False(receipt.Succeeded);
+        Assert.False(Assert.IsType<DurableTemplateTimingSample>(receipt.Samples[0].Sample).Succeeded);
+        Assert.All(FirstSampleCleanupRequests(runner), request => Assert.Equal(1, request.TimeoutMilliseconds));
+        Assert.NotEmpty(FirstSampleCleanupRequests(runner));
+        Assert.Equal(0, runner.ActiveCommands);
+    }
+
+    [Theory]
+    [InlineData("missing-started-ticks")]
+    [InlineData("duplicate-database-sha256")]
+    [InlineData("invalid-database")]
+    [InlineData("nonzero-exit")]
+    public async Task CompletedFirstWorkCapturesCleanupAllowanceBeforeOtherEvidenceIsRejected(string fault)
+    {
+        var runner = new TimingRunner(this, cleanupElapsedMilliseconds: "15000",
+            markerFaultOrdinal: 1, markerFault: fault,
+            invalidDatabaseOrdinal: fault == "invalid-database" ? 1 : null,
+            failFirstWorkOrdinal: fault == "nonzero-exit" ? 1 : null);
+
+        var receipt = await new DurableTemplateTimingWorkflow(runner, () => true)
+            .RunAsync(_input, DurableTemplateTimingMode.Primed, [], CancellationToken.None);
+
+        Assert.False(receipt.Succeeded);
+        var failed = Assert.IsType<DurableTemplateTimingSample>(receipt.Samples[0].Sample);
+        Assert.False(failed.Succeeded);
+        Assert.True(failed.CleanupComplete);
+        Assert.NotEmpty(FirstSampleCleanupRequests(runner));
+        Assert.All(FirstSampleCleanupRequests(runner), request => Assert.InRange(request.TimeoutMilliseconds, 1, 5_000));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TruncatedCompletedFirstWorkCannotTrustAnOtherwiseValidCleanupMarker(bool standardError)
+    {
+        var runner = new TimingRunner(this, cleanupElapsedMilliseconds: "0",
+            truncatedFirstWorkOrdinal: standardError ? null : 1,
+            truncatedFirstWorkErrorOrdinal: standardError ? 1 : null);
+
+        var receipt = await new DurableTemplateTimingWorkflow(runner, () => true)
+            .RunAsync(_input, DurableTemplateTimingMode.Primed, [], CancellationToken.None);
+
+        Assert.False(receipt.Succeeded);
+        Assert.NotEmpty(FirstSampleCleanupRequests(runner));
+        Assert.All(FirstSampleCleanupRequests(runner), request => Assert.Equal(1, request.TimeoutMilliseconds));
+    }
+
+    [Fact]
+    public async Task ParentEvidenceAndEarlierCleanupStageConsumeTheSameRemainingBudget()
+    {
+        var delayedEvidence = false;
+        var delayedUninstall = false;
+        var runner = new TimingRunner(this, cleanupElapsedMilliseconds: "10000", afterRequest: request =>
+        {
+            if (Path.GetFileName(request.WorkingDirectory) != "sample-1") return;
+            if (request.OperationName == "image-identity" && !delayedEvidence)
+            {
+                // The second image observation follows the completed FirstWork child.
+                delayedEvidence = true;
+                return;
+            }
+            if (request.OperationName == "image-identity" || request.Arguments.Take(2).SequenceEqual(["new", "uninstall"]))
+            {
+                var started = Stopwatch.GetTimestamp();
+                while (Stopwatch.GetElapsedTime(started).TotalMilliseconds < 30) Thread.Sleep(1);
+                if (request.OperationName != "image-identity") delayedUninstall = true;
+            }
+        });
+
+        var receipt = await new DurableTemplateTimingWorkflow(runner, () => true)
+            .RunAsync(_input, DurableTemplateTimingMode.Primed, [], CancellationToken.None);
+
+        Assert.True(receipt.Succeeded, receipt.FailureCode);
+        Assert.True(delayedEvidence);
+        Assert.True(delayedUninstall);
+        var requests = FirstSampleCleanupRequests(runner);
+        Assert.Equal(2, requests.Length);
+        Assert.InRange(requests[0].TimeoutMilliseconds, 1, 9_970);
+        Assert.InRange(requests[1].TimeoutMilliseconds, 1, requests[0].TimeoutMilliseconds - 30);
+        Assert.Equal(runner.FirstCleanupTokens[0], runner.FirstCleanupTokens[1]);
+    }
+
+    [Fact]
+    public async Task ParentEvidenceExhaustionUsesACanceledMinimalAttemptAndCannotClaimCleanupSuccess()
+    {
+        var observations = 0;
+        var runner = new TimingRunner(this, cleanupElapsedMilliseconds: "19999", afterRequest: request =>
+        {
+            if (Path.GetFileName(request.WorkingDirectory) != "sample-1" || request.OperationName != "image-identity") return;
+            if (++observations == 2)
+            {
+                var started = Stopwatch.GetTimestamp();
+                while (Stopwatch.GetElapsedTime(started).TotalMilliseconds < 10) Thread.Sleep(1);
+            }
+        });
+
+        var receipt = await new DurableTemplateTimingWorkflow(runner, () => true)
+            .RunAsync(_input, DurableTemplateTimingMode.Primed, [], CancellationToken.None);
+
+        var failed = Assert.IsType<DurableTemplateTimingSample>(receipt.Samples[0].Sample);
+        Assert.False(receipt.Succeeded);
+        Assert.False(failed.Succeeded);
+        Assert.False(failed.CleanupComplete);
+        Assert.Equal(1, FirstSampleCleanupRequests(runner)[0].TimeoutMilliseconds);
+        Assert.True(runner.FirstCleanupTokens[0].IsCancellationRequested);
+        Assert.Equal(0, runner.ActiveCommands);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NoReturnedFirstWorkResultRetainsTheIndependentParentCleanupAllowance(bool firstWorkStarted)
+    {
+        var runner = new TimingRunner(this, failOperation: firstWorkStarted ? null : "sample-1-create",
+            invalidReadyOrdinal: firstWorkStarted ? 1 : null);
+
+        var receipt = await new DurableTemplateTimingWorkflow(runner, () => true)
+            .RunAsync(_input, DurableTemplateTimingMode.Primed, [], CancellationToken.None);
+
+        Assert.False(receipt.Succeeded);
+        Assert.True(Assert.IsType<DurableTemplateTimingSample>(receipt.Samples[0].Sample).CleanupComplete);
+        Assert.InRange(FirstSampleCleanupRequests(runner)[0].TimeoutMilliseconds, 2, 20_000);
+        Assert.Equal(0, runner.ActiveCommands);
+    }
+
+    private static ExternalCommandRequest[] FirstSampleCleanupRequests(TimingRunner runner) => runner.Requests
+        .Where(request => Path.GetFileName(request.WorkingDirectory) == "sample-1"
+            && (request.Arguments.Take(2).SequenceEqual(["new", "uninstall"])
+                || request.Arguments.Take(2).SequenceEqual(["new", "list"])))
+        .ToArray();
 
     [Fact]
     public async Task ModeAndColdEndpointGuardsRejectBeforeLaunchingCommands()
@@ -560,6 +728,8 @@ public sealed class DurableTemplateTimingWorkflowTests : IDisposable
         int? markerFaultOrdinal = null,
         string? markerFault = null,
         int? truncatedFirstWorkOrdinal = null,
+        int? truncatedFirstWorkErrorOrdinal = null,
+        string? cleanupElapsedMilliseconds = null,
         int? wrongImageOrdinal = null,
         int? emptyDaemonOrdinal = null,
         int? templateRemainsInstalledOrdinal = null,
@@ -571,6 +741,7 @@ public sealed class DurableTemplateTimingWorkflowTests : IDisposable
         private int _activeCommandsAtFirstCleanup = -1;
 
         internal List<ExternalCommandRequest> Requests { get; } = [];
+        internal List<CancellationToken> FirstCleanupTokens { get; } = [];
         internal IReadOnlyCollection<string> PrivateRoots => _privateRoots;
         internal IReadOnlyList<string> DockerHosts => Requests
             .Where(request => request.FileName == "docker"
@@ -588,6 +759,9 @@ public sealed class DurableTemplateTimingWorkflowTests : IDisposable
         public async Task<ExternalCommandResult> RunAsync(ExternalCommandRequest request, CancellationToken cancellationToken)
         {
             Requests.Add(request);
+            if (ParseSampleOrdinal(request.WorkingDirectory) == 1
+                && (StartsWith(request, "new", "uninstall") || StartsWith(request, "new", "list")))
+                FirstCleanupTokens.Add(cancellationToken);
             CapturePrivateRoots(request.Environment);
             cancellationToken.ThrowIfCancellationRequested();
             if (request.FileName == "dotnet" && StartsWith(request, "new", "uninstall")
@@ -672,13 +846,18 @@ public sealed class DurableTemplateTimingWorkflowTests : IDisposable
                 var output = string.Join(Environment.NewLine, checkpoints)
                     + Environment.NewLine + $"[timing-fixture] started-ticks={ticks}"
                     + Environment.NewLine + $"[timing-fixture] database-sha256={(invalidDatabaseOrdinal == ordinal ? "invalid" : Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("timing-db-" + ordinal))))}"
-                    + Environment.NewLine + "[first-work-cleanup] elapsed-ms=1" + Environment.NewLine;
+                    + Environment.NewLine + $"[first-work-cleanup] elapsed-ms={(ordinal == 1 ? cleanupElapsedMilliseconds ?? "1" : "1")}" + Environment.NewLine;
+                if (ordinal == 1 && cleanupElapsedMilliseconds == "missing")
+                    output = output.Replace("[first-work-cleanup] elapsed-ms=missing" + Environment.NewLine, string.Empty, StringComparison.Ordinal);
+                if (ordinal == 1 && cleanupElapsedMilliseconds == "duplicate")
+                    output = output.Replace("[first-work-cleanup] elapsed-ms=duplicate", "[first-work-cleanup] elapsed-ms=1" + Environment.NewLine + "[first-work-cleanup] elapsed-ms=1", StringComparison.Ordinal);
                 var fault = markerFaultOrdinal == ordinal ? markerFault : null;
                 if (fault == "missing-started-ticks") output = output.Replace($"[timing-fixture] started-ticks={ticks}{Environment.NewLine}", string.Empty, StringComparison.Ordinal);
                 if (fault == "duplicate-database-sha256") output += $"[timing-fixture] database-sha256={Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("duplicate")))}{Environment.NewLine}";
                 if (fault == "missing-cleanup-marker") output = output.Replace("[first-work-cleanup] elapsed-ms=1" + Environment.NewLine, string.Empty, StringComparison.Ordinal);
                 return new(failFirstWorkOrdinal == ordinal ? 1 : 0, output, SecretSentinel,
-                    StandardOutputTruncated: truncatedFirstWorkOrdinal == ordinal);
+                    StandardOutputTruncated: truncatedFirstWorkOrdinal == ordinal,
+                    StandardErrorTruncated: truncatedFirstWorkErrorOrdinal == ordinal);
             }
             finally
             {
