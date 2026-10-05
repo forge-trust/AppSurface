@@ -1,0 +1,40 @@
+name: Issue 779 existing permissions coverage mechanism
+on:
+  push:
+    branches: [codex/issue779-existing-permissions-coverage-20261004]
+permissions:
+  contents: read
+jobs:
+  mechanism:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.401
+      - name: Verify the baseline and build the isolated public-task probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/verify-inputs.py "$GITHUB_WORKSPACE"
+          python3 -B tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/supervise-build.py tests/evidencehost-consumer/ExistingPermissionsCoverageProbe "$RUNNER_TEMP/issue779-probe-build"
+      - name: Check actual worker hits and controller file isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo /usr/bin/python3 -B tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/supervise-native.py --source-root "$GITHUB_WORKSPACE" --probe-build "$RUNNER_TEMP/issue779-probe-build/probe-build" --output "$RUNNER_TEMP/issue779-probe-result" --dotnet "$(readlink -f "$DOTNET_ROOT/dotnet")"
+      - name: Retain bounded mechanism receipts
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/verify-inputs.py "$GITHUB_WORKSPACE"
+          sudo /usr/bin/python3 -B tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/export-result.py "$RUNNER_TEMP/issue779-probe-result" "$RUNNER_TEMP/issue779-probe-build" "$RUNNER_TEMP/issue779-probe-artifact.tar" "$(id -u)" "$(id -g)"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue779-existing-permissions-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/issue779-probe-artifact.tar
+          if-no-files-found: error
+          retention-days: 7

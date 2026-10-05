@@ -1,0 +1,76 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <OutputType>Exe</OutputType>
+        <AssemblyName>OfficialTaskHost</AssemblyName>
+        <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+        <UseSharedCompilation>false</UseSharedCompilation>
+    </PropertyGroup>
+    <ItemGroup>
+        <Compile Include="TaskHost.cs" />
+        <Reference Include="Coverlet.MSbuild.Tasks">
+            <HintPath>$(CoverletPackageRoot)/tasks/net10.0/coverlet.msbuild.tasks.dll</HintPath>
+            <Private>true</Private>
+        </Reference>
+        <Reference Include="Microsoft.Build.Framework">
+            <HintPath>$(MSBuildBinPath)/Microsoft.Build.Framework.dll</HintPath>
+            <Private>true</Private>
+        </Reference>
+        <Reference Include="Microsoft.Build.Utilities.Core">
+            <HintPath>$(MSBuildBinPath)/Microsoft.Build.Utilities.Core.dll</HintPath>
+            <Private>true</Private>
+        </Reference>
+        <Reference Include="Mono.Cecil.Rocks">
+            <HintPath>$(CoverletPackageRoot)/tasks/net10.0/Mono.Cecil.Rocks.dll</HintPath>
+            <Private>true</Private>
+        </Reference>
+        <Reference Include="Microsoft.Extensions.FileSystemGlobbing">
+            <HintPath>$(CoverletPackageRoot)/tasks/net10.0/Microsoft.Extensions.FileSystemGlobbing.dll</HintPath>
+            <Private>true</Private>
+        </Reference>
+        <Reference Include="System.Security.Cryptography.Pkcs">
+            <HintPath>$(CoverletPackageRoot)/tasks/net10.0/System.Security.Cryptography.Pkcs.dll</HintPath>
+            <Private>true</Private>
+        </Reference>
+        <Reference Include="Microsoft.Extensions.DependencyModel">
+            <HintPath>$(CoverletPackageRoot)/tasks/net10.0/Microsoft.Extensions.DependencyModel.dll</HintPath>
+            <Private>true</Private>
+        </Reference>
+        <Reference Include="Microsoft.Extensions.DependencyInjection">
+            <HintPath>$(CoverletPackageRoot)/tasks/net10.0/Microsoft.Extensions.DependencyInjection.dll</HintPath>
+            <Private>true</Private>
+        </Reference>
+        <Reference Include="NuGet.Versioning">
+            <HintPath>$(CoverletPackageRoot)/tasks/net10.0/NuGet.Versioning.dll</HintPath>
+            <Private>true</Private>
+        </Reference>
+        <Reference Include="Mono.Cecil">
+            <HintPath>$(CoverletPackageRoot)/tasks/net10.0/Mono.Cecil.dll</HintPath>
+            <Private>true</Private>
+        </Reference>
+        <Reference Include="coverlet.core">
+            <HintPath>$(CoverletPackageRoot)/tasks/net10.0/coverlet.core.dll</HintPath>
+            <Private>true</Private>
+        </Reference>
+        <Reference Include="Microsoft.Extensions.DependencyInjection.Abstractions">
+            <HintPath>$(CoverletPackageRoot)/tasks/net10.0/Microsoft.Extensions.DependencyInjection.Abstractions.dll</HintPath>
+            <Private>true</Private>
+        </Reference>
+        <Reference Include="Mono.Cecil.Pdb">
+            <HintPath>$(CoverletPackageRoot)/tasks/net10.0/Mono.Cecil.Pdb.dll</HintPath>
+            <Private>true</Private>
+        </Reference>
+        <Reference Include="Mono.Cecil.Mdb">
+            <HintPath>$(CoverletPackageRoot)/tasks/net10.0/Mono.Cecil.Mdb.dll</HintPath>
+            <Private>true</Private>
+        </Reference>
+    </ItemGroup>
+    <Target Name="VerifyCoverletPackageRoot" BeforeTargets="ResolveAssemblyReferences">
+        <Error Condition="'$(CoverletPackageRoot)' == ''" Text="CoverletPackageRoot must select the verified absolute Coverlet 10.0.1 package directory." />
+        <Error Condition="'$(CoverletPackageRoot)' != '' and !$([System.IO.Path]::IsPathFullyQualified('$(CoverletPackageRoot)'))" Text="CoverletPackageRoot must be absolute." />
+        <Error Condition="!Exists('$(CoverletPackageRoot)/tasks/net10.0/coverlet.msbuild.tasks.dll')" Text="The selected Coverlet tasks/net10.0 assembly is absent." />
+    </Target>
+</Project>
