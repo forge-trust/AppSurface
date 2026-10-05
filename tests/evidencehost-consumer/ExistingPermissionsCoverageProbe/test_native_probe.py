@@ -265,6 +265,50 @@ class BuildCopyControls(unittest.TestCase):
                 if case == 'directory-substitution':
                     self.assertFalse((tool / 'cs').exists())
                     self.assertEqual(expected['cs/' + self.RESOURCE], (outside / 'held-directory' / self.RESOURCE).read_bytes())
+    def test_mixed_closed_resources_copy_and_unknown_fourth_retains_rejected_inventory(self):
+        resource_names = (self.RESOURCE, 'Microsoft.Build.Framework.resources.dll',
+                          'Microsoft.NET.StringTools.resources.dll')
+        for count in (2, 3, 4):
+            with self.subTest(resource_count=count), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp).resolve()
+                build, tool, expected, outside = self.fixture(root)
+                for resource in resource_names[1:min(count, 3)]:
+                    relative = 'cs/' + resource
+                    content = b'\x00mixed-resource-' + resource.encode() + b'\xff'
+                    (build / relative).write_bytes(content)
+                    expected[relative] = content
+                if count == 4:
+                    unknown = 'Unknown.Fourth.resources.dll'
+                    (build / 'cs' / unknown).write_bytes(b'not-admitted')
+                diagnostics = []
+                if count == 4:
+                    with self.assertRaisesRegex(m.Failure, '^build-resource-inventory$'):
+                        m.copy_build(build, tool, time.monotonic() + 5, diagnostics)
+                    self.assertEqual([{'culture': 'cs', 'names': sorted((*resource_names, unknown))}], diagnostics)
+                    self.assertEqual(4, len(diagnostics[0]['names']))
+                    self.assertFalse((tool / 'cs').exists())
+                    self.assertTrue((build / 'cs' / unknown).is_file())
+                else:
+                    result = m.copy_build(build, tool, time.monotonic() + 5, diagnostics)
+                    selected = sorted(resource_names[:count])
+                    self.assertEqual([{'culture': 'cs', 'names': selected}], diagnostics)
+                    self.assertEqual(['cs'], result['directories'])
+                    self.assertEqual(sorted(expected), sorted(result['files']))
+                    self.assertEqual(selected, sorted(path.name for path in (tool / 'cs').iterdir()))
+                    self.assertEqual(0o555, (tool / 'cs').stat().st_mode & 0o777)
+                    self.assertEqual(sum(len(content) for content in expected.values()), result['total_bytes'])
+                    inventory = {row['name']: row for row in result['inventory']}
+                    self.assertEqual(len(expected), len(result['inventory']))
+                    self.assertEqual(set(expected), set(inventory))
+                    for relative, content in expected.items():
+                        path = tool / relative
+                        self.assertEqual(content, path.read_bytes())
+                        self.assertEqual(content, (build / relative).read_bytes())
+                        self.assertEqual(0o444, path.stat().st_mode & 0o777)
+                        self.assertEqual(os.getuid(), path.stat().st_uid)
+                        self.assertEqual({'name': relative, 'kind': 'file', 'bytes': len(content),
+                                          'sha256': hashlib.sha256(content).hexdigest()}, inventory[relative])
+                self.assertEqual(b'outside-unchanged', (outside / 'sentinel').read_bytes())
 
 
 if __name__ == '__main__':

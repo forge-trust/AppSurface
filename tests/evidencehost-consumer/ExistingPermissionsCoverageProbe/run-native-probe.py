@@ -17,6 +17,7 @@ FIELDS = ('LoadState','User','Group','Type','ActiveState','SubState','MainPID','
 REPORTS = ('coverage.cobertura.xml','coverage.json')
 BUILD_CULTURES = frozenset(('cs','de','es','fr','it','ja','ko','pl','pt-BR','ru','tr','zh-Hans','zh-Hant'))
 BUILD_RESOURCE = 'Microsoft.Build.Utilities.Core.resources.dll'
+BUILD_RESOURCES = frozenset((BUILD_RESOURCE,'Microsoft.Build.Framework.resources.dll','Microsoft.NET.StringTools.resources.dll'))
 class Failure(Exception):
     """Only fixed categories, never native exception text, leave the controller."""
 def require(ok, category):
@@ -276,7 +277,7 @@ def runtime_helper():
 def baseline(n,t,s,i,a):
     """Equality check only; never mutate/imported policy or add a writable path."""
     return {'User':n,'Group':n,'Type':'exec','KillMode':'control-group','RuntimeMaxSec':'900','TimeoutStopSec':'2','SendSIGKILL':'yes','NoNewPrivileges':'yes','CapabilityBoundingSet':'','AmbientCapabilities':'','ProtectControlGroups':'yes','RestrictSUIDSGID':'no','PrivateTmp':'yes','ProtectSystem':'strict','ProtectHome':'yes','LimitCORE':'0','TasksMax':'64','MemoryMax':'1G','Restart':'no','RemainAfterExit':'yes','ReadOnlyPaths':f'{t} {s}','ReadWritePaths':str(a),'InaccessiblePaths':str(i)}
-def copy_build(build,tool,d):
+def copy_build(build,tool,d,diagnostics=None):
     source=os.open(build,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW); target=os.open(tool,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
     try:
         ns=names(source,d,128); required={'CounterFixture.dll','CounterFixture.pdb','CounterFixture.runtimeconfig.json','CounterFixture.deps.json','OfficialTaskHost.dll','OfficialTaskHost.runtimeconfig.json','OfficialTaskHost.deps.json'}
@@ -299,12 +300,14 @@ def copy_build(build,tool,d):
             child=os.open(n,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=source); dest=None
             try:
                 require(snap(s)==snap(os.fstat(child)),'build-directory-changed')
-                require(names(child,d,2)==[BUILD_RESOURCE],'build-resource-inventory')
+                resources=names(child,d,4)
+                if diagnostics is not None: diagnostics.append({'culture':n,'names':resources})
+                require(resources and set(resources)<=BUILD_RESOURCES,'build-resource-inventory')
                 os.mkdir(n,mode=0o700,dir_fd=target); dirs.append(n)
                 dest=os.open(n,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=target)
                 ds=os.fstat(dest); require(ds.st_uid==os.geteuid() and stat.S_IMODE(ds.st_mode)==0o700,'build-created-directory')
-                copy_file(child,dest,BUILD_RESOURCE,n+'/'+BUILD_RESOURCE)
-                require(names(child,d,2)==[BUILD_RESOURCE] and snap(s)==snap(os.fstat(child))==snap(os.stat(n,dir_fd=source,follow_symlinks=False)),'build-directory-changed')
+                for resource in resources: copy_file(child,dest,resource,n+'/'+resource)
+                require(names(child,d,4)==resources and snap(s)==snap(os.fstat(child))==snap(os.stat(n,dir_fd=source,follow_symlinks=False)),'build-directory-changed')
                 os.fchmod(dest,0o555); require(snap(os.fstat(dest))==snap(os.stat(n,dir_fd=target,follow_symlinks=False)),'build-target-directory-changed')
             finally:
                 if dest is not None: os.close(dest)
@@ -349,7 +352,8 @@ def run(source,build,output,selected_dotnet,tag):
         owner.command(['mount','-t','tmpfs','-o','size=32M,nr_inodes=64,nosuid,nodev,noexec,uid=0,gid=65011,mode=1770','tmpfs',str(session)],deadline); mounted=True
         sf=directory(session,0,GID,0o1770); device=os.fstat(sf).st_dev; v=os.fstatvfs(sf); require(0<v.f_blocks*v.f_frsize<=32<<20 and 0<v.f_files<=64,'tmpfs-bounds')
         result['root_session_mount']=mount_data(kernel('/proc/self/mountinfo',deadline).decode('ascii'),session,device)
-        build_copy=copy_build(build,tool,deadline); copied=build_copy['files']; copied_dirs=build_copy['directories']; result['build_copy']=build_copy
+        result['build_resource_inventory']=[]
+        build_copy=copy_build(build,tool,deadline,result['build_resource_inventory']); copied=build_copy['files']; copied_dirs=build_copy['directories']; result['build_copy']=build_copy
         tf=directory(tool,0,0,0o555); originals={}
         for n in ('CounterFixture.dll','CounterFixture.pdb'):
             b,s=read_file(tf,n,deadline,0,mode=0o444); originals[n]={'sha256':hashlib.sha256(b).hexdigest(),'mode':s[4]}

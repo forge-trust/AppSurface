@@ -57,7 +57,7 @@ while genuine official hit files can be freshly created by the actual worker. Mo
 account/namespace/policy checks belong to the root controller, not this managed data fixture.
 
 The worker attempts Directory.Move(session, derived sibling). Only UnauthorizedAccessException or
-IOException with the exact HRESULT_FROM_WIN32(16), 0x80070010, is accepted. No generic IOException or
+IOException with raw Unix HResult16 (EBUSY) is accepted. No generic IOException or
 missing path is accepted as denial proof. After the exception the original session must still exist
 at its same pathname and the sibling must remain absent. This managed same-path check does not prove
 inode identity: root retained-FD and mountpoint identity must independently remain equal afterward.
@@ -65,8 +65,8 @@ The mounted-child EBUSY behavior and actual .NET errno/HResult mapping require L
 Unexpected successful movement fails; controller cleanup must account for both fixed original and
 sibling names under its fresh anchor rather than overlooking a moved object.
 
-Worker also requires UnauthorizedAccessException opening the fixed running CounterFixture.dll for
-write, selected from AppContext.BaseDirectory without reflection. Root independently pins that
+Worker also requires UnauthorizedAccessException or IOException with raw Unix HResult30 (EROFS)
+opening the fixed running CounterFixture.dll for write, selected from AppContext.BaseDirectory without reflection. Root independently pins that
 selected executable inode. Finally Calculate(1)+Calculate(-1) exercises both real branches and must
 produce3. Success is flushed {"stage":"completed","denials_passed":true,"value":3}, exit0.
 Every rejected condition returns exit1 with a fixed failed/category JSON; no exception text or raw

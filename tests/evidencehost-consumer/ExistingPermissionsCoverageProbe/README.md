@@ -53,12 +53,24 @@ both worker and task host. Portable marker files test copying, not executable
 runtime validity; native execution remains the required check.
 
 The official MSBuild utility reference emits thirteen culture directories. The
-private build copy accepts only that closed culture set, each containing exactly
-`Microsoft.Build.Utilities.Core.resources.dll`, with the same no-follow,
+private build copy accepts only that closed culture set, each containing a nonempty subset of the closed MSBuild Utilities.Core,
+Framework and NET.StringTools `.resources.dll` names, with the same no-follow,
 single-link, per-file and aggregate byte checks as top-level files. Each copied
 culture directory is0555 and each file0444. The receipt records the exact copied
 relative inventory and hashes; cleanup removes those exact files/directories.
-Unknown directories, nested layouts or additional resource files fail closed.
+Unknown directories, nested layouts or other resource files fail closed.
+A bounded culture/name inventory is retained before the closed-name check so a
+rejected native layout remains diagnosable; it grants no extra file eligibility.
 Attempt3 measured runtime sealing and the root mount but failed before worker
 start; its exact rejected build filename was not retained. The satellite layout
 explanation comes from the actual local build and remains separate evidence.
+
+The selected .NET10.0.12 Unix implementation returns raw errno values in
+`IOException.HResult`. The probe accepts raw16 (EBUSY) only for the mounted
+session rename, retaining post-denial path checks. The assembly write probe
+accepts `UnauthorizedAccessException` or raw30 (EROFS); the root-owned
+state/backup read/write/delete probes still require `UnauthorizedAccessException`.
+An operation that succeeds always fails the probe. These source-backed classifier
+corrections do not identify an errno from an earlier native run. See the
+[Unix directory implementation](https://github.com/dotnet/runtime/blob/v10.0.12/src/libraries/System.Private.CoreLib/src/System/IO/FileSystem.Unix.cs#L409-L422)
+and [Unix I/O error mapping](https://github.com/dotnet/runtime/blob/v10.0.12/src/libraries/Common/src/Interop/Unix/Interop.IOErrors.cs#L179-L184).

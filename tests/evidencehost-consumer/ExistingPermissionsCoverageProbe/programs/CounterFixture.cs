@@ -7,7 +7,9 @@ internal static class Program
 {
     private const int MaximumSessionBytes = 4096;
     private const int MaximumBasenameBytes = 255;
-    private const int BusyErrnoHResult = unchecked((int)0x80070010);
+    // .NET 10 Unix IOException preserves raw EBUSY, not HRESULT_FROM_WIN32.
+    private const int BusyErrnoHResult = 16;
+    private const int ReadOnlyFileSystemErrnoHResult = 30;
 
     public static int Main(string[] args)
     {
@@ -52,7 +54,7 @@ internal static class Program
             // No reflective lookup or private Coverlet interface is used.
             string assemblyPath = Path.Combine(AppContext.BaseDirectory, "CounterFixture.dll");
             if (!File.Exists(assemblyPath)
-                || !Denied(() => { using FileStream stream = File.Open(assemblyPath, FileMode.Open, FileAccess.Write); }))
+                || !ReadOnlyAssemblyDenied(() => { using FileStream stream = File.Open(assemblyPath, FileMode.Open, FileAccess.Write); }))
             {
                 return Fail("required-assembly-denial-not-observed");
             }
@@ -115,7 +117,7 @@ internal static class Program
         }
         catch (IOException exception) when (exception.HResult == BusyErrnoHResult)
         {
-            // Exact HRESULT_FROM_WIN32(16), the selected Linux EBUSY result only.
+            // Exact raw Linux EBUSY from the .NET 10 Unix rename error path.
             denied = true;
         }
 
@@ -123,6 +125,24 @@ internal static class Program
         // checked separately by the root controller's retained descriptors.
         return denied && Directory.Exists(session)
             && !Directory.Exists(sibling) && !File.Exists(sibling);
+    }
+
+    private static bool ReadOnlyAssemblyDenied(Action operation)
+    {
+        try
+        {
+            operation();
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return true;
+        }
+        catch (IOException exception) when (exception.HResult == ReadOnlyFileSystemErrnoHResult)
+        {
+            // Only raw EROFS from .NET 10 Unix is accepted for this write probe.
+            return true;
+        }
     }
 
     private static bool ValidateArguments(string[] args)

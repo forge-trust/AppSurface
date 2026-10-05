@@ -11266,7 +11266,7 @@
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/README.md": {
       "mode": "0644",
-      "sha256": "9d72b9157c498b738b342128a82b272e468ab563e35cf4ce68554e789e0934c1"
+      "sha256": "e8419f299a6010c484586c5e9e94d72d3ef4cd5e0499b5b8030b595f14df7a98"
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/build-native-probe.py": {
       "mode": "0644",
@@ -11278,7 +11278,7 @@
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/programs/CounterFixture.cs": {
       "mode": "0644",
-      "sha256": "8a3734166e973f67e4d595ebcd86ad0b1824a02c4a146b93f72a8fb59105c764"
+      "sha256": "28512e02461c19382caa74a97f19915b927059412ec356d164461aa4d0194ab8"
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/programs/CounterFixture.csproj": {
       "mode": "0644",
@@ -11290,7 +11290,7 @@
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/programs/README.md": {
       "mode": "0644",
-      "sha256": "727b71c612690cdf85a25d4bec2c94ba3af3528eb9ee86dee0a07506297cf71f"
+      "sha256": "df81fa2f26a324aa93ba2ef55dee2ec929f8bed868b1207db846ab23a0e2a81f"
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/programs/TaskHost.cs": {
       "mode": "0644",
@@ -11306,7 +11306,7 @@
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/run-native-probe.py": {
       "mode": "0644",
-      "sha256": "101ed252fdc82db03a062059efc5e6416f09ff20a2e851a7d13f50a3a70d6f70"
+      "sha256": "78bee66eed6bc3cd3b284212bbbd3d702fceb36d9de1a596daee1704ae76c584"
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/sealed-runtime.py": {
       "mode": "0644",
@@ -11322,7 +11322,7 @@
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/test_native_probe.py": {
       "mode": "0644",
-      "sha256": "23c5565169d0c1e86328d5f3abd735cb15a2760737166ee0f9a04ce8f5b317c5"
+      "sha256": "74d1cfb3c90820f423239aba37b7966bfdb16809e4f0f924586f696bc6ffe1c6"
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/test_sealed_runtime.py": {
       "mode": "0644",
