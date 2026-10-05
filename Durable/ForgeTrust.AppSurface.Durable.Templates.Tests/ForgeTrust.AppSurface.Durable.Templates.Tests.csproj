@@ -49,6 +49,8 @@
     <Compile Include="../ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/tests/AppSurfaceDurableWorker.Tests/HostContractTests.cs"
              Condition="Exists('../ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/tests/AppSurfaceDurableWorker.Tests/HostContractTests.cs')"
              Link="GeneratedTests/HostContractTests.cs" />
+    <Compile Include="../ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/tests/AppSurfaceDurableWorker.Tests/ActivityExporter.cs"
+             Link="GeneratedTests/ActivityExporter.cs" />
     <Compile Include="../ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/tests/AppSurfaceDurableWorker.Tests/SetupOperationLifetime.cs"
              Link="GeneratedTests/SetupOperationLifetime.cs" />
     <Compile Include="../ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/tests/AppSurfaceDurableWorker.Tests/SetupOperationLifetimeTests.cs"
