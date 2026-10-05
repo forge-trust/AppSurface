@@ -1,5 +1,7 @@
 # ForgeTrust.AppSurface.Durable.Provider
 
+The [runtime doctor](../runtime-doctor.md) provides a separate one-store CLI observation. It does not replace these host-health or pump-admission contracts, or their application-owned decisions.
+
 > **Public preview:** the [`PostgreSQL provider`](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md) supplies the
 > current conformance path. This package contains SPI contracts, not a runtime.
 

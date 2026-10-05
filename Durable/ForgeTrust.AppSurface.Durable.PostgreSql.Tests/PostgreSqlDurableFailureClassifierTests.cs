@@ -16,6 +16,7 @@ public sealed class PostgreSqlDurableFailureClassifierTests
             Assert.Equal(PostgreSqlDurableFailureDisposition.Unavailable, classification.Disposition);
             Assert.Equal(DurableProblemCodes.StoreUnavailable, classification.ProblemCode);
             Assert.Equal(PostgreSqlDurableUnavailableCause.Transport, classification.UnavailableCause);
+            Assert.Same(Diagnostic(DurableProblemCodes.StoreUnavailable), classification.Diagnostic);
         }
     }
 
@@ -33,6 +34,7 @@ public sealed class PostgreSqlDurableFailureClassifierTests
         Assert.Equal(PostgreSqlDurableFailureDisposition.Unavailable, classification.Disposition);
         Assert.Equal(DurableProblemCodes.StoreUnavailable, classification.ProblemCode);
         Assert.Equal(PostgreSqlDurableUnavailableCause.PermissionDenied, classification.UnavailableCause);
+        Assert.Same(Diagnostic(DurableProblemCodes.StoreUnavailable), classification.Diagnostic);
     }
 
     [Fact]
@@ -180,6 +182,49 @@ public sealed class PostgreSqlDurableFailureClassifierTests
         Assert.Equal(PostgreSqlDurableFailureDisposition.Incompatible, classification.Disposition);
         Assert.Equal(expectedProblemCode, classification.ProblemCode);
         Assert.Null(classification.UnavailableCause);
+        Assert.Same(Diagnostic(expectedProblemCode), classification.Diagnostic);
+    }
+
+    // Value: protects=schema problem adapter preserves canonical diagnostic codes; fails_when=health consumers lose the exact incompatibility; why_new=classification tests do not call this adapter; seam=ProblemForSchema
+    [Theory]
+    [InlineData(DurableRuntimeSchemaCompatibility.Missing, DurableProblemCodes.SchemaMissing)]
+    [InlineData(DurableRuntimeSchemaCompatibility.UpgradeRequired, DurableProblemCodes.SchemaUpgradeRequired)]
+    [InlineData(DurableRuntimeSchemaCompatibility.StoreTooNew, DurableProblemCodes.SchemaVersionUnsupported)]
+    [InlineData(DurableRuntimeSchemaCompatibility.Inconsistent, DurableProblemCodes.SchemaInconsistent)]
+    public void Schema_problem_adapter_preserves_the_canonical_descriptor_code(
+        DurableRuntimeSchemaCompatibility compatibility, string expectedCode)
+    {
+        Assert.Equal(expectedCode, PostgreSqlDurableFailureClassifier.ProblemForSchema(compatibility));
+    }
+
+    [Theory]
+    [InlineData(DurableProblemCodes.RecoveryEpochRequired)]
+    [InlineData(DurableProblemCodes.SchemaMissing)]
+    [InlineData(DurableProblemCodes.SchemaUpgradeRequired)]
+    [InlineData(DurableProblemCodes.SchemaVersionUnsupported)]
+    [InlineData(DurableProblemCodes.SchemaInconsistent)]
+    [InlineData(DurableProblemCodes.ActivatorStale)]
+    public void CanonicalProblemCode_PreservesExistingHealthAndAdmissionCodes(string problemCode)
+    {
+        Assert.Equal(problemCode, PostgreSqlDurableFailureClassifier.CanonicalProblemCode(problemCode));
+    }
+
+    [Fact]
+    public void DiagnosticFor_LeavesUncataloguedApplicationAndWorkerConflictCodesUnclassified()
+    {
+        Assert.Null(PostgreSqlDurableFailureClassifier.DiagnosticFor("APP123"));
+        Assert.Null(PostgreSqlDurableFailureClassifier.DiagnosticFor(DurableProblemCodes.WorkerIdentityConflict));
+        Assert.Equal("APP123", PostgreSqlDurableFailureClassifier.CanonicalProblemCode("APP123"));
+        Assert.Equal(
+            DurableProblemCodes.WorkerIdentityConflict,
+            PostgreSqlDurableFailureClassifier.CanonicalProblemCode(DurableProblemCodes.WorkerIdentityConflict));
+        Assert.Null(PostgreSqlDurableFailureClassifier.CanonicalProblemCode(null));
+
+        var applicationClassification = new PostgreSqlDurableFailureClassification(
+            PostgreSqlDurableFailureDisposition.Incompatible,
+            "APP123",
+            null);
+        Assert.Null(applicationClassification.Diagnostic);
     }
 
     [Fact]
@@ -286,6 +331,32 @@ public sealed class PostgreSqlDurableFailureClassifierTests
     }
 
     [Fact]
+    public async Task ControlPlaneCommand_DoesNotRecordDeadlineForUnrelatedCancellation()
+    {
+        await using var command = new NpgsqlCommand { CommandTimeout = 1 };
+        using var unrelated = new CancellationTokenSource();
+        unrelated.Cancel();
+
+        var exception = await Assert.ThrowsAsync<OperationCanceledException>(
+            async () => await PostgreSqlDurableControlPlaneCommand.ExecuteOperationAsync<int>(
+                command,
+                CancellationToken.None,
+                async effectiveToken =>
+                {
+                    var deadlineElapsed = new TaskCompletionSource(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    using var registration = effectiveToken.Register(deadlineElapsed.SetResult);
+                    await deadlineElapsed.Task;
+                    throw new OperationCanceledException(unrelated.Token);
+                }));
+
+        Assert.Equal(unrelated.Token, exception.CancellationToken);
+        Assert.Equal(PostgreSqlDurableTimeoutEvidence.None,
+            PostgreSqlDurableControlPlaneCommand.GetTimeoutEvidence(exception));
+        Assert.Equal(PostgreSqlDurableFailureDisposition.Propagate, Classify(exception).Disposition);
+    }
+
+    [Fact]
     public async Task ControlPlaneCommand_RecordsDeadlineForQueryCanceledFailure()
     {
         await using var command = new NpgsqlCommand
@@ -345,6 +416,12 @@ public sealed class PostgreSqlDurableFailureClassifierTests
                 callerCancellation.Token,
                 static effectiveToken => Task.FromCanceled<int>(effectiveToken)));
 
+        Assert.True(PostgreSqlDurableControlPlaneCommand.IsCancellationFrom(exception, callerCancellation.Token));
+        using var unrelatedCancellation = new CancellationTokenSource();
+        unrelatedCancellation.Cancel();
+        Assert.False(PostgreSqlDurableControlPlaneCommand.IsCancellationFrom(exception, unrelatedCancellation.Token));
+        Assert.False(PostgreSqlDurableControlPlaneCommand.IsCancellationFrom(exception, CancellationToken.None));
+        Assert.NotEqual(callerCancellation.Token, exception.CancellationToken);
         Assert.Equal(
             PostgreSqlDurableTimeoutEvidence.None,
             PostgreSqlDurableControlPlaneCommand.GetTimeoutEvidence(exception));
@@ -433,6 +510,12 @@ public sealed class PostgreSqlDurableFailureClassifierTests
             operation,
             exception,
             cancellationToken);
+
+    private static DurableDiagnosticDescriptor Diagnostic(string problemCode)
+    {
+        Assert.True(DurableDiagnosticCatalog.TryGet(problemCode, out var descriptor));
+        return Assert.IsType<DurableDiagnosticDescriptor>(descriptor);
+    }
 
     private static PostgresException Postgres(string sqlState) =>
         new("server-controlled detail", "ERROR", "ERROR", sqlState);

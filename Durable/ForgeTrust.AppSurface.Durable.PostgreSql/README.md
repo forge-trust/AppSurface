@@ -1,5 +1,7 @@
 # ForgeTrust.AppSurface.Durable.PostgreSql
 
+Use the [runtime doctor](../runtime-doctor.md) to inspect one connected store with a restricted runtime credential. Migration 0011 retention checks are local structural evidence; [complete deployment preflight](../heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist) requires its own reviewed inputs.
+
 For schema-11 runtime heartbeat cleanup, start with the [retention configuration and operations guide](../heartbeat-retention-operations.md). It gives the defaults, pause setting, exact migration commands, security boundary, capacity measurements, and forward-only recovery path.
 
 > **Public preview:** this package supplies explicit PostgreSQL schema management, Work, Flow, Schedule, an explicitly
