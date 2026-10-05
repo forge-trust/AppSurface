@@ -15,3 +15,7 @@ docs/designs/issue-804-external-activation.md.review.8YsHpT/round-1.json|runnabl
 Durable/verify-packed-consumers.sh|Runnable|2027-09-16|The standard TRX counter notRunnable is required to reject non-executable test runs; it is not a product brand.
 docs/designs/issue-845-complete-runtime-preflight.md|Runnable|2027-10-02|Historical external review artifact paths retained as provenance; not current product branding.
 docs/designs/issue-845-complete-runtime-preflight.md|runnable|2027-10-02|Generic executable-example wording preserved in the approved review record; not current product branding.
+docs/designs/issue-765-deterministic-retry-plans-autoplan.md|Runnable|2027-10-05|Historical external planning and review artifact paths retained as provenance; not current product branding.
+docs/designs/issue-765-deterministic-retry-plans-autoplan.md|runnable|2027-10-05|Historical workspace paths retained in the approved plan and review record; not current product branding.
+docs/designs/issue-765-deterministic-retry-plans.md|runnable|2027-10-05|Historical workspace paths retained in the approved design record; not current product branding.
+.github/plans/issue-765-completion-audit.md|runnable|2027-10-05|Historical local worktree path retained as validation provenance; not current product branding.
