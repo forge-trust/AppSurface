@@ -146,6 +146,10 @@ cache copy and rejects a missing or linked store archive or linked staging desti
 public bytes: the carrier still compares every payload entry before invoking the shared proof. A candidate archive
 or an existing cache entry cannot substitute for a missing installed tool archive.
 
+The [promoted Durable template replay](#durable-worker-template-proof-806) also compares every manifest archive, so
+installed tool archives are staged before it begins. Both that replay and the published runtime-preflight proof require
+successful library and tool smoke; the report retains those results when a later proof fails.
+
 Each canonical CLI result row carries a `Scenario` identity. The one-pair scenario proves forwarder Work, Flow, and
 Schedule before and after; the installed `work_only` pair scenarios also prove Work succeeds while Flow, Schedule,
 and All are denied. Each before/after lane record binds its scenario, store, epoch, guard backend, and runtime-role

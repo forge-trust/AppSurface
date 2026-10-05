@@ -11,6 +11,8 @@ public sealed class DurableTemplatePublicReplayTests : IDisposable
     private const string Version = "0.2.0-preview.13";
     private const string ProviderId = "ForgeTrust.AppSurface.Durable.PostgreSql";
     private const string TestingId = "ForgeTrust.AppSurface.Durable.Testing";
+    private const string ToolId = "ForgeTrust.AppSurface.Cli";
+    private const string WebId = "ForgeTrust.AppSurface.Web";
     private const string SourceCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     private const string SecretSentinel = "public-replay-secret-output-must-not-be-retained";
     private const string ProjectName = "FirstDurableWorker";
@@ -156,6 +158,71 @@ public sealed class DurableTemplatePublicReplayTests : IDisposable
             var firstWork = Assert.Single(runner.Requests, request => request.OperationName == "first-work");
             Assert.Contains(FirstWorkCheckpoints[0], runner.OutputFor(firstWork));
         }
+    }
+
+    [Fact]
+    public async Task SmokeWorkflowStagesInstalledToolBeforeTemplateReplayWithoutPreflightProof()
+    {
+        var fixture = new ReplayFixture(_root, _repositoryRoot, includeTool: true);
+        var (workflow, request, runner) = fixture.CreateSmokeWorkflow();
+        PackageSmokeInstallReport? report = null;
+
+        var failure = await Record.ExceptionAsync(async () =>
+            report = await workflow.RunAsync(request, CancellationToken.None));
+
+        Assert.True(runner.Requests.Any(command => command.OperationName == "public-template-install"),
+            $"The combined workflow did not reach public replay: {failure?.Message}");
+        Assert.True(runner.ToolWasStagedBeforeReplay,
+            "The CLI archive existed only in the installed tool .store, but was not staged before public-template-install.");
+        Assert.Null(failure);
+        Assert.Null(request.PreflightProof);
+        Assert.NotNull(report);
+        Assert.Equal(fixture.Manifest.Entries.Count, report.Entries.Count);
+        Assert.All(report.Entries, entry => Assert.Equal(PackageSmokeInstallStatus.Restored, entry.Status));
+        Assert.Equal(File.ReadAllBytes(runner.InstalledToolArchive), File.ReadAllBytes(runner.StagedToolArchive));
+        DurableTemplatePublicReplay.RequirePayloadIdentity(fixture.CandidateTool, runner.StagedToolArchive);
+        Assert.Contains(runner.Requests, command => command.OperationName == "feed-create");
+        Assert.DoesNotContain(runner.Requests, command => command.OperationName == "PostgreSQL preflight artifact proof");
+        Assert.False(Directory.Exists(runner.Replay.PublicRoot));
+        Assert.False(Directory.Exists(runner.Replay.ProofRoot));
+    }
+
+    [Theory]
+    [InlineData("missing-tool-archive")]
+    [InlineData("tool-install")]
+    [InlineData("tool-help")]
+    [InlineData("tool-version")]
+    [InlineData("library-restore")]
+    public async Task SmokeWorkflowMissingArchiveOrFailedSmokeBlocksTemplateReplay(string fault)
+    {
+        var fixture = new ReplayFixture(_root, _repositoryRoot, includeTool: true);
+        var (workflow, request, runner) = fixture.CreateSmokeWorkflow(fault);
+
+        var failure = await Assert.ThrowsAsync<PackageIndexException>(() => workflow.RunAsync(request, CancellationToken.None));
+
+        Assert.True(runner.Requests.Any(command => command.OperationName == "dotnet tool install"),
+            $"The combined workflow did not reach tool smoke: {failure.Message}");
+        Assert.DoesNotContain(runner.Requests, command => command.OperationName == "public-template-install");
+        Assert.DoesNotContain(runner.Requests, command => command.OperationName == "sdk");
+        Assert.False(File.Exists(TestPathUtils.PathUnder(request.WorkDirectory, "durable-template-public-replay.json")));
+    }
+
+    [Fact]
+    public async Task SmokeWorkflowChangedInstalledToolPayloadFailsBeforeConsumerProof()
+    {
+        var fixture = new ReplayFixture(_root, _repositoryRoot, includeTool: true);
+        var (workflow, request, runner) = fixture.CreateSmokeWorkflow("tool-payload");
+
+        var failure = await Assert.ThrowsAsync<PackageIndexException>(() => workflow.RunAsync(request, CancellationToken.None));
+
+        Assert.True(runner.Requests.Any(command => command.OperationName == "public-template-install"),
+            $"The combined workflow did not reach public replay: {failure.Message}");
+        Assert.True(runner.ToolWasStagedBeforeReplay);
+        Assert.Contains(runner.Requests, command => command.OperationName == "public-template-install");
+        Assert.DoesNotContain(runner.Requests, command => command.OperationName == "sdk");
+        Assert.Throws<PackageIndexException>(() =>
+            DurableTemplatePublicReplay.RequirePayloadIdentity(fixture.CandidateTool, runner.StagedToolArchive));
+        Assert.False(Directory.Exists(runner.Replay.PublicRoot));
     }
 
     [Fact]
@@ -329,7 +396,7 @@ public sealed class DurableTemplatePublicReplayTests : IDisposable
         private readonly byte[] _providerSql;
         private readonly Dictionary<string, string> _candidateArchives = new(StringComparer.Ordinal);
 
-        internal ReplayFixture(string testRoot, string repositoryRoot, bool changePublishedTemplatePayload = false)
+        internal ReplayFixture(string testRoot, string repositoryRoot, bool changePublishedTemplatePayload = false, bool includeTool = false)
         {
             _root = Path.Join(testRoot, Guid.NewGuid().ToString("N"));
             _repositoryRoot = repositoryRoot;
@@ -355,6 +422,17 @@ public sealed class DurableTemplatePublicReplayTests : IDisposable
             _candidateArchives.Add(DurableTemplateStaging.PackageId, template);
             _candidateArchives.Add(ProviderId, provider);
             _candidateArchives.Add(TestingId, testing);
+            if (includeTool)
+            {
+                var web = CreateSimpleArchive(TestPathUtils.PathUnder(_artifacts, $"{WebId}.{Version}.nupkg"),
+                    "lib/net10.0/fixture.dll", "fixture web payload"u8.ToArray());
+                _candidateArchives.Add(WebId, web);
+                AddPublishedDependency(WebId, web);
+                var tool = CreateSimpleArchive(TestPathUtils.PathUnder(_artifacts, $"{ToolId}.{Version}.nupkg"),
+                    "tools/net10.0/any/appsurface.dll", "fixture tool payload"u8.ToArray());
+                _candidateArchives.Add(ToolId, tool);
+                PublishedTool = CreateSignedCopy(tool, TestPathUtils.PathUnder(_root, "public-tool.nupkg"), changePayload: false);
+            }
 
             PublishedTemplate = CreateSignedCopy(
                 template,
@@ -369,7 +447,8 @@ public sealed class DurableTemplatePublicReplayTests : IDisposable
                 "publish",
                 Path.GetFileName(pair.Value),
                 PackageHash.ComputeSha512(pair.Value),
-                IsTool: false)).ToArray();
+                IsTool: pair.Key == ToolId,
+                ToolCommandName: pair.Key == ToolId ? "appsurface" : "")).ToArray();
             Manifest = new(1, Version, DateTimeOffset.Parse("2026-10-04T00:00:00Z"), entries);
             File.WriteAllBytes(Request.ArtifactManifestPath,
                 JsonSerializer.SerializeToUtf8Bytes(Manifest, PackageArtifactJson.Options));
@@ -379,9 +458,47 @@ public sealed class DurableTemplatePublicReplayTests : IDisposable
         internal PackageSmokeInstallRequest Request { get; }
         internal string PublicCache { get; }
         internal string PublishedTemplate { get; }
+        internal string PublishedTool { get; } = "";
         internal string CandidateTemplate => _candidateArchives[DurableTemplateStaging.PackageId];
+        internal string CandidateTool => _candidateArchives[ToolId];
         internal string TemplateContent => _templateContent;
         internal byte[] ProviderSql => _providerSql;
+
+        internal (PackageSmokeInstallWorkflow Workflow, PackageSmokeInstallRequest Request, SmokeWorkflowRunner Runner) CreateSmokeWorkflow(string? fault = null)
+        {
+            var repository = TestPathUtils.PathUnder(_root, "smoke-repository");
+            var chooser = new StringBuilder("packages:\n");
+            var metadata = new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (entry, index) in Manifest.Entries.Select((entry, index) => (entry, index)))
+            {
+                var project = TestPathUtils.PathUnder(repository, entry.ProjectPath);
+                Directory.CreateDirectory(Path.GetDirectoryName(project)!);
+                File.WriteAllText(project, "<Project />");
+                const string readme = "README.md";
+                File.WriteAllText(TestPathUtils.PathUnder(repository, readme), "# Fixture package");
+                chooser.AppendLine($"  - project: {entry.ProjectPath}")
+                    .AppendLine("    product_family: appsurface")
+                    .AppendLine("    classification: public")
+                    .AppendLine("    publish_decision: publish")
+                    .AppendLine($"    order: {index + 1}")
+                    .AppendLine("    use_when: Exercise the coordinated smoke workflow.")
+                    .AppendLine("    includes: Fixture package payload.")
+                    .AppendLine("    does_not_include: Other package payloads.")
+                    .AppendLine($"    start_here_path: {readme}");
+                if (entry.IsTool) chooser.AppendLine("    tool_command_name: appsurface");
+                metadata.Add(entry.ProjectPath, new(entry.ProjectPath, entry.PackageId, "net10.0", true,
+                    entry.IsTool, entry.IsTool ? "Exe" : "Library", [],
+                    entry.PackageId == DurableTemplateStaging.PackageId ? "Template" : ""));
+            }
+            var manifestPath = TestPathUtils.PathUnder(repository, "package-index.yml");
+            File.WriteAllText(manifestPath, chooser.ToString());
+            var request = Request with { RepositoryRoot = repository, ManifestPath = manifestPath };
+            var runner = new SmokeWorkflowRunner(this, request, fault);
+            var workflow = new PackageSmokeInstallWorkflow(new PackageArtifactManifestReader(),
+                new PackagePublishPlanResolver(new PackageProjectScanner(), new FixtureMetadataProvider(metadata), new PackageManifestLoader()),
+                runner, new PackageSmokeInstallReportRenderer(), (_, _) => Task.CompletedTask);
+            return (workflow, request, runner);
+        }
 
         private string CreateTemplateArchive(string path)
         {
@@ -458,6 +575,8 @@ public sealed class DurableTemplatePublicReplayTests : IDisposable
         {
             DurableTemplateStaging.PackageId => "Durable/ForgeTrust.AppSurface.Durable.Templates.csproj",
             ProviderId => "Durable/ForgeTrust.AppSurface.Durable.PostgreSql.csproj",
+            ToolId => "Cli/ForgeTrust.AppSurface.Cli.csproj",
+            WebId => "Web/ForgeTrust.AppSurface.Web.csproj",
             _ => "Durable/ForgeTrust.AppSurface.Durable.Testing.csproj"
         };
 
@@ -467,6 +586,82 @@ public sealed class DurableTemplatePublicReplayTests : IDisposable
             using var output = entry.Open();
             output.Write(bytes);
         }
+    }
+
+    private sealed class FixtureMetadataProvider(IReadOnlyDictionary<string, PackageProjectMetadata> metadata) : IProjectMetadataProvider
+    {
+        public Task<PackageProjectMetadata> GetMetadataAsync(string repositoryRoot, string projectPath, CancellationToken cancellationToken)
+            => Task.FromResult(metadata[projectPath]);
+    }
+
+    private sealed class SmokeWorkflowRunner(ReplayFixture fixture, PackageSmokeInstallRequest smokeRequest, string? fault) : IExternalCommandRunner
+    {
+        internal ReplayRunner Replay { get; } = new(fixture);
+        internal List<ExternalCommandRequest> Requests { get; } = [];
+        internal bool ToolWasStagedBeforeReplay { get; private set; }
+        internal string InstalledToolArchive { get; private set; } = "";
+        internal string StagedToolArchive => TestPathUtils.PathUnder(smokeRequest.WorkDirectory, "packages", ToolId.ToLowerInvariant(), Version,
+            $"{ToolId.ToLowerInvariant()}.{Version}.nupkg");
+
+        public Task<ExternalCommandResult> RunAsync(ExternalCommandRequest request, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Requests.Add(request);
+            if (request.OperationName == "dotnet restore")
+            {
+                foreach (var packageId in new[] { ProviderId, TestingId, WebId })
+                {
+                    var id = packageId.ToLowerInvariant();
+                    var archiveName = $"{id}.{Version}.nupkg";
+                    var destination = TestPathUtils.PathUnder(smokeRequest.WorkDirectory, "packages", id, Version, archiveName);
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    File.Copy(TestPathUtils.PathUnder(fixture.PublicCache, id, Version, archiveName), destination, overwrite: true);
+                }
+                Assert.False(File.Exists(StagedToolArchive));
+                return Result(fault == "library-restore" ? 1 : 0);
+            }
+            if (request.OperationName == "dotnet tool install")
+            {
+                var toolPath = request.Arguments[request.Arguments.ToList().IndexOf("--tool-path") + 1];
+                InstalledToolArchive = TestPathUtils.PathUnder(toolPath, ".store", ToolId.ToLowerInvariant(), Version, ToolId.ToLowerInvariant(), Version,
+                    $"{ToolId.ToLowerInvariant()}.{Version}.nupkg");
+                Directory.CreateDirectory(Path.GetDirectoryName(InstalledToolArchive)!);
+                if (fault != "missing-tool-archive")
+                {
+                    File.Copy(fixture.PublishedTool, InstalledToolArchive, overwrite: true);
+                    if (fault == "tool-payload")
+                    {
+                        using var archive = ZipFile.Open(InstalledToolArchive, ZipArchiveMode.Update);
+                        using var writer = new StreamWriter(archive.CreateEntry("changed-payload.txt").Open());
+                        writer.Write("changed installed tool payload");
+                    }
+                }
+                Assert.False(File.Exists(StagedToolArchive));
+                return Result(fault == "tool-install" ? 1 : 0);
+            }
+            if (request.OperationName == "dotnet tool run")
+            {
+                var help = request.Arguments.SequenceEqual(["--help"]);
+                return Result(fault == (help ? "tool-help" : "tool-version") ? 1 : 0,
+                    help ? "appsurface commands" : Version + "\n");
+            }
+            if (request.OperationName == "public-template-install")
+            {
+                ToolWasStagedBeforeReplay = File.Exists(StagedToolArchive);
+                // Add authored fixture content only after the coordinated publish plan has been resolved.
+                var content = TestPathUtils.PathUnder(smokeRequest.RepositoryRoot, DurableTemplateStaging.ContentPath);
+                foreach (var source in DurableTemplateStaging.EnumerateContent(fixture.TemplateContent))
+                {
+                    var destination = TestPathUtils.PathUnder(content, Path.GetRelativePath(fixture.TemplateContent, source));
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    File.Copy(source, destination);
+                }
+            }
+            return Replay.RunAsync(request, cancellationToken);
+        }
+
+        private static Task<ExternalCommandResult> Result(int exitCode, string output = "")
+            => Task.FromResult(new ExternalCommandResult(exitCode, output, ""));
     }
 
     private sealed class ReplayRunner : IExternalCommandRunner

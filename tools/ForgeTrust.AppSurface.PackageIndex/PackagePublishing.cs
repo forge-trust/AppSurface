@@ -820,8 +820,8 @@ internal sealed class PackageSmokeInstallWorkflow
     }
 
     /// <summary>
-    /// Restores all non-tool <c>publish</c> entries in one aggregate smoke project, then verifies each tool package
-    /// independently from isolated per-tool workspaces.
+    /// Restores library entries in one aggregate smoke project, verifies tools in isolated workspaces, and replays
+    /// a promoted Durable template against all installed package archives.
     /// </summary>
     /// <param name="request">
     /// Smoke install request containing the repository root, package index manifest path, artifact manifest path,
@@ -845,9 +845,11 @@ internal sealed class PackageSmokeInstallWorkflow
     /// </para>
     /// <para>
     /// Pitfall: a failed aggregate package restore marks every non-tool package entry failed, but tool smoke still runs
-    /// and is reported independently. Request validation and manifest or package-plan mismatches throw before a report is
-    /// written; command failures are captured in the returned report unless the supplied <paramref name="cancellationToken" />
-    /// cancels the workflow.
+    /// and is reported independently. Failed library or tool smoke withholds promoted template replay and published
+    /// runtime-preflight proof. The report records completed library/tool results before either proof, and adds a template
+    /// success only after replay and owned cleanup pass. Request validation and manifest or package-plan mismatches throw
+    /// before a report is written; command failures without a required proof remain in the returned report unless the
+    /// supplied <paramref name="cancellationToken" /> cancels the workflow.
     /// </para>
     /// </remarks>
     internal async Task<PackageSmokeInstallReport> RunAsync(
@@ -941,41 +943,51 @@ internal sealed class PackageSmokeInstallWorkflow
                 CombineOutput(result)));
         }
 
-        if (entries.Any(entry => string.Equals(entry.ManifestEntry.PackageId, DurableTemplateStaging.PackageId, StringComparison.OrdinalIgnoreCase)))
-        {
-            await DurableTemplatePublicReplay.RunAsync(request, manifest, sharedPackagesPath, _commandRunner, cancellationToken);
-            var templateEntry = entries.Single(entry => string.Equals(entry.ManifestEntry.PackageId, DurableTemplateStaging.PackageId, StringComparison.OrdinalIgnoreCase));
-            reportEntries.Add(new(DurableTemplateStaging.PackageId, templateEntry.ManifestEntry.ProjectPath, false,
-                PackageSmokeInstallStatus.Restored, 0, "Promoted native template and generated Work proof passed after owned cleanup."));
-        }
+        var hasTemplate = entries.Any(entry => string.Equals(entry.ManifestEntry.PackageId,
+            DurableTemplateStaging.PackageId, StringComparison.OrdinalIgnoreCase));
         var report = new PackageSmokeInstallReport(manifest.PackageVersion, request.Source, reportEntries);
         Directory.CreateDirectory(Path.GetDirectoryName(request.ReportPath)!);
         await File.WriteAllTextAsync(request.ReportPath, _reportRenderer.RenderMarkdown(report), cancellationToken);
 
-        if (request.PreflightProof is not null)
+        if (hasTemplate || request.PreflightProof is not null)
         {
             if (reportEntries.Any(entry => entry.Status != PackageSmokeInstallStatus.Restored))
             {
-                throw new PackageIndexException("Public-feed smoke failed; the published runtime-preflight proof cannot run.");
+                throw new PackageIndexException(hasTemplate
+                    ? "Public-feed smoke failed; the promoted template replay cannot run."
+                    : "Public-feed smoke failed; the published runtime-preflight proof cannot run.");
             }
 
-            if (string.IsNullOrWhiteSpace(request.CandidatePreflightReceiptPath)
-                || string.IsNullOrWhiteSpace(request.PublishedPreflightReceiptPath))
+            if (request.PreflightProof is not null && (string.IsNullOrWhiteSpace(request.CandidatePreflightReceiptPath)
+                || string.IsNullOrWhiteSpace(request.PublishedPreflightReceiptPath)))
             {
                 throw new PackageIndexException("Public-feed runtime-preflight proof requires candidate and published receipt paths.");
             }
 
+            // Both proofs consume every manifest archive; tool install keeps its archive outside the library cache.
             foreach (var entry in entries.Where(entry => entry.ManifestEntry.IsTool))
             {
                 var toolPath = Path.Join(request.WorkDirectory, SanitizeFileName(entry.ManifestEntry.PackageId), "tools");
                 StageInstalledToolArchive(toolPath, entry.ManifestEntry, manifest.PackageVersion, sharedPackagesPath);
             }
+        }
 
+        if (hasTemplate)
+        {
+            await DurableTemplatePublicReplay.RunAsync(request, manifest, sharedPackagesPath, _commandRunner, cancellationToken);
+            var templateEntry = entries.Single(entry => string.Equals(entry.ManifestEntry.PackageId, DurableTemplateStaging.PackageId, StringComparison.OrdinalIgnoreCase));
+            reportEntries.Add(new(DurableTemplateStaging.PackageId, templateEntry.ManifestEntry.ProjectPath, false,
+                PackageSmokeInstallStatus.Restored, 0, "Promoted native template and generated Work proof passed after owned cleanup."));
+            await File.WriteAllTextAsync(request.ReportPath, _reportRenderer.RenderMarkdown(report), cancellationToken);
+        }
+
+        if (request.PreflightProof is not null)
+        {
             await _preflightArtifactProof.RunPublishedAsync(
                 request.PreflightProof,
-                request.CandidatePreflightReceiptPath,
+                request.CandidatePreflightReceiptPath!,
                 sharedPackagesPath,
-                request.PublishedPreflightReceiptPath,
+                request.PublishedPreflightReceiptPath!,
                 cancellationToken);
         }
 
