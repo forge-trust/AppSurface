@@ -667,7 +667,7 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
 
-        await page.EvaluateAsync(ScrollMainContentToBottomScript);
+        await ScrollMainContentToBottomAsync(page);
         var scrollState = await page.EvaluateAsync<DetailsScrollState>(
             """
             () => {
@@ -720,7 +720,7 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             "() => getComputedStyle(document.getElementById('main-content')).overflowAnchor");
         Assert.Equal("none", overflowAnchor);
 
-        await page.EvaluateAsync(ScrollMainContentToBottomScript);
+        await ScrollMainContentToBottomAsync(page);
         await page.EvaluateAsync(
             """
             () => {
@@ -765,7 +765,7 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
 
-        await page.EvaluateAsync(ScrollMainContentToBottomScript);
+        await ScrollMainContentToBottomAsync(page);
         var scrollState = await page.EvaluateAsync<DetailsScrollState>(
             """
             () => {
@@ -1699,6 +1699,20 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
         await AssertSectionCopyDidNotMutateHistoryAsync(page);
     }
 
+    private static async Task ScrollMainContentToBottomAsync(IPage page)
+    {
+        await page.EvaluateAsync(ScrollMainContentToBottomScript);
+        await page.WaitForFunctionAsync(
+            """
+            () => {
+              const main = document.getElementById('main-content');
+              return main && Math.max(0, main.scrollHeight - main.clientHeight) - main.scrollTop <= 8;
+            }
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+    }
+
     private const string ScrollMainContentToBottomScript =
         """
         () => {
@@ -1708,7 +1722,8 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
           }
 
           main.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true }));
-          main.scrollTo(0, main.scrollHeight);
+          // Cancel any in-flight smooth outline navigation before checking the bottom.
+          main.scrollTo({ top: main.scrollHeight, behavior: 'instant' });
         }
         """;
 }
