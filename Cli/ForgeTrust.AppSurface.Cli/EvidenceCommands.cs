@@ -188,12 +188,19 @@ internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, C
                 }
             }
 
-            var manifest = EvidenceManifestBuilder.Build(plan, results, ObservationOnly, resourceResults: resourceResults);
+            // The built-in CLI does not authenticate CI job provenance or isolate head-controlled execution.
+            // A revision-bound local run is useful evidence to inspect, but only the trusted host may promote it.
+            var manifest = EvidenceManifestBuilder.Build(
+                plan,
+                results,
+                ObservationOnly || string.Equals(plan.ContractVersion, "2.0", StringComparison.Ordinal),
+                resourceResults: resourceResults);
             await Workflow.WriteManifestAsync(manifest, OutputDirectory, cancellationToken);
             await console.Output.WriteLineAsync(EvidenceCliWorkflow.FormatSummary(manifest));
             await console.Output.WriteLineAsync($"Artifacts: {Path.Join(OutputDirectory, "evidence-plan.json")}, {Path.Join(OutputDirectory, "evidence-manifest.json")}, {Path.Join(OutputDirectory, "evidence-summary.json")}");
             await WriteGitHubSummaryAsync(manifest, cancellationToken);
-            if (manifest.ClaimKind == EvidenceClaimKind.None)
+            if (manifest.ClaimKind == EvidenceClaimKind.None
+                || (GateMode && manifest.ClaimKind == EvidenceClaimKind.ObservationOnly))
             {
                 throw new CommandException("ASEVD211: Evidence is incomplete. Inspect evidence-summary.json and the producer output before allowing a gate to proceed.");
             }
@@ -252,6 +259,14 @@ internal sealed partial class EvidenceVerifyCommand(EvidenceCliWorkflow workflow
     [CommandOption("plan", Description = "Generated evidence-plan.json path. Defaults next to the manifest.")]
     public string? PlanPath { get; set; }
 
+    /// <summary>Gets or sets the trusted base-owned policy required for v2 verification.</summary>
+    [CommandOption("policy", Description = "Trusted base-owned policy path required for revision-bound v2 verification.")]
+    public string? PolicyPath { get; set; }
+
+    /// <summary>Gets or sets the trusted Git object store required for v2 verification.</summary>
+    [CommandOption("repository", Description = "Trusted Git object store containing both exact commits for v2 verification.")]
+    public string? RepositoryPath { get; set; }
+
     /// <inheritdoc />
     public async ValueTask ExecuteAsync(IConsole console)
     {
@@ -265,7 +280,7 @@ internal sealed partial class EvidenceVerifyCommand(EvidenceCliWorkflow workflow
             var planPath = string.IsNullOrWhiteSpace(PlanPath)
                 ? Path.Join(Path.GetDirectoryName(Path.GetFullPath(ManifestPath))!, "evidence-plan.json")
                 : PlanPath;
-            var (_, manifest) = await _workflow.VerifyAsync(planPath, ManifestPath, console.RegisterCancellationHandler());
+            var (_, manifest) = await _workflow.VerifyAsync(planPath, ManifestPath, console.RegisterCancellationHandler(), PolicyPath, RepositoryPath);
             await console.Output.WriteLineAsync($"Evidence manifest verified: {manifest.ClaimKind} ({manifest.Eligibility})");
         }
         catch (EvidenceCliException exception)
@@ -303,5 +318,25 @@ internal abstract partial class EvidencePlanningCommandBase(EvidenceCliWorkflow 
     /// <summary>
     /// Creates the explicit policy-and-diff input consumed by a planning operation.
     /// </summary>
-    protected EvidencePlanningRequest CreatePlanningRequest() => new(PolicyPath, Paths, DiffFile);
+    protected EvidencePlanningRequest CreatePlanningRequest() => new(PolicyPath, Paths, DiffFile, BaseRevision, HeadRevision, RepositoryPath, GateMode, PullRequestRunIdentityFile);
+
+    /// <summary>Gets or sets the complete base commit ID for revision-bound planning.</summary>
+    [CommandOption("base-revision", Description = "Complete base Git commit ID. Requires --head-revision and --diff-file.")]
+    public string? BaseRevision { get; set; }
+
+    /// <summary>Gets or sets the complete head commit ID for revision-bound planning.</summary>
+    [CommandOption("head-revision", Description = "Complete head Git commit ID. Requires --base-revision and --diff-file.")]
+    public string? HeadRevision { get; set; }
+
+    /// <summary>Gets or sets the trusted Git object-store directory containing both exact commits.</summary>
+    [CommandOption("repository", Description = "Git object-store directory for revision capture. Defaults to the current directory.")]
+    public string? RepositoryPath { get; set; }
+
+    /// <summary>Gets or sets whether path-only local planning must be rejected.</summary>
+    [CommandOption("gate-mode", Description = "Require revision-bound inputs; local path-only evidence is never gate eligible.")]
+    public bool GateMode { get; set; }
+
+    /// <summary>Gets or sets the trusted controller's canonical PR/run identity JSON path.</summary>
+    [CommandOption("pr-run-identity", Description = "Canonical controller-captured PR/run identity JSON for a revision-bound CI plan.")]
+    public string? PullRequestRunIdentityFile { get; set; }
 }

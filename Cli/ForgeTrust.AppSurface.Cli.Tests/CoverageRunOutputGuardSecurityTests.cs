@@ -14,6 +14,24 @@ public sealed class CoverageRunOutputGuardSecurityTests
     private const string MarkerContents = "AppSurface coverage output directory";
 
     [Fact]
+    public void Prepare_ShouldAcquireAnOrdinaryOutputDirectoryOnLinuxArm64()
+    {
+        if (!OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.Arm64)
+        {
+            return;
+        }
+
+        using var root = TestDirectory.Create();
+        var output = Path.Join(root.Path, "coverage");
+        using var lease = CoverageRunOutputLease.Acquire(output);
+
+        lease.Prepare(clean: false, beforeMutation: null, beforeCleanup: null);
+
+        Assert.True(Directory.Exists(output));
+        Assert.Equal(MarkerContents + Environment.NewLine, File.ReadAllText(Path.Join(output, ".appsurface-coverage-output")));
+    }
+
+    [Fact]
     public void Validate_ShouldRejectExistingAncestorLinkWithoutTouchingExternalFiles()
     {
         using var root = TestDirectory.Create();

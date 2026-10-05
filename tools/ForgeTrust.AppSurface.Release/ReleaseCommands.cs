@@ -198,6 +198,12 @@ internal sealed partial class ReleaseInspectCommand : ReleaseCommandBase, IComma
     [CommandOption("out", Description = "Optional temporary YAML output path outside the repository for the validated tagged sidecar projection.")]
     public string? OutputPath { get; set; }
 
+    /// <summary>
+    /// Gets a value indicating whether inspect should emit the versioned, read-only machine result instead of the tagged projection.
+    /// </summary>
+    [CommandOption("machine-json", Description = "Emit the versioned read-only appsurface-release-inspect-v1 JSON result after successful V2 validation.")]
+    public bool MachineJson { get; set; }
+
     /// <inheritdoc />
     protected override string CommandName => "inspect";
 
@@ -238,8 +244,27 @@ internal sealed partial class ReleaseInspectCommand : ReleaseCommandBase, IComma
     {
         return ExecuteWithDiagnosticsAsync(console, async (options, cancellationToken) =>
         {
+            if (MachineJson && !string.IsNullOrWhiteSpace(OutputPath))
+            {
+                throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                    "release-inspect-machine-json-output-conflict",
+                    "Machine-readable inspect cannot be combined with tagged projection output.",
+                    "--machine-json and --out request different stdout/output contracts.",
+                    "Run inspect once with --machine-json, or run it without that option to write the tagged projection.",
+                    "tools/ForgeTrust.AppSurface.Release/README.md#prepared-to-tagged-state"));
+            }
+
             var services = CreateServices(options);
-            var projection = await services.TaggedProjectionResolver.ResolveAsync(options, cancellationToken);
+            var projection = MachineJson
+                ? await services.TaggedProjectionResolver.ResolveMachineInspectAsync(options, cancellationToken)
+                : await services.TaggedProjectionResolver.ResolveAsync(options, cancellationToken);
+            if (MachineJson)
+            {
+                var machineResult = ReleaseInspectMachineResult.FromProjection(options, projection);
+                await console.Output.WriteLineAsync(machineResult.SerializeBounded());
+                return 0;
+            }
+
             if (string.IsNullOrWhiteSpace(OutputPath))
             {
                 await console.Output.WriteAsync(projection.SidecarYaml);

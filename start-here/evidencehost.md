@@ -6,6 +6,8 @@ It is not a replacement for a test framework, coverage collector, GitHub Actions
 
 ## The first five minutes
 
+To rehearse exact base/head planning against an immutable Git bundle, follow the [docs-only gate fixture](../docs/fixtures/issue-777-docs-only/README.md). It runs `explain`, the first-party host, and local `verify`; the [rollout record](../docs/evidence-gate-rollout.md) covers the separate live GitHub check proof.
+
 Install the [AppSurface CLI](../Cli/ForgeTrust.AppSurface.Cli/README.md), then create the deliberately small policy starter:
 
 ```bash
@@ -74,6 +76,8 @@ Similarly, v1 validates a registered release envelope but labels it `ValidatedNo
 ## Read next
 
 - [EvidenceHost cookbook](../guides/evidencehost-cookbook.md)
+- [AppSurface issue #777 policy and producer matrix](../docs/evidence-gate-policy-matrix.md) explains which first-party PR profiles have real producers and which currently fail incomplete.
+- [Evidence gate rollout record](../docs/evidence-gate-rollout.md) tracks the live proof needed before a required status check can be enabled. The current `pull_request_target` pilot is deliberately non-claiming.
 - [CLI evidence command reference](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-evidence)
 - [Evidence contract reference](../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md)
 - [Aspire lifecycle reference](../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md)

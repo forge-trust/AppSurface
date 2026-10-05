@@ -2,7 +2,7 @@
 
 `ForgeTrust.AppSurface.Evidence.Cli` supplies the internal workflow used by the public `appsurface evidence` commands. Most adopters install the [AppSurface CLI](../../Cli/ForgeTrust.AppSurface.Cli/README.md), not this package directly.
 
-Start with the [EvidenceHost guide](../../start-here/evidencehost.md). The workflow reads only explicit policy and diff inputs; it does not scan consumer assemblies, discover tests, provision third-party services, or report outbound usage telemetry.
+Start with the [EvidenceHost guide](../../start-here/evidencehost.md). The workflow reads explicit policy and diff inputs; revision-bound mode also invokes fixed-options Git against the supplied object store. It does not scan consumer assemblies, discover tests, provision third-party services, or report outbound usage telemetry.
 
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
@@ -28,7 +28,9 @@ appsurface evidence verify TestResults/evidence/evidence-manifest.json
 | `doctor` | Resolves policy and reports policy, diff, Docker, browser, and release-envelope prerequisites without starting anything. |
 | `explain` | Writes the resolved plan and a human-readable summary without running producers. |
 | `run` | Runs selected built-in coverage evidence, writes a canonical plan/manifest/summary, and writes a GitHub step summary when available. Consumer-owned browser/E2E or resource-backed producers run through the separate Aspire EvidenceHost package. |
-| `verify` | Recomputes binding and digest verification without running any producer. |
+| `verify` | Reads at most 4 MiB per canonical plan or manifest, then recomputes binding and digests without running a producer. v2 also requires a separately trusted `--policy` and `--repository` to regenerate the exact Git change. |
+
+Revision-bound `doctor`, `explain`, and `run` require `--base-revision`, `--head-revision`, and `--diff-file` together, with no `--path`. `--repository` points at the trusted object store and defaults to the current directory for these planning commands. `--gate-mode` rejects local path-only planning. A trusted controller may add `--pr-run-identity` with canonical PR/run identity JSON; it is not accepted for a local-only plan. A mismatch between the supplied source diff and the fixed-options Git diff fails with `ASEVD231`; partial input fails with `ASEVD230`; identity without revisions fails with `ASEVD233`. The [cookbook rehearsal](../../guides/evidencehost-cookbook.md#revision-bound-pr-rehearsal) shows a copyable command sequence. Built-in `run` treats v2 results as `ObservationOnly` because the local CLI cannot authenticate CI job provenance or subject isolation; gate mode exits nonzero on that observation. External gate authorization requires the [base-owned verifier](../../docs/designs/issue-777-policy-driven-ci-evidence-gate.md) to check current PR identity and execution provenance.
 
 ## Incomplete profiles are not complete evidence
 

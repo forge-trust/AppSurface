@@ -171,7 +171,7 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
             using var process = Process.Start(startInfo)!;
             try
             {
-                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(8));
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
             }
             catch
             {
@@ -310,7 +310,9 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
                 fakeBin,
                 Environment.GetEnvironmentVariable("PATH") ?? string.Empty);
             startInfo.Environment["APPSURFACE_DURABLE_LOCAL_PORT"] = "54349";
-            startInfo.Environment["APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS"] = "2";
+            // Leave time for all fake prerequisites to complete under the full coverage run.
+            // The deadline still expires while the fake verify-local child is running.
+            startInfo.Environment["APPSURFACE_DURABLE_LOCAL_PROOF_TIMEOUT_SECONDS"] = "10";
             startInfo.Environment["APPSURFACE_TEST_CHILD_PID_FILE"] = childPidFile;
             startInfo.Environment["APPSURFACE_TEST_HEARTBEAT_FILE"] = heartbeatFile;
             startInfo.Environment["APPSURFACE_TEST_CLEANUP_HEARTBEAT_FILE"] = cleanupHeartbeatFile;
@@ -320,7 +322,7 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
             using var process = Process.Start(startInfo)!;
             try
             {
-                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(8));
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
             }
             catch
             {
@@ -340,8 +342,8 @@ public sealed class DurablePostgreSqlLocalProofScriptTests
             Assert.True(
                 process.ExitCode is 130 or 143,
                 $"Expected an interrupted exit (130 or 143), but received {process.ExitCode}. stderr: {standardError}");
-            Assert.Contains("exceeded its 2-second deadline", standardError, StringComparison.Ordinal);
-            Assert.InRange(stopwatch.Elapsed, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(7));
+            Assert.Contains("exceeded its 10-second deadline", standardError, StringComparison.Ordinal);
+            Assert.InRange(stopwatch.Elapsed, TimeSpan.FromSeconds(9), TimeSpan.FromSeconds(19));
 
             var childPid = await File.ReadAllTextAsync(childPidFile);
             Assert.Matches("^[0-9]+\\n?$", childPid);

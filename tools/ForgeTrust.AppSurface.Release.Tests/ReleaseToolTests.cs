@@ -13,6 +13,8 @@ namespace ForgeTrust.AppSurface.Release.Tests;
 public sealed class ReleaseToolTests : IDisposable
 {
     private const string TaggedReleaseNoteContent = "# Release 0.1.0-preview.1\n";
+    private const string PreviewTagObjectId = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    private const string PreviewPeeledCommit = "cccccccccccccccccccccccccccccccccccccccc";
     private static string PreparedReleaseSidecarContent(string version) => $"""
         release:
           schema: appsurface-release-sidecar-v1
@@ -755,6 +757,291 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Contains("GitHub Release publication is bound to that annotated tag.", result.Stdout, StringComparison.Ordinal);
         var preparedSidecar = await ReadFileAsync("releases/v0.1.0-preview.1.md.yml");
         Assert.Contains("state: prepared", preparedSidecar, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InspectMachineJsonEmitsValidatedV2TagIdentityWithoutPublicationCalls()
+    {
+        await SeedRepositoryAsync();
+        var runner = await CreateSuccessfulV2InspectRunnerAsync();
+
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--base-ref", "release/0.1.0", "--machine-json"],
+            runner);
+
+        Assert.Equal(0, result.ExitCode);
+        using var document = JsonDocument.Parse(result.Stdout);
+        var evidenceJson = await ReadFileAsync("releases/v0.1.0-preview.1.evidence.json");
+        var evidenceBundle = JsonDocument.Parse(evidenceJson);
+        using var evidenceDocument = evidenceBundle;
+        var root = document.RootElement;
+        Assert.Equal(10, root.EnumerateObject().Count());
+        Assert.Equal("appsurface-release-inspect-v1", root.GetProperty("schema").GetString());
+        Assert.Equal("0.1.0-preview.1", root.GetProperty("version").GetString());
+        Assert.Equal("v0.1.0-preview.1", root.GetProperty("tag").GetString());
+        Assert.Equal("release/0.1.0", root.GetProperty("baseRef").GetString());
+        Assert.Equal(PreviewTagObjectId, root.GetProperty("tagObjectId").GetString());
+        Assert.Equal(PreviewPeeledCommit, root.GetProperty("peeledCommit").GetString());
+        Assert.Equal(new string('a', 40), root.GetProperty("comparisonBaseCommit").GetString());
+        Assert.Equal(ReleaseEvidence.ComputeSha256Hex(evidenceJson), root.GetProperty("evidenceBundleSha256").GetString());
+        Assert.Equal(
+            evidenceDocument.RootElement.GetProperty("subject").GetProperty("sha256").GetString(),
+            root.GetProperty("evidenceSubjectSha256").GetString());
+        var evidenceArtifacts = evidenceDocument.RootElement.GetProperty("releaseArtifactDigests").EnumerateArray()
+            .ToDictionary(artifact => artifact.GetProperty("path").GetString()!, artifact => artifact.GetProperty("value").GetString()!, StringComparer.Ordinal);
+        var machineArtifacts = root.GetProperty("releaseArtifactDigests").EnumerateArray().ToArray();
+        Assert.Equal(evidenceArtifacts.Count, machineArtifacts.Length);
+        foreach (var artifact in machineArtifacts)
+        {
+            var path = artifact.GetProperty("path").GetString()!;
+            Assert.Equal(evidenceArtifacts[path], artifact.GetProperty("sha256").GetString());
+            Assert.Equal(ReleaseEvidence.ComputeSha256Hex(await ReadFileAsync(path)), artifact.GetProperty("sha256").GetString());
+        }
+
+        Assert.Equal(ReleaseInspectMachineResult.MaximumSerializedUtf8Bytes, 16 * 1024);
+        Assert.True(Encoding.UTF8.GetByteCount(result.Stdout.TrimEnd('\r', '\n')) <= ReleaseInspectMachineResult.MaximumSerializedUtf8Bytes);
+        Assert.Equal(2, runner.Calls.Count(call => call == "git rev-parse --verify refs/tags/v0.1.0-preview.1"));
+        Assert.DoesNotContain(runner.Calls, call => call.StartsWith("gh ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task InProcessInspectBridgeMatchesTheCliMachineResultForTheSameValidatedTag()
+    {
+        await SeedRepositoryAsync();
+        var runner = await CreateSuccessfulV2InspectRunnerAsync();
+        var cli = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--base-ref", "release/0.1.0", "--machine-json"],
+            runner);
+
+        var inProcess = await ReleaseInspectMachineAuthority.InspectAsync(
+            _repositoryRoot,
+            "0.1.0-preview.1",
+            "v0.1.0-preview.1",
+            "release/0.1.0",
+            commandRunner: runner);
+
+        Assert.Equal(0, cli.ExitCode);
+        Assert.Equal(cli.Stdout.TrimEnd('\r', '\n'), inProcess.SerializeBounded());
+        Assert.Equal(4, runner.Calls.Count(call => call == "git rev-parse --verify refs/tags/v0.1.0-preview.1"));
+        Assert.DoesNotContain(runner.Calls, call => call.StartsWith("gh ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task InProcessInspectBridgeRejectsMismatchedTagBeforeAnyGitCall()
+    {
+        var runner = new FakeCommandRunner();
+
+        var failure = await Assert.ThrowsAsync<ReleaseToolException>(() => ReleaseInspectMachineAuthority.InspectAsync(
+            _repositoryRoot,
+            "0.1.0-preview.1",
+            "v0.1.0-preview.2",
+            "main",
+            commandRunner: runner));
+
+        Assert.Equal("release-tag-version-mismatch", failure.Diagnostic.Code);
+        Assert.Empty(runner.Calls);
+    }
+
+    [Fact]
+    public async Task InspectWithoutMachineJsonKeepsDefaultProjectionOutput()
+    {
+        await SeedRepositoryAsync();
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1"],
+            CreateSuccessfulPublishRunner());
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("state: tagged", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("schema: appsurface-release-sidecar-v1", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InspectMachineJsonRejectsV1EvidenceWithoutWritingSuccessJson()
+    {
+        await SeedRepositoryAsync();
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--machine-json"],
+            CreateSuccessfulV1InspectRunner());
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-inspect-machine-json-v2-required", result.Stderr, StringComparison.Ordinal);
+        Assert.Empty(result.Stdout);
+    }
+
+    [Fact]
+    public async Task InspectMachineJsonAndProjectionOutputConflictBeforeGitInspection()
+    {
+        await SeedRepositoryAsync();
+        var runner = new FakeCommandRunner();
+        var output = ExternalPath("tagged-projection.yml");
+
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--machine-json", "--out", output],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-inspect-machine-json-output-conflict", result.Stderr, StringComparison.Ordinal);
+        Assert.Empty(runner.Calls);
+        Assert.Empty(result.Stdout);
+    }
+
+    [Fact]
+    public async Task InspectMachineJsonDoesNotEmitSuccessJsonWhenTagValidationFails()
+    {
+        await SeedRepositoryAsync();
+        var runner = await CreateSuccessfulV2InspectRunnerAsync();
+        runner.Add(
+            "git cat-file -p " + PreviewTagObjectId,
+            new CommandResult(0, CreateAnnotatedTagObject(PreviewPeeledCommit, "v0.1.0-preview.1", CreateReleaseTagBinding(), "+1401"), ""));
+
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--machine-json"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-tag-tagger-invalid", result.Stderr, StringComparison.Ordinal);
+        Assert.Empty(result.Stdout);
+    }
+
+    [Fact]
+    public async Task InspectMachineJsonRejectsForgedTagTrailerWithoutWritingSuccessJson()
+    {
+        await SeedRepositoryAsync();
+        var runner = await CreateSuccessfulV2InspectRunnerAsync();
+        var evidence = JsonSerializer.Deserialize<ReleaseEvidenceBundleV2>(
+            await ReadFileAsync("releases/v0.1.0-preview.1.evidence.json"),
+            ReleaseJson.Options)!;
+        var forgedBinding = new ReleaseTagBinding(
+            "v0.1.0-preview.1",
+            ReleaseEvidence.ComputeSha256Hex(await ReadFileAsync("releases/v0.1.0-preview.1.md.yml")),
+            ReleaseEvidence.ComputeSha256Hex(await ReadFileAsync("releases/v0.1.0-preview.1.release.json")),
+            new string('f', 64));
+        Assert.NotEqual(evidence.Subject.Sha256, forgedBinding.EvidenceSubjectSha256);
+        runner.Add(
+            "git cat-file -p " + PreviewTagObjectId,
+            new CommandResult(0, CreateAnnotatedTagObject(PreviewPeeledCommit, "v0.1.0-preview.1", forgedBinding), ""));
+
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--machine-json"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-tag-trailer-mismatch", result.Stderr, StringComparison.Ordinal);
+        Assert.Empty(result.Stdout);
+    }
+
+    [Theory]
+    [InlineData("missing", "release-tag-missing")]
+    [InlineData("invalid-object-id", "release-tag-object-id-invalid")]
+    [InlineData("lightweight", "release-tag-lightweight")]
+    [InlineData("unreadable-object", "release-tag-object-missing")]
+    public async Task InspectMachineJsonDoesNotEmitSuccessJsonWhenCapturedTagCannotBeResolved(string failure, string expectedCode)
+    {
+        await SeedRepositoryAsync();
+        var runner = failure == "missing"
+            ? new FakeCommandRunner()
+            : await CreateSuccessfulV2InspectRunnerAsync();
+        const string tagRefCommand = "git rev-parse --verify refs/tags/v0.1.0-preview.1";
+
+        switch (failure)
+        {
+            case "invalid-object-id":
+                runner.Add(tagRefCommand, new CommandResult(0, "not-an-object-id\n", ""));
+                break;
+            case "lightweight":
+                runner.Add("git cat-file -t " + PreviewTagObjectId, new CommandResult(0, "commit\n", ""));
+                break;
+            case "unreadable-object":
+                runner.Add("git cat-file -t " + PreviewTagObjectId, new CommandResult(1, "", "object unavailable"));
+                break;
+        }
+
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--machine-json"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains($"Code: {expectedCode}", result.Stderr, StringComparison.Ordinal);
+        Assert.Empty(result.Stdout);
+    }
+
+    [Fact]
+    public async Task InspectCapturesTagObjectOnceAndUsesThatIdentityForTagAndArtifacts()
+    {
+        await SeedRepositoryAsync();
+        var runner = await CreateSuccessfulV2InspectRunnerAsync();
+        const string movedTagObjectId = "dddddddddddddddddddddddddddddddddddddddd";
+        runner.AddSequence(
+            "git rev-parse --verify refs/tags/v0.1.0-preview.1",
+            new CommandResult(0, PreviewTagObjectId + "\n", ""),
+            new CommandResult(0, PreviewTagObjectId + "\n", ""));
+
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--machine-json"],
+            runner);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(2, runner.Calls.Count(call => call == "git rev-parse --verify refs/tags/v0.1.0-preview.1"));
+        Assert.Contains("git cat-file -p " + PreviewTagObjectId, runner.Calls);
+        Assert.DoesNotContain("git cat-file -p " + movedTagObjectId, runner.Calls);
+        Assert.Contains("git rev-parse " + PreviewTagObjectId + "^{commit}", runner.Calls);
+        Assert.Contains($"git show {PreviewPeeledCommit}:releases/v0.1.0-preview.1.evidence.json", runner.Calls);
+        Assert.DoesNotContain("git show v0.1.0-preview.1:", runner.Calls);
+    }
+
+    [Fact]
+    public async Task InspectMachineJsonRejectsTagMoveAfterCapturedArtifactsAreValidated()
+    {
+        await SeedRepositoryAsync();
+        var runner = await CreateSuccessfulV2InspectRunnerAsync();
+        runner.AddSequence(
+            "git rev-parse --verify refs/tags/v0.1.0-preview.1",
+            new CommandResult(0, PreviewTagObjectId + "\n", ""),
+            new CommandResult(0, new string('d', 40) + "\n", ""));
+
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--machine-json"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-tag-moved-during-inspect", result.Stderr, StringComparison.Ordinal);
+        Assert.Empty(result.Stdout);
+    }
+
+    [Fact]
+    public async Task InspectMachineJsonRejectsRebuiltReleaseArtifact()
+    {
+        await SeedRepositoryAsync();
+        var runner = await CreateSuccessfulV2InspectRunnerAsync();
+        runner.Add(
+            $"git show {PreviewPeeledCommit}:releases/v0.1.0-preview.1.md",
+            new CommandResult(0, "# Rebuilt after release evidence was prepared\n", ""));
+
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--machine-json"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-evidence-artifact-digest-mismatch", result.Stderr, StringComparison.Ordinal);
+        Assert.Empty(result.Stdout);
+    }
+
+    [Fact]
+    public async Task InspectMachineJsonRejectsMissingReleaseArtifact()
+    {
+        await SeedRepositoryAsync();
+        var runner = await CreateSuccessfulV2InspectRunnerAsync();
+        runner.Add(
+            $"git show {PreviewPeeledCommit}:releases/v0.1.0-preview.1.release.json",
+            new CommandResult(1, "", "missing blob"));
+
+        var result = await RunAsync(
+            ["inspect", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--machine-json"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-note-missing-from-tag", result.Stderr, StringComparison.Ordinal);
+        Assert.Empty(result.Stdout);
     }
 
     [Fact]
@@ -5960,7 +6247,12 @@ public sealed class ReleaseToolTests : IDisposable
     {
         await SeedRepositoryAsync();
         var githubOutput = Path.Join(_repositoryRoot, "github-output.txt");
-        var runner = CreateSuccessfulPublishRunner();
+        var runner = CreateSuccessfulV1InspectRunner();
+        runner.Add(
+            "gh run list --workflow nuget-prerelease-publish.yml --commit "
+            + PreviewPeeledCommit
+            + " --json conclusion,headBranch,status,url --jq [.[] | select(.headBranch == \"v0.1.0-preview.1\" and .status == \"completed\" and .conclusion == \"success\")][0].url // \"\"",
+            new CommandResult(0, "https://github.com/example/actions/runs/1\n", ""));
 
         var result = await RunAsync(
             [
@@ -5980,10 +6272,11 @@ public sealed class ReleaseToolTests : IDisposable
 
         var output = await File.ReadAllTextAsync(githubOutput);
         Assert.Contains("tag=v0.1.0-preview.1", output, StringComparison.Ordinal);
-        Assert.Contains("tag_commit=abc123", output, StringComparison.Ordinal);
+        Assert.Contains($"tag_object_id={PreviewTagObjectId}", output, StringComparison.Ordinal);
+        Assert.Contains($"tag_commit={PreviewPeeledCommit}", output, StringComparison.Ordinal);
         Assert.Contains("evidence_path=releases/v0.1.0-preview.1.evidence.json", output, StringComparison.Ordinal);
         Assert.Contains("evidence_subject_sha256=", output, StringComparison.Ordinal);
-        Assert.Contains("evidence_tag_commit=abc123", output, StringComparison.Ordinal);
+        Assert.Contains($"evidence_tag_commit={PreviewPeeledCommit}", output, StringComparison.Ordinal);
         Assert.Contains("prerelease=true", output, StringComparison.Ordinal);
         Assert.Contains("notes_file=", output, StringComparison.Ordinal);
     }
@@ -6396,6 +6689,7 @@ public sealed class ReleaseToolTests : IDisposable
         var outputs = new PublishOutputs(
             "0.1.0-preview.1",
             "v0.1.0-preview.1",
+            PreviewTagObjectId,
             "abc123",
             "releases/v0.1.0-preview.1.md",
             "first\nsecond",
@@ -6412,6 +6706,44 @@ public sealed class ReleaseToolTests : IDisposable
         var output = await File.ReadAllTextAsync(githubOutput);
         Assert.Contains("notes_file<<EOF_", output, StringComparison.Ordinal);
         Assert.Contains("first\nsecond", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishRejectsGithubOutputWithoutCapturedTagObjectId()
+    {
+        await SeedRepositoryAsync();
+        var githubOutput = Path.Join(_repositoryRoot, "artifacts", "github-output.txt");
+        var publishing = new ReleasePublishing(new ReleaseWorkspace(_repositoryRoot), new FakeCommandRunner());
+        var options = new ReleaseOptions(
+            "publish",
+            _repositoryRoot,
+            SemVer.Parse("0.1.0-preview.1"),
+            "v0.1.0-preview.1",
+            Date: null,
+            DryRun: true,
+            ReportPath: null,
+            GitHubOutputPath: githubOutput,
+            FailOnWarnings: false,
+            AllowExistingTargets: false);
+        var outputs = new PublishOutputs(
+            "0.1.0-preview.1",
+            "v0.1.0-preview.1",
+            null,
+            "abc123",
+            "releases/v0.1.0-preview.1.md",
+            "notes.md",
+            "prerelease",
+            "releases/v0.1.0-preview.1.evidence.json",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "abc123",
+            null,
+            Prerelease: true,
+            DryRun: true);
+
+        var exception = await Assert.ThrowsAsync<ReleaseToolException>(() => publishing.WriteOutputsAsync(outputs, options, CancellationToken.None));
+
+        Assert.Equal("release-tag-object-id-unavailable", exception.Diagnostic.Code);
+        Assert.False(File.Exists(githubOutput));
     }
 
     [Fact]
@@ -6432,6 +6764,7 @@ public sealed class ReleaseToolTests : IDisposable
         var outputs = new PublishOutputs(
             "0.1.0-preview.1",
             "v0.1.0-preview.1",
+            PreviewTagObjectId,
             "abc123",
             "releases/v0.1.0-preview.1.md",
             "notes.md",
@@ -7740,8 +8073,14 @@ public sealed class ReleaseToolTests : IDisposable
     private static string CreateAnnotatedTagObject(string offset = "+0000")
     {
         var binding = CreateReleaseTagBinding();
-        return $"object abc123\ntype commit\ntag v0.1.0-preview.1\ntagger Release Tests <release-tests@example.test> 1770000000 {offset}\n\n{binding.Render()}";
+        return CreateAnnotatedTagObject("v0.1.0-preview.1", binding, offset);
     }
+
+    private static string CreateAnnotatedTagObject(string tag, ReleaseTagBinding binding, string offset = "+0000") =>
+        CreateAnnotatedTagObject("abc123", tag, binding, offset);
+
+    private static string CreateAnnotatedTagObject(string commit, string tag, ReleaseTagBinding binding, string offset = "+0000") =>
+        $"object {commit}\ntype commit\ntag {tag}\ntagger Release Tests <release-tests@example.test> 1770000000 {offset}\n\n{binding.Render()}";
 
     private async Task<FakeCommandRunner> CreateSuccessfulV2PublishRunnerAsync(string preparationBaseCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     {
@@ -7768,6 +8107,69 @@ public sealed class ReleaseToolTests : IDisposable
         runner.Add(
             $"git show {tag}:packages/package-index.yml",
             new CommandResult(0, await ReadFileAsync("packages/package-index.yml"), ""));
+
+        return runner;
+    }
+
+    private static FakeCommandRunner CreateSuccessfulV1InspectRunner()
+    {
+        var runner = CreateSuccessfulPublishRunner();
+        var releaseManifest = CreateReleaseManifestJson();
+        var evidenceJson = CreateReleaseEvidenceJson(releaseManifest);
+        var evidence = JsonSerializer.Deserialize<ReleaseEvidenceBundle>(evidenceJson, ReleaseJson.Options)!;
+        var binding = new ReleaseTagBinding(
+            "v0.1.0-preview.1",
+            ReleaseEvidence.ComputeSha256Hex(TaggedReleaseSidecarContent),
+            ReleaseEvidence.ComputeSha256Hex(releaseManifest),
+            evidence.Subject.Sha256);
+
+        runner.Add("git rev-parse --verify refs/tags/v0.1.0-preview.1", new CommandResult(0, PreviewTagObjectId + "\n", ""));
+        runner.Add("git cat-file -t " + PreviewTagObjectId, new CommandResult(0, "tag\n", ""));
+        runner.Add("git cat-file -p " + PreviewTagObjectId, new CommandResult(0, CreateAnnotatedTagObject(PreviewPeeledCommit, "v0.1.0-preview.1", binding), ""));
+        runner.Add("git rev-parse " + PreviewTagObjectId + "^{commit}", new CommandResult(0, PreviewPeeledCommit + "\n", ""));
+        runner.Add("git merge-base --is-ancestor " + PreviewPeeledCommit + " origin/main", new CommandResult(0, "", ""));
+        runner.Add($"git show {PreviewPeeledCommit}:releases/v0.1.0-preview.1.md", new CommandResult(0, TaggedReleaseNoteContent, ""));
+        runner.Add($"git show {PreviewPeeledCommit}:releases/v0.1.0-preview.1.md.yml", new CommandResult(0, TaggedReleaseSidecarContent, ""));
+        runner.Add($"git show {PreviewPeeledCommit}:releases/v0.1.0-preview.1.release.json", new CommandResult(0, releaseManifest, ""));
+        runner.Add($"git show {PreviewPeeledCommit}:releases/v0.1.0-preview.1.evidence.json", new CommandResult(0, evidenceJson, ""));
+        return runner;
+    }
+
+    private async Task<FakeCommandRunner> CreateSuccessfulV2InspectRunnerAsync()
+    {
+        var runner = await CreateSuccessfulV2PublishRunnerAsync();
+        var tag = "v0.1.0-preview.1";
+        var sidecar = await ReadFileAsync("releases/v0.1.0-preview.1.md.yml");
+        var manifest = await ReadFileAsync("releases/v0.1.0-preview.1.release.json");
+        var evidenceJson = await ReadFileAsync("releases/v0.1.0-preview.1.evidence.json");
+        var evidence = JsonSerializer.Deserialize<ReleaseEvidenceBundleV2>(evidenceJson, ReleaseJson.Options)!;
+        var binding = new ReleaseTagBinding(
+            tag,
+            ReleaseEvidence.ComputeSha256Hex(sidecar),
+            ReleaseEvidence.ComputeSha256Hex(manifest),
+            evidence.Subject.Sha256);
+
+        runner.Add("git rev-parse --verify refs/tags/" + tag, new CommandResult(0, PreviewTagObjectId + "\n", ""));
+        runner.Add("git cat-file -t " + PreviewTagObjectId, new CommandResult(0, "tag\n", ""));
+        runner.Add("git cat-file -p " + PreviewTagObjectId, new CommandResult(0, CreateAnnotatedTagObject(PreviewPeeledCommit, tag, binding), ""));
+        runner.Add("git rev-parse " + PreviewTagObjectId + "^{commit}", new CommandResult(0, PreviewPeeledCommit + "\n", ""));
+        runner.Add($"git merge-base --is-ancestor {new string('a', 40)} {PreviewPeeledCommit}", new CommandResult(0, "", ""));
+        runner.Add("git merge-base --is-ancestor " + PreviewPeeledCommit + " origin/release/0.1.0", new CommandResult(0, "", ""));
+        runner.Add("git merge-base --is-ancestor " + PreviewPeeledCommit + " origin/main", new CommandResult(0, "", ""));
+
+        foreach (var path in new[]
+                 {
+                     "releases/v0.1.0-preview.1.md",
+                     "releases/v0.1.0-preview.1.md.yml",
+                     "releases/v0.1.0-preview.1.release.json",
+                     "releases/v0.1.0-preview.1.evidence.json",
+                     "releases/current.md",
+                     "releases/current.md.yml",
+                     "packages/package-index.yml"
+                 })
+        {
+            runner.Add($"git show {PreviewPeeledCommit}:{path}", new CommandResult(0, await ReadFileAsync(path), ""));
+        }
 
         return runner;
     }

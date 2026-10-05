@@ -9,6 +9,28 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CoverageRunArtifactReaderTests
 {
     [Fact]
+    public void OpenRegularFile_ShouldReadCoverageArtifactOnLinuxArm64()
+    {
+        if (!OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.Arm64)
+        {
+            return;
+        }
+
+        using var repo = ArtifactTempDirectory.Create("appsurface-coverage-arm64-artifact-");
+        var projectOutput = Path.Join(repo.Path, "project");
+        var raw = Path.Join(projectOutput, "collector-results", "invocation");
+        Directory.CreateDirectory(raw);
+        var candidate = repo.WriteFile(
+            "project/collector-results/invocation/coverage.cobertura.xml",
+            "<coverage />");
+
+        using var stream = CoverageRunArtifactReader.OpenRegularFile(projectOutput, raw, candidate);
+        using var reader = new StreamReader(stream);
+
+        Assert.Equal("<coverage />", reader.ReadToEnd());
+    }
+
+    [Fact]
     public void WindowsInteropStructures_ShouldMatchNativeLayouts()
     {
         Assert.Equal(8, Marshal.SizeOf<CoverageFileSystemInterop.WindowsFileTime>());

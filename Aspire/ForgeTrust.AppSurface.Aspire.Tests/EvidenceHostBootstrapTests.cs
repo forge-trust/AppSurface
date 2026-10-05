@@ -420,6 +420,309 @@ public sealed class EvidenceHostBootstrapTests
     }
 
     [Fact]
+    public async Task ArtifactWriter_StreamWriteShouldHashAndVerifyWithoutTakingStreamOwnership()
+    {
+        var artifactDirectory = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-evidence-stream-{Guid.NewGuid():N}");
+        var writer = CreateArtifactWriter(artifactDirectory, maximumBytes: 512 * 1024);
+        var contents = Enumerable.Range(0, 200_000).Select(static value => (byte)(value % 251)).ToArray();
+        await using var source = new NonSeekableReadStream(contents);
+
+        var artifact = await writer.WriteAsync("report", "coverage/report.bin", source, contents.LongLength);
+
+        Assert.Equal(contents.LongLength, artifact.LengthBytes);
+        Assert.Equal(EvidenceDigest.Sha256(contents), artifact.Sha256);
+        Assert.Equal(contents, await File.ReadAllBytesAsync(TestPathUtils.PathUnder(artifactDirectory, "coverage", "report.bin")));
+        Assert.True(source.CanRead);
+        Assert.True(await writer.VerifyWrittenArtifactsAsync());
+        Directory.Delete(artifactDirectory, recursive: true);
+    }
+
+    [Fact]
+    public async Task ArtifactWriter_StreamWriteShouldHandleTheV1MaximumWithBoundedReads()
+    {
+        var artifactDirectory = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-evidence-maximum-{Guid.NewGuid():N}");
+        var writer = CreateArtifactWriter(artifactDirectory, EvidenceArtifactWriter.MaximumTotalArtifactBytes);
+        await using var source = new GeneratedReadStream(EvidenceArtifactWriter.MaximumTotalArtifactBytes);
+
+        var artifact = await writer.WriteAsync(
+            "report",
+            "coverage/report.bin",
+            source,
+            EvidenceArtifactWriter.MaximumTotalArtifactBytes);
+
+        Assert.Equal(EvidenceArtifactWriter.MaximumTotalArtifactBytes, artifact.LengthBytes);
+        Assert.Equal(EvidenceArtifactWriter.MaximumTotalArtifactBytes, source.BytesRead);
+        Assert.InRange(source.MaximumRequestedReadSize, 1, 81_920);
+        Assert.True(await writer.VerifyWrittenArtifactsAsync());
+        Directory.Delete(artifactDirectory, recursive: true);
+    }
+
+    [Fact]
+    public async Task ArtifactWriter_StreamWriteShouldRejectSlotAndProducerLimitsBeforeReading()
+    {
+        var slotWriter = CreateArtifactWriter(TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-evidence-slot-{Guid.NewGuid():N}"), maximumBytes: 4);
+        await using var slotSource = new MemoryStream("12345"u8.ToArray(), writable: false);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await slotWriter.WriteAsync("report", "coverage/report.bin", slotSource, 5));
+        Assert.Equal(0, slotSource.Position);
+
+        var producerWriter = CreateArtifactWriter(
+            TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-evidence-producer-{Guid.NewGuid():N}"),
+            maximumBytes: EvidenceArtifactWriter.MaximumTotalArtifactBytes + 1);
+        await using var producerSource = new MemoryStream();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await producerWriter.WriteAsync(
+            "report",
+            "coverage/report.bin",
+            producerSource,
+            EvidenceArtifactWriter.MaximumTotalArtifactBytes + 1));
+        Assert.Equal(0, producerSource.Position);
+    }
+
+    [Fact]
+    public async Task ArtifactWriter_StreamWriteShouldEnforceTheProducerLimitAcrossConcurrentSlots()
+    {
+        var artifactDirectory = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-evidence-total-{Guid.NewGuid():N}");
+        var producer = new EvidenceProducerDeclaration(
+            "coverage",
+            "coverage",
+            "1.0.0",
+            [],
+            [],
+            [
+                new EvidenceArtifactSlot("report", "coverage", "application/octet-stream", Required: false, MaximumBytes: EvidenceArtifactWriter.MaximumTotalArtifactBytes),
+                new EvidenceArtifactSlot("summary", "coverage", "application/octet-stream", Required: false, MaximumBytes: EvidenceArtifactWriter.MaximumTotalArtifactBytes),
+            ],
+            30);
+        var writer = new EvidenceArtifactWriter(producer, artifactDirectory);
+        using var cancellation = new CancellationTokenSource();
+        await using var firstSource = new BlockingAfterFirstReadStream("partial"u8.ToArray());
+        var firstWrite = writer.WriteAsync(
+            "report",
+            "coverage/report.bin",
+            firstSource,
+            EvidenceArtifactWriter.MaximumTotalArtifactBytes,
+            cancellation.Token).AsTask();
+        await firstSource.FirstReadCompleted.Task;
+        await using var secondSource = new MemoryStream("x"u8.ToArray(), writable: false);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await writer.WriteAsync("summary", "coverage/summary.bin", secondSource, 1));
+        Assert.Equal(0, secondSource.Position);
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => firstWrite);
+        Directory.Delete(artifactDirectory, recursive: true);
+    }
+
+    [Fact]
+    public async Task ArtifactWriter_StreamWriteShouldRejectShortAndLongStreamsAndReleaseReservations()
+    {
+        var artifactDirectory = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-evidence-length-{Guid.NewGuid():N}");
+        var writer = CreateArtifactWriter(artifactDirectory, maximumBytes: 16);
+        await using var shortSource = new MemoryStream("short"u8.ToArray(), writable: false);
+
+        await Assert.ThrowsAsync<InvalidDataException>(async () => await writer.WriteAsync("report", "coverage/report.bin", shortSource, 6));
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.False(File.Exists(TestPathUtils.PathUnder(artifactDirectory, "coverage", "report.bin")));
+
+        await using var longSource = new MemoryStream("long"u8.ToArray(), writable: false);
+        await Assert.ThrowsAsync<InvalidDataException>(async () => await writer.WriteAsync("report", "coverage/report.bin", longSource, 3));
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.False(File.Exists(TestPathUtils.PathUnder(artifactDirectory, "coverage", "report.bin")));
+
+        await using var validSource = new MemoryStream("valid"u8.ToArray(), writable: false);
+        var artifact = await writer.WriteAsync("report", "coverage/report.bin", validSource, 5);
+        Assert.Equal(5, artifact.LengthBytes);
+        Directory.Delete(artifactDirectory, recursive: true);
+    }
+
+    [Fact]
+    public async Task ArtifactWriter_StreamVerificationShouldDetectTampering()
+    {
+        var artifactDirectory = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-evidence-tamper-{Guid.NewGuid():N}");
+        var writer = CreateArtifactWriter(artifactDirectory, maximumBytes: 16);
+        await using var source = new MemoryStream("original"u8.ToArray(), writable: false);
+        await writer.WriteAsync("report", "coverage/report.bin", source, source.Length);
+        Assert.True(await writer.VerifyWrittenArtifactsAsync());
+
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => writer.VerifyWrittenArtifactsAsync(cancellation.Token));
+
+        await File.WriteAllTextAsync(TestPathUtils.PathUnder(artifactDirectory, "coverage", "report.bin"), "tampered");
+
+        Assert.False(await writer.VerifyWrittenArtifactsAsync());
+        await File.WriteAllTextAsync(TestPathUtils.PathUnder(artifactDirectory, "coverage", "report.bin"), "tampered-size");
+        Assert.False(await writer.VerifyWrittenArtifactsAsync());
+        Directory.Delete(artifactDirectory, recursive: true);
+    }
+
+    [Fact]
+    public async Task ArtifactWriter_StreamWriteShouldCleanUpAndReleaseReservationWhenCancelledMidCopy()
+    {
+        var artifactDirectory = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-evidence-cancel-{Guid.NewGuid():N}");
+        var writer = CreateArtifactWriter(artifactDirectory, maximumBytes: 16);
+        using var cancellation = new CancellationTokenSource();
+        await using var source = new BlockingAfterFirstReadStream("partial"u8.ToArray());
+
+        var write = writer.WriteAsync("report", "coverage/report.bin", source, 16, cancellation.Token).AsTask();
+        await source.FirstReadCompleted.Task;
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => write);
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.False(File.Exists(TestPathUtils.PathUnder(artifactDirectory, "coverage", "report.bin")));
+        Assert.Empty(Directory.EnumerateFiles(artifactDirectory, "*", SearchOption.AllDirectories));
+
+        await using var validSource = new MemoryStream("valid"u8.ToArray(), writable: false);
+        Assert.Equal(5, (await writer.WriteAsync("report", "coverage/report.bin", validSource, 5)).LengthBytes);
+        Directory.Delete(artifactDirectory, recursive: true);
+    }
+
+    private static EvidenceArtifactWriter CreateArtifactWriter(string artifactDirectory, long maximumBytes) => new(
+        new EvidenceProducerDeclaration(
+            "coverage",
+            "coverage",
+            "1.0.0",
+            [],
+            [],
+            [new EvidenceArtifactSlot("report", "coverage", "application/octet-stream", Required: false, MaximumBytes: maximumBytes)],
+            30),
+        artifactDirectory);
+
+    private sealed class NonSeekableReadStream(byte[] contents) : Stream
+    {
+        private int _position;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush() => throw new NotSupportedException();
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var bytesToCopy = Math.Min(Math.Min(count, 4_096), contents.Length - _position);
+            contents.AsSpan(_position, bytesToCopy).CopyTo(buffer.AsSpan(offset, bytesToCopy));
+            _position += bytesToCopy;
+            return bytesToCopy;
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var bytesToCopy = Math.Min(Math.Min(buffer.Length, 4_096), contents.Length - _position);
+            contents.AsMemory(_position, bytesToCopy).CopyTo(buffer);
+            _position += bytesToCopy;
+            return ValueTask.FromResult(bytesToCopy);
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private sealed class GeneratedReadStream(long length) : Stream
+    {
+        private long _position;
+
+        public long BytesRead => _position;
+
+        public int MaximumRequestedReadSize { get; private set; }
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush() => throw new NotSupportedException();
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            MaximumRequestedReadSize = Math.Max(MaximumRequestedReadSize, buffer.Length);
+            var bytesToRead = (int)Math.Min(buffer.Length, length - _position);
+            buffer.Span[..bytesToRead].Clear();
+            _position += bytesToRead;
+            return ValueTask.FromResult(bytesToRead);
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private sealed class BlockingAfterFirstReadStream(byte[] firstChunk) : Stream
+    {
+        private bool _firstRead = true;
+
+        public TaskCompletionSource FirstReadCompleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush() => throw new NotSupportedException();
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_firstRead)
+            {
+                _firstRead = false;
+                var bytesToCopy = Math.Min(buffer.Length, firstChunk.Length);
+                firstChunk.AsMemory(0, bytesToCopy).CopyTo(buffer);
+                FirstReadCompleted.TrySetResult();
+                return bytesToCopy;
+            }
+
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldProtectLifecycleBoundsSharedDependenciesAndCallerCancelledProducers()
     {
         var oversizedPlan = CreatePlan() with
