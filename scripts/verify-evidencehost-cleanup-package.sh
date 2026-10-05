@@ -48,7 +48,7 @@ echo "EvidenceHost package-consumer workspace: $work_directory"
 echo "Candidate package version: $package_version"
 echo "Whole-operation deadline: ${total_timeout_seconds}s"
 
-python3 - "$repo_root" "$fixture_root" "$work_directory" "$package_version" "$total_timeout_seconds" <<'PY'
+exec python3 - "$repo_root" "$fixture_root" "$work_directory" "$package_version" "$total_timeout_seconds" <<'PY'
 import json
 import os
 from pathlib import Path
@@ -73,6 +73,26 @@ package_cache = work_root / "nuget-packages"
 logs_root = work_root / "logs"
 operation_log = work_root / "operation.log"
 result_file = work_root / "result.txt"
+interrupted_signal = None
+
+class VerificationInterrupted(Exception):
+    def __init__(self, signum):
+        self.signum = signum
+        super().__init__(f"Verification interrupted by {signal.Signals(signum).name}.")
+
+def request_interruption(signum, frame):
+    # Record rather than raise inside Popen: the stage must acquire its handle
+    # before cancellation can unwind and stop the independently grouped child.
+    global interrupted_signal
+    if interrupted_signal is None:
+        interrupted_signal = signum
+
+def check_interruption():
+    if interrupted_signal is not None:
+        raise VerificationInterrupted(interrupted_signal)
+
+signal.signal(signal.SIGINT, request_interruption)
+signal.signal(signal.SIGTERM, request_interruption)
 
 logs_root.mkdir(parents=True, exist_ok=True)
 feed_root.mkdir()
@@ -84,6 +104,7 @@ def record(message):
         stream.write(line)
 
 def run_stage(label, argv, cwd, env):
+    check_interruption()
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise TimeoutError(f"Whole-operation deadline expired before {label}.")
@@ -100,15 +121,25 @@ def run_stage(label, argv, cwd, env):
             start_new_session=True,
         )
         try:
-            return_code = process.wait(timeout=remaining)
-        except subprocess.TimeoutExpired:
+            while True:
+                check_interruption()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(f"Whole-operation deadline expired during {label}; process group was stopped.")
+                try:
+                    return_code = process.wait(timeout=min(remaining, 0.25))
+                    check_interruption()
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+        except BaseException:
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            process.wait()
+            process.wait(timeout=5)
             print(log_path.read_text(encoding="utf-8", errors="replace"), end="", flush=True)
-            raise TimeoutError(f"Whole-operation deadline expired during {label}; process group was stopped.")
+            raise
 
     output = log_path.read_text(encoding="utf-8", errors="replace")
     if output:
@@ -157,6 +188,7 @@ def verify_assets():
         raise RuntimeError("Restored consumer assets contain a non-package target library.")
 
 try:
+    check_interruption()
     copy_build_inputs()
     env = os.environ.copy()
     env["NUGET_PACKAGES"] = str(package_cache)
@@ -199,6 +231,7 @@ try:
     consumer_dll = consumer_root / "bin/Release/net10.0/EvidenceHostCleanupConsumer.dll"
     run_stage("run-consumer", [dotnet, consumer_dll], consumer_root, env)
 
+    check_interruption()
     elapsed = total_timeout - max(0.0, deadline - time.monotonic())
     report = (
         "EvidenceHost cleanup package consumer: PASS\n"
@@ -221,5 +254,7 @@ except Exception as error:
     )
     result_file.write_text(report, encoding="utf-8")
     record(report)
+    if isinstance(error, VerificationInterrupted):
+        raise SystemExit(128 + error.signum)
     raise
 PY

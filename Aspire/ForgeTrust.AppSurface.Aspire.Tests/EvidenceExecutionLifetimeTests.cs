@@ -95,6 +95,38 @@ public sealed class EvidenceExecutionLifetimeTests
         }
     }
 
+    [Fact]
+    public async Task ProcessLifetime_ShouldAttemptAndJoinOtherOwnersAfterTreeTerminationFailure()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        using var valid = Start("/bin/sh", "-c", "echo ready; exec sleep 60");
+        using var failing = Start("/bin/sh", "-c", "echo ready; exec sleep 60");
+        await valid.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        await failing.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        var attempted = new List<Process>();
+        var lifetime = new EvidenceProcessLifetime([valid, failing], process =>
+        {
+            attempted.Add(process);
+            process.Kill(entireProcessTree: true);
+            if (ReferenceEquals(process, failing))
+                throw new AggregateException(new System.ComponentModel.Win32Exception("Synthetic tree termination failure."));
+        });
+        try
+        {
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => lifetime.StopAsync(cancellation.Token).AsTask());
+            Assert.IsType<AggregateException>(error.InnerException);
+            Assert.Equal([failing, valid], attempted);
+            Assert.True(failing.HasExited);
+            Assert.True(valid.HasExited);
+        }
+        finally
+        {
+            await KillAndJoinAsync(failing);
+            await KillAndJoinAsync(valid);
+        }
+    }
+
     private static Process Start(string executable, params string[] arguments)
     {
         var info = new ProcessStartInfo(executable) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardInput = true };

@@ -16,14 +16,24 @@ namespace ForgeTrust.AppSurface.Evidence.Aspire;
 public sealed class EvidenceProcessLifetime : IEvidenceExecutionLifetime
 {
     private readonly Process[] _ownedProcesses;
+    private readonly Action<Process> _terminateProcess;
     private readonly object _stopLock = new();
     private Task? _stop;
 
     /// <summary>Creates a stop capability from already-started, explicitly owned process handles.</summary>
     /// <param name="ownedProcesses">The leader and all independently surviving descendants; handles remain consumer-owned.</param>
     public EvidenceProcessLifetime(IReadOnlyCollection<Process> ownedProcesses)
+        : this(ownedProcesses, static process => process.Kill(entireProcessTree: true))
+    {
+    }
+
+    /// <summary>Creates a lifetime with a termination boundary for deterministic OS-failure verification.</summary>
+    /// <param name="ownedProcesses">Started, consumer-owned handles to stop and join.</param>
+    /// <param name="terminateProcess">Terminates a live handle or throws its termination failure.</param>
+    internal EvidenceProcessLifetime(IReadOnlyCollection<Process> ownedProcesses, Action<Process> terminateProcess)
     {
         ArgumentNullException.ThrowIfNull(ownedProcesses);
+        ArgumentNullException.ThrowIfNull(terminateProcess);
         if (ownedProcesses.Count == 0)
         {
             throw new ArgumentException("Enroll at least one owned process.", nameof(ownedProcesses));
@@ -33,6 +43,7 @@ public sealed class EvidenceProcessLifetime : IEvidenceExecutionLifetime
             throw new ArgumentException("Owned process handles cannot be null.", nameof(ownedProcesses));
         }
         _ownedProcesses = ownedProcesses.Distinct(ReferenceEqualityComparer.Instance).Cast<Process>().ToArray();
+        _terminateProcess = terminateProcess;
         // Validate usable, started handles before this lease can be registered.
         foreach (var process in _ownedProcesses) _ = process.Id;
     }
@@ -65,9 +76,9 @@ public sealed class EvidenceProcessLifetime : IEvidenceExecutionLifetime
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                if (!process.HasExited) process.Kill(entireProcessTree: true);
+                if (!process.HasExited) _terminateProcess(process);
             }
-            catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException)
+            catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException or AggregateException)
             {
                 // Still attempt every other owner when one handle cannot be terminated.
                 failure ??= exception;

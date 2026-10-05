@@ -30,7 +30,20 @@ to keep the failure cases deterministic and checks terminal host output within
 three seconds. Each run archives the packed feed, copied source, package cache,
 stage logs, and a readable `result.txt` in the printed work directory. The whole
 operation has a 15-minute default deadline, configurable with
-`--total-timeout-seconds`.
+`--total-timeout-seconds`. Deadline expiry, Ctrl-C (`SIGINT`), and termination
+(`SIGTERM`) stop the active stage's process group and reap its leader before the
+verifier exits. Forced-stop reaping has a separate five-second upper bound.
+
+Verify these shutdown paths without invoking the SDK:
+
+```bash
+python3 tests/evidencehost-cleanup-consumer/verify-interruption.py
+```
+
+This POSIX fixture replaces `dotnet` with a stage that owns a child and ignores
+graceful termination. It checks both processes have stopped, the verifier's exit
+status, and its failure report for interruption and deadline expiry. Its own
+bounded supervisor cleans up the synthetic processes even if an assertion fails.
 
 The verifier's deadline bounds its own build and consumer subprocesses; it does
 not establish generic process-tree attestation for arbitrary evidence producers.
