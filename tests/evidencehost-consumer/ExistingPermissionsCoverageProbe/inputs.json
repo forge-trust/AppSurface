@@ -11278,7 +11278,7 @@
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/programs/CounterFixture.cs": {
       "mode": "0644",
-      "sha256": "ab467499df369b722607d4be51b73d689b1298e5a7adfe9032b72debbb323efd"
+      "sha256": "6ecbba83413b6c2455847081ccf70cd2ea2b203d05aee5934c5bfc7a1ee007d8"
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/programs/CounterFixture.csproj": {
       "mode": "0644",
@@ -11290,7 +11290,7 @@
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/programs/README.md": {
       "mode": "0644",
-      "sha256": "92ce72e189607314d6cf2c9473aba920acb71fccdca4420efb1890ffbcfe8e05"
+      "sha256": "16314b31710408f0ddd02602b26e5a81aa22a60588a96f71a1b9ace086f81e22"
     },
     "tests/evidencehost-consumer/ExistingPermissionsCoverageProbe/programs/TaskHost.cs": {
       "mode": "0644",

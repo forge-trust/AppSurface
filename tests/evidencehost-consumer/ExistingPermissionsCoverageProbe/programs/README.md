@@ -106,3 +106,8 @@ IOException raw errno1/13/16/18/30; all other values are null. It includes no
 exception text, path or arbitrary value. The separate read/write/delete checks
 retain the same required denial outcomes. This diagnostic establishes no denial
 or hit/report/restoration success.
+
+The unexpected-exception packet also retains the signed32-bit HResult as a numeric
+diagnostic. An unrecognized value remains a failure; the errno field stays null
+when outside its closed list. The number is never parsed as an acceptance fact
+and no exception message, path or arbitrary string is exported.

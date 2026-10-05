@@ -241,7 +241,7 @@ internal static class Program
                 };
                 int? nativeErrno = exception is IOException && exception.HResult is 1 or 13 or 16 or 18 or 30
                     ? exception.HResult : null;
-                Console.WriteLine(JsonSerializer.Serialize(new { stage = "failed", category, operation, exception_class = exceptionClass, native_errno = nativeErrno }));
+                Console.WriteLine(JsonSerializer.Serialize(new { stage = "failed", category, operation, exception_class = exceptionClass, native_errno = nativeErrno, hresult = exception.HResult }));
             }
             Console.Out.Flush();
         }
