@@ -154,8 +154,99 @@ root-owned `0600` destination and 4096-byte record bound remain in effect.
 Capture failure still leaves the original exception to be rethrown. File/tree
 bounds, bytes, filesystem selection, worker policy and proof requirements do not
 change. The new [diagnostic controls](test_product_preparation_diagnostics.py)
-are defined source only at this handoff; no tests or native run have executed for
-this change, and the prior failure's actual guard remains unknown.
+were defined and unexecuted at their initial source handoff. A later verified run
+37404309689 records `ProductCoverageError` / `tree-byte-bound` at checkpoint
+`inventory`, before any entry ran. It establishes an aggregate Tool guard failure,
+not the triggering filename or a successful publication size.
+
+## Fixed private Linux publication
+
+The private [preparer](prepare.py) now applies the fixed properties
+`RuntimeIdentifier=linux-x64`, `SelfContained=false` and `NuGetAudit=true` to the
+CLI metadata refresh, subsequent locked restore, both Debug publishes and the
+Host clean/rebuild. The canonical RID matches the already authenticated
+10.0.401 Linux-x64 SDK provenance. `UseAppHost` keeps its SDK default; the actual
+entry still invokes the fixed dotnet host with the top-level CLI DLL. These
+properties affect only the root-owned private build copy, not package defaults,
+the immutable product171f build, selected three DLL/PDB pairs, ABI comparison,
+Coverlet provider, application bundle or worker unit permissions.
+
+The earlier authenticated publication map contained 272 cross-platform runtime
+files, including TreeSitter and Onigwrap assets. It did not record their lengths.
+RID selection asks the SDK to resolve the required Linux assets through the
+normal publish pipeline; no manual file deletion, exclusion or dependency
+selection is performed. Neither this source change nor that path count proves
+the resulting Tool fits the unchanged 32 MiB/file, 256 MiB/tree, 2048-entry and
+depth-eight guards. Complete sealed Tool measurement remains mandatory.
+
+### Metadata APIs and ordering
+
+`snapshot_private_publish_locks(root, deadline, expected_paths=None,
+expected_owner_uid=0)` reads every `*.lock.json` under a protected root through
+retained no-follow FDs. It bounds locks to 256, each to 256 KiB, combined bytes to
+8 MiB, directory depth to sixteen and scanned entries to 32768, charging entries
+before sorting. A supplied tuple must match the complete path set. Files must
+be owned, regular and single-link; growth, named substitution, links, unexpected
+paths and nonregular entries reject. The UID override is an ordinary metadata
+test seam, never a root owner or admission. Archive child modes are not rewritten
+by this read procedure; their protected root prevents worker access.
+
+`validate_private_publish_lock(before_raw, after_raw)` accepts duplicate-free
+JSON with the same lock version and byte-equivalent canonical original target
+groups and rows, preserving package versions, content hashes, dependency
+requirements and project nodes. The only new group allowed is
+`net10.0/linux-x64`. Every new-group node must exist under the inherited
+`net10.0` group with an identical complete row; a subset is permitted. Unknown
+SDK/RID nodes fail closed for review, not dynamic enrollment. Existing RID groups
+must remain unchanged. Malformed JSON, duplicate/case-folded members, non-JSON
+numbers, removed groups, changed rows and other new RIDs reject with the existing
+fixed preparation failure.
+
+`prepare_private_linux_publish(build, source_files, protected_roots, runner,
+dotnet)` first snapshots and authenticates the build-copy locks against the
+frozen source map. The fixed `protected_roots` mapping contains source, baseline,
+product_source and product_build; none may contain the mutable build copy.
+Their original lock bytes and path sets must remain unchanged. The initial
+build-copy-only restore uses `--force-evaluate --use-lock-file` and
+`RestoreLockedMode=false` with auditing enabled to generate RID metadata. This
+one metadata refresh is followed by strict graph comparison **before** the
+ordinary `--locked-mode` restore with the same RID/self-contained properties.
+No original source, baseline or pristine product lock is rewritten. The refreshed
+lock bytes must also remain unchanged through locked restore and publication.
+
+`private_publish_assets(build, deadline, expected_owner_uid=0)` reads the fixed
+CLI `obj/project.assets.json`, capped at 8 MiB, through the retained protected
+build root and no-follow child FDs. It requires a dictionary target named
+`net10.0/linux-x64` and the exact selected private CLI project path. Applying a
+RID only to `publish --no-restore` without these assets is invalid. The return
+value binds its relative path, target, byte length and SHA256; it does not load
+an assembly or grant runtime authority.
+
+`verify_private_linux_publish_metadata(build, metadata, protected_roots,
+deadline)` repeats lock/assets/protected-root verification after both publishes
+and before final preparation publication. `private_linux_publish` in the build
+binding records the fixed properties, per-lock before/after lengths and hashes,
+assets identity and each protected role's count and canonical lock-map digest.
+It is provenance of actual checks, not a binary compatibility, coverage or
+qualification claim. All file reads, closes, commands and final checks share the
+original Runner deadline; there is no new grace period or command owner.
+
+### Validation and pitfalls
+
+The eight new [metadata controls](test_preparation.py) define actual owned-file
+snapshots, inherited-row neighbors, version/hash/requirement drift, unknown RID
+nodes, bad/duplicate JSON, no-follow/link/count/byte/deadline boundaries, exact
+assets targets and FD closure after growth/substitution. The previous 36 test
+bodies are preserved. These controls are source definitions only at this handoff;
+no refresh, restore, build, test or native publication has run for this change.
+
+A refresh may affect several project locks. It cannot be accepted just because
+the command exits zero; all original groups must still match and newly required
+SDK/RID nodes need a separately reviewed plan if rejected. Keep the same fixed
+properties on Host clean so it removes the correct RID-specific branch outputs.
+Preserve the actual lock/command receipts on failure. The Linux package graph,
+actual Tool fit and genuine mixed CLI/Host execution remain unverified. The local
+SDK targets inspected for design were 10.0.102, not the native pinned 10.0.401.
 
 Official reports are limited to 2 MiB XML and 4 MiB JSON. Utilities share the
 existing deadline and a maximum five-second operation bound. No added job timer

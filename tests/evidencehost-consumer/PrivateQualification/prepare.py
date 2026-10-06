@@ -16,6 +16,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import time
 
 from trusted_sdk import SDK_ROOT, SDK_PATH, SdkDiagnostic, identity as sdk_identity, metadata as sdk_metadata, protect_sdk_ancestors, seal_trusted_sdk
@@ -29,6 +30,14 @@ PRODUCER = "qual-coverage"
 ASSERTION = "appsurface/coverage/behavioral-patch@1"
 CLI_PROJECT = "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"
 HOST_SYMBOL = "EVIDENCE_PRIVATE_QUALIFICATION_HOST"
+PRIVATE_PUBLISH_RID = "linux-x64"
+PRIVATE_PUBLISH_TARGET = "net10.0/linux-x64"
+PRIVATE_PUBLISH_PROPERTIES = ("-p:RuntimeIdentifier=linux-x64", "-p:SelfContained=false", "-p:NuGetAudit=true")
+PRIVATE_LOCK_COUNT = 256
+PRIVATE_LOCK_BYTES = 256 * 1024
+PRIVATE_LOCK_TOTAL = 8 * 1024 * 1024
+PRIVATE_LOCK_SCAN_ENTRIES = 32768
+PRIVATE_ASSETS_BYTES = 8 * 1024 * 1024
 
 
 class PreparationFailure(Exception):
@@ -768,6 +777,259 @@ def measure_product_tool_inventory(tool, coverage_module, deadline, *, expected_
     return {name: row["sha256"] for name, row in files.items()}, summary
 
 
+def _publish_metadata_identity(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+            info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _close_publish_metadata_fd(fd):
+    """Close a borrowed metadata procedure's owned FD without replacing failure."""
+    pending = sys.exc_info()[0] is not None
+    try:
+        os.close(fd)
+    except BaseException:
+        if not pending:
+            raise PreparationFailure("qualification-preparation-rejected") from None
+
+
+def _open_publish_metadata_directory(path, deadline, expected_owner_uid):
+    """Pin every ancestor without following links; return one owned leaf FD."""
+    path = Path(path)
+    require(path.is_absolute() and ".." not in path.parts and time.monotonic() < deadline)
+    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        for name in path.parts[1:]:
+            require(time.monotonic() < deadline)
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+            try:
+                _close_publish_metadata_fd(fd)
+            except BaseException:
+                _close_publish_metadata_fd(child)
+                raise
+            fd = child
+        info = os.fstat(fd)
+        require(info.st_uid == expected_owner_uid and not info.st_mode & 0o022
+                and _publish_metadata_identity(info) == _publish_metadata_identity(path.lstat()))
+        result, fd = fd, None
+        return result
+    finally:
+        if fd is not None:
+            _close_publish_metadata_fd(fd)
+
+
+def _read_publish_metadata(parent, name, deadline, cap, expected_owner_uid):
+    """Read only a pinned owned single-link file, with the cap checked first."""
+    require(time.monotonic() < deadline and type(cap) is int and cap >= 0)
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=parent)
+    try:
+        before = os.fstat(fd)
+        require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1
+                and before.st_uid == expected_owner_uid and before.st_dev == os.fstat(parent).st_dev
+                and 0 < before.st_size <= cap)
+        data = bytearray()
+        while len(data) < before.st_size:
+            require(time.monotonic() < deadline)
+            block = os.read(fd, min(65536, before.st_size-len(data)))
+            require(bool(block))
+            data.extend(block)
+        require(os.read(fd, 1) == b"" and _publish_metadata_identity(before) == _publish_metadata_identity(os.fstat(fd))
+                == _publish_metadata_identity(os.stat(name, dir_fd=parent, follow_symlinks=False)))
+    finally:
+        _close_publish_metadata_fd(fd)
+    require(time.monotonic() < deadline)
+    return bytes(data)
+
+
+def snapshot_private_publish_locks(root, deadline, expected_paths=None, *, expected_owner_uid=0):
+    """Read every *.lock.json through retained FDs; reject changed path sets.
+
+    Metadata only: 256 locks, 256 KiB each, 8 MiB combined; traversal charges
+    32768 entries before sorting and permits depth sixteen. UID override is an
+    ordinary-file data seam. Source archive modes below the protected root are
+    not changed. No links or nonregular entries are accepted anywhere scanned.
+    """
+    require(type(expected_owner_uid) is int and expected_owner_uid >= 0)
+    if expected_paths is not None:
+        require(type(expected_paths) is tuple and 0 < len(expected_paths) <= PRIVATE_LOCK_COUNT
+                and all(type(p) is str and p.endswith(".lock.json") and not p.startswith("/")
+                        and all(s not in ("", ".", "..") for s in p.split("/")) for p in expected_paths)
+                and len(set(expected_paths)) == len(expected_paths))
+    locks, charged, total = {}, 0, 0
+    root_fd = _open_publish_metadata_directory(root, deadline, expected_owner_uid)
+    def walk(fd, prefix, depth):
+        nonlocal charged, total
+        require(depth <= 16 and time.monotonic() < deadline)
+        directory = os.fstat(fd)
+        require(directory.st_uid == expected_owner_uid)
+        names = []
+        with os.scandir(fd) as entries:
+            for entry in entries:
+                require(time.monotonic() < deadline and charged < PRIVATE_LOCK_SCAN_ENTRIES)
+                charged += 1
+                names.append(entry.name)
+        for name in sorted(names):
+            require(time.monotonic() < deadline)
+            relative = name if not prefix else prefix+"/"+name
+            info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            require(info.st_uid == expected_owner_uid)
+            if stat.S_ISDIR(info.st_mode):
+                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+                try:
+                    require(_publish_metadata_identity(info) == _publish_metadata_identity(os.fstat(child)))
+                    walk(child, relative, depth+1)
+                    require(_publish_metadata_identity(info) == _publish_metadata_identity(os.stat(name, dir_fd=fd, follow_symlinks=False)))
+                finally:
+                    _close_publish_metadata_fd(child)
+            else:
+                require(stat.S_ISREG(info.st_mode))
+                if name.endswith(".lock.json"):
+                    require(len(locks) < PRIVATE_LOCK_COUNT)
+                    data = _read_publish_metadata(fd, name, deadline,
+                        min(PRIVATE_LOCK_BYTES, PRIVATE_LOCK_TOTAL-total), expected_owner_uid)
+                    total += len(data)
+                    locks[relative] = data
+        require(_publish_metadata_identity(directory) == _publish_metadata_identity(os.fstat(fd)))
+    try:
+        walk(root_fd, "", 0)
+        require(_publish_metadata_identity(os.fstat(root_fd)) == _publish_metadata_identity(Path(root).lstat()))
+    finally:
+        _close_publish_metadata_fd(root_fd)
+    require(0 < len(locks) <= PRIVATE_LOCK_COUNT and time.monotonic() < deadline
+            and (expected_paths is None or set(locks) == set(expected_paths)))
+    return locks
+
+
+def _private_publish_json(raw, maximum):
+    require(type(raw) is bytes and 0 < len(raw) <= maximum)
+    try:
+        result = unique_json(raw)
+        require(type(result) is dict)
+        # Round-trip rejects non-JSON numbers and preserves scalar types for comparisons.
+        json.dumps(result, allow_nan=False)
+        return result
+    except (ValueError, TypeError, RecursionError):
+        raise PreparationFailure("qualification-preparation-rejected") from None
+
+
+def validate_private_publish_lock(before_raw, after_raw):
+    """Allow only an inherited-row subset in the one fixed Linux RID group.
+
+    Every original group and row (including version/content hash/dependencies)
+    must remain identical. Unknown SDK/RID nodes fail closed. This compares
+    metadata; it does not establish binary compatibility or publication fit.
+    """
+    before = _private_publish_json(before_raw, PRIVATE_LOCK_BYTES)
+    after = _private_publish_json(after_raw, PRIVATE_LOCK_BYTES)
+    for document in (before, after):
+        require(set(document) == {"version", "dependencies"} and type(document["version"]) is int
+                and document["version"] in (1, 2, 3) and type(document["dependencies"]) is dict
+                and len(document["dependencies"]) <= 64)
+        for target, rows in document["dependencies"].items():
+            require(type(target) is str and type(rows) is dict and len(rows) <= 8192
+                    and all(type(name) is str and type(row) is dict for name, row in rows.items()))
+    canonical = lambda value: json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    require(before["version"] == after["version"])
+    old, new = before["dependencies"], after["dependencies"]
+    require(set(old) <= set(new) and set(new)-set(old) <= {PRIVATE_PUBLISH_TARGET})
+    for target, rows in old.items():
+        require(canonical(rows) == canonical(new[target]))
+    if PRIVATE_PUBLISH_TARGET in new and PRIVATE_PUBLISH_TARGET not in old:
+        require("net10.0" in old)
+        inherited = old["net10.0"]
+        for name, row in new[PRIVATE_PUBLISH_TARGET].items():
+            require(name in inherited and canonical(row) == canonical(inherited[name]))
+    return PRIVATE_PUBLISH_TARGET in new
+
+
+def private_publish_assets(build, deadline, *, expected_owner_uid=0):
+    """Require the actual fixed CLI assets RID target; return its hash binding."""
+    owned = [_open_publish_metadata_directory(build, deadline, expected_owner_uid)]
+    try:
+        for name in (*Path(CLI_PROJECT).parent.parts, "obj"):
+            parent = owned[-1]
+            before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+            owned.append(child)
+            require(time.monotonic() < deadline and before.st_uid == expected_owner_uid
+                    and _publish_metadata_identity(before) == _publish_metadata_identity(os.fstat(child))
+                    == _publish_metadata_identity(os.stat(name, dir_fd=parent, follow_symlinks=False)))
+        raw = _read_publish_metadata(owned[-1], "project.assets.json", deadline, PRIVATE_ASSETS_BYTES, expected_owner_uid)
+        for index, name in enumerate((*Path(CLI_PROJECT).parent.parts, "obj")):
+            require(_publish_metadata_identity(os.fstat(owned[index+1]))
+                    == _publish_metadata_identity(os.stat(name, dir_fd=owned[index], follow_symlinks=False)))
+        require(_publish_metadata_identity(os.fstat(owned[0])) == _publish_metadata_identity(Path(build).lstat()))
+    finally:
+        first = None
+        pending = sys.exc_info()[0] is not None
+        for fd in reversed(owned):
+            try:
+                os.close(fd)
+            except BaseException as error:
+                first = first or error
+        if first is not None and not pending:
+            raise PreparationFailure("qualification-preparation-rejected") from None
+    document = _private_publish_json(raw, PRIVATE_ASSETS_BYTES)
+    require(type(document.get("targets")) is dict and type(document["targets"].get(PRIVATE_PUBLISH_TARGET)) is dict
+            and type(document.get("project")) is dict and type(document["project"].get("restore")) is dict
+            and document["project"]["restore"].get("projectPath") == str(Path(build) / CLI_PROJECT)
+            and time.monotonic() < deadline)
+    return {"relative_path": str(Path(CLI_PROJECT).parent / "obj/project.assets.json"),
+            "target": PRIVATE_PUBLISH_TARGET, "sha256": sha(raw), "bytes": len(raw)}
+
+
+def prepare_private_linux_publish(build, source_files, protected_roots, runner, dotnet):
+    """Refresh only private build-copy RID locks, validate, then restore locked.
+
+    protected_roots is the parent's fixed role->Path mapping for source, baseline,
+    pristine product checkout and pristine product build. Their lock bytes/path
+    sets must remain unchanged. All snapshots and commands use runner.deadline.
+    """
+    require(type(protected_roots) is dict and set(protected_roots) == {"source", "baseline", "product_source", "product_build"}
+            and all(Path(build) != Path(root) and Path(build) not in Path(root).parents
+                    and Path(root) not in Path(build).parents for root in protected_roots.values()))
+    paths = tuple(sorted(name for name in source_files if name.endswith(".lock.json")))
+    before = snapshot_private_publish_locks(build, runner.deadline, paths)
+    require(all(sha(data) == source_files[name]["sha256"] for name, data in before.items()))
+    for data in before.values():
+        validate_private_publish_lock(data, data)
+    def fingerprints(root):
+        return {name: sha(data) for name, data in snapshot_private_publish_locks(root, runner.deadline).items()}
+    protected = {role: fingerprints(root) for role, root in protected_roots.items()}
+    cli = str(Path(build) / CLI_PROJECT)
+    properties = list(PRIVATE_PUBLISH_PROPERTIES)
+    runner.run([str(dotnet), "restore", cli, "--force-evaluate", "--use-lock-file",
+                "-p:RestoreLockedMode=false"] + properties, build)
+    after = snapshot_private_publish_locks(build, runner.deadline, paths)
+    for name in paths:
+        validate_private_publish_lock(before[name], after[name])
+    require(validate_private_publish_lock(before[str(Path(CLI_PROJECT).parent / "packages.lock.json")],
+                                         after[str(Path(CLI_PROJECT).parent / "packages.lock.json")]))
+    require(protected == {role: fingerprints(root) for role, root in protected_roots.items()})
+    runner.run([str(dotnet), "restore", cli, "--locked-mode"] + properties, build)
+    require(snapshot_private_publish_locks(build, runner.deadline, paths) == after
+            and protected == {role: fingerprints(root) for role, root in protected_roots.items()})
+    assets = private_publish_assets(build, runner.deadline)
+    require(time.monotonic() < runner.deadline)
+    return {"schema": "issue779-private-linux-publish-metadata-v1", "runtime_identifier": PRIVATE_PUBLISH_RID,
+            "self_contained": False, "nuget_audit_enabled": True, "assets": assets,
+            "locks": {name: {"before_sha256": sha(before[name]), "after_sha256": sha(after[name]),
+                             "before_bytes": len(before[name]), "after_bytes": len(after[name])} for name in paths},
+            "protected_locks": {role: {"count": len(rows), "sha256": sha(json.dumps(rows, sort_keys=True,
+                separators=(",", ":")).encode())} for role, rows in protected.items()}}
+
+
+def verify_private_linux_publish_metadata(build, metadata, protected_roots, deadline):
+    """Reject publication-time lock/assets drift before the final build binding."""
+    final_locks = snapshot_private_publish_locks(build, deadline, tuple(metadata["locks"]))
+    require(all(sha(data) == metadata["locks"][name]["after_sha256"] for name, data in final_locks.items()))
+    require(private_publish_assets(build, deadline) == metadata["assets"])
+    for role, root in protected_roots.items():
+        rows = {name: sha(data) for name, data in snapshot_private_publish_locks(root, deadline).items()}
+        require(metadata["protected_locks"][role] == {"count": len(rows),
+            "sha256": sha(json.dumps(rows, sort_keys=True, separators=(",", ":")).encode())})
+    require(time.monotonic() < deadline)
+
+
 def prepare(source, workspace, source_commit, run_id, workflow_identity):
     """Build both actual entries from the same frozen variant and exact compiled bindings."""
     require(os.geteuid() == 0 and re.fullmatch(r"[0-9a-f]{40}", source_commit)
@@ -859,14 +1121,16 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
     coverage_module = importlib.util.module_from_spec(coverage_spec)
     coverage_spec.loader.exec_module(coverage_module)
     cli_project = build / CLI_PROJECT
-    runner.run([str(dotnet), "restore", str(cli_project), "--locked-mode"], build)
+    protected_lock_roots = {"source": source, "baseline": baseline,
+        "product_source": source.parent / "issue779-product-source", "product_build": Path(product["build_root"])}
+    linux_publish = prepare_private_linux_publish(build, before, protected_lock_roots, runner, dotnet)
     tools, product_binary_bindings = {}, {}
     for entry in ("cli", "host"):
         tool = prepare_product_tool_directory(workspace, entry, runner.deadline)
-        argv = [str(dotnet), "publish", str(cli_project), "--no-restore", "--configuration", "Debug", "--output", str(tool), "-p:UseSharedCompilation=false"]
+        argv = [str(dotnet), "publish", str(cli_project), "--no-restore", "--configuration", "Debug", "--output", str(tool), "-p:UseSharedCompilation=false"] + list(PRIVATE_PUBLISH_PROPERTIES)
         if entry == "host":
             # A full rebuild prevents reuse of the first entry's compile-time branch.
-            runner.run([str(dotnet), "clean", str(cli_project), "--configuration", "Debug"], build)
+            runner.run([str(dotnet), "clean", str(cli_project), "--configuration", "Debug"] + list(PRIVATE_PUBLISH_PROPERTIES), build)
             argv.append("-p:QualificationHostEntry=true")
         runner.run(argv, build)
         reporter = tool / "reportgenerator/net10.0"
@@ -902,12 +1166,14 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
                 pass
             raise
     require(time.monotonic() < runner.deadline)
+    verify_private_linux_publish_metadata(build, linux_publish, protected_lock_roots, runner.deadline)
     require(source_inventory(source) == before)
     require(time.monotonic() < runner.deadline)
     result = {"source_commit": source_commit, "source_files": before, "run_id": run_id, "workflow_identity": workflow_identity,
         "subject_revision": subject_revision, "subject_sha256": subject_map, "metadata": metadata, "bundle_files": files,
         "generated_sha256": {str(p.relative_to(build)): sha(p.read_bytes()) for p in (generated_contracts, generated_planner, root_module, launcher_module)},
         "application_bundle_input": bundle_input,
+        "private_linux_publish": linux_publish,
         "preparation_complete": True, "sdk_bootstrap": sdk_binding,
         "product_coverage_inputs": {"source_commit": product["source_commit"],
             "source_manifest_sha256": sha((source / "tests/evidencehost-consumer/PrivateQualification/product-source-manifest.json").read_bytes()),

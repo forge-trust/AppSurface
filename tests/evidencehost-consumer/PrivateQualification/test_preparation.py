@@ -830,5 +830,205 @@ class PrivateBundleLayoutControls(unittest.TestCase):
         with self.assertRaises(self.coverage.ProductCoverageError): self.measure(deep)
 
 
+class PrivateLinuxPublishMetadataControls(unittest.TestCase):
+    """Ordinary owned metadata files only; no restore, build, lease or authority."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="private-linux-publish-data-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.uid = os.geteuid()
+        self.deadline = prepare.time.monotonic()+10
+        self.command = patch.object(prepare.Runner, "run", side_effect=AssertionError("no-command-dispatch"))
+        self.command_mock = self.command.start()
+        self.addCleanup(self.command.stop)
+
+    def tearDown(self):
+        self.command_mock.assert_not_called()
+
+    def document(self):
+        return {"version": 2, "dependencies": {"net10.0": {
+            "Package.One": {"type": "Direct", "requested": "[1.2.3, )", "resolved": "1.2.3",
+                            "contentHash": "ordinary-data-content-hash", "dependencies": {"Package.Two": "2.0.0"}},
+            "Project.One": {"type": "Project", "dependencies": {"Package.One": "[1.2.3, )"}}}}}
+
+    def encode(self, value):
+        return json.dumps(value, sort_keys=True).encode()
+
+    def with_rid(self, value):
+        result = json.loads(self.encode(value))
+        result["dependencies"][prepare.PRIVATE_PUBLISH_TARGET] = json.loads(self.encode(value["dependencies"]["net10.0"]))
+        return result
+
+    def write_lock(self, relative="Project/packages.lock.json", value=None):
+        path = self.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(self.encode(self.document() if value is None else value))
+        path.chmod(0o600)
+        return path
+
+    def snapshot(self, paths=None):
+        return prepare.snapshot_private_publish_locks(self.root, self.deadline, paths, expected_owner_uid=self.uid)
+
+    def rejected(self, action):
+        with self.assertRaises(prepare.PreparationFailure) as failure:
+            action()
+        self.assertEqual("qualification-preparation-rejected", str(failure.exception))
+        self.assertIsNone(failure.exception.__cause__)
+
+    def test_real_lock_snapshot_accepts_only_inherited_rid_rows_and_preserves_input_bytes(self):
+        before = self.document()
+        path = self.write_lock(value=before)
+        saved = self.snapshot(("Project/packages.lock.json",))
+        self.assertEqual(path.read_bytes(), saved["Project/packages.lock.json"])
+        self.assertFalse(prepare.validate_private_publish_lock(saved["Project/packages.lock.json"], self.encode(before)))
+        after = self.with_rid(before)
+        del after["dependencies"][prepare.PRIVATE_PUBLISH_TARGET]["Project.One"]
+        self.assertTrue(prepare.validate_private_publish_lock(saved["Project/packages.lock.json"], self.encode(after)))
+        self.assertEqual(saved["Project/packages.lock.json"], path.read_bytes())
+        self.assertEqual(0o600, stat.S_IMODE(path.stat().st_mode))
+
+    def test_original_version_hash_dependency_and_scalar_type_drift_have_valid_neighbors(self):
+        before = self.document()
+        good = self.with_rid(before)
+        for field, value in (("resolved", "1.2.4"), ("contentHash", "different"),
+                             ("requested", "[1.0.0, )"), ("dependencies", {"Package.Two": "3.0.0"}),
+                             ("type", True)):
+            with self.subTest(field=field):
+                self.assertTrue(prepare.validate_private_publish_lock(self.encode(before), self.encode(good)))
+                bad = json.loads(self.encode(good))
+                bad["dependencies"]["net10.0"]["Package.One"][field] = value
+                self.rejected(lambda: prepare.validate_private_publish_lock(self.encode(before), self.encode(bad)))
+        for change in ("version", "missing-group", "missing-node"):
+            bad = json.loads(self.encode(good))
+            if change == "version": bad["version"] = True
+            elif change == "missing-group": del bad["dependencies"]["net10.0"]
+            else: del bad["dependencies"]["net10.0"]["Project.One"]
+            self.rejected(lambda: prepare.validate_private_publish_lock(self.encode(before), self.encode(bad)))
+
+    def test_unknown_sdk_nodes_wrong_rid_and_mismatched_rid_rows_fail_closed(self):
+        before = self.document()
+        good = self.with_rid(before)
+        for change in ("new-sdk-node", "wrong-rid", "wrong-rid-row", "new-target", "scalar-row"):
+            with self.subTest(change=change):
+                self.assertTrue(prepare.validate_private_publish_lock(self.encode(before), self.encode(good)))
+                bad = json.loads(self.encode(good))
+                if change == "new-sdk-node": bad["dependencies"][prepare.PRIVATE_PUBLISH_TARGET]["Unreviewed.SDK"] = {"type": "Transitive", "resolved": "10.0.401"}
+                elif change == "wrong-rid": bad["dependencies"]["net10.0/osx-arm64"] = bad["dependencies"].pop(prepare.PRIVATE_PUBLISH_TARGET)
+                elif change == "wrong-rid-row": bad["dependencies"][prepare.PRIVATE_PUBLISH_TARGET]["Package.One"]["resolved"] = "9.9.9"
+                elif change == "new-target": bad["dependencies"]["net9.0"] = {}
+                else: bad["dependencies"][prepare.PRIVATE_PUBLISH_TARGET]["Package.One"] = ["canary-not-a-row"]
+                self.rejected(lambda: prepare.validate_private_publish_lock(self.encode(before), self.encode(bad)))
+
+    def test_bad_json_duplicate_members_and_non_json_numbers_emit_only_fixed_failure(self):
+        before = self.encode(self.document())
+        for raw in (b'{"version":2,"version":2,"dependencies":{}}',
+                    b'{"version":2,"Version":2,"dependencies":{}}', b'{"canary-secret":',
+                    b'{"version":NaN,"dependencies":{}}', b'[]', b'\xff',
+                    b'{"version":2,"dependencies":{"net10.0":{"P":{},"P":{}}}}'):
+            with self.subTest(shape=raw[:8]):
+                self.rejected(lambda: prepare.validate_private_publish_lock(before, raw))
+        self.assertTrue(prepare.validate_private_publish_lock(before, self.encode(self.with_rid(self.document()))))
+
+    def test_lock_paths_are_exact_and_links_or_nonregular_files_never_escape_root(self):
+        path = self.write_lock()
+        expected = ("Project/packages.lock.json",)
+        self.assertEqual(set(expected), set(self.snapshot(expected)))
+        extra = self.write_lock("Other/packages.lock.json")
+        self.rejected(lambda: self.snapshot(expected))
+        extra.unlink(); extra.parent.rmdir()
+        original = path.read_bytes()
+        path.unlink()
+        self.rejected(lambda: self.snapshot(expected))
+        path.write_bytes(original)
+        outside = self.root.parent / (self.root.name+"-outside")
+        outside.write_bytes(b"outside-sentinel")
+        self.addCleanup(lambda: outside.unlink(missing_ok=True))
+        for shape in ("symlink", "hardlink", "fifo"):
+            with self.subTest(shape=shape):
+                path.unlink()
+                if shape == "symlink": path.symlink_to(outside)
+                elif shape == "hardlink": os.link(outside, path)
+                else: os.mkfifo(path)
+                with self.assertRaises((prepare.PreparationFailure, OSError)):
+                    self.snapshot(expected)
+                self.assertEqual(b"outside-sentinel", outside.read_bytes())
+                path.unlink(); path.write_bytes(original)
+        os.chmod(self.root, 0o720)
+        self.rejected(lambda: self.snapshot(expected))
+        self.root.chmod(0o700)
+
+    def test_count_bytes_traversal_and_deadline_limits_reject_before_unbounded_reads(self):
+        path = self.write_lock()
+        size = len(path.read_bytes())
+        with patch.object(prepare, "PRIVATE_LOCK_COUNT", 1), patch.object(prepare, "PRIVATE_LOCK_BYTES", size), patch.object(prepare, "PRIVATE_LOCK_TOTAL", size):
+            self.assertEqual(1, len(self.snapshot()))
+            with patch.object(prepare, "PRIVATE_LOCK_BYTES", size-1), patch.object(prepare.os, "read", side_effect=AssertionError("must-not-read-oversize")) as read:
+                self.rejected(self.snapshot)
+            read.assert_not_called()
+            self.write_lock("Second/packages.lock.json")
+            self.rejected(self.snapshot)
+        with patch.object(prepare, "PRIVATE_LOCK_SCAN_ENTRIES", 1):
+            self.rejected(self.snapshot)
+        with patch.object(prepare.os, "open", side_effect=AssertionError("expired-must-not-open")) as opened:
+            self.rejected(lambda: prepare.snapshot_private_publish_locks(self.root, prepare.time.monotonic()-1,
+                                                                          expected_owner_uid=self.uid))
+        opened.assert_not_called()
+
+    def test_actual_assets_require_exact_project_and_rid_without_loading_an_assembly(self):
+        directory = self.root / Path(prepare.CLI_PROJECT).parent / "obj"
+        directory.mkdir(parents=True)
+        path = directory / "project.assets.json"
+        good = {"targets": {prepare.PRIVATE_PUBLISH_TARGET: {}}, "project": {"restore": {
+            "projectPath": str(self.root / prepare.CLI_PROJECT)}}}
+        for change in (None, "missing-rid", "wrong-rid", "foreign-project", "scalar-target", "duplicate"):
+            data = json.loads(self.encode(good))
+            if change == "missing-rid": data["targets"] = {"net10.0": {}}
+            elif change == "wrong-rid": data["targets"] = {"net10.0/win-x64": {}}
+            elif change == "foreign-project": data["project"]["restore"]["projectPath"] += ".foreign"
+            elif change == "scalar-target": data["targets"][prepare.PRIVATE_PUBLISH_TARGET] = True
+            raw = self.encode(data) if change != "duplicate" else b'{"targets":{},"targets":{}}'
+            path.write_bytes(raw)
+            if change is None:
+                result = prepare.private_publish_assets(self.root, self.deadline, expected_owner_uid=self.uid)
+                self.assertEqual((prepare.PRIVATE_PUBLISH_TARGET, len(raw), hashlib.sha256(raw).hexdigest()),
+                                 (result["target"], result["bytes"], result["sha256"]))
+            else:
+                self.rejected(lambda: prepare.private_publish_assets(self.root, self.deadline, expected_owner_uid=self.uid))
+
+    def test_real_metadata_growth_and_named_substitution_close_owned_file_fds(self):
+        path = self.write_lock()
+        saved = path.read_bytes()
+        original_read, original_open = prepare.os.read, prepare.os.open
+        for change in ("growth", "substitution"):
+            with self.subTest(change=change):
+                path.write_bytes(saved)
+                wanted_inode = path.stat().st_ino
+                changed, owned = [], []
+                def record_open(name, flags, *args, **kwargs):
+                    fd = original_open(name, flags, *args, **kwargs)
+                    if name == path.name: owned.append(fd)
+                    return fd
+                def mutate(fd, count):
+                    if not changed and os.fstat(fd).st_ino == wanted_inode:
+                        changed.append(True)
+                        if change == "growth":
+                            with path.open("ab") as stream: stream.write(b"x")
+                        else:
+                            path.rename(path.with_name("original.saved"))
+                            path.write_bytes(saved)
+                    return original_read(fd, count)
+                with patch.object(prepare.os, "open", record_open), patch.object(prepare.os, "read", mutate):
+                    self.rejected(self.snapshot)
+                self.assertTrue(changed)
+                self.assertTrue(owned)
+                for fd in owned:
+                    with self.assertRaises(OSError): os.fstat(fd)
+                displaced = path.with_name("original.saved")
+                if displaced.exists():
+                    self.assertEqual(saved, displaced.read_bytes())
+                    displaced.unlink()
+
+
 if __name__ == "__main__":
     unittest.main()
