@@ -92,6 +92,27 @@ remaining tree budget before opening it. Restoration passes the remaining
 budget into the file preflight and still verifies every original hash before
 changing any mode or group. The buffered `read_file()` API is unchanged.
 
+The [private bundle layout](README.md#private-bundle-source-layout) uses the
+compile-owned launcher marker to keep one root-only application input outside
+both tools, before bundle canonicalization. In this generated variant the owner
+receives `published_files=()` because there are no in-tool application-bundle rows.
+The ordinary default marker remains false and still projects the exact selected
+audit's in-tool length/hash tuples. Neither branch accepts an environment value,
+worker path or caller-provided audit. The source bundle remains fully audited and
+copied into the existing `/run` application workspace under the same permissions.
+
+`measure_product_tool_inventory` in [prepare.py](prepare.py) measures the complete
+sealed tool using this module's actual bounded snapshot and streaming procedures,
+without a declaration override or file exclusion. Its `published_inventory`
+summary accompanies the complete tool SHA map and records file/directory counts,
+total bytes, largest file and relative-path depth. It uses the original build deadline
+including FD closure and repeat verification. The 32 MiB file / 256 MiB tree /
+2,048-entry / depth-eight limits remain unchanged. The previously retained
+`tree-byte-bound` failure does not identify the precise triggering file or
+snapshot; remaining tool sizes and native product execution still require a new
+actual preparation and qualified run. This source-only change claims no gain in
+coverage and supplies no admission or Trusted authority.
+
 This metadata procedure reuses the [application bundle limit](../../../scripts/evidencehost_linux_application.py)
 without changing that limit, worker access, unit limits or deadlines. The closed
 private startup categories `file-shape`, `published-binding` and

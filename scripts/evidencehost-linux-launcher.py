@@ -72,6 +72,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from contextlib import contextmanager
 import ctypes
 import grp
 import errno as errno_module
@@ -95,6 +96,10 @@ import threading
 import time
 import uuid
 from pathlib import Path
+
+# Only the private preparer replaces this one compile-owned marker. Ordinary
+# launcher deployments continue to audit bundles beneath their tool root.
+_PRIVATE_QUALIFICATION_BUNDLE_SOURCE = False
 
 # Load the single adjacent implementation, including when a protected parent imports
 # this hyphenated launcher by its exact file path. There is no search-path fallback.
@@ -2328,10 +2333,73 @@ def application_preparation_remaining(deadline: float, maximum: float | None = N
     return remaining if maximum is None else min(maximum, remaining)
 
 
+@contextmanager
+def _application_bundle_source(tool: Path, application_id: str, build_id: str, deadline: float,
+                               *, expected_owner_uid: int = 0, expected_owner_gid: int = 0):
+    """Yield the fixed audited source while retaining private-layout parent FDs.
+
+    False preserves the ordinary in-tool layout. True is generated only by the
+    private preparer and selects the fixed sibling, never a caller path/fallback.
+    Owner overrides exercise file metadata only and cannot issue a lease.
+    Every retained FD closes within the original deadline; errors retain the
+    first failure. The caller still audits all actual declared source bytes.
+    """
+    application_preparation_remaining(deadline)
+    if not _PRIVATE_QUALIFICATION_BUNDLE_SOURCE:
+        yield tool / "application-bundles" / application_id / build_id
+        application_preparation_remaining(deadline)
+        return
+    _application._require(isinstance(tool, Path) and tool.is_absolute()
+                          and type(expected_owner_uid) is int and expected_owner_uid >= 0
+                          and type(expected_owner_gid) is int and expected_owner_gid >= 0)
+    _application._name(application_id)
+    _application._name(build_id)
+    owned, pins, failure = [], [], None
+    pin = lambda row: (row.st_dev, row.st_ino, row.st_uid, row.st_gid, stat.S_IMODE(row.st_mode))
+    try:
+        workspace = tool.parent
+        parent = _product.open_directory(workspace, deadline, uid=expected_owner_uid, gid=expected_owner_gid)
+        owned.append(parent)
+        before = os.fstat(parent)
+        _application._require(not before.st_mode & 0o022)
+        workspace_pin = pin(before)
+        source = workspace
+        for name, mode in (("application-bundle-input", 0o700), (application_id, 0o555), (build_id, 0o555)):
+            application_preparation_remaining(deadline)
+            named = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+            owned.append(child)
+            actual = os.fstat(child)
+            _application._require(stat.S_ISDIR(actual.st_mode) and actual.st_uid == expected_owner_uid
+                and actual.st_gid == expected_owner_gid and actual.st_dev == before.st_dev
+                and stat.S_IMODE(actual.st_mode) == mode and pin(actual) == pin(named))
+            pins.append((parent, child, name, pin(actual)))
+            parent, source = child, source / name
+        yield source
+        for parent, child, name, expected in pins:
+            application_preparation_remaining(deadline)
+            _application._require(pin(os.fstat(child)) == expected
+                == pin(os.stat(name, dir_fd=parent, follow_symlinks=False)))
+        _application._require(workspace_pin == pin(os.fstat(owned[0]))
+                              == pin(workspace.lstat()))
+    except BaseException as error:
+        failure = error
+    finally:
+        for fd in reversed(owned):
+            try:
+                os.close(fd)
+            except BaseException as error:
+                if failure is None:
+                    failure = error
+    if failure is not None:
+        raise failure
+    application_preparation_remaining(deadline)
+
+
 class _ApplicationWorkspaceOwner:
     """Root-only workspace owner; only successful aggregate exit permits strict disposal.
 
-    Bundle inputs are pinned under the protected tool root, copied through retained
+    Bundle inputs use the compile-owned source layout, copied through retained
     file descriptors, then independently pinned in a root-owned immutable /run tree.
     The scratch bound is an actual host tmpfs mount, not a systemd path permission.
     """
@@ -2349,7 +2417,6 @@ class _ApplicationWorkspaceOwner:
         self.deadline = deadline
         self._remaining()
         audit = selected.audit
-        source = tool / "application-bundles" / audit.application_id / audit.descriptor(identities)["build_id"]
         self.parent.mkdir(mode=0o711)
         os.chown(self.parent, 0, 0)
         os.chmod(self.parent, 0o711)
@@ -2360,47 +2427,59 @@ class _ApplicationWorkspaceOwner:
         os.chmod(self.workspace.control, 0o700)
         target = self.parent / "bundle"
         target.mkdir(mode=0o755)
-        # The deployment tree is inspected before prepare_tool_root changes its worker group modes.
-        with _application.audit_bundle(source, audit, deadline=self.deadline) as pinned:
-            for relative, fd, identity in pinned.files:
-                self._remaining()
-                item = next(item for item in audit.files if item.relative_path == relative)
-                path = target / relative
-                path.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
-                destination = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
-                try:
-                    position = 0
-                    digest = hashlib.sha256()
-                    while position < item.length_bytes:
+        try:
+            with _application_bundle_source(tool, audit.application_id, audit.descriptor(identities)["build_id"],
+                                            self.deadline) as source:
+                # The deployment tree is inspected before prepare_tool_root changes its worker group modes.
+                with _application.audit_bundle(source, audit, deadline=self.deadline) as pinned:
+                    for relative, fd, identity in pinned.files:
                         self._remaining()
-                        block = os.pread(fd, min(65536, item.length_bytes - position), position)
-                        self._remaining()
-                        if not block:
-                            raise _application.ApplicationError("ASEVD404")
-                        digest.update(block)
-                        view = memoryview(block)
-                        while view:
-                            self._remaining()
-                            written = os.write(destination, view)
-                            self._remaining()
-                            if written <= 0:
+                        item = next(item for item in audit.files if item.relative_path == relative)
+                        path = target / relative
+                        path.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+                        destination = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+                        try:
+                            position = 0
+                            digest = hashlib.sha256()
+                            while position < item.length_bytes:
+                                self._remaining()
+                                block = os.pread(fd, min(65536, item.length_bytes - position), position)
+                                self._remaining()
+                                if not block:
+                                    raise _application.ApplicationError("ASEVD404")
+                                digest.update(block)
+                                view = memoryview(block)
+                                while view:
+                                    self._remaining()
+                                    written = os.write(destination, view)
+                                    self._remaining()
+                                    if written <= 0:
+                                        raise _application.ApplicationError("ASEVD404")
+                                    view = view[written:]
+                                position += len(block)
+                            if (_application._identity(os.fstat(fd)) != identity
+                                    or digest.hexdigest() != item.sha256):
                                 raise _application.ApplicationError("ASEVD404")
-                            view = view[written:]
-                        position += len(block)
-                    if (_application._identity(os.fstat(fd)) != identity
-                            or digest.hexdigest() != item.sha256):
-                        raise _application.ApplicationError("ASEVD404")
-                    os.fchown(destination, 0, 0)
-                    os.fchmod(destination, item.mode)
-                finally:
-                    os.close(destination)
-            pinned.recheck()
-        self._remaining()
-        for directory, children, files in os.walk(target, topdown=False):
-            self._remaining()
-            os.chown(directory, 0, 0)
-            os.chmod(directory, 0o555)
-        self.bundle = _application.audit_bundle(target, audit, deadline=self.deadline)
+                            os.fchown(destination, 0, 0)
+                            os.fchmod(destination, item.mode)
+                        finally:
+                            os.close(destination)
+                    pinned.recheck()
+                self._remaining()
+                for directory, children, files in os.walk(target, topdown=False):
+                    self._remaining()
+                    os.chown(directory, 0, 0)
+                    os.chmod(directory, 0o555)
+                self.bundle = _application.audit_bundle(target, audit, deadline=self.deadline)
+        except BaseException:
+            # A parent-FD close/recheck can fail after the target audit opened.
+            # Release those owned target FDs while preserving the first error.
+            if self.bundle is not None:
+                try:
+                    self.bundle.close()
+                except BaseException:
+                    pass
+            raise
         self._remaining()
         self.workspace.scratch.mkdir(mode=0o700)
         _systemd(["/usr/bin/mount", "--types", "tmpfs", "--options",
@@ -3488,7 +3567,8 @@ def _launch_with_completion_impl(args: argparse.Namespace, *, diagnostic_directo
             published_files=tuple((str(Path("application-bundles") / selected_application.audit.application_id
                                   / selected_application.audit.descriptor(identities)["build_id"] / row.relative_path),
                                   row.length_bytes, row.sha256)
-                                 for row in selected_application.audit.files) if selected_application is not None else ())
+                                 for row in selected_application.audit.files)
+            if selected_application is not None and not _PRIVATE_QUALIFICATION_BUNDLE_SOURCE else ())
         _startup.enter("product-prepare")
         execution_map = product_coverage_owner.prepare()
         _startup.enter("tool-pin")

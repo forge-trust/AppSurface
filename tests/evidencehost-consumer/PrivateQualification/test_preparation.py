@@ -615,5 +615,220 @@ class ProductToolDirectoryControls(unittest.TestCase):
         self.assertEqual(0o711, stat.S_IMODE(workspace.lstat().st_mode))
 
 
+class PrivateBundleLayoutControls(unittest.TestCase):
+    """Actual temporary file/FD custody only; UID overrides confer no root lease."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="private-bundle-layout-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        self.root.chmod(0o700)
+        self.uid, self.gid = os.getuid(), os.getgid()
+        self.guards = []
+        for owner, name in ((prepare.subprocess, "Popen"),
+                            (prepare.subprocess, "check_output"), (prepare.Runner, "run")):
+            guard = patch.object(owner, name, side_effect=AssertionError("command-path-not-allowed"))
+            self.guards.append(guard.start())
+            self.addCleanup(guard.stop)
+        spec = importlib.util.spec_from_file_location(
+            "private_bundle_inventory_data", Path(__file__).with_name("product-coverage.py"))
+        self.coverage = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = self.coverage
+        spec.loader.exec_module(self.coverage)
+
+    def tearDown(self):
+        for guard in self.guards:
+            guard.assert_not_called()
+
+    def workspace(self, name):
+        workspace = self.root / name
+        workspace.mkdir(mode=0o700)
+        bundle = workspace / "bundle"
+        bundle.mkdir(mode=0o700)
+        payloads = {
+            "AspireChild.dll": b"metadata-app", "AspireChild.runtimeconfig.json": b"{}",
+            "resource/NativeHttpResource.dll": b"metadata-resource",
+            "resource/NativeHttpResource.runtimeconfig.json": b"{}",
+            "dcp/dcp": b"\x7fELF\x02metadata-only", "proof-input/declared.txt": b"input"}
+        for name, data in payloads.items():
+            target = bundle / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            target.chmod(0o644)
+        tool = workspace / "tool-cli"
+        tool.mkdir(mode=0o700)
+        canary = tool / "unchanged.dll"
+        canary.write_bytes(b"published bytes unchanged")
+        canary.chmod(0o444)
+        return workspace, payloads, canary
+
+    def relocate(self, workspace, *, deadline=None, uid=None, gid=None):
+        return prepare.prepare_application_bundle_input(workspace,
+            prepare.time.monotonic()+10 if deadline is None else deadline,
+            expected_owner_uid=self.uid if uid is None else uid,
+            expected_owner_gid=self.gid if gid is None else gid)
+
+    def measure(self, tool, deadline=None):
+        return prepare.measure_product_tool_inventory(tool, self.coverage,
+            prepare.time.monotonic()+20 if deadline is None else deadline,
+            expected_owner_uid=self.uid, expected_owner_gid=self.gid)
+
+    def test_private_outer_and_sealed_inventory_preserve_published_tool_under_real_umasks(self):
+        for mask in (0o000, 0o077, 0o777):
+            with self.subTest(umask=oct(mask)):
+                workspace, payloads, canary = self.workspace(f"mask-{mask:03o}")
+                before = (canary.read_bytes(), canary.lstat())
+                (workspace / "bundle").chmod(0o775)
+                previous = os.umask(mask)
+                try:
+                    bundle, provenance = self.relocate(workspace)
+                finally:
+                    os.umask(previous)
+                self.assertEqual(workspace / "application-bundle-input" / prepare.APP_ID / prepare.BUILD_ID, bundle)
+                self.assertFalse((workspace / "bundle").exists())
+                outer = workspace / "application-bundle-input"
+                self.assertEqual(0o700, stat.S_IMODE(outer.lstat().st_mode))
+                self.assertEqual(0o555, stat.S_IMODE(bundle.parent.lstat().st_mode))
+                self.assertEqual(0o755, stat.S_IMODE(bundle.lstat().st_mode))
+                rows = prepare.bundle_inventory(bundle, deadline=prepare.time.monotonic()+10)
+                self.assertEqual(sorted(payloads), [row["RelativePath"] for row in rows])
+                for row in rows:
+                    self.assertEqual(payloads[row["RelativePath"]], (bundle / row["RelativePath"]).read_bytes())
+                    self.assertEqual(hashlib.sha256(payloads[row["RelativePath"]]).hexdigest(), row["Sha256"])
+                    self.assertEqual(len(payloads[row["RelativePath"]]), row["LengthBytes"])
+                    self.assertEqual(row["Mode"], stat.S_IMODE((bundle / row["RelativePath"]).lstat().st_mode))
+                self.assertEqual(0o555, stat.S_IMODE(bundle.lstat().st_mode))
+                self.assertEqual({"container_path", "path", "container_metadata"}, set(provenance))
+                info = outer.lstat()
+                self.assertEqual({"uid": info.st_uid, "gid": info.st_gid, "mode": "0700",
+                                  "device": info.st_dev, "inode": info.st_ino, "nlink": info.st_nlink},
+                                 provenance["container_metadata"])
+                self.assertEqual(str(outer), provenance["container_path"])
+                self.assertEqual(str(bundle), provenance["path"])
+                self.assertEqual(before[0], canary.read_bytes())
+                self.assertEqual((before[1].st_dev, before[1].st_ino, before[1].st_mode),
+                                 (canary.lstat().st_dev, canary.lstat().st_ino, canary.lstat().st_mode))
+
+    def test_wrong_workspace_owner_group_mode_and_existing_link_reject_without_outside_changes(self):
+        for variant in ("owner", "group", "mode", "existing", "symlink"):
+            with self.subTest(variant=variant):
+                workspace, _, canary = self.workspace(variant)
+                before = (canary.read_bytes(), canary.lstat().st_mode)
+                kwargs = {}
+                if variant == "owner": kwargs["uid"] = self.uid+1
+                if variant == "group": kwargs["gid"] = self.gid+1
+                if variant == "mode": workspace.chmod(0o777)
+                outer = workspace / "application-bundle-input"
+                if variant == "existing": outer.mkdir(mode=0o777)
+                if variant == "symlink": outer.symlink_to(canary.parent, target_is_directory=True)
+                with self.assertRaises((prepare.PreparationFailure, OSError)):
+                    self.relocate(workspace, **kwargs)
+                self.assertTrue((workspace / "bundle").is_dir())
+                self.assertEqual(before, (canary.read_bytes(), canary.lstat().st_mode))
+                if variant in ("owner", "group", "mode"):
+                    self.assertFalse(outer.exists())
+
+    def test_relocation_named_substitution_is_rejected_and_original_bytes_are_retained(self):
+        workspace, payloads, canary = self.workspace("substitution")
+        original = os.rename
+        displaced = "retained-original"
+        def substitute(source, destination, *args, **kwargs):
+            result = original(source, destination, *args, **kwargs)
+            if source == "bundle" and destination == prepare.BUILD_ID:
+                fd = kwargs["dst_dir_fd"]
+                original(destination, displaced, src_dir_fd=fd, dst_dir_fd=fd)
+                os.mkdir(destination, mode=0o700, dir_fd=fd)
+            return result
+        with patch.object(prepare.os, "rename", substitute):
+            with self.assertRaises(prepare.PreparationFailure): self.relocate(workspace)
+        retained = workspace / "application-bundle-input" / prepare.APP_ID / displaced
+        self.assertEqual(payloads["AspireChild.dll"], (retained / "AspireChild.dll").read_bytes())
+        self.assertEqual(b"published bytes unchanged", canary.read_bytes())
+
+    def test_expired_relocation_deadline_prevents_open_and_creation(self):
+        workspace, _, canary = self.workspace("expired")
+        with patch.object(prepare.os, "open", side_effect=AssertionError("must-not-open")) as opened:
+            with self.assertRaises(prepare.PreparationFailure):
+                self.relocate(workspace, deadline=prepare.time.monotonic()-1)
+        opened.assert_not_called()
+        self.assertEqual({"bundle", "tool-cli"}, {p.name for p in workspace.iterdir()})
+        self.assertEqual(b"published bytes unchanged", canary.read_bytes())
+
+    def test_complete_tool_measurement_includes_nested_files_and_rejects_changed_second_snapshot(self):
+        tool = self.root / "measured"
+        tool.mkdir(mode=0o700)
+        child = tool / "application-bundles"
+        child.mkdir(mode=0o555)
+        # Create before sealing the nested directory; no exclusion may hide it.
+        child.chmod(0o700)
+        payloads = {"root.dll": b"root", "application-bundles/not-excluded.txt": b"included"}
+        for name, data in payloads.items():
+            (tool / name).write_bytes(data); (tool / name).chmod(0o444)
+        child.chmod(0o555)
+        actual, summary = self.measure(tool)
+        self.assertEqual({n: hashlib.sha256(b).hexdigest() for n, b in payloads.items()}, actual)
+        self.assertEqual((2, 2, 12, 8, 2), tuple(summary[k] for k in
+                         ("file_count", "directory_count", "total_bytes", "maximum_file_bytes", "maximum_depth")))
+        original = self.coverage.snapshot_tree
+        calls = []
+        def changed_snapshot(*args, **kwargs):
+            result = original(*args, **kwargs); calls.append(result)
+            if len(calls) == 2:
+                files, directories = result
+                files = {name: dict(row) for name, row in files.items()}
+                files["root.dll"]["sha256"] = "0"*64
+                return files, directories
+            return result
+        with patch.object(self.coverage, "snapshot_tree", changed_snapshot):
+            with self.assertRaises(prepare.PreparationFailure): self.measure(tool)
+        self.assertEqual(2, len(calls))
+        self.assertEqual(b"included", (child / "not-excluded.txt").read_bytes())
+
+    def test_actual_sparse_files_reach_exact_file_and_tree_byte_bounds_without_limit_changes(self):
+        tool = self.root / "byte-bound"
+        tool.mkdir(mode=0o700)
+        for index in range(8):
+            path = tool / f"{index:02d}.dll"
+            with path.open("wb") as stream: stream.truncate(32 << 20)
+            path.chmod(0o444)
+        rows, summary = self.measure(tool)
+        self.assertEqual(8, len(rows))
+        self.assertEqual((256 << 20, 32 << 20, 32 << 20, 256 << 20, 2048),
+                         tuple(summary[k] for k in ("total_bytes", "maximum_file_bytes",
+                               "file_limit_bytes", "tree_limit_bytes", "maximum_entries")))
+        extra = tool / "99-extra.dll"
+        extra.write_bytes(b"x"); extra.chmod(0o444)
+        with self.assertRaises(self.coverage.ProductCoverageError): self.measure(tool)
+        extra.unlink()
+        first = tool / "00.dll"
+        first.chmod(0o600)
+        with first.open("r+b") as stream: stream.truncate((32 << 20)+1)
+        first.chmod(0o444)
+        with patch.object(self.coverage.os, "read", side_effect=AssertionError("overlimit-must-not-read")) as hashed:
+            with self.assertRaises(self.coverage.ProductCoverageError): self.measure(tool)
+        hashed.assert_not_called()
+
+    def test_exact_entry_and_depth_limits_have_one_over_rejecting_neighbors(self):
+        tool = self.root / "entry-bound"
+        tool.mkdir(mode=0o700)
+        for index in range(2047):
+            path = tool / f"f{index:04d}.bin"
+            path.write_bytes(b"x"); path.chmod(0o444)
+        files, summary = self.measure(tool)
+        self.assertEqual((2047, 1, 2048), (len(files), summary["directory_count"], summary["maximum_entries"]))
+        extra = tool / "extra.bin"
+        extra.write_bytes(b"x"); extra.chmod(0o444)
+        with self.assertRaises(self.coverage.ProductCoverageError): self.measure(tool)
+        deep = self.root / "depth-bound"
+        deep.mkdir(mode=0o700)
+        current = deep
+        for _ in range(8): current = current / "d"; current.mkdir(mode=0o700)
+        (current.parent / "leaf.bin").write_bytes(b"x"); (current.parent / "leaf.bin").chmod(0o444)
+        _, valid = self.measure(deep)
+        self.assertEqual(8, valid["maximum_depth"])
+        (current / "ninth").mkdir(mode=0o700)
+        with self.assertRaises(self.coverage.ProductCoverageError): self.measure(deep)
+
+
 if __name__ == "__main__":
     unittest.main()
