@@ -1299,22 +1299,36 @@ def swap_product_pairs(tool, candidates, deadline, *, expected_owner_uid=0):
 PRODUCT_PREPARATION_FAILURE_PHASES = (
     "reconciliation-owner-finalization", "reconciliation-receipt-validation",
     "image-replacement", "tool-sealing")
+PRODUCT_PREPARATION_CHECKPOINTS = ("permission-sealing", "inventory")
+# Exact literal categories in the existing snapshot/streaming dependency chain.
+# This diagnostic allowlist does not define, bypass or change any runtime guard.
+PRODUCT_PREPARATION_CATEGORIES = frozenset((
+    "basename", "deadline", "directory-changed", "directory-owner", "directory-path",
+    "file-changed", "file-count", "file-gid", "file-mode", "file-shape", "file-short",
+    "published-binding", "published-files-missing", "tree-bound", "tree-byte-bound",
+    "tree-changed", "tree-mode", "tree-owner"))
 
 
 def capture_product_preparation_failure(tool, receipt_path, phase, error, *,
-                                        deadline, expected_owner_uid=0):
+                                        deadline, expected_owner_uid=0, checkpoint=None):
     """Best-effort closed stat data, never a replacement for the original failure.
 
     The original Runner deadline is mandatory and is never renewed. Production
     uses UID0; the optional UID is ordinary portable file-data validation only.
     No target content is read. Existing diagnostics are never replaced; False
     means capture was unavailable/incomplete and conveys no preparation success.
+    Checkpoint defaults to null; only permission-sealing/inventory are accepted.
+    The closed ProductCoverageError family label permits one exact allowlisted
+    string argument as product_category; no exception formatting occurs. Unknown
+    arguments/families remain null. These labels establish neither origin nor proof.
     """
     owned, complete = [], False
     try:
         require(type(expected_owner_uid) is int and expected_owner_uid >= 0
                 and type(deadline) in (int, float) and 0 < deadline < float("inf")
-                and phase in PRODUCT_PREPARATION_FAILURE_PHASES)
+                and phase in PRODUCT_PREPARATION_FAILURE_PHASES
+                and (checkpoint is None or type(checkpoint) is str
+                     and checkpoint in PRODUCT_PREPARATION_CHECKPOINTS))
         tool, receipt_path = Path(tool), Path(receipt_path)
         entry = "cli" if tool.name == "tool-cli" else "host" if tool.name == "tool-host" else None
         require(entry is not None and tool.is_absolute() and receipt_path.is_absolute()
@@ -1377,8 +1391,14 @@ def capture_product_preparation_failure(tool, receipt_path, phase, error, *,
         known_errors = ("ValueError", "OSError", "FileNotFoundError", "PermissionError", "TimeoutError",
                         "RuntimeError", "KeyError", "TypeError", "AssertionError")
         error_class = type(error).__name__
+        product_family = error_class == "ProductCoverageError" and isinstance(error, RuntimeError)
+        arguments = error.args if product_family else ()
+        product_category = (arguments[0] if type(arguments) is tuple and len(arguments) == 1
+            and type(arguments[0]) is str and arguments[0] in PRODUCT_PREPARATION_CATEGORIES else None)
         record = {"schema": "issue779-private-product-preparation-failure-v1", "entry": entry, "phase": phase,
-                  "error_class": error_class if error_class in known_errors else "OtherException",
+                  "error_class": "ProductCoverageError" if product_family else
+                                 error_class if error_class in known_errors else "OtherException",
+                  "product_category": product_category, "checkpoint": checkpoint,
                   "errno": direct_errno(error), "remaining_seconds": round(deadline-time.monotonic(), 6),
                   "completed_replacement_count": None, "parent": facts(selected, tool_errno),
                   "workspace": facts(before), "targets": rows,
