@@ -14,7 +14,7 @@ jobs:
     env:
       # Main must promote the reviewed assembled harness before pushing it.
       BUILD_REVIEWED: 'true'
-      BUILD_SCRIPT_SHA256: ae5b313614b5f4c0193c7bf7d62d1585683ee4084c95df5bd3d3b88f3d40d18c
+      BUILD_SCRIPT_SHA256: fa3a839ab1ef64390ec09441081ed4caa144a0026e7def1ba7484092c9f574be
     steps:
       - name: Promotion gate
         shell: bash
@@ -50,6 +50,7 @@ jobs:
         with:
           name: issue779-csharp-build-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
+          include-hidden-files: true
           path: |
             ${{ runner.temp }}/issue779-csharp-build/receipts/
             ${{ runner.temp }}/issue779-csharp-build/handoff/

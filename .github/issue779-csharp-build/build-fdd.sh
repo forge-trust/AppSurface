@@ -19,7 +19,7 @@ import time
 
 HEAD = '2993dcfaac1b9b6dfb8adf057191f837876f01fe'
 PARENT = '4dd992ec1bc2df8220c73149115c5b478edb0085'
-HARNESS_PARENT = '08bde140f37bf1663d754edcd9ad69bd5c2d65d3'
+HARNESS_PARENT = 'ae50220277503cf75aaaf8d2337fb7dfd545c398'
 TREE = '190d0b2066d4df980715f31642b4a38198094123'
 CAPTURE_SHA = 'b8772a5cd9686c3f5c7e65278102c397ea1d1c1af9b047140b9b4de15a997fb8'
 CAPTURE_PROJECTION_SHA = '5917596232d55365c39e460f611efeef46db9a74b289732c4c6f80d5388401d6'
@@ -37,7 +37,7 @@ HARN, OUT, CAPTURE = map(pathlib.Path, sys.argv[1:])
 RECORDS = []
 LOG_BYTES = 0
 PHASE = 'input'
-RESULT = {'schema': 'issue779-csharp-fdd-build-v3', 'exit': 1,
+RESULT = {'schema': 'issue779-csharp-fdd-build-v4', 'exit': 1,
           'build_prerequisite_only': True, 'native_execution': False,
           'checkpoint_pass': False, 'os_audit': None, 'source_commit': HEAD,
           'capture_sha256': CAPTURE_SHA, 'sdk_required': SDK, 'commands': RECORDS}
@@ -302,8 +302,14 @@ def source_check(repo, source):
             require(directory(parent) == parents[parent], 'source-parent-substitution')
             parent = parent.parent
         facts = regular(path)
-        require(facts['sha256'] == hashes[name] and facts['mode'] == modes[name] and
-                index[name] == ('100755' if modes[name] == '0755' else '100644', facts['git_sha1']), 'source-sha-mode-object')
+        matches = (facts['sha256'] == hashes[name] and facts['mode'] == modes[name] and
+                   index[name] == ('100755' if modes[name] == '0755' else '100644', facts['git_sha1']))
+        if not matches:
+            RESULT['source_mismatch'] = {'path': name, 'expected_sha256': hashes[name],
+                                         'actual_sha256': facts['sha256'], 'expected_mode': modes[name],
+                                         'actual_mode': facts['mode'], 'index_git_sha1': index[name][1],
+                                         'physical_git_sha1': facts['git_sha1']}
+        require(matches, 'source-sha-mode-object')
     for parent, before in parents.items():
         require(directory(parent) == before, 'source-parent-changed')
     require(run(['git', 'rev-parse', 'HEAD'], repo).strip().decode() == HEAD and
@@ -590,8 +596,8 @@ def main():
     run([str(selected_dotnet), '--list-runtimes'], clone)
     require(run(['pnpm', '--version'], clone).strip().decode() == '11.1.3', 'pnpm-pin')
     require(run(['node', '--version'], clone).strip().decode().startswith('v24.'), 'node-major')
-    run(['pnpm', '--dir', 'Web', 'install', '--frozen-lockfile'], clone)
-    run(['pnpm', '--dir', 'Web', 'run', 'assets:build'], clone)
+    run(['pnpm', '--dir', 'Web', 'install', '--frozen-lockfile'], clone, child_umask=0o022)
+    run(['pnpm', '--dir', 'Web', 'run', 'assets:build'], clone, child_umask=0o022)
     RESULT['source_after_assets'] = source_check(clone, capture['source'])
     PHASE = 'restore-publish'
     project = str(clone / 'Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj')
