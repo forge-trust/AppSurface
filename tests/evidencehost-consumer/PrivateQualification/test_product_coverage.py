@@ -112,13 +112,13 @@ class FileControls(unittest.TestCase):
     def test_restore_named_substitution_between_hash_and_reopen_never_writes(self):
         (self.root/'first').write_bytes(b'abc')
         original = ({'first': {'sha256': hashlib.sha256(b'abc').hexdigest(), 'mode': '0400'}}, {'': '0700'})
-        actual = M.read_file
+        actual = M.hash_published_file
         def substitute(*args, **options):
             result = actual(*args, **options)
             os.rename(self.root/'first', self.root/'old')
             (self.root/'first').write_bytes(b'abc')
             return result
-        with patch.object(M, 'read_file', side_effect=substitute), patch.object(M.os, 'fchmod') as chmod, patch.object(M.os, 'fchown') as chown:
+        with patch.object(M, 'hash_published_file', side_effect=substitute), patch.object(M.os, 'fchmod') as chmod, patch.object(M.os, 'fchown') as chown:
             with self.assertRaises(M.ProductCoverageError):
                 M.restore_metadata(self.root, original, time.monotonic()+2, uid=os.getuid(), gid=os.getgid())
             chmod.assert_not_called()
@@ -249,6 +249,194 @@ class PublishedBasenameControls(unittest.TestCase):
                     M.snapshot_tree(root, time.monotonic()+2, uid=os.getuid())
                 self.assertEqual('basename', str(caught.exception))
                 read.assert_not_called()
+
+
+class PublishedStreamingControls(unittest.TestCase):
+    """Owned sparse files exercise real hashing, never a root coverage owner."""
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='published-stream-', dir='/tmp')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        self.fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+        self.addCleanup(os.close, self.fd)
+
+    def sparse(self, name, size):
+        path = self.root / name
+        with path.open('wb') as stream:
+            stream.truncate(size)
+        path.chmod(0o600)
+        return path
+
+    def zeros(self, size):
+        digest, chunk = hashlib.sha256(), bytes(M.HASH_CHUNK)
+        while size:
+            part = min(size, len(chunk))
+            digest.update(chunk[:part])
+            size -= part
+        return digest.hexdigest()
+
+    def test_dependency_larger_than_buffer_limit_streams_and_restores(self):
+        size = M.FILE_LIMIT+1
+        path = self.sparse('dcp', size)
+        calls, actual = [], M.os.read
+        def bounded(fd, count):
+            calls.append(count)
+            self.assertLessEqual(count, 65536)
+            return actual(fd, count)
+        deadline = time.monotonic()+10
+        bindings = (('dcp', size, self.zeros(size)),)
+        with patch.object(M.os, 'read') as read:
+            with self.assertRaises(M.ProductCoverageError):
+                M.snapshot_tree(self.root, deadline, uid=os.getuid())
+            read.assert_not_called()
+        with patch.object(M.os, 'read', side_effect=bounded):
+            original = M.snapshot_tree(self.root, deadline, uid=os.getuid(), published_files=bindings)
+            self.assertEqual(bindings[0][2], original[0]['dcp']['sha256'])
+            path.chmod(0o400)
+            M.restore_metadata(self.root, original, deadline, uid=os.getuid(), gid=os.getgid(), published_files=bindings)
+            self.assertEqual(original, M.snapshot_tree(self.root, deadline, uid=os.getuid(), gid=os.getgid(), published_files=bindings))
+        self.assertGreater(len(calls), size//65536)
+        self.assertEqual(0o600, path.stat().st_mode & 0o777)
+        self.assertEqual(32 << 20, M.FILE_LIMIT)
+        self.assertEqual(256 << 20, M.TREE_LIMIT)
+        self.assertEqual(2048, M.MAX_FILES)
+
+    def test_existing_bundle_file_envelope_and_buffered_bound_are_independent(self):
+        self.assertEqual(128 << 20, M.PUBLISHED_FILE_LIMIT)
+        self.sparse('exact', M.PUBLISHED_FILE_LIMIT)
+        digest, info = M.hash_published_file(self.fd, 'exact', time.monotonic()+10, uid=os.getuid(), cap=M.PUBLISHED_FILE_LIMIT)
+        self.assertEqual(self.zeros(M.PUBLISHED_FILE_LIMIT), digest)
+        self.assertEqual(M.PUBLISHED_FILE_LIMIT, info[6])
+        self.sparse('oversize', M.PUBLISHED_FILE_LIMIT+1)
+        with patch.object(M.os, 'read') as read:
+            for operation, name, options in ((M.hash_published_file, 'oversize', {'cap': M.PUBLISHED_FILE_LIMIT}),
+                                             (M.read_file, 'exact', {})):
+                with self.subTest(name=name), self.assertRaises(M.ProductCoverageError) as caught:
+                    operation(self.fd, name, time.monotonic()+2, uid=os.getuid(), **options)
+                self.assertEqual('file-shape', str(caught.exception))
+            read.assert_not_called()
+        self.assertTrue(os.fstat(self.fd))
+
+    def test_remaining_tree_budget_prevents_next_file_open_and_growth_read(self):
+        (self.root/'a').write_bytes(b'12345')
+        (self.root/'b').write_bytes(b'6')
+        actual, opened = M.os.open, []
+        def record(name, *args, **options):
+            opened.append(name)
+            return actual(name, *args, **options)
+        with patch.object(M, 'TREE_LIMIT', 5), patch.object(M.os, 'open', side_effect=record):
+            with self.assertRaises(M.ProductCoverageError) as caught:
+                M.snapshot_tree(self.root, time.monotonic()+2, uid=os.getuid())
+        self.assertEqual('tree-byte-bound', str(caught.exception))
+        self.assertNotIn('b', opened)
+        original_hash, hashed = M.hash_published_file, []
+        def grow(fd, name, *args, **options):
+            if name == 'b': (self.root/'b').write_bytes(b'1234')
+            value = original_hash(fd, name, *args, **options)
+            hashed.append(name)
+            return value
+        with patch.object(M, 'TREE_LIMIT', 8), patch.object(M, 'hash_published_file', side_effect=grow):
+            with self.assertRaises(M.ProductCoverageError) as caught:
+                M.snapshot_tree(self.root, time.monotonic()+2, uid=os.getuid())
+        self.assertEqual('file-shape', str(caught.exception))
+        self.assertEqual(['a'], hashed)
+
+    def test_streamed_named_substitution_and_growth_cannot_publish_hash(self):
+        for kind in ('substitution', 'growth'):
+            with self.subTest(kind=kind):
+                path = self.root/kind
+                path.write_bytes(b'abc')
+                actual, changed = M.os.read, False
+                def mutate(fd, count):
+                    nonlocal changed
+                    part = actual(fd, count)
+                    if not changed:
+                        changed = True
+                        if kind == 'substitution':
+                            path.rename(self.root/(kind+'-old'))
+                            path.write_bytes(b'abc')
+                        else:
+                            with path.open('ab') as stream: stream.write(b'd')
+                    return part
+                with patch.object(M.os, 'read', side_effect=mutate):
+                    with self.assertRaises(M.ProductCoverageError) as caught:
+                        M.hash_published_file(self.fd, kind, time.monotonic()+2, uid=os.getuid())
+                self.assertEqual('file-changed', str(caught.exception))
+
+    def test_stream_read_error_and_late_close_leave_no_digest_or_open_child(self):
+        self.sparse('small', 3)
+        actual, closed = M.os.close, []
+        def record(fd):
+            actual(fd)
+            closed.append(fd)
+        with patch.object(M.os, 'read', side_effect=OSError('owned private canary')), patch.object(M.os, 'close', side_effect=record):
+            with self.assertRaises(OSError):
+                M.hash_published_file(self.fd, 'small', time.monotonic()+2, uid=os.getuid())
+        self.assertEqual(1, len(closed))
+        with self.assertRaises(OSError): os.fstat(closed[0])
+        deadline, expired = time.monotonic()+2, False
+        def late(fd):
+            nonlocal expired
+            record(fd)
+            expired = True
+        with patch.object(M.os, 'close', side_effect=late), patch.object(M.time, 'monotonic', side_effect=lambda: deadline+1 if expired else deadline-1):
+            with self.assertRaises(M.ProductCoverageError) as caught:
+                M.hash_published_file(self.fd, 'small', deadline, uid=os.getuid())
+        self.assertEqual('deadline', str(caught.exception))
+        with self.assertRaises(OSError): os.fstat(closed[-1])
+        self.assertTrue(os.fstat(self.fd))
+
+    def test_declared_metadata_is_strict_and_cannot_raise_eligible_or_foreign_limits(self):
+        digest = hashlib.sha256(b'x').hexdigest()
+        eligible = sorted(M.ELIGIBLE)[0]
+        valid = (('dcp', 1, digest),)
+        self.assertEqual({'dcp': (1, digest)}, M.published_file_bindings(valid))
+        malformed = (None, list(valid), (('dcp', 1),), (('dcp', True, digest),),
+                     (('dcp', M.PUBLISHED_FILE_LIMIT+1, digest),), (('dcp', 1, 'raw-canary'),),
+                     (('/dcp', 1, digest),), (('../dcp', 1, digest),), (('dcp//child', 1, digest),),
+                     valid+valid, ((eligible, 1, digest),))
+        with patch.object(M.os, 'open') as opened:
+            for rows in malformed:
+                with self.subTest(rows=rows), self.assertRaises(M.ProductCoverageError):
+                    M.snapshot_tree(self.root, time.monotonic()+2, uid=os.getuid(), published_files=rows)
+            opened.assert_not_called()
+        self.sparse(eligible, M.FILE_LIMIT+1)
+        with patch.object(M.os, 'read') as read:
+            with self.assertRaises(M.ProductCoverageError):
+                M.snapshot_tree(self.root, time.monotonic()+2, uid=os.getuid())
+            read.assert_not_called()
+
+    def test_missing_length_and_hash_bindings_fail_before_any_metadata_write(self):
+        path = self.root/'plain'
+        path.write_bytes(b'abc')
+        path.chmod(0o600)
+        digest = hashlib.sha256(b'abc').hexdigest()
+        original = M.snapshot_tree(self.root, time.monotonic()+2, uid=os.getuid())
+        for rows in ((('plain', 4, digest),), (('plain', 3, '0'*64),), (('missing', 3, digest),)):
+            with self.subTest(rows=rows):
+                with self.assertRaises(M.ProductCoverageError):
+                    M.snapshot_tree(self.root, time.monotonic()+2, uid=os.getuid(), published_files=rows)
+                with patch.object(M.os, 'fchmod') as chmod, patch.object(M.os, 'fchown') as chown:
+                    with self.assertRaises(M.ProductCoverageError):
+                        M.restore_metadata(self.root, original, time.monotonic()+2,
+                                           uid=os.getuid(), gid=os.getgid(), published_files=rows)
+                    chmod.assert_not_called()
+                    chown.assert_not_called()
+                self.assertEqual(b'abc', path.read_bytes())
+                self.assertEqual(0o600, path.stat().st_mode & 0o777)
+
+    def test_streamed_links_fifo_owner_and_mode_reject_before_read(self):
+        path = self.sparse('plain', 3)
+        os.link(path, self.root/'linked')
+        (self.root/'alias').symlink_to('plain')
+        os.mkfifo(self.root/'pipe', 0o600)
+        with patch.object(M.os, 'read') as read:
+            for name, options in (('linked', {}), ('alias', {}), ('pipe', {}),
+                                  ('plain', {'uid': os.getuid()+1}), ('plain', {'mode': 0o444})):
+                with self.subTest(name=name, options=options), self.assertRaises((M.ProductCoverageError, OSError)):
+                    M.hash_published_file(self.fd, name, time.monotonic()+2,
+                                          **dict({'uid': os.getuid()}, **options))
+            read.assert_not_called()
 
 
 class DataControls(unittest.TestCase):

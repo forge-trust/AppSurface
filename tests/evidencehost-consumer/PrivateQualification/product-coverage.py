@@ -30,6 +30,8 @@ ELIGIBLE = frozenset(s + ext for s in LIBRARIES for ext in (".dll", ".pdb"))
 REPORTS = ("coverage.cobertura.xml", "coverage.json")
 SESSION = "product-coverage-session"
 FILE_LIMIT, TREE_LIMIT, MAX_FILES = 32 << 20, 256 << 20, 2048
+PUBLISHED_FILE_LIMIT = 128 << 20  # The existing application bundle file envelope.
+HASH_CHUNK = 65536
 IPC_LIMIT, LOG_LIMIT = 256 << 10, 192 << 10
 ENV = {"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"}
 
@@ -91,6 +93,38 @@ def read_file(parent_fd, name, deadline, *, uid=0, gid=None, mode=None, cap=FILE
     return result
 
 
+def hash_published_file(parent_fd, name, deadline, *, uid=0, gid=None, mode=None, cap=FILE_LIMIT):
+    """Hash a pinned published file in 64 KiB chunks without buffering its bytes.
+
+    The existing 128 MiB application bundle envelope bounds dependency files.
+    Callers retain the 32 MiB eligible-pair limit and remaining tree-byte budget.
+    Portable UID/GID overrides exercise data procedures, never a root lease.
+    """
+    left(deadline)
+    basename(name)
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=parent_fd)
+    try:
+        before = os.fstat(fd)
+        require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1 and before.st_uid == uid
+                and before.st_dev == os.fstat(parent_fd).st_dev and 0 <= before.st_size <= cap, 'file-shape')
+        require(gid is None or before.st_gid == gid, 'file-gid')
+        require(mode is None or stat.S_IMODE(before.st_mode) == mode, 'file-mode')
+        observed, digest = 0, hashlib.sha256()
+        while observed < before.st_size:
+            left(deadline)
+            part = os.read(fd, min(HASH_CHUNK, before.st_size-observed))
+            require(bool(part), 'file-short')
+            observed += len(part)
+            digest.update(part)
+        require(os.read(fd, 1) == b'' and identity(before) == identity(os.fstat(fd))
+                == identity(os.stat(name, dir_fd=parent_fd, follow_symlinks=False)), 'file-changed')
+        result = digest.hexdigest(), identity(before)
+    finally:
+        os.close(fd)
+    left(deadline)
+    return result
+
+
 def open_directory(path, deadline, *, uid=0, gid=None, mode=None):
     """Pin an absolute directory through no-follow ancestor handles."""
     require(type(path) is Path or isinstance(path, Path), "directory-path")
@@ -123,9 +157,32 @@ def names(fd, deadline, maximum=MAX_FILES):
     return sorted(result)
 
 
-def snapshot_tree(path, deadline, *, uid=0, gid=None):
+def published_file_bindings(rows):
+    """Snapshot bounded declared length/hash data; this helper grants no lease.
+
+    Only the launcher supplies rows from its already selected application audit.
+    Undeclared files and eligible top-level pairs keep the 32 MiB file limit.
+    """
+    require(type(rows) is tuple and len(rows) <= 256, 'published-binding')
+    result = {}
+    for row in rows:
+        require(type(row) is tuple and len(row) == 3, 'published-binding')
+        name, length, digest = row
+        require(type(name) is str and 0 < len(name) <= 1024 and not name.startswith('/'), 'published-binding')
+        parts = name.split('/')
+        require(1 <= len(parts) <= 8, 'published-binding')
+        for part in parts: basename(part)
+        require(name not in result and name not in ELIGIBLE and type(length) is int
+                and 0 < length <= PUBLISHED_FILE_LIMIT and type(digest) is str
+                and re.fullmatch('[0-9a-f]{64}', digest), 'published-binding')
+        result[name] = (length, digest)
+    return result
+
+
+def snapshot_tree(path, deadline, *, uid=0, gid=None, published_files=()):
     """Bounded real-file map. Portable UID overrides grant no owner capability."""
     files, directories, total = {}, {}, 0
+    published = published_file_bindings(published_files)
     root = open_directory(path, deadline, uid=uid, gid=gid)
     def walk(fd, prefix, depth):
         nonlocal total
@@ -145,13 +202,19 @@ def snapshot_tree(path, deadline, *, uid=0, gid=None):
                 finally: os.close(child)
             else:
                 require(not selected.st_mode & 0o022, "tree-mode")
-                data, info = read_file(fd, name, deadline, uid=uid, gid=gid)
-                total += len(data)
+                require(0 <= selected.st_size <= TREE_LIMIT-total, 'tree-byte-bound')
+                declared = published.get(relative)
+                limit = FILE_LIMIT if declared is None else declared[0]
+                digest, info = hash_published_file(fd, name, deadline, uid=uid, gid=gid,
+                                                   cap=min(limit, TREE_LIMIT-total))
+                require(declared is None or (info[6], digest) == declared, 'published-binding')
+                total += info[6]
                 require(total <= TREE_LIMIT, "tree-byte-bound")
-                files[relative] = {"sha256": hashlib.sha256(data).hexdigest(), "mode": format(stat.S_IMODE(info[2]), "04o")}
+                files[relative] = {"sha256": digest, "mode": format(stat.S_IMODE(info[2]), "04o")}
     try: walk(root, "", 0)
     finally: os.close(root)
     left(deadline)
+    require(set(published) <= set(files), 'published-files-missing')
     return files, directories
 
 
@@ -678,7 +741,7 @@ def seal_file(fd, name, deadline, mode):
     left(deadline)
 
 
-def restore_metadata(tool, original, deadline, *, uid=0, gid=0):
+def restore_metadata(tool, original, deadline, *, uid=0, gid=0, published_files=()):
     """Preflight all hashes, retain verified FDs, then restore captured metadata.
 
     Portable UID/GID overrides exercise file procedures only. They cannot issue
@@ -688,6 +751,9 @@ def restore_metadata(tool, original, deadline, *, uid=0, gid=0):
     failure = None
     total = 0
     require(type(original) is tuple and len(original) == 2 and len(original[0])+len(original[1]) <= MAX_FILES, 'restore-map')
+    published = published_file_bindings(published_files)
+    require(set(published) <= set(original[0]) and all(original[0][name]['sha256'] == row[1]
+            for name, row in published.items()), 'published-binding')
     try:
         for relative, entry in original[0].items():
             parts = Path(relative).parts
@@ -696,9 +762,13 @@ def restore_metadata(tool, original, deadline, *, uid=0, gid=0):
             parent = open_directory(tool / Path(relative).parent, deadline, uid=uid)
             file_fd = -1
             try:
-                data, verified = read_file(parent, parts[-1], deadline, uid=uid)
-                total += len(data)
-                require(total <= TREE_LIMIT and hashlib.sha256(data).hexdigest() == entry['sha256'], 'restore-hash')
+                declared = published.get(relative)
+                limit = FILE_LIMIT if declared is None else declared[0]
+                digest, verified = hash_published_file(parent, parts[-1], deadline, uid=uid,
+                                                       cap=min(limit, TREE_LIMIT-total))
+                require(declared is None or (verified[6], digest) == declared, 'published-binding')
+                total += verified[6]
+                require(total <= TREE_LIMIT and digest == entry['sha256'], 'restore-hash')
                 file_fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=parent)
                 require(identity(os.fstat(file_fd)) == verified
                         == identity(os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)), 'restore-pin')
@@ -777,7 +847,7 @@ class ProductCoverageOwner:
     create admission, a registered application, a public writer or a Trust claim.
     Mount and account release require genuine joined coverage and restoration.
     """
-    def __init__(self, tool, anchor, worker_uid, worker_gid, deadline, dotnet, taskhost, reports, worker_unit):
+    def __init__(self, tool, anchor, worker_uid, worker_gid, deadline, dotnet, taskhost, reports, worker_unit, *, published_files=()):
         require(platform.system() == 'Linux' and os.geteuid() == 0, 'owner-platform')
         require(type(worker_uid) is int and worker_uid > 0 and type(worker_gid) is int and worker_gid > 0, 'owner-identity')
         require(unit_kind(worker_unit, worker_unit) == 'worker', 'owner-unit')
@@ -793,6 +863,8 @@ class ProductCoverageOwner:
         self.watchdog = self.broker = None
         self.runtime_map = None
         self.units, self.captured = {worker_unit: 'worker'}, {}
+        published_file_bindings(published_files)
+        self.published_files = published_files
         self.original = self.execution = self.root_files = self.hits = self.receipt = None
         self.worker_evidence = None
 
@@ -818,7 +890,7 @@ class ProductCoverageOwner:
                 report = open_directory(self.reports, self.deadline, uid=0, mode=0o700)
                 try: require(not names(report, self.deadline), 'reports-not-fresh')
                 finally: os.close(report)
-                self.original = snapshot_tree(self.tool, self.deadline, gid=0)
+                self.original = snapshot_tree(self.tool, self.deadline, gid=0, published_files=self.published_files)
                 require(ELIGIBLE <= set(self.original[0]) and all(self.original[0][s]['mode'] == '0444' for s in ELIGIBLE), 'eligible-originals')
                 # A separate FD and mount preserve artifact-root NO_XDEV semantics.
                 self.session.mkdir(mode=0o700)
@@ -863,7 +935,7 @@ class ProductCoverageOwner:
                 try:
                     for name in sorted(ELIGIBLE): seal_file(tool_fd, name, self.deadline, 0o444)
                 finally: os.close(tool_fd)
-                self.execution = snapshot_tree(self.tool, self.deadline, gid=0)
+                self.execution = snapshot_tree(self.tool, self.deadline, gid=0, published_files=self.published_files)
                 require(self.execution[1] == self.original[1] and set(self.execution[0]) == set(self.original[0]), 'execution-inventory')
                 for name, original in self.original[0].items():
                     if name not in ELIGIBLE: require(self.execution[0][name] == original, 'noneligible-mutation')
@@ -883,7 +955,7 @@ class ProductCoverageOwner:
                 self._check()
                 require(self.execution is not None and self.runtime_map is None and not self.dispatched, 'tool-pin-order')
                 expected = tool_permission_map(*self.execution)
-                actual = snapshot_tree(self.tool, self.deadline, gid=self.gid)
+                actual = snapshot_tree(self.tool, self.deadline, gid=self.gid, published_files=self.published_files)
                 require(actual == expected, 'tool-pin-map')
                 self.runtime_map = actual
                 self._check()
@@ -1029,8 +1101,8 @@ class ProductCoverageOwner:
                 tool_fd = open_directory(self.tool, self.deadline, uid=0, gid=self.gid,
                                          mode=int(self.runtime_map[1][''], 8))
                 os.close(tool_fd)
-                restore_metadata(self.tool, self.original, self.deadline)
-                require(snapshot_tree(self.tool, self.deadline, gid=0) == self.original, 'restore-tree')
+                restore_metadata(self.tool, self.original, self.deadline, published_files=self.published_files)
+                require(snapshot_tree(self.tool, self.deadline, gid=0, published_files=self.published_files) == self.original, 'restore-tree')
                 self.watchdog.disarm()
                 self._check_after_disarm()
                 self.collected = True

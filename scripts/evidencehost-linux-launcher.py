@@ -3208,7 +3208,8 @@ LAUNCHER_STARTUP_STAGES = frozenset((
 LAUNCHER_STARTUP_PRODUCT_CATEGORIES = frozenset((
     "deadline", "directory-path", "directory-owner", "directory-changed", "tree-bound",
     "tree-owner", "tree-changed", "tree-mode", "tree-byte-bound", "file-count",
-    "file-gid", "file-mode", "file-short", "file-changed", "basename",
+    "file-shape", "file-gid", "file-mode", "file-short", "file-changed", "basename",
+    "published-binding", "published-files-missing",
     "owner-failed-or-closed", "owner-replay", "reports-not-fresh", "eligible-originals",
     "mount-budget", "provider-start-ack", "provider-temp", "backup-selection",
     "session-inventory", "execution-inventory", "noneligible-mutation", "execution-modes",
@@ -3483,7 +3484,11 @@ def _launch_with_completion_impl(args: argparse.Namespace, *, diagnostic_directo
         _startup.enter("product-owner")
         product_coverage_owner = _product.ProductCoverageOwner(
             tool, output_parent, wu.pw_uid, wu.pw_gid, job_deadline_monotonic, dotnet,
-            tool.parent / "product-coverage-taskhost", product_reports, worker_unit)
+            tool.parent / "product-coverage-taskhost", product_reports, worker_unit,
+            published_files=tuple((str(Path("application-bundles") / selected_application.audit.application_id
+                                  / selected_application.audit.descriptor(identities)["build_id"] / row.relative_path),
+                                  row.length_bytes, row.sha256)
+                                 for row in selected_application.audit.files) if selected_application is not None else ())
         _startup.enter("product-prepare")
         execution_map = product_coverage_owner.prepare()
         _startup.enter("tool-pin")
