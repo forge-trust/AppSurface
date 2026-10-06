@@ -13,6 +13,10 @@ from unittest.mock import patch
 SPEC = importlib.util.spec_from_file_location("product_preparation_diagnostics", Path(__file__).with_name("prepare-product.py"))
 P = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(P)
+COVERAGE_SPEC = importlib.util.spec_from_file_location(
+    "product_preparation_diagnostic_categories", Path(__file__).with_name("product-coverage.py"))
+C = importlib.util.module_from_spec(COVERAGE_SPEC)
+COVERAGE_SPEC.loader.exec_module(C)
 
 
 class ProductPreparationDiagnosticControls(unittest.TestCase):
@@ -216,6 +220,89 @@ class ProductPreparationDiagnosticControls(unittest.TestCase):
                 self.assertEqual(0o600, member.mode)
                 self.assertEqual(expected, retained.extractfile(member).read())
                 self.assertLessEqual(member.size, 4096)
+
+    def test_actual_product_guard_categories_and_closed_checkpoints_are_private_data(self):
+        tree = ast.parse(Path(C.__file__).read_bytes())
+        functions = {"left", "basename", "hash_published_file", "open_directory", "names",
+                     "published_file_bindings", "snapshot_tree"}
+        source_categories = {node.args[1].value for function in tree.body
+            if isinstance(function, ast.FunctionDef) and function.name in functions
+            for node in ast.walk(function)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "require"
+            and len(node.args) == 2 and isinstance(node.args[1], ast.Constant)
+            and type(node.args[1].value) is str}
+        self.assertEqual(source_categories, set(P.PRODUCT_PREPARATION_CATEGORIES))
+        for category in sorted(source_categories):
+            for checkpoint in (None, "permission-sealing", "inventory"):
+                with self.subTest(category=category, checkpoint=checkpoint):
+                    original = C.ProductCoverageError(category)
+                    with patch.object(C.ProductCoverageError, "__str__",
+                                      side_effect=AssertionError("exception-formatting-canary")):
+                        self.assertTrue(self.capture(phase="tool-sealing", error=original, checkpoint=checkpoint))
+                    raw = self.diagnostic.read_bytes()
+                    record = json.loads(raw)
+                    self.assertEqual("ProductCoverageError", record["error_class"])
+                    self.assertEqual(category, record["product_category"])
+                    self.assertEqual(checkpoint, record["checkpoint"])
+                    self.assertIsNone(record["errno"])
+                    self.assertIsNone(record["completed_replacement_count"])
+                    self.assertFalse(record["native_execution"])
+                    self.assertFalse(record["runtime_compatibility_claim"])
+                    self.assertLessEqual(len(raw), 4096)
+                    self.assertEqual(0o600, self.diagnostic.stat().st_mode & 0o777)
+                    self.assertEqual(1, self.diagnostic.stat().st_nlink)
+                    for canary in (str(self.root), "private-image-content-canary", "exception-formatting-canary"):
+                        self.assertNotIn(canary.encode(), raw)
+                    self.diagnostic.unlink()
+
+    def test_unknown_product_arguments_and_spoofed_valueerror_messages_stay_null(self):
+        class MessageCanaryException(Exception):
+            def __str__(self):
+                raise AssertionError("raw-exception-canary")
+        cases = [
+            (C.ProductCoverageError("unknown-category-path-canary-"+str(self.root)), "ProductCoverageError"),
+            (C.ProductCoverageError("tree-byte-bound", "second-argument-canary"), "ProductCoverageError"),
+            (C.ProductCoverageError(["tree-byte-bound"]), "ProductCoverageError"),
+            (C.ProductCoverageError(True), "ProductCoverageError"),
+            (ValueError("tree-byte-bound"), "ValueError"),
+            (ValueError("message-path-canary-"+str(self.root)), "ValueError"),
+            (MessageCanaryException("raw-exception-canary"), "OtherException")]
+        for original, expected_class in cases:
+            with self.subTest(error_class=expected_class, argument_type=type(original.args[0]).__name__):
+                self.assertTrue(self.capture(phase="tool-sealing", error=original, checkpoint="inventory"))
+                raw = self.diagnostic.read_bytes()
+                record = json.loads(raw)
+                self.assertEqual(expected_class, record["error_class"])
+                self.assertIsNone(record["product_category"])
+                self.assertEqual("inventory", record["checkpoint"])
+                for canary in (str(self.root), "unknown-category-path-canary", "second-argument-canary",
+                               "message-path-canary", "raw-exception-canary", "private-image-content-canary"):
+                    self.assertNotIn(canary.encode(), raw)
+                self.diagnostic.unlink()
+
+    def test_invalid_checkpoint_prevents_io_and_capture_write_error_preserves_product_failure(self):
+        original = C.ProductCoverageError("tree-byte-bound")
+        for checkpoint in ("unknown-checkpoint-canary", False, 1, ["inventory"]):
+            with self.subTest(checkpoint_type=type(checkpoint).__name__):
+                with patch.object(P.os, "open", side_effect=AssertionError("unexpected-open")) as opened, \
+                     patch.object(P.os, "lstat", side_effect=AssertionError("unexpected-stat")) as observed:
+                    self.assertFalse(self.capture(error=original, checkpoint=checkpoint))
+                opened.assert_not_called()
+                observed.assert_not_called()
+                self.assertFalse(self.diagnostic.exists())
+        # A valid neighbor demonstrates that the same root-file procedure still runs.
+        self.assertTrue(self.capture(error=original))
+        self.assertIsNone(json.loads(self.diagnostic.read_bytes())["checkpoint"])
+        self.diagnostic.unlink()
+        with self.assertRaises(C.ProductCoverageError) as caught:
+            try:
+                raise original
+            except C.ProductCoverageError:
+                with patch.object(P.os, "write", side_effect=OSError(5, "capture-write-canary")):
+                    self.assertFalse(self.capture(phase="tool-sealing", error=original, checkpoint="inventory"))
+                raise
+        self.assertIs(original, caught.exception)
+        self.assertEqual(b"", self.diagnostic.read_bytes())
 
 
 if __name__ == "__main__":

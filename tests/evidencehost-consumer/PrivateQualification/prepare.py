@@ -880,6 +880,7 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
         product_binary_bindings[entry] = product_helper.replace_and_inspect(tool, product,
             runner, dotnet, inspector, workspace / ("product-binary-"+entry+".json"),
             inspector_sha256=inspector_sha256, inspector_contract_confirmed=True)
+        checkpoint = "permission-sealing"
         try:
             require(time.monotonic() < runner.deadline)
             for path in tool.rglob("*"):
@@ -890,12 +891,13 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
                 else:
                     os.chmod(path, 0o444)
             os.chmod(tool, 0o755)
+            checkpoint = "inventory"
             tool_map, published_inventory = measure_product_tool_inventory(tool, coverage_module, runner.deadline)
             tools[entry] = {"path": str(tool), "sha256": tool_map, "published_inventory": published_inventory}
         except BaseException as error:
             try:
                 product_helper.capture_product_preparation_failure(tool, workspace / ("product-binary-"+entry+".json"),
-                    "tool-sealing", error, deadline=runner.deadline)
+                    "tool-sealing", error, deadline=runner.deadline, checkpoint=checkpoint)
             except BaseException:
                 pass
             raise

@@ -121,6 +121,42 @@ authority claims.
 Streaming [procedure controls](test_product_coverage.py) use sparse owned files
 and demonstrate actual reads and restoration, not native qualification.
 
+## Private tool-sealing failure diagnostics
+
+Run 37401725081 retained a `tool-sealing` failure labeled `OtherException` with
+no product category. The previous [preparation diagnostic](prepare-product.py)
+mapped `ProductCoverageError` to that fallback, so this label did not exclude
+`file-shape`, `tree-byte-bound` or another inventory guard. It does not identify
+an exact failing file, operation or exception, and motivates diagnostics only.
+
+`capture_product_preparation_failure(tool, receipt_path, phase, error, *, deadline,
+expected_owner_uid=0, checkpoint=None)` now adds nullable `product_category` and
+`checkpoint` fields to the same private schema. Checkpoint defaults to null;
+`permission-sealing` and `inventory` are the only non-null values. The owning
+[prepare.py](prepare.py) sets the former before changing permissions and the latter
+immediately before complete tool measurement. Invalid checkpoints fail capture
+before filesystem I/O and cannot replace the original preparation failure.
+
+The `ProductCoverageError` diagnostic family is the exact class-name label on a
+`RuntimeError` instance. Only its single exact-string argument can become a
+category, and only when present in the fixed 18-category inventory/streaming
+allowlist: `basename`, `deadline`, `directory-changed`, `directory-owner`,
+`directory-path`, `file-changed`, `file-count`, `file-gid`, `file-mode`,
+`file-shape`, `file-short`, `published-binding`, `published-files-missing`,
+`tree-bound`, `tree-byte-bound`, `tree-changed`, `tree-mode`, `tree-owner`.
+Unknown or malformed arguments and messages from another exception family yield
+null; exception formatting and `str(error)` are never used. Existing exception
+labels retain their previous handling. These labels are diagnostic data and
+cannot authenticate a class's origin, issue authority, or establish execution.
+
+The same original deadline, stat-only target inspection, exclusive/no-follow
+root-owned `0600` destination and 4096-byte record bound remain in effect.
+Capture failure still leaves the original exception to be rethrown. File/tree
+bounds, bytes, filesystem selection, worker policy and proof requirements do not
+change. The new [diagnostic controls](test_product_preparation_diagnostics.py)
+are defined source only at this handoff; no tests or native run have executed for
+this change, and the prior failure's actual guard remains unknown.
+
 Official reports are limited to 2 MiB XML and 4 MiB JSON. Utilities share the
 existing deadline and a maximum five-second operation bound. No added job timer
 or grace period can create success after expiry. Private logs and receipts stay
