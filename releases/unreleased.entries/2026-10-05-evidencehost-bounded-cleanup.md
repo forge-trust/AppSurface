@@ -1,0 +1,2 @@
+<!-- appsurface:unreleased-entry section="migration-watch" -->
+- [EvidenceHost](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#execution-and-cleanup-budgets) now bounds total execution and cleanup separately, joins callbacks before disposal, and withholds complete claims when cleanup cannot settle. Consumers can register an explicit stop/join capability and enroll owned process handles; keep an independent CI supervisor for non-cooperative work and startup/finalization outside the host.

@@ -40,7 +40,14 @@ public enum EvidenceHostState
 /// <param name="ArtifactDirectory">Controlled root for producer artifacts. Defaults to <c>TestResults/evidence/artifacts</c>.</param>
 public sealed record EvidenceHostOptions(
     bool RequireTrustedEnvelope = false,
-    string? ArtifactDirectory = null);
+    string? ArtifactDirectory = null)
+{
+    /// <summary>Gets the total validation/readiness/production budget. Defaults to one hour; cleanup has a separate allowance.</summary>
+    public TimeSpan ExecutionTimeout { get; init; } = TimeSpan.FromHours(1);
+
+    /// <summary>Gets the total stop/join/disposal allowance. Defaults to 30 seconds, shared fairly across owned registrations.</summary>
+    public TimeSpan CleanupTimeout { get; init; } = TimeSpan.FromSeconds(30);
+}
 
 /// <summary>
 /// Describes a secret-safe execution-envelope validation result.
@@ -150,7 +157,14 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
     private readonly TimeProvider _timeProvider;
     private readonly string _artifactDirectory;
     private readonly SemaphoreSlim _execution = new(1, 1);
+    private readonly CancellationTokenSource _disposeRequested = new();
+    private readonly object _cleanupClockLock = new();
+    private long? _cleanupStarted;
+    private readonly Dictionary<object, List<Task>> _callbacks = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<object> _unsettledOwners = new(ReferenceEqualityComparer.Instance);
     private bool _cleaned;
+    private bool _cleanupReported;
+    private string? _cleanupFailure;
 
     private EvidenceHostBootstrap(
         EvidencePlan plan,
@@ -158,6 +172,8 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         EvidenceHostOptions options,
         TimeProvider timeProvider)
     {
+        ValidateTimeout(options.ExecutionTimeout, nameof(options.ExecutionTimeout));
+        ValidateTimeout(options.CleanupTimeout, nameof(options.CleanupTimeout));
         _plan = plan;
         _registration = registration;
         _options = options;
@@ -170,6 +186,12 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
 
     /// <summary>Gets the current one-way EvidenceHost lifecycle state.</summary>
     public EvidenceHostState State { get; private set; } = EvidenceHostState.Created;
+
+    /// <summary>
+    /// Gets the bounded, payload-free cleanup failure, including when execution throws before a manifest exists.
+    /// </summary>
+    /// <remarks>A null value before cleanup finishes does not establish successful cleanup.</remarks>
+    public string? CleanupDiagnostic => _cleanupFailure;
 
     /// <summary>
     /// Creates a host with registrations supplied only by explicit caller code.
@@ -201,7 +223,9 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
     /// <returns>A terminal immutable manifest.</returns>
     public async Task<EvidenceManifest> RunAsync(bool observationOnly = false, CancellationToken cancellationToken = default)
     {
-        await _execution.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var executionDeadline = new CancellationTokenSource(_options.ExecutionTimeout, _timeProvider);
+        using var executionCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, executionDeadline.Token, _disposeRequested.Token);
+        await _execution.WaitAsync(executionCancellation.Token).ConfigureAwait(false);
         try
         {
             if (State != EvidenceHostState.Created)
@@ -215,7 +239,7 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
             try
             {
                 State = EvidenceHostState.Validating;
-                var envelope = await ValidateEnvelopeAsync(cancellationToken).ConfigureAwait(false);
+                var envelope = await ValidateEnvelopeAsync(executionCancellation.Token).ConfigureAwait(false);
                 envelopeStatus = envelope.Status;
                 if (envelope.Results is not null)
                 {
@@ -224,7 +248,7 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
 
                 ValidateRegistrations();
                 State = EvidenceHostState.WaitingForResources;
-                var readiness = await WaitForResourcesAsync(cancellationToken).ConfigureAwait(false);
+                var readiness = await WaitForResourcesAsync(executionCancellation.Token).ConfigureAwait(false);
                 resourceResults = readiness.ResourceResults;
                 if (readiness.FailureResults is not null)
                 {
@@ -232,13 +256,18 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
                 }
 
                 State = EvidenceHostState.Producing;
-                var results = await ProduceAsync(cancellationToken).ConfigureAwait(false);
+                var results = await ProduceAsync(executionCancellation.Token).ConfigureAwait(false);
                 return await CollectAndCleanAsync(results, resourceResults, observationOnly, envelopeStatus, execution).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (executionCancellation.IsCancellationRequested)
             {
                 return await CollectAndCleanAsync(
-                    FailureForEveryProducer(EvidenceProducerOutcome.Cancelled, "EvidenceHost execution was cancelled by the caller."),
+                    FailureForEveryProducer(
+                        executionDeadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested && !_disposeRequested.IsCancellationRequested
+                            ? EvidenceProducerOutcome.TimedOut : EvidenceProducerOutcome.Cancelled,
+                        executionDeadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested && !_disposeRequested.IsCancellationRequested
+                            ? "EvidenceHost execution exceeded its total execution deadline."
+                            : "EvidenceHost execution was cancelled by the caller or disposal."),
                     resourceResults,
                     observationOnly,
                     envelopeStatus,
@@ -247,6 +276,8 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
             catch
             {
                 await CleanAsync().ConfigureAwait(false);
+                // Preserve the primary exception when an await-using scope subsequently disposes us.
+                _cleanupReported = true;
                 throw;
             }
         }
@@ -262,16 +293,37 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
     /// <returns>A task that completes when owned cleanup settles.</returns>
     public async ValueTask DisposeAsync()
     {
-        await _execution.WaitAsync().ConfigureAwait(false);
+        // Signaling, joining an active run, and direct cleanup share one allowance.
+        using var disposalDeadline = new CancellationTokenSource(_options.CleanupTimeout, _timeProvider);
+        BeginCleanupClock();
         try
         {
-            if (State == EvidenceHostState.Disposed)
+            try
             {
-                return;
+                await _disposeRequested.CancelAsync().WaitAsync(disposalDeadline.Token).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (IsNonFatalException(exception) && !disposalDeadline.IsCancellationRequested)
+            {
+                _cleanupFailure ??= $"Evidence cancellation signaling failed with {exception.GetType().Name}.";
+            }
+            await _execution.WaitAsync(disposalDeadline.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (disposalDeadline.IsCancellationRequested)
+        {
+            throw new EvidenceHostException("ASEVD306", "Evidence host disposal could not join the active lifecycle within its cleanup allowance.", "Supervise non-cooperative callbacks and cancellation handlers outside this process.");
+        }
+        try
+        {
+            if (State != EvidenceHostState.Disposed)
+            {
+                await CleanAsync().ConfigureAwait(false);
+                State = EvidenceHostState.Disposed;
             }
 
-            await CleanAsync().ConfigureAwait(false);
-            State = EvidenceHostState.Disposed;
+            if (_cleanupFailure is { } failure && !_cleanupReported)
+            {
+                throw new EvidenceHostException("ASEVD306", failure, "Stop and join owned work before disposal; supervise non-cooperative work outside this process.");
+            }
         }
         finally
         {
@@ -294,7 +346,9 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
                 FailureForEveryProducer(EvidenceProducerOutcome.Invalid, "Trusted evidence requires an explicitly registered CI envelope verifier."));
         }
 
-        var result = await _registration.EnvelopeVerifier.VerifyAsync(_plan, cancellationToken).ConfigureAwait(false);
+        var verifier = _registration.EnvelopeVerifier;
+        var verification = StartCallback(verifier, token => verifier.VerifyAsync(_plan, token).AsTask(), cancellationToken);
+        var result = await verification.WaitAsync(cancellationToken).ConfigureAwait(false);
         return result.Accepted
             ? new EnvelopeValidation(EvidenceEnvelopeStatus.ValidatedNotAttested, null)
             : new EnvelopeValidation(
@@ -335,13 +389,14 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         foreach (var resource in OrderResources(declarations))
         {
             var timer = Stopwatch.StartNew();
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            deadline.CancelAfter(TimeSpan.FromSeconds(resource.DeadlineSeconds));
+            using var timerDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(resource.DeadlineSeconds), _timeProvider);
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timerDeadline.Token);
             try
             {
                 // A registration should observe cancellation, but the host must also enforce its
                 // declared deadline when a third-party probe fails to do so.
-                var readinessTask = _registration.Resources[resource.Id].WaitUntilReadyAsync(deadline.Token);
+                var probe = _registration.Resources[resource.Id];
+                var readinessTask = StartCallback(probe, probe.WaitUntilReadyAsync, deadline.Token);
                 await readinessTask.WaitAsync(deadline.Token).ConfigureAwait(false);
                 results.Add(new EvidenceResourceResult(resource.Id, EvidenceResourceOutcome.Ready, timer.ElapsedMilliseconds));
             }
@@ -374,16 +429,16 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         foreach (var declaration in _plan.Profile.Producers)
         {
             var timer = Stopwatch.StartNew();
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            deadline.CancelAfter(TimeSpan.FromSeconds(declaration.TimeoutSeconds));
+            using var timerDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(declaration.TimeoutSeconds), _timeProvider);
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timerDeadline.Token);
             try
             {
                 var artifacts = new EvidenceArtifactWriter(declaration, Path.Join(_artifactDirectory, declaration.Id));
                 // A registration should observe cancellation, but the host must also enforce its
                 // declared deadline when a third-party producer fails to do so.
-                var producerTask = _registration.Producers[declaration.Id]
-                    .ProduceAsync(new EvidenceProducerContext(_plan, declaration, _timeProvider, artifacts), deadline.Token)
-                    .AsTask();
+                var producer = _registration.Producers[declaration.Id];
+                var producerTask = StartCallback(producer, token => producer
+                    .ProduceAsync(new EvidenceProducerContext(_plan, declaration, _timeProvider, artifacts), token).AsTask(), deadline.Token);
                 var result = await producerTask.WaitAsync(deadline.Token).ConfigureAwait(false);
                 results.Add(await ValidateProducerResultAsync(
                     declaration,
@@ -456,43 +511,259 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
             CleanupDiagnostic: cleanupFailure);
         var manifest = EvidenceManifestBuilder.Build(_plan, results, observationOnly, envelopeStatus, resourceResults, metrics);
         State = EvidenceHostState.Completed;
+        _cleanupReported = true;
         return manifest;
+    }
+
+    private long BeginCleanupClock()
+    {
+        lock (_cleanupClockLock)
+        {
+            return _cleanupStarted ??= _timeProvider.GetTimestamp();
+        }
     }
 
     private async Task<string?> CleanAsync()
     {
-        if (_cleaned)
-        {
-            return null;
-        }
+        if (_cleaned) return _cleanupFailure;
 
         State = EvidenceHostState.Cleaning;
         _cleaned = true;
-        Exception? failure = null;
-        var owned = _registration.Producers.Values.Reverse().Cast<object>()
-            .Concat(_registration.Resources.Values.Reverse().Cast<object>())
-            .Distinct(ReferenceEqualityComparer.Instance);
-        foreach (var disposable in owned)
+        var started = BeginCleanupClock();
+        var registrations = _registration.Producers.Values.Reverse().Select(value => new OwnedRegistration(value, value.Id, "producer"))
+            .Concat(ResourcesInCleanupOrder().Select(value => new OwnedRegistration(value, value.Id, "resource")))
+            .Concat(_registration.EnvelopeVerifier is { } verifier ? [new OwnedRegistration(verifier, "envelope", "verifier")] : [])
+            .DistinctBy(value => value.Value, ReferenceEqualityComparer.Instance)
+            .ToArray();
+        var dependencies = OwnedDependencies(registrations);
+        // Readiness-only owners still carry transitive edges even when there is nothing to clean directly.
+        var owned = OrderOwnedCleanup(registrations, dependencies)
+            .Where(value => value.Value is IDisposable or IAsyncDisposable or IEvidenceExecutionLifetime || _callbacks.ContainsKey(value.Value))
+            .ToArray();
+        for (var index = 0; index < owned.Length; index++)
         {
+            var remaining = _options.CleanupTimeout - _timeProvider.GetElapsedTime(started);
+            if (remaining <= TimeSpan.Zero)
+            {
+                _cleanupFailure ??= "Evidence cleanup timed out before all registrations settled.";
+                break;
+            }
+
+            // A single hung owner cannot consume the allowance reserved for later owners.
+            var slice = TimeSpan.FromTicks(Math.Max(1, remaining.Ticks / (owned.Length - index)));
+            using var deadline = new CancellationTokenSource(slice, _timeProvider);
+            var entry = owned[index];
+            if (HasUnsettledDependent(entry.Value, dependencies))
+            {
+                _cleanupFailure ??= $"Evidence cleanup retained {entry.Kind} '{SafeId(entry.Id)}' because dependent owned work did not settle.";
+                _unsettledOwners.Add(entry.Value);
+                continue;
+            }
             try
             {
-                if (disposable is IAsyncDisposable asyncDisposable)
-                {
-                    await asyncDisposable.DisposeAsync().ConfigureAwait(false);
-                }
-                else if (disposable is IDisposable syncDisposable)
-                {
-                    syncDisposable.Dispose();
-                }
+                var cleanup = RunIsolatedAsync(token => CleanRegistrationAsync(entry.Value, token), deadline.Token);
+                ObserveLateFailure(cleanup);
+                await cleanup.WaitAsync(deadline.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+            {
+                _unsettledOwners.Add(entry.Value);
+                _cleanupFailure ??= $"Evidence cleanup timed out stopping/joining/disposing {entry.Kind} '{SafeId(entry.Id)}'; owned work may remain active.";
             }
             catch (Exception exception) when (IsNonFatalException(exception))
             {
-                failure ??= exception;
+                _unsettledOwners.Add(entry.Value);
+                _cleanupFailure ??= $"Evidence cleanup failed for {entry.Kind} '{SafeId(entry.Id)}' with {exception.GetType().Name}.";
             }
         }
 
-        return failure is null ? null : $"Evidence cleanup failed with {failure.GetType().Name}.";
+        return _cleanupFailure;
     }
+
+    private IEnumerable<IEvidenceResourceReadiness> ResourcesInCleanupOrder()
+    {
+        // Readiness dependency order defines ownership, regardless of caller registration order.
+        IReadOnlyList<EvidenceResourceDeclaration> declarations;
+        try
+        {
+            declarations = OrderResources(_plan.Profile.Resources.ToDictionary(resource => resource.Id, StringComparer.Ordinal));
+        }
+        catch (EvidenceHostException)
+        {
+            // Invalid graphs never reached readiness. Preserve the validation failure and still
+            // clean explicitly registered owners once in reverse registration order.
+            return _registration.Resources.Values.Reverse();
+        }
+        var declaredIds = declarations.Select(resource => resource.Id).ToHashSet(StringComparer.Ordinal);
+        return declarations.Reverse().Where(resource => _registration.Resources.ContainsKey(resource.Id))
+            .Select(resource => _registration.Resources[resource.Id])
+            .Concat(_registration.Resources.Values.Reverse().Where(resource => !declaredIds.Contains(resource.Id)));
+    }
+
+    private Dictionary<object, HashSet<object>> OwnedDependencies(OwnedRegistration[] registrations)
+    {
+        var dependencies = new Dictionary<object, HashSet<object>>(ReferenceEqualityComparer.Instance);
+        foreach (var entry in registrations) dependencies.Add(entry.Value, new HashSet<object>(ReferenceEqualityComparer.Instance));
+
+        foreach (var producer in _plan.Profile.Producers)
+            if (_registration.Producers.TryGetValue(producer.Id, out var owner)) AddDependencies(owner, producer.RequiredResources);
+        foreach (var resource in _plan.Profile.Resources)
+            if (_registration.Resources.TryGetValue(resource.Id, out var owner)) AddDependencies(owner, resource.Requires);
+        return dependencies;
+
+        void AddDependencies(object owner, IReadOnlyList<string> requiredResources)
+        {
+            if (!dependencies.TryGetValue(owner, out var required)) return;
+            foreach (var id in requiredResources)
+                if (_registration.Resources.TryGetValue(id, out var dependency)
+                    && !ReferenceEquals(owner, dependency) && dependencies.ContainsKey(dependency)) required.Add(dependency);
+        }
+    }
+
+    private OwnedRegistration[] OrderOwnedCleanup(OwnedRegistration[] registrations, Dictionary<object, HashSet<object>> dependencies)
+    {
+        // One object may have several roles. Order its combined ownership edges before deduplicated disposal.
+        var dependentCounts = new Dictionary<object, int>(ReferenceEqualityComparer.Instance);
+        var indices = new Dictionary<object, int>(ReferenceEqualityComparer.Instance);
+        for (var index = 0; index < registrations.Length; index++)
+        {
+            dependentCounts.Add(registrations[index].Value, 0);
+            indices.Add(registrations[index].Value, index);
+        }
+        foreach (var required in dependencies.Values)
+            foreach (var dependency in required) dependentCounts[dependency]++;
+        var available = new SortedSet<int>(indices.Where(pair => dependentCounts[pair.Key] == 0).Select(pair => pair.Value));
+        var ordered = new List<OwnedRegistration>();
+        while (available.Count > 0)
+        {
+            var index = available.Min;
+            available.Remove(index);
+            var next = registrations[index];
+            ordered.Add(next);
+            foreach (var dependency in dependencies[next.Value])
+                if (--dependentCounts[dependency] == 0) available.Add(indices[dependency]);
+        }
+        if (ordered.Count != registrations.Length)
+        {
+            // Cyclic owners and their prerequisites cannot be safely disposed; unrelated owners still settle.
+            foreach (var owner in dependentCounts.Where(pair => pair.Value > 0)) _unsettledOwners.Add(owner.Key);
+            var entry = registrations.First(value => dependentCounts[value.Value] > 0);
+            _cleanupFailure ??= $"Evidence cleanup retained {entry.Kind} '{SafeId(entry.Id)}' because an ownership cycle prevents safe disposal.";
+        }
+        return ordered.ToArray();
+    }
+
+    private bool HasUnsettledDependent(object owner, Dictionary<object, HashSet<object>> dependencies)
+    {
+        var pending = new Stack<object>(_unsettledOwners.SelectMany(value => dependencies[value]));
+        var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        while (pending.TryPop(out var dependency))
+        {
+            if (!visited.Add(dependency)) continue;
+            if (ReferenceEquals(dependency, owner)) return true;
+            foreach (var required in dependencies[dependency]) pending.Push(required);
+        }
+        return false;
+    }
+
+    private async Task CleanRegistrationAsync(object owner, CancellationToken cancellationToken)
+    {
+        if (owner is IEvidenceExecutionLifetime lifetime)
+        {
+            // This explicit capability permits stop to overlap execution. Completion promises quiescence.
+            await lifetime.StopAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        if (_callbacks.TryGetValue(owner, out var callbacks))
+        {
+            foreach (var callback in callbacks)
+            {
+                try
+                {
+                    await callback.WaitAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception) when (callback.IsCompleted)
+                {
+                    // Already reflected in the execution result; completion, not success, permits disposal.
+                }
+            }
+        }
+
+        // Never start ordinary disposal while callback execution is still active.
+        cancellationToken.ThrowIfCancellationRequested();
+        if (owner is IAsyncDisposable asynchronous) await asynchronous.DisposeAsync().ConfigureAwait(false);
+        else if (owner is IDisposable synchronous) synchronous.Dispose();
+    }
+
+    private Task<T> StartCallback<T>(object owner, Func<CancellationToken, Task<T>> callback, CancellationToken deadline)
+    {
+        var task = RunIsolatedAsync(callback, deadline);
+        TrackCallback(owner, task);
+        return task;
+    }
+
+    private Task StartCallback(object owner, Func<CancellationToken, Task> callback, CancellationToken deadline)
+    {
+        var task = RunIsolatedAsync(callback, deadline);
+        TrackCallback(owner, task);
+        return task;
+    }
+
+    private static Task RunIsolatedAsync(Func<CancellationToken, Task> callback, CancellationToken deadline) =>
+        RunIsolatedAsync(async token => { await callback(token).ConfigureAwait(false); return true; }, deadline);
+
+    private static async Task<T> RunIsolatedAsync<T>(Func<CancellationToken, Task<T>> callback, CancellationToken deadline)
+    {
+        using var cancellation = new CallbackCancellation();
+        using var registration = deadline.UnsafeRegister(static state => ((CallbackCancellation)state!).Cancel(), cancellation);
+        try
+        {
+            return await Task.Run(() => callback(cancellation.Token)).ConfigureAwait(false);
+        }
+        finally
+        {
+            // Unregister the nonblocking dispatcher before observing its pending handlers. Handlers
+            // execute on their own token and cannot block the host's deadline/cancellation waiter.
+            registration.Dispose();
+            await cancellation.JoinAsync().ConfigureAwait(false);
+        }
+    }
+
+    private sealed class CallbackCancellation : IDisposable
+    {
+        private readonly CancellationTokenSource _source = new();
+        private Task _handlers = Task.CompletedTask;
+
+        public CancellationToken Token => _source.Token;
+
+        public void Cancel() => _handlers = _source.CancelAsync();
+
+        public Task JoinAsync() => _handlers;
+
+        public void Dispose() => _source.Dispose();
+    }
+
+    private void TrackCallback(object owner, Task task)
+    {
+        if (!_callbacks.TryGetValue(owner, out var tasks)) _callbacks.Add(owner, tasks = []);
+        tasks.Add(task);
+        ObserveLateFailure(task);
+    }
+
+    private static void ObserveLateFailure(Task task) =>
+        _ = task.ContinueWith(static faulted => { _ = faulted.Exception; }, CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously | TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+
+    private static string SafeId(string id) =>
+        new(id.Take(80).Select(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.' ? character : '_').ToArray());
+
+    private static void ValidateTimeout(TimeSpan timeout, string name)
+    {
+        if (timeout <= TimeSpan.Zero || timeout.TotalMilliseconds > int.MaxValue / 2)
+            throw new ArgumentOutOfRangeException(name, "Evidence lifecycle budgets must be positive and at most 1,073,741,823 milliseconds.");
+    }
+
+    private sealed record OwnedRegistration(object Value, string Id, string Kind);
 
     private static bool IsNonFatalException(Exception exception) =>
         exception is not OutOfMemoryException

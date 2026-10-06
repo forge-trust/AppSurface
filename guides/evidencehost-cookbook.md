@@ -58,6 +58,34 @@ if (manifest.ClaimKind != EvidenceClaimKind.TargetedComplete)
 
 `postgresReadiness` and `webApplicationReadiness` should wait for the condition the test needs—not simply a created resource. The browser producer must return only its declared assertion ids. A producer time limit, resource deadline, test failure, or cleanup failure produces no gate-eligible claim.
 
+## Bounded host cleanup
+
+Give [the explicit host](../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#execution-and-cleanup-budgets) a total execution budget and a separate cleanup allowance:
+
+```csharp
+var options = new EvidenceHostOptions
+{
+    ExecutionTimeout = TimeSpan.FromMinutes(60),
+    CleanupTimeout = TimeSpan.FromSeconds(30),
+};
+await using var host = EvidenceHostBootstrap.Create(plan, registration =>
+{
+    registration.AddResource(postgresReadiness);
+    registration.AddProducer(orderSubmissionBrowserE2e);
+}, options);
+var manifest = await host.RunAsync(cancellationToken: cancellationToken);
+if (!manifest.Metrics.CleanupCompleted || manifest.ClaimKind == EvidenceClaimKind.None)
+{
+    throw new InvalidOperationException("Evidence or owned cleanup did not complete.");
+}
+```
+
+A deadline stops waiting, not arbitrary managed work. The host tracks execution, joins callbacks before ordinary disposal, and invalidates cleanup if an owner cannot settle. Process-backed registrations can implement `IEvidenceExecutionLifetime` to stop and join work while production is still active. The package's `EvidenceProcessLifetime` can stop and join an explicitly enrolled leader and independently surviving descendants; retain each started process handle until stop completes. Enrollment is consumer-owned and does not establish a sandbox or discover detached children automatically. That capability must prove termination of all owned processes, including explicitly owned descendants; a process-leader exit is insufficient. Keep resource dependencies declared in the plan so cleanup can retain dependencies of unsettled work.
+
+If execution throws before a manifest exists, inspect the host's `CleanupDiagnostic` for a cleanup failure while preserving the original exception. A null diagnostic before cleanup finishes does not establish success.
+
+Keep an independent CI guard around consumer startup, the host process, finalization, and upload. Host-local timers cannot enforce a limit on a lost runner. The [package smoke fixture](../tests/evidencehost-cleanup-consumer/README.md) demonstrates terminalization through a NuGet package reference.
+
 ## Release evidence
 
 Release profiles require an explicit `IEvidenceExecutionEnvelopeVerifier` registration. The verifier should validate protected CI inputs and return no secret material. An accepted v1 result produces `ValidatedNotAttested`, so release automation must describe it as validated CI context, not independently attested provenance.
