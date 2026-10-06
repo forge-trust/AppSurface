@@ -48,7 +48,14 @@ confirm provider exit, that watchdog remains its actual parent/reaper and holds
 stdin; this is failure quarantine, never a successful bounded cleanup claim.
 
 All reads are bounded before buffering. Provider stdout/stderr are 64/128 KiB;
-IPC is 256 KiB; packets 16 KiB; file/tree bounds are 32/256 MiB with 512 entries.
+IPC is 256 KiB; packets 16 KiB; file/tree bounds are 32/256 MiB with 2,048
+combined file and directory entries, including the tree root. The authenticated
+CLI and Host publication in run 37389431507 contained 972 files and 84 directories
+each; the former 512-entry inventory bound could not accept either tree. This
+private metadata inventory limit permits those published dependencies while
+retaining depth eight, the same byte limits, protected ownership and link checks,
+and the original deadline. It changes no worker unit property, filesystem grant,
+account permission, job output quota or qualification requirement.
 Official reports are limited to 2 MiB XML and 4 MiB JSON. Utilities share the
 existing deadline and a maximum five-second operation bound. No added job timer
 or grace period can create success after expiry. Private logs and receipts stay

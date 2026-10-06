@@ -74,6 +74,8 @@ import argparse
 import base64
 import ctypes
 import grp
+import errno as errno_module
+import math
 import hashlib
 import importlib.util
 import json
@@ -3195,7 +3197,166 @@ def launch(args: argparse.Namespace, *, diagnostic_directory_fd: int | None = No
         return completion.output
 
 
+LAUNCHER_STARTUP_FILE = "launcher-startup-failure.json"
+LAUNCHER_STARTUP_SCHEMA = "issue779-private-launcher-startup-failure-v1"
+LAUNCHER_STARTUP_LIMIT = 4096
+LAUNCHER_STARTUP_STAGES = frozenset((
+    "platform", "kernel", "systemd", "inputs", "application-selection", "directories",
+    "accounts", "subject-copy", "job-deadline", "application-workspace", "dotnet",
+    "product-reports", "product-owner", "product-prepare", "tool-pin", "listener",
+    "application-lease", "worker-dispatch", "worker-identity", "descriptor", "broker"))
+LAUNCHER_STARTUP_PRODUCT_CATEGORIES = frozenset((
+    "deadline", "directory-path", "directory-owner", "directory-changed", "tree-bound",
+    "tree-owner", "tree-changed", "tree-mode", "tree-byte-bound", "file-count",
+    "file-gid", "file-mode", "file-short", "file-changed", "basename",
+    "owner-failed-or-closed", "owner-replay", "reports-not-fresh", "eligible-originals",
+    "mount-budget", "provider-start-ack", "provider-temp", "backup-selection",
+    "session-inventory", "execution-inventory", "noneligible-mutation", "execution-modes",
+    "eligible-not-instrumented", "provider-packet-bound", "provider-packet-duplicate",
+    "provider-packet-schema", "provider-packet-path", "provider-log-bound",
+    "provider-early-exit", "root-command-bound",
+    "root-command-exit", "root-command-residue"))
+
+
+class _LauncherStartupProgress:
+    """Private phase data; the deadline is borrowed from capture_job_deadline only."""
+    def __init__(self):
+        self.stage = "platform"
+        self.deadline = None
+        self.active = True
+
+    def enter(self, stage):
+        if stage not in LAUNCHER_STARTUP_STAGES:
+            raise ValueError("invalid-startup-stage")
+        self.stage = stage
+
+    def bind_deadline(self, deadline):
+        self.deadline = deadline
+
+    def finish(self):
+        self.active = False
+
+
+def _capture_launcher_startup_failure(directory_fd, error, progress, *, expected_owner_uid=0):
+    """Best-effort closed data to a borrowed protected FD; never execution authority.
+
+    A missing pre-start deadline is recorded as null. A known expired deadline
+    skips capture. No fresh timer, process, caller path, or error text is used.
+    The owner override is only for portable filesystem-data controls.
+    Partial I/O or close failures return False; they never replace the launch error.
+    """
+    opened = -1
+    complete = False
+    try:
+        if (type(directory_fd) is not int or directory_fd < 0 or not progress.active
+                or progress.stage not in LAUNCHER_STARTUP_STAGES
+                or type(expected_owner_uid) is not int or expected_owner_uid < 0):
+            return False
+        def remaining():
+            if progress.deadline is None:
+                return None
+            if (type(progress.deadline) not in (int, float)
+                    or not math.isfinite(progress.deadline)):
+                raise ValueError("invalid-startup-deadline")
+            value = progress.deadline - time.monotonic()
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError("expired-startup-deadline")
+            return min(2147483647, int(value * 1000))
+        milliseconds = remaining()
+        parent = os.fstat(directory_fd)
+        if (not stat.S_ISDIR(parent.st_mode) or parent.st_nlink < 1 or parent.st_uid != expected_owner_uid
+                or stat.S_IMODE(parent.st_mode) != 0o700):
+            return False
+        if isinstance(error, _product.ProductCoverageError):
+            family = "ProductCoverageError"
+        elif isinstance(error, LauncherError):
+            family = "LauncherError"
+        elif isinstance(error, OSError):
+            family = "OSError"
+        elif isinstance(error, subprocess.SubprocessError):
+            family = "SubprocessError"
+        else:
+            family = next((name for cls, name in ((TypeError, "TypeError"), (ValueError, "ValueError"),
+                (KeyError, "KeyError"), (ImportError, "ImportError"), (RuntimeError, "RuntimeError"))
+                if isinstance(error, cls)), "Other")
+        category = None
+        if (family == "ProductCoverageError" and len(error.args) == 1
+                and type(error.args[0]) is str and error.args[0] in LAUNCHER_STARTUP_PRODUCT_CATEGORIES):
+            category = error.args[0]
+        code = getattr(error, "errno", None) if isinstance(error, (OSError, LauncherError)) else None
+        code = code if type(code) is int and code in errno_module.errorcode else None
+        record = {"schema": LAUNCHER_STARTUP_SCHEMA, "stage": progress.stage,
+                  "exception_family": family, "product_category": category,
+                  "errno": code, "job_remaining_ms": milliseconds,
+                  "qualification_claim": False, "coverage_credit": False}
+        raw = (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
+        if len(raw) > LAUNCHER_STARTUP_LIMIT:
+            return False
+        remaining()
+        opened = os.open(LAUNCHER_STARTUP_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                         | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o600, dir_fd=directory_fd)
+        before = os.fstat(opened)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != expected_owner_uid
+                or before.st_nlink != 1 or before.st_size != 0
+                or stat.S_IMODE(before.st_mode) != 0o600):
+            return False
+        position = 0
+        while position < len(raw):
+            remaining()
+            count = os.write(opened, raw[position:])
+            if count <= 0:
+                return False
+            position += count
+        after = os.fstat(opened)
+        named = os.stat(LAUNCHER_STARTUP_FILE, dir_fd=directory_fd, follow_symlinks=False)
+        pin = lambda item: (item.st_dev, item.st_ino, item.st_uid, item.st_gid,
+                            item.st_mode, item.st_nlink, item.st_size)
+        final_parent = os.fstat(directory_fd)
+        if ((before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)
+                or pin(after) != pin(named) or after.st_size != len(raw) or after.st_nlink != 1
+                or stat.S_IMODE(after.st_mode) != 0o600 or after.st_uid != expected_owner_uid
+                or (parent.st_dev, parent.st_ino, parent.st_uid, parent.st_gid, parent.st_mode)
+                != (final_parent.st_dev, final_parent.st_ino, final_parent.st_uid,
+                    final_parent.st_gid, final_parent.st_mode)):
+            return False
+        complete = True
+    except BaseException:
+        complete = False
+    finally:
+        if opened >= 0:
+            try:
+                os.close(opened)
+            except BaseException:
+                complete = False
+    # Closing the owned file is part of the original deadline, including a late close.
+    if complete:
+        try:
+            remaining()
+        except BaseException:
+            complete = False
+    return complete
+
+
 def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd: int | None = None) -> _LaunchCompletion:
+    """Run the unchanged ownership procedure; retain only private startup failure data.
+
+    The optional borrowed diagnostic FD does not participate in admission or
+    completion validation. The returned context must still close successfully.
+    """
+    progress = _LauncherStartupProgress()
+    try:
+        return _launch_with_completion_impl(args, diagnostic_directory_fd=diagnostic_directory_fd,
+                                            _startup=progress)
+    except BaseException as error:
+        try:
+            _capture_launcher_startup_failure(diagnostic_directory_fd, error, progress)
+        except BaseException:
+            pass
+        raise
+
+
+def _launch_with_completion_impl(args: argparse.Namespace, *, diagnostic_directory_fd: int | None = None,
+                                 _startup: _LauncherStartupProgress) -> _LaunchCompletion:
     """Execute as root and return retained final ownership facts to the importing protected parent.
 
     The caller must finish collection, close duplicates and successfully close the
@@ -3208,13 +3369,16 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
     """
     if sys.platform != "linux" or os.geteuid() != 0 or Path("/proc/1/comm").read_text().strip() != "systemd":
         raise LauncherError("requires-root-systemd-linux")
+    _startup.enter("kernel")
     ensure_openat2_supported()
     if not Path("/sys/fs/cgroup/cgroup.controllers").is_file():
         raise LauncherError("requires-cgroup-v2")
+    _startup.enter("systemd")
     version = _systemd(["systemctl", "--version"]).stdout.decode().splitlines()[0]
     m = re.search(r"systemd (\d+)", version)
     if not m or int(m.group(1)) < 255:
         raise LauncherError("requires-systemd-255")
+    _startup.enter("inputs")
     tool, subject, policy, parent = validate_args(args)
     diff_file, diff_sha256 = protected_diff_snapshot(tool, getattr(args, "diff_file", None))
     if not RUN_ID.fullmatch(args.run_id):
@@ -3228,12 +3392,14 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
     if any(not SAFE_NAME.fullmatch(value) for value in args.observation_profile + args.observation_producer):
         raise LauncherError("invalid-observation-identifier")
     source_subject = subject
+    _startup.enter("application-selection")
     selected_application = select_root_application(args, policy)
     solution, declared_paths = declared_subject_inputs(source_subject, args.solution, args.path)
     solution_relative = Path(solution).relative_to(source_subject)
     tag = uuid.uuid4().hex[:12]
     if args.mode == "trusted" and not trusted_proof_admitted(""):
         raise LauncherError("trusted-proof-not-allowlisted")
+    _startup.enter("directories")
     output_parent = parent / f"run-{tag}"
     if output_parent.exists() or output_parent.is_symlink():
         raise LauncherError("output-anchor-not-fresh")
@@ -3262,6 +3428,7 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
     product_coverage_owner = None
     execution_map = None
     try:
+        _startup.enter("accounts")
         _create_run_accounts(worker_name, subject_name, results_group, users, groups)
         wu, su = pwd.getpwnam(worker_name), pwd.getpwnam(subject_name)
         rgid = grp.getgrnam(results_group).gr_gid
@@ -3277,6 +3444,7 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
         if wu.pw_uid == su.pw_uid or not wu.pw_uid or not su.pw_uid: raise LauncherError("identity-separation-failed")
         os.chown(output_parent, wu.pw_uid, wu.pw_gid)
         os.chmod(output_parent, 0o700)
+        _startup.enter("subject-copy")
         prepare_scratch_layout(scratch, su.pw_uid, su.pw_gid, wu.pw_gid, rgid)
         prepared_subject = (scratch / "subject").resolve(strict=False)
         if any(roots_overlap(prepared_subject, protected)
@@ -3288,14 +3456,19 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
         os.chown(root, 0, wu.pw_gid)
         os.chmod(root, 0o710)
         os.chown(worker_socket_dir, 0, wu.pw_gid)
+        _startup.enter("job-deadline")
         job_deadline_utc, job_deadline_monotonic = capture_job_deadline(args.job_seconds)
+        _startup.bind_deadline(job_deadline_monotonic)
+        _startup.enter("application-workspace")
         if selected_application is not None:
             application_workspace = _ApplicationWorkspaceOwner(selected_application, identities, tool,
                 parent, root, scratch, source_subject, job_deadline_monotonic)
+        _startup.enter("dotnet")
         dotnet = Path(shutil.which("dotnet", path=ENV["PATH"]) or "").resolve(strict=True)
         worker_unit = f"evidencehost-{tag}-worker.service"
         # Fixed protected sibling input and root-only report output. No worker
         # path, unit property, descriptor field or caller-selected callback is added.
+        _startup.enter("product-reports")
         product_reports = parent / f"product-coverage-{tag}"
         os.mkdir(product_reports, 0o700)
         report_fd = os.open(product_reports, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
@@ -3307,15 +3480,20 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
                 raise LauncherError("product-coverage-report-invalid")
         finally:
             os.close(report_fd)
+        _startup.enter("product-owner")
         product_coverage_owner = _product.ProductCoverageOwner(
             tool, output_parent, wu.pw_uid, wu.pw_gid, job_deadline_monotonic, dotnet,
             tool.parent / "product-coverage-taskhost", product_reports, worker_unit)
+        _startup.enter("product-prepare")
         execution_map = product_coverage_owner.prepare()
+        _startup.enter("tool-pin")
         prepare_tool_root(tool, wu.pw_gid)
         product_coverage_owner.bind_tool_pin()
+        _startup.enter("listener")
         sock_path = worker_socket_dir / "control.sock"
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         listener.bind(str(sock_path)); os.chown(sock_path, 0, wu.pw_gid); os.chmod(sock_path, 0o660); listener.listen(8); listener.settimeout(0.25)
+        _startup.enter("application-lease")
         if selected_application is not None:
             application = _application.RootApplicationLease(selected_application, identities,
                 application_workspace.workspace, application_workspace.bundle, dotnet,
@@ -3324,6 +3502,7 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
         if not cli.is_file(): raise LauncherError("trusted-cli-missing")
         worker_command = ["/usr/bin/env", "-i", *[f"{key}={value}" for key, value in WORKER_ENV.items()],
                           str(dotnet), str(cli), "evidence", "worker", "--control", str(sock_path)]
+        _startup.enter("worker-dispatch")
         units.append(worker_unit)
         worker_argv = ["systemd-run", "--quiet", "--unit="+worker_unit, "--expand-environment=no",
                        *[f"--property={k}={v}" for k,v in worker_unit_properties(
@@ -3334,6 +3513,7 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
             raise LauncherError("product-coverage-aborted")
         product_coverage_owner.mark_worker_dispatch()
         _start_worker_unit(worker_argv, worker_unit)
+        _startup.enter("worker-identity")
         props = {}
         deadline = job_deadline_monotonic
         while time.monotonic() < deadline:
@@ -3343,6 +3523,7 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
         worker_pid = int(props.get("MainPID", "0"))
         if not worker_pid: raise LauncherError("worker-start-failed")
         product_coverage_owner.verify_live_worker(worker_pid)
+        _startup.enter("descriptor")
         desc = {"schema": SCHEMA, "run_id": args.run_id, "worker_pid": worker_pid,
                 "broker_pid": os.getpid(), "worker_uid": wu.pw_uid,
                 "worker_gid": wu.pw_gid, "subject_uid": su.pw_uid, "subject_gid": su.pw_gid,
@@ -3372,6 +3553,7 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
             descriptor_file.write("\n")
         os.chown(descriptor_path, 0, wu.pw_gid)
         os.chmod(descriptor_path, 0o440)
+        _startup.enter("broker")
         broker = Broker(desc,wu.pw_uid,worker_pid,wu.pw_gid,su.pw_uid,su.pw_gid,rgid,subject,
                         (tool, output_parent, root, policy), scratch, dotnet,
                         f"evidencehost-{tag}", deadline, args.job_seconds,
@@ -3379,6 +3561,7 @@ def launch_with_completion(args: argparse.Namespace, *, diagnostic_directory_fd:
                         application=application, product_coverage_owner=product_coverage_owner)
         test_output_fd = -1  # Broker owns this pinned directory descriptor until all handlers have joined.
         product_coverage_owner.bind_broker(broker)
+        _startup.finish()
         # The socket exists before worker start; ready returns this complete root-created descriptor.
         while time.monotonic() < deadline:
             try:

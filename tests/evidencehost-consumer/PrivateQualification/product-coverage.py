@@ -29,7 +29,7 @@ LIBRARIES = tuple("ForgeTrust.AppSurface.Evidence." + s for s in ("Cli", "Aspire
 ELIGIBLE = frozenset(s + ext for s in LIBRARIES for ext in (".dll", ".pdb"))
 REPORTS = ("coverage.cobertura.xml", "coverage.json")
 SESSION = "product-coverage-session"
-FILE_LIMIT, TREE_LIMIT, MAX_FILES = 32 << 20, 256 << 20, 512
+FILE_LIMIT, TREE_LIMIT, MAX_FILES = 32 << 20, 256 << 20, 2048
 IPC_LIMIT, LOG_LIMIT = 256 << 10, 192 << 10
 ENV = {"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"}
 

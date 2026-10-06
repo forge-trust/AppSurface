@@ -409,3 +409,36 @@ leave no complete diagnostic; absence cannot identify a native cause.
 The new [portable controls](test_product_preparation_diagnostics.py) use real tiny
 files and current-user metadata. Their execution receipt is separate; source
 existence alone proves neither a test pass nor root/native qualification.
+
+## Private launcher startup failure data
+
+The [launcher](../../../scripts/evidencehost-linux-launcher.py) may write one
+`launcher-startup-failure.json` through its borrowed, already protected diagnostic
+directory FD. The [controller](run-qualification.py) retains that fixed name for
+CLI and Host, at most 4096 bytes each, within the unchanged aggregate archive
+limits. It is diagnostic data and grants no admission, qualification or coverage.
+
+`issue779-private-launcher-startup-failure-v1` contains only a closed startup
+`stage`, actual `exception_family`, allowlisted `product_category` (otherwise
+null), known numeric `errno` (otherwise null), and `job_remaining_ms` (null before
+the existing job deadline is captured). Both claim fields are false. No exception
+message, path, command output or product inventory is copied. In particular,
+`tree-bound`, `tree-owner` and `file-count` distinguish actual owner categories
+without inferring which caused a historical unclassified failure.
+
+The public launch signature and failure packet remain unchanged. An internal
+progress tracker annotates existing startup operations and borrows the single
+`capture_job_deadline` result. Capture becomes inactive before the broker run loop;
+later consumer/completion failures do not create this startup record. The wrapper
+catches after existing resource cleanup and bare-raises the same original error.
+Capture is best effort: no new process or timer, no deadline renewal, and known
+expiry skips the write. A missing record does not establish a cause or success.
+
+The helper requires a root-owned 0700 directory FD and creates a fresh, regular,
+single-link 0600 file exclusively, with no-follow/nonblocking flags. It checks
+held/named identity and the original deadline after closing its owned file FD;
+the borrowed directory FD remains open. Partial writes or close errors may leave
+private incomplete bytes, which never count as successful diagnostic capture.
+The expected-owner override exists only for portable filesystem-data controls.
+The new source controls are initially unexecuted; they do not establish actual
+root ownership, systemd behavior, native startup, consumer execution or coverage.

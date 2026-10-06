@@ -134,6 +134,69 @@ class FileControls(unittest.TestCase):
         os.chmod(self.root/'first', 0o600)
 
 
+class PublishedTreeInventoryControls(unittest.TestCase):
+    """Ordinary owned bytes exercise inventory bounds, never a root owner or lease."""
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='published-tree-', dir='/tmp')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        os.chmod(self.root, 0o700)
+
+    def write(self, relative, data=b'x'):
+        path = self.root / relative
+        path.write_bytes(data)
+        os.chmod(path, 0o600)
+
+    def snapshot(self):
+        return M.snapshot_tree(self.root, time.monotonic()+10, uid=os.getuid())
+
+    def test_authenticated_published_shape_972_files_and_84_directories_is_bounded(self):
+        for index in range(83):
+            (self.root / f'd{index:03d}').mkdir(mode=0o700)
+        for index in range(972):
+            self.write(f'd{index % 83:03d}/f{index:04d}')
+        files, directories = self.snapshot()
+        self.assertEqual(972, len(files))
+        self.assertEqual(84, len(directories))
+        self.assertEqual(1056, len(files)+len(directories))
+        self.assertEqual({'sha256': hashlib.sha256(b'x').hexdigest(), 'mode': '0600'},
+                         files['d000/f0000'])
+
+    def test_exact_2048_rows_include_root_and_next_row_is_rejected(self):
+        for index in range(2047):
+            self.write(f'f{index:04d}')
+        files, directories = self.snapshot()
+        self.assertEqual(2048, len(files)+len(directories))
+        self.assertEqual({'': '0700'}, directories)
+        self.write('f2047')
+        with self.assertRaises(M.ProductCoverageError) as caught:
+            self.snapshot()
+        self.assertEqual('tree-bound', str(caught.exception))
+
+    def test_byte_limit_remains_independent_of_entry_capacity(self):
+        self.write('first', b'1234')
+        self.write('second', b'5678')
+        self.assertEqual(32 << 20, M.FILE_LIMIT)
+        self.assertEqual(256 << 20, M.TREE_LIMIT)
+        with patch.object(M, 'TREE_LIMIT', 8):
+            self.assertEqual(2, len(self.snapshot()[0]))
+            self.write('third', b'9')
+            with self.assertRaises(M.ProductCoverageError) as caught:
+                self.snapshot()
+        self.assertEqual('tree-byte-bound', str(caught.exception))
+
+    def test_depth_eight_still_accepts_and_ninth_directory_is_rejected(self):
+        current = self.root
+        for index in range(8):
+            current = current / f'd{index}'
+            current.mkdir(mode=0o700)
+        self.assertEqual(9, len(self.snapshot()[1]))
+        (current / 'ninth').mkdir(mode=0o700)
+        with self.assertRaises(M.ProductCoverageError) as caught:
+            self.snapshot()
+        self.assertEqual('tree-bound', str(caught.exception))
+
+
 class DataControls(unittest.TestCase):
     def test_fixed_packets_reject_duplicates_and_wrong_shape(self):
         good = {'stage': 'collected', 'passed': True, 'errors': 0, 'warnings': 0}
