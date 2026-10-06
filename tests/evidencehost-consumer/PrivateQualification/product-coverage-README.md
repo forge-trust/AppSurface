@@ -56,6 +56,17 @@ private metadata inventory limit permits those published dependencies while
 retaining depth eight, the same byte limits, protected ownership and link checks,
 and the original deadline. It changes no worker unit property, filesystem grant,
 account permission, job output quota or qualification requirement.
+The pinned published tree includes the DCP dependency directory `_manifest`.
+The private [inventory and restoration procedures](product-coverage.py) accept
+an ASCII letter, digit or underscore as the first component character, followed
+by ASCII letters, digits, underscores, dots or hyphens, up to 128 characters.
+Leading dots, consecutive dots, separators and other characters remain invalid.
+This component grammar applies before file opening during inventory and
+restoration; no-follow handles, ownership, byte, depth and deadline checks still
+apply. The [published-name controls](test_product_coverage.py) exercise the seven
+actual manifest names with owned bytes and an inventory/restoration round trip.
+They do not issue a root coverage owner or demonstrate native qualification.
+
 Official reports are limited to 2 MiB XML and 4 MiB JSON. Utilities share the
 existing deadline and a maximum five-second operation bound. No added job timer
 or grace period can create success after expiry. Private logs and receipts stay

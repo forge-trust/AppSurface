@@ -51,7 +51,7 @@ def left(deadline):
 
 
 def basename(value):
-    require(type(value) is str and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", value)
+    require(type(value) is str and re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", value)
             and ".." not in value, "basename")
     return value
 

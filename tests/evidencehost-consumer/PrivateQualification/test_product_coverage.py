@@ -197,6 +197,60 @@ class PublishedTreeInventoryControls(unittest.TestCase):
         self.assertEqual('tree-bound', str(caught.exception))
 
 
+class PublishedBasenameControls(unittest.TestCase):
+    """Published dependency names use owned files, not an instrumentation lease."""
+    def test_actual_dcp_manifest_shape_snapshots_and_restores(self):
+        with tempfile.TemporaryDirectory(prefix='published-names-', dir='/tmp') as root:
+            root = Path(root).resolve()
+            relative = 'application-bundles/issue779-qualified-native-http/issue779-private-qualification-1/dcp/_manifest/spdx_2.2'
+            parent = root / relative
+            parent.mkdir(parents=True, mode=0o700)
+            for directory in root.rglob('*'):
+                os.chmod(directory, 0o700)
+            expected = {}
+            for name in ('ESRPClientLogs0520014109497.json', 'bsi.cose', 'bsi.json',
+                         'manifest.cat', 'manifest.spdx.cose', 'manifest.spdx.json',
+                         'manifest.spdx.json.sha256'):
+                data = ('owned metadata ' + name).encode()
+                path = parent / name
+                path.write_bytes(data)
+                os.chmod(path, 0o600)
+                expected[relative + '/' + name] = {
+                    'sha256': hashlib.sha256(data).hexdigest(), 'mode': '0600'}
+            deadline = time.monotonic()+5
+            original = M.snapshot_tree(root, deadline, uid=os.getuid())
+            self.assertEqual(expected, original[0])
+            self.assertEqual(7, len(original[1]))
+            self.assertEqual('0700', original[1][relative])
+            for path in parent.iterdir():
+                os.chmod(path, 0o400)
+            M.restore_metadata(root, original, deadline, uid=os.getuid(), gid=os.getgid())
+            self.assertEqual(original,
+                             M.snapshot_tree(root, deadline, uid=os.getuid(), gid=os.getgid()))
+
+    def test_underscore_component_exact_length_and_unsafe_names_precede_open(self):
+        self.assertEqual('_manifest', M.basename('_manifest'))
+        self.assertEqual('_' + 'a'*127, M.basename('_' + 'a'*127))
+        with patch.object(M.os, 'open') as opened:
+            for name in ('_' + 'a'*128, '', '.', '..', '.hidden', '_../escape',
+                         '_nested/escape', '_nested\\escape', '_raw\ncanary', None, True):
+                with self.subTest(name=name), self.assertRaises(M.ProductCoverageError) as caught:
+                    M.read_file(-1, name, time.monotonic()+2, uid=os.getuid())
+                self.assertEqual('basename', str(caught.exception))
+            opened.assert_not_called()
+
+    def test_leading_dot_dependency_still_rejects_before_file_read(self):
+        with tempfile.TemporaryDirectory(prefix='unsafe-published-name-', dir='/tmp') as root:
+            root = Path(root).resolve()
+            (root / '.hidden').write_bytes(b'owned canary')
+            os.chmod(root / '.hidden', 0o600)
+            with patch.object(M.os, 'read') as read:
+                with self.assertRaises(M.ProductCoverageError) as caught:
+                    M.snapshot_tree(root, time.monotonic()+2, uid=os.getuid())
+                self.assertEqual('basename', str(caught.exception))
+                read.assert_not_called()
+
+
 class DataControls(unittest.TestCase):
     def test_fixed_packets_reject_duplicates_and_wrong_shape(self):
         good = {'stage': 'collected', 'passed': True, 'errors': 0, 'warnings': 0}
