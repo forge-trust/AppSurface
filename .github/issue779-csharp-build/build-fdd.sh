@@ -19,6 +19,7 @@ import time
 
 HEAD = '2993dcfaac1b9b6dfb8adf057191f837876f01fe'
 PARENT = '4dd992ec1bc2df8220c73149115c5b478edb0085'
+HARNESS_PARENT = '08bde140f37bf1663d754edcd9ad69bd5c2d65d3'
 TREE = '190d0b2066d4df980715f31642b4a38198094123'
 CAPTURE_SHA = 'b8772a5cd9686c3f5c7e65278102c397ea1d1c1af9b047140b9b4de15a997fb8'
 CAPTURE_PROJECTION_SHA = '5917596232d55365c39e460f611efeef46db9a74b289732c4c6f80d5388401d6'
@@ -36,14 +37,19 @@ HARN, OUT, CAPTURE = map(pathlib.Path, sys.argv[1:])
 RECORDS = []
 LOG_BYTES = 0
 PHASE = 'input'
-RESULT = {'schema': 'issue779-csharp-fdd-build-v2', 'exit': 1,
+RESULT = {'schema': 'issue779-csharp-fdd-build-v3', 'exit': 1,
           'build_prerequisite_only': True, 'native_execution': False,
           'checkpoint_pass': False, 'os_audit': None, 'source_commit': HEAD,
           'capture_sha256': CAPTURE_SHA, 'sdk_required': SDK, 'commands': RECORDS}
 
+class BuildFailure(ValueError):
+    def __init__(self, category):
+        super().__init__('build-validation-failed')
+        self.category = category
+
 def require(ok, category):
     if not ok:
-        raise ValueError(category)
+        raise BuildFailure(category)
 
 def check(final=False):
     if time.monotonic() >= (FINAL if final else WORK):
@@ -162,12 +168,13 @@ def append_event(event):
     finally:
         os.close(fd)
 
-def run(argv, cwd, read_stdout=True):
+def run(argv, cwd, read_stdout=True, child_umask=-1):
     global LOG_BYTES
     check()
     record = {'ordinal': len(RECORDS), 'phase': PHASE, 'argv': argv,
               'pid': None, 'exit': None, 'timed_out': False, 'forced_cleanup': False,
-              'waited': False, 'group_absent': False, 'failure': None}
+              'waited': False, 'group_absent': False, 'failure': None,
+              'child_umask': child_umask}
     RECORDS.append(record)
     append_event({'before_popen': record.copy()})
     logs = [OUT / 'receipts' / f'{record["ordinal"]:02d}-{kind}.log' for kind in ('stdout', 'stderr')]
@@ -181,7 +188,7 @@ def run(argv, cwd, read_stdout=True):
         command_start = time.monotonic()
         process = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL,
                                    stdout=handles[0], stderr=handles[1], start_new_session=True,
-                                   env=ENV)
+                                   env=ENV, umask=child_umask)
         record['pid'] = process.pid
         # Recompute AFTER Popen; no pre-spawn allowance can extend the deadline.
         command_end = min(WORK, command_start + 180)
@@ -564,11 +571,13 @@ def main():
     RESULT['environment_names_set'] = sorted(k for k in ENV if k in ('GIT_OPTIONAL_LOCKS', 'DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER', 'MSBUILDDISABLENODEREUSE', 'DOTNET_NOLOGO', 'DOTNET_CLI_TELEMETRY_OPTOUT'))
     PHASE = 'source'
     harness_head = run(['git', 'rev-parse', 'HEAD'], HARN).strip().decode()
-    require(run(['git', 'show', '-s', '--format=%P', 'HEAD'], HARN).strip().decode() == HEAD, 'normal-harness-child')
+    require(run(['git', 'show', '-s', '--format=%P', 'HEAD'], HARN).strip().decode() == HARNESS_PARENT, 'normal-harness-child')
+    run(['git', 'merge-base', '--is-ancestor', HEAD, 'HEAD'], HARN)
+    RESULT['harness_parent'] = HARNESS_PARENT
     RESULT['harness_commit'] = harness_head
     clone = OUT / 'compile'
-    run(['git', 'clone', '--no-hardlinks', '--no-checkout', str(HARN), str(clone)], HARN)
-    run(['git', 'checkout', '--detach', HEAD], clone)
+    run(['git', 'clone', '--no-hardlinks', '--no-checkout', str(HARN), str(clone)], HARN, child_umask=0o022)
+    run(['git', 'checkout', '--detach', HEAD], clone, child_umask=0o022)
     RESULT['source_before'] = source_check(clone, capture['source'])
     source_inventory = source_export(clone, capture['source'])
     PHASE = 'sdk-assets'
@@ -625,7 +634,8 @@ try:
     RESULT['exit'] = 0
 except BaseException as error:
     RESULT['exit'] = 1
-    RESULT['failure'] = {'phase': PHASE, 'error_class': type(error).__name__}
+    RESULT['failure'] = {'phase': PHASE, 'error_class': type(error).__name__,
+                         'category': error.category if isinstance(error, BuildFailure) else None}
 RESULT['elapsed_seconds'] = time.monotonic() - START
 RESULT['work_deadline_seconds'] = 1195
 RESULT['original_deadline_seconds'] = 1200
