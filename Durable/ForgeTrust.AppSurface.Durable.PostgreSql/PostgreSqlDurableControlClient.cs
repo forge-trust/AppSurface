@@ -50,7 +50,10 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
                        accepted_at, due_at, updated_at, terminal_code, cancellation_requested_at IS NOT NULL,
                        runtime_epoch <> @runtime_epoch
                          AND state NOT IN ('succeeded', 'succeeded_after_cancel_requested', 'failed', 'canceled_before_effect')
-                         AS requires_recovery_release
+                         AS requires_recovery_release,
+                       execution_policy_schema, attempt_plan_version, attempt_plan_offsets, maximum_circuit_microseconds,
+                       execution_not_after, maximum_attempts, maximum_elapsed, initial_retry_delay, maximum_retry_delay,
+                       lease_duration, lease_renewal_cadence, maximum_lease_lifetime, backoff_algorithm
                 FROM appsurface_durable.work
                 WHERE scope_id = @scope_id
                   AND (@continuation_token IS NULL OR work_id > @continuation_token)
@@ -86,7 +89,7 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
             {
                 while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    items.Add(new DurableWorkListItem(
+                    var item = new DurableWorkListItem(
                         new DurableWorkId(reader.GetString(0)),
                         reader.GetString(1),
                         reader.GetString(2),
@@ -100,7 +103,17 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
                         ReadUtc(reader, 10),
                         reader.IsDBNull(11) ? null : reader.GetString(11),
                         reader.GetBoolean(12),
-                        reader.GetBoolean(13)));
+                        reader.GetBoolean(13));
+                    // The extra pagination row is only a continuation witness. Decode timing facts for returned
+                    // items alone, matching the previous list contract when the witness has invalid policy data.
+                    var execution = items.Count < request.PageSize
+                        ? PostgreSqlDurableWorkStore.ReadInspectionExecutionSnapshot(
+                            reader, 14, item.AcceptedAtUtc, item.DueAtUtc, item.AttemptNumber)
+                        : null;
+                    items.Add(execution is null ? item : DurableWorkListItem.CreateWithExecution(
+                        item.WorkId, item.ActivityId, item.WorkName, item.WorkVersion, item.State, item.ProviderSafety,
+                        item.AttemptNumber, item.Revision, item.AcceptedAtUtc, item.DueAtUtc, item.UpdatedAtUtc,
+                        item.TerminalCode, item.CancellationRequested, item.RequiresRecoveryRelease, execution));
                 }
             }
 
@@ -108,36 +121,6 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
             if (hasMore)
             {
                 items.RemoveAt(items.Count - 1);
-            }
-
-            for (var index = 0; index < items.Count; index++)
-            {
-                var item = items[index];
-                var execution = await PostgreSqlDurableWorkStore.ReadExecutionRowLockedAsync(
-                    connection,
-                    transaction,
-                    request.ScopeId,
-                    item.WorkId,
-                    cancellationToken).ConfigureAwait(false);
-                if (execution is not null)
-                {
-                    items[index] = DurableWorkListItem.CreateWithExecution(
-                        item.WorkId,
-                        item.ActivityId,
-                        item.WorkName,
-                        item.WorkVersion,
-                        item.State,
-                        item.ProviderSafety,
-                        item.AttemptNumber,
-                        item.Revision,
-                        item.AcceptedAtUtc,
-                        item.DueAtUtc,
-                        item.UpdatedAtUtc,
-                        item.TerminalCode,
-                        item.CancellationRequested,
-                        item.RequiresRecoveryRelease,
-                        execution.ExecutionSnapshot);
-                }
             }
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);

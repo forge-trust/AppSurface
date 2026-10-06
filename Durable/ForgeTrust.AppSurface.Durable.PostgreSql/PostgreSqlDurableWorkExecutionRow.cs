@@ -126,20 +126,7 @@ internal partial class PostgreSqlDurableWorkStore
         await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
         {
             if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false) || reader.IsDBNull(0)) return null;
-            if (reader.GetString(0) != "work-execution-v1") throw new InvalidDataException("Unsupported accepted execution policy schema.");
-            var retry = new DurableWorkRetryPolicy(reader.GetInt32(5), reader.GetFieldValue<TimeSpan>(6),
-                reader.GetFieldValue<TimeSpan>(7), reader.GetFieldValue<TimeSpan>(8), reader.GetFieldValue<TimeSpan>(9),
-                reader.GetFieldValue<TimeSpan>(10), reader.GetFieldValue<TimeSpan>(11), reader.GetString(12));
-            if (retry.BackoffAlgorithm != "exponential-v1") throw new InvalidDataException("Unsupported accepted retry policy.");
-            DurableWorkExecutionPolicy policy;
-            if (!reader.IsDBNull(1))
-            {
-                if (reader.GetString(1) != "attempt-plan-v1") throw new InvalidDataException("Unsupported accepted attempt plan version.");
-                var offsets = reader.GetFieldValue<long[]>(2).Select(static value => TimeSpan.FromTicks(checked(value * 10)));
-                policy = DurableWorkExecutionPolicy.ForAttemptPlan(retry,
-                    new DurableAttemptPlan(reader.GetString(1), offsets, TimeSpan.FromTicks(checked(reader.GetInt64(3) * 10))));
-            }
-            else policy = DurableWorkExecutionPolicy.FromRetryPolicy(retry);
+            var policy = ReadAcceptedExecutionPolicy(reader, 0)!;
             row = new(scopeId, workId, Guid.Empty, policy,
                 reader.IsDBNull(4) ? null : new DurableExecutionDeadline(ReadUtc(reader, 4)),
                 ReadUtc(reader, 13), ReadUtc(reader, 14), default,
@@ -189,6 +176,42 @@ internal partial class PostgreSqlDurableWorkStore
             }
         }
         return row with { DispatchId = id, NowUtc = await SampleExecutionTimeAsync(connection, transaction, cancellationToken).ConfigureAwait(false) };
+    }
+
+    /// <summary>Projects immutable timing facts from a Work row already locked for authorized inspection.</summary>
+    /// <remarks>No dispatch/permit reads or clock sample are needed: this projection grants no admission.</remarks>
+    internal static DurableWorkExecutionSnapshot? ReadInspectionExecutionSnapshot(NpgsqlDataReader reader,
+        int offset, DateTimeOffset acceptedAtUtc, DateTimeOffset dueAtUtc, int attemptNumber)
+    {
+        var policy = ReadAcceptedExecutionPolicy(reader, offset);
+        if (policy is null) return null;
+        var deadline = reader.IsDBNull(offset + 4) ? null : new DurableExecutionDeadline(ReadUtc(reader, offset + 4));
+        DateTimeOffset? next = policy.AttemptPlan is { } plan
+            ? attemptNumber >= plan.ElapsedOffsets.Count ? null : acceptedAtUtc + plan.ElapsedOffsets[attemptNumber]
+            : dueAtUtc;
+        return new(policy, deadline, acceptedAtUtc, next,
+            DurableWorkTimingEvaluator.GetAdmissionCutoff(policy, acceptedAtUtc, deadline));
+    }
+
+    /// <summary>Decodes the accepted policy column group; unknown versions fail closed.</summary>
+    private static DurableWorkExecutionPolicy? ReadAcceptedExecutionPolicy(NpgsqlDataReader reader, int offset)
+    {
+        if (reader.IsDBNull(offset)) return null;
+        if (reader.GetString(offset) != "work-execution-v1") throw new InvalidDataException("Unsupported accepted execution policy schema.");
+        var retry = new DurableWorkRetryPolicy(reader.GetInt32(offset + 5), reader.GetFieldValue<TimeSpan>(offset + 6),
+            reader.GetFieldValue<TimeSpan>(offset + 7), reader.GetFieldValue<TimeSpan>(offset + 8), reader.GetFieldValue<TimeSpan>(offset + 9),
+            reader.GetFieldValue<TimeSpan>(offset + 10), reader.GetFieldValue<TimeSpan>(offset + 11), reader.GetString(offset + 12));
+        if (retry.BackoffAlgorithm != "exponential-v1") throw new InvalidDataException("Unsupported accepted retry policy.");
+        DurableWorkExecutionPolicy policy;
+        if (!reader.IsDBNull(offset + 1))
+        {
+            if (reader.GetString(offset + 1) != "attempt-plan-v1") throw new InvalidDataException("Unsupported accepted attempt plan version.");
+            var offsets = reader.GetFieldValue<long[]>(offset + 2).Select(static value => TimeSpan.FromTicks(checked(value * 10)));
+            policy = DurableWorkExecutionPolicy.ForAttemptPlan(retry,
+                new DurableAttemptPlan(reader.GetString(offset + 1), offsets, TimeSpan.FromTicks(checked(reader.GetInt64(offset + 3) * 10))));
+        }
+        else policy = DurableWorkExecutionPolicy.FromRetryPolicy(retry);
+        return policy;
     }
 
     /// <summary>Samples the volatile authoritative clock only after callers acquire required locks.</summary>
