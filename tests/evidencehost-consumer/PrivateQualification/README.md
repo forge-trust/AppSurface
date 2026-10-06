@@ -64,6 +64,58 @@ is a substitute for measured execution. This preparation document makes no nativ
 
 ## Root build and consumer procedure
 
+### Private bundle source layout
+
+The launcher defaults to `_PRIVATE_QUALIFICATION_BUNDLE_SOURCE = False` and keeps
+the ordinary `Tool/application-bundles/application-id/build-id` lookup. The private
+[`prepare.py`](prepare.py) replaces exactly one marker with `True` alongside the
+existing generated root registration, and includes the resulting launcher in
+`generated_sha256`. No environment variable, worker packet, CLI option, uploaded
+path or existence fallback selects this layout.
+
+`prepare_application_bundle_input(workspace, deadline, *, expected_owner_uid=0,
+expected_owner_gid=0)` returns `(bundle_path, provenance)`. Before canonicalization,
+it moves the freshly built `workspace/bundle` into the fresh fixed
+`workspace/application-bundle-input/application-id/build-id`. The root-owned outer
+container stays `0700`; the application parent and sealed build directories are
+`0555`, and declared files remain `0444`/`0555`. The helper retains no-follow parent
+and bundle FDs, checks named identities, rejects occupied names, closes every FD,
+and uses the original Runner deadline. A failure retains the partial private
+workspace; it cannot fall back to another source. Owner overrides exercise file
+metadata in portable controls and supply no root lease.
+
+`application_bundle_input` contains `container_path`, `path`, `container_metadata`
+(`uid`, `gid`, four-digit `mode`, `device`, `inode`, `nlink`) and
+`bundle_files_sha256`, the SHA256 of canonical JSON for the existing `bundle_files`
+rows. This is provenance data. The [controller](run-qualification.py) checks the
+generated launcher digest before loading it, checks the exact fixed relationship,
+and audits all declared bytes against the actual compiled root registration before
+launch. Its existing 900-second entry collection clock now includes preflight;
+the launcher's captured job and stage timers are unchanged.
+
+The launcher's `_application_bundle_source(...)` context manager holds the outer
+and nested directory FDs through the same actual source audit and copy into the
+existing `/run` application workspace. The sealed inner root remains distinct
+from the writable root-only outer container. Worker/app permissions, target audit,
+scratch mounts, admission, accounts, cgroups, pumps and proof criteria are unchanged.
+
+No application bundle copy is published beneath either tool in this private
+variant. `measure_product_tool_inventory(tool, coverage_module, deadline, *,
+expected_owner_uid=0, expected_owner_gid=0)` returns `(complete_sha_map, summary)`
+after bounded real snapshots and streamed rehashing. `tools[entry].sha256` still
+binds every tool file; `published_inventory` records actual `file_count`,
+`directory_count` (including the root), `total_bytes`, `maximum_file_bytes`,
+`maximum_depth`, `file_limit_bytes`, `tree_limit_bytes` and `maximum_entries`.
+No file is skipped. The [coverage owner](product-coverage-README.md) retains its
+32 MiB per-file, 256 MiB tree, 2,048-entry and depth-eight bounds.
+
+Run 37397763258 retained `tree-byte-bound` at product preparation. Its declared
+bundle was 170,136,237 bytes; each tool included that deployment. The fix removes
+those additional tool copies while retaining the same actual audited application
+copy. The remaining tool totals have not been measured by a new preparation run:
+source readiness does not establish that they fit, native success, genuine product
+coverage, or a passing coverage gate.
+
 [`prepare.py`](prepare.py) requires the workflow's exact clean source commit and a fresh root-owned workspace.
 It binds every tracked source byte and Git executable mode, archives pristine `5d325bb` for the
 [metadata formatter](../PrivateQualificationMetadata/README.md), and builds the pinned 13.4.4 AppHost/DCP payload.

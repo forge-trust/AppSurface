@@ -307,5 +307,247 @@ class LauncherStartupDiagnosticControls(unittest.TestCase):
         self.assertLess(events.index("abort"), events.index(capture))
 
 
+class PrivateBundleSourceControls(unittest.TestCase):
+    """Real portable FD/audit data; never a registration, root lease or launch."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="private-bundle-source-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        self.root.chmod(0o700)
+        self.uid, self.gid, self.number = os.getuid(), os.getgid(), 0
+        self.guards = []
+        for owner, name in ((module._application, "RootApplicationLease"),
+                            (module._application, "select_registration"),
+                            (module, "_systemd"), (module.subprocess, "Popen")):
+            guard = patch.object(owner, name, side_effect=AssertionError("authority-path-not-allowed"))
+            self.guards.append(guard.start()); self.addCleanup(guard.stop)
+
+    def tearDown(self):
+        for guard in self.guards: guard.assert_not_called()
+
+    def fixture(self):
+        import hashlib
+        self.number += 1
+        workspace = self.root / str(self.number)
+        workspace.mkdir(mode=0o700)
+        tool = workspace / "tool-cli"
+        tool.mkdir(mode=0o700)
+        canary = tool / "untouched.dll"
+        canary.write_bytes(b"outside-published-canary"); canary.chmod(0o444)
+        tool.chmod(0o555)
+        outer = workspace / "application-bundle-input"
+        outer.mkdir(mode=0o700)
+        application = outer / "app"
+        application.mkdir(mode=0o700)
+        bundle = application / "build"
+        bundle.mkdir(mode=0o700)
+        payloads = {"data.dll": (b"dll-data", 0o444),
+                    "native": (b"\x7fELF\x02data-only", 0o555),
+                    "declared.txt": (b"declared-input", 0o444)}
+        rows = []
+        for name, (data, mode) in payloads.items():
+            (bundle / name).write_bytes(data); (bundle / name).chmod(mode)
+            rows.append(module._application.BundleFile(name, "Dependency", len(data),
+                                                       hashlib.sha256(data).hexdigest(), mode))
+        bundle.chmod(0o555); application.chmod(0o555)
+        # Direct CandidateAudit file data has no selected-registration identity.
+        # Only audit_bundle consumes it; every authority constructor is guarded.
+        canonical = b'{"file_audit_data_only":true}'
+        candidate = module._application.CandidateAudit(canonical, b'{}', hashlib.sha256(canonical).hexdigest(),
+            "0"*64, "0"*64, "profile", "app", tuple(rows),
+            module._application.Capabilities(("declared.txt",), 1, 1, 1, 1, 1, 1), "resource", 1)
+        return workspace, tool, outer, application, bundle, candidate, payloads, canary
+
+    def source(self, tool, *, uid=None, gid=None, deadline=None):
+        return module._application_bundle_source(tool, "app", "build",
+            module.time.monotonic()+10 if deadline is None else deadline,
+            expected_owner_uid=self.uid if uid is None else uid,
+            expected_owner_gid=self.gid if gid is None else gid)
+
+    def test_default_false_preserves_tool_lookup_and_private_missing_sibling_has_no_fallback(self):
+        workspace, tool, outer, application, bundle, candidate, payloads, canary = self.fixture()
+        with patch.object(module, "_PRIVATE_QUALIFICATION_BUNDLE_SOURCE", False), patch.object(
+                module._product, "open_directory", side_effect=AssertionError("ordinary-lookup-must-not-open")) as opened:
+            with self.source(tool) as source:
+                self.assertEqual(tool / "application-bundles/app/build", source)
+        opened.assert_not_called()
+        tool.chmod(0o700)
+        ordinary = tool / "application-bundles/app/build"
+        ordinary.mkdir(parents=True)
+        (ordinary / "ordinary-canary").write_bytes(b"must-not-be-fallback")
+        outer.rename(workspace / "retained-sibling")
+        with patch.object(module, "_PRIVATE_QUALIFICATION_BUNDLE_SOURCE", True):
+            with self.assertRaises((module._application.ApplicationError, module._product.ProductCoverageError, OSError)):
+                with self.source(tool): self.fail("missing-sibling-must-reject")
+        self.assertEqual(b"must-not-be-fallback", (ordinary / "ordinary-canary").read_bytes())
+        self.assertEqual(b"outside-published-canary", canary.read_bytes())
+
+    def test_private_fixed_sibling_audit_pins_exact_bytes_and_closes_actual_descriptors(self):
+        _, tool, outer, _, bundle, candidate, payloads, canary = self.fixture()
+        held = []
+        with patch.object(module, "_PRIVATE_QUALIFICATION_BUNDLE_SOURCE", True):
+            with self.source(tool) as source:
+                self.assertEqual(bundle, source)
+                with module._application.audit_bundle(source, candidate,
+                        expected_owner_uid=self.uid, deadline=module.time.monotonic()+10) as pinned:
+                    held = [pinned.root_fd, *(fd for _, fd, _ in pinned.files)]
+                    pinned.require_binding(candidate)
+                    for name, fd, identity in pinned.files:
+                        self.assertEqual(payloads[name][0], os.pread(fd, len(payloads[name][0])+1, 0))
+                        self.assertEqual(payloads[name][1], stat.S_IMODE(os.fstat(fd).st_mode))
+                        self.assertEqual(1, os.fstat(fd).st_nlink)
+                    pinned.verify_candidate(candidate, expected_owner_uid=self.uid,
+                                            deadline=module.time.monotonic()+10)
+                    # Copy only actual retained small FD data, then exercise the
+                    # same independent audit on the copy; no workspace/lease runs.
+                    copied = self.root / "audited-copy"
+                    copied.mkdir(mode=0o700)
+                    for name, fd, _ in pinned.files:
+                        item = next(row for row in candidate.files if row.relative_path == name)
+                        destination = os.open(copied / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                        try:
+                            data = os.pread(fd, item.length_bytes+1, 0)
+                            self.assertEqual(item.length_bytes, len(data))
+                            position = 0
+                            while position < len(data):
+                                written = os.write(destination, data[position:])
+                                self.assertGreater(written, 0); position += written
+                            os.fchmod(destination, item.mode)
+                        finally:
+                            os.close(destination)
+                    copied.chmod(0o555)
+                    with module._application.audit_bundle(copied, candidate,
+                            expected_owner_uid=self.uid, deadline=module.time.monotonic()+10) as audited_copy:
+                        audited_copy.require_binding(candidate)
+                        self.assertNotEqual(pinned.root_identity[:2], audited_copy.root_identity[:2])
+                        for name, fd, _ in audited_copy.files:
+                            self.assertEqual(payloads[name][0], os.pread(fd, len(payloads[name][0])+1, 0))
+                self.assertEqual(0o700, stat.S_IMODE(outer.lstat().st_mode))
+        for fd in held:
+            with self.assertRaises(OSError) as failure: os.fstat(fd)
+            self.assertEqual(errno.EBADF, failure.exception.errno)
+        self.assertEqual(b"outside-published-canary", canary.read_bytes())
+
+    def test_private_unsafe_parent_modes_owner_group_or_link_reject_before_bundle_audit(self):
+        for variant in ("outer-mode", "app-mode", "build-mode", "owner", "group", "link"):
+            with self.subTest(variant=variant):
+                _, tool, outer, application, bundle, _, _, canary = self.fixture()
+                kwargs = {}
+                if variant == "outer-mode": outer.chmod(0o755)
+                if variant == "app-mode": application.chmod(0o755)
+                if variant == "build-mode": bundle.chmod(0o755)
+                if variant == "owner": kwargs["uid"] = self.uid+1
+                if variant == "group": kwargs["gid"] = self.gid+1
+                if variant == "link":
+                    application.chmod(0o700)
+                    bundle.rename(application / "original")
+                    bundle.symlink_to(application / "original", target_is_directory=True)
+                    application.chmod(0o555)
+                with patch.object(module, "_PRIVATE_QUALIFICATION_BUNDLE_SOURCE", True), patch.object(
+                        module._application, "audit_bundle", side_effect=AssertionError("must-not-audit")) as audited:
+                    with self.assertRaises((module._application.ApplicationError, module._product.ProductCoverageError, OSError)):
+                        with self.source(tool, **kwargs): self.fail("unsafe-parent-must-reject")
+                audited.assert_not_called()
+                self.assertEqual(b"outside-published-canary", canary.read_bytes())
+
+    def test_bundle_actual_hash_length_mode_link_and_fifo_fail_without_outside_mutation(self):
+        for variant in ("hash", "length", "mode", "hardlink", "symlink", "fifo"):
+            with self.subTest(variant=variant):
+                _, tool, _, _, bundle, candidate, _, canary = self.fixture()
+                target = bundle / "data.dll"
+                bundle.chmod(0o700)
+                if variant == "hash":
+                    target.chmod(0o600); target.write_bytes(b"bad-data"); target.chmod(0o444)
+                if variant == "length":
+                    target.chmod(0o600); target.write_bytes(b"dll-data-extra"); target.chmod(0o444)
+                if variant == "mode": target.chmod(0o644)
+                if variant == "hardlink": os.link(target, self.root / f"hardlink-{self.number}")
+                if variant == "symlink": target.unlink(); target.symlink_to(canary)
+                if variant == "fifo": target.unlink(); os.mkfifo(target, 0o444)
+                bundle.chmod(0o555)
+                with patch.object(module, "_PRIVATE_QUALIFICATION_BUNDLE_SOURCE", True):
+                    with self.source(tool) as source:
+                        with self.assertRaises(module._application.ApplicationError):
+                            module._application.audit_bundle(source, candidate,
+                                expected_owner_uid=self.uid, deadline=module.time.monotonic()+10)
+                self.assertEqual(b"outside-published-canary", canary.read_bytes())
+                self.assertEqual(0o444, stat.S_IMODE(canary.lstat().st_mode))
+
+    def test_named_build_substitution_rejects_on_context_exit_and_closes_all_retained_fds(self):
+        _, tool, _, application, bundle, _, payloads, canary = self.fixture()
+        closed = []
+        original_close = os.close
+        def close(fd):
+            closed.append(fd); return original_close(fd)
+        with patch.object(module, "_PRIVATE_QUALIFICATION_BUNDLE_SOURCE", True), patch.object(module.os, "close", close):
+            with self.assertRaises(module._application.ApplicationError):
+                with self.source(tool) as source:
+                    application.chmod(0o700)
+                    source.rename(application / "retained-original")
+                    source.mkdir(mode=0o555)
+                    application.chmod(0o555)
+        self.assertEqual(4, len(set(closed)))
+        for fd in set(closed):
+            with self.assertRaises(OSError) as failure: os.fstat(fd)
+            self.assertEqual(errno.EBADF, failure.exception.errno)
+        self.assertEqual(payloads["data.dll"][0], (application / "retained-original/data.dll").read_bytes())
+        self.assertEqual(b"outside-published-canary", canary.read_bytes())
+
+    def test_original_deadline_rejects_before_any_directory_open(self):
+        _, tool, _, _, _, _, _, canary = self.fixture()
+        with patch.object(module, "_PRIVATE_QUALIFICATION_BUNDLE_SOURCE", True), patch.object(
+                module.os, "open", side_effect=AssertionError("expired-must-not-open")) as opened:
+            with self.assertRaises(module.LauncherError):
+                with self.source(tool, deadline=module.time.monotonic()-1): self.fail("expired-must-reject")
+        opened.assert_not_called()
+        self.assertEqual(b"outside-published-canary", canary.read_bytes())
+
+    def test_compiled_marker_selects_empty_published_rows_and_source_audits_enclose_copy(self):
+        import ast
+        tree = ast.parse(Path(module.__file__).read_text())
+        constants = [node for node in tree.body if isinstance(node, ast.Assign)
+                     and any(isinstance(target, ast.Name) and target.id == "_PRIVATE_QUALIFICATION_BUNDLE_SOURCE"
+                             for target in node.targets)]
+        self.assertEqual(1, len(constants)); self.assertIs(constants[0].value.value, False)
+        launch = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                      and node.name == "_launch_with_completion_impl")
+        owner = next(node for node in ast.walk(launch) if isinstance(node, ast.Call)
+                     and isinstance(node.func, ast.Attribute) and node.func.attr == "ProductCoverageOwner")
+        expression = next(row.value for row in owner.keywords if row.arg == "published_files")
+        self.assertIsInstance(expression, ast.IfExp)
+        self.assertIsInstance(expression.orelse, ast.Tuple); self.assertEqual([], expression.orelse.elts)
+        markers = [node for node in ast.walk(expression.test)
+                   if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not)
+                   and isinstance(node.operand, ast.Name)
+                   and node.operand.id == "_PRIVATE_QUALIFICATION_BUNDLE_SOURCE"]
+        self.assertEqual(1, len(markers))
+        self.assertIsInstance(expression.body, ast.Call)
+        self.assertIsInstance(expression.body.func, ast.Name)
+        self.assertEqual("tuple", expression.body.func.id)
+        # Evaluate only the actual closed selector, never ProductCoverageOwner.
+        result = eval(compile(ast.Expression(expression), "published-selector-data", "eval"),
+                      {"_PRIVATE_QUALIFICATION_BUNDLE_SOURCE": True,
+                       "selected_application": object(), "Path": Path})
+        self.assertEqual((), result)
+        workspace = next(node for node in tree.body if isinstance(node, ast.ClassDef)
+                         and node.name == "_ApplicationWorkspaceOwner")
+        initializer = next(node for node in workspace.body if isinstance(node, ast.FunctionDef)
+                           and node.name == "__init__")
+        source_context = next(node for node in ast.walk(initializer) if isinstance(node, ast.With)
+                              and any(isinstance(item.context_expr, ast.Call)
+                                      and isinstance(item.context_expr.func, ast.Name)
+                                      and item.context_expr.func.id == "_application_bundle_source"
+                                      for item in node.items))
+        audited = [node for node in ast.walk(source_context) if isinstance(node, ast.Call)
+                   and isinstance(node.func, ast.Attribute) and node.func.attr == "audit_bundle"]
+        self.assertEqual(2, len(audited))
+        audited.sort(key=lambda node: node.lineno)
+        copy = next(node for node in ast.walk(source_context) if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute) and node.func.attr == "pread")
+        self.assertLess(audited[0].lineno, copy.lineno)
+        self.assertGreater(audited[1].lineno, copy.lineno)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -107,6 +107,65 @@ def persist_and_validate(workspace, entry, artifacts, plan, metadata):
     return copies, validate_result(artifacts, plan, entry, metadata)
 
 
+def private_bundle_preflight(binding, workspace, launcher, tool, deadline):
+    """Check the fixed sibling's provenance and actual compile-selected bytes.
+
+    Binding JSON is data, never an audit/capability substitute. The generated
+    launcher selects the exact root registration and retains every parent FD
+    through the existing real bundle audit. Uses the captured entry deadline.
+    """
+    require(time.monotonic() < deadline and launcher._PRIVATE_QUALIFICATION_BUNDLE_SOURCE is True
+            and tool.parent == workspace)
+    provenance = binding["application_bundle_input"]
+    require(type(provenance) is dict and set(provenance) == {
+        "container_path", "path", "container_metadata", "bundle_files_sha256"})
+    outer = workspace / "application-bundle-input"
+    expected = outer / APP_ID / BUILD_ID
+    require(provenance["container_path"] == str(outer) and provenance["path"] == str(expected)
+            and provenance["bundle_files_sha256"] == sha(json.dumps(binding["bundle_files"],
+                sort_keys=True, separators=(",", ":")).encode()))
+    selected = launcher._application.select_registration(APP_ID, binding["metadata"]["entry_digest"],
+        policy_sha256=binding["metadata"]["policy_sha256"], profile_id=PROFILE)
+    require([(row.relative_path, row.length_bytes, row.sha256, row.mode) for row in selected.audit.files]
+            == [(row["RelativePath"], row["LengthBytes"], row["Sha256"], row["Mode"])
+                for row in binding["bundle_files"]])
+    with launcher._application_bundle_source(tool, APP_ID, BUILD_ID, deadline) as source:
+        info = outer.lstat()
+        require(provenance["container_metadata"] == {"uid": info.st_uid, "gid": info.st_gid,
+            "mode": format(stat.S_IMODE(info.st_mode), "04o"), "device": info.st_dev,
+            "inode": info.st_ino, "nlink": info.st_nlink})
+        with launcher._application.audit_bundle(source, selected.audit, deadline=deadline) as pinned:
+            pinned.recheck(deadline=deadline)
+    require(time.monotonic() < deadline)
+
+
+def generated_launcher_preflight(binding, deadline):
+    """Pin the generated launcher digest before loading code, without issuing authority."""
+    require(type(deadline) in (int, float) and 0 < deadline < float("inf") and time.monotonic() < deadline)
+    build = Path(binding["build_root"])
+    launcher_path = build / "scripts/evidencehost-linux-launcher.py"
+    launcher_fd = os.open(launcher_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    try:
+        info = os.fstat(launcher_fd)
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_nlink == 1
+                and not info.st_mode & 0o022 and 0 < info.st_size <= 1 << 20)
+        launcher_bytes = bytearray()
+        while len(launcher_bytes) <= info.st_size:
+            require(time.monotonic() < deadline)
+            part = os.read(launcher_fd, min(65536, info.st_size+1-len(launcher_bytes)))
+            if not part:
+                break
+            launcher_bytes.extend(part)
+        identity = lambda row: (row.st_dev, row.st_ino, row.st_mode, row.st_uid, row.st_gid,
+                                row.st_nlink, row.st_size, row.st_mtime_ns, row.st_ctime_ns)
+        require(len(launcher_bytes) == info.st_size and identity(info) == identity(os.fstat(launcher_fd))
+                == identity(launcher_path.lstat()) and sha(launcher_bytes)
+                == binding["generated_sha256"]["scripts/evidencehost-linux-launcher.py"])
+    finally:
+        os.close(launcher_fd)
+    require(time.monotonic() < deadline)
+
+
 def entry_preflight(binding, workspace, entry):
     """Load selected code and verify immutable snapshots before any launch.
 
@@ -318,7 +377,10 @@ def close_entry_resources(diagnostic_fd, completion, original_error):
 def one_entry(binding, workspace, entry):
     """Launch, pin output, collect bytes, close accounts, then evaluate structural data."""
     build = Path(binding["build_root"])
+    started = time.monotonic()
+    generated_launcher_preflight(binding, started+900)
     launcher, collector, tool, subject = entry_preflight(binding, workspace, entry)
+    private_bundle_preflight(binding, workspace, launcher, tool, started+900)
     output = prepare_entry_output_parent(workspace, entry)
     diagnostics = workspace / ("failure-"+entry)
     diagnostics.mkdir(mode=0o700)
@@ -334,7 +396,6 @@ def one_entry(binding, workspace, entry):
         "--application-id", APP_ID, "--application-entry-digest", metadata["entry_digest"], "--application-profile", PROFILE,
         "--admission-seconds", "30", "--start-seconds", "120", "--collection-seconds", "60",
         "--cleanup-seconds", "60", "--stopping-seconds", "5"])
-    started = time.monotonic()
     completion = None
     try:
         completion = launcher.launch_with_completion(args, diagnostic_directory_fd=diag_fd)

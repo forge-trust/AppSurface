@@ -293,13 +293,14 @@ def policy():
             "Profiles": [profile], "Rules": [{"Id": "qualification-source", "Pattern": "tests/**", "ProfileId": PROFILE, "Precedence": 0}]}
 
 
-def bundle_inventory(bundle):
+def bundle_inventory(bundle, *, deadline=None):
     """Set finite immutable deployment roles/modes before catalogue canonicalization."""
     roles = {"AspireChild.dll": "AppHost", "AspireChild.runtimeconfig.json": "AppHostRuntimeConfiguration",
              "resource/NativeHttpResource.dll": "Resource", "resource/NativeHttpResource.runtimeconfig.json": "ResourceRuntimeConfiguration",
              "dcp/dcp": "Dcp", "proof-input/declared.txt": "DeclaredInput"}
     result = []
     for path in sorted(bundle.rglob("*")):
+        require(deadline is None or time.monotonic() < deadline)
         require(not path.is_symlink())
         if path.is_dir():
             os.chmod(path, 0o755)
@@ -312,13 +313,16 @@ def bundle_inventory(bundle):
         mode = 0o555 if role in ("Dcp", "DcpExtension") else 0o444
         os.chmod(path, mode)
         result.append({"RelativePath": relative, "Role": role, "LengthBytes": info.st_size, "Sha256": sha(path.read_bytes()), "Mode": mode})
+        require(deadline is None or time.monotonic() < deadline)
     require(6 <= len(result) <= 256 and sum(row["LengthBytes"] for row in result) <= 512*1024*1024)
     dcp = bundle / "dcp/dcp"
     require(dcp.read_bytes()[:5] == b"\x7fELF\x02")
     for path in sorted(bundle.rglob("*"), reverse=True):
+        require(deadline is None or time.monotonic() < deadline)
         if path.is_dir():
             os.chmod(path, 0o555)
     os.chmod(bundle, 0o555)
+    require(deadline is None or time.monotonic() < deadline)
     return result
 
 
@@ -639,6 +643,131 @@ def prepare_product_tool_directory(workspace, entry, deadline, *, expected_owner
     return result
 
 
+def prepare_application_bundle_input(workspace, deadline, *, expected_owner_uid=0, expected_owner_gid=0):
+    """Relocate the fresh build into one protected sibling before canonicalization.
+
+    Returns (bundle_path, provenance). Existing names are rejected; no payload is
+    copied into a tool. The outer container remains 0700, its application parent
+    becomes 0555, and bundle_inventory later seals the build tree to 0555/0444.
+    Owner overrides test file data only. Every FD closes on the original deadline;
+    partial failure remains private for diagnosis and is never repaired/fallback.
+    """
+    workspace = Path(workspace)
+    require(workspace.is_absolute() and ".." not in workspace.parts
+            and type(expected_owner_uid) is int and expected_owner_uid >= 0
+            and type(expected_owner_gid) is int and expected_owner_gid >= 0
+            and type(deadline) in (int, float) and 0 < deadline < float("inf")
+            and time.monotonic() < deadline)
+    identity = lambda row: (row.st_dev, row.st_ino, row.st_uid, row.st_gid, stat.S_IMODE(row.st_mode))
+    owned, error, result = [], None, None
+    try:
+        named_workspace = workspace.lstat()
+        require(stat.S_ISDIR(named_workspace.st_mode) and named_workspace.st_uid == expected_owner_uid
+                and named_workspace.st_gid == expected_owner_gid and not named_workspace.st_mode & 0o022)
+        parent = os.open(workspace, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        owned.append(parent)
+        require(identity(named_workspace) == identity(os.fstat(parent)))
+        pins = []
+        container = parent
+        for name, mode in (("application-bundle-input", 0o700), (APP_ID, 0o755)):
+            require(time.monotonic() < deadline)
+            os.mkdir(name, mode=0o700, dir_fd=parent)
+            created = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            require(stat.S_ISDIR(created.st_mode) and created.st_uid == expected_owner_uid)
+            # Only the fresh name in a retained protected parent is eligible.
+            os.chmod(name, 0o700, dir_fd=parent, follow_symlinks=False)
+            named = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            require(identity(named)[:2] == identity(created)[:2] and stat.S_ISDIR(named.st_mode)
+                    and named.st_uid == expected_owner_uid and stat.S_IMODE(named.st_mode) == 0o700)
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+            owned.append(child)
+            require(identity(named) == identity(os.fstat(child)))
+            os.fchown(child, expected_owner_uid, expected_owner_gid)
+            os.fchmod(child, mode)
+            final = os.fstat(child)
+            require(identity(final) == identity(os.stat(name, dir_fd=parent, follow_symlinks=False))
+                    and final.st_uid == expected_owner_uid and final.st_gid == expected_owner_gid
+                    and stat.S_IMODE(final.st_mode) == mode and final.st_dev == named_workspace.st_dev)
+            pins.append((parent, child, name, identity(final)))
+            parent = child
+            if name == "application-bundle-input":
+                container = child
+        require(time.monotonic() < deadline)
+        named_bundle = os.stat("bundle", dir_fd=owned[0], follow_symlinks=False)
+        require(stat.S_ISDIR(named_bundle.st_mode) and named_bundle.st_uid == expected_owner_uid
+                and named_bundle.st_gid == expected_owner_gid)
+        bundle_fd = os.open("bundle", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=owned[0])
+        owned.append(bundle_fd)
+        require(identity(named_bundle) == identity(os.fstat(bundle_fd)))
+        # This is the root's fresh copied build, still before canonical sealing.
+        # A publisher's inherited group-write mode cannot escape the 0700 outer.
+        os.fchmod(bundle_fd, 0o755)
+        named_bundle = os.fstat(bundle_fd)
+        require(identity(named_bundle) == identity(os.stat("bundle", dir_fd=owned[0], follow_symlinks=False)))
+        # The application directory was created exclusively above and is empty.
+        require(os.listdir(parent) == [] and time.monotonic() < deadline)
+        os.rename("bundle", BUILD_ID, src_dir_fd=owned[0], dst_dir_fd=parent)
+        require(identity(named_bundle) == identity(os.stat(BUILD_ID, dir_fd=parent, follow_symlinks=False))
+                == identity(os.fstat(bundle_fd)))
+        os.fchmod(parent, 0o555)
+        pins[-1] = (pins[-1][0], parent, APP_ID, identity(os.fstat(parent)))
+        for ancestor, child, name, expected in pins:
+            require(expected == identity(os.fstat(child))
+                    == identity(os.stat(name, dir_fd=ancestor, follow_symlinks=False)))
+        require(identity(named_workspace) == identity(os.fstat(owned[0])) == identity(workspace.lstat()))
+        info = os.fstat(container)
+        outer = workspace / "application-bundle-input"
+        result = (outer / APP_ID / BUILD_ID, {"container_path": str(outer), "path": str(outer / APP_ID / BUILD_ID),
+            "container_metadata": {"uid": info.st_uid, "gid": info.st_gid, "mode": format(stat.S_IMODE(info.st_mode), "04o"),
+                                   "device": info.st_dev, "inode": info.st_ino, "nlink": info.st_nlink}})
+    except BaseException as failure:
+        error = failure
+    finally:
+        for fd in reversed(owned):
+            try:
+                os.close(fd)
+            except BaseException as failure:
+                if error is None:
+                    error = failure
+    if error is not None:
+        raise error
+    require(time.monotonic() < deadline)
+    return result
+
+
+def measure_product_tool_inventory(tool, coverage_module, deadline, *, expected_owner_uid=0, expected_owner_gid=0):
+    """Return (complete_sha_map, observed_summary) using the existing tool bounds.
+
+    No files are excluded and no bundle override is supplied. All files retain
+    32 MiB, the tree 256 MiB/2048 entries/depth eight. Measurements are real pinned
+    file data, not a fit prediction or runtime authority. The original deadline
+    includes both snapshots, streaming verification and descriptor closure.
+    """
+    files, directories = coverage_module.snapshot_tree(tool, deadline, uid=expected_owner_uid, gid=expected_owner_gid)
+    total, maximum = 0, 0
+    for relative, row in files.items():
+        path = tool / relative
+        parent = coverage_module.open_directory(path.parent, deadline, uid=expected_owner_uid, gid=expected_owner_gid)
+        try:
+            digest, info = coverage_module.hash_published_file(parent, path.name, deadline,
+                uid=expected_owner_uid, gid=expected_owner_gid, mode=int(row["mode"], 8),
+                cap=min(coverage_module.FILE_LIMIT, coverage_module.TREE_LIMIT-total))
+            require(digest == row["sha256"])
+            total += info[6]
+            maximum = max(maximum, info[6])
+        finally:
+            os.close(parent)
+        require(time.monotonic() < deadline)
+    require((files, directories) == coverage_module.snapshot_tree(tool, deadline, uid=expected_owner_uid, gid=expected_owner_gid)
+            and time.monotonic() < deadline)
+    summary = {"file_count": len(files), "directory_count": len(directories), "total_bytes": total,
+               "maximum_file_bytes": maximum,
+               "maximum_depth": max((len(Path(name).parts) for name in (*files, *directories) if name), default=0),
+               "file_limit_bytes": coverage_module.FILE_LIMIT, "tree_limit_bytes": coverage_module.TREE_LIMIT,
+               "maximum_entries": coverage_module.MAX_FILES}
+    return {name: row["sha256"] for name, row in files.items()}, summary
+
+
 def prepare(source, workspace, source_commit, run_id, workflow_identity):
     """Build both actual entries from the same frozen variant and exact compiled bindings."""
     require(os.geteuid() == 0 and re.fullmatch(r"[0-9a-f]{40}", source_commit)
@@ -685,7 +814,9 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
     declared = bundle / "proof-input"
     declared.mkdir(mode=0o755)
     (declared / "declared.txt").write_bytes(b"declared-native-input\n")
-    files = bundle_inventory(bundle)
+    bundle, bundle_input = prepare_application_bundle_input(workspace, runner.deadline)
+    files = bundle_inventory(bundle, deadline=runner.deadline)
+    bundle_input["bundle_files_sha256"] = sha(json.dumps(files, sort_keys=True, separators=(",", ":")).encode())
     formatter = metadata_project.parent / "bin/Debug/net10.0/ForgeTrust.AppSurface.Cli.Tests.dll"
     metadata_raw = runner.run([str(dotnet), str(formatter)], build,
         input_bytes=json.dumps({"policy": policy(), "bundle_files": files}, separators=(",", ":")).encode(), capture=True)
@@ -718,6 +849,15 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
     marker = "_COMPILED_REGISTRATIONS: tuple[_CompiledRegistration, ...] = ()"
     require(original.count(marker) == 1)
     root_module.write_text(original.replace(marker, registration))
+    launcher_module = build / "scripts/evidencehost-linux-launcher.py"
+    launcher_source = launcher_module.read_text()
+    bundle_marker = "_PRIVATE_QUALIFICATION_BUNDLE_SOURCE = False"
+    require(launcher_source.count(bundle_marker) == 1 and time.monotonic() < runner.deadline)
+    launcher_module.write_text(launcher_source.replace(bundle_marker, "_PRIVATE_QUALIFICATION_BUNDLE_SOURCE = True"))
+    coverage_spec = importlib.util.spec_from_file_location("qualification_product_inventory",
+        build / "tests/evidencehost-consumer/PrivateQualification/product-coverage.py")
+    coverage_module = importlib.util.module_from_spec(coverage_spec)
+    coverage_spec.loader.exec_module(coverage_module)
     cli_project = build / CLI_PROJECT
     runner.run([str(dotnet), "restore", str(cli_project), "--locked-mode"], build)
     tools, product_binary_bindings = {}, {}
@@ -735,8 +875,6 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
             source_reporter = cache / "reportgenerator/5.5.10/tools/net10.0"
             require((source_reporter / "ReportGenerator.dll").is_file())
             shutil.copytree(source_reporter, reporter)
-        deployment = tool / "application-bundles" / APP_ID / BUILD_ID
-        shutil.copytree(bundle, deployment)
         shutil.copyfile(tool / "ForgeTrust.AppSurface.Evidence.Contracts.dll", tool / "protected-tool.dll")
         (tool / "qualification-policy.json").write_bytes(base64.b64decode(metadata["policybase64"], validate=True))
         product_binary_bindings[entry] = product_helper.replace_and_inspect(tool, product,
@@ -747,13 +885,13 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
             for path in tool.rglob("*"):
                 require(time.monotonic() < runner.deadline)
                 require(not path.is_symlink())
-                if path.is_dir() and not path.is_relative_to(deployment):
+                if path.is_dir():
                     os.chmod(path, 0o755)
-                elif not path.is_relative_to(deployment):
+                else:
                     os.chmod(path, 0o444)
             os.chmod(tool, 0o755)
-            tools[entry] = {"path": str(tool), "sha256": {p.relative_to(tool).as_posix(): sha(p.read_bytes())
-                for p in sorted(tool.rglob("*")) if p.is_file()}}
+            tool_map, published_inventory = measure_product_tool_inventory(tool, coverage_module, runner.deadline)
+            tools[entry] = {"path": str(tool), "sha256": tool_map, "published_inventory": published_inventory}
         except BaseException as error:
             try:
                 product_helper.capture_product_preparation_failure(tool, workspace / ("product-binary-"+entry+".json"),
@@ -766,7 +904,8 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
     require(time.monotonic() < runner.deadline)
     result = {"source_commit": source_commit, "source_files": before, "run_id": run_id, "workflow_identity": workflow_identity,
         "subject_revision": subject_revision, "subject_sha256": subject_map, "metadata": metadata, "bundle_files": files,
-        "generated_sha256": {str(p.relative_to(build)): sha(p.read_bytes()) for p in (generated_contracts, generated_planner, root_module)},
+        "generated_sha256": {str(p.relative_to(build)): sha(p.read_bytes()) for p in (generated_contracts, generated_planner, root_module, launcher_module)},
+        "application_bundle_input": bundle_input,
         "preparation_complete": True, "sdk_bootstrap": sdk_binding,
         "product_coverage_inputs": {"source_commit": product["source_commit"],
             "source_manifest_sha256": sha((source / "tests/evidencehost-consumer/PrivateQualification/product-source-manifest.json").read_bytes()),
