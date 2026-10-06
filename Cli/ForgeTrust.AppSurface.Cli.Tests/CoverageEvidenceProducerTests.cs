@@ -160,7 +160,9 @@ public sealed class CoverageEvidenceProducerTests
             CoverageTextWriters.Create(standardOutputWriter, standardErrorWriter),
             CancellationToken.None);
 
-        Assert.Equal(EvidenceProducerOutcome.TimedOut, result.Outcome);
+        Assert.True(result.Outcome == EvidenceProducerOutcome.TimedOut,
+            $"Expected TimedOut, actual {result.Outcome}. Diagnostic: {result.Diagnostic}\n" +
+            $"Fixture stdout: {standardOutputWriter}\nFixture stderr: {standardErrorWriter}");
         Assert.Empty(result.SatisfiedAssertionIds);
         Assert.Contains("coverage/timings.json", result.Diagnostic, StringComparison.Ordinal);
         Assert.True(File.Exists(TestPathUtils.PathUnder(outputDirectory, "coverage", "timings.json")));
@@ -188,7 +190,9 @@ public sealed class CoverageEvidenceProducerTests
             CoverageTextWriters.Create(standardOutputWriter, standardErrorWriter),
             CancellationToken.None);
 
-        Assert.Equal(EvidenceProducerOutcome.TimedOut, result.Outcome);
+        Assert.True(result.Outcome == EvidenceProducerOutcome.TimedOut,
+            $"Expected TimedOut, actual {result.Outcome}. Diagnostic: {result.Diagnostic}\n" +
+            $"Fixture stdout: {standardOutputWriter}\nFixture stderr: {standardErrorWriter}");
         Assert.DoesNotContain("coverage/timings.json", result.Diagnostic, StringComparison.Ordinal);
         Assert.False(File.Exists(TestPathUtils.PathUnder(outputDirectory, "coverage", "timings.json")));
     }
@@ -248,7 +252,9 @@ public sealed class CoverageEvidenceProducerTests
             CoverageTextWriters.Create(standardOutputWriter, standardErrorWriter),
             CancellationToken.None);
 
-        Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
+        Assert.True(result.Outcome == EvidenceProducerOutcome.Passed,
+            $"Expected Passed, actual {result.Outcome}. Diagnostic: {result.Diagnostic}\n" +
+            $"Fixture stdout: {standardOutputWriter}\nFixture stderr: {standardErrorWriter}");
         Assert.Contains("Coverage gate passed", result.Diagnostic, StringComparison.Ordinal);
         Assert.Contains("Patch line mode: codecov", await File.ReadAllTextAsync(Path.Join(outputDirectory, "coverage", "coverage-gate.md")), StringComparison.Ordinal);
     }

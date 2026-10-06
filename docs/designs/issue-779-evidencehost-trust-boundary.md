@@ -10,6 +10,10 @@
 - Mode: Builder
 Builds on: [Contract-First EvidenceHost](appsurface-evidencehost-contract-first.md) and [issue #779](https://github.com/forge-trust/AppSurface/issues/779)
 
+### Runtime redesign (2026-10-06)
+
+The user requested supervision around a [C# core with supervisor and worker roles in the same executable](issue-779-csharp-supervision-core.md). That design and its [migration checkpoints](../plans/issue-779-csharp-supervision-migration.md) replace the Python runtime architecture and delivery sequence. The admission, trust, lifecycle, permission, and acceptance requirements below remain in force. The redesign has no implementation or native acceptance claim.
+
 ## Problem Statement
 
 An EvidenceHost manifest can be internally consistent while its policy, registration, verifier, or execution environment came from the tested head. A digest proves that bytes match other bytes; it does not establish who supplied them. The current `observationOnly` switch also changes the final claim without preventing registered resources and producers from running. A consumer therefore needs one admission decision before any resource, producer, or head-controlled code starts, and a hostile-input proof that the decision cannot be bypassed by either the Aspire host or the CLI.

@@ -239,7 +239,7 @@ public sealed class EvidenceCliJsonInputTests
             "bounded-input", "1", "contract", [profile, conservative],
             [new EvidencePolicyRule("docs", "docs/**", "docs")]);
         var plan = new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("docs/readme.md")]);
-        var manifest = EvidenceManifestBuilder.Build(plan, []);
+        var manifest = EvidenceAdmissionTestFixture.BuildLegacyStructural(plan, []);
         var paths = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["policy"] = Path.Join(root, "policy.json"),

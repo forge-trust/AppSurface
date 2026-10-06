@@ -385,6 +385,21 @@ public sealed class EvidenceJsonInputTests
         Assert.True(EvidenceManifestBuilder.Verify(parsedPlan, parsedManifest));
     }
 
+    [Fact]
+    public void Serialize_EmitsAdmissionMetadataForNewManifestAndOmitsItForLegacyStructuralFixture()
+    {
+        var plan = CreatePlan();
+        var admitted = EvidenceAdmissionTestFixture.BuildTrusted(plan, []);
+        var legacy = EvidenceAdmissionTestFixture.BuildLegacyStructural(plan, []);
+        using var admittedJson = JsonDocument.Parse(EvidenceCanonicalJson.Serialize(admitted));
+        using var legacyJson = JsonDocument.Parse(EvidenceCanonicalJson.Serialize(legacy));
+
+        Assert.Equal("Trusted", admittedJson.RootElement.GetProperty("Mode").GetString());
+        Assert.Equal("fake-test-verifier", admittedJson.RootElement.GetProperty("EnvelopeAssertion").GetProperty("VerifierId").GetString());
+        Assert.False(legacyJson.RootElement.TryGetProperty("Mode", out _));
+        Assert.False(legacyJson.RootElement.TryGetProperty("EnvelopeAssertion", out _));
+    }
+
     private static EvidencePolicy CreatePolicy()
     {
         var profile = new EvidenceProfile("coverage", EvidenceProfileScope.Targeted, [], [], []);
@@ -407,7 +422,7 @@ public sealed class EvidenceJsonInputTests
         return draft with { PlanDigest = EvidenceDigest.CanonicalSha256(draft) };
     }
 
-    private static EvidenceManifest CreateManifest() => EvidenceManifestBuilder.Build(CreatePlan(), []);
+    private static EvidenceManifest CreateManifest() => EvidenceAdmissionTestFixture.BuildLegacyStructural(CreatePlan(), []);
 
     private sealed class ChunkedNonSeekableStream(byte[] bytes, int maximumChunkBytes) : Stream
     {

@@ -1,0 +1,229 @@
+# Protected consumer execution broker fixture
+
+This fixture exercises the production protected CLI and Aspire consumer entries over the same Unix socket protocol they use in production. It runs on disposable Linux x86-64 as root, starts the requested .NET test command under a non-root UID/GID with `setpriv`, and copies the restored, pinned ReportGenerator 5.5.10 `net10.0` payload into a root-owned tool root. Each scenario has its own root-owned socket and metadata file. The broker captures `SO_PEERCRED` from the first `ready` connection and pins that actual testhost PID, UID, and GID for every later operation on the scenario socket.
+
+The worker output parents are fresh worker-owned directories with their device, inode, UID, and GID taken from `stat`. Policy bytes are written once under the root-owned tool root and exposed read-only to the worker. The fixture's `/system.slice/...` cgroup value is explicitly synthetic; this script starts no systemd unit and does not test cgroup supervision, subject isolation, a production launcher, or protected CI acceptance. The `run` response is deterministic fixture data. The positive coverage test still runs the production coverage adapter, collects hostile Cobertura bytes through the broker protocol, invokes the copied ReportGenerator package, writes artifacts through retained production handles, and verifies their digests. That proves consumer-path behavior only.
+
+The positive Cobertura report contains one synthetic covered line and two covered branch outcomes in a class. ReportGenerator recalculates valid-item counts from these elements, so top-level percentages on an empty package tree cannot establish a positive numeric gate: the [coverage gate](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate) rejects zero valid items with `ASCOV006`. The [portable report regression](test_execution_broker_fixture.py) checks that covered line/branch elements exist and match the declared totals. The protected consumer test then requires the actual merged report to pass the existing numeric gate before claiming Observation evidence.
+
+## Linux invocation
+
+Use a disposable Linux x86-64 runner with Python 3, `setpriv`, .NET 10, and the already restored ReportGenerator 5.5.10 package. Build the two test assemblies before entering the root fixture. Then invoke the fixture from the repository root with the numeric worker and subject identities chosen for that runner. Both UID/GID pairs must be non-root and distinct. For example, if `worker` is 65534:65534 and `subject` is 65533:65533:
+
+```sh
+sudo -n python3 tests/evidencehost-consumer/test_execution_broker.py \
+  --worker-uid 65534 --worker-gid 65534 \
+  --subject-uid 65533 --subject-gid 65533 \
+  --reportgenerator-package /home/runner/.nuget/packages/reportgenerator/5.5.10 \
+  -- dotnet vstest \
+    Cli/ForgeTrust.AppSurface.Cli.Tests/bin/Debug/net10.0/ForgeTrust.AppSurface.Cli.Tests.dll \
+    Aspire/ForgeTrust.AppSurface.Aspire.Tests/bin/Debug/net10.0/ForgeTrust.AppSurface.Aspire.Tests.dll \
+    '--TestCaseFilter:FullyQualifiedName~EvidenceProtectedCliExecutionTests|FullyQualifiedName~EvidenceProtectedAspireExecutionTests'
+```
+
+The worker starts with supplementary groups cleared. To grant a specific runner group, pass `--worker-supplementary-groups 998,1002` with the explicit positive GIDs required on that host. GID 0, duplicates, and the subject GID are rejected; the fixture never adds groups by default. The actual wrapper or validation command can be supplied unchanged after `--`. For a full wrapper, an owner can explicitly set its required environment in that command, for example `/usr/bin/env PATH=<runner-path> NUGET_PACKAGES=<runner-owned-cache> ./scripts/coverage-solution.sh`; the fixture does not pass through the caller's general environment. The fixture defaults `NUGET_PACKAGES` to a fresh worker-owned temporary cache. If the command overrides it, that selected cache must be writable by the non-root worker.
+
+The test assemblies must be readable by the selected worker identity. The test command receives worker-owned temporary HOME, .NET CLI home, NuGet cache, temp, and result directories. The fixture prints its temporary root and test-command exit status to stderr; it preserves that root for inspection. Scenario metadata files next to the sockets carry the protected policy path, selected paths, output parent/slot, and operation log path to both test assemblies through `EVIDENCEHOST_TEST_BROKER_SOCKET` (the socket directory). `EVIDENCEHOST_TEST_BROKER_POLICY` and `EVIDENCEHOST_TEST_BROKER_RESULTS` identify the shared policy and worker-owned results directory. Only the four sandbox marker variables `CODEX_SANDBOX`, `SANDBOX_MODE`, `IN_SANDBOX`, and `IS_SANDBOX` are forwarded unchanged when present; the owner must preserve those keys through `sudo`. Other caller environment variables, including credentials, are not forwarded.
+
+The fixture root and worker-root ancestors are root-owned with the worker group and mode `0750`. The [retained coverage output lease](../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunOutputLease.cs) opens each temporary-path ancestor with `O_RDONLY | O_DIRECTORY`, which requires both read and search access. Execute-only `0710` ancestors make the coverage procedure fail before it can produce evidence. The worker group has no write access to those ancestors, and the distinct non-root subject UID/GID has no access through the other permission bits. Worker-owned HOME, cache, temp, and result directories use `0700`. The [portable fixture regression](test_execution_broker_fixture.py) checks the applied ancestor modes and root/worker ownership assignments without requiring root.
+
+Each scenario's control root is root-owned with the worker group and mode `0710`, with its socket at `broker/control.sock`. After authenticating and pinning the actual worker PID, UID, and GID, the fixture writes `worker-control.json` in that control root with root/worker-group ownership and mode `0440`. The descriptor's `broker_pid` is the actual root broker process PID; the synthetic base and subject revisions are respectively forty `b` and forty `c` hexadecimal characters, and both diff fields are explicitly null. These control paths follow the [production descriptor grammar](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md); they do not change the `0750` coverage ancestors or the positive Cobertura report described above. The four [portable fixture controls](test_execution_broker_fixture.py) inspect real `chmod`/`stat` results and recorded privileged `chown` calls, with no actual root execution or native acceptance claim.
+
+The C# suites always run a small guard proving that unsupported platforms and absent Linux channels reject. On Linux, the selected production-path cases require this fixture and fail closed when it is absent; a missing-channel rejection is not counted as a production-path pass. On macOS and Windows, each Linux-only case performs the explicit unsupported-connect assertion and returns; those returns do not count as protected execution coverage.
+
+The scenario operation logs and `*.peer.json` files are useful for diagnosing test failures. The socket peer record must match the selected non-root worker UID/GID, and the C# tests compare its PID with the active testhost process. Each descriptor uses a scenario-specific run ID, and its policy digest is computed from the fixture policy bytes; the all-zero proof digest intentionally cannot admit Trusted execution. A successful report remains informational in Observation; Trusted remains rejected with ASEVD407 because the consumer proof allowlist is empty. A separate systemd-backed CI run is still required for actual launcher, cgroup, process-isolation, and published-gate acceptance.
+
+## Direct authenticated protocol rejection controls
+
+The existing [C# control tests](../../Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxControlProtocolTests.cs)
+add four direct supervisor controls under this root fixture: a negative declared artifact length
+(`ASEVD420`, no artifact request), a valid two-byte chunk against a one-byte declaration
+(`ASEVD420`, one chunk and no result), a valid 174,768-character base64 chunk above the 174,764-character
+allowance but below the 1 MiB wire cap (`ASEVD420`, rejected before decoding), and an acknowledged
+`stop` followed by `owned_exit=false` (`ASEVD410`, no terminal `exit` request or acknowledgement).
+The operation arrays assert exact counts and order, including absence of subject `run` calls.
+The false-exit scenario also rejects any subsequent `exit` request rather than upgrading its receipt.
+
+These four cases require root broker UID 0 and the owner's selected non-root worker and subject
+UID/GID pairs, distinct by both UID and GID. The root-written scenario metadata carries those selected
+identities. Tests compare the actual test-host UID/GID and authenticated descriptor against that metadata,
+and require the descriptor's subject identities to match the selected disjoint pair. Actual test-host
+PID and socket peer PID/UID/GID checks remain mandatory; metadata cannot replace root `SO_PEERCRED`
+authentication. Each case uses its own scenario socket with the peer pinned at first connection,
+a captured 600-second descriptor deadline, and a 15-second local cancellation bound.
+Artifact cases request stop and wait in `finally` with a fresh five-second cleanup bound.
+The supervisor retains metadata and opens/closes a socket per request; it owns no persistent socket
+or disposable process. The false-exit test calls the supervisor directly without invoking a
+process-fatal shared cleanup path. The root controller independently owns the real test process
+in a fresh process group, uses a finite owner-selected command budget, reaps its leader, and
+polls physical group absence within one eight-second cleanup deadline after TERM/KILL.
+Leader reap alone cannot establish whole-group absence. It explicitly joins all retained daemon
+accept loops and handlers before returning. Handler socket I/O is bounded to five seconds and
+thread joins share a six-second allowance. Unknown or surviving work rejects fixture cleanup;
+daemon status only permits the failing root process to terminate without waiting indefinitely for
+a surviving Python thread. A synthetic `owned_exit` value cannot establish physical cleanup.
+
+`--command-timeout-seconds` accepts integer seconds from 1 through 4,200 and defaults to 4,200.
+Owners may select 600 for focused cases; the default preserves the existing native runner's
+4,200-second full-lane wrapper allowance. The [official solution coverage job](../../.github/workflows/build.yml)
+has a 45-minute job cap; the issue-specific private native runner separately uses a 90-minute job cap,
+600 seconds for focused broker checks and 4,200 seconds for the unchanged full coverage wrapper.
+Command budgets are separate from the per-scenario captured descriptor allowance. There is no
+ambient timeout override, unlimited value, renewed cleanup deadline or change to the coverage command.
+
+For focused Linux execution, the invocation above can select
+`--worker-uid 65534 --worker-gid 65532 --subject-uid 65533 --subject-gid 65531`
+and filter `FullyQualifiedName~EvidenceLinuxControlProtocolTests`. The existing native runner's
+actual runner UID/GID with subject 65533:65533 is also supported when both identities are non-root
+and disjoint as required by the fixture. A full test wrapper may run the same assembly under the
+fixture's existing environment; account selection is not a fixed-account authority or native proof. The production calls execute inside that
+C# test host; actual instrumentation and resulting coverage must be reviewed and measured separately.
+No extra collector setting, synthetic report, or external worker execution is evidence of improved
+Cobertura coverage for these controls. Missing Linux fixture metadata fails; other platforms only
+assert unsupported connection behavior.
+
+The [portable fixture controls](test_execution_broker_fixture.py) inspect the exact hostile response
+shapes, valid base64 and frame sizes, false-exit rejection, and bounded join procedure.
+Additional real unprivileged process/thread controls check command timeout cleanup, delayed group
+absence after leader reap, and failure-process exit with a surviving daemon handler; they do not
+create an authenticated root supervisor. Budget parsing and neighbor rejection also have portable controls. These controls grant no
+authentication authority and establish no actual root execution. The blocked-handler control uses
+the actual fixture socket server with a portable blocking peer-pin gate and mocked privileged
+ownership assignment. This is
+mechanical authenticated root protocol coverage with synthetic cgroup metadata, no systemd unit,
+no application admission or consumer qualification, and no Trusted acceptance. The original scenarios,
+policy, report, root/platform checks and supplementary-group restrictions are retained.
+
+### Additional artifact guards (prepared)
+
+Three additional [C# wire cases](../../Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceLinuxControlProtocolTests.cs)
+use the same actual root broker and authenticated non-root testhost contract. Each expects fixed
+`ASEVD420`, no returned artifact collection or inner exception, no canary disclosure, and exactly
+`ready, artifacts, artifact, stop, wait`. Cleanup uses a fresh five-second token. No second artifact
+request or subject `run` is permitted by the operation assertion.
+
+| Scenario | Fixture bytes/declarations | Guard exercised |
+| --- | --- | --- |
+| `protocol-duplicate-declaration` | Two identical zero-length declarations; the first receives valid empty base64 with terminal `end=true`. | The later duplicate rejects before reading the duplicate's bytes. |
+| `protocol-decoded-limit` | A declared/decoded 131,073-byte chunk, encoded as exactly 174,764 base64 characters, with terminal `end=true`. | The decoded 128 KiB bound rejects, while the encoded bound and declared-length comparison remain satisfied. |
+| `protocol-empty-chunk` | A one-byte declaration receives valid empty base64 with `end=false`. | An empty nonterminal transfer rejects before a further chunk request. |
+
+The duplicate check occurs as the production supervisor iterates declarations: the first valid artifact
+is read before the later duplicate is reached. This case does **not** claim duplicate validation before
+any artifact read. The production do-loop makes one legitimate request for the first zero-length
+artifact, and its empty terminal chunk is accepted before the duplicate rejects. This is the adjacent
+positive transfer control to the empty nonterminal rejection; the overall collection remains rejected.
+The common path and decoded-limit payload include a fixed test canary that must not
+appear in the protected diagnostic.
+
+The three new [portable methods](test_execution_broker_fixture.py) verify only fixture response shapes,
+lengths, legal base64, terminal flags and recorded request counts. They exercise no supervisor or root
+authentication. Source counts are twelve C# cases and sixteen portable methods after these additions;
+the new cases have not been compiled or executed at this source-ready stage. Existing nine C# cases,
+thirteen portable controls, authentication, identity selection and cleanup behavior remain intact.
+Actual Linux execution and any instrumented coverage must be measured separately. The synthetic report,
+artifact and cgroup metadata establish no systemd supervision, application admission, consumer
+qualification or Trusted acceptance.
+
+## CLI budget and fresh-slot controls (prepared)
+
+Two additional [direct CLI facts](../../Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceProtectedCliExecutionTests.cs)
+use the same root-owned broker and actual non-root testhost credentials. `cli-budget-insufficient`
+selects the ordinary coverage plan (60-second producer), two 10-second admission stages, 20-second
+collection and 30-second cleanup reserves, but delivers a fresh authenticated 90-second job allowance.
+The unchanged caller must reject with `ASEVD421` and the declared-work/reserves diagnostic before output
+allocation. The ordinary 600-second scenario remains its valid budget neighbor; stopping's five seconds
+are included within cleanup, not added twice.
+
+`cli-output-slot-exists` keeps the ordinary 600-second budget and precreates exactly `evidence-output`
+beneath that scenario's actual worker-owned parent. The slot is worker-owned `0700`; its sole
+`allocation-sentinel.bin` is worker-owned `0600` with fixed known bytes. The caller must reach the
+allocator's exclusive `CreateSlot` operation and reject with `ASEVD409` / direct Linux `EEXIST` (17).
+The test rechecks the sentinel's exact bytes and mode, slot mode and sole file; no manifest can be added.
+Both facts require exactly `ready`, `stop`, `wait` after the caller's rejection cleanup, so neither a
+producer `run`, artifact declaration/read, nor a successful-finalization `exit` request can occur.
+The fixture independently joins its actual command process group, server and handler threads regardless
+of the synthetic wait acknowledgement.
+
+The [two new portable controls](test_execution_broker_fixture.py) check the finite allowance against
+the legitimate neighboring policy and use actual temporary filesystem bytes/modes with recorded
+ownership calls for the collision. They establish no actual root ownership or consumer execution.
+Source totals are 26 direct CLI cases, 21 broker scenarios and 18 portable methods; these additions
+are uncompiled and unexecuted at source preparation. Actual Linux peer authentication and filesystem
+rejection require the coordinated native run. This remains a root IPC/filesystem procedure with
+synthetic cgroup/SDK/report metadata, not systemd supervision, accepted admission, a lease, Trusted
+acceptance or measured coverage gain. The [consumer acceptance contract](../../docs/evidence/issue779-consumer-acceptance.md)
+continues to govern those claims.
+
+## Production worker syscall compatibility
+
+The [production launcher's worker unit](../../scripts/evidencehost-linux-launcher.py) explicitly uses `RestrictSUIDSGID=no`; its subject units retain `RestrictSUIDSGID=yes`. In pinned [systemd v255 `seccomp_restrict_sxid`](https://github.com/systemd/systemd/blob/v255/src/shared/seccomp-util.c#L2148-L2164), the filter blocks `openat2` with `ENOSYS` because the syscall's flags are passed indirectly; [`RestrictSUIDSGID` installs that filter](https://github.com/systemd/systemd/blob/v255/src/shared/seccomp-util.c#L2179-L2205). The protected artifact allocator requires `openat2` and has no syscall fallback, so the worker must permit that syscall to allocate its retained output handles.
+
+The [native two-control compatibility probe](https://github.com/forge-trust/AppSurface/actions/runs/37058052231) used identical worker properties except this setting: `yes` produced errno 38, while `no` opened the filesystem root successfully. Both controls verified the actual non-root UID/GID, exact generated cgroup, `NoNewPrivs=1`, zero effective capabilities, and empty owned groups after stop before account cleanup. Worker capability sets remain empty, `NoNewPrivileges=yes`, `PrivateTmp=yes`, `ProtectHome=yes`, `ProtectSystem=strict`, tooling/source paths read-only, raw subject artifacts inaccessible, and only the owned output parent writable. Identity, cgroup, quota, lease, and account-lifetime guards are unchanged. The [portable launcher regressions](test_linux_launcher.py) inspect actual emitted worker and subject unit arguments. These results establish syscall compatibility and configuration emission only; a fresh published production Observation proof is still required.
+
+## Production subject command completion
+
+Before launching `dotnet test`, the [production broker](../../scripts/evidencehost-linux-launcher.py)
+pins the selected results directory beneath its retained `test-output` descriptor. A fresh directory is
+created with owner-only permissions and initially belongs to the root broker; its retained FD must match
+the named directory and expected results group before ownership transfers to the subject UID/results GID
+and mode `2770`. An existing directory must already belong to the worker or subject with that results GID;
+existing root-owned or foreign directories are rejected. Both branches recheck the retained and named
+identities after transfer. The subject supplies report bytes, so this ownership handoff grants no report
+authenticity or admission. The [portable results-ownership controls](test_linux_launcher.py) use real
+directories/FDs, distinct creator/worker/subject identities and recorded privileged ownership calls;
+they do not establish a native root handoff or passed coverage procedure.
+
+The [production broker](../../scripts/evidencehost-linux-launcher.py) keeps subject services with
+`RemainAfterExit=yes` and launches them with `systemd-run --wait --pipe`. Pinned
+[systemd v255](https://github.com/systemd/systemd/blob/v255/man/systemd-run.xml#L195-L200) retains a finished
+service until explicit stop; [`--wait`](https://github.com/systemd/systemd/blob/v255/man/systemd-run.xml#L406-L415)
+waits for deactivation. The broker therefore polls the exact generated unit within the job deadline, validates
+its actual User/Group and control-group policy, and captures terminal MainPID/ExecMainCode/ExecMainStatus before
+stopping it. Normal per-command stop keeps the broker lease available for subsequent approved commands.
+
+Explicit stop, launcher exit and both output-pump joins share one finite stopping/cleanup allowance. A pruned
+ControlGroup property after main exit does not replace physical exit: the broker retains the exact generated
+`/system.slice/<unit>` path and verifies its kernel group is empty after stop and joins. No post-stop unit query
+is required after garbage collection. Missing terminal facts, identity mismatch, cancellation, deadline expiry,
+launcher-status mismatch or unacknowledged output reject the command and cannot register a results root.
+Actual zero/nonzero command status, exact received-byte quotas, error-free EOF, and all existing subject sandbox
+properties remain required. The [portable completion controls](test_linux_launcher.py) use a process double
+that remains waiting until explicit stop and rejects inspection after stop; they establish ordering and guard
+behavior, with no native systemd or consumer acceptance claim.
+
+## Internal root application integration
+
+The [runtime output validator](runtime-proof.py) reads the exact PascalCase fields emitted by [Contracts canonical JSON](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceContracts.cs), including `PolicySnapshot`, `Profile`, `PlanDigest`, `ManifestDigest`, producer/artifact metadata and the final summary. The input fixture policy remains lower camel case. `expected_runtime_policy_snapshot` maps only that fixed fixture to the full current emitted policy, including nullable `MinPatchLinePercent`/`MinPatchBranchPercent` and default `PatchLineMode = "measurable"`; it is not a general case converter or a canonical digest implementation. `canonical_output_digests` requires the exact emitted digest fields and matching plan binding before public artifact writes. The [published CLI structural verifier](runtime-proof.py) still re-resolves the collected plan and verifies its canonical bindings independently. The [metadata regression controls](test_runtime_proof.py) combine the observed v16 PascalCase plan shape with explicitly synthetic Passed producer/manifest data solely to test parsing, rejection and public digest extraction; those data do not establish native execution, accepted evidence, admission or qualification. Public runtime-proof record field names remain lower camel case and informational.
+
+The [production launcher](../../scripts/evidencehost-linux-launcher.py) loads the single adjacent [root application module](LinuxApplication-README.md) by its fixed file path. Optional internal `--application-id`, `--application-entry-digest` and `--application-profile` selectors must be supplied together and must match an existing compile-owned registration and the actual protected policy SHA-256. These selectors contain metadata only; there is no bundle-path, argv, endpoint, callback or enrollment option. The production registration tuple remains empty, so selection returns `ASEVD407` before account creation, workspace allocation or application startup. The existing v1 path omits all three selectors and emits no application field.
+
+A future qualified registration uses the exact immutable deployment inventory at `<tool-root>/application-bundles/<application-id>/<build-id>`. `_ApplicationWorkspaceOwner` audits the actual source through retained no-follow descriptors, copies only declared bytes and modes, and independently pins the copy under a fresh `/run/issue779-app-<32-hex>` root-owned `0711` parent. Its bundle is root-owned and read-only; control is root/root `0700`. Application scratch is owned by its distinct UID/GID and mounted as a host-visible size-bounded tmpfs with `nosuid,nodev,noexec`; a writable path declaration cannot substitute for the mount or its verified size. Source copying precedes the worker-group permission adjustment to the tool tree. Startup retains the root module's pending owner and watchdog acknowledgement before application execution.
+
+The account owner reserves three distinct positive UIDs and five distinct positive GIDs: worker, producer and application UID/primary GID pairs, plus separate results and resource-access GIDs. The root module accepts only the fixed AppHost/resource kinds documented in its [closed payload contract](LinuxApplication-README.md#root-launcher-contract). The application has no results/output access, and the producer cannot traverse its private scratch. Neither a matching descriptor nor a portable candidate audit creates an application lease.
+
+The authenticated broker accepts exactly `application-start {application_id, entry_digest}` and `resource-wait {lease_id, resource_id}`. Requests use the pinned worker PID/UID/GID check already required on every connection and dispatch only to the retained actual root application owner. A v1 broker rejects these operations. Root emits v2 only after compiled selection, account/workspace setup and construction of that owner; the [C# descriptor and application parsers](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md#internal-restricted-application-protocol-v2-prerequisite) still independently validate all metadata and compiled binding before execution.
+
+Application and producer ownership remain separate. Intermediate report transfer requires producer groups and pumps idle; the application may remain alive during that interval. Final `stop`, `wait`, `exit` and retained completion join both lanes under one frozen stopping/cleanup deadline. Repeated stop/wait requests cannot restart that allowance. Both lanes count every received byte against the same `JobOutputCounter`. Final reconciliation checks each producer receipt and the separate application receipt for actual EOF byte totals; omitting application bytes, reporting a receipt before join, or exceeding the shared quota rejects completion.
+
+After successful aggregate exit, the launcher closes the pinned application bundle, unmounts scratch and removes the root workspace before handing retained output to its collector. Account reservations remain owned by retained completion until collection is finished and strict completion close succeeds. Any unconfirmed exit, failed bundle close, unmount or cleanup retains failure and quarantine; a later cleanup retry cannot establish success. These source and portable procedure controls do not establish root/systemd execution, application admission, a passed consumer proof or Trusted eligibility. Native payload qualification and the unchanged coverage gate remain required.
+
+Workspace preparation consumes the same captured aggregate job deadline as execution. Bundle audit, each copy read/write and directory operation check the remaining allowance; the mount command receives at most the lesser of eight seconds and that remaining allowance. Expiry rejects preparation and retains failure rather than arming an application with a renewed budget. The application's denied output root is the validated root-owned outer output parent, which contains the worker-owned run anchor and its final output; the fixed output probe is checked under that denied ancestor.
+
+`require_successful_worker` preserves a nonzero or mismatched terminal worker failure even when the broker's ready/wait/exit protocol completed. Both `worker-protocol-incomplete` and `worker-unsuccessful` may attach the existing closed checkpoints and bounded private journal. The generated worker unit, five-second/4096-byte read limit, exclusive root-owned `0600` file, canonical private archive and safe code allowlist remain the same. Raw journal text cannot change the original host failure or authorize a gate. See the [runtime driver](runtime-proof.py), which delegates diagnostic validation to the launcher's single validator before retaining the private archive.
+
+For a validated `worker-unsuccessful` failure with completed ready/wait/exit/closed checkpoints, no active handlers or runs, and a nonzero normally exited worker, the [runtime driver](runtime-proof.py) may additionally retain private failed-worker output. It receives the known output parent and exact slot from its own invocation; uploaded JSON supplies no path authority. The current launcher layout is a root-owned `0755` outer `output-parent`, one `run-<12-hex>` worker-owned `0700` anchor, and the worker-owned `0700` slot. A fixed root helper pins each directory and only `evidence-plan.json`, `evidence-manifest.json`, and `evidence-summary.json` with no-follow descriptors, requiring matching worker ownership, exact `0600` regular files, one link, and unchanged named/retained identities and lengths. Available fixed files may be retained when others are missing; absence of all three prevents capture. Limits are 128 KiB per file, 384 KiB combined content, and 400 KiB for the canonical USTAR archive. Copies and `failure-output.tar` are exclusively created as `0600` files beneath fresh `private-diagnostics/failure-output` directories of mode `0700`. Symlinks, substitutions, unsafe permissions, oversized files, and destination collisions reject capture without replacing the original launcher failure. These hostile private bytes must not be rendered into public receipts, interpreted as a passed producer or proof, or used to admit execution. The [portable controls](test_runtime_proof.py) exercise retained FDs and failure preservation; they establish no root/systemd authority.
+
+The [launcher](../../scripts/evidencehost-linux-launcher.py) can also preserve the last **confirmed nonzero producer command's** raw stdout/stderr prefixes for private diagnosis. `_run` takes immutable bytes from its existing pump buffers only after explicit stop, terminal process wait, actual EOF acknowledgements, exact received-byte reconciliation, unchanged quota checks and an empty physical subject group. A later successful command does not replace that failed-command pair. Each diagnostic prefix is limited to 519,168 bytes; the existing per-stream `MAX_PREFIX` and aggregate received-byte quota are unchanged, and no stream is read again.
+
+`capture_subject_failure_prefixes(broker, directory_fd, owned_exit_confirmed)` is an internal best-effort failure-cleanup procedure. It runs after actual owned wait returns true and `_close_launch_resources` successfully joins/closes the launch resources, requiring ready/wait/exit/closed checkpoints, zero active handlers/runs/artifact/application operations, no output or application failure latch, no exceeded quota and an empty physical worker group. It creates only `subject-failure-output/stdout.prefix` and `subject-failure-output/stderr.prefix` beneath the already pinned root-owned diagnostic directory. The child is root/root `0700`; files are root/root `0600`, regular, single-link and exclusively created through no-follow descriptors, with retained/named identity and length checks. Existing destinations, partial writes and unsafe metadata return false and preserve the original failure. `_capture_subject_failure_prefixes_fd` has owner overrides solely for [portable real-FD controls](test_linux_launcher.py); they grant no lease or authority.
+
+The matching [runtime collector](runtime-proof.py), `retain_private_subject_prefixes`, invokes the fixed `PRIVATE_SUBJECT_PREFIX_ROOT_SCRIPT` with only the invocation-selected workspace token and pinned device/inode identity, never a path from uploaded JSON. The root command and helper each have a five-second bound. The helper pins `<work_root>/subject-failure-output` as root/root `0700` and requires exactly `stdout.prefix` and `stderr.prefix`, each root/root `0600`, regular, single-link and at most 519,168 bytes. It checks retained/named identities before and after reading and emits canonical USTAR in that fixed order, with zero UID/GID/mtime and an archive cap of 1 MiB including framing. The collector exclusively creates runner-owned `private-diagnostics/subject-failure-output.tar` as `0600` beneath its private `0700` directory.
+
+The collector reuses `validate_failure_diagnostic` and performs no capture I/O unless the record is `worker-unsuccessful` / `worker-exit`, with main code 1, nonzero status, completed ready/wait/exited/work-closed checkpoints and zero active handlers/runs. A successful launcher returns before capture calls; failed execution attempts this retention after the journal and failed-worker manifest collection and then unconditionally preserves the original failure. Prefixes can be truncated or absent and are diagnostic hostile bytes: no content or capture flag is added to public JSON, exceptions, producer artifacts, admission or completion eligibility. Source prefixes remain under root `0700` protection until the collector copies the archive into its own private `0700` destination. The [collector controls](test_runtime_proof.py) and [launcher controls](test_linux_launcher.py) do not identify the native failure cause or establish root/systemd execution or Trusted eligibility.
+
+## Validation record
+
+The [runtime proof driver](runtime-proof.py) binds the shared execution source inventory before build and repeats the exact file hashes and canonical aggregate digest after execution. The coverage producer and transport have one physical copy each in [Evidence.Coverage](../../Evidence/ForgeTrust.AppSurface.Evidence.Coverage/README.md); either old `Evidence.Cli/EvidenceRestrictedCoverageProducer.cs` or `Evidence.Cli/EvidenceRestrictedCoverageTransport.cs` location being present (including a dangling link) rejects the inventory. Required inputs also include the metadata factory, [protected producer lease and owned execution lifecycle](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md), application protocol, closed catalogue, [restricted Aspire host adapter](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md), and the five Evidence project files and package locks. Missing, linked, or nonregular required source files fail closed. The [portable inventory controls](test_runtime_proof.py) verify real file presence, stale-copy rejection, exact byte hashes, and mutation detection; they establish source binding behavior, not Linux execution or protected acceptance.
+
+The coordinating parent reports that native CLI verification passed 327 tests with no warnings. Formatting verification passed for both owned C# test files. These results do not establish Linux fixture or systemd-backed published-gate acceptance.

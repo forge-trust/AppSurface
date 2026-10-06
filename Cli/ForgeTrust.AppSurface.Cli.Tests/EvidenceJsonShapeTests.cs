@@ -86,6 +86,7 @@ public sealed class EvidenceJsonShapeTests
         var policy = EvidenceCanonicalJson.Deserialize<EvidencePolicy>(policyBytes);
         var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(planBytes);
         var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(manifestBytes);
+        using var manifestJson = JsonDocument.Parse(manifestBytes);
 
         Assert.Equal(policyBytes, EvidenceCanonicalJson.Serialize(policy));
         Assert.Equal(planBytes, EvidenceCanonicalJson.Serialize(plan));
@@ -101,6 +102,9 @@ public sealed class EvidenceJsonShapeTests
         Assert.Equal(new EvidenceExecutionMetrics(2, 12, 24, 3, 41, true), manifest.Metrics);
         Assert.Equal("integration/assertion@1", Assert.Single(manifest.ProducerResults[0].SatisfiedAssertionIds));
         Assert.Equal("reports/result.json", Assert.Single(manifest.ProducerResults[0].Artifacts!).RelativePath);
+        Assert.False(manifestJson.RootElement.TryGetProperty("Mode", out _));
+        Assert.False(manifestJson.RootElement.TryGetProperty("EnvelopeAssertion", out _));
+        Assert.False(manifestJson.RootElement.GetProperty("Metrics").TryGetProperty("TerminalFailureCode", out _));
     }
 
     [Fact]
@@ -282,11 +286,11 @@ public sealed class EvidenceJsonShapeTests
             Artifacts: [artifact],
             ElapsedMilliseconds: 24);
         var metrics = new EvidenceExecutionMetrics(2, 12, 24, 3, 41, true);
-        var manifest = EvidenceManifestBuilder.Build(
+        var manifest = EvidenceAdmissionTestFixture.BuildLegacyStructural(
             plan,
             [producerResult],
-            resourceResults: [resourceResult],
-            metrics: metrics);
+            [resourceResult],
+            metrics);
 
         return new EvidenceFixture(policy, profile, resource, producer, obligation, plan, resourceResult, producerResult, manifest);
     }

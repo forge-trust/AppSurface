@@ -217,3 +217,39 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+
+## Tmds.DBus.Protocol
+
+- Package: `Tmds.DBus.Protocol`
+- Version: `0.95.1`
+- License: MIT
+- Project: [Tmds.DBus](https://github.com/tmds/Tmds.DBus)
+- License source: [pinned release source](https://github.com/tmds/Tmds.DBus/blob/491bde2c16d65a7904397933cffa24e15e45eb2a/COPYING)
+
+The internal [Evidence.Supervision library](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md) uses the low-level protocol client for typed Linux systemd communication. It is included in the CLI dependency graph.
+
+### MIT License Text
+
+Copyright 2006 Alp Toker <alp@atoker.com>
+Copyright 2010 Other Contributors
+Copyright 2016 Tom Deseyn <tom.deseyn@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

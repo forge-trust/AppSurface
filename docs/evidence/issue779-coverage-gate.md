@@ -50,3 +50,36 @@ These dated results establish their recorded inputs only. Subsequent documentati
 still require the final [verification gate](../plans/issue-779-execution.md#required-checks);
 local coverage does not establish Ubuntu mechanism proof, protected admission, or completion
 of the [full consumer acceptance plan](issue779-consumer-acceptance.md).
+
+## Current frozen-source coverage checkpoint (2026-10-03)
+
+[Native-v15 run 37101591528](https://github.com/forge-trust/AppSurface/actions/runs/37101591528)
+tested source `5d325bb8c0f857eb37f0a736f39a0342b03e5c38` against comparison
+base `416b30919e6c4d03b634d9d3fe558884b02f0b91`. Its aggregate gate passed,
+but its patch line result **86.7302%** failed the unchanged requirement; patch
+branch coverage was **85.109%**. This run exited **1 / ASCOV020**.
+
+[Native-v16 run 37143380879](https://github.com/forge-trust/AppSurface/actions/runs/37143380879),
+source `610489dbd1165ea7980faced55969cfe32c06b69` and the same comparison
+base, produced raw merged measurements of **143,490 / 151,152 lines
+(94.930930%)** and **48,765 / 54,890 branches (88.841319%)**. A test failure
+made the unchanged wrapper exit **1 / ASCOV120** before numerical gating.
+Official patch metrics for this run are unavailable; the raw percentages do not
+establish a gate pass.
+
+A source-matched advisory comparison of 599 previously identified gap locations
+found **28 now fully covered**: 16 formerly zero-hit locations and 12 formerly
+partial-condition locations. The other mapped locations remained 411 zero-hit
+and 160 partial-condition. This historical location comparison does not measure
+the complete current patch or supply official patch percentages.
+
+[Native-v17 run 37147414478](https://github.com/forge-trust/AppSurface/actions/runs/37147414478)
+tested source `085b302fedc37c30932122be27b3efc20ff9f5b0` against the same
+base and completed every test selection. The job log reports aggregate
+**94.94% line / 88.85% branch** and patch **87.44% line / 86.07% branch**.
+Aggregate and patch branch gates passed; patch lines failed the unchanged
+effective **94.5%** requirement. The wrapper exited **1 / ASCOV020**. Artifact
+numerators and the latest per-file gaps remain under verification. The
+[consumer checkpoint](issue779-consumer-acceptance.md#current-validation-checkpoint-2026-10-03-1958-utc)
+records focused repairs and immutable run statuses. The current complete gate
+has failed and remains required before the product PR can be updated.

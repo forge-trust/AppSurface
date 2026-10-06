@@ -123,6 +123,25 @@ The Durable packages are coordinated public previews. The [Durable operational-a
 - [**ForgeTrust.AppSurface.Evidence.Planner**](./Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md) – Deterministic explicit-diff policy resolution with conservative fallback and ambiguity rejection.
 - [**ForgeTrust.AppSurface.Evidence.Aspire**](./Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) – Separate, explicit consumer-owned lifecycle for Aspire readiness and browser/E2E producers; it is never mixed into normal application startup.
 
+#### Aspire caller migration
+
+The legacy `RunAsync(bool observationOnly)` overload remains for source compatibility and always rejects before
+the registration callback runs: omission or `false` returns `ASEVD401`, and `true` returns `ASEVD402`. The public
+`EvidenceAspireApplication.StartAsync(builder)` entry returns `ASEVD400` before building the supplied builder.
+
+The explicit `EvidenceExecutionRequest` is the migration target and requires an independently armed protected
+Linux worker. The production Aspire application-factory path remains unavailable: a configured factory rejects
+with `ASEVD407` before invocation, and a resource-bearing Observation profile rejects with `ASEVD406`. The
+[Aspire factory and registration example](./Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#explicit-supervised-bootstrap)
+describes the provisional API shape for a future accepted resource lane.
+
+Observation is restricted to a protected, dependency-free targeted profile with no resources or protected
+secrets and produces informational evidence. Trusted admission remains closed on every provider and platform
+pending full consumer and CI proof; the current production context rejects it with `ASEVD407`. The Linux launcher
+is a candidate mechanism whose complete consumer and platform proof remains pending. Windows, macOS, and unrelated
+long-lived host processes are unsupported. See the
+[migration and support reference](./docs/evidence/evidencehost-migration.md) for the current API and proof boundaries.
+
 ### [Dependency](./Dependency/README.md)
 
 - [**ForgeTrust.AppSurface.Dependency.Autofac**](./Dependency/ForgeTrust.AppSurface.Dependency.Autofac/README.md) – Optional integration with the Autofac IoC container so modules can participate in Autofac service registration.

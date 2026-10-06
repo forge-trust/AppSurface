@@ -610,6 +610,7 @@
           "ForgeTrust.AppSurface.Durable.PostgreSql": "[0.1.0, )",
           "ForgeTrust.AppSurface.Evidence.Cli": "[0.1.0, )",
           "ForgeTrust.AppSurface.Evidence.Coverage": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Supervision": "[0.1.0, )",
           "ForgeTrust.AppSurface.ReleaseContracts": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
           "ForgeTrust.RazorWire.Cli": "[0.1.0, )",
@@ -726,13 +727,22 @@
       "forgetrust.appsurface.evidence.coverage": {
         "type": "Project",
         "dependencies": {
-          "CliWrap": "[3.10.1, )"
+          "CliWrap": "[3.10.1, )",
+          "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.evidence.planner": {
         "type": "Project",
         "dependencies": {
           "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )"
+        }
+      },
+      "forgetrust.appsurface.evidence.supervision": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Planner": "[0.1.0, )",
+          "Tmds.DBus.Protocol": "[0.95.1, )"
         }
       },
       "forgetrust.appsurface.flow": {
@@ -776,28 +786,8 @@
         "type": "Project",
         "dependencies": {
           "CliWrap": "[3.10.1, )",
-          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64": "[0.1.0, )"
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.linux-arm64": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.linux-x64": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.osx-arm64": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.osx-x64": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.win-x64": {
-        "type": "Project"
       },
       "forgetrust.appsurface.workers": {
         "type": "Project",
@@ -1077,6 +1067,12 @@
         "dependencies": {
           "TextMateSharp": "2.0.3"
         }
+      },
+      "Tmds.DBus.Protocol": {
+        "type": "CentralTransitive",
+        "requested": "[0.95.1, )",
+        "resolved": "0.95.1",
+        "contentHash": "IbGhqZAqqgB/DkT70+lAk4MNv95tZtsTMFQ+S3uGy0aTfOkGVeFjeNJsX8dBI/3+CPnO5XW6lRQKGeFEgHElKw=="
       },
       "TreeSitter.DotNet": {
         "type": "CentralTransitive",

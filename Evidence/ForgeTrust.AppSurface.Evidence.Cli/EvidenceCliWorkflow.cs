@@ -120,7 +120,7 @@ internal sealed class EvidenceCliWorkflow
             false,
             "unverified",
             "Trusted execution facts are unverified. Planning and environment values do not grant admission.",
-            "Use the registered verifier and independently armed supervisor in a supported protected consumer workflow. See docs/evidence/issue779-consumer-acceptance.md; doctor does not authenticate a run."));
+            "Trusted admission requires a registered verifier and a protected consumer workflow that passes the required acceptance proofs. See docs/evidence/issue779-consumer-acceptance.md; doctor does not authenticate a run."));
 
         var blocked = checks.Any(static check => string.Equals(check.Status, "blocked", StringComparison.Ordinal));
         var external = checks.Any(static check => check.Status is "external-prerequisite" or "unverified");
@@ -264,11 +264,11 @@ internal sealed class EvidenceCliWorkflow
         ArgumentNullException.ThrowIfNull(manifest);
         var action = manifest.ClaimKind switch
         {
-            EvidenceClaimKind.ReleaseComplete => "Release evidence is complete.",
-            EvidenceClaimKind.TargetedComplete => "Targeted evidence is complete.",
-            EvidenceClaimKind.NoEvidenceRequired => "No evidence is required by the matched policy rule.",
-            EvidenceClaimKind.ObservationOnly => "Observation recorded; it is not gate eligible.",
-            _ => "Evidence is incomplete. Review unmediated obligations and producer diagnostics.",
+            EvidenceClaimKind.ReleaseComplete => "Release evidence is complete. This manifest alone does not authenticate origin or admit a protected release gate.",
+            EvidenceClaimKind.TargetedComplete => "Targeted evidence is complete. This manifest alone does not authenticate origin or admit a protected gate.",
+            EvidenceClaimKind.NoEvidenceRequired => "No evidence is required by the matched policy rule. This is structural policy output, not protected gate admission.",
+            EvidenceClaimKind.ObservationOnly => "Observation recorded; it is not gate eligible and still requires an independent protected worker.",
+            _ => "Evidence is incomplete. Review unmediated obligations and producer diagnostics; do not infer admission from this summary.",
         };
         return string.Join(
             Environment.NewLine,
@@ -441,7 +441,7 @@ internal sealed class EvidenceCliWorkflow
         scope = plan.Profile.Scope.ToString(),
         matchedRules = plan.MatchedRuleIds,
         obligations = plan.Profile.Obligations.Select(static obligation => obligation.Id).ToArray(),
-        next = "Run 'appsurface evidence run' only when the selected producer capabilities are ready.",
+        next = "Planning only: protected worker, verifier, allocation, and consumer proof remain unverified; do not use this plan as gate evidence.",
     };
 
     private static object CreateSummary(EvidenceManifest manifest) => new
@@ -453,7 +453,9 @@ internal sealed class EvidenceCliWorkflow
         envelopeStatus = manifest.EnvelopeStatus.ToString(),
         closedObligations = manifest.ClosedObligationIds,
         unmediatedObligations = manifest.UnmediatedObligationIds,
-        next = manifest.ClaimKind == EvidenceClaimKind.None ? "Resolve the listed producer or obligation failure before gating." : "Evidence claim is ready for its declared eligible consumer.",
+        next = manifest.ClaimKind == EvidenceClaimKind.None
+            ? "Resolve the listed producer or obligation failure; retry only after owned work has stopped and cleanup is confirmed."
+            : "This manifest records a structural claim only; a protected downstream gate must authenticate current expected facts and artifacts.",
     };
 
     private static string FormatIds(IEnumerable<string> ids)
@@ -528,6 +530,11 @@ internal sealed class EvidenceCliWorkflow
         // Keep this EvidenceHost separate from the normal development AppHost.
         // Register consumer-owned PostgreSQL, browser, migration, or contract producers explicitly.
         // The generated policy is the control plane. Never discover producers from loaded assemblies.
+        // Trusted PR/release admission remains closed until full consumer, production-broker, and CI proofs are accepted.
+        // Any future execution must use explicit --mode trusted|observation and the protected launcher's --control socket.
+        // Observation still requires an independent worker; a local Boolean or environment flag grants no authority.
+        // The restricted coverage adapter needs the ReportGenerator payload from the packed tool root; publish does not include it by default.
+        // See https://github.com/forge-trust/AppSurface/blob/main/docs/evidence/evidencehost-migration.md
         """;
 
     private static string CreateStarterReadme() =>
@@ -538,9 +545,15 @@ internal sealed class EvidenceCliWorkflow
         1. Edit `evidence.policy.json` to name the consumer's risk profiles and explicit producer registrations.
         2. Run `appsurface evidence doctor --policy .appsurface/evidence/evidence.policy.json --path docs/README.md`.
         3. Run `appsurface evidence explain --policy .appsurface/evidence/evidence.policy.json --path src/Changed.cs`.
-        4. Run `appsurface evidence run` only after required producer capabilities are ready.
+        4. Treat this starter as planning only. Trusted PR/release admission remains closed until full consumer,
+           production-broker, and CI proofs are accepted; `doctor` cannot verify those proofs.
 
         An incomplete profile is not complete evidence. Keep normal AppHost composition separate from this EvidenceHost.
+        Any future run requires explicit `--mode trusted` or `--mode observation` and the protected Linux launcher's
+        `--control` socket. `--observation-only` is an alias, not a shortcut; Observation still needs the independent worker.
+        The restricted coverage adapter requires the ReportGenerator payload under the packed tool root; `dotnet publish`
+        does not include it by default. See the canonical migration and support reference:
+        https://github.com/forge-trust/AppSurface/blob/main/docs/evidence/evidencehost-migration.md
         """;
 }
 

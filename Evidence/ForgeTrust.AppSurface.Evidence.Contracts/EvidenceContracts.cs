@@ -153,9 +153,13 @@ public sealed record NormalizedDiffPath(string Path, string Kind = "modified", s
 /// Declares one artifact slot that a producer is allowed to return.
 /// </summary>
 /// <param name="LogicalName">Stable logical artifact name.</param>
-/// <param name="RelativeRoot">Normalized artifact-root-relative directory permitted for this slot.</param>
+/// <param name="RelativeRoot">Normalized directory path relative to the producer's artifact directory permitted for this slot.</param>
 /// <param name="MediaType">Expected media type.</param>
-/// <param name="Required">Whether a missing artifact invalidates the producer result.</param>
+/// <param name="Required">
+/// Whether a <c>Passed</c> producer must include this slot for complete evidence.
+/// Missing slots alone leave other unsuccessful outcomes <c>Incomplete</c>;
+/// an explicit <c>Invalid</c> outcome remains <c>Invalid</c>.
+/// </param>
 /// <param name="MaximumBytes">Maximum allowed artifact length.</param>
 public sealed record EvidenceArtifactSlot(string LogicalName, string RelativeRoot, string MediaType, bool Required, long MaximumBytes);
 
@@ -163,7 +167,10 @@ public sealed record EvidenceArtifactSlot(string LogicalName, string RelativeRoo
 /// Captures bounded metadata for one declared artifact without serializing its raw content.
 /// </summary>
 /// <param name="LogicalName">Declared artifact slot identifier.</param>
-/// <param name="RelativePath">Normalized path beneath the evidence artifact root.</param>
+/// <param name="RelativePath">
+/// Normalized path relative to the producer's artifact directory, excluding its producer ID.
+/// Protected hosts resolve the physical file beneath <c>run output / ProducerId / RelativePath</c>.
+/// </param>
 /// <param name="MediaType">Declared media type.</param>
 /// <param name="LengthBytes">Written artifact length.</param>
 /// <param name="Sha256">Lower-case SHA-256 digest of the written bytes.</param>
@@ -357,6 +364,7 @@ public sealed record EvidenceProducerResult(
 /// <param name="TotalMilliseconds">Total measured execution duration.</param>
 /// <param name="CleanupCompleted">Whether owned cleanup completed without a terminal failure.</param>
 /// <param name="CleanupDiagnostic">Secret-safe cleanup diagnostic when cleanup did not complete.</param>
+/// <param name="TerminalFailureCode">Latched host-selected stop or quota cause; a late result cannot clear it.</param>
 public sealed record EvidenceExecutionMetrics(
     long PlanningMilliseconds = 0,
     long ResourceReadinessMilliseconds = 0,
@@ -364,7 +372,8 @@ public sealed record EvidenceExecutionMetrics(
     long CleanupMilliseconds = 0,
     long TotalMilliseconds = 0,
     bool CleanupCompleted = true,
-    string? CleanupDiagnostic = null);
+    string? CleanupDiagnostic = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TerminalFailureCode = null);
 
 /// <summary>
 /// Captures the immutable claim and execution result of an evidence run.
@@ -382,6 +391,8 @@ public sealed record EvidenceExecutionMetrics(
 /// <param name="ProducerResults">Bounded producer terminal results.</param>
 /// <param name="Metrics">Secret-free lifecycle timing and cleanup state.</param>
 /// <param name="ManifestDigest">SHA-256 digest of canonical manifest bytes excluding this digest field.</param>
+/// <param name="Mode">Explicit execution mode for newly admitted runs; absent on legacy structural fixtures.</param>
+/// <param name="EnvelopeAssertion">Accepted protected facts; serialized metadata grants no runtime authority.</param>
 public sealed record EvidenceManifest(
     string ContractVersion,
     string PlanDigest,
@@ -395,7 +406,9 @@ public sealed record EvidenceManifest(
     IReadOnlyList<string> UnmediatedObligationIds,
     IReadOnlyList<EvidenceProducerResult> ProducerResults,
     EvidenceExecutionMetrics Metrics,
-    string ManifestDigest);
+    string ManifestDigest,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EvidenceExecutionMode? Mode = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EvidenceEnvelopeAssertion? EnvelopeAssertion = null);
 
 /// <summary>
 /// Supplies the immutable execution context exposed to a registered evidence producer.
@@ -442,6 +455,12 @@ public sealed class EvidenceArtifactWriter
     private readonly object _sync = new();
     private readonly Dictionary<string, EvidenceArtifactResult?> _artifacts = new(StringComparer.Ordinal);
     private readonly HashSet<string> _destinations = new(StringComparer.Ordinal);
+    private readonly EvidenceLinuxArtifactRoot? _protectedRoot;
+    private readonly EvidenceRunByteQuota? _runQuota;
+    private readonly EvidenceWorkerExecution? _execution;
+    private readonly EvidenceAdmissionResult? _admission;
+    private EvidenceRestrictedProducerLease? _restrictedProducerLease;
+    private readonly string _producerPrefix = string.Empty;
     private long _totalBytes;
 
     /// <summary>
@@ -454,6 +473,64 @@ public sealed class EvidenceArtifactWriter
         _producer = producer ?? throw new ArgumentNullException(nameof(producer));
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
         _rootPath = Path.GetFullPath(rootPath);
+    }
+
+    /// <summary>Creates an admitted writer sharing protected handles, run quota and ownership tracking.</summary>
+    /// <remarks>
+    /// The host retains storage until all writer tasks stop; producer callbacks cannot replace these controls.
+    /// Write paths and returned metadata are relative to the producer's artifact directory.
+    /// This constructor prepends the normalized producer ID only to physical write and verification paths
+    /// beneath the shared protected root; returned metadata excludes that prefix.
+    /// </remarks>
+    internal EvidenceArtifactWriter(EvidenceProducerDeclaration producer, EvidenceLinuxArtifactRoot root,
+        EvidenceRunByteQuota runQuota, EvidenceWorkerExecution execution, EvidenceAdmissionResult admission)
+    {
+        _producer = producer;
+        _rootPath = string.Empty;
+        _protectedRoot = root;
+        _runQuota = runQuota;
+        _execution = execution;
+        _admission = admission;
+        _producerPrefix = EvidenceArtifactValidation.NormalizeRelativePath(producer.Id) + "/";
+    }
+
+    /// <summary>Binds one actual protected producer callback to its existing writer and owning lifecycle.</summary>
+    /// <param name="worker">Supervisor returned by the real credential-checked ConnectAsync path.</param>
+    /// <param name="admission">The same active admission used to construct this protected writer.</param>
+    /// <param name="plan">The complete protected resolved plan.</param>
+    /// <param name="diffBytes">Counted protected planning diff bytes, copied before callbacks can mutate them.</param>
+    /// <param name="processOutputQuota">The one run-wide received-output quota shared with every reporter.</param>
+    /// <param name="execution">The same lifecycle used to construct this writer.</param>
+    /// <param name="stageToken">The actual current producer-stage token; CancellationToken.None is rejected.</param>
+    /// <returns>A callback-scoped binding to dispose in the producer callback's finally block.</returns>
+    /// <remarks>Local/public writers cannot bind. A writer cannot be rebound after success, failure or disposal.</remarks>
+    internal EvidenceRestrictedProducerLease BindRestrictedProducerLease(EvidenceLinuxWorkerSupervisor worker,
+        EvidenceAdmissionResult admission, EvidencePlan plan, byte[]? diffBytes, EvidenceRunByteQuota processOutputQuota,
+        EvidenceWorkerExecution execution, CancellationToken stageToken)
+    {
+        lock (_sync)
+        {
+            if (_restrictedProducerLease is not null) throw EvidenceRestrictedProducerLease.Failure();
+            return _restrictedProducerLease = EvidenceRestrictedProducerLease.Create(this, worker, admission, plan, _producer,
+                diffBytes, processOutputQuota, execution, stageToken);
+        }
+    }
+
+    /// <summary>Checks actual protected storage and identical admission/lifecycle ownership before lease issuance.</summary>
+    /// <remarks>Called by the lease issuer as well as its binder, so internal creation cannot use a public/local writer.</remarks>
+    internal void RequireRestrictedProducerOwnership(EvidenceLinuxWorkerSupervisor worker, EvidenceAdmissionResult admission,
+        EvidenceWorkerExecution execution)
+    {
+        if (_protectedRoot is null || !ReferenceEquals(_admission, admission) || !ReferenceEquals(_execution, execution)
+            || worker is null || _protectedRoot.Identity.Uid != worker.Descriptor.WorkerUid
+            || _protectedRoot.Identity.Gid != worker.Descriptor.WorkerGid)
+            throw EvidenceRestrictedProducerLease.Failure();
+    }
+
+    /// <summary>Gets only this writer's internally issued callback binding; grants no public transport authority.</summary>
+    internal EvidenceRestrictedProducerLease GetRestrictedProducerLease()
+    {
+        lock (_sync) return _restrictedProducerLease ?? throw EvidenceRestrictedProducerLease.Failure();
     }
 
     /// <summary>Gets completed artifact metadata emitted through this writer in ordinal logical-name order.</summary>
@@ -485,6 +562,24 @@ public sealed class EvidenceArtifactWriter
         ReadOnlyMemory<byte> contents,
         CancellationToken cancellationToken = default)
     {
+        if (_execution is null)
+        {
+            return await WriteCoreAsync(logicalName, relativePath, contents, cancellationToken).ConfigureAwait(false);
+        }
+
+        _admission!.ValidateActive();
+        EvidenceArtifactResult? result = null;
+        var write = _execution.TrackOwnedWork(async token =>
+        {
+            result = await WriteCoreAsync(logicalName, relativePath, contents, token).ConfigureAwait(false);
+        }, cancellationToken) ?? throw new EvidenceAdmissionException("ASEVD410", "Artifact write admission is closed.");
+        await write.ConfigureAwait(false);
+        return result!;
+    }
+
+    private async ValueTask<EvidenceArtifactResult> WriteCoreAsync(
+        string logicalName, string relativePath, ReadOnlyMemory<byte> contents, CancellationToken cancellationToken)
+    {
         if (_producer.ArtifactSlots.FirstOrDefault(slot => string.Equals(slot.LogicalName, logicalName, StringComparison.Ordinal)) is not { } slot)
         {
             throw new InvalidOperationException($"Artifact '{logicalName}' is not declared by producer '{_producer.Id}'.");
@@ -493,12 +588,24 @@ public sealed class EvidenceArtifactWriter
         var normalizedPath = EvidenceArtifactValidation.NormalizeRelativePath(relativePath);
         EvidenceArtifactValidation.ValidatePathForSlot(slot, normalizedPath);
         ReserveArtifact(logicalName, normalizedPath, contents.Length, slot.MaximumBytes);
+        EvidenceRunByteReservation? reservation = null;
 
         try
         {
-            var destination = EvidenceArtifactValidation.GetContainedPath(_rootPath, normalizedPath);
-            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            await File.WriteAllBytesAsync(destination, contents, cancellationToken).ConfigureAwait(false);
+            if (_runQuota is not null && !_runQuota.TryReserve(contents.Length, out reservation))
+                throw new EvidenceAdmissionException("ASEVD420", "The run-wide artifact quota was exceeded.");
+            if (_protectedRoot is not null)
+            {
+                await _protectedRoot.WriteAsync(_producerPrefix + normalizedPath, contents, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                var destination = EvidenceArtifactValidation.GetContainedPath(_rootPath, normalizedPath);
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                await using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.Read,
+                    81920, FileOptions.Asynchronous);
+                await output.WriteAsync(contents, cancellationToken).ConfigureAwait(false);
+            }
             var artifact = new EvidenceArtifactResult(
                 logicalName,
                 normalizedPath,
@@ -509,6 +616,7 @@ public sealed class EvidenceArtifactWriter
             {
                 _artifacts[logicalName] = artifact;
             }
+            reservation?.Commit();
 
             return artifact;
         }
@@ -517,6 +625,7 @@ public sealed class EvidenceArtifactWriter
             ReleaseArtifact(logicalName, normalizedPath, contents.Length);
             throw;
         }
+        finally { reservation?.Dispose(); }
     }
 
     /// <summary>
@@ -531,10 +640,19 @@ public sealed class EvidenceArtifactWriter
             string path;
             try
             {
+                if (_protectedRoot is not null)
+                {
+                    await _protectedRoot.VerifyAsync(_producerPrefix + artifact.RelativePath, artifact.LengthBytes,
+                        artifact.Sha256, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
                 path = EvidenceArtifactValidation.GetContainedPath(_rootPath, artifact.RelativePath);
-                var bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
-                if (bytes.LongLength != artifact.LengthBytes
-                    || !string.Equals(EvidenceDigest.Sha256(bytes), artifact.Sha256, StringComparison.Ordinal))
+                await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                    81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                if (input.Length != artifact.LengthBytes || input.Length > MaximumTotalArtifactBytes)
+                    return false;
+                var digest = Convert.ToHexString(await SHA256.HashDataAsync(input, cancellationToken).ConfigureAwait(false)).ToLowerInvariant();
+                if (input.Length != artifact.LengthBytes || !string.Equals(digest, artifact.Sha256, StringComparison.Ordinal))
                 {
                     return false;
                 }
@@ -596,8 +714,22 @@ public static class EvidenceArtifactValidation
     /// </summary>
     /// <param name="producer">Producer declaration that owns the slots.</param>
     /// <param name="artifacts">Producer-returned artifact metadata.</param>
-    /// <returns><see langword="true"/> when every artifact is declared, bounded, and valid.</returns>
+    /// <returns><see langword="true"/> when every artifact is declared, bounded, and valid and every required slot is present.</returns>
     public static bool AreValid(EvidenceProducerDeclaration producer, IReadOnlyList<EvidenceArtifactResult>? artifacts)
+        => AreValid(producer, artifacts, requireRequiredSlots: true);
+
+    /// <summary>
+    /// Validates all returned metadata, allowing a terminal unsuccessful producer to omit artifacts it could not produce.
+    /// </summary>
+    /// <param name="producer">Producer declaration that owns the slots.</param>
+    /// <param name="artifacts">Producer-returned artifact metadata.</param>
+    /// <param name="requireRequiredSlots">Whether successful completion requires every declared required slot.</param>
+    /// <returns>Whether the returned metadata satisfies the declaration and the requested completeness check.</returns>
+    /// <remarks>Disabling the completeness check never permits undeclared or malformed metadata and cannot close an obligation.</remarks>
+    internal static bool AreValid(
+        EvidenceProducerDeclaration producer,
+        IReadOnlyList<EvidenceArtifactResult>? artifacts,
+        bool requireRequiredSlots)
     {
         ArgumentNullException.ThrowIfNull(producer);
         artifacts ??= [];
@@ -649,7 +781,7 @@ public static class EvidenceArtifactValidation
             }
         }
 
-        return producer.ArtifactSlots.Where(static slot => slot.Required)
+        return !requireRequiredSlots || producer.ArtifactSlots.Where(static slot => slot.Required)
             .All(slot => artifacts.Any(artifact => string.Equals(artifact.LogicalName, slot.LogicalName, StringComparison.Ordinal)));
     }
 
@@ -665,8 +797,9 @@ public static class EvidenceArtifactValidation
             throw new ArgumentException("Evidence artifact paths cannot be empty.", nameof(relativePath));
         }
 
-        var normalized = relativePath.Trim().Replace('\\', '/');
+        var normalized = relativePath.Trim();
         if (Path.IsPathRooted(normalized)
+            || normalized.Contains('\\') || normalized.Contains(':') || normalized.Any(char.IsControl)
             || normalized.Contains("//", StringComparison.Ordinal)
             || normalized.EndsWith("/", StringComparison.Ordinal)
             || normalized.Split('/').Any(static segment => segment is "." or ".."))
@@ -874,7 +1007,8 @@ public static class EvidenceCanonicalJson
         return options;
     }
 
-    private static async ValueTask<byte[]> ReadBoundedInputAsync(
+    /// <summary>Counts actual bytes for protected non-JSON snapshots before parsing or hash binding.</summary>
+    internal static async ValueTask<byte[]> ReadBoundedInputAsync(
         Stream source,
         int maximumBytes,
         CancellationToken cancellationToken)
@@ -1171,7 +1305,7 @@ public static class EvidenceCanonicalJson
 public static class EvidenceManifestBuilder
 {
     /// <summary>
-    /// Produces a manifest and closes obligations only when every declared producer and assertion requirement passed.
+    /// Rejects the legacy Boolean/status-enum claim-construction API with a migration diagnostic.
     /// </summary>
     /// <param name="plan">Resolved plan.</param>
     /// <param name="producerResults">Terminal results returned by selected producers.</param>
@@ -1179,7 +1313,8 @@ public static class EvidenceManifestBuilder
     /// <param name="envelopeStatus">Constrained CI-envelope status bound to the manifest.</param>
     /// <param name="resourceResults">Terminal readiness results for selected resources.</param>
     /// <param name="metrics">Secret-free lifecycle timing and cleanup state.</param>
-    /// <returns>A digest-bound manifest.</returns>
+    /// <returns>This legacy entry never returns a manifest.</returns>
+    /// <exception cref="EvidenceAdmissionException">Always: use the overload accepting a completed runtime admission.</exception>
     public static EvidenceManifest Build(
         EvidencePlan plan,
         IReadOnlyList<EvidenceProducerResult> producerResults,
@@ -1187,6 +1322,62 @@ public static class EvidenceManifestBuilder
         EvidenceEnvelopeStatus envelopeStatus = EvidenceEnvelopeStatus.NotRequired,
         IReadOnlyList<EvidenceResourceResult>? resourceResults = null,
         EvidenceExecutionMetrics? metrics = null)
+    {
+        throw new EvidenceAdmissionException("ASEVD400", "Legacy Boolean or envelope-status claim construction cannot grant admission.");
+    }
+
+    /// <summary>Consumes one completed host-issued admission to create bounded, digest-bound evidence.</summary>
+    /// <param name="plan">Exact immutable plan captured at admission.</param>
+    /// <param name="producerResults">Results from the protected registered producers.</param>
+    /// <param name="admission">Single-use capability completed after owned work stopped, artifact verification and cleanup.</param>
+    /// <param name="resourceResults">Declared terminal readiness results.</param>
+    /// <param name="metrics">Bounded lifecycle and cleanup metadata.</param>
+    /// <returns>A manifest whose claim cannot exceed its admitted mode and terminal lifecycle disposition.</returns>
+    public static EvidenceManifest Build(
+        EvidencePlan plan,
+        IReadOnlyList<EvidenceProducerResult> producerResults,
+        EvidenceAdmissionResult admission,
+        IReadOnlyList<EvidenceResourceResult>? resourceResults = null,
+        EvidenceExecutionMetrics? metrics = null)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(producerResults);
+        ArgumentNullException.ThrowIfNull(admission);
+        var completed = admission.Consume(plan);
+        metrics ??= new EvidenceExecutionMetrics();
+        if (!completed)
+        {
+            metrics = metrics with { TerminalFailureCode = metrics.TerminalFailureCode ?? "ASEVD410" };
+        }
+
+        var manifest = BuildStructural(plan, producerResults, admission.Mode == EvidenceExecutionMode.Observation,
+            admission.Mode == EvidenceExecutionMode.Trusted ? EvidenceEnvelopeStatus.ValidatedNotAttested : EvidenceEnvelopeStatus.NotRequired,
+            resourceResults, metrics, admission.Mode, admission.Assertion);
+        if (!completed)
+        {
+            manifest = manifest with
+            {
+                ExecutionVerdict = manifest.ExecutionVerdict == EvidenceExecutionVerdict.Invalid ? EvidenceExecutionVerdict.Invalid : EvidenceExecutionVerdict.Incomplete,
+                ClaimKind = EvidenceClaimKind.None,
+                Eligibility = EvidenceClaimEligibility.None,
+                ManifestDigest = string.Empty,
+            };
+            manifest = manifest with { ManifestDigest = EvidenceDigest.CanonicalSha256(manifest) };
+        }
+
+        return manifest;
+    }
+
+    // Structural reconstruction is deliberately private: verification never returns a runtime capability.
+    private static EvidenceManifest BuildStructural(
+        EvidencePlan plan,
+        IReadOnlyList<EvidenceProducerResult> producerResults,
+        bool observationOnly,
+        EvidenceEnvelopeStatus envelopeStatus,
+        IReadOnlyList<EvidenceResourceResult>? resourceResults,
+        EvidenceExecutionMetrics? metrics,
+        EvidenceExecutionMode? mode = null,
+        EvidenceEnvelopeAssertion? assertion = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(producerResults);
@@ -1220,9 +1411,21 @@ public static class EvidenceManifestBuilder
             || results.Keys.Any(id => !producerDeclarations.ContainsKey(id))
             || resources.Keys.Any(id => !declaredResources.ContainsKey(id))
             || results.Any(pair => !producerDeclarations.TryGetValue(pair.Key, out var declaration)
+                || pair.Value.Outcome == EvidenceProducerOutcome.Invalid
                 || pair.Value.SatisfiedAssertionIds.Any(assertion =>
                     !declaration.AssertionIds.Contains(assertion, StringComparer.Ordinal))
-                || !EvidenceArtifactValidation.AreValid(declaration, pair.Value.Artifacts));
+                || !EvidenceArtifactValidation.AreValid(
+                    declaration, pair.Value.Artifacts, requireRequiredSlots: pair.Value.Outcome == EvidenceProducerOutcome.Passed));
+        long aggregateArtifactBytes = 0;
+        foreach (var artifact in producerResults.SelectMany(static result => result.Artifacts ?? []))
+        {
+            if (artifact.LengthBytes < 0 || artifact.LengthBytes > EvidenceArtifactWriter.MaximumTotalArtifactBytes - aggregateArtifactBytes)
+            {
+                invalid = true;
+                break;
+            }
+            aggregateArtifactBytes += artifact.LengthBytes;
+        }
         var closed = new List<string>();
         var unmediated = new List<string>();
 
@@ -1240,16 +1443,21 @@ public static class EvidenceManifestBuilder
         var everyResourceReady = plan.Profile.Resources.All(resource =>
             resources.TryGetValue(resource.Id, out var result) && result.Outcome == EvidenceResourceOutcome.Ready);
         var noEvidence = plan.Profile.Resources.Count == 0 && plan.Profile.Producers.Count == 0 && plan.Profile.Obligations.Count == 0;
-        var releaseEnvelopeAccepted = plan.Profile.Scope != EvidenceProfileScope.Release
-            || envelopeStatus == EvidenceEnvelopeStatus.ValidatedNotAttested;
+        var releaseEnvelopeAccepted = mode is null
+            ? plan.Profile.Scope != EvidenceProfileScope.Release || envelopeStatus == EvidenceEnvelopeStatus.ValidatedNotAttested
+            : mode == EvidenceExecutionMode.Observation
+                ? plan.Profile.Scope == EvidenceProfileScope.Targeted && plan.Profile.Resources.Count == 0
+                : mode == EvidenceExecutionMode.Trusted && envelopeStatus == EvidenceEnvelopeStatus.ValidatedNotAttested
+                    && EvidenceAdmission.ValidAssertion(assertion, assertion?.RunId ?? string.Empty)
+                    && !string.IsNullOrWhiteSpace(assertion?.OutputIdentity);
         var verdict = invalid
             ? EvidenceExecutionVerdict.Invalid
-            : everyResourceReady && everyProducerPassed && unmediated.Count == 0 && releaseEnvelopeAccepted && metrics.CleanupCompleted
+            : everyResourceReady && everyProducerPassed && unmediated.Count == 0 && releaseEnvelopeAccepted && metrics.CleanupCompleted && metrics.TerminalFailureCode is null
                 ? EvidenceExecutionVerdict.Passed
                 : EvidenceExecutionVerdict.Incomplete;
         var claim = verdict == EvidenceExecutionVerdict.Invalid
             ? EvidenceClaimKind.None
-            : observationOnly
+            : observationOnly && (mode is null || verdict == EvidenceExecutionVerdict.Passed)
                 ? EvidenceClaimKind.ObservationOnly
                 : verdict != EvidenceExecutionVerdict.Passed
                 ? EvidenceClaimKind.None
@@ -1279,7 +1487,9 @@ public static class EvidenceManifestBuilder
             UnmediatedObligationIds: unmediated.OrderBy(static id => id, StringComparer.Ordinal).ToArray(),
             ProducerResults: producerResults.OrderBy(static result => result.ProducerId, StringComparer.Ordinal).ToArray(),
             Metrics: metrics,
-            ManifestDigest: string.Empty);
+            ManifestDigest: string.Empty,
+            Mode: mode,
+            EnvelopeAssertion: assertion);
 
         return draft with { ManifestDigest = EvidenceDigest.CanonicalSha256(draft) };
     }
@@ -1313,13 +1523,15 @@ public static class EvidenceManifestBuilder
             return false;
         }
 
-        var expected = Build(
+        var expected = BuildStructural(
             plan,
             manifest.ProducerResults,
             manifest.ClaimKind == EvidenceClaimKind.ObservationOnly,
             manifest.EnvelopeStatus,
             manifest.ResourceResults,
-            manifest.Metrics);
+            manifest.Metrics,
+            manifest.Mode,
+            manifest.EnvelopeAssertion);
         return string.Equals(manifest.ManifestDigest, expected.ManifestDigest, StringComparison.Ordinal);
     }
 }

@@ -119,6 +119,12 @@ the host content root. Explicit paths bypass runtime mapping, cache lookup, cach
 writes, and network acquisition. On Windows, watch supports .cmd and .ps1 shims as
 well as the standalone executable.
 
+Tailwind writes its version banner (`≈ tailwindcss v…`) and completion line (`Done in …`) to stderr.
+These recognized lines are informational in build and watch logging, including when the CLI applies ANSI SGR
+styling. Classification removes only complete SGR sequences from a temporary copy; callbacks and captured
+stderr retain the original text and escape sequences. Warnings, errors, unrecognized messages, and lines with
+incomplete or other escape sequences retain error severity. Color does not suppress a diagnostic.
+
 ## Configuration reference
 
 | Property | Default | Use it when |

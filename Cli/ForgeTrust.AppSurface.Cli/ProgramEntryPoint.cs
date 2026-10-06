@@ -1,5 +1,7 @@
 using System.Threading;
 using ForgeTrust.AppSurface.Console;
+using CliFx.Infrastructure;
+using ForgeTrust.AppSurface.Evidence.Supervision;
 
 namespace ForgeTrust.AppSurface.Cli;
 
@@ -27,9 +29,20 @@ internal static class ProgramEntryPoint
     /// </summary>
     /// <param name="args">Command-line arguments to parse and execute.</param>
     /// <param name="configureOptions">Optional primary console-options callback for the current invocation.</param>
+    /// <param name="protectedConsole">Optional capture console for reserved roles; it cannot replace admission or supervision.</param>
     /// <returns>A task that represents the CLI execution.</returns>
-    internal static Task RunAsync(string[] args, Action<ConsoleOptions>? configureOptions = null) =>
-        AppSurfaceCliApp.RunAsync(args, CombineConfigureOptions(configureOptions, _configureOptionsOverrideForTests.Value));
+    /// <remarks>Reserved role attempts are dispatched before configuration callbacks and command discovery.</remarks>
+    internal static async Task RunAsync(string[] args, Action<ConsoleOptions>? configureOptions = null,
+        IConsole? protectedConsole = null)
+    {
+        if (EvidenceProcessRoleParser.IsReserved(args))
+        {
+            using var systemConsole = protectedConsole is null ? new SystemConsole() : null;
+            Environment.ExitCode = await EvidenceProcessEntryPoint.RunAsync(args, protectedConsole ?? systemConsole!).ConfigureAwait(false);
+            return;
+        }
+        await AppSurfaceCliApp.RunAsync(args, CombineConfigureOptions(configureOptions, _configureOptionsOverrideForTests.Value)).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Pushes a test-only console-options override for the current async context.

@@ -14,7 +14,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="README.md" Pack="true" PackagePath="" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Aspire" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Cli" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Supervision" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli.Tests" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Aspire.Tests" />
   </ItemGroup>
 
 </Project>

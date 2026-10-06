@@ -2,11 +2,89 @@
 
 Goal: implement the [approved EvidenceHost plan](../designs/issue-779-evidencehost-trust-boundary.md) through a validated **draft** PR. Preserve the shared admission contract, zero protected secrets, mandatory stop/join-or-fatal ordering, and all [57 acceptance groups](issue-779-evidencehost-test-plan.md).
 
+## Runtime redesign direction (2026-10-06)
+
+The user requested a [C# supervision core](../designs/issue-779-csharp-supervision-core.md) with supervisor and worker roles in the same protected executable. Follow the new [migration checkpoints](issue-779-csharp-supervision-migration.md) for runtime work. Earlier Python/private-harness recovery entries below are historical and do not authorize restarting that repair loop. The original admission, trust, permission, acceptance, and unchanged gate requirements remain active; the redesign's implementation and native proof are pending.
+
+## Shared integration checkpoint (2026-10-02)
+
+The [shared producer and host checkpoint](../evidence/issue779-consumer-acceptance.md#shared-producer-and-host-integration-checkpoint-2026-10-02)
+records the completed physical coverage extraction, internal callback lease,
+captured concrete host registrations, tracked readiness and joined cleanup guard.
+The focused validation covers 457 distinct cases across successful scoped runs;
+it is macOS metadata/procedure/lifecycle evidence and supplies no native or
+coverage improvement claim. Historical failed assertion and fixture runs are
+preserved. The production catalogue and consumer-proof resolver remain closed.
+
+The [frozen v11 native outcomes](../evidence/issue779-consumer-acceptance.md#frozen-v11-native-outcomes-and-next-corrections-2026-10-02)
+retain the failed production handshake and Aspire 0/5 result, their immutable
+source/run/artifact bindings and the narrow next corrections. The corrected
+control fixture, subject completion flow and additional startup diagnostics
+require a fresh snapshot and native execution. The root v2 application handler,
+actual shared application/producer execution, protected downstream proof, all 57
+acceptance groups, current-main integration and fresh unchanged coverage gate
+remain required before updating the draft feature PR.
+
+## Current recovery checkpoint — native gate reached (2026-10-02)
+
+The [native solution and systemd startup records](../evidence/issue779-consumer-acceptance.md#native-solution-gate-and-systemd-startup-result-2026-10-02)
+bind each observation to its private source snapshot. Native v4 passed CLI
+**338/338** and Aspire **81/81**, then the unchanged exact coverage wrapper
+failed `ASCOV120` on one test path-policy assertion. Its merged measurement was
+**94.88% line / 88.52% branch**; numerical and patch gates were not reached.
+Focused Enhance cycle 1 remains in Verify with this concrete failure. The next
+correction uses the repository's shared path helper and meaningful behavior
+tests for changed uncovered execution paths; no threshold, selection or base
+change is authorized or needed.
+
+Runtime v5 reached worker submission but `systemd-run` returned **1**, without a
+completed runtime proof. Source-build and publish logs are warning-free. Closed
+startup diagnostics and actual mount visibility must distinguish rejection from
+service-start failure before selecting a runtime fix.
+
+The standalone protected gate consumer has a warning-free locked restore/build
+and **11/11** external-process portable controls. Its coherent synthetic JSON
+positive verifies public gate behavior and supplies no authenticated channel or
+Trusted authority. The provisional Aspire child fixture builds a real pinned
+Aspire/DCP payload and exercises a real native HTTP resource in portable controls.
+Native Aspire/DCP/systemd execution, shared-host integration, protected-base/fork workflows and downstream acceptance
+remain required. The preliminary draft PR has not been updated from these
+candidate observations.
+
+The subsequent fixture correction closes the scoped watchdog/pump source findings:
+private PID acknowledgement precedes launch; watchdog liveness remains required
+through clean disarm; both joined pumps must acknowledge error-free EOF and exact
+final byte totals. Main-only TERM gives a fresh five-second grace before whole-unit
+force, and normal/cancel require exit zero. **33/33** portable controls passed,
+including real fork/Pipe and four ordinary resource-DLL HTTP controls. A separate
+read-only review found no remaining P1/P2 issue in those three fixes or their
+private native wrapper. Native execution remains pending.
+
+The production broker had the same joined-thread gap. It now rejects failed or
+missing pump EOF, latches the lease closed, and checks command/job received-byte
+accounting before registering artifact results. Portable launcher controls passed
+**56/56** and driver controls **20/20**, exit zero. Bounded worker startup status
+diagnostics were added; namespace guards remain unchanged pending actual failure
+evidence. The path-helper and legacy-option migration corrections passed **26/26**
+focused tests, with warning-free source builds and unchanged bytes after both
+scoped formatters. These observations require a new immutable native snapshot.
+
+The [full-snapshot startup diagnosis](../evidence/issue779-consumer-acceptance.md#full-snapshot-startup-diagnosis-2026-10-02)
+now records 2725 source files at `cdadf95bb91e46c21d46dc72a8317950e9fd5da4`.
+Runtime v6 failed namespace setup with systemd status **226**, without a terminal
+manifest. Aspire v1 passed the factory-stall control and failed the other four
+before DCP/resource execution because its embedded SDK store path was not
+writable. All five Aspire controls confirmed owned exit, empty cgroups and exact
+error-free pump accounting. The narrow workspace and store-path corrections
+retain the existing guards and require new native runs. Native v5b is rerunning
+the same full snapshot after correcting the harness's required `--consumer`
+argument; its current-source coverage acceptance remains pending.
+
 ## Current state
 
 - Dedicated branch: `codex/make-it-so-evidencehost-779`, initially from `5dc141db81009348538d3f6b7634a99ccb34cd99`, fast-forwarded to `origin/main` at `fd0b124e16a35b85ee16acde799834af407e18de`. Existing approved plan, test-plan and `TODOS.md` changes belong to #779 and are preserved.
 - GitHub access: repository `forge-trust/AppSurface`, default branch `main`, viewer permission `ADMIN`; issue #779 remains open. This does not confer a recorded CI-owner acceptance.
-- Durable Make It So goal exists. The user has resolved the prior ownership blocker; work continues toward the same objective. The preparatory implementation is committed; no PR exists yet.
+- Durable Make It So goal exists. The user has resolved the prior ownership blocker; work continues toward the same full objective. [Draft PR #850](https://github.com/forge-trust/AppSurface/pull/850) contains the committed preliminary stage at `4dd992ec`; the shared implementation remains local and requires fresh verification before the draft is updated.
 - Read the actual workflow, existing host/CLI entry points and registered claim/parser paths. [Consumer acceptance record](../evidence/issue779-consumer-acceptance.md) records the existing unsupported workflow and required proof.
 - The user selected **A** on 2026-09-30: AppSurface's GitHub Actions workflows are the first consumer, and Andrew is the CI owner. The next step is actual process/filesystem/supervision proof; ownership confirmation alone admits no platform. A provisional Linux proof is now prepared; see the consumer acceptance record.
 - [Gate inventory](../evidence/issue779-gate-inventory.md) is complete. External consumers remain unknown. Existing CLI targeted/no-evidence gates, Aspire observation resources and public builder status-enum authority require coordinated migration; no protected downstream manifest gate currently exists in this repository.
@@ -747,3 +825,391 @@ source paths and historical archive filenames. No runtime, test or gate policy c
 The Ship documentation attempt limit is exhausted; publication requires the specific
 named documentation-risk decision while all unwaivable validation gates remain required.
 Actual Ubuntu proof and the full #779 continuation remain pending.
+
+### Verified mechanism and shared implementation continuation (2026-10-02)
+
+[Draft PR #850](https://github.com/forge-trust/AppSurface/pull/850) now exists and is attached to the task. The parent independently verified the actual Ubuntu mechanism run and immutable artifact bindings recorded in the [consumer acceptance record](../evidence/issue779-consumer-acceptance.md#actual-ubuntu-mechanism-observation-2026-10-02). The source head remains `4dd992ec`; the successful mechanism run admits no platform or runtime. Prior documentation-cap decisions D1 and D2 were answered A and their final targeted audit accepted; no publication question remains pending from that preparatory pass.
+
+Shared internal implementation is now in progress: explicit modes, non-public admission minting, exact protected plan/catalogue binding, capability activation and single-use completion, and legacy Boolean/status-enum builder rejection. The first focused admission run passed 20 tests. This is a partial local result; the old callers and their tests are being migrated. New source changes invalidate reuse of the previous green solution coverage result. The unchanged coverage gate must pass again before updating the published implementation.
+
+Disjoint workers own monotonic and byte budgets, Linux retained-handle storage, tracked callback stop/join-or-fatal lifecycle, protected Linux launcher/broker and Aspire caller migration. The parent owns shared admission/provider integration and CLI integration. The broader preliminary PR build has a terminal failure under investigation; no retry or waiver has been inferred. All full acceptance work remains required.
+
+The broader preliminary build failure was traced to `VerifierContractTests.RepeatedSignal_IsMaskedUntilTheOwnedChildIsReaped` for SIGINT in the dev-auth example. Its 12-second process timeout expired with two owned processes still running; fixture cleanup then observed verifier exit. The failing step was the unchanged `./scripts/coverage-solution.sh`, with `ASCOV120` as its summary code. All other 53 project summaries passed. The test and verifier script are unchanged by the preliminary slice; this observation does not determine whether scheduling or a latent signal defect caused it. A focused Linux reproduction is required before repair or any rerun claim.
+
+### Full integration recovery and focused results (2026-10-02)
+
+The current CLI Evidence focused run exited **0**, **289 passed / 0 failed / 0 skipped**.
+The neighboring coverage process-runner checks exited **0**, **11 passed / 0 failed / 0 skipped**
+against that built candidate. Five isolated lifecycle cases also passed, including stalled
+callbacks, tracked write/pump work and disposal fail-stop, plus cooperative failure collection.
+The real Linux C# control client passed **16 protocol mechanism cases** with process/container
+exits **0/0**, including root peer credentials, broker PID replacement, declaration/response
+limits and multi-chunk reports. The libc `SO_PEERCRED` call replaces an unsupported .NET socket
+option; this is client mechanism evidence, not systemd or consumer admission.
+
+The Aspire focused run exited **1**, **35 passed / 4 failed / 0 skipped**. Its four failures
+cover failure-manifest collection, first verifier diagnostic and invalid producer output;
+repairs are in progress. Initial broker authentication now has its own thirty-second maximum
+linked to caller cancellation. These subsequent edits invalidate reuse of focused and coverage
+results until rerun. Detailed current logs and hash receipt are retained under
+`TestResults/issue779-recovery-20261002/integration-pass2/`.
+
+The full production Observation fixture and candidate runtime workflow are being completed.
+They cannot supply protected-base/fork acceptance or enable Trusted support. The production
+allowlists remain empty, and application startup still requires the proved restricted child
+and capability map. The entire 57-group plan, final enhancement, unchanged coverage gate,
+packed caller QA, documentation verification and validated draft update remain required.
+
+### Shared enhancement cycle 1 and coverage attempt 18 (2026-10-02)
+
+The unchanged `./scripts/coverage-solution.sh` completed all 54 projects, exited **1 / ASCOV120**,
+and recorded **15,178 passed / 7 failed / 4 existing skips**. Its owned process group 57995 was
+empty at completion. Raw aggregate coverage was **94.3816% line / 87.8938% branch**; the wrapper
+did not reach its aggregate/patch gate. No current gate pass is asserted. The archived reports and
+279-file checksum manifest are retained under the ignored `TestResults/issue779-recovery-20261002/coverage18/`.
+
+Six current fixture-path constructions were corrected to the repository's shared `TestPathUtils.PathUnder`.
+The ignored generated dev-auth checkout had also been harvested by package, lockfile, path-policy and
+documentation tests. That directory alone was moved, preserving its inode and contents, to
+`/private/tmp/issue779-recovery-20261002-dev-auth-repro-repo`; a relocation receipt remains beside
+the original fixture location. Both failed documentation controls then passed unchanged, **2/2**, exit **0**.
+The path-policy controls passed **15/15**, exit **0**. Native locked restore with the existing NuGet audit
+policy passed, exit **0**, after requesting native cache access; the earlier cache warnings were not waived.
+
+Review cycle 1 corrected two concrete defects: the protected Aspire start allowance now reaches every
+shared start stage, and monotonic completion checks reject late callbacks, tracked writes, collection,
+stop acknowledgements and disposal despite delayed timer delivery. Timer notifications round fractional
+milliseconds upward while acceptance retains the exact original deadline. New controls include one tick
+before, exactly at, and one tick after stage/collection/stop/disposal boundaries. Lowered Aspire start
+limits of 1, 60 and 120 seconds pass; 0 and 121 reject before configuration. The combined Aspire Evidence
+filter passed **71/71**, exit **0**, with no warning diagnostics. CLI Evidence plus the failed lockfile control
+passed **309/309**, exit **0**, with no warning diagnostics. Scoped formatting and `git diff --check` passed.
+The pure Python launcher suite passed **35/35**, exit **0**; driver source binding and launcher-budget
+validation also passed. These results overlap earlier runs and are not distinct acceptance-group totals.
+
+The scoped native deadline review found no correctness regression. Actual isolated fatal-process, current
+Ubuntu production Observation, protected/fork downstream, packed callers and all remaining acceptance
+groups remain required. Linux-only paths account for substantial uncovered source in the macOS report;
+an honest Linux verification lane is being prepared. No threshold, comparison base, exclusion, skip or
+production support allowlist was changed. The shared implementation remains uncommitted and unpushed;
+the existing draft remains the preliminary mechanism slice until the required current gates pass.
+
+A second ignored generated Linux harness was also discovered by PackageIndex and preserved outside the repository
+at `/private/tmp/issue779-managed-linux-preserved`, with a relocation receipt. Fresh package tests then exposed
+two real missing manifest expectations: Coverage now depends on Contracts for shared received-byte accounting,
+and Aspire now depends on Planner for protected re-resolution. The expected dependency lists and generated
+readiness document were corrected; the corresponding package documentation was updated. PackageIndex generate,
+verify and policy gate exited **0**, and all three previously failed package controls passed **3/3**, exit **0**.
+The current isolated lifecycle worker built with **0 warnings/errors** and passed **5/5** actual POSIX worker
+checks, exit **0**; PGID 93094 was absent after completion. These include forbidden hash/manifest/disposal markers
+on fatal cases and ordered cooperative failure collection. This is not a systemd consumer acceptance run.
+
+### Current retained-root and proof-driver verification (2026-10-02)
+
+The corrected restricted-coverage failure suite passed **10/10**, exit **0**, and the combined CLI
+Evidence plus lockfile controls passed **320/320**, exit **0**, with zero warning diagnostics.
+Scoped formatting verified both changed test files unchanged. These runs include the Mac unsupported
+platform control; they do not execute the Linux retained-root regression or new direct broker caller cases.
+Receipts and source hashes are retained in the ignored
+`TestResults/issue779-recovery-20261002/enhance-shared-cycle1/restricted-coverage-failure-validation-20261002124201/`.
+
+A further concrete filesystem finding is fixed: a failed later component in `OpenParent` could leak
+an already opened intermediate directory descriptor. Exceptional exits now release that ownership,
+and the next SafeFileHandle is retained until successful transfer. The new Linux test performs sixteen
+nested symlink rejections, checks descriptors naming its unique intermediate directory, then writes and
+verifies a neighboring valid artifact. Actual current x64 Linux results remain pending.
+
+The candidate runtime proof now requires exact `ASEVD407` Trusted missing-proof rejection with exit 1,
+empty stdout, and no output anchor. Other launcher exceptions retain the safe generic diagnostic.
+Its successful Observation path additionally invokes the actual published CLI's structural plan/manifest
+verification after protected collection. The launcher unit suite passes **37/37**, and the proof-driver
+suite passes **2/2**, including five exit/diagnostic rows and an output-anchor rejection, all exit **0**.
+These are local proof-control results; no new actual Ubuntu acceptance is asserted. The private x64
+verification image is prepared, and direct production CLI/Aspire broker tests are being added while the
+unchanged full coverage wrapper remains required. No threshold, exclusion, schema authority, or Trusted
+allowlist has been weakened. Current shared code remains local and the published draft remains preliminary.
+
+
+### Single-use admission recovery and Linux SDK diagnosis (2026-10-02)
+
+A scoped reviewer confirmed that an Aspire authentication or admission failure could leave
+`State` as `Created`, permitting a second call on the same host and stopped control lease.
+The host now claims its single execution attempt under `_execution` before authentication
+or shared admission. Failure consumes the attempt; null request validation and cancellation
+before acquiring execution ownership do not. The broker also rejects `ready` after its
+work closure or exit latch while preserving stopped-work artifact collection.
+
+The focused Aspire Evidence filter passed **76/76**, exit **0**, with **zero failures,
+skips, or warnings**. It excludes only the still-unverified new production broker fixture
+class from this focused run. New deterministic cases cover authentication/admission failure
+retry, pre-ownership cancellation, a held producer with concurrent Run/Dispose, and disposal
+before execution. The portable launcher suite passed **39/39**, exit **0**, including
+handler-level ready/stop/wait/exit and post-stop artifact checks. A narrow independent
+re-review found no defect in the host guard. These are library/protocol results, not the
+full gate or actual systemd consumer acceptance.
+
+The prepared Linux x64 SDK lane stopped before tests with `MSB4184` in
+`Microsoft.NET.Publish.targets`. A minimal SDK project reproduced the failure and an
+observed QEMU segmentation fault on the ARM64 Docker engine. Disabling runtime hardware
+intrinsics and ReadyToRun did not repair the tiny-project evaluation. The existing x64
+runtime is being tested with host-built AnyCPU assemblies; no current Linux pass, unchanged
+full-gate pass, source publication, or Trusted enablement is inferred. The receipt and
+source hashes are retained under ignored `TestResults/issue779-recovery-20261002/`;
+SDK logs are under `TestResults/issue-779/linux-verification-preparation/`.
+
+
+The direct Linux VSTest alternative also failed before a test result: xUnit discovery
+raised a NullReferenceException, followed by AccessViolationException and a QEMU abort,
+exit **1**. No pass/skip count was produced. The SDK-only diagnostic then also aborted
+inside runtime exception handling, exit **134**. These are infrastructure failures,
+not failed EvidenceHost assertions. Completing the Linux checks requires a working
+native x64 runner or equivalent stable environment. Microsoft's [.NET 10 support
+notes](https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md#notes)
+exclude QEMU execution. The user has been asked for native Linux access or an owner-run
+bundle; local formatting, packaged caller preparation and documentation continue while
+that environment input remains pending.
+
+
+The current native macOS CLI Evidence filter compiles the new broker caller class and
+passes **327/327**, with no failures/skips or warning diagnostics. Linux-only cases
+exercise explicit unsupported-platform rejection on this host; their successful Linux
+consumer paths remain unverified. The broker fixture forwards the four named sandbox
+markers unchanged and clears supplementary groups unless the owner explicitly names
+positive disjoint groups. This permits a native runner to execute the unchanged wrapper
+without disabling its environment guard. The fixture's synthetic cgroup and subject
+results remain explicitly documented.
+
+
+### Current packaged CLI checks and native validation handoff (2026-10-02)
+
+Release package `0.1.0-issue779-current.20261002.1` built and installed from an
+isolated local feed, both exit **0**, with no compiler warnings or disabled NuGet
+audit. Its installed tool passed seven checks: Evidence help/run help/worker help,
+sample generation, doctor with synthetic `GITHUB_ACTIONS=true`, and two negative
+run cases. Doctor kept trust unverified; omitted mode rejected with `ASEVD401` and
+Observation without authenticated control rejected with `ASEVD402`, both exit **1**,
+empty stdout and no fixture output. Package, README, assembly and source hashes
+are in the ignored `current-packed-cli/completion.json`. These Darwin arm64
+package results are preparation, not a completed clean-baseline QA or Linux/SDK
+acceptance decision.
+
+The native validation handoff preserves the current dirty source in an isolated
+Git snapshot solely so the unchanged patch gate can compare it with the recorded
+`origin/main`. The feature branch and preliminary draft remain unchanged. A source
+hash verifier and receipt-preserving runner execute locked restores, required web
+dependencies and current Linux fixtures before the exact
+`./scripts/coverage-solution.sh`. Its local policy remains aggregate 95% line/85%
+branch and patch 95% line/85% branch with the existing tolerance; no base, skip,
+threshold, exclusion or sandbox requirement is relaxed. Native Linux execution
+is pending. Actual current systemd/consumer Observation, protected/fork/downstream
+acceptance, restricted Aspire resources, packed SDK proof and all remaining
+approved groups remain required even after a green native gate.
+
+
+The final current native macOS Aspire Evidence filter passed **81/81**, exit **0**,
+with zero failures, skips or warnings, including the protected broker class. Scoped
+whitespace formatting of the host and caller regression tests exited **0**. The
+parent also recovered the current CLI filter process exit **0** from the runtime
+record (the watcher had only reported its 327-pass log). These results validate
+compilation, shared behavior and unsupported-platform rejection; Linux positive
+paths and the exact solution coverage gate remain pending.
+
+
+### Native GitHub validation and first fixture corrections (2026-10-02)
+
+The previously confirmed AppSurface CI ownership provides a native Linux route.
+A separate `codex/issue779-native-validation-20261002` branch contains a validation
+harness and an isolated source snapshot; PR850 remains at `4dd992ec`. The harness
+checks all source hashes, preserves the recorded comparison base and runs the
+unchanged solution wrapper. It is validation work, not a feature publication or
+a clean enhancement conclusion.
+
+[Native run37016357414](https://github.com/forge-trust/AppSurface/actions/runs/37016357414)
+failed before the gate: 38 launcher cases passed and one fixture error rejected
+the unresolved `/usr/bin/dotnet` alias. The fixture now uses a canonical approved
+path for both configuration and request; the production guard remains unchanged.
+The launcher suite passes 39 locally. The source before/after checks matched on
+that run; artifact11229473438 retains the actual logs. No C# or coverage pass was
+produced by this run. The earlier request for a separate native host no longer
+blocks this validation route.
+
+A portable descriptor regression exposed and repairs an independent fixture
+NameError: the broker constructor now retains its unique root/scenario run ID
+rather than referencing `main`'s local variable from a method. Descriptor creation
+is verified for every configured scenario and authenticated peer/root binding.
+The CLI's authenticated caller-mode check is moved inside owned execution cleanup
+so rejected mode conflicts stop and join before returning `ASEVD401`. A paired
+production broker regression requires `ready -> stop -> wait` with no subject or
+artifact operations and no output allocation. Native execution remains pending.
+
+Three touched Evidence package projects duplicated the implicit README item
+already packed by `Directory.Build.targets`, producing existing `NU5118` warnings.
+Their redundant Include item groups are removed; the shared packing rule and
+PackageReadmeFile remain. Fresh exact-version SDK package/README verification is
+in progress without warning suppression or disabled NuGet audit. These changes
+invalidate the first source bundle and require a fresh candidate and native gate.
+
+
+After the CLI cleanup correction, scoped whitespace formatting passed and the
+current native macOS CLI Evidence filter passed **328/328**, exit **0**, with no
+failures, skips or warnings. This includes the new mode-conflict fixture class
+under the explicit unsupported-platform guard; the Linux operation sequence
+remains pending. The descriptor regression passes one test across all twelve
+scenario rows. A revised Linux runner executes focused CLI/Aspire consumer checks
+under a fresh root broker before the longer exact solution gate, which gets its
+own new broker. Focused success does not replace the unchanged gate.
+
+### Native caller failures and focused recovery (2026-10-02)
+
+[Native run 37018837795](https://github.com/forge-trust/AppSurface/actions/runs/37018837795)
+verified all 2707 captured source files before and after execution. It passed 39 launcher,
+two runtime-driver, one twelve-scenario descriptor, five POSIX lifecycle and sixteen
+control-protocol mechanism cases. The CLI Evidence filter recorded **316 passed / 12 failed**,
+including passing native retained-root and mode-conflict cleanup regressions. Aspire and
+the unchanged solution gate were not reached. Artifact `11231723272` retains the logs.
+
+Nine failures reproduced with the broker fixture's execute-only temporary ancestors:
+the shared coverage output lease opens each ancestor with `O_RDONLY | O_DIRECTORY`.
+The same built tests passed **9/9** with readable ancestors and failed **9/9** with
+execute-only ancestors. The fixture now grants the worker group read/search on its
+root-owned parent and worker-root directories without granting write or subject access.
+The protected report data and production path guards are unchanged. The output-quota
+assertion now requires the host's discarded terminal callback result, no closed obligation
+and no gate eligibility. Bounded synthetic diagnostics make future caller failures visible.
+
+A confirmed manifest defect required absent reports even after producer failure, making
+otherwise valid unsuccessful runs `Invalid`. Structural construction now permits missing
+required slots for unsuccessful outcomes and reports `Incomplete`; returned partial
+metadata remains fully validated. Public artifact validation and successful producer
+completeness remain strict. The focused planner suite passed **46/46**, exit **0**, with no
+warnings, failures or skips, including missing-report and malformed-partial regressions.
+
+[Current systemd run 37019675947](https://github.com/forge-trust/AppSurface/actions/runs/37019675947)
+stopped before launch because publish did not emit the build summary required by the
+proof driver. The driver now verifies an explicit warning-as-error, zero-warning CLI
+build before publishing that exact configuration without rebuilding, and retains six
+raw build/publish streams with their combined digest. The driver's portable controls
+pass **9/9**, exit **0**. Its generated private parent becomes root-owned and traversable
+before launch; protected tool/output children retain their narrower launcher permissions.
+The disposable runner retains that private workspace for diagnosis. A fresh source
+snapshot, native caller run, actual systemd Observation and unchanged solution gate are
+still required. No current acceptance decision or Trusted support is asserted.
+
+The direct broker's empty-packages Cobertura fixture exposed an independent positive-control
+error: ReportGenerator exited zero but recalculated zero valid items, which the actual CLI
+numeric gate rejected with `ASCOV006`. A private measured-class candidate with one covered
+line and a fully covered two-way branch passed the exact pinned reporter and actual gate,
+both exit **0**, at **100% line / 100% branch**. The meaningful report replaces only synthetic
+fixture data. Separately, that measured report still rejects execute-only ancestors with
+`ASCOV019`/`ASCOV109`, confirming that numerical and permission failures are distinct.
+
+The native build also exposed a pre-existing Tailwind warning: ANSI SGR styling prevented
+the stderr classifier from recognizing its informational version banner. Classification
+now ignores only complete SGR sequences, preserving raw output and error severity for
+real warnings and unknown or incomplete controls. Focused process/classifier tests pass
+**40/40**, exit **0**, with no warnings or skips. No warning suppression or coverage
+policy change was used.
+
+### Native candidate results and invalid-outcome regression (2026-10-02)
+
+[Native run 37024942137](https://github.com/forge-trust/AppSurface/actions/runs/37024942137)
+used private source snapshot `43e826b11ece70845ca1eabdec79679a9865d797` and verified
+all 2707 captured source files before and after execution. The launcher controls
+passed **39/39**, runtime-driver controls **9/9**, descriptor controls **3/3**,
+POSIX lifecycle controls **5/5**, and control-protocol controls **16/16**. Its CLI
+Evidence filter reported **336 passed / 1 failed**, with no skips. The positive
+broker case produced a Passed Observation manifest, completed cleanup, closed its
+obligation, and passed the numeric coverage gate at **100% line / 100% branch**.
+Its remaining failure was the test's physical report lookup: artifact metadata is
+relative to a producer directory, so the lookup must include `ProducerId`. This
+does not change the writer layout or manifest schema. Artifact `11235321545`
+retains the actual failure and source checks. The focused Aspire selection and
+the exact `./scripts/coverage-solution.sh` gate were **not reached**.
+
+[Systemd run 37025006612](https://github.com/forge-trust/AppSurface/actions/runs/37025006612)
+used the same source snapshot. All six subject-build, CLI-build and publish
+streams contained zero warnings or errors. The production Observation launcher
+then failed with the generic `launcher-failed` diagnostic; no completed runtime
+proof was produced. Artifact `11234757444` retains those actual logs. A bounded
+private host-category diagnostic and a pre-reserved private structural-verification
+directory are being added to make the next failure actionable without publishing
+subject output or exception text. This failed run establishes no runtime acceptance.
+
+Review found a separate structural regression after allowing absent reports on
+unsuccessful producers: an explicit `Invalid` outcome could become `Incomplete`
+when finalization removed invalid artifact metadata. The structural builder now
+preserves explicit `Invalid`, and both the public builder and existing Aspire
+artifact-tampering regression assert `Invalid` with `None` claim and eligibility.
+Source-built macOS planner tests passed **47/47** and the exact Aspire tampering
+test passed **1/1**, both exit **0**, with no warnings, failures or skips. Scoped
+formatting exited **0** without changing the Aspire test bytes. The combined
+validation and formatting took **22.602 seconds**, without timeout. The local-only
+receipt is `TestResults/issue779-recovery-20261002/native-validation/invalid-outcome-validation/receipt.json`.
+
+Packed candidate `0.1.0-issue779-current.20261002.2` passed 67 modern SDK assertions,
+two legacy assertions, its expected two internal-access compiler errors, and
+seven installed CLI checks. All six packed README files matched source; SDK and
+tool Evidence assemblies matched. The legacy build produced only its expected
+unsuppressed obsolete-API warning. These checks bind their earlier captured source;
+the subsequent Contracts regression fix requires fresh packages. Current Linux
+caller execution, the unchanged solution gate, the actual systemd runtime proof,
+restricted Aspire resources and protected downstream acceptance remain required.
+
+The runtime diagnostic fix is source-clear: portable launcher controls passed
+**45/45** and runtime-driver controls **15/15**, both exit **0**. The optional
+private receipt permits only fixed host categories and bounded numeric systemd
+status. It uses exclusive no-follow creation beneath a pinned protected parent;
+the driver publishes only validated fields. Default public launcher diagnostics
+remain unchanged. The structural-verification child is created privately before
+root ownership of its parent, then checked before writing fresh collected copies.
+These portable controls do not substitute for the next actual systemd run.
+
+The [full-source native gate](https://github.com/forge-trust/AppSurface/actions/runs/37037592365)
+reached the unchanged solution gate: 15269 tests passed, none failed and two
+existing tests were skipped. Aggregate coverage was 94.88% lines and 88.522%
+branches, but patch coverage was 82.852% lines and 76.6374% branches. The
+required gate exited **1**, `ASCOV020`. Measured worker, budget, protected
+producer and host gaps are being addressed through meaningful behavior tests;
+the gate policy and comparison base remain unchanged.
+
+The next complete snapshot, `2b7da72fa2eba5d15300052efc5818fb868d7f9d`,
+failed [systemd Observation](https://github.com/forge-trust/AppSurface/actions/runs/37039914626)
+after namespace setup, with worker exit status 1 and an incomplete protocol.
+It also failed all five [Aspire mechanism controls](https://github.com/forge-trust/AppSurface/actions/runs/37039916803).
+The store correction reached DCP configuration, revealing the fixture's
+incorrect option section. The corrected `DcpPublisher` arguments now build
+without warnings, and forty portable child controls pass. A bounded private
+identity diagnostic preserves the original startup rejection and its kernel
+facts. Fresh source-bound native execution remains required for both paths.
+
+An internal root completion context now retains the authenticated descriptor,
+output identities and directory handles for same-parent collection. Portable
+collector controls cover actual bytes, links, replacement, modes and bounds;
+account lifetime and cleanup ownership are now repaired and reviewed. Launcher
+controls passed **72/72** and runtime-driver controls passed **30/30**. A failed
+cleanup closes both retained descriptors, and successful collection reserves
+the run accounts until completion closes. A fixed root-owned journal is retained
+as a bounded private archive while the original failure remains unchanged.
+These are portable checks, with no admission authority. Native completion verification, the immutable
+controlled release fixture, shared Aspire resource integration and the complete
+protected consumer matrix remain required. See the
+[acceptance record](../evidence/issue779-consumer-acceptance.md) for the exact
+failed runs and their limits.
+
+The complete frozen snapshot `8a964188e85561d57119133d26b552f9412e2445`
+also failed [systemd Observation](https://github.com/forge-trust/AppSurface/actions/runs/37047555055)
+and [Aspire mechanism execution](https://github.com/forge-trust/AppSurface/actions/runs/37047560583).
+All 2725 frozen hashes and dispatched workflow bindings matched. The runtime
+worker reached readiness and completed its wait, then reported `ASEVD409`;
+the erased internal allocation/activation exception still needs a closed private
+diagnostic. Aspire reached DCP and resource startup, where thread creation failed;
+task and memory counters are needed to distinguish the cause. Its factory-stall
+identity guard correctly rejected an observed root UID, without establishing
+factory execution. The [acceptance record](../evidence/issue779-consumer-acceptance.md#frozen-source-allocation-and-resource-startup-failures-2026-10-02)
+preserves these failed results and their limits. The [unchanged coverage run](https://github.com/forge-trust/AppSurface/actions/runs/37047553718)
+subsequently exited **1** (`ASCOV120`) because the fixture-path policy rejected
+a dynamic `Path.Join` in the Bootstrap artifact test. Its measured aggregate
+was 94.98% line / 88.79% branch; the patch gate was not reached. There were
+15,393 passes, one failure, two existing skips and zero compiler warnings.
+The source correction uses `TestPathUtils.PathUnder`, followed by the exact
+existing policy regression and a new complete frozen native run.

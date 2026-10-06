@@ -7,13 +7,70 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 
 public sealed class EvidencePlannerTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ManifestBuilder_ObservationChecksAggregateArtifactsAcrossIndividuallyValidProducers(bool exceedsLimit)
+    {
+        // Metadata-only library control through the existing ordinary Observation fixture.
+        // This creates no artifact bytes, protected producer lease, Trusted grant, or native proof.
+        var maximum = EvidenceArtifactWriter.MaximumTotalArtifactBytes;
+        var firstLength = maximum / 2;
+        var secondLength = maximum - firstLength + (exceedsLimit ? 1 : 0);
+        var slotMaximum = Math.Max(firstLength, secondLength);
+        Assert.InRange(slotMaximum, 1L, maximum);
+        var declarations = new[]
+        {
+            new EvidenceProducerDeclaration("coverage-first", "coverage", "1.0.0", [], [],
+                [new EvidenceArtifactSlot("report", "coverage", "text/plain", Required: true, MaximumBytes: slotMaximum)], 60),
+            new EvidenceProducerDeclaration("coverage-second", "coverage", "1.0.0", [], [],
+                [new EvidenceArtifactSlot("report", "coverage", "text/plain", Required: true, MaximumBytes: slotMaximum)], 60),
+        };
+        var profile = new EvidenceProfile("aggregate-observation", EvidenceProfileScope.Targeted, [], declarations, []);
+        var policy = new EvidencePolicy("aggregate-policy", "1", profile.Id, [profile], []);
+        var plan = new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("src/AggregateArtifacts.cs")]);
+        var results = new[]
+        {
+            new EvidenceProducerResult("coverage-first", EvidenceProducerOutcome.Passed, [], Artifacts:
+                [new EvidenceArtifactResult("report", "coverage/first.txt", "text/plain", firstLength, new string('a', 64))]),
+            new EvidenceProducerResult("coverage-second", EvidenceProducerOutcome.Passed, [], Artifacts:
+                [new EvidenceArtifactResult("report", "coverage/second.txt", "text/plain", secondLength, new string('b', 64))]),
+        };
+        Assert.Equal(maximum + (exceedsLimit ? 1 : 0), results.Sum(result => Assert.Single(result.Artifacts!).LengthBytes));
+        foreach (var result in results)
+        {
+            var declaration = Assert.Single(plan.Profile.Producers, producer => producer.Id == result.ProducerId);
+            Assert.True(EvidenceArtifactValidation.AreValid(declaration, result.Artifacts));
+        }
+        Assert.Empty(plan.Profile.Resources);
+        Assert.Empty(plan.Profile.Obligations);
+
+        var admission = EvidenceAdmissionTestFixture.AdmitObservation(plan);
+        Assert.Equal(EvidenceExecutionMode.Observation, admission.Mode);
+        Assert.Null(admission.Assertion);
+        admission.Activate("metadata-only-aggregate-observation-root");
+        admission.Complete(ownedWorkStopped: true, artifactsVerified: true, cleanupCompleted: true);
+        var manifest = EvidenceManifestBuilder.Build(plan, results, admission,
+            metrics: new EvidenceExecutionMetrics(CleanupCompleted: true));
+
+        Assert.Equal(exceedsLimit ? EvidenceExecutionVerdict.Invalid : EvidenceExecutionVerdict.Passed, manifest.ExecutionVerdict);
+        Assert.Equal(exceedsLimit ? EvidenceClaimKind.None : EvidenceClaimKind.ObservationOnly, manifest.ClaimKind);
+        Assert.Equal(exceedsLimit ? EvidenceClaimEligibility.None : EvidenceClaimEligibility.Informational, manifest.Eligibility);
+        Assert.Equal(EvidenceExecutionMode.Observation, manifest.Mode);
+        Assert.Null(manifest.EnvelopeAssertion);
+        Assert.Empty(manifest.ClosedObligationIds);
+        Assert.True(manifest.Metrics.CleanupCompleted);
+        Assert.Null(manifest.Metrics.TerminalFailureCode);
+        Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
+    }
+
     [Fact]
     public void Resolve_ShouldSelectExplicitNoEvidenceProfileForDocumentationPath()
     {
         var planner = new EvidencePlanner();
 
         var plan = planner.Resolve(CreatePolicy(), [new NormalizedDiffPath("docs/readme.md")]);
-        var manifest = EvidenceManifestBuilder.Build(plan, []);
+        var manifest = EvidenceAdmissionTestFixture.BuildTrusted(plan, []);
 
         Assert.Equal("no-evidence", plan.Profile.Id);
         Assert.Equal(EvidenceClaimKind.NoEvidenceRequired, manifest.ClaimKind);
@@ -226,7 +283,7 @@ public sealed class EvidencePlannerTests
     }
 
     [Fact]
-    public void ManifestBuilder_ShouldRejectReleaseClaimWithoutValidatedEnvelope()
+    public void ManifestBuilder_LegacyStatusCannotMintAReleaseClaimAndFakeTrustedAdmissionExercisesReleaseRules()
     {
         var release = CreatePolicy() with
         {
@@ -237,20 +294,26 @@ public sealed class EvidencePlannerTests
         var plan = new EvidencePlanner().Resolve(release, [new NormalizedDiffPath("src/Feature.cs")]);
         var result = new EvidenceProducerResult("coverage", EvidenceProducerOutcome.Passed, ["appsurface/coverage/behavioral-patch@1"]);
 
-        var incomplete = EvidenceManifestBuilder.Build(plan, [result]);
-        var complete = EvidenceManifestBuilder.Build(plan, [result], envelopeStatus: EvidenceEnvelopeStatus.ValidatedNotAttested);
+        var legacy = Assert.Throws<EvidenceAdmissionException>(() => EvidenceManifestBuilder.Build(plan, [result]));
+        var legacyBoolean = Assert.Throws<EvidenceAdmissionException>(() => EvidenceManifestBuilder.Build(plan, [result], observationOnly: true));
+        var legacyStatus = Assert.Throws<EvidenceAdmissionException>(() => EvidenceManifestBuilder.Build(
+            plan, [result], envelopeStatus: EvidenceEnvelopeStatus.ValidatedNotAttested));
+        var complete = EvidenceAdmissionTestFixture.BuildTrusted(plan, [result]);
 
-        Assert.Equal(EvidenceExecutionVerdict.Incomplete, incomplete.ExecutionVerdict);
-        Assert.Equal(EvidenceClaimKind.None, incomplete.ClaimKind);
+        Assert.Equal("ASEVD400", legacy.Code);
+        Assert.Equal("ASEVD400", legacyBoolean.Code);
+        Assert.Equal("ASEVD400", legacyStatus.Code);
         Assert.Equal(EvidenceClaimKind.ReleaseComplete, complete.ClaimKind);
         Assert.Equal(EvidenceClaimEligibility.ReleaseGate, complete.Eligibility);
+        Assert.Equal(EvidenceExecutionMode.Trusted, complete.Mode);
+        Assert.NotNull(complete.EnvelopeAssertion);
     }
 
     [Fact]
     public void ManifestBuilder_ShouldRejectClaimTamperingEvenWhenDigestIsRecomputed()
     {
         var plan = new EvidencePlanner().Resolve(CreatePolicy(), [new NormalizedDiffPath("docs/readme.md")]);
-        var manifest = EvidenceManifestBuilder.Build(plan, []);
+        var manifest = EvidenceAdmissionTestFixture.BuildTrusted(plan, []);
         var tampered = manifest with { ClaimKind = EvidenceClaimKind.TargetedComplete, Eligibility = EvidenceClaimEligibility.PullRequestGate, ManifestDigest = string.Empty };
         tampered = tampered with { ManifestDigest = EvidenceDigest.CanonicalSha256(tampered) };
 
@@ -276,10 +339,84 @@ public sealed class EvidencePlannerTests
         var policy = new EvidencePolicy("artifact", "1", "artifact-coverage", [profile], []);
         var plan = new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("src/Feature.cs")]);
 
-        var manifest = EvidenceManifestBuilder.Build(plan, [new EvidenceProducerResult("coverage", EvidenceProducerOutcome.Passed, ["coverage/assertion@1"])]);
+        var manifest = EvidenceAdmissionTestFixture.BuildTrusted(plan, [new EvidenceProducerResult("coverage", EvidenceProducerOutcome.Passed, ["coverage/assertion@1"])]);
 
         Assert.Equal(EvidenceExecutionVerdict.Invalid, manifest.ExecutionVerdict);
         Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+    }
+
+    [Theory]
+    [InlineData(EvidenceProducerOutcome.Failed)]
+    [InlineData(EvidenceProducerOutcome.Flaky)]
+    [InlineData(EvidenceProducerOutcome.TimedOut)]
+    [InlineData(EvidenceProducerOutcome.Unavailable)]
+    [InlineData(EvidenceProducerOutcome.Cancelled)]
+    [InlineData(EvidenceProducerOutcome.SkippedNotRequired)]
+    public void ManifestBuilder_ShouldKeepUnsuccessfulProducerIncompleteWhenRequiredArtifactsAreAbsent(EvidenceProducerOutcome outcome)
+    {
+        var plan = CreateRequiredArtifactPlan();
+        var result = new EvidenceProducerResult("coverage", outcome, ["coverage/assertion@1"]);
+
+        var manifest = EvidenceAdmissionTestFixture.BuildTrusted(plan, [result]);
+
+        Assert.Equal(EvidenceExecutionVerdict.Incomplete, manifest.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+        Assert.Equal(EvidenceClaimEligibility.None, manifest.Eligibility);
+        Assert.Empty(manifest.ClosedObligationIds);
+        Assert.Equal(["coverage"], manifest.UnmediatedObligationIds);
+        Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
+        Assert.False(EvidenceArtifactValidation.AreValid(Assert.Single(plan.Profile.Producers), result.Artifacts));
+    }
+
+    [Fact]
+    public void ManifestBuilder_ShouldKeepAnInvalidProducerInvalidWhenItsArtifactMetadataIsRemoved()
+    {
+        var plan = CreateRequiredArtifactPlan();
+        var result = new EvidenceProducerResult("coverage", EvidenceProducerOutcome.Invalid, [], Artifacts: []);
+
+        var manifest = EvidenceAdmissionTestFixture.BuildTrusted(plan, [result]);
+
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, manifest.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+        Assert.Equal(EvidenceClaimEligibility.None, manifest.Eligibility);
+        Assert.Empty(manifest.ClosedObligationIds);
+        Assert.Equal(["coverage"], manifest.UnmediatedObligationIds);
+        Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
+    }
+
+    [Fact]
+    public void ManifestBuilder_ShouldValidatePartialArtifactsWithoutPromotingAnUnsuccessfulProducer()
+    {
+        var plan = CreateRequiredArtifactPlan();
+        var artifact = new EvidenceArtifactResult("report", "coverage/result.txt", "text/plain", 2, new string('a', 64));
+        var result = new EvidenceProducerResult("coverage", EvidenceProducerOutcome.Failed, ["coverage/assertion@1"], Artifacts: [artifact]);
+
+        var manifest = EvidenceAdmissionTestFixture.BuildTrusted(plan, [result]);
+
+        Assert.Equal(EvidenceExecutionVerdict.Incomplete, manifest.ExecutionVerdict);
+        Assert.Equal(artifact, Assert.Single(Assert.Single(manifest.ProducerResults).Artifacts!));
+        Assert.Equal(EvidenceClaimEligibility.None, manifest.Eligibility);
+        Assert.Empty(manifest.ClosedObligationIds);
+        Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
+        Assert.False(EvidenceArtifactValidation.AreValid(Assert.Single(plan.Profile.Producers), result.Artifacts));
+    }
+
+    [Theory]
+    [InlineData("coverage/result.txt", "bad-digest")]
+    [InlineData("../escape.txt", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    public void ManifestBuilder_ShouldRejectMalformedPartialArtifactsFromAnUnsuccessfulProducer(string relativePath, string digest)
+    {
+        var plan = CreateRequiredArtifactPlan();
+        var artifact = new EvidenceArtifactResult("report", relativePath, "text/plain", 2, digest);
+        var result = new EvidenceProducerResult("coverage", EvidenceProducerOutcome.Failed, ["coverage/assertion@1"], Artifacts: [artifact]);
+
+        var manifest = EvidenceAdmissionTestFixture.BuildTrusted(plan, [result]);
+
+        Assert.Equal(EvidenceExecutionVerdict.Invalid, manifest.ExecutionVerdict);
+        Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+        Assert.Equal(EvidenceClaimEligibility.None, manifest.Eligibility);
+        Assert.Empty(manifest.ClosedObligationIds);
+        Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
     }
 
     [Fact]
@@ -321,7 +458,7 @@ public sealed class EvidencePlannerTests
             CancellationToken.None);
         var output = Path.Join(directory.Path, "TestResults", "evidence");
         await workflow.WritePlanAsync(plan, output, CancellationToken.None);
-        var manifest = EvidenceManifestBuilder.Build(plan, []);
+        var manifest = EvidenceAdmissionTestFixture.BuildTrusted(plan, []);
         await workflow.WriteManifestAsync(manifest, output, CancellationToken.None);
         var verified = await workflow.VerifyAsync(Path.Join(output, "evidence-plan.json"), Path.Join(output, "evidence-manifest.json"), CancellationToken.None);
 
@@ -411,7 +548,7 @@ public sealed class EvidencePlannerTests
         var plan = await workflow.ExplainAsync(new EvidencePlanningRequest(policyPath, ["docs/readme.md"], null), CancellationToken.None);
         var output = Path.Join(directory.Path, "output");
         await workflow.WritePlanAsync(plan, output, CancellationToken.None);
-        await workflow.WriteManifestAsync(EvidenceManifestBuilder.Build(plan, []), output, CancellationToken.None);
+        await workflow.WriteManifestAsync(EvidenceAdmissionTestFixture.BuildTrusted(plan, []), output, CancellationToken.None);
         await File.WriteAllTextAsync(Path.Join(output, "evidence-manifest.json"), "not-json");
 
         var malformedManifestException = await Assert.ThrowsAsync<EvidenceCliException>(() => workflow.VerifyAsync(Path.Join(output, "evidence-plan.json"), Path.Join(output, "evidence-manifest.json"), CancellationToken.None));
@@ -484,7 +621,7 @@ public sealed class EvidencePlannerTests
         var plan = await workflow.ExplainAsync(new EvidencePlanningRequest(policyPath, ["docs/readme.md"], null), CancellationToken.None);
         var output = Path.Join(directory.Path, "output");
         await workflow.WritePlanAsync(plan with { PolicySnapshot = null }, output, CancellationToken.None);
-        await workflow.WriteManifestAsync(EvidenceManifestBuilder.Build(plan, []), output, CancellationToken.None);
+        await workflow.WriteManifestAsync(EvidenceAdmissionTestFixture.BuildTrusted(plan, []), output, CancellationToken.None);
 
         var exception = await Assert.ThrowsAsync<EvidenceCliException>(() => workflow.VerifyAsync(Path.Join(output, "evidence-plan.json"), Path.Join(output, "evidence-manifest.json"), CancellationToken.None));
         Assert.Contains("ASEVD203", exception.Message, StringComparison.Ordinal);
@@ -502,12 +639,12 @@ public sealed class EvidencePlannerTests
 
         var unresolvable = plan with { PolicySnapshot = new EvidencePolicy("invalid", "1", "missing", [], []) };
         await workflow.WritePlanAsync(unresolvable, output, CancellationToken.None);
-        await workflow.WriteManifestAsync(EvidenceManifestBuilder.Build(unresolvable, []), output, CancellationToken.None);
+        await workflow.WriteManifestAsync(EvidenceAdmissionTestFixture.BuildTrusted(plan, []), output, CancellationToken.None);
         var snapshotException = await Assert.ThrowsAsync<EvidenceCliException>(() => workflow.VerifyAsync(Path.Join(output, "evidence-plan.json"), Path.Join(output, "evidence-manifest.json"), CancellationToken.None));
         Assert.Contains("ASEVD203", snapshotException.Message, StringComparison.Ordinal);
 
         await workflow.WritePlanAsync(plan with { PlanDigest = "tampered-plan-digest" }, output, CancellationToken.None);
-        await workflow.WriteManifestAsync(EvidenceManifestBuilder.Build(plan, []), output, CancellationToken.None);
+        await workflow.WriteManifestAsync(EvidenceAdmissionTestFixture.BuildTrusted(plan, []), output, CancellationToken.None);
         var bindingException = await Assert.ThrowsAsync<EvidenceCliException>(() => workflow.VerifyAsync(Path.Join(output, "evidence-plan.json"), Path.Join(output, "evidence-manifest.json"), CancellationToken.None));
         Assert.Contains("ASEVD203", bindingException.Message, StringComparison.Ordinal);
     }
@@ -780,15 +917,15 @@ public sealed class EvidencePlannerTests
 
         var plan = new EvidencePlanner().Resolve(CreatePolicy(), [new NormalizedDiffPath("src/Feature.cs")]);
         var validResult = new EvidenceProducerResult("coverage", EvidenceProducerOutcome.Passed, ["appsurface/coverage/behavioral-patch@1"]);
-        var duplicateResult = EvidenceManifestBuilder.Build(plan, [validResult, validResult]);
-        var unexpectedProducer = EvidenceManifestBuilder.Build(plan, [validResult, new EvidenceProducerResult("unexpected", EvidenceProducerOutcome.Passed, [])]);
-        var unknownResource = EvidenceManifestBuilder.Build(plan, [validResult], resourceResults: [new EvidenceResourceResult("unexpected", EvidenceResourceOutcome.Ready, 0)]);
+        var duplicateResult = EvidenceAdmissionTestFixture.BuildTrusted(plan, [validResult, validResult]);
+        var unexpectedProducer = EvidenceAdmissionTestFixture.BuildTrusted(plan, [validResult, new EvidenceProducerResult("unexpected", EvidenceProducerOutcome.Passed, [])]);
+        var unknownResource = EvidenceAdmissionTestFixture.BuildTrusted(plan, [validResult], [new EvidenceResourceResult("unexpected", EvidenceResourceOutcome.Ready, 0)]);
 
         Assert.Equal(EvidenceExecutionVerdict.Invalid, duplicateResult.ExecutionVerdict);
         Assert.Equal(EvidenceExecutionVerdict.Invalid, unexpectedProducer.ExecutionVerdict);
         Assert.Equal(EvidenceExecutionVerdict.Invalid, unknownResource.ExecutionVerdict);
-        Assert.False(EvidenceManifestBuilder.Verify(plan with { PolicySnapshot = null }, EvidenceManifestBuilder.Build(plan, [validResult])));
-        Assert.False(EvidenceManifestBuilder.Verify(plan, EvidenceManifestBuilder.Build(plan, [validResult]) with { ManifestDigest = "tampered" }));
+        Assert.False(EvidenceManifestBuilder.Verify(plan with { PolicySnapshot = null }, EvidenceAdmissionTestFixture.BuildTrusted(plan, [validResult])));
+        Assert.False(EvidenceManifestBuilder.Verify(plan, EvidenceAdmissionTestFixture.BuildTrusted(plan, [validResult]) with { ManifestDigest = "tampered" }));
     }
 
     [Fact]
@@ -796,20 +933,38 @@ public sealed class EvidencePlannerTests
     {
         var targetPlan = new EvidencePlanner().Resolve(CreatePolicy(), [new NormalizedDiffPath("src/Feature.cs")]);
         var targetResult = new EvidenceProducerResult("coverage", EvidenceProducerOutcome.Passed, ["appsurface/coverage/behavioral-patch@1"]);
-        var targeted = EvidenceManifestBuilder.Build(targetPlan, [targetResult]);
-        var observation = EvidenceManifestBuilder.Build(targetPlan, [targetResult], observationOnly: true);
+        var targeted = EvidenceAdmissionTestFixture.BuildTrusted(targetPlan, [targetResult]);
+        var observationAdmission = EvidenceAdmissionTestFixture.AdmitObservation(targetPlan);
+        observationAdmission.Activate("fake-observation-root");
+        observationAdmission.Complete(ownedWorkStopped: true, artifactsVerified: true, cleanupCompleted: true);
+        var observation = EvidenceManifestBuilder.Build(targetPlan, [targetResult], observationAdmission);
         var releasePolicy = CreatePolicy() with
         {
             Profiles = [CreateCoverageProfile(EvidenceProfileScope.Release)],
             Rules = [],
         };
         var releasePlan = new EvidencePlanner().Resolve(releasePolicy, [new NormalizedDiffPath("src/Feature.cs")]);
-        var release = EvidenceManifestBuilder.Build(releasePlan, [targetResult], envelopeStatus: EvidenceEnvelopeStatus.ValidatedNotAttested);
+        var release = EvidenceAdmissionTestFixture.BuildTrusted(releasePlan, [targetResult]);
 
         Assert.Contains("Required producers: coverage", EvidenceCliWorkflow.FormatSummary(targetPlan), StringComparison.Ordinal);
         Assert.Contains("Targeted evidence is complete", EvidenceCliWorkflow.FormatSummary(targeted), StringComparison.Ordinal);
         Assert.Contains("Observation recorded", EvidenceCliWorkflow.FormatSummary(observation), StringComparison.Ordinal);
         Assert.Contains("Release evidence is complete", EvidenceCliWorkflow.FormatSummary(release), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ManifestBuilder_ObservationAdmissionRejectsResourceBearingProfile()
+    {
+        var profile = CreateCoverageProfile(EvidenceProfileScope.Targeted) with
+        {
+            Resources = [new EvidenceResourceDeclaration("database", "aspire_health", 1, [])],
+        };
+        var policy = new EvidencePolicy("resource-observation", "1", "coverage", [profile], []);
+        var plan = new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("src/Feature.cs")]);
+
+        var exception = Assert.Throws<EvidenceAdmissionException>(() => EvidenceAdmissionTestFixture.AdmitObservation(plan));
+
+        Assert.Equal("ASEVD406", exception.Code);
     }
 
     [Fact]
@@ -850,6 +1005,22 @@ public sealed class EvidencePlannerTests
         var exception = Assert.Throws<EvidencePlanningException>(action);
 
         Assert.Equal(code, exception.Code);
+    }
+
+    private static EvidencePlan CreateRequiredArtifactPlan()
+    {
+        var profile = new EvidenceProfile(
+            "artifact-coverage",
+            EvidenceProfileScope.Targeted,
+            [],
+            [new EvidenceProducerDeclaration(
+                "coverage", "coverage", "1.0.0", [], ["coverage/assertion@1"],
+                [new EvidenceArtifactSlot("report", "coverage", "text/plain", Required: true, MaximumBytes: 128),
+                    new EvidenceArtifactSlot("detail", "coverage", "text/plain", Required: true, MaximumBytes: 128)],
+                60)],
+            [new EvidenceObligation("coverage", "behavior", "Coverage reports are required.", ["coverage"], "coverage/assertion@1")]);
+        var policy = new EvidencePolicy("artifact", "1", "artifact-coverage", [profile], []);
+        return new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("src/Feature.cs")]);
     }
 
     private static EvidencePolicy CreatePolicy() => new(

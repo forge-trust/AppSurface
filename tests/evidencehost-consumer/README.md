@@ -2,9 +2,23 @@
 
 This fixture tests the Linux mechanism proposed for [issue #779](https://github.com/forge-trust/AppSurface/issues/779).
 The [consumer acceptance record](../../docs/evidence/issue779-consumer-acceptance.md) remains the release prerequisite.
-Neither a passed fixture nor its uploaded JSON grants runtime admission. The fixture has no EvidenceHost lease API,
+Neither a passed fixture nor its uploaded JSON grants Trusted admission. The preliminary mechanism fixture has no EvidenceHost lease API,
 protected verifier, producer catalogue, or downstream gate. Public provider APIs remain provisional until a real
 consumer demonstrates the [approved boundaries](../../docs/designs/issue-779-evidencehost-trust-boundary.md).
+
+The separate [runtime candidate](RuntimeSubject/README.md) exercises production CLI Observation orchestration,
+including authenticated broker communication and retained-handle output. Its [workflow](../../.github/workflows/evidencehost-runtime-proof.yml)
+is candidate-controlled and supplies no protected-base or Trusted acceptance. The [runtime proof driver](runtime-proof.py)
+requires exact missing-proof rejection and structural verification of the collected plan/manifest. These tests and
+the preliminary mechanism observations have different source and execution bindings; one cannot substitute for the other.
+
+The runtime driver requires explicit zero-warning subject and CLI builds, then publishes the same CLI configuration
+with `--no-build --no-restore`. It preserves six raw build/publish stdout/stderr logs in the public proof directory,
+including on build or validation failure, and records their combined digest when the proof completes. The CLI build
+requires the repository's pinned Node/pnpm asset prerequisites, which the candidate workflow installs. Before launching,
+the generated temporary parent becomes root-owned and traversable; the launcher separately restricts tool and output
+children to the worker. Private build homes and caches keep their restrictive permissions. The disposable VM retains
+the private workspace after either result for diagnosis; it is never reused or uploaded as a proof artifact.
 
 ## Run
 
@@ -65,6 +79,78 @@ be established, the probe fails; a real integration must quarantine output and c
 not handle external topology or confer permission to reuse failed production output.
 
 ## Before public API freeze or Trusted support
+
+### Root completion channel
+
+The [internal Linux launcher](../../scripts/evidencehost-linux-launcher.py) offers
+`launch_with_completion(args)` to an importing protected root parent. It executes
+the same authentication, admission, allocation and supervised worker path as
+`launch(args)`. The existing command-line entry and Path return remain compatible;
+there is no completion or admission override in command-line or environment data.
+
+The returned context owns retained no-follow output and output-parent directory
+descriptors. `descriptor`, `output_identity` and `output_parent_identity` return
+defensive copies of root-selected facts. `subject_output_receipts` contains one
+immutable `(received_bytes, stdout_bytes, stderr_bytes)` tuple per acknowledged
+subject command. `duplicate_output_directory()` and `duplicate_output_parent()`
+return caller-owned descriptors; close each duplicate and the context explicitly.
+The context also retains this launch's worker/subject accounts and results group, so
+the worker UID cannot be reused while the parent collects from the retained handles.
+Finish collection and close all duplicate handles, then call `completion.close()`
+successfully **before invoking the gate**. Close attempts both owned descriptor
+closures and strictly checks account deletion. It is idempotent: cleanup runs once,
+and any cleanup failure is latched and raised on every subsequent close. A close
+failure forbids the gate; it cannot be made successful by calling close again.
+Duplicate handles continue to refer to the originally verified directories if a
+path is renamed. A collector must also reject a changed named binding before
+publication and read every artifact through the retained directory, with the
+existing byte, link, ownership and digest checks.
+
+Completion requires authenticated ready, protocol wait/exit, successful physical
+worker exit, empty worker and subject cgroups, no active request/artifact operation,
+and error-free joined subject pumps with exact job-wide received-byte accounting.
+Every started command must have both EOF acknowledgements and a matching byte
+receipt; overflow, missing acknowledgement or identity drift yields no completion.
+Failures retain the existing quarantine disposition. A completion candidate stays
+launcher-owned until channels/handlers and scratch cleanup succeed. Any exceptional
+exit before transfer closes both retained directory descriptors and returns no
+completion; run accounts and the output quarantine remain retained on failure.
+Successful transfer moves account cleanup into the returned context. Its copied
+descriptor records the actual selected subject root and identities after private
+scratch removal. The legacy `launch(args) -> Path` wrapper closes the context,
+including accounts, before returning and propagates cleanup failure.
+
+Use this channel to build independently selected downstream expectations after
+owned exit. It grants no Trusted admission and verifies no artifact contents by
+itself. Uploaded copies of its facts or a success exit do not authenticate a
+protected channel. The [portable retained-handle controls](test_linux_launcher.py)
+exercise physical directory descriptors and rejection paths with fixture-owned
+protocol/cgroup state; the current channel still requires native integration.
+
+### Standalone gate and Aspire child controls
+
+The [protected gate consumer](ProtectedGateConsumer/README.md) is a separate
+executable using only public Contracts APIs. Its counted standard-input message
+contains a plan, nullable manifest and independently selected expected facts.
+Its [external-process controls](test_protected_gate_consumer.py) check bounded
+JSON ingestion, current-fact comparisons, Observation denial and fixed diagnostics.
+A coherent synthetic positive checks API behavior; standard input and exit zero
+do not authenticate the producer, expected facts or collected artifact bytes.
+The protected parent must establish those bindings before using its decision.
+
+The [Aspire child controller](AspireChild/README.md) prepares a real pinned
+AppHost/DCP bundle with one [native HTTP executable](NativeHttpResource/README.md).
+Its own root watchdog, systemd unit and independent Unix-socket peer checks
+exercise startup, readiness and bounded teardown. The portable controls run the
+resource DLL directly and check controller behavior; native Aspire/DCP/systemd
+execution has separate prerequisites and results. This provisional fixture uses
+one application/resource identity and has no admission capability. Shared-host
+ownership, resource capability mapping and protected consumer acceptance remain
+part of the approved implementation.
+
+For direct CLI/Aspire consumer-path regression tests, use the separate
+[root-owned protocol fixture](ExecutionBroker-README.md). Its subject results and cgroup
+metadata are synthetic; it does not replace the actual systemd or consumer CI proof.
 
 Record immutable real CI run/revision/artifact identifiers, rerun from a reviewed protected workflow/base,
 then integrate the actual protected worker and restricted subject. Prove exact catalogue/context binding,

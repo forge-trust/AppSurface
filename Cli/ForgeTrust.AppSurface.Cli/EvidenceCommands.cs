@@ -1,11 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Text;
 using CliFx;
 using CliFx.Binding;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
-using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Evidence.Planner;
 
 namespace ForgeTrust.AppSurface.Cli;
@@ -141,99 +139,54 @@ internal sealed partial class EvidenceExplainCommand(EvidenceCliWorkflow workflo
 [Command("evidence run", Description = "Run selected built-in evidence and write a plan, manifest, and human summary.")]
 internal sealed partial class EvidenceRunCommand(EvidenceCliWorkflow workflow, CoverageEvidenceProducer coverageProducer) : EvidencePlanningCommandBase(workflow)
 {
+    // Keep the constructor shape used by existing command consumers during migration.
     private readonly CoverageEvidenceProducer _coverageProducer = coverageProducer ?? throw new ArgumentNullException(nameof(coverageProducer));
 
-    /// <summary>Gets or sets the output directory for plan, manifest, and producer artifacts.</summary>
-    [CommandOption("output", Description = "Evidence artifact directory. Defaults to TestResults/evidence.")]
+    /// <summary>Gets or sets the legacy output hint; the protected launcher supplies the admitted output allocation.</summary>
+    [CommandOption("output", Description = "Legacy output hint. Admitted execution uses the fresh output selected by the protected launcher.")]
     public string OutputDirectory { get; set; } = Path.Join("TestResults", "evidence");
 
-    /// <summary>Gets or sets the solution supplied to the in-process coverage producer.</summary>
-    [CommandOption("solution", Description = "Solution supplied to the built-in coverage producer when the selected profile requires coverage.")]
+    /// <summary>Gets or sets the legacy solution hint; the protected launcher supplies the restricted subject input.</summary>
+    [CommandOption("solution", Description = "Legacy solution hint. Admitted execution uses the subject solution selected by the protected launcher.")]
     public string? SolutionPath { get; set; }
 
     /// <summary>Gets or sets a value indicating whether the run is informative only and cannot satisfy a gate.</summary>
-    [CommandOption("observation-only", Description = "Emit an informational observation claim instead of a gate-eligible claim.")]
+    [CommandOption("observation-only", Description = "Legacy alias for --mode observation. Requires the same protected worker; conflicting mode is invalid.")]
     public bool ObservationOnly { get; set; }
+
+    /// <summary>Gets or sets the explicit execution mode.</summary>
+    [CommandOption("mode", Description = "Required: trusted or observation. Environment values never select a mode.")]
+    public string? Mode { get; set; }
+
+    /// <summary>Gets or sets the protected launcher's Unix control channel for this worker.</summary>
+    [CommandOption("control", Description = "Protected Linux worker control socket supplied by the independent launcher.")]
+    public string? ControlChannel { get; set; }
 
     /// <inheritdoc />
     public override async ValueTask ExecuteAsync(IConsole console)
     {
         try
         {
-            var cancellationToken = console.RegisterCancellationHandler();
-            var resolution = await Workflow.ResolveAsync(CreatePlanningRequest(), cancellationToken);
-            var plan = resolution.Plan;
-            await Workflow.WritePlanAsync(plan, OutputDirectory, cancellationToken);
-            var results = new List<EvidenceProducerResult>();
-            var resourceResults = plan.Profile.Resources
-                .Select(resource => new EvidenceResourceResult(
-                    resource.Id,
-                    EvidenceResourceOutcome.Unavailable,
-                    0,
-                    "Resource-backed evidence requires an explicitly registered consumer EvidenceHost; the CLI does not provision or infer consumer resources."))
-                .ToArray();
-            if (resourceResults.Length > 0)
-            {
-                results.AddRange(plan.Profile.Producers.Select(producer => new EvidenceProducerResult(
-                    producer.Id,
-                    EvidenceProducerOutcome.Unavailable,
-                    [],
-                    "The selected profile requires consumer-owned resources. Run it through ForgeTrust.AppSurface.Evidence.Aspire with explicit registrations.")));
-            }
-            else
-            {
-                foreach (var producer in plan.Profile.Producers)
-                {
-                    results.Add(await RunProducerAsync(producer, resolution.DiffSnapshot, console, cancellationToken));
-                }
-            }
-
-            var manifest = EvidenceManifestBuilder.Build(plan, results, ObservationOnly, resourceResults: resourceResults);
-            await Workflow.WriteManifestAsync(manifest, OutputDirectory, cancellationToken);
+            var mode = EvidenceModeSelection.Select(Mode, ObservationOnly);
+            _ = _coverageProducer; // The migration dependency never launches subject work in this process.
+            if (string.IsNullOrWhiteSpace(ControlChannel))
+                throw new EvidenceAdmissionException("ASEVD402", "An independently armed protected worker is required before execution.");
+            var manifest = await EvidenceProtectedCliExecution.RunAsync(new EvidenceExecutionRequest(mode, ControlChannel),
+                console.RegisterCancellationHandler()).ConfigureAwait(false);
             await console.Output.WriteLineAsync(EvidenceCliWorkflow.FormatSummary(manifest));
-            await console.Output.WriteLineAsync($"Artifacts: {Path.Join(OutputDirectory, "evidence-plan.json")}, {Path.Join(OutputDirectory, "evidence-manifest.json")}, {Path.Join(OutputDirectory, "evidence-summary.json")}");
-            await WriteGitHubSummaryAsync(manifest, cancellationToken);
             if (manifest.ClaimKind == EvidenceClaimKind.None)
-            {
-                throw new CommandException("ASEVD211: Evidence is incomplete. Inspect evidence-summary.json and the producer output before allowing a gate to proceed.");
-            }
+                throw new CommandException("ASEVD211: Evidence did not complete. Inspect the protected summary and use a fresh run only after owned exit is confirmed.");
         }
-        catch (EvidencePlanningException exception)
+        catch (EvidenceAdmissionException exception) { throw new CommandException(exception.Message); }
+        catch (EvidencePlanningException) { throw new CommandException("ASEVD403: Protected policy resolution failed. Fix: review protected inputs. See start-here/evidencehost.md."); }
+        catch (EvidenceCliException exception) { throw new CommandException(exception.Message); }
+        catch (Exception exception) when (exception is System.Text.Json.JsonException or IOException or UnauthorizedAccessException
+            or ArgumentException or KeyNotFoundException or FormatException or InvalidOperationException or System.Net.Sockets.SocketException)
         {
-            throw new CommandException(exception.Message);
-        }
-        catch (EvidenceCliException exception)
-        {
-            throw new CommandException(exception.Message);
+            throw new CommandException("ASEVD402: Protected control or input validation failed. Fix: inspect the launcher and use a fresh supervised run. See start-here/evidencehost.md.");
         }
     }
 
-    private async Task<EvidenceProducerResult> RunProducerAsync(
-        EvidenceProducerDeclaration producer,
-        EvidenceDiffSnapshot? diffSnapshot,
-        IConsole console,
-        CancellationToken cancellationToken)
-    {
-        return await _coverageProducer.RunAsync(
-            producer,
-            SolutionPath,
-            OutputDirectory,
-            diffSnapshot,
-            CoverageTextWriters.Create(console.Output, console.Error),
-            cancellationToken);
-    }
-
-    private static async Task WriteGitHubSummaryAsync(EvidenceManifest manifest, CancellationToken cancellationToken)
-    {
-        var summaryPath = Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY");
-        if (string.IsNullOrWhiteSpace(summaryPath))
-        {
-            return;
-        }
-
-        var markdown = $"## AppSurface Evidence{Environment.NewLine}{Environment.NewLine}- Claim: `{manifest.ClaimKind}`{Environment.NewLine}- Execution: `{manifest.ExecutionVerdict}`{Environment.NewLine}- Closed obligations: {manifest.ClosedObligationIds.Count}{Environment.NewLine}- Unmediated obligations: {manifest.UnmediatedObligationIds.Count}{Environment.NewLine}";
-        await File.AppendAllTextAsync(summaryPath, markdown, new UTF8Encoding(false), cancellationToken);
-    }
 }
 
 /// <summary>
@@ -266,7 +219,7 @@ internal sealed partial class EvidenceVerifyCommand(EvidenceCliWorkflow workflow
                 ? Path.Join(Path.GetDirectoryName(Path.GetFullPath(ManifestPath))!, "evidence-plan.json")
                 : PlanPath;
             var (_, manifest) = await _workflow.VerifyAsync(planPath, ManifestPath, console.RegisterCancellationHandler());
-            await console.Output.WriteLineAsync($"Evidence manifest verified: {manifest.ClaimKind} ({manifest.Eligibility})");
+            await console.Output.WriteLineAsync($"Evidence manifest structurally verified: {manifest.ClaimKind} ({manifest.Eligibility}). This does not authenticate origin or grant gate admission.");
         }
         catch (EvidenceCliException exception)
         {

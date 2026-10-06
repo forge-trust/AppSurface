@@ -4,12 +4,14 @@ using ForgeTrust.AppSurface.Evidence.Contracts;
 namespace ForgeTrust.AppSurface.Evidence.Aspire;
 
 /// <summary>
-/// Owns one consumer-composed Aspire application used only by an EvidenceHost run.
+/// Retains the legacy consumer-composed Aspire application lease for source compatibility.
 /// </summary>
 /// <remarks>
-/// Build the supplied <see cref="IDistributedApplicationBuilder"/> in test or CI composition code,
-/// then register readiness adapters from this lease with <see cref="EvidenceHostBootstrap"/>. This
-/// type does not inspect the entry assembly and must not be added to normal application startup.
+/// The public <see cref="StartAsync"/> method rejects a supplied builder with ASEVD400 before
+/// building or starting it. A preconfigured builder cannot establish authenticated admission or
+/// the root-owned restricted application lease required by <see cref="EvidenceHostBootstrap"/>.
+/// Current production application registration remains closed until its consumer proof is accepted;
+/// this compatibility API must not be added to normal application startup.
 /// </remarks>
 public sealed class EvidenceAspireApplication : IAsyncDisposable
 {
@@ -23,38 +25,82 @@ public sealed class EvidenceAspireApplication : IAsyncDisposable
     }
 
     /// <summary>
-    /// Builds and starts an explicitly supplied consumer Aspire application.
+    /// Rejects a preconfigured consumer Aspire builder before application construction.
     /// </summary>
     /// <param name="builder">Consumer-composed Aspire builder.</param>
-    /// <param name="cancellationToken">Cancellation requested while building or starting the application.</param>
-    /// <returns>An evidence-owned application lease that stops and disposes the application.</returns>
-    public static async Task<EvidenceAspireApplication> StartAsync(
+    /// <param name="cancellationToken">Retained for source compatibility; rejection precedes application work.</param>
+    /// <returns>A faulted task containing an <see cref="EvidenceAdmissionException"/> with code ASEVD400.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="builder"/> is null.</exception>
+    public static Task<EvidenceAspireApplication> StartAsync(
         IDistributedApplicationBuilder builder,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(builder);
-        cancellationToken.ThrowIfCancellationRequested();
-        var application = builder.Build();
-        try
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await application.StartAsync(cancellationToken).ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
-            return new EvidenceAspireApplication(application);
-        }
-        catch
-        {
-            try
-            {
-                await application.DisposeAsync().ConfigureAwait(false);
-            }
-            catch
-            {
-                // Preserve the primary consumer build/start failure. Cleanup is best effort on a lease that was never returned.
-            }
+        // A preconfigured builder may already have run consumer configuration. Keep this compatibility
+        // entry point closed before build or start; restricted application ownership belongs to the host.
+        _ = cancellationToken;
+        return Task.FromException<EvidenceAspireApplication>(
+            new EvidenceAdmissionException("ASEVD400", "Use the host-owned admitted Aspire application factory."));
+    }
 
-            throw;
-        }
+    /// <summary>Starts an application only after admission and registers ownership before startup can fail.</summary>
+    /// <remarks>
+    /// The owning host must register its cleanup callback before calling this method and stop/join all work
+    /// before invoking the registered application's disposer. This operation never cleans up inside a failed
+    /// start callback. Production callers additionally require a proved restricted child capability.
+    /// </remarks>
+    internal static ValueTask<EvidenceAspireApplication> StartAdmittedAsync(
+        EvidenceAdmissionResult admission,
+        EvidencePlan plan,
+        Func<IDistributedApplicationBuilder> builderFactory,
+        Action<EvidenceAspireApplication> registerOwnership,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(builderFactory);
+        return StartOwnedAsync(
+            admission,
+            plan,
+            () =>
+            {
+                var builder = builderFactory();
+                ArgumentNullException.ThrowIfNull(builder);
+                return new EvidenceAspireApplication(builder.Build());
+            },
+            registerOwnership,
+            static (application, token) => application._application.StartAsync(token),
+            cancellationToken);
+    }
+
+    /// <summary>Shares admission and ownership ordering with deterministic application-start tests.</summary>
+    /// <remarks>
+    /// The ownership callback must retain the lease before it returns and cannot dispose it during startup.
+    /// It runs under the host's tracked callback, whose real completion is joined before cleanup begins.
+    /// This internal seam supplies no restricted-child or platform admission authority.
+    /// </remarks>
+    internal static async ValueTask<TApplication> StartOwnedAsync<TApplication>(
+        EvidenceAdmissionResult admission,
+        EvidencePlan plan,
+        Func<TApplication> build,
+        Action<TApplication> registerOwnership,
+        Func<TApplication, CancellationToken, Task> start,
+        CancellationToken cancellationToken = default)
+        where TApplication : class, IAsyncDisposable
+    {
+        ArgumentNullException.ThrowIfNull(admission);
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(build);
+        ArgumentNullException.ThrowIfNull(registerOwnership);
+        ArgumentNullException.ThrowIfNull(start);
+        admission.ValidateActive(plan);
+        cancellationToken.ThrowIfCancellationRequested();
+        var application = build();
+        ArgumentNullException.ThrowIfNull(application);
+        registerOwnership(application);
+        cancellationToken.ThrowIfCancellationRequested();
+        admission.ValidateActive(plan);
+        await start(application, cancellationToken).ConfigureAwait(false);
+        admission.ValidateActive(plan);
+        return application;
     }
 
     /// <summary>
