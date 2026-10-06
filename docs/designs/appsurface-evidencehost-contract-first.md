@@ -7,6 +7,8 @@ Status: APPROVED (office-hours and autoplan, 2026-08-20)
 Mode: Builder
 Supersedes: andrew-main-design-20260813-043247-issue147-rich-authoring.md
 
+This is the historical design and decision record approved in August 2026. Its proposed lifecycle flow and `CreateAsync` composition signature are preserved as design history; they are not the current API reference. For the implemented `EvidenceHostBootstrap.Create(...)`, `EvidenceHostState` lifecycle, and bounded execution/cleanup contract, use the [Evidence.Aspire package reference](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) and [EvidenceHost guide](../../start-here/evidencehost.md).
+
 ## Problem Statement
 
 AppSurface currently provides strong local coverage execution and gating, but it does not express or prove the complete evidence required for a particular change or release. A consumer selects coverage projects manually, separately provisions dependencies, separately runs browser and release checks, and then interprets many CI steps as a confidence claim.
