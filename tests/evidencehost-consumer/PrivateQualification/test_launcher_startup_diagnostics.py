@@ -90,6 +90,17 @@ class LauncherStartupDiagnosticControls(unittest.TestCase):
                 self.assertIsNone(row["job_remaining_ms"])
                 self.assertTrue(stat.S_ISDIR(os.fstat(fd).st_mode))
 
+    def test_file_shape_category_is_closed_private_data(self):
+        for category in ('file-shape', 'published-binding', 'published-files-missing'):
+            with self.subTest(category=category):
+                path, fd = self.directory()
+                self.assertTrue(self.capture(fd, module._product.ProductCoverageError(category)))
+                row = self.record(path)
+                self.assertEqual('ProductCoverageError', row['exception_family'])
+                self.assertEqual(category, row['product_category'])
+                self.assertIsNone(row['errno'])
+                self.assertIsNone(row['job_remaining_ms'])
+
     def test_unknown_category_and_numeric_errno_never_echo_or_gain_a_category(self):
         for error in (module._product.ProductCoverageError("private-canary"),
                       module._product.ProductCoverageError("tree-bound", "private-canary"),
@@ -283,7 +294,7 @@ class LauncherStartupDiagnosticControls(unittest.TestCase):
                 (module, "open_test_output_root", lambda path, *a: os.open(path / "test-output", os.O_RDONLY | os.O_DIRECTORY)),
                 (module, "capture_job_deadline", lambda seconds: ("frozen-wall", 12345.0)),
                 (module.shutil, "which", lambda *a, **k: sys.executable), (module.os, "fstat", root_stat),
-                (module._product, "ProductCoverageOwner", lambda *a: Owner()),
+                (module._product, "ProductCoverageOwner", lambda *a, **k: Owner()),
                 (module, "_capture_launcher_startup_failure", captured))
             for target, name, value in replacements: stack.enter_context(patch.object(target, name, value))
             with self.assertRaises(module._product.ProductCoverageError) as caught:

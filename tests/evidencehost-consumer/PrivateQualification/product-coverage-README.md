@@ -10,7 +10,7 @@ pairs are eligible; private Contracts/Planner and the entry executable are exclu
 ## Ownership and ordering
 
 `ProductCoverageOwner(tool, anchor, worker_uid, worker_gid, deadline, dotnet,
-taskhost, reports, worker_unit)` receives launcher-selected paths and actual
+taskhost, reports, worker_unit, *, published_files=())` receives launcher-selected paths and actual
 accounts, never worker JSON. `prepare()` pins the entire original tool map,
 mounts a bounded 32 MiB/64 inode sticky tmpfs below the existing worker-owned
 0700 anchor, then starts an independent root watchdog. No new writable path is
@@ -48,12 +48,16 @@ confirm provider exit, that watchdog remains its actual parent/reaper and holds
 stdin; this is failure quarantine, never a successful bounded cleanup claim.
 
 All reads are bounded before buffering. Provider stdout/stderr are 64/128 KiB;
-IPC is 256 KiB; packets 16 KiB; file/tree bounds are 32/256 MiB with 2,048
+IPC is 256 KiB; packets 16 KiB; buffered file reads and eligible DLL/PDB pairs
+remain bounded to 32 MiB. Only files declared by the selected application audit may use its existing
+128 MiB bundle envelope, and are hashed in 64 KiB chunks. Unlisted files keep
+the 32 MiB limit. The total tree
+bound remains 256 MiB with 2,048
 combined file and directory entries, including the tree root. The authenticated
 CLI and Host publication in run 37389431507 contained 972 files and 84 directories
 each; the former 512-entry inventory bound could not accept either tree. This
 private metadata inventory limit permits those published dependencies while
-retaining depth eight, the same byte limits, protected ownership and link checks,
+retaining depth eight, protected ownership and link checks,
 and the original deadline. It changes no worker unit property, filesystem grant,
 account permission, job output quota or qualification requirement.
 The pinned published tree includes the DCP dependency directory `_manifest`.
@@ -66,6 +70,35 @@ restoration; no-follow handles, ownership, byte, depth and deadline checks still
 apply. The [published-name controls](test_product_coverage.py) exercise the seven
 actual manifest names with owned bytes and an inventory/restoration round trip.
 They do not issue a root coverage owner or demonstrate native qualification.
+
+The authenticated bundle in run 37394601651 contains an 84,042,030-byte DCP
+binary and a 61,567,278-byte tunnel dependency. Neither fits a 32 MiB buffered
+read. `hash_published_file(parent_fd, name, deadline, *, uid=0, gid=None,
+mode=None, cap=FILE_LIMIT)` borrows the directory FD, validates size
+before reading, hashes with bounded chunks, and returns the SHA256 plus pinned
+file identity after EOF, named-identity, close and original-deadline checks.
+Both `snapshot_tree(..., published_files=())` and
+`restore_metadata(..., published_files=())` use this procedure. The optional
+immutable tuple contains `(relative_path, length_bytes, sha256)` rows projected
+by the launcher from the already selected and pinned application audit.
+`published_file_bindings(rows)` validates tuple shape, at most 256 rows, safe
+relative paths, positive lengths up to 128 MiB, unique names and SHA256 syntax;
+it grants no selection, admission or lease. A declared file must match its exact
+length and hash, and every declared file must exist in the inventory. Rows cannot
+raise eligible-pair limits. Unlisted files and eligible pairs keep 32 MiB.
+Restoration requires declarations to match its captured original hash map before
+any metadata change. Inventory also rejects a file that exceeds the
+remaining tree budget before opening it. Restoration passes the remaining
+budget into the file preflight and still verifies every original hash before
+changing any mode or group. The buffered `read_file()` API is unchanged.
+
+This metadata procedure reuses the [application bundle limit](../../../scripts/evidencehost_linux_application.py)
+without changing that limit, worker access, unit limits or deadlines. The closed
+private startup categories `file-shape`, `published-binding` and
+`published-files-missing` record only guard families, not raw exception text or
+authority claims.
+Streaming [procedure controls](test_product_coverage.py) use sparse owned files
+and demonstrate actual reads and restoration, not native qualification.
 
 Official reports are limited to 2 MiB XML and 4 MiB JSON. Utilities share the
 existing deadline and a maximum five-second operation bound. No added job timer
