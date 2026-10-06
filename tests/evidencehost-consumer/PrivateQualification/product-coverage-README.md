@@ -258,3 +258,55 @@ processes, including SIGKILL without an exit hook and two EOFs. They issue no
 root owner or admission. Linux mount/systemd/credential proof and actual
 qualified product coverage require separate native execution; source readiness
 or portable tests are not such proof.
+
+### Closed diagnostics before the locked RID restore
+
+The initial source handoff for this diagnostic is **source preparation only**.
+The preceding native attempt completed the metadata refresh but rejected
+preparation before its next locked restore. It retained no changed lock rows;
+that observation does not identify a package, lock path, Tool fit, or native
+qualification cause. See the [preparation procedure](prepare.py) and
+[ordinary-file controls](test_preparation.py).
+
+`prepare_private_linux_publish(..., diagnostic_workspace=None,
+source_commit=None)` retains its existing validation and command behavior.
+Only the root preparer's fixed workspace and actual source commit enable the
+optional capture. Its four checkpoints are `post-refresh-snapshot`,
+`lock-comparison`, `cli-rid-target`, and `protected-lock-check`. The original
+exception is rethrown unchanged; capture failure cannot become success or
+replace it. The locked restore remains behind every existing rejection.
+
+`PrivatePublishDiagnostic` records only closed data: JSON/schema/version,
+original-group/row, newRIDgroup/unknownRIDnode/RIDrow, pathset/metadata/bounds,
+deadline, or unknown categories. A lock ordinal identifies the parent's sorted
+expected lock-path list; it is not a caller-selected path. Expected count,
+before/after lock SHA-256, bounded versions/group counts, offending row-name
+SHA-256, and closed field differences describe observations where available.
+`original_group_identical`, resolved/content-hash/dependency equality, and the
+closed package-type enum are nullable. Null means unavailable, not identical,
+zero, or accepted. No raw package names, paths, unknown versions, messages,
+exception text, or row content enter this record. Unknown RID nodes still
+reject; these observations do not enroll them.
+
+`retain_private_publish_failure(workspace, source_commit, diagnostic, deadline,
+expected_owner_uid=0)` is an internal ordinary-file procedure. It appends
+`private_linux_publish_failure` (schema
+`issue779-private-linux-publish-failure-v1`, at most 1 KiB) to the **existing**
+incomplete SDK `build-binding.json`. The entire binding remains at most 4 KiB,
+regular, single-link, and mode 0600. Root is the default owner; the UID override
+exists solely for portable file-data controls and confers no root authority.
+The source commit, exact partial-binding field set, SDK identity and pinned
+installer provenance are checked before writing. A previous diagnostic,
+complete/foreign record, or unsafe file rejects capture.
+
+Capture pins ancestors, workspace, source file and a fresh exclusive fixed
+sibling through no-follow FDs, rechecks named identities and metadata before
+atomic replacement, and closes all owned FDs independently. Failure rollback
+removes only the temporary name still proven to refer to its held file;
+unproven substitutions are retained. It uses the original Runner deadline,
+without a renewed timer. A late failure may leave complete private bytes while
+returning false; those bytes never change the qualification result. The
+[retained archive](retained-output-README.md) already includes this binding, so
+no controller whitelist, archive cap, worker permission, or runtime authority
+changes. The default Linux RID, all lock rejection predicates, Tool inventory
+bounds and genuine product pins remain unchanged.

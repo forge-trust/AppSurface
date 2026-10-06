@@ -1030,5 +1030,239 @@ class PrivateLinuxPublishMetadataControls(unittest.TestCase):
                     displaced.unlink()
 
 
+class PrivateLinuxPublishFailureDiagnosticControls(unittest.TestCase):
+    """Closed metadata and real owned FDs; never SDK, build, root authority or admission."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="linux-publish-failure-data-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.uid = os.geteuid()
+        self.deadline = prepare.time.monotonic()+10
+        self.source_commit = "a"*40
+        self.path = self.root / "build-binding.json"
+        self.guard = patch.object(prepare.Runner, "run", side_effect=AssertionError("no-command-dispatch"))
+        self.commands = self.guard.start()
+        self.addCleanup(self.guard.stop)
+
+    def tearDown(self):
+        self.commands.assert_not_called()
+
+    def document(self):
+        return {"version": 2, "dependencies": {"net10.0": {"Package.One": {
+            "type": "Direct", "resolved": "1.0.0", "requested": "[1.0.0, )",
+            "contentHash": "ordinary-file-data", "dependencies": {"Package.Two": "2.0.0"}}}}}
+
+    def diagnostic(self, checkpoint="lock-comparison"):
+        value = prepare.PrivatePublishDiagnostic()
+        value.value.update(checkpoint=checkpoint, expected_lock_count=1, lock_ordinal=0)
+        return value
+
+    def compare(self, before, after, category):
+        diagnostic = self.diagnostic()
+        with self.assertRaises(prepare.PreparationFailure) as caught:
+            prepare.validate_private_publish_lock(json.dumps(before).encode(), json.dumps(after).encode(), diagnostic=diagnostic)
+        self.assertEqual("qualification-preparation-rejected", str(caught.exception))
+        self.assertIsNone(caught.exception.__cause__)
+        self.assertEqual(category, diagnostic.snapshot()["category"])
+        return diagnostic.snapshot()
+
+    def binding(self):
+        distribution = {"schema": "issue779-pinned-sdk-distribution-v1", "sdk_version": prepare.SDK_VERSION,
+            "rid": "linux-x64", "root": str(prepare.SDK_ROOT), "archive_url": prepare.ARCHIVE_URL,
+            "archive_sha512": prepare.ARCHIVE_SHA512, "compressed_bytes": 1, "expanded_bytes": 1,
+            "node_count": 1, "explicit_member_count": 1, "gnu_longname_headers": 0,
+            "tree_sha256": "b"*64, "complete": True, "sdk_audit_completed": False, "qualification_claim": False}
+        return {"source_commit": self.source_commit, "preparation_complete": False, "sdk_bootstrap": {
+            "schema": "issue779-trusted-sdk-bootstrap-preflight-v1", "root": str(prepare.SDK_ROOT),
+            "host_before": {"uid": self.uid}, "host_metadata_state": "observed", "distribution": distribution,
+            "preinstallation_ancestors": {"write_bits_cleared": True}}}
+
+    def write_binding(self, binding=None):
+        self.path.write_bytes(json.dumps(self.binding() if binding is None else binding).encode())
+        self.path.chmod(0o600)
+        return self.path.read_bytes()
+
+    def capture(self, diagnostic=None, deadline=None):
+        return prepare.retain_private_publish_failure(self.root, self.source_commit,
+            self.diagnostic() if diagnostic is None else diagnostic,
+            self.deadline if deadline is None else deadline, expected_owner_uid=self.uid)
+
+    def test_json_schema_version_group_and_cli_target_categories_have_valid_neighbors(self):
+        before = self.document()
+        good = json.loads(json.dumps(before))
+        good["dependencies"][prepare.PRIVATE_PUBLISH_TARGET] = json.loads(json.dumps(before["dependencies"]["net10.0"]))
+        self.assertTrue(prepare.validate_private_publish_lock(json.dumps(before).encode(), json.dumps(good).encode()))
+        for raw in (b'{"secret-canary":', b'{"version":2,"version":2,"dependencies":{}}'):
+            diagnostic = self.diagnostic()
+            with self.assertRaises(prepare.PreparationFailure) as caught:
+                prepare.validate_private_publish_lock(json.dumps(before).encode(), raw, diagnostic=diagnostic)
+            self.assertEqual("JSON", diagnostic.snapshot()["category"])
+            self.assertNotIn("secret-canary", json.dumps(diagnostic.snapshot()))
+            self.assertIsNone(caught.exception.__cause__)
+        bad = json.loads(json.dumps(good)); bad["version"] = True
+        self.compare(before, bad, "schema")
+        bad = json.loads(json.dumps(good)); bad["version"] = 3
+        self.compare(before, bad, "version")
+        bad = json.loads(json.dumps(good)); del bad["dependencies"]["net10.0"]
+        self.compare(before, bad, "original-group")
+        bad = json.loads(json.dumps(good)); bad["dependencies"]["net10.0/osx-arm64"] = {}
+        self.compare(before, bad, "newRIDgroup")
+        diagnostic = self.diagnostic("cli-rid-target")
+        self.assertFalse(prepare.validate_private_publish_lock(json.dumps(before).encode(), json.dumps(before).encode(), diagnostic=diagnostic))
+        self.assertEqual("schema", diagnostic.snapshot()["category"])
+
+    def test_original_row_fields_and_rid_nodes_emit_hashes_and_closed_equality_facts(self):
+        before = self.document()
+        good = json.loads(json.dumps(before))
+        good["dependencies"][prepare.PRIVATE_PUBLISH_TARGET] = json.loads(json.dumps(before["dependencies"]["net10.0"]))
+        for field in ("resolved", "contentHash", "dependencies", "type", "requested"):
+            bad = json.loads(json.dumps(good))
+            bad["dependencies"]["net10.0"]["Package.One"][field] = {"canary": "value"} if field == "dependencies" else "secret-canary"
+            result = self.compare(before, bad, "row")
+            self.assertEqual([field], result["fields"])
+            self.assertFalse(result["original_group_identical"])
+            self.assertEqual(hashlib.sha256(b"Package.One").hexdigest(), result["row_sha256"])
+            self.assertNotIn("secret-canary", json.dumps(result))
+        bad = json.loads(json.dumps(good))
+        bad["dependencies"][prepare.PRIVATE_PUBLISH_TARGET]["unknown-secret-canary"] = {"type": "Transitive", "resolved": "unknown-canary"}
+        result = self.compare(before, bad, "unknownRIDnode")
+        self.assertEqual("Transitive", result["package_type"])
+        self.assertTrue(result["original_group_identical"])
+        self.assertIsNone(result["resolved_equal"])
+        self.assertNotIn("canary", json.dumps(result))
+        bad = json.loads(json.dumps(good)); bad["dependencies"][prepare.PRIVATE_PUBLISH_TARGET]["Package.One"]["contentHash"] = "different"
+        result = self.compare(before, bad, "RIDrow")
+        self.assertTrue(result["resolved_equal"]); self.assertFalse(result["content_hash_equal"])
+        self.assertTrue(result["dependencies_equal"])
+
+    def test_real_snapshot_pathset_metadata_bounds_and_deadline_rejections_remain_failures(self):
+        path = self.root / "packages.lock.json"
+        path.write_bytes(json.dumps(self.document()).encode()); path.chmod(0o600)
+        expected = (path.name,)
+        self.assertEqual(set(expected), set(prepare.snapshot_private_publish_locks(self.root, self.deadline, expected, expected_owner_uid=self.uid)))
+        for kind in ("pathset", "metadata", "bounds", "deadline"):
+            diagnostic = self.diagnostic("post-refresh-snapshot")
+            if kind == "pathset": wanted = ("missing.lock.json",)
+            else: wanted = expected
+            if kind == "metadata": path.chmod(0o600); path.unlink(); path.symlink_to(self.root / "missing-target")
+            try:
+                with patch.object(prepare, "PRIVATE_LOCK_BYTES", 1 if kind == "bounds" else prepare.PRIVATE_LOCK_BYTES):
+                    with self.assertRaises((prepare.PreparationFailure, OSError)):
+                        prepare.snapshot_private_publish_locks(self.root, prepare.time.monotonic()-1 if kind == "deadline" else self.deadline,
+                            wanted, expected_owner_uid=self.uid, diagnostic=diagnostic)
+                self.assertEqual(kind, diagnostic.snapshot()["category"])
+            finally:
+                if path.is_symlink(): path.unlink(); path.write_bytes(json.dumps(self.document()).encode()); path.chmod(0o600)
+
+    def test_existing_partial_binding_is_atomically_extended_once_and_preserved(self):
+        original = self.write_binding()
+        diagnostic = self.diagnostic()
+        diagnostic.value.update(category="unknownRIDnode", row_sha256="c"*64)
+        self.assertTrue(self.capture(diagnostic))
+        after = json.loads(self.path.read_bytes())
+        observation = after.pop("private_linux_publish_failure")
+        self.assertEqual(json.loads(original), after)
+        self.assertEqual(diagnostic.snapshot(), observation)
+        self.assertLessEqual(len(json.dumps(observation, separators=(",", ":")).encode()), 1024)
+        self.assertLessEqual(self.path.stat().st_size, 4096)
+        self.assertEqual(0o600, stat.S_IMODE(self.path.stat().st_mode)); self.assertEqual(1, self.path.stat().st_nlink)
+        completed = self.path.read_bytes()
+        self.assertFalse(self.capture())
+        self.assertEqual(completed, self.path.read_bytes())
+        self.assertFalse((self.root / ".build-binding-linux-publish-diagnostic.tmp").exists())
+
+    def test_missing_foreign_or_unsafe_binding_and_malformed_observation_never_write(self):
+        original = self.write_binding()
+        for kind in ("missing", "mode", "hardlink", "symlink", "complete", "foreign", "record", "oversize", "total-bound", "expired"):
+            self.path.unlink(missing_ok=True)
+            other = self.root / "other"; other.unlink(missing_ok=True)
+            self.write_binding()
+            diagnostic = self.diagnostic()
+            if kind == "missing": self.path.unlink()
+            elif kind == "mode": self.path.chmod(0o640)
+            elif kind == "hardlink": os.link(self.path, other)
+            elif kind == "symlink": self.path.rename(other); self.path.symlink_to(other)
+            elif kind == "complete": value = self.binding(); value["preparation_complete"] = True; self.write_binding(value)
+            elif kind == "foreign": value = self.binding(); value["source_commit"] = "f"*40; self.write_binding(value)
+            elif kind == "record": diagnostic.value["category"] = "secret-canary"
+            elif kind == "oversize": self.path.write_bytes(b"x"*4097)
+            elif kind == "total-bound":
+                value = self.binding(); value["sdk_bootstrap"]["preinstallation_ancestors"]["padding"] = ""
+                value["sdk_bootstrap"]["preinstallation_ancestors"]["padding"] = "x"*(4090-len(json.dumps(value).encode()))
+                self.write_binding(value)
+                self.assertEqual(4090, self.path.stat().st_size)
+            with patch.object(prepare.os, "write", side_effect=AssertionError("must-not-write")) as wrote:
+                self.assertFalse(self.capture(diagnostic, prepare.time.monotonic()-1 if kind == "expired" else None))
+            wrote.assert_not_called()
+            if other.exists(): self.assertEqual(original, other.read_bytes())
+            self.path.unlink(missing_ok=True); other.unlink(missing_ok=True)
+        self.write_binding()
+        self.assertTrue(self.capture())
+
+    def test_named_binding_substitution_after_read_closes_fds_without_replacing_new_file(self):
+        original = self.write_binding()
+        inode = self.path.stat().st_ino
+        actual_read, actual_open = prepare.os.read, prepare.os.open
+        changed, owned = [], []
+        def observe_open(name, flags, *args, **kwargs):
+            fd = actual_open(name, flags, *args, **kwargs)
+            owned.append(fd)
+            return fd
+        def substitute(fd, count):
+            data = actual_read(fd, count)
+            if not changed and os.fstat(fd).st_ino == inode:
+                changed.append(True)
+                self.path.rename(self.root / "original.saved")
+                self.path.write_bytes(b"replacement-canary"); self.path.chmod(0o600)
+            return data
+        with patch.object(prepare.os, "open", observe_open), patch.object(prepare.os, "read", substitute):
+            self.assertFalse(self.capture())
+        self.assertTrue(changed)
+        self.assertEqual(b"replacement-canary", self.path.read_bytes())
+        self.assertEqual(original, (self.root / "original.saved").read_bytes())
+        for fd in owned:
+            with self.assertRaises(OSError): os.fstat(fd)
+
+    def test_write_failure_keeps_original_exception_and_conservative_temporary_rollback(self):
+        original = self.write_binding()
+        error = ValueError("original-private-canary")
+        with self.assertRaises(ValueError) as caught:
+            try:
+                raise error
+            except ValueError:
+                with patch.object(prepare.os, "write", side_effect=OSError("write-private-canary")):
+                    self.assertFalse(self.capture())
+                raise
+        self.assertIs(error, caught.exception)
+        self.assertEqual(original, self.path.read_bytes())
+        self.assertFalse((self.root / ".build-binding-linux-publish-diagnostic.tmp").exists())
+        self.assertTrue(self.capture())
+
+    def test_temporary_name_replacement_is_retained_and_late_deadline_cannot_report_capture(self):
+        original = self.write_binding()
+        actual_write = prepare.os.write
+        def replace_temporary(fd, value):
+            name = self.root / ".build-binding-linux-publish-diagnostic.tmp"
+            name.rename(self.root / "held.saved")
+            name.write_bytes(b"foreign-sentinel"); name.chmod(0o600)
+            return actual_write(fd, value)
+        with patch.object(prepare.os, "write", replace_temporary):
+            self.assertFalse(self.capture())
+        self.assertEqual(b"foreign-sentinel", (self.root / ".build-binding-linux-publish-diagnostic.tmp").read_bytes())
+        self.assertEqual(original, self.path.read_bytes())
+        (self.root / ".build-binding-linux-publish-diagnostic.tmp").unlink()
+        (self.root / "held.saved").unlink()
+        actual_replace = prepare.os.replace
+        def expire_after_replace(*args, **kwargs):
+            result = actual_replace(*args, **kwargs)
+            self.deadline = 0
+            return result
+        # Closed bytes may exist after a late deadline; capture still reports false.
+        with patch.object(prepare.os, "replace", expire_after_replace), patch.object(prepare.time, "monotonic", side_effect=lambda: 1 if self.deadline == 0 else 0):
+            self.assertFalse(self.capture(deadline=0.5))
+        self.assertIs(json.loads(self.path.read_bytes())["preparation_complete"], False)
+
+
 if __name__ == "__main__":
     unittest.main()

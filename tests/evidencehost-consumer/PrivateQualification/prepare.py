@@ -777,6 +777,168 @@ def measure_product_tool_inventory(tool, coverage_module, deadline, *, expected_
     return {name: row["sha256"] for name, row in files.items()}, summary
 
 
+PRIVATE_PUBLISH_CHECKPOINTS = frozenset(("post-refresh-snapshot", "lock-comparison", "cli-rid-target", "protected-lock-check"))
+PRIVATE_PUBLISH_CATEGORIES = frozenset(("JSON", "schema", "version", "original-group", "row", "newRIDgroup", "unknownRIDnode", "RIDrow", "pathset", "metadata", "bounds", "deadline", "unknown"))
+PRIVATE_PUBLISH_FIELDS = frozenset(("type", "requested", "resolved", "contentHash", "dependencies", "row-set", "other"))
+PRIVATE_PUBLISH_PACKAGE_TYPES = frozenset(("Direct", "Transitive", "CentralTransitive", "Project"))
+
+
+class PrivatePublishDiagnostic:
+    """Closed failure observations only; no command, filesystem or acceptance API."""
+
+    def __init__(self):
+        self.value = {"schema": "issue779-private-linux-publish-failure-v1", "checkpoint": None,
+            "category": "unknown", "lock_ordinal": None, "expected_lock_count": None,
+            "before_sha256": None, "after_sha256": None, "row_sha256": None,
+            "before_version": None, "after_version": None, "before_groups": None, "after_groups": None,
+            "original_group_identical": None, "fields": [], "package_type": None,
+            "resolved_equal": None, "content_hash_equal": None, "dependencies_equal": None}
+
+    def snapshot(self):
+        value = dict(self.value)
+        require(set(value) == set(PrivatePublishDiagnostic().value)
+                and value["schema"] == "issue779-private-linux-publish-failure-v1"
+                and value["checkpoint"] in PRIVATE_PUBLISH_CHECKPOINTS
+                and value["category"] in PRIVATE_PUBLISH_CATEGORIES)
+        for name, maximum in (("lock_ordinal", PRIVATE_LOCK_COUNT-1), ("expected_lock_count", PRIVATE_LOCK_COUNT),
+                              ("before_version", 3), ("after_version", 3), ("before_groups", 64), ("after_groups", 64)):
+            require(value[name] is None or type(value[name]) is int and 0 <= value[name] <= maximum)
+        for name in ("before_sha256", "after_sha256", "row_sha256"):
+            require(value[name] is None or type(value[name]) is str and re.fullmatch(r"[0-9a-f]{64}", value[name]))
+        for name in ("original_group_identical", "resolved_equal", "content_hash_equal", "dependencies_equal"):
+            require(value[name] is None or type(value[name]) is bool)
+        require(type(value["fields"]) is list and len(value["fields"]) <= len(PRIVATE_PUBLISH_FIELDS)
+                and all(type(name) is str and name in PRIVATE_PUBLISH_FIELDS for name in value["fields"])
+                and len(set(value["fields"])) == len(value["fields"])
+                and (value["package_type"] is None or value["package_type"] in PRIVATE_PUBLISH_PACKAGE_TYPES))
+        value["fields"] = list(value["fields"])
+        require(len(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()) <= 1024)
+        return value
+
+
+def _publish_note(diagnostic, category, **fields):
+    """Best effort bookkeeping must never replace an existing rejection."""
+    try:
+        if type(diagnostic) is PrivatePublishDiagnostic:
+            diagnostic.value.update(fields, category=category)
+    except BaseException:
+        pass
+
+
+def _publish_row_difference(diagnostic, before, after, category):
+    """Describe the first differing row using hashes and closed field names only."""
+    try:
+        for name in sorted(set(before) | set(after)):
+            old, new = before.get(name), after.get(name)
+            canonical = lambda row: json.dumps(row, sort_keys=True, separators=(",", ":"), allow_nan=False)
+            if canonical(old) == canonical(new):
+                continue
+            fields = ["row-set"] if old is None or new is None else sorted(
+                field if field in PRIVATE_PUBLISH_FIELDS else "other"
+                for field in set(old) | set(new) if canonical(old.get(field)) != canonical(new.get(field)))
+            row = new if type(new) is dict else {}
+            _publish_note(diagnostic, category, row_sha256=sha(name.encode()), fields=sorted(set(fields)),
+                package_type=row.get("type") if type(row.get("type")) is str and row["type"] in PRIVATE_PUBLISH_PACKAGE_TYPES else None,
+                **{key: (canonical(old.get(field)) == canonical(new.get(field))
+                    if type(old) is dict and type(new) is dict else None)
+                    for key, field in (("resolved_equal", "resolved"), ("content_hash_equal", "contentHash"),
+                                       ("dependencies_equal", "dependencies"))})
+            break
+    except BaseException:
+        pass
+
+
+def retain_private_publish_failure(workspace, source_commit, diagnostic, deadline, *, expected_owner_uid=0):
+    """Append one <=1 KiB observation to the existing SDK partial binding.
+
+    This ordinary-file procedure returns false on every capture failure. The
+    default UID is root; the override is a portable metadata seam, not authority.
+    No new clock is created. Only the exact incomplete SDK binding is replaced.
+    """
+    parent = source = target = None
+    made = None
+    temporary = ".build-binding-linux-publish-diagnostic.tmp"
+    published = close_failed = False
+    try:
+        require(type(diagnostic) is PrivatePublishDiagnostic and type(expected_owner_uid) is int
+                and expected_owner_uid >= 0 and type(source_commit) is str
+                and re.fullmatch(r"[0-9a-f]{40}", source_commit) and time.monotonic() < deadline)
+        observation = diagnostic.snapshot()
+        parent = _open_publish_metadata_directory(workspace, deadline, expected_owner_uid)
+        parent_info = os.fstat(parent)
+        source = os.open("build-binding.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=parent)
+        before = os.fstat(source)
+        require(stat.S_ISREG(before.st_mode) and before.st_uid == expected_owner_uid and before.st_nlink == 1
+                and stat.S_IMODE(before.st_mode) == 0o600 and 0 < before.st_size <= 4096
+                and before.st_dev == parent_info.st_dev and time.monotonic() < deadline)
+        raw = os.read(source, 4097)
+        require(len(raw) == before.st_size and os.read(source, 1) == b""
+                and _publish_metadata_identity(before) == _publish_metadata_identity(os.fstat(source))
+                == _publish_metadata_identity(os.stat("build-binding.json", dir_fd=parent, follow_symlinks=False)))
+        binding = unique_json(raw)
+        require(type(binding) is dict and set(binding) == {"source_commit", "preparation_complete", "sdk_bootstrap"}
+                and binding["source_commit"] == source_commit and binding["preparation_complete"] is False)
+        sdk = binding["sdk_bootstrap"]
+        require(type(sdk) is dict and set(sdk) == {"schema", "root", "host_before", "host_metadata_state", "distribution", "preinstallation_ancestors"}
+                and sdk["schema"] == "issue779-trusted-sdk-bootstrap-preflight-v1" and sdk["root"] == str(SDK_ROOT)
+                and sdk["host_metadata_state"] == "observed" and type(sdk["host_before"]) is dict
+                and type(sdk["preinstallation_ancestors"]) is dict)
+        validate_distribution_provenance(json.dumps(sdk["distribution"], allow_nan=False).encode())
+        binding["private_linux_publish_failure"] = observation
+        encoded = (json.dumps(binding, sort_keys=True, separators=(",", ":"), allow_nan=False)+"\n").encode()
+        require(len(encoded) <= 4096 and time.monotonic() < deadline
+                and (os.fstat(parent).st_dev, os.fstat(parent).st_ino, os.fstat(parent).st_mode, os.fstat(parent).st_uid, os.fstat(parent).st_gid)
+                == (parent_info.st_dev, parent_info.st_ino, parent_info.st_mode, parent_info.st_uid, parent_info.st_gid)
+                and _publish_metadata_identity(os.fstat(parent)) == _publish_metadata_identity(Path(workspace).lstat())
+                and _publish_metadata_identity(before) == _publish_metadata_identity(os.fstat(source))
+                == _publish_metadata_identity(os.stat("build-binding.json", dir_fd=parent, follow_symlinks=False)))
+        target = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=parent)
+        made = os.fstat(target)
+        require(stat.S_ISREG(made.st_mode) and made.st_uid == expected_owner_uid and made.st_gid == before.st_gid and made.st_nlink == 1
+                and stat.S_IMODE(made.st_mode) == 0o600 and time.monotonic() < deadline)
+        require(os.write(target, encoded) == len(encoded))
+        os.fsync(target)
+        after = os.fstat(target)
+        require(after.st_size == len(encoded) and after.st_uid == expected_owner_uid and after.st_gid == before.st_gid and after.st_nlink == 1
+                and stat.S_IMODE(after.st_mode) == 0o600
+                and (after.st_dev, after.st_ino) == (made.st_dev, made.st_ino)
+                and _publish_metadata_identity(after) == _publish_metadata_identity(os.stat(temporary, dir_fd=parent, follow_symlinks=False))
+                and _publish_metadata_identity(before) == _publish_metadata_identity(os.fstat(source))
+                == _publish_metadata_identity(os.stat("build-binding.json", dir_fd=parent, follow_symlinks=False))
+                and (os.fstat(parent).st_dev, os.fstat(parent).st_ino, os.fstat(parent).st_mode, os.fstat(parent).st_uid, os.fstat(parent).st_gid)
+                == (parent_info.st_dev, parent_info.st_ino, parent_info.st_mode, parent_info.st_uid, parent_info.st_gid)
+                and _publish_metadata_identity(os.fstat(parent)) == _publish_metadata_identity(Path(workspace).lstat())
+                and time.monotonic() < deadline)
+        os.replace(temporary, "build-binding.json", src_dir_fd=parent, dst_dir_fd=parent)
+        made = None
+        os.fsync(parent)
+        require(_publish_metadata_identity(os.fstat(target)) == _publish_metadata_identity(
+                os.stat("build-binding.json", dir_fd=parent, follow_symlinks=False)) and time.monotonic() < deadline)
+        published = True
+    except BaseException:
+        pass
+    finally:
+        # Delete only the sibling still proven to be our held file, never a replacement.
+        if made is not None and parent is not None and target is not None:
+            try:
+                held = os.fstat(target)
+                named = os.stat(temporary, dir_fd=parent, follow_symlinks=False)
+                if (held.st_dev, held.st_ino) == (made.st_dev, made.st_ino) == (named.st_dev, named.st_ino):
+                    os.unlink(temporary, dir_fd=parent)
+            except BaseException:
+                pass
+        for fd in (target, source, parent):
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except BaseException:
+                    close_failed = True
+    try:
+        return published and not close_failed and time.monotonic() < deadline
+    except BaseException:
+        return False
+
+
 def _publish_metadata_identity(info):
     return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
             info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
@@ -840,7 +1002,7 @@ def _read_publish_metadata(parent, name, deadline, cap, expected_owner_uid):
     return bytes(data)
 
 
-def snapshot_private_publish_locks(root, deadline, expected_paths=None, *, expected_owner_uid=0):
+def snapshot_private_publish_locks(root, deadline, expected_paths=None, *, expected_owner_uid=0, diagnostic=None):
     """Read every *.lock.json through retained FDs; reject changed path sets.
 
     Metadata only: 256 locks, 256 KiB each, 8 MiB combined; traversal charges
@@ -855,15 +1017,18 @@ def snapshot_private_publish_locks(root, deadline, expected_paths=None, *, expec
                         and all(s not in ("", ".", "..") for s in p.split("/")) for p in expected_paths)
                 and len(set(expected_paths)) == len(expected_paths))
     locks, charged, total = {}, 0, 0
+    _publish_note(diagnostic, "deadline" if time.monotonic() >= deadline else "metadata")
     root_fd = _open_publish_metadata_directory(root, deadline, expected_owner_uid)
     def walk(fd, prefix, depth):
         nonlocal charged, total
+        _publish_note(diagnostic, "bounds" if depth > 16 else "deadline" if time.monotonic() >= deadline else "metadata")
         require(depth <= 16 and time.monotonic() < deadline)
         directory = os.fstat(fd)
         require(directory.st_uid == expected_owner_uid)
         names = []
         with os.scandir(fd) as entries:
             for entry in entries:
+                _publish_note(diagnostic, "bounds" if charged >= PRIVATE_LOCK_SCAN_ENTRIES else "deadline" if time.monotonic() >= deadline else "metadata")
                 require(time.monotonic() < deadline and charged < PRIVATE_LOCK_SCAN_ENTRIES)
                 charged += 1
                 names.append(entry.name)
@@ -883,6 +1048,7 @@ def snapshot_private_publish_locks(root, deadline, expected_paths=None, *, expec
             else:
                 require(stat.S_ISREG(info.st_mode))
                 if name.endswith(".lock.json"):
+                    _publish_note(diagnostic, "bounds" if len(locks) >= PRIVATE_LOCK_COUNT or info.st_size > min(PRIVATE_LOCK_BYTES, PRIVATE_LOCK_TOTAL-total) else "metadata")
                     require(len(locks) < PRIVATE_LOCK_COUNT)
                     data = _read_publish_metadata(fd, name, deadline,
                         min(PRIVATE_LOCK_BYTES, PRIVATE_LOCK_TOTAL-total), expected_owner_uid)
@@ -894,6 +1060,7 @@ def snapshot_private_publish_locks(root, deadline, expected_paths=None, *, expec
         require(_publish_metadata_identity(os.fstat(root_fd)) == _publish_metadata_identity(Path(root).lstat()))
     finally:
         _close_publish_metadata_fd(root_fd)
+    _publish_note(diagnostic, "deadline" if time.monotonic() >= deadline else "pathset" if expected_paths is not None and set(locks) != set(expected_paths) else "bounds")
     require(0 < len(locks) <= PRIVATE_LOCK_COUNT and time.monotonic() < deadline
             and (expected_paths is None or set(locks) == set(expected_paths)))
     return locks
@@ -911,15 +1078,26 @@ def _private_publish_json(raw, maximum):
         raise PreparationFailure("qualification-preparation-rejected") from None
 
 
-def validate_private_publish_lock(before_raw, after_raw):
+def validate_private_publish_lock(before_raw, after_raw, *, diagnostic=None):
     """Allow only an inherited-row subset in the one fixed Linux RID group.
 
     Every original group and row (including version/content hash/dependencies)
     must remain identical. Unknown SDK/RID nodes fail closed. This compares
     metadata; it does not establish binary compatibility or publication fit.
     """
+    _publish_note(diagnostic, "JSON", before_sha256=sha(before_raw) if type(before_raw) is bytes and 0 < len(before_raw) <= PRIVATE_LOCK_BYTES else None,
+                  after_sha256=sha(after_raw) if type(after_raw) is bytes and 0 < len(after_raw) <= PRIVATE_LOCK_BYTES else None, row_sha256=None, fields=[],
+                  package_type=None, resolved_equal=None, content_hash_equal=None, dependencies_equal=None,
+                  original_group_identical=None)
+    if any(type(raw) is bytes and not 0 < len(raw) <= PRIVATE_LOCK_BYTES for raw in (before_raw, after_raw)):
+        _publish_note(diagnostic, "bounds")
     before = _private_publish_json(before_raw, PRIVATE_LOCK_BYTES)
     after = _private_publish_json(after_raw, PRIVATE_LOCK_BYTES)
+    _publish_note(diagnostic, "schema",
+        **{prefix+"_version": document.get("version") if type(document.get("version")) is int and 0 <= document["version"] <= 3 else None
+           for prefix, document in (("before", before), ("after", after))},
+        **{prefix+"_groups": len(document["dependencies"]) if type(document.get("dependencies")) is dict and len(document["dependencies"]) <= 64 else None
+           for prefix, document in (("before", before), ("after", after))})
     for document in (before, after):
         require(set(document) == {"version", "dependencies"} and type(document["version"]) is int
                 and document["version"] in (1, 2, 3) and type(document["dependencies"]) is dict
@@ -928,16 +1106,31 @@ def validate_private_publish_lock(before_raw, after_raw):
             require(type(target) is str and type(rows) is dict and len(rows) <= 8192
                     and all(type(name) is str and type(row) is dict for name, row in rows.items()))
     canonical = lambda value: json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    _publish_note(diagnostic, "version")
     require(before["version"] == after["version"])
     old, new = before["dependencies"], after["dependencies"]
+    _publish_note(diagnostic, "original-group" if not set(old) <= set(new) else "newRIDgroup")
     require(set(old) <= set(new) and set(new)-set(old) <= {PRIVATE_PUBLISH_TARGET})
     for target, rows in old.items():
+        _publish_note(diagnostic, "original-group", original_group_identical=canonical(rows) == canonical(new[target]))
+        if canonical(rows) != canonical(new[target]):
+            _publish_row_difference(diagnostic, rows, new[target], "row")
         require(canonical(rows) == canonical(new[target]))
     if PRIVATE_PUBLISH_TARGET in new and PRIVATE_PUBLISH_TARGET not in old:
+        _publish_note(diagnostic, "original-group")
         require("net10.0" in old)
         inherited = old["net10.0"]
         for name, row in new[PRIVATE_PUBLISH_TARGET].items():
+            if name not in inherited:
+                _publish_row_difference(diagnostic, {}, {name: row}, "unknownRIDnode")
+            elif canonical(row) != canonical(inherited[name]):
+                _publish_row_difference(diagnostic, {name: inherited[name]}, {name: row}, "RIDrow")
             require(name in inherited and canonical(row) == canonical(inherited[name]))
+    try:
+        if type(diagnostic) is PrivatePublishDiagnostic and diagnostic.value["checkpoint"] == "cli-rid-target" and PRIVATE_PUBLISH_TARGET not in new:
+            _publish_note(diagnostic, "schema")
+    except BaseException:
+        pass
     return PRIVATE_PUBLISH_TARGET in new
 
 
@@ -977,7 +1170,7 @@ def private_publish_assets(build, deadline, *, expected_owner_uid=0):
             "target": PRIVATE_PUBLISH_TARGET, "sha256": sha(raw), "bytes": len(raw)}
 
 
-def prepare_private_linux_publish(build, source_files, protected_roots, runner, dotnet):
+def prepare_private_linux_publish(build, source_files, protected_roots, runner, dotnet, *, diagnostic_workspace=None, source_commit=None):
     """Refresh only private build-copy RID locks, validate, then restore locked.
 
     protected_roots is the parent's fixed role->Path mapping for source, baseline,
@@ -999,12 +1192,33 @@ def prepare_private_linux_publish(build, source_files, protected_roots, runner, 
     properties = list(PRIVATE_PUBLISH_PROPERTIES)
     runner.run([str(dotnet), "restore", cli, "--force-evaluate", "--use-lock-file",
                 "-p:RestoreLockedMode=false"] + properties, build)
-    after = snapshot_private_publish_locks(build, runner.deadline, paths)
-    for name in paths:
-        validate_private_publish_lock(before[name], after[name])
-    require(validate_private_publish_lock(before[str(Path(CLI_PROJECT).parent / "packages.lock.json")],
-                                         after[str(Path(CLI_PROJECT).parent / "packages.lock.json")]))
-    require(protected == {role: fingerprints(root) for role, root in protected_roots.items()})
+    diagnostic = PrivatePublishDiagnostic()
+    try:
+        _publish_note(diagnostic, "unknown", checkpoint="post-refresh-snapshot", expected_lock_count=len(paths))
+        after = snapshot_private_publish_locks(build, runner.deadline, paths, diagnostic=diagnostic)
+        _publish_note(diagnostic, "unknown", checkpoint="lock-comparison")
+        for ordinal, name in enumerate(paths):
+            _publish_note(diagnostic, "unknown", lock_ordinal=ordinal)
+            validate_private_publish_lock(before[name], after[name], diagnostic=diagnostic)
+        _publish_note(diagnostic, "unknown", checkpoint="cli-rid-target",
+            lock_ordinal=paths.index(str(Path(CLI_PROJECT).parent / "packages.lock.json")))
+        require(validate_private_publish_lock(before[str(Path(CLI_PROJECT).parent / "packages.lock.json")],
+                                             after[str(Path(CLI_PROJECT).parent / "packages.lock.json")], diagnostic=diagnostic))
+        _publish_note(diagnostic, "metadata", checkpoint="protected-lock-check", lock_ordinal=None,
+            before_sha256=None, after_sha256=None, row_sha256=None, before_version=None, after_version=None,
+            before_groups=None, after_groups=None, original_group_identical=None, fields=[], package_type=None,
+            resolved_equal=None, content_hash_equal=None, dependencies_equal=None)
+        require(protected == {role: fingerprints(root) for role, root in protected_roots.items()})
+    except BaseException:
+        # Every observation, including its clock read, is subordinate to the original error.
+        try:
+            if time.monotonic() >= runner.deadline:
+                _publish_note(diagnostic, "deadline")
+            if diagnostic_workspace is not None:
+                retain_private_publish_failure(diagnostic_workspace, source_commit, diagnostic, runner.deadline)
+        except BaseException:
+            pass
+        raise
     runner.run([str(dotnet), "restore", cli, "--locked-mode"] + properties, build)
     require(snapshot_private_publish_locks(build, runner.deadline, paths) == after
             and protected == {role: fingerprints(root) for role, root in protected_roots.items()})
@@ -1123,7 +1337,8 @@ def prepare(source, workspace, source_commit, run_id, workflow_identity):
     cli_project = build / CLI_PROJECT
     protected_lock_roots = {"source": source, "baseline": baseline,
         "product_source": source.parent / "issue779-product-source", "product_build": Path(product["build_root"])}
-    linux_publish = prepare_private_linux_publish(build, before, protected_lock_roots, runner, dotnet)
+    linux_publish = prepare_private_linux_publish(build, before, protected_lock_roots, runner, dotnet,
+        diagnostic_workspace=workspace, source_commit=source_commit)
     tools, product_binary_bindings = {}, {}
     for entry in ("cli", "host"):
         tool = prepare_product_tool_directory(workspace, entry, runner.deadline)
