@@ -1079,11 +1079,13 @@ def _private_publish_json(raw, maximum):
 
 
 def validate_private_publish_lock(before_raw, after_raw, *, diagnostic=None):
-    """Allow only an inherited-row subset in the one fixed Linux RID group.
+    """Allow fixed Linux RID subsets of their exact inherited framework groups.
 
-    Every original group and row (including version/content hash/dependencies)
-    must remain identical. Unknown SDK/RID nodes fail closed. This compares
-    metadata; it does not establish binary compatibility or publication fit.
+    Added keys must be nonempty RID-free original keys plus /linux-x64, without
+    framework aliasing or normalization. Every original group and row remains
+    identical; each added group uses only identical rows from its own framework.
+    The return value still reports the exact CLI net10.0/linux-x64 target only.
+    Unknown SDK/RID nodes fail closed; this is metadata, not binary or fit proof.
     """
     _publish_note(diagnostic, "JSON", before_sha256=sha(before_raw) if type(before_raw) is bytes and 0 < len(before_raw) <= PRIVATE_LOCK_BYTES else None,
                   after_sha256=sha(after_raw) if type(after_raw) is bytes and 0 < len(after_raw) <= PRIVATE_LOCK_BYTES else None, row_sha256=None, fields=[],
@@ -1109,18 +1111,21 @@ def validate_private_publish_lock(before_raw, after_raw, *, diagnostic=None):
     _publish_note(diagnostic, "version")
     require(before["version"] == after["version"])
     old, new = before["dependencies"], after["dependencies"]
+    # NuGet lock targets are per framework: derive only the one fixed RID from
+    # exact inherited framework keys, never from a normalized alias or RID key.
+    linux_groups = {framework+"/"+PRIVATE_PUBLISH_RID: framework for framework in old
+                    if framework and "/" not in framework}
+    added_groups = set(new)-set(old)
     _publish_note(diagnostic, "original-group" if not set(old) <= set(new) else "newRIDgroup")
-    require(set(old) <= set(new) and set(new)-set(old) <= {PRIVATE_PUBLISH_TARGET})
+    require(set(old) <= set(new) and added_groups <= set(linux_groups))
     for target, rows in old.items():
         _publish_note(diagnostic, "original-group", original_group_identical=canonical(rows) == canonical(new[target]))
         if canonical(rows) != canonical(new[target]):
             _publish_row_difference(diagnostic, rows, new[target], "row")
         require(canonical(rows) == canonical(new[target]))
-    if PRIVATE_PUBLISH_TARGET in new and PRIVATE_PUBLISH_TARGET not in old:
-        _publish_note(diagnostic, "original-group")
-        require("net10.0" in old)
-        inherited = old["net10.0"]
-        for name, row in new[PRIVATE_PUBLISH_TARGET].items():
+    for target in sorted(added_groups):
+        inherited = old[linux_groups[target]]
+        for name, row in new[target].items():
             if name not in inherited:
                 _publish_row_difference(diagnostic, {}, {name: row}, "unknownRIDnode")
             elif canonical(row) != canonical(inherited[name]):

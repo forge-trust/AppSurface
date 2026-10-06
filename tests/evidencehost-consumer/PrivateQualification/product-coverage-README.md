@@ -194,11 +194,20 @@ by this read procedure; their protected root prevents worker access.
 `validate_private_publish_lock(before_raw, after_raw)` accepts duplicate-free
 JSON with the same lock version and byte-equivalent canonical original target
 groups and rows, preserving package versions, content hashes, dependency
-requirements and project nodes. The only new group allowed is
-`net10.0/linux-x64`. Every new-group node must exist under the inherited
-`net10.0` group with an identical complete row; a subset is permitted. Unknown
-SDK/RID nodes fail closed for review, not dynamic enrollment. Existing RID groups
-must remain unchanged. Malformed JSON, duplicate/case-folded members, non-JSON
+requirements and project nodes. Each added group must be the exact nonempty,
+RID-free inherited framework key followed by `/linux-x64`. For example,
+`net10.0` permits `net10.0/linux-x64`, and the inherited literal
+`.NETStandard,Version=v2.0` permits `.NETStandard,Version=v2.0/linux-x64`.
+These are exact string relationships: no framework aliases, case conversion,
+framework replacement, foreign RID, empty framework key, or repeated RID suffix
+is accepted. Every new-group node must exist under **its corresponding original
+framework** with an identical complete canonical row; a subset is permitted.
+Unknown SDK/RID nodes fail closed for review, not dynamic enrollment. Existing
+RID groups must remain unchanged and cannot themselves generate another RID
+suffix. The return value still reports only the presence of the exact CLI
+`net10.0/linux-x64` target; successful validation of another framework may return
+false. The caller still requires true for the CLI lock, and its assets validator
+is unchanged. Malformed JSON, duplicate/case-folded members, non-JSON
 numbers, removed groups, changed rows and other new RIDs reject with the existing
 fixed preparation failure.
 
@@ -237,8 +246,9 @@ The eight new [metadata controls](test_preparation.py) define actual owned-file
 snapshots, inherited-row neighbors, version/hash/requirement drift, unknown RID
 nodes, bad/duplicate JSON, no-follow/link/count/byte/deadline boundaries, exact
 assets targets and FD closure after growth/substitution. The previous 36 test
-bodies are preserved. These controls are source definitions only at this handoff;
-no refresh, restore, build, test or native publication has run for this change.
+bodies were preserved. At that historical initial source handoff these controls
+were definitions only; it did not claim refresh, restore, build, test or native
+publication outcomes.
 
 A refresh may affect several project locks. It cannot be accepted just because
 the command exits zero; all original groups must still match and newly required
@@ -310,3 +320,40 @@ returning false; those bytes never change the qualification result. The
 no controller whitelist, archive cap, worker permission, or runtime authority
 changes. The default Linux RID, all lock rejection predicates, Tool inventory
 bounds and genuine product pins remain unchanged.
+
+
+### Framework-specific Linux lock projection correction
+
+The pinned SDK 10.0.401 native attempt at private head `7d9cabd8…` completed
+its initial CLI RID metadata refresh (command 27, exit zero), then failed at
+`lock-comparison` with category `newRIDgroup`. The recorded ordinal 58 maps to
+`Flow/ForgeTrust.AppSurface.Flow.Generators/packages.lock.json`: its original
+version was 2 and its only inherited key was `.NETStandard,Version=v2.0`.
+Recorded group counts changed from one to two. **The new group's name was not
+retained**, and no locked restore, consumer entry or Tool-fit result was reached.
+This correction does not assert the unobserved new name or that later checks pass.
+
+[NuGet's target-name implementation](https://github.com/NuGet/NuGet.Client/blob/dev/src/NuGet.Core/NuGet.ProjectModel/ProjectLockFile/PackagesLockFileTarget.cs)
+and [lock-file graph design](https://github.com/NuGet/Home/wiki/Repeatable-build-using-lock-file-implementation)
+explain per-framework/RID groups and the long framework names used outside newer
+.NETCoreApp frameworks. The linked development source is format evidence, not
+an independent source-to-binary pin for SDK 10.0.401. The private validator now
+uses the exact inherited key, rather than guessing or normalizing the SDK's
+framework spelling. It keeps the fixed Linux RID and all complete original rows.
+
+This source handoff changes only the group-to-inherited-framework relationship
+in `validate_private_publish_lock`. Six new pure [framework controls](test_preparation.py)
+are defined using the actual immutable generator lock, short-framework and
+multi-framework data, cross-framework row substitution, foreign/alias/empty keys,
+stacked suffixes, unknown nodes, complete row drift and the unchanged exact CLI
+requirement. The 52 preceding method bodies are preserved byte for byte.
+**No new controls or target helpers have been executed in this source lane.**
+Review and the parent's finite pure validation precede any new native attempt.
+
+The original 177 lock files, fixed CLI publish properties, auditing, protected
+path sets, no-follow ownership/identity checks, limits and original deadlines are
+unchanged. This is not a package unlock or production lock update. A refresh
+that changes an original group or resolves a new RID node still rejects; it needs
+actual retained data and a separate reviewed decision. Product source `171f…`,
+worker grants and the Tool caps remain unchanged. Genuine publication fit,
+mixed CLI/Host execution, XML and coverage-gate results remain unverified here.

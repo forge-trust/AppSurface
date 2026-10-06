@@ -1264,5 +1264,133 @@ class PrivateLinuxPublishFailureDiagnosticControls(unittest.TestCase):
         self.assertIs(json.loads(self.path.read_bytes())["preparation_complete"], False)
 
 
+class PrivateLinuxFrameworkRidControls(unittest.TestCase):
+    """Exact per-framework lock data only; no restore, SDK, worker or authority."""
+
+    def setUp(self):
+        self.guard = patch.object(prepare.Runner, "run", side_effect=AssertionError("no-command-dispatch"))
+        self.commands = self.guard.start()
+        self.addCleanup(self.guard.stop)
+
+    def tearDown(self):
+        self.commands.assert_not_called()
+
+    def encode(self, document):
+        return json.dumps(document, sort_keys=True).encode()
+
+    def document(self):
+        return {"version": 2, "dependencies": {".NETStandard,Version=v2.0": {"Package.One": {
+            "type": "Direct", "requested": "[1.0.0, )", "resolved": "1.0.0", "contentHash": "ordinary-data",
+            "dependencies": {"Package.Two": "2.0.0"}}, "Project.One": {"type": "Project"}}}}
+
+    def projected(self, before):
+        after = json.loads(self.encode(before))
+        for framework, rows in before["dependencies"].items():
+            if framework and "/" not in framework:
+                after["dependencies"][framework+"/linux-x64"] = json.loads(self.encode(rows))
+        return after
+
+    def accepted(self, before, after, cli_target=False):
+        self.assertIs(cli_target, prepare.validate_private_publish_lock(self.encode(before), self.encode(after)))
+
+    def rejected(self, before, after, category):
+        diagnostic = prepare.PrivatePublishDiagnostic()
+        diagnostic.value.update(checkpoint="lock-comparison", expected_lock_count=1, lock_ordinal=0)
+        with self.assertRaises(prepare.PreparationFailure) as caught:
+            prepare.validate_private_publish_lock(self.encode(before), self.encode(after), diagnostic=diagnostic)
+        self.assertEqual("qualification-preparation-rejected", str(caught.exception))
+        self.assertIsNone(caught.exception.__cause__)
+        self.assertEqual(category, diagnostic.snapshot()["category"])
+        self.assertNotIn("private-canary", json.dumps(diagnostic.snapshot()))
+
+    def test_actual_inherited_netstandard_literal_accepts_its_own_identical_linux_subset(self):
+        source = Path(__file__).resolve().parents[3] / "Flow/ForgeTrust.AppSurface.Flow.Generators/packages.lock.json"
+        raw = source.read_bytes()
+        self.assertEqual("61445a96920972fc6536478330983d1283673a3ba73ea84b383d709726e73e0f", hashlib.sha256(raw).hexdigest())
+        before = json.loads(raw)
+        self.assertEqual([".NETStandard,Version=v2.0"], list(before["dependencies"]))
+        self.assertGreater(len(before["dependencies"][".NETStandard,Version=v2.0"]), 0)
+        after = self.projected(before)
+        rows = after["dependencies"][".NETStandard,Version=v2.0/linux-x64"]
+        name = sorted(rows)[0]
+        after["dependencies"][".NETStandard,Version=v2.0/linux-x64"] = {name: rows[name]}
+        self.accepted(before, after)
+        self.assertEqual(raw, source.read_bytes())
+        # The literal is a declared control input, not the unretained native new name.
+        self.assertNotIn(prepare.PRIVATE_PUBLISH_TARGET, after["dependencies"])
+
+    def test_short_and_multiple_frameworks_use_their_own_complete_rows(self):
+        before = self.document()
+        before["dependencies"]["net10.0"] = {"Package.One": {
+            "type": "Direct", "resolved": "10.0.0", "contentHash": "different-framework-data"}}
+        good = self.projected(before)
+        self.accepted(before, good, cli_target=True)
+        self.assertEqual("net10.0/linux-x64", prepare.PRIVATE_PUBLISH_TARGET)
+        for target, borrowed in (("net10.0/linux-x64", ".NETStandard,Version=v2.0"),
+                                 (".NETStandard,Version=v2.0/linux-x64", "net10.0")):
+            bad = json.loads(self.encode(good))
+            bad["dependencies"][target] = {"Package.One": before["dependencies"][borrowed]["Package.One"]}
+            self.rejected(before, bad, "RIDrow")
+            self.accepted(before, good, cli_target=True)
+
+    def test_foreign_alias_other_rid_repeated_suffix_and_empty_framework_keys_reject(self):
+        before = self.document(); good = self.projected(before)
+        framework = ".NETStandard,Version=v2.0"
+        for name in ("netstandard2.0/linux-x64", ".NETStandard,Version=v2.1/linux-x64",
+                     framework+"/linux-arm64", framework+"/LINUX-X64", framework+"/linux-x64/linux-x64",
+                     "", "/linux-x64", framework+"/", "private-canary/linux-x64"):
+            with self.subTest(shape=name if "canary" not in name else "unknown-framework"):
+                self.accepted(before, good)
+                bad = json.loads(self.encode(before)); bad["dependencies"][name] = before["dependencies"][framework]
+                self.rejected(before, bad, "newRIDgroup")
+        empty = {"version": 2, "dependencies": {"": before["dependencies"][framework]}}
+        bad = json.loads(self.encode(empty)); bad["dependencies"]["/linux-x64"] = before["dependencies"][framework]
+        self.rejected(empty, bad, "newRIDgroup")
+        rid_only = {"version": 2, "dependencies": {framework+"/linux-x64": before["dependencies"][framework]}}
+        stacked = json.loads(self.encode(rid_only)); stacked["dependencies"][framework+"/linux-x64/linux-x64"] = before["dependencies"][framework]
+        self.rejected(rid_only, stacked, "newRIDgroup")
+
+    def test_added_framework_rows_reject_unknown_nodes_and_every_complete_row_drift(self):
+        before = self.document(); good = self.projected(before); target = ".NETStandard,Version=v2.0/linux-x64"
+        for field, replacement in (("type", "Transitive"), ("requested", "[0.0.1, )"), ("resolved", "2.0.0"),
+                                   ("contentHash", "private-canary"), ("dependencies", {"Package.Two": "3.0.0"}),
+                                   ("extra", "private-canary")):
+            with self.subTest(field=field):
+                self.accepted(before, good)
+                bad = json.loads(self.encode(good)); bad["dependencies"][target]["Package.One"][field] = replacement
+                self.rejected(before, bad, "RIDrow")
+        bad = json.loads(self.encode(good)); bad["dependencies"][target]["unknown-private-canary"] = {"type": "Transitive", "resolved": "1.0.0"}
+        self.rejected(before, bad, "unknownRIDnode")
+        bad = json.loads(self.encode(good)); bad["dependencies"][target]["Project.One"] = {"type": "Project", "dependencies": {"Package.One": "[1.0.0, )"}}
+        self.rejected(before, bad, "RIDrow")
+
+    def test_all_original_groups_versions_and_existing_rid_rows_remain_immutable(self):
+        before = self.document()
+        before["dependencies"]["net10.0"] = {"Project.Cli": {"type": "Project"}}
+        before["dependencies"][prepare.PRIVATE_PUBLISH_TARGET] = {"Project.Cli": {"type": "Project"}}
+        good = self.projected(before)
+        self.accepted(before, good, cli_target=True)
+        for change in ("missing-framework", "original-row", "existing-rid-row", "version"):
+            with self.subTest(change=change):
+                bad = json.loads(self.encode(good))
+                if change == "missing-framework": del bad["dependencies"][".NETStandard,Version=v2.0"]
+                elif change == "original-row": bad["dependencies"][".NETStandard,Version=v2.0"]["Package.One"]["resolved"] = "9.0.0"
+                elif change == "existing-rid-row": bad["dependencies"][prepare.PRIVATE_PUBLISH_TARGET]["Project.Cli"]["type"] = "Direct"
+                else: bad["version"] = 3
+                self.rejected(before, bad, "original-group" if change == "missing-framework" else "version" if change == "version" else "row")
+                self.accepted(before, good, cli_target=True)
+
+    def test_non_cli_framework_projection_never_satisfies_exact_cli_target_requirement(self):
+        before = self.document(); after = self.projected(before)
+        diagnostic = prepare.PrivatePublishDiagnostic()
+        diagnostic.value.update(checkpoint="cli-rid-target", expected_lock_count=1, lock_ordinal=0)
+        self.assertFalse(prepare.validate_private_publish_lock(self.encode(before), self.encode(after), diagnostic=diagnostic))
+        self.assertEqual("schema", diagnostic.snapshot()["category"])
+        bad = json.loads(self.encode(after)); bad["dependencies"][prepare.PRIVATE_PUBLISH_TARGET] = {}
+        self.rejected(before, bad, "newRIDgroup")
+        before["dependencies"]["net10.0"] = {"Project.Cli": {"type": "Project"}}
+        self.accepted(before, self.projected(before), cli_target=True)
+
+
 if __name__ == "__main__":
     unittest.main()
