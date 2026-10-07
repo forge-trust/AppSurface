@@ -395,8 +395,8 @@ public sealed class DurableTemplateConsumerProofTests : IDisposable
 
             Assert.All(sensitive, name =>
             {
-                Assert.True(environment.ContainsKey(name));
-                Assert.Null(environment[name]);
+                Assert.True(environment.TryGetValue(name, out var value));
+                Assert.Null(value);
             });
             Assert.False(environment.ContainsKey(benign));
             Assert.All(names, name => Assert.Equal("parent-sentinel", Environment.GetEnvironmentVariable(name)));

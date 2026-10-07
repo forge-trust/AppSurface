@@ -2,7 +2,6 @@
 """Executes the #806 immutable receipt resolver using owned fake GitHub pages."""
 import json
 import os
-import re
 import subprocess
 import tempfile
 import unittest
