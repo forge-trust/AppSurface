@@ -19,15 +19,15 @@ import time
 
 HEAD = '2993dcfaac1b9b6dfb8adf057191f837876f01fe'
 PARENT = '4dd992ec1bc2df8220c73149115c5b478edb0085'
-HARNESS_PARENT = 'ae50220277503cf75aaaf8d2337fb7dfd545c398'
+HARNESS_PARENT = '4100f73363fc33716923371aa3b3b26708398645'
 TREE = '190d0b2066d4df980715f31642b4a38198094123'
 CAPTURE_SHA = 'b8772a5cd9686c3f5c7e65278102c397ea1d1c1af9b047140b9b4de15a997fb8'
 CAPTURE_PROJECTION_SHA = '5917596232d55365c39e460f611efeef46db9a74b289732c4c6f80d5388401d6'
 SDK = '10.0.401'
 COUNT = 2819
 FILE_CAP = 256 * 1024 * 1024
-TREE_CAP = 512 * 1024 * 1024
-NODE_CAP = 4096
+TREE_CAP = 1024 * 1024 * 1024
+NODE_CAP = 8192
 LOG_CAP = 8 * 1024 * 1024
 ALL_LOG_CAP = 64 * 1024 * 1024
 START = time.monotonic()
@@ -37,10 +37,14 @@ HARN, OUT, CAPTURE = map(pathlib.Path, sys.argv[1:])
 RECORDS = []
 LOG_BYTES = 0
 PHASE = 'input'
-RESULT = {'schema': 'issue779-csharp-fdd-build-v4', 'exit': 1,
+RESULT = {'schema': 'issue779-csharp-fdd-build-v5', 'exit': 1,
           'build_prerequisite_only': True, 'native_execution': False,
           'checkpoint_pass': False, 'os_audit': None, 'source_commit': HEAD,
-          'capture_sha256': CAPTURE_SHA, 'sdk_required': SDK, 'commands': RECORDS}
+          'capture_sha256': CAPTURE_SHA, 'sdk_required': SDK, 'commands': RECORDS,
+          'packaging_limits': {'file_bytes': FILE_CAP, 'tree_bytes': TREE_CAP,
+                               'tree_nodes': NODE_CAP, 'combined_tool_runtime_bytes': TREE_CAP,
+                               'combined_tool_runtime_nodes': NODE_CAP},
+          'tree_measurements': {}}
 
 class BuildFailure(ValueError):
     def __init__(self, category):
@@ -345,34 +349,47 @@ def source_check(repo, source):
             'source_map_sha256': sha(json.dumps(source, sort_keys=True, separators=(',', ':')).encode()),
             'expected_ignored_outputs_present': sorted(excluded)}
 
-def scan(root):
+def scan(root, measurement_name=None):
     files, dirs = {}, {}
     total = 0
-    for current, children, names in os.walk(root, followlinks=False):
-        check()
-        current = pathlib.Path(current)
-        rel_dir = current.relative_to(root).as_posix()
-        dirs[rel_dir] = directory(current)
-        require(len(files) + len(dirs) + len(children) + len(names) <= NODE_CAP, 'node-count')
-        for child in children:
-            directory(current / child)
-        for name in names:
-            path = current / name
-            relative = path.relative_to(root).as_posix()
-            relative_name(relative)
-            facts = regular(path)
-            total += facts['bytes']
-            require(total <= TREE_CAP, 'tree-bytes')
-            files[relative] = {k: facts[k] for k in ('sha256', 'mode', 'bytes')}
-    require(directory(root) == dirs['.'], 'tree-root-changed')
-    return {'files': files, 'directories': dirs, 'file_count': len(files),
-            'node_count': len(files) + len(dirs), 'total_bytes': total}
+    complete = False
+    try:
+        for current, children, names in os.walk(root, followlinks=False):
+            check()
+            current = pathlib.Path(current)
+            rel_dir = current.relative_to(root).as_posix()
+            dirs[rel_dir] = directory(current)
+            require(len(files) + len(dirs) + len(children) + len(names) <= NODE_CAP, 'node-count')
+            for child in children:
+                directory(current / child)
+            for name in names:
+                path = current / name
+                relative = path.relative_to(root).as_posix()
+                relative_name(relative)
+                facts = regular(path)
+                total += facts['bytes']
+                files[relative] = {k: facts[k] for k in ('sha256', 'mode', 'bytes')}
+                require(total <= TREE_CAP, 'tree-bytes')
+        require(directory(root) == dirs['.'], 'tree-root-changed')
+        complete = True
+        return {'files': files, 'directories': dirs, 'file_count': len(files),
+                'node_count': len(files) + len(dirs), 'total_bytes': total}
+    finally:
+        if measurement_name is not None:
+            require(measurement_name == 'published', 'measurement-name')
+            # Incomplete observations remain diagnostic data; they never pass a tree guard.
+            largest = sorted(files, key=lambda name: (-files[name]['bytes'], name))[:25]
+            RESULT['tree_measurements'][measurement_name] = {
+                'complete': complete, 'sampled_file_count': len(files),
+                'visited_directory_count': len(dirs), 'observed_bytes': total,
+                'largest_sampled_files': [{'path': name, 'bytes': files[name]['bytes']}
+                                          for name in largest]}
 
 def compare_scan(first, second):
     require(first == second, 'tree-copy-or-substitution')
 
-def copy_tree(source, target):
-    before = scan(source)
+def copy_tree(source, target, measurement_name=None):
+    before = scan(source, measurement_name)
     target.mkdir(mode=0o700)
     for name in sorted(before['directories'], key=lambda x: (len(pathlib.PurePosixPath(x).parts), x)):
         check()
@@ -621,8 +638,12 @@ def main():
     require(not diagnostics, 'compiler-or-analyzer-diagnostics')
     PHASE = 'handoff'
     require((published / 'ForgeTrust.AppSurface.Cli.dll').is_file(), 'cli-output-missing')
-    tool_inventory = copy_tree(published, OUT / 'handoff' / 'tool')
+    tool_inventory = copy_tree(published, OUT / 'handoff' / 'tool', 'published')
     runtime_inventory, runtime_selection = runtime_copy(OUT / 'handoff' / 'tool', selected_dotnet)
+    RESULT['handoff_measurements'] = {name: {'total_bytes': inv['total_bytes'],
+                                            'file_count': inv['file_count'],
+                                            'node_count': inv['node_count']}
+                                     for name, inv in (('tool', tool_inventory), ('runtime', runtime_inventory))}
     require(tool_inventory['total_bytes'] + runtime_inventory['total_bytes'] <= TREE_CAP and
             tool_inventory['node_count'] + runtime_inventory['node_count'] <= NODE_CAP, 'tool-runtime-combined-bound')
     RESULT['runtime_selection'] = runtime_selection

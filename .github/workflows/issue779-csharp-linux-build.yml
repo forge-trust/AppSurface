@@ -14,7 +14,7 @@ jobs:
     env:
       # Main must promote the reviewed assembled harness before pushing it.
       BUILD_REVIEWED: 'true'
-      BUILD_SCRIPT_SHA256: fa3a839ab1ef64390ec09441081ed4caa144a0026e7def1ba7484092c9f574be
+      BUILD_SCRIPT_SHA256: c7305ae989c9ee1d8abe3c153b2c492593400bebf484c744b758dfdee2972a55
     steps:
       - name: Promotion gate
         shell: bash
