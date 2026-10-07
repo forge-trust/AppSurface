@@ -475,15 +475,124 @@ absent_accounts() {
 unit_absent() { local state; state=$(bounded systemctl show "$1" -p LoadState --value); [[ $state == not-found ]] || fail unit-collision; }
 absent_accounts; unit_absent "$owner"; unit_absent "$worker"
 diagnostic_stage=n02
-set +e
-(ulimit -f 2048; try_bounded strace -f -qq -e trace=openat,openat2,mkdir,mkdirat,unlink,unlinkat,rmdir,connect -o "$log/n02.trace" setpriv --reuid="$n02_uid" --regid="$n02_gid" --clear-groups /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp "$host" "$managed" evidence supervise --request "$request") >"$log/n02.stdout" 2>"$log/n02.stderr"
-n02=$?; set -e; remaining >/dev/null
-[[ $n02 == 1 && ! -s $log/n02.stdout ]] || fail N02-outcome
-bounded grep -q '^ASEVD402:' "$log/n02.stderr" || fail N02-error
-[[ $(bounded stat -c %s "$log/n02.stderr") -le 1024 && $(bounded stat -c %s "$log/n02.trace") -le 1048576 ]] || fail N02-log-bound
-if try_bounded grep -F -e "$private" -e "/run/appsurface-evidence-$G" -e "$guard" -e /run/dbus/system_bus_socket "$log/n02.trace" >/dev/null; then fail N02-protected-IO; else code=$?; [[ $code == 1 ]] || fail N02-trace-inspection; fi
-if try_bounded grep -F -e "$request" -e "$stage" "$log/n02.stderr" >/dev/null; then fail N02-path-leak; else code=$?; [[ $code == 1 ]] || fail N02-error-inspection; fi
-absent_accounts; [[ ! -e /run/appsurface-evidence-$G ]] || fail N02-workspace; unit_absent "$owner"; unit_absent "$worker"
+# N02_STARTUP_LIMIT_DIAGNOSTIC_BEGIN: only this block differs from the reviewed fixture.
+readonly diagnostic_trace_syscalls=openat,openat2,mkdir,mkdirat,unlink,unlinkat,rmdir,connect,getrlimit,prlimit64,memfd_create,ftruncate,mmap,mprotect,munmap,getuid,geteuid,getgid,getegid,getresuid,getresgid,setresuid,setresgid,setgroups,execve
+readonly diagnostic_trace_bound=1048576 diagnostic_limits_bound=4096
+runtime_image_sha=$(bounded sha256sum "$host"); runtime_image_sha=${runtime_image_sha:0:64}
+request_image_sha=$(bounded sha256sum "$request"); request_image_sha=${request_image_sha:0:64}
+sha "$runtime_image_sha"; sha "$request_image_sha"
+diagnostic_verify_inputs() {
+ pin_file "$host" "$runtime_image_sha" "$CORE_FILE_BYTES"
+ pin_file "$managed" "$entry_sha256" "$CORE_FILE_BYTES"
+ pin_file "$request" "$request_image_sha" 65536
+ pin_file "$build_receipt" "$build_receipt_sha256" "$MAX_NODE_JSON_BYTES"
+ absent_accounts; unit_absent "$owner"; unit_absent "$worker"
+ [[ ! -e /run/appsurface-evidence-$G && ! -e $guard/armed ]] || fail N02-diagnostic-root-effect
+ remaining >/dev/null
+}
+diagnostic_case() {
+ local limit_kib=$1 prefix=$2 code=0 line soft hard core proc_soft proc_hard value oom=false marker=false
+ local stdout_bytes stderr_bytes trace_bytes limits_bytes; local -a limit_fields=()
+ diagnostic_verify_inputs
+ # Root launcher limits are sampled after the ONE varying setting. The real process
+ # still receives the exact setpriv/env/image/argument tuple used by original N02.
+ set +e
+ (
+  ulimit -c 0 || exit 125
+  ulimit -f "$limit_kib" || exit 125
+  printf 'soft_blocks=%s\nhard_blocks=%s\ncore_blocks=%s\n' "$(ulimit -Sf)" "$(ulimit -Hf)" "$(ulimit -Sc)" >"$log/$prefix.file-limit"
+  while IFS= read -r line; do printf '%s\n' "$line"; done </proc/self/limits >"$log/$prefix.limits"
+  try_bounded strace -f -qq -e "trace=$diagnostic_trace_syscalls" -o "$log/$prefix.trace" setpriv --reuid="$n02_uid" --regid="$n02_gid" --clear-groups /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp "$host" "$managed" evidence supervise --request "$request"
+ ) >"$log/$prefix.stdout" 2>"$log/$prefix.stderr"
+ code=$?; set -e
+ remaining >/dev/null
+ [[ $code =~ ^[0-9]+$ ]] && ((code<=255)) || fail N02-diagnostic-exit-shape
+ [[ $(bounded stat -c '%u:%g:%a:%h' "$log/$prefix.file-limit") == 0:0:600:1 ]] || fail N02-limit-file-shape
+ [[ $(bounded stat -c '%u:%g:%a:%h' "$log/$prefix.limits") == 0:0:600:1 ]] || fail N02-limits-file-shape
+ [[ $(bounded stat -c %s "$log/$prefix.file-limit") -le 128 ]] || fail N02-limit-byte-bound
+ limits_bytes=$(bounded stat -c %s "$log/$prefix.limits")
+ ((limits_bytes<=diagnostic_limits_bound)) || fail N02-limits-byte-bound
+ soft=; hard=; core=; proc_soft=; proc_hard=
+ while IFS='=' read -r line value; do
+  case "$line" in soft_blocks) [[ -z $soft ]] || fail N02-duplicate-limit; soft=$value ;; hard_blocks) [[ -z $hard ]] || fail N02-duplicate-limit; hard=$value ;; core_blocks) [[ -z $core ]] || fail N02-duplicate-limit; core=$value ;; *) fail N02-limit-key ;; esac
+ done <"$log/$prefix.file-limit"
+ while IFS= read -r line; do
+  if [[ $line == 'Max file size '* ]]; then
+   [[ -z $proc_soft && -z $proc_hard ]] || fail N02-duplicate-proc-limit
+   read -r -a limit_fields <<<"$line"
+   [[ ${#limit_fields[@]} == 6 && ${limit_fields[5]} == bytes ]] || fail N02-proc-limit-shape
+   proc_soft=${limit_fields[3]}; proc_hard=${limit_fields[4]}
+  fi
+ done <"$log/$prefix.limits"
+ for value in "$soft" "$hard" "$proc_soft" "$proc_hard"; do [[ $value =~ ^[0-9]{1,12}$ ]] || fail N02-numeric-limit; done
+ [[ $core == 0 && $soft == "$limit_kib" && $hard == "$limit_kib" && $proc_soft == "$((limit_kib*1024))" && $proc_hard == "$((limit_kib*1024))" ]] || fail N02-measured-limit-mismatch
+ stdout_bytes=$(bounded stat -c %s "$log/$prefix.stdout")
+ stderr_bytes=$(bounded stat -c %s "$log/$prefix.stderr")
+ trace_bytes=$(bounded stat -c %s "$log/$prefix.trace")
+ ((stdout_bytes<=1024 && stderr_bytes<=1024 && trace_bytes<=diagnostic_trace_bound)) || fail N02-log-bound
+ local search_code=0
+ try_bounded grep -q '^Out of memory\.$' "$log/$prefix.stderr" || search_code=$?
+ case "$search_code" in 0) oom=true ;; 1) ;; *) fail N02-diagnostic-oom-inspection ;; esac
+ search_code=0; try_bounded grep -q '^ASEVD402:' "$log/$prefix.stderr" || search_code=$?
+ case "$search_code" in 0) marker=true ;; 1) ;; *) fail N02-diagnostic-marker-inspection ;; esac
+ # execve argv is private diagnostic data, not a filesystem access. Retain all
+ # non-execve lines for the unchanged protected-filesystem predicate.
+ bounded awk '!/execve\(/' "$log/$prefix.trace" >"$log/$prefix.io.trace"
+ search_code=0
+ try_bounded grep -F -e "$private" -e "/run/appsurface-evidence-$G" -e "$guard" -e /run/dbus/system_bus_socket "$log/$prefix.io.trace" >/dev/null || search_code=$?
+ [[ $search_code == 1 ]] || fail N02-protected-IO
+ search_code=0; try_bounded grep -F -e "$request" -e "$stage" "$log/$prefix.stderr" >/dev/null || search_code=$?
+ [[ $search_code == 1 ]] || fail N02-path-leak
+ diagnostic_verify_inputs
+ # Only actual completed kernel returns on the PID with a successful exact host
+ # exec are projected. No sampled process handle, four-ID tuple or lease is issued.
+ bounded jq -Rsc --arg host "$host" '
+  split("\n") | to_entries | map(. as $line | try (.value | capture("^(?<pid>[0-9]+)\\s+(?<call>execve|getuid|geteuid|getgid|getegid)\\((?<args>.*)\\)\\s+=\\s+(?<ret>[0-9]+)(?:\\s.*)?$") | . + {line:$line.key}) catch empty) as $rows |
+  [$rows[] | select(.call=="execve" and .ret=="0" and (.args|startswith("\""+$host+"\", ")))] as $execs |
+  [$rows[] as $r | $execs[] | select(.pid==$r.pid) | select($r.call!="execve") |
+   {pid:($r.pid|tonumber),syscall:$r.call,value:($r.ret|tonumber),phase:(if $r.line>.line then "post-host-exec" else "pre-host-exec" end)}] as $samples |
+  if ($samples|length)==0 then null else
+   {kind:"kernel-syscall-samples-not-live-continuity",observations:($samples|sort_by(if .phase=="post-host-exec" then 0 else 1 end)|.[0:4]),truncated:(($samples|length)>4)} end
+ ' "$log/$prefix.trace" >"$log/$prefix.credentials.json"
+ [[ $(bounded stat -c %s "$log/$prefix.credentials.json") -le 1024 ]] || fail N02-credential-facts-bound
+ bounded jq -jcS -n --argjson limit "$limit_kib" --argjson soft "$proc_soft" --argjson hard "$proc_hard" --argjson code "$code" --argjson oom "$oom" --argjson marker "$marker" --argjson stdout "$stdout_bytes" --argjson stderr "$stderr_bytes" --argjson trace "$trace_bytes" --slurpfile credentials "$log/$prefix.credentials.json" \
+  '{file_limit_kib:$limit,measured_launcher_soft_bytes:$soft,measured_launcher_hard_bytes:$hard,exit:$code,oom_observed:$oom,asevd402_observed:$marker,stdout_bytes:$stdout,stderr_bytes:$stderr,trace_bytes:$trace,pid_credential_facts:$credentials[0]}' >"$log/$prefix.facts.json"
+ [[ $(bounded stat -c %s "$log/$prefix.facts.json") -le 1024 ]] || fail N02-case-facts-bound
+ remaining >/dev/null
+}
+diagnostic_case 2048 n02
+n02=$(bounded jq -r .exit "$log/n02.facts.json")
+# Keep the original exit/raw files, including its failure, even if the second case differs.
+diagnostic_case 262144 n02-higher
+IFS= read -r -d '' diagnostic_projection <<'DIAGNOSTIC_PROJECTION' || :
+def integer: if type=="number" then floor==. and .>=0 else false end;
+def digest: type=="string" and test("^[0-9a-f]{64}$");
+def credential_shape:
+ .==null or (type=="object" and keys==["kind","observations","truncated"] and .kind=="kernel-syscall-samples-not-live-continuity" and
+ (.truncated|type=="boolean") and (.observations|type=="array" and length>0 and length<=4 and all(.[];
+ type=="object" and keys==["phase","pid","syscall","value"] and (.pid|integer and .>0) and (.value|integer) and
+ (.phase=="pre-host-exec" or .phase=="post-host-exec") and (.syscall=="getuid" or .syscall=="geteuid" or .syscall=="getgid" or .syscall=="getegid"))));
+def case_shape($limit):
+ type=="object" and keys==["asevd402_observed","exit","file_limit_kib","measured_launcher_hard_bytes","measured_launcher_soft_bytes","oom_observed","pid_credential_facts","stderr_bytes","stdout_bytes","trace_bytes"] and
+ .file_limit_kib==$limit and .measured_launcher_soft_bytes==($limit*1024) and .measured_launcher_hard_bytes==($limit*1024) and
+ (.exit|integer and .<=255) and (.oom_observed|type=="boolean") and (.asevd402_observed|type=="boolean") and
+ (.stdout_bytes|integer and .<=1024) and (.stderr_bytes|integer and .<=1024) and (.trace_bytes|integer and .<=1048576) and (.pid_credential_facts|credential_shape);
+try (if type=="object" and keys==["higher_limit","image_bindings","lower_limit","n01_attempted","native_acceptance","native_controls_executed","schema","selected_credentials"] and
+ .schema=="issue779-n02-startup-limit-diagnostic-v1" and .native_controls_executed==[] and .n01_attempted==false and .native_acceptance==false and
+ (.lower_limit|case_shape(2048)) and (.higher_limit|case_shape(262144)) and
+ (.image_bindings|type=="object" and keys==["entry_sha256","request_sha256","runtime_sha256"] and all(.[];digest)) and
+ (.selected_credentials|type=="object" and keys==["gid","kind","uid"] and .kind=="command-selection-not-live-identity" and (.uid|integer and .>0 and .<4294967295) and (.gid|integer and .>0 and .<4294967295))
+then . else error("invalid-diagnostic-data") end) catch error("invalid-diagnostic-data")
+DIAGNOSTIC_PROJECTION
+bounded jq -jcS -n --slurpfile low "$log/n02.facts.json" --slurpfile high "$log/n02-higher.facts.json" \
+ --arg runtime "$runtime_image_sha" --arg entry "$entry_sha256" --arg request "$request_image_sha" --argjson uid "$n02_uid" --argjson gid "$n02_gid" \
+ '{schema:"issue779-n02-startup-limit-diagnostic-v1",native_controls_executed:[],n01_attempted:false,native_acceptance:false,lower_limit:$low[0],higher_limit:$high[0],image_bindings:{runtime_sha256:$runtime,entry_sha256:$entry,request_sha256:$request},selected_credentials:{uid:$uid,gid:$gid,kind:"command-selection-not-live-identity"}}' >"$private/n02-startup-limit-diagnostic.pending"
+bounded jq -jcS "$diagnostic_projection" "$private/n02-startup-limit-diagnostic.pending" >"$private/n02-startup-limit-diagnostic.json"
+[[ $(bounded stat -c '%u:%g:%a:%h' "$private/n02-startup-limit-diagnostic.json") == 0:0:600:1 && $(bounded stat -c %s "$private/n02-startup-limit-diagnostic.json") -le 4096 ]] || fail N02-diagnostic-publication-shape
+remaining >/dev/null
+# Always reject: no guard is armed, no N01 dispatch or positive cleanup publication.
+fail N02-startup-limit-diagnostic-only
+# N02_STARTUP_LIMIT_DIAGNOSTIC_END
 printf '%s\n' "$G" >"$guard/armed"; bounded chmod 600 "$guard/armed"
 [[ $(bounded stat -c '%u:%g:%a:%h' "$guard/armed") == 0:0:600:1 ]] || fail armed-guard
 fixed_env=(PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp)

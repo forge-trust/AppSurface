@@ -16,15 +16,15 @@ import time
 import uuid
 
 SOURCE = '5d1036b7035a7d9e980cdab5afc88879fca5048c'
-PARENT = '98be4042d47fc6f7e55f0fcdac3e26cc8131ebca'
+PARENT = 'c97f07daea57b6330adac691f000c7da210581cd'
 SOURCE_MAP = 'ebc6e6815e7e951789fe58ec6bddb194013f8c9faaaa944a123231be69a6b1d0'
 PINS = {
-    'prepare-root-inputs-v2.sh': 'dcfd5773a0e699a2cf677bca6d98e91691e1121efab0401346d66ef050eb61f6',
-    'checkpoint-n01-n02-v5.sh': '676939bd2e353691832fa505d4459d28b7e0bcfca53398f57778918949b9a93c',
+    'prepare-root-inputs-v2.sh': 'b181c7672fa3dbe9351fee15dcbf85b7ff99808d09077c8338bf4981c782ec6b',
+    'checkpoint-n01-n02-v5.sh': '87a274fb28698437f7eb0fdf86eb2bed85ac5cedf103bed303165f16cac655a4',
     'prepare-os-audit-v2.py': '314acbe4ad8f8eaf942fce615865671fb77bc42d63c6885b5309feeb17d4b3f7',
-    'source-review.json': '84f34613f597cd2226cd92b08ea6b3a9c8b02fa37bf5e752db8b38ab2a65eeee',
-    'acquire-inbound.sh': '9164f37cace08586a69ecf2f83265ca1735077a56ad9e1af97e9f70a303165a0',
-    'retain-native.sh': '5e1d19d0e09e3733ced9c32182e978c1824f9f64c5ea332706abd42b524e8efb',
+    'source-review.json': 'ee6fa029cf2873a18b849f6e5590f3dd792ee71fa88f3409100ff802df3b4ca0',
+    'acquire-inbound.sh': '152b3f275b4bbbb899ae96e4214ec66e4a658b1f7a45551a8c17f29af155fbf3',
+    'retain-native.sh': 'a6bc3da869386b440d0b8a2ad93eb3cb888a4e48aabe52febf6a609b33d45331',
 }
 ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',
                'LANG=C', 'LC_ALL=C', '/usr/bin/bash', '--noprofile', '--norc']
@@ -575,8 +575,23 @@ ARCHIVE_NAMES = {
     'retention-selection.json', 'fixture-stdout.log', 'fixture-stderr.log', 'fixture-result.json',
     'raw-evidence-plan.json', 'raw-evidence-manifest.json', 'raw-evidence-summary.json', 'worker-live.json',
     'request-policy.sha256', 'final-files.sha256', 'logs/n01.stdout', 'logs/n01.stderr', 'logs/n02.stdout',
-    'logs/n02.stderr', 'logs/n02.trace', 'logs/observer.stdout', 'logs/observer.stderr', 'logs/kill.log', 'logs/stop.log',
+    'logs/n02.stderr', 'logs/n02.trace', 'logs/observer.stdout', 'logs/observer.stderr', 'logs/kill.log', 'logs/stop.log',    'logs/n02.file-limit',
+    'logs/n02.limits',
+    'logs/n02.facts.json',
+    'logs/n02.io.trace',
+    'logs/n02.credentials.json',
+    'logs/n02-higher.stdout',
+    'logs/n02-higher.stderr',
+    'logs/n02-higher.trace',
+    'logs/n02-higher.file-limit',
+    'logs/n02-higher.limits',
+    'logs/n02-higher.facts.json',
+    'logs/n02-higher.io.trace',
+    'logs/n02-higher.credentials.json',
+    'n02-startup-limit-diagnostic.pending',
+    'n02-startup-limit-diagnostic.json',
 }
+
 
 
 def inspect_archive(data):

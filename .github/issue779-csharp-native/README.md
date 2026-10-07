@@ -1,48 +1,21 @@
-# C# native supervision checkpoint
+# C# N02 startup file-limit diagnostic
 
-This private workflow builds and runs the ordinary CLI with the reviewed
-[C# supervision core](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md).
-The [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md)
-requires real N01/N02 first and all sixteen native controls before producer,
-application or production cutover work.
+This private workflow builds the ordinary CLI and investigates a fixture limit before any native acceptance credit. The [C# supervision core](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md) and [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md) still require all sixteen native controls.
 
-## Source and prerequisites
+## Binding and baseline
 
-The source is 5d1036b7035a7d9e980cdab5afc88879fca5048c, direct parent
-2993dcfaac1b9b6dfb8adf057191f837876f01fe. The actual source merge is
-98be4042d47fc6f7e55f0fcdac3e26cc8131ebca. All 2,819 source hashes and modes
-are bound by the capture receipt and checked around the build. The
-[source review](source-review.json) distinguishes the historical 997 local
-baseline from the 28 focused STOP/WAIT tests; these counts are not additive.
-Its pending-at-preparation field records the original handoff status.
+Product source remains 5d1036b7035a7d9e980cdab5afc88879fca5048c, direct parent 2993dcfaac1b9b6dfb8adf057191f837876f01fe. This harness is a direct child of c97f07daea57b6330adac691f000c7da210581cd. All 2,819 source hashes/modes, source tree and historical 997 local tests plus separate 28 focused STOP/WAIT tests remain bound by [source-review.json](source-review.json). The SDK remains 10.0.401; the execution runtime is the pinned Ubuntu 10.0.12 packages. Every ELF/dependency remains subject to [the OS audit](prepare-os-audit-v2.py).
 
-The SDK is 10.0.401. Execution uses the exact Ubuntu 10.0.12 packages and
-frameworks, recorded by [the prerequisite](prepare-ubuntu-runtime.py).
-All runtime ELFs and their dependencies remain subject to the same-host
-[OS audit](prepare-os-audit-v2.py). Source hashes are verified before interpreter
-use. No runtime file is skipped, feature disabled or foreign library supplied.
+## Diagnostic contract
 
-## Staging and capture
+[The fixture](checkpoint-n01-n02-v5.sh) runs the same unprivileged supervise command sequentially under 2048 KiB and 262144 KiB file limits. Both children uniformly disable core dumps. The second value is the existing 256 MiB deployment-file envelope. Image, request, selected UID/GID, cleared groups, environment and argv remain identical. The original monotonic 600-second fixture interval and cleanup reserve remain. Extended fixed strace records actual memory/limit/credential calls. Missing kernel facts remain unknown.
 
-[The dispatcher](run-native.py) applies the existing 256 MiB payload-file
-limit to staging. Each stdout/stderr capture writer has its own 8 MiB limit,
-exclusive private log creation and core output disabled. Fixed private FIFOs
-join the writers to the fixture. Each child clears the parent EXIT trap before
-setup. The parent retains both PIDs, attempts both joins, and removes only
-FIFOs it successfully created. Fixture, pump, cleanup and containment failures
-remain failures. All waits use the prearmed root utility's original deadline.
-The fixed audit adds only mkfifo and rm at its existing trusted OS locations.
+Attempt 9 measured runtime out-of-memory and SIGABRT; it did not measure the failed allocation. [Pinned .NET runtime source](https://github.com/dotnet/runtime/blob/v10.0.12/src/coreclr/minipal/Unix/doublemapping.cpp#L107-L122) clips executable-code backing storage by the file limit. This is the reason for the comparison, not a measured cause. Both results and private raw traces are preserved, including the lower failure. Trace caps of 1 MiB and stdio caps of 1024 bytes are verified after each synchronous case; there is no claim of an independent live trace writer cap. The root utility cgroup/deadline containment is unchanged.
 
-## Diagnostic and acceptance limits
+The final result is the closed issue779-n02-startup-limit-diagnostic-v1 shape. It has empty native_controls_executed, false n01_attempted and false native_acceptance. Completion intentionally exits nonzero even if the larger limit reaches ASEVD402. The normal native result validator is unchanged and cannot accept this run. All N01/other controls remain pending.
 
-[The fixture](checkpoint-n01-n02-v5.sh) adds fixed internal stage labels and a
-best-effort closed stage/tool/exit marker before its existing bounded-operation
-rejection. It adds no paths, argv or exception text. Marker failure cannot
-replace the original rejection. The latch is per shell process, not a global
-claim. The earlier failing child remains unknown.
+## Private retention and ordering
 
-Root containment of validation tools does not prove supervisor or worker
-settlement. Existing native process credentials, cgroups, source custody,
-canonical files, NSS cleanup, deadlines and receipt predicates remain required.
-Preparation and local pipe tests establish no native case pass, qualification
-or Trusted admission. Production catalogue and proof registry remain closed.
+[The dispatcher](run-native.py) retains the reviewed FIFO capture with separate 8 MiB writers, exclusive root-private files, both PID joins and the original deadline. [The retainer](retain-native.sh) adds only the fifteen fixed diagnostic names listed in the source review; no discovery, authority or original-result override is added. Every retained source remains root 0600/single-link/no-follow; fixed canonical USTAR and 32 MiB total bounds remain. Externally verified hashes precede interpreter use.
+
+Nine pure jq/static controls passed; they establish no native result. No worker security policy, cap, timer, production catalogue or acceptance registry is changed. Root-owned validation-tool settlement cannot establish C# supervisor/worker settlement. At source preparation, the workflow has seven false promotion flags. Main may promote exactly those flags only after independent composition review; the diagnostic remains nonzero.

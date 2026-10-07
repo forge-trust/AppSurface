@@ -110,7 +110,7 @@ if [[ -e $parent || -L $parent ]]; then
  [[ $(identity "$parent") == "$parent_before" ]] || fail fixture-selection-changed
 fi
 # No discovery below these fixed names. Missing files are retained as missing counts.
-inner=(fixture-result.json raw-evidence-plan.json raw-evidence-manifest.json raw-evidence-summary.json worker-live.json request-policy.sha256 final-files.sha256 logs/n01.stdout logs/n01.stderr logs/n02.stdout logs/n02.stderr logs/n02.trace logs/observer.stdout logs/observer.stderr logs/kill.log logs/stop.log)
+inner=(fixture-result.json raw-evidence-plan.json raw-evidence-manifest.json raw-evidence-summary.json worker-live.json request-policy.sha256 final-files.sha256 logs/n01.stdout logs/n01.stderr logs/n02.stdout logs/n02.stderr logs/n02.trace logs/observer.stdout logs/observer.stderr logs/kill.log logs/stop.log logs/n02.file-limit logs/n02.limits logs/n02.facts.json logs/n02.io.trace logs/n02.credentials.json logs/n02-higher.stdout logs/n02-higher.stderr logs/n02-higher.trace logs/n02-higher.file-limit logs/n02-higher.limits logs/n02-higher.facts.json logs/n02-higher.io.trace logs/n02-higher.credentials.json n02-startup-limit-diagnostic.pending n02-startup-limit-diagnostic.json)
 declare -a sources=() targets=() identities=() hashes=()
 total=0; present=0; missing=0
 add_file() {

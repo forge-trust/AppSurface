@@ -1,7 +1,7 @@
-name: C# candidate real N01/N02 bootstrap
+name: C# N02 startup file-limit diagnostic
 on:
   push:
-    branches: [codex/issue779-csharp-linux-native-20261007-retry-8]
+    branches: [codex/issue779-csharp-linux-native-20261007-retry-9]
 permissions:
   contents: read
 concurrency:
@@ -15,24 +15,24 @@ jobs:
       # Promotion requires frozen source reviews and a complete native handoff.
       # Promote only after full source composition review; no native passing claim.
       UBUNTU_RUNTIME_REVIEWED: 'true'
-      UBUNTU_RUNTIME_SCRIPT_SHA256: dfcdfe9ae1ab567c7ef966b309c00ad446d0037dcdaac36b2fabc8a8ba2fc7f8
+      UBUNTU_RUNTIME_SCRIPT_SHA256: 95bbdde4cedc173dd93271c6c8f4db5389c46e356992260478be9eaa77408b6c
       BUILD_REVIEWED: 'true'
-      BUILD_SCRIPT_SHA256: 130e80508da009e40754fb5a395830abc04cecc84db8a80acfff443eb8ea9e16
+      BUILD_SCRIPT_SHA256: d01fa9663bc166d3c29b7d7e9698922edf78e7d34802de8c5adf0edbb65106d5
       ROOT_TRANSPORT_REVIEWED: 'true'
-      ROOT_TRANSPORT_SHA256: dcfd5773a0e699a2cf677bca6d98e91691e1121efab0401346d66ef050eb61f6
+      ROOT_TRANSPORT_SHA256: b181c7672fa3dbe9351fee15dcbf85b7ff99808d09077c8338bf4981c782ec6b
       FIXTURE_REVIEWED: 'true'
-      FIXTURE_SHA256: 676939bd2e353691832fa505d4459d28b7e0bcfca53398f57778918949b9a93c
+      FIXTURE_SHA256: 87a274fb28698437f7eb0fdf86eb2bed85ac5cedf103bed303165f16cac655a4
       OS_AUDIT_REVIEWED: 'true'
       OS_AUDIT_SHA256: 314acbe4ad8f8eaf942fce615865671fb77bc42d63c6885b5309feeb17d4b3f7
-      SOURCE_REVIEW_SHA256: 84f34613f597cd2226cd92b08ea6b3a9c8b02fa37bf5e752db8b38ab2a65eeee
+      SOURCE_REVIEW_SHA256: ee6fa029cf2873a18b849f6e5590f3dd792ee71fa88f3409100ff802df3b4ca0
       NATIVE_HANDOFF_REVIEWED: 'true'
       NATIVE_HANDOFF_IMPLEMENTED: 'true'
-      ACQUISITION_SHA256: 9164f37cace08586a69ecf2f83265ca1735077a56ad9e1af97e9f70a303165a0
-      RETENTION_SHA256: 5e1d19d0e09e3733ced9c32182e978c1824f9f64c5ea332706abd42b524e8efb
-      ORCHESTRATOR_SHA256: 38ebe7325479bc2c2f0a3f460c5b908fb6b9044c84ce603a1ae635dbbd13b34c
+      ACQUISITION_SHA256: 152b3f275b4bbbb899ae96e4214ec66e4a658b1f7a45551a8c17f29af155fbf3
+      RETENTION_SHA256: a6bc3da869386b440d0b8a2ad93eb3cb888a4e48aabe52febf6a609b33d45331
+      ORCHESTRATOR_SHA256: 874aa755eb1fa96a3d43e10ce03c356ee2527e7a48944e8c9dc18b8e39fabb39
       CAPTURE_RECEIPT_SHA256: 51afcbd61af3c2319e814beee18e88714e589cb26132d755371248d045cfd64d
       SOURCE_COMMIT: 5d1036b7035a7d9e980cdab5afc88879fca5048c
-      HARNESS_PARENT: 98be4042d47fc6f7e55f0fcdac3e26cc8131ebca
+      HARNESS_PARENT: c97f07daea57b6330adac691f000c7da210581cd
     steps:
       - name: Reject unreviewed or incomplete proposal before build
         shell: bash
@@ -225,7 +225,7 @@ jobs:
               print('BOOTSTRAP_REJECTED:build-terminal-or-map-pins', file=sys.stderr)
               sys.exit(1)
           PY
-      - name: Stage reviewed root inputs, audit same host, run real C# N01/N02
+      - name: Stage reviewed root inputs and run rejected N02 startup diagnostic
         shell: bash
         run: |
           set -euo pipefail
