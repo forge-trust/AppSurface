@@ -226,6 +226,10 @@ internal sealed class LinuxEmptyObservationControlServer
             // this control handler or the worker that issued the request.
             if (request is EvidenceStopControlRequest)
                 await _sequence.StopAsync(CleanupToken()).ConfigureAwait(false);
+            // WAIT joins only an already owned STOP, outside response ordering. It never starts
+            // containment itself or holds the reply gate while that original procedure is pending.
+            else if (request is EvidenceWaitControlRequest)
+                await _sequence.JoinStartedStopAsync().ConfigureAwait(false);
             await _replyOrder.WaitAsync(io.Token).ConfigureAwait(false);
             heldReplyOrder = true;
             byte[] response;

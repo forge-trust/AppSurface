@@ -95,6 +95,30 @@ internal sealed class SupervisionControlSequence
         return stop;
     }
 
+    /// <summary>Joins an already registered stop without starting containment or closing work itself.</summary>
+    /// <returns>A task that completes only after the original stop callback and workload drain have joined.</returns>
+    /// <remarks>
+    /// Rejects when no stop is registered or when the stop callback attempts to join itself. The first
+    /// stop caller's retained cleanup token remains in force; this operation creates no token or timer
+    /// and never detaches cancellation-ignoring work. Completed stop failure stays latched but permits
+    /// a subsequent negative ClaimWait response. Call before acquiring the server's reply-order gate,
+    /// then claim and commit the response through the existing write/close procedure. Joining creates
+    /// no reply claim, acknowledgement or native exit authority.
+    /// </remarks>
+    internal async Task JoinStartedStopAsync()
+    {
+        RequireOutsideProcedure();
+        Task stop;
+        lock (_gate) stop = _stop ?? throw Rejected();
+        try { await stop.ConfigureAwait(false); }
+        catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException or AccessViolationException))
+        {
+            // The actual task has settled. Observe its failure without turning it into a positive
+            // join assertion, and retain cleanup's existing negative WAIT response path.
+            lock (_gate) FailLocked();
+        }
+    }
+
     /// <summary>Claims one wait response only after the shared stop task and workload drain actually completed.</summary>
     /// <returns>A positive claim only when every real-callback join assertion is true and no failure is latched.</returns>
     /// <remarks>A completed failed stop permits a negative cleanup response; it cannot create a positive wait.</remarks>
