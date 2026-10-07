@@ -1,0 +1,137 @@
+# Read-only fixed OS metadata diagnosis, not an authority or acceptance issuer.
+# Selection mirrors the pinned auditor TOOLS AST: first existing literal, ordered choices.
+# Read at most four prefix bytes from regular resolved files; retain classifications only.
+# Completion requires the actual job exit 0 AND absence of late-publication.json.
+# A later runner's facts cannot retroactively identify the prior attempt's failing tool.
+name: C# native fixed OS tool diagnostic
+on:
+  push:
+    branches: [codex/issue779-csharp-os-tool-diagnostic-20261007]
+permissions:
+  contents: read
+concurrency:
+  group: issue779-csharp-os-tool-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  os-tool-metadata:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Read fixed OS tool metadata only
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          /usr/bin/timeout --signal=KILL 5 /usr/bin/python3 -B - <<'PY'
+          import json, os, pathlib, stat, sys, time
+          start = time.monotonic()
+          end = start + 4
+          TOOLS = {'sha256sum': ('/usr/bin/sha256sum', '/bin/sha256sum'), 'stat': ('/usr/bin/stat', '/bin/stat'), 'find': ('/usr/bin/find', '/bin/find'), 'timeout': ('/usr/bin/timeout', '/bin/timeout'), 'head': ('/usr/bin/head', '/bin/head'), 'jq': ('/usr/bin/jq', '/bin/jq'), 'readelf': ('/usr/bin/readelf', '/bin/readelf'), 'awk': ('/usr/bin/awk', '/bin/awk'), 'sort': ('/usr/bin/sort', '/bin/sort'), 'cmp': ('/usr/bin/cmp', '/bin/cmp'), 'cp': ('/usr/bin/cp', '/bin/cp'), 'chmod': ('/usr/bin/chmod', '/bin/chmod'), 'chown': ('/usr/bin/chown', '/bin/chown'), 'install': ('/usr/bin/install', '/bin/install'), 'systemd-run': ('/usr/bin/systemd-run', '/bin/systemd-run'), 'systemctl': ('/usr/bin/systemctl', '/bin/systemctl'), 'getent': ('/usr/bin/getent', '/bin/getent'), 'setpriv': ('/usr/bin/setpriv', '/bin/setpriv'), 'strace': ('/usr/bin/strace', '/bin/strace'), 'date': ('/usr/bin/date', '/bin/date'), 'sleep': ('/usr/bin/sleep', '/bin/sleep'), 'od': ('/usr/bin/od', '/bin/od'), 'tr': ('/usr/bin/tr', '/bin/tr'), 'cut': ('/usr/bin/cut', '/bin/cut'), 'cat': ('/usr/bin/cat', '/bin/cat'), 'grep': ('/usr/bin/grep', '/bin/grep'), 'wc': ('/usr/bin/wc', '/bin/wc'), 'readlink': ('/usr/bin/readlink', '/bin/readlink'), 'uname': ('/usr/bin/uname', '/bin/uname'), 'setsid': ('/usr/bin/setsid', '/bin/setsid'), 'ps': ('/usr/bin/ps', '/bin/ps'), 'mv': ('/usr/bin/mv', '/bin/mv'), 'bash': ('/usr/bin/bash',), 'env': ('/usr/bin/env',), 'ldconfig': ('/usr/sbin/ldconfig', '/sbin/ldconfig')}
+          # These optional literals observe packaging only; neither can replace an auditor choice.
+          EXTRA = {'ldconfig.real-usr': ('/usr/sbin/ldconfig.real',), 'ldconfig.real-sbin': ('/sbin/ldconfig.real',)}
+          def check():
+              if time.monotonic() >= end:
+                  raise TimeoutError('probe-deadline')
+          def file_type(mode):
+              return ('regular' if stat.S_ISREG(mode) else 'directory' if stat.S_ISDIR(mode)
+                      else 'symlink' if stat.S_ISLNK(mode) else 'fifo' if stat.S_ISFIFO(mode)
+                      else 'socket' if stat.S_ISSOCK(mode) else 'character' if stat.S_ISCHR(mode)
+                      else 'block' if stat.S_ISBLK(mode) else 'other')
+          def identity(info):
+              return (info.st_dev, info.st_ino, info.st_mode, info.st_size,
+                      info.st_uid, info.st_gid, info.st_mtime_ns, info.st_ctime_ns)
+          def observe(name, choices, optional):
+              check()
+              selected = None
+              info = None
+              for literal in choices:
+                  check()
+                  try:
+                      info = os.lstat(literal)
+                  except FileNotFoundError:
+                      continue
+                  selected = literal
+                  break
+              row = {'name': name, 'choices': list(choices), 'optional': optional,
+                     'selected_literal': selected, 'exists': selected is not None,
+                     'file_type': None, 'uid': None, 'gid': None, 'mode': None,
+                     'is_symlink': None, 'resolved_literal': None, 'prefix_class': None}
+              if selected is None:
+                  return row
+              row.update(file_type=file_type(info.st_mode), uid=info.st_uid, gid=info.st_gid,
+                         mode=format(stat.S_IMODE(info.st_mode), '04o'), is_symlink=stat.S_ISLNK(info.st_mode))
+              check()
+              resolved = os.path.realpath(selected, strict=True)
+              if len(os.fsencode(resolved)) > 4096:
+                  raise ValueError('resolved-path-bound')
+              actual = os.lstat(resolved)
+              row['resolved_literal'] = resolved
+              row['prefix_class'] = 'other'
+              if stat.S_ISREG(actual.st_mode):
+                  fd = os.open(resolved, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+                  try:
+                      opened = os.fstat(fd)
+                      if identity(opened) != identity(actual):
+                          raise ValueError('changed-file')
+                      check()
+                      prefix = os.read(fd, 4)
+                      if identity(os.fstat(fd)) != identity(opened):
+                          raise ValueError('changed-file')
+                      row['prefix_class'] = 'ELF' if prefix.startswith(b'\x7fELF') else 'script' if prefix.startswith(b'#!') else 'other'
+                  finally:
+                      os.close(fd)
+              if identity(os.lstat(selected)) != identity(info) or identity(os.lstat(resolved)) != identity(actual):
+                  raise ValueError('changed-path')
+              check()
+              return row
+          parent = None
+          def terminal_deadline():
+              if time.monotonic() >= end:
+                  fd = os.open(parent / 'late-publication.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                  with os.fdopen(fd, 'wb') as output:
+                      output.write(b'{"schema":"issue779-os-tool-probe-failure-v1","status":"late-publication"}\n')
+                  raise TimeoutError('late-publication')
+          try:
+              if sys.platform != 'linux' or os.geteuid() == 0:
+                  raise ValueError('unprivileged-linux-required')
+              rows = []
+              for optional, table in ((False, TOOLS), (True, EXTRA)):
+                  for name, choices in table.items():
+                      if len(rows) >= 40:
+                          raise ValueError('row-bound')
+                      rows.append(observe(name, choices, optional))
+              check()
+              parent = pathlib.Path(os.environ['RUNNER_TEMP']) / 'issue779-csharp-os-tool-diagnostic'
+              parent.mkdir(mode=0o700)
+              data = json.dumps({'schema': 'issue779-fixed-os-tool-diagnostic-v1',
+                                'capture_status': 'observations-only', 'rows': rows,
+                                'harness_parent': 'e95a4e84bcba7f4974d8b188286b1e8f87139a2b',
+                                'source_commit': '2993dcfaac1b9b6dfb8adf057191f837876f01fe',
+                                'source_count': 2819, 'auditor_source_sha256': '73356e8ad155f5c121fce627f3bea7aeb12bdb0b594b16f3a32b425b42c928be',
+                                'native_execution': False, 'authority': False,
+                                'elapsed_seconds': time.monotonic() - start},
+                               sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode('ascii') + b'\n'
+              # Reserve 1KiB for the closed late-failure sidecar within the aggregate 32KiB cap.
+              if len(data) > 32768 - 1024:
+                  raise ValueError('metadata-bound')
+              fd = os.open(parent / 'os-tool-metadata.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+              with os.fdopen(fd, 'wb') as output:
+                  output.write(data)
+              terminal_deadline()
+              print('OS_TOOL_METADATA_CAPTURED:observations-only:no-utility-execution', flush=True)
+              terminal_deadline()
+          except Exception:
+              print('OS_TOOL_PROBE_FAILED', file=sys.stderr, flush=True)
+              raise SystemExit(1)
+          PY
+      - name: Retain fixed diagnostic observations
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: issue779-csharp-os-tool-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          include-hidden-files: true
+          path: ${{ runner.temp }}/issue779-csharp-os-tool-diagnostic/
