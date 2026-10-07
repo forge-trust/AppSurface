@@ -25,3 +25,7 @@ Nine pure jq/static controls passed; they establish no native result. No worker 
 Attempt 10 compiled the unchanged CLI with 33 successful commands and zero compiler diagnostics, then rejected the handoff as ubuntu-runtime-prerequisite-source. Its builder still embedded obsolete prerequisite/runner hashes. The named startup diagnostic did not run. Historical receipts remain unchanged.
 
 The builder now names both required hashes as compilation-bound constants and uses require_prerequisite_source after the existing result, package and schema checks and before runtime host copying. It checks exact equality and preserves the same fixed BuildFailure category. This helper validates metadata only; it cannot construct execution, admission or completion authority. All command settlement, selected runtime reads, ELFs, tree bounds, native checks and deadlines remain required. Five pure regression controls execute only the actual guard definitions and verify the current file-to-pin chain; no SDK/root/runtime is launched.
+
+## Private batched input audit
+
+The prior attempt exhausted the original fixture deadline before N02. This candidate batches full input checks, preserves the early named-root identity and all file/node/depth envelopes, and separately tests the actual parser on unprivileged Linux data before root dispatch. The diagnostic retains 600 seconds and cleanup30 and always rejects; it cannot establish N01/N02 acceptance. The C# product source is unchanged.

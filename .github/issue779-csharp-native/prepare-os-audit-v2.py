@@ -31,7 +31,7 @@ SONAME = re.compile(r"[A-Za-z0-9_.+-]{1,256}\Z")
 TOOLS = {
     name: ("/usr/bin/" + name, "/bin/" + name)
     for name in (
-        "sha256sum", "stat", "find", "timeout", "head", "jq", "readelf", "awk",
+        "dd", "sha256sum", "stat", "find", "timeout", "head", "jq", "readelf", "awk",
         "sort", "cmp", "cp", "chmod", "chown", "install", "systemd-run", "systemctl",
         "getent", "setpriv", "strace", "date", "sleep", "od", "tr", "cut", "cat",
         "grep", "wc", "readlink", "uname", "setsid", "ps", "mv", "mkfifo", "rm",

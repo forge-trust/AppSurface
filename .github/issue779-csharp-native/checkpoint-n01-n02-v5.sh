@@ -27,7 +27,7 @@ if [[ $mode == prepare-only && -z $source_root ]]; then
  printf '%s\n' 'PREPARATION_ONLY:NO_INPUTS_VERIFIED:N01_NOT_RUN:N02_NOT_RUN'; exit 0
 fi
 [[ $OSTYPE == linux* ]] || fail Linux-x64
-for t in sha256sum stat find timeout head jq readelf awk sort cmp cp chmod chown install systemd-run systemctl getent setpriv strace date sleep od tr cut cat grep wc readlink uname setsid ps bash mv; do command -v "$t" >/dev/null || fail missing-trusted-tool; done
+for t in dd sha256sum stat find timeout head jq readelf awk sort cmp cp chmod chown install systemd-run systemctl getent setpriv strace date sleep od tr cut cat grep wc readlink uname setsid ps bash mv; do command -v "$t" >/dev/null || fail missing-trusted-tool; done
 monotonic() { local up rest; IFS=' ' read -r up rest </proc/uptime || return 1; [[ $up =~ ^[0-9]+\.[0-9]+$ ]] || return 1; printf '%s' "${up%%.*}"; }
 fixture_start=$(monotonic) || fail monotonic-clock
 readonly fixture_start hard_end=$((fixture_start+FIXTURE_SECONDS)) work_end=$((fixture_start+FIXTURE_SECONDS-CLEANUP_RESERVE))
@@ -117,7 +117,7 @@ validate_node_inventory() {
  pin_file "$file" "$digest" "$MAX_NODE_JSON_BYTES"
 }
 # Exact JSON directory membership includes authenticated empty directories.
-verify_tree() {
+verify_tree_unbatched() {
  local root=$1 manifest=$2 expected=$3 node_file=$4 node_digest=$5 root_name=$6 sealed=${7:-0} policy_extra=${8:-0}
  local line m h rel extra previous= p size before after measured actual desired nodes kind declared_bytes node_rows depth
  local rows=0 total=0 root_before root_after ancestor_nodes
@@ -203,6 +203,197 @@ verify_tree() {
  root_after=$(bounded stat -c '%d:%i:%f:%u:%g' -- "$root"); [[ $root_before == "$root_after" ]] || fail tree-root-changed
  pin_file "$manifest" "$expected" "$MAX_MANIFEST_BYTES"
  pin_file "$node_file" "$node_digest" "$MAX_NODE_JSON_BYTES"
+ printf 'FULL_TREE_POINT_SAMPLES_MATCHED:%s:%s:%s\n' "$rows" "${#wanted[@]}" "$total"
+}
+# Replacement block for the existing fixture, not a standalone/root entry point.
+# Uses only its existing bounded/remaining/ancestor/pin_file/node-schema helpers.
+batch_check_time() {
+ local stamp rest now end=$work_end
+ [[ $phase != cleanup ]] || end=$hard_end
+ IFS=' ' read -r stamp rest </proc/uptime || fail monotonic-clock
+ [[ $stamp =~ ^[0-9]+\.[0-9]+$ ]] || fail monotonic-clock
+ now=${stamp%%.*}; ((now<end)) || fail fixture-deadline
+}
+batch_root_pin() {
+ local root=$1 expected=$2 measured
+ absolute "$root"; [[ -d $root && ! -L $root ]] || fail input-root
+ measured=$(bounded stat -c '%d:%i:%f:%u:%g' -- "$root")
+ [[ $measured == "$expected" ]] || fail tree-root-changed
+}
+batch_create_scratch_leaf() {
+ local path=$1
+ [[ ! -e $path && ! -L $path ]] || fail audit-scratch-collision
+ bounded /usr/bin/dd of="$path" oflag=nofollow conv=excl count=0 status=none
+}
+batch_scratch_pin() {
+ local path=$1 fd=$2 cap=$3 named opened size
+ [[ -f $path && ! -L $path ]] || fail audit-scratch-type
+ named=$(bounded stat -c '%d:%i:%s:%f:%h:%u:%g' -- "$path")
+ opened=$(bounded stat -L -c '%d:%i:%s:%f:%h:%u:%g' -- "/proc/$$/fd/$fd")
+ [[ $named == "$opened" ]] || fail audit-scratch-substitution
+ [[ $(bounded stat -c '%u:%g:%a:%h' -- "$path") == 0:0:600:1 ]] || fail audit-scratch-custody
+ size=$(bounded stat -c %s -- "$path")
+ [[ $size =~ ^[0-9]+$ ]] && ((size<=cap)) || fail audit-scratch-byte-bound
+}
+batch_snapshot() {
+ local root=$1 path=$2 fd=$3
+ # NUL fields preserve arbitrary find names until the parser explicitly rejects controls.
+ # The outer bounded task and inner timeout consume the SAME original remaining allowance.
+ bounded bash -c 'set -euo pipefail; timeout --signal=KILL "$1" find -P "$2" -printf "%P\0%y\0%D\0%i\0%s\0%m\0%n\0%U\0%G\0%T@\0%C@\0" | head -c 16777217' -- "$(remaining)" "$root" >&"$fd"
+ batch_scratch_pin "$path" "$fd" 16777216
+}
+# Data parser only: caller retains FD and supplies authenticated wanted/mode/length maps.
+# Bash dynamic scope shares pre/seen/total from verify_tree; this is not an authority factory.
+# Separately sourceable for future finite data controls without the fixture entry point.
+batch_parse_snapshot() {
+ local pass=$1 read_fd=$2 root_name=$3 sealed=$4 field n rel kind record m desired size
+ local -a fields=()
+  while :; do
+   batch_check_time; fields=()
+   if ! IFS= read -r -d '' field <&"$read_fd"; then [[ -z $field ]] || fail full-node-set; break; fi
+   fields+=("$field")
+   for ((n=1;n<11;n++)); do IFS= read -r -d '' field <&"$read_fd" || fail full-node-set; fields+=("$field"); done
+   rel=${fields[0]}; [[ -n $rel ]] || rel=.
+   kind=${fields[1]}
+   [[ ! $rel =~ [[:cntrl:]] && $rel != *\\* && ${wanted[$rel]+present} && ${wanted[$rel]} == "$kind" && ! ${seen[$rel]+present} ]] || fail full-node-set
+   if [[ $rel == . ]]; then lexical "$root"; else lexical "$root/$rel"; fi
+   seen[$rel]=1
+   for ((n=2;n<9;n++)); do [[ ${fields[n]} =~ ^[0-9]+$ ]] || fail full-node-set; done
+   [[ ${fields[5]} =~ ^[0-7]{3,4}$ && ${fields[9]} =~ ^-?[0-9]+\.[0-9]+$ && ${fields[10]} =~ ^-?[0-9]+\.[0-9]+$ ]] || fail full-node-set
+   printf -v record '%s\t' "${fields[@]}"; record=${record%$'\t'}
+   if [[ $pass == post ]]; then [[ ${pre[$rel]:-} == "$record" ]] || fail manifest-content; continue; fi
+   pre[$rel]=$record
+   m=${node_modes[$rel]}; desired=${m#0}
+   if [[ $kind == f ]]; then
+    size=${fields[4]}; ((size<=MAX_INPUT_FILE_BYTES)) || fail input-file-bound
+    [[ $size == "${node_bytes[$rel]}" ]] || fail manifest-node-length
+    total=$((total+size)); ((total<=MAX_INPUT_TREE_BYTES)) || fail input-tree-bound
+    if ((sealed)); then desired=444; (((8#$m & 0111)==0)) || desired=555; fi
+    [[ ${fields[5]} == "$desired" ]] || fail manifest-mode
+    [[ ${fields[6]} == 1 ]] || fail manifest-hardlink
+    if ((sealed)); then [[ ${fields[7]}:${fields[8]} == 0:0 ]] || fail sealed-owner; fi
+   elif [[ $kind == d ]]; then
+    if ((sealed)); then [[ ${fields[7]}:${fields[8]}:${fields[5]} == 0:0:555 ]] || fail full-directory-mode
+    elif [[ ${fields[5]} != "$desired" ]]; then
+     [[ $root_name == source && ${fields[7]}:${fields[8]}:${fields[5]} == 0:0:555 ]] || fail input-directory-mode
+    fi
+   else fail full-node-set; fi
+  done
+}
+# Exact full JSON/TSV/physical membership, including authenticated empty directories.
+verify_tree() {
+ if [[ $mode == prepare-only ]]; then verify_tree_unbatched "$@"; return; fi
+ local root=$1 manifest=$2 expected=$3 node_file=$4 node_digest=$5 root_name=$6 sealed=${7:-0} policy_extra=${8:-0}
+ local line m h rel extra previous= kind declared_bytes node_rows depth desired size
+ local root_before
+ local rows=0 total=0 ancestor_nodes scratch uuid scratch_before scratch_after checksum_bytes=0
+ local pre_fd post_fd check_fd read_fd field n pass record named opened path
+ local -a fields=()
+ local -A wanted=() node_modes=() node_hashes=() node_bytes=() manifest_seen=() pre=() seen=()
+ absolute "$root"; [[ -d $root && ! -L $root ]] || fail input-root
+ # Old sha256sum's first-64-byte comparison already rejected escaped backslash names.
+ [[ $root != *\\* ]] || fail manifest-path
+ ancestor_nodes=${#components[@]}
+ root_before=$(bounded stat -c '%d:%i:%f:%u:%g' -- "$root")
+ pin_file "$manifest" "$expected" "$MAX_MANIFEST_BYTES"
+ validate_node_inventory "$node_file" "$node_digest" "$root_name"
+ node_rows=$(bounded jq -r '(.directories|to_entries|sort_by(.key)[]|["d",.key,.value.mode]|join("\t")),
+  (.files|to_entries|sort_by(.key)[]|["f",.key,.value.mode,.value.sha256,(.value.bytes|tostring)]|join("\t"))' "$node_file")
+ while IFS=$'\t' read -r kind rel m h declared_bytes extra; do
+  batch_check_time
+  [[ -n $rel && -z $extra && $rel != *\\* && ! ${wanted[$rel]+present} ]] || fail node-row
+  wanted[$rel]=$kind; node_modes[$rel]=$m
+  if [[ $kind == f ]]; then node_hashes[$rel]=$h; node_bytes[$rel]=$declared_bytes; fi
+ done <<<"$node_rows"
+ while IFS= read -r line || [[ -n $line ]]; do
+  batch_check_time
+  IFS=$'\t' read -r m h rel extra <<<"$line"
+  [[ $line == "$m"$'\t'"$h"$'\t'"$rel" && -z $extra && $m =~ ^0[0-7]{3}$ ]] || fail manifest-shape
+  sha "$h"; [[ -n $rel && $rel != /* && ${#rel} -le 4096 && ! $rel =~ [[:cntrl:]] && $rel != *\\* ]] || fail manifest-path
+  [[ -z $previous || $rel > $previous ]] || fail manifest-order
+  previous=$rel; rows=$((rows+1)); ((rows<=MAX_ROWS)) || fail manifest-row-bound
+  [[ ${wanted[$rel]:-} == f && ! ${manifest_seen[$rel]+present} && ${node_modes[$rel]} == "$m" && ${node_hashes[$rel]} == "$h" ]] || fail manifest-node-disagreement
+  manifest_seen[$rel]=1
+ done <"$manifest"
+ ((rows>0)) || fail empty-manifest
+ ((${#manifest_seen[@]}==${#node_hashes[@]})) || fail manifest-node-file-set
+ if ((policy_extra)); then
+  [[ ! ${wanted[fixture-policy.json]+present} ]] || fail policy-manifest-collision
+  pin_file "$root/fixture-policy.json" "$policy_sha" 4096
+  [[ $(bounded stat -c '%u:%g:%a:%h' -- "$root/fixture-policy.json") == 0:0:444:1 ]] || fail policy-custody
+  wanted[fixture-policy.json]=f; node_modes[fixture-policy.json]=0444; node_hashes[fixture-policy.json]=$policy_sha
+  node_bytes[fixture-policy.json]=$(bounded stat -c %s -- "$root/fixture-policy.json")
+ fi
+ ((${#wanted[@]}<=MAX_NODES)) || fail node-bound
+ # Authenticated-input batch execution is root-only. No-input prepare-only remains unchanged.
+ # A private fresh namespace has no untrusted writers; failure quarantines it, never deletes inputs.
+ ((EUID==0)) || fail root-fixture
+ ancestor /run
+ IFS= read -r uuid </proc/sys/kernel/random/uuid; uuid=${uuid//-/}
+ [[ $uuid =~ ^[0-9a-f]{32}$ ]] || fail generation
+ scratch=/run/appsurface-evidence-tree-audit-$uuid
+ [[ ! -e $scratch && ! -L $scratch && $scratch != "$root" && $scratch != "$root/"* ]] || fail audit-scratch-collision
+ bounded install -d -o 0 -g 0 -m 700 -- "$scratch"
+ [[ -d $scratch && ! -L $scratch && $(bounded stat -c '%u:%g:%a' -- "$scratch") == 0:0:700 ]] || fail audit-scratch-custody
+ scratch_before=$(bounded stat -c '%d:%i:%f:%u:%g' -- "$scratch")
+ # Audited GNU dd explicitly creates each scratch leaf with O_NOFOLLOW/O_EXCL.
+ # Any existing leaf rejects before open; the root-0700 directory has no untrusted writer.
+ for path in "$scratch/pre" "$scratch/post" "$scratch/checks"; do
+  [[ ! -e $path && ! -L $path ]] || fail audit-scratch-collision
+ done
+ for path in "$scratch/pre" "$scratch/post" "$scratch/checks"; do
+  batch_create_scratch_leaf "$path"
+ done
+ # Reopen without truncation, retain every FD, then compare named/open identities before writes.
+ exec {pre_fd}<>"$scratch/pre" {post_fd}<>"$scratch/post" {check_fd}<>"$scratch/checks"
+ batch_scratch_pin "$scratch/pre" "$pre_fd" 16777216
+ batch_scratch_pin "$scratch/post" "$post_fd" 16777216
+ batch_scratch_pin "$scratch/checks" "$check_fd" "$MAX_MANIFEST_BYTES"
+ batch_root_pin "$root" "$root_before"
+ batch_snapshot "$root" "$scratch/pre" "$pre_fd"
+ # Exactly one checksum batch: expected hashes derive only from authenticated inputs.
+ for rel in "${!node_hashes[@]}"; do
+  batch_check_time
+  path=$root/$rel; checksum_bytes=$((checksum_bytes+67+${#path}))
+  ((checksum_bytes<=MAX_MANIFEST_BYTES)) || fail audit-checksum-byte-bound
+  printf '%s  %s\n' "${node_hashes[$rel]}" "$path" >&"$check_fd"
+ done
+ batch_scratch_pin "$scratch/checks" "$check_fd" "$MAX_MANIFEST_BYTES"
+ for pass in pre post; do
+  if [[ $pass == post ]]; then
+   # A failed/missing checksum is a fixed rejection, not a partial successful audit.
+   batch_root_pin "$root" "$root_before"
+   bounded sha256sum --check --strict --status -- "$scratch/checks" || fail manifest-content
+   batch_scratch_pin "$scratch/checks" "$check_fd" "$MAX_MANIFEST_BYTES"
+   batch_root_pin "$root" "$root_before"
+   batch_snapshot "$root" "$scratch/post" "$post_fd"
+  fi
+  seen=(); exec {read_fd}<"$scratch/$pass"
+  batch_scratch_pin "$scratch/$pass" "$read_fd" 16777216
+  batch_parse_snapshot "$pass" "$read_fd" "$root_name" "$sealed"
+  batch_scratch_pin "$scratch/$pass" "$read_fd" 16777216
+  exec {read_fd}<&-
+  ((${#seen[@]}==${#wanted[@]})) || fail full-node-count
+ done
+ if ((sealed)) && [[ $root_name != source ]]; then
+  ((total<=CORE_TREE_BYTES && ${#wanted[@]}+ancestor_nodes<=CORE_NODES)) || fail core-tree-envelope
+  for rel in "${!wanted[@]}"; do
+   batch_check_time
+   if [[ $rel == . ]]; then depth=0; else IFS=/ read -r -a components <<<"$rel"; depth=${#components[@]}; fi
+   if [[ ${wanted[$rel]} == d ]]; then ((depth<=32)) || fail core-directory-depth
+   else size=${node_bytes[$rel]}; ((depth<=33 && size>0 && size<=CORE_FILE_BYTES)) || fail core-file-envelope; fi
+  done
+ fi
+ scratch_after=$(bounded stat -c '%d:%i:%f:%u:%g' -- "$scratch")
+ [[ $scratch_before == "$scratch_after" && ! -L $scratch ]] || fail audit-scratch-substitution
+ exec {pre_fd}>&- {post_fd}>&- {check_fd}>&-
+ # Delete only the three retained leaves and their verified private parent after success.
+ bounded rm -- "$scratch/pre" "$scratch/post" "$scratch/checks"
+ bounded rm -d -- "$scratch"
+ pin_file "$manifest" "$expected" "$MAX_MANIFEST_BYTES"
+ pin_file "$node_file" "$node_digest" "$MAX_NODE_JSON_BYTES"
+ batch_root_pin "$root" "$root_before"
+ remaining >/dev/null
  printf 'FULL_TREE_POINT_SAMPLES_MATCHED:%s:%s:%s\n' "$rows" "${#wanted[@]}" "$total"
 }
 # OS aliases ONLY: do lexical resolution ourselves and match every actually encountered link.

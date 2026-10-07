@@ -16,14 +16,14 @@ import time
 import uuid
 
 SOURCE = '5d1036b7035a7d9e980cdab5afc88879fca5048c'
-PARENT = '18ab1ad31eec2a304c9121b33375d14a08e5deed'
+PARENT = 'ed8dfcc228a59d4e6c058c3659fb1f0bf9d221f9'
 SOURCE_MAP = 'ebc6e6815e7e951789fe58ec6bddb194013f8c9faaaa944a123231be69a6b1d0'
 PINS = {
     'prepare-root-inputs-v2.sh': 'b181c7672fa3dbe9351fee15dcbf85b7ff99808d09077c8338bf4981c782ec6b',
-    'checkpoint-n01-n02-v5.sh': '87a274fb28698437f7eb0fdf86eb2bed85ac5cedf103bed303165f16cac655a4',
-    'prepare-os-audit-v2.py': '314acbe4ad8f8eaf942fce615865671fb77bc42d63c6885b5309feeb17d4b3f7',
+    'checkpoint-n01-n02-v5.sh': '43c5c837cb152b284ac1bc23f58fbb36479a1e51539552ea4d9db952fd261cb0',
+    'prepare-os-audit-v2.py': 'a76d3ec9521f021e799b8b56a6c57afdbeb6d4abdb21a55f42899a834eed4604',
     'source-review.json': 'ee6fa029cf2873a18b849f6e5590f3dd792ee71fa88f3409100ff802df3b4ca0',
-    'acquire-inbound.sh': 'b2558bb1238d896005c11aca03bc511e9c256435dd75baf067870e778744ed64',
+    'acquire-inbound.sh': '849c6d0e9f6f0bf2b985a924f1f5c5b046799105170d55302fdd055f2e7f2f06',
     'retain-native.sh': 'a6bc3da869386b440d0b8a2ad93eb3cb888a4e48aabe52febf6a609b33d45331',
 }
 ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',
