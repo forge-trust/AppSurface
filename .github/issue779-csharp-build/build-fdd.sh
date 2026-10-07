@@ -19,7 +19,7 @@ import time
 
 HEAD = '2993dcfaac1b9b6dfb8adf057191f837876f01fe'
 PARENT = '4dd992ec1bc2df8220c73149115c5b478edb0085'
-HARNESS_PARENT = '4100f73363fc33716923371aa3b3b26708398645'
+HARNESS_PARENT = 'e95a4e84bcba7f4974d8b188286b1e8f87139a2b'
 TREE = '190d0b2066d4df980715f31642b4a38198094123'
 CAPTURE_SHA = 'b8772a5cd9686c3f5c7e65278102c397ea1d1c1af9b047140b9b4de15a997fb8'
 CAPTURE_PROJECTION_SHA = '5917596232d55365c39e460f611efeef46db9a74b289732c4c6f80d5388401d6'
@@ -208,8 +208,11 @@ def run(argv, cwd, read_stdout=True, child_umask=-1):
             if process.poll() is not None:
                 record['exit'] = process.wait()
                 record['waited'] = True
-                require(group_absent(process.pid), 'surviving-command-group')
-                break
+                # Leader exit is not descendant completion. Join the same real
+                # process group within the ORIGINAL command/log bounds; never
+                # reset its allowance or accept forced cleanup as success.
+                if group_absent(process.pid):
+                    break
             time.sleep(min(.02, max(0, command_end - time.monotonic())))
     except BaseException as error:
         failure = error
@@ -250,6 +253,11 @@ def run(argv, cwd, read_stdout=True, child_umask=-1):
                 except BaseException as error:
                     record['logs'].append({'name': path.name, 'hash_error': type(error).__name__})
                     failure = failure or error
+        # Final bytes may arrive between the last poll and group absence.
+        # Reconcile the aggregate after final per-file hashing, preserving the
+        # first failure and every already-completed cleanup operation.
+        if LOG_BYTES > ALL_LOG_CAP:
+            failure = failure or BuildFailure('aggregate-log-bound')
         if time.monotonic() >= WORK:
             record['late_completion'] = True
             failure = failure or TimeoutError('late-command-completion')
@@ -488,6 +496,40 @@ def select_framework(requested, available, roll):
     require(bool(candidates), 'compatible-runtime-missing')
     return max(candidates)
 
+def ubuntu_runtime_host():
+    # Package data conveys provenance only. The complete selected tree is still copied, hashed and ELF-audited.
+    prerequisite_root = OUT.parent / 'issue779-csharp-ubuntu-runtime'
+    require(not os.path.lexists(prerequisite_root / 'late-publication-failure.json'), 'late-ubuntu-runtime-prerequisite')
+    fact = regular(prerequisite_root / 'receipt.json', 1048576, collect=True)
+    receipt = decode(fact['data'])
+    require(receipt['schema'] == 'issue779-ubuntu-runtime-prerequisite-v1'
+            and type(receipt['exit']) is int and receipt['exit'] == 0
+            and receipt.get('failure') is None and receipt['native_csharp_dispatched'] is False,
+            'ubuntu-runtime-prerequisite-result')
+    expected_packages = ('dotnet-host-10.0', 'dotnet-hostfxr-10.0', 'dotnet-runtime-10.0', 'aspnetcore-runtime-10.0')
+    version = '10.0.12-0ubuntu1~24.04.1'
+    require(receipt['package_version'] == version and set(receipt['packages']) == set(expected_packages)
+            and all(v == {'architecture': 'amd64', 'version': version, 'status': 'ii '}
+                    for v in receipt['packages'].values()), 'ubuntu-runtime-packages')
+    require(receipt['prerequisite_script_sha256'] == 'c61bfb89941418774f83396420fb21c39f13362fbcf0520a809db1ef73651c23'
+            and receipt['runner_sha256'] == 'a66b3b66c1ab714a409e889864a47451838e3a4959bcf2bb7f180cbd654331e9',
+            'ubuntu-runtime-prerequisite-source')
+    require(len(receipt['commands']) == 5
+            and all(type(c['exit']) is int and c['exit'] == 0 and c['failure'] is None
+                    and c['waited'] is True and c['group_absent'] is True
+                    and c['forced_cleanup'] is False and c['timed_out'] is False
+                    and (not c['root_utility_unit'] or (c['root_start_guard_closed'] is True
+                         and c['root_utility_cgroup_empty'] is True)) for c in receipt['commands']),
+            'ubuntu-runtime-prerequisite-join')
+    host = pathlib.Path('/usr/lib/dotnet/dotnet')
+    require(receipt['runtime_host'] == str(host) and receipt['runtime_root'] == str(host.parent)
+            and host.resolve(strict=True) == host, 'ubuntu-runtime-host-name')
+    actual = regular(host, elf=True)
+    require(actual['sha256'] == receipt['runtime_host_sha256'], 'ubuntu-runtime-host-sha')
+    RESULT['execution_runtime_prerequisite'] = {'receipt_sha256': fact['sha256'],
+        'packages': receipt['packages'], 'host_sha256': actual['sha256']}
+    return host
+
 def runtime_copy(tool, dotnet):
     config_path = tool / 'ForgeTrust.AppSurface.Cli.runtimeconfig.json'
     config_fact = regular(config_path, 65536, collect=True)
@@ -506,8 +548,7 @@ def runtime_copy(tool, dotnet):
         require('framework' not in options, 'framework-shape-ambiguous')
     require(isinstance(frameworks, list) and 1 <= len(frameworks) <= 2, 'framework-count')
     runtime_root = dotnet.parent
-    actual_root = pathlib.Path(os.environ['DOTNET_ROOT']).resolve(strict=True)
-    require(actual_root == runtime_root, 'dotnet-root-mismatch')
+    require(runtime_root == pathlib.Path('/usr/lib/dotnet'), 'ubuntu-runtime-root')
     root_identity = directory(runtime_root)
     for relative in ('host', 'host/fxr', 'shared'):
         directory(runtime_root / relative)
@@ -519,6 +560,7 @@ def runtime_copy(tool, dotnet):
         require(name in ('Microsoft.NETCore.App', 'Microsoft.AspNetCore.App') and name not in selected, 'framework-name')
         available = versions(runtime_root / 'shared' / name)
         v = select_framework(framework['version'], available, roll)
+        require(v == (10, 0, 12), 'ubuntu-execution-framework-version')
         selected[name] = {'requested': framework['version'], 'selected': '.'.join(map(str, v)), 'path': available[v]}
     require('Microsoft.NETCore.App' in selected, 'netcore-framework-required')
     # Fail closed instead of guessing multi-framework version reconciliation.
@@ -526,6 +568,7 @@ def runtime_copy(tool, dotnet):
     fxrs = {v: path for v, path in versions(runtime_root / 'host' / 'fxr').items() if v[0] == 10}
     require(bool(fxrs), 'hostfxr-missing')
     fxr_version = max(fxrs)
+    require(fxr_version == (10, 0, 12), 'ubuntu-execution-hostfxr-version')
     require(fxr_version[:2] == numeric(selected['Microsoft.NETCore.App']['selected'])[:2], 'fxr-framework-minor-conflict')
     fxr = fxrs[fxr_version] / 'libhostfxr.so'
     require(set(p.name for p in fxrs[fxr_version].iterdir()) == {'libhostfxr.so'}, 'hostfxr-directory-shape')
@@ -604,7 +647,7 @@ def main():
     RESULT['source_before'] = source_check(clone, capture['source'])
     source_inventory = source_export(clone, capture['source'])
     PHASE = 'sdk-assets'
-    selected_dotnet = pathlib.Path(shutil.which('dotnet') or '').resolve(strict=True)
+    selected_dotnet = (pathlib.Path(os.environ['DOTNET_ROOT']) / 'dotnet').resolve(strict=True)
     require(selected_dotnet.name == 'dotnet', 'dotnet-path')
     dotnet_fact = regular(selected_dotnet, elf=True)
     RESULT['selected_dotnet_sha256'] = dotnet_fact['sha256']
@@ -639,7 +682,7 @@ def main():
     PHASE = 'handoff'
     require((published / 'ForgeTrust.AppSurface.Cli.dll').is_file(), 'cli-output-missing')
     tool_inventory = copy_tree(published, OUT / 'handoff' / 'tool', 'published')
-    runtime_inventory, runtime_selection = runtime_copy(OUT / 'handoff' / 'tool', selected_dotnet)
+    runtime_inventory, runtime_selection = runtime_copy(OUT / 'handoff' / 'tool', ubuntu_runtime_host())
     RESULT['handoff_measurements'] = {name: {'total_bytes': inv['total_bytes'],
                                             'file_count': inv['file_count'],
                                             'node_count': inv['node_count']}
