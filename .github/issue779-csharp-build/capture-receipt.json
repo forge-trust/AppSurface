@@ -1,6 +1,6 @@
 {
   "exit": 0,
-  "previous_validation_commit": "4dd992ec1bc2df8220c73149115c5b478edb0085",
+  "previous_validation_commit": "2993dcfaac1b9b6dfb8adf057191f837876f01fe",
   "primary_head": "4dd992ec1bc2df8220c73149115c5b478edb0085",
   "source": {
     "modes": {
@@ -3854,7 +3854,7 @@
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxSystemdBackendTests.cs": "02837c1067a7a108a19059f409a818a4f62d4cfa76ec2028418684a8de7f8fc9",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxWorkerUnitTests.cs": "ced369cc2ac117a23b350c8146690dc0a9f0f41beaf1fec527b27eebf0d80d91",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionAcceptOwnershipTests.cs": "e8f791d2fa8458d3dfc69a499f92b87edc8423f3c1a2a3c3545f9860f4ded3a2",
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionControlSequenceTests.cs": "9683b848937c53d682e270c32c52c6f0c868a9ee46a8cbf12e6029811f0a749f",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionControlSequenceTests.cs": "48d77d6dbf46fcb06b948c156fe63b6cc0cd3632f11675b087def31aa7f333e2",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionCustodyTransferTests.cs": "b7fa6ab9bcff964a6290f9d84609f2fae0c5607fd0676caebe4b6a3017ab9784",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionOutputCollectorTests.cs": "fe233aba1f0c9e4b9f43a362332260e66dbb96a364c4bd62d145a91d589aa18a",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionPendingStartTests.cs": "8d12d9c46a1a02aa91c7bc1bf8c3089d0fe10398c9fe7e78263b83d5b6a9c7c2",
@@ -3877,7 +3877,7 @@
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxControlConnection.cs": "6c587fa5973b985ba9ea3023638de4a637708f8dd0ecaeba32093ef9e1c73eab",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxControlListener.cs": "206496e021ef42e87865d6b5642244449a13ca5ba91f2ab3051517ff2b13b3e4",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxCustodyData.cs": "2be7661665319806864bc4be94ad94439311ec16e2e6d72f61d0012740e271a7",
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationControlServer.cs": "e241933310095df4161767b56145d453fe964c70a79b7b610650dd04a9d1b40b",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationControlServer.cs": "9c4c72e845f510c0e49330401e9bf9db9b8cf8308f215f8079e7307f5eba532a",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationExecution.cs": "c2e08e5b798b1f8e9f3fb5247429ce7d0b17276453d044400b047c1a8f587a5e",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxOutputPipes.cs": "11c67230c6c138b280d85fcddcd3a5fd9fd35f038e5a2cfd610d4137240fec4b",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxOwnerActivation.cs": "ae8bf189f70f379e0db7728199666c21b2917bd16b59fc63b7a369f42eca4ba5",
@@ -3892,9 +3892,9 @@
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxSystemdBackend.cs": "44db74e6e59d771781814076ed9e45dddf1516813da90ca5359f6260c04e1bf6",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerProcess.cs": "f1d9f78172488054b5fb12c41b1057499ed41e21ce86738554bf698cf13f0fab",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerUnit.cs": "50065d2353864f5e066eadc985b372143e7946937536874a62bdbabfa3891de2",
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md": "2fefd17ef25f1537438f63f9ae0fefeca1bb320bc393fa892fcfc28a6c2d7f43",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md": "06639ef6ff932909d1e872db46a13c8255c88d640264aff25316c283d7005809",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/SupervisionAcceptOwnership.cs": "1e2e4adb519cf46a3548ab88c3df70846f21a167fcebb0ef793ecfbabf4039f0",
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/SupervisionControlSequence.cs": "34f4feb4f253c36204d13a2fd48409fa37eca16852020973a655a545dbb00aaa",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/SupervisionControlSequence.cs": "838a7e5420b1f57766df6321056b3563dd0569ed2157bc1297436fbd5556fe6c",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/SupervisionCustodyTransfer.cs": "ad4132575cacd0b3198bd80d56637b28e9a61e9ace7d7262125cdac83f6fef86",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/SupervisionOutputCollector.cs": "f211a8e882fa6bcaebcee28c7cee0c7d0d61c51c4915d9818f9f10bc96b108a8",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/SupervisionPendingStart.cs": "8ed0094a81916d86dd374178a844eadc1b0549e82a62f6d588e37d3bf35bab16",
@@ -5647,5 +5647,5 @@
     }
   },
   "source_count": 2819,
-  "validation_commit": "2993dcfaac1b9b6dfb8adf057191f837876f01fe"
+  "validation_commit": "5d1036b7035a7d9e980cdab5afc88879fca5048c"
 }

@@ -15,15 +15,15 @@ import tarfile
 import time
 import uuid
 
-SOURCE = '2993dcfaac1b9b6dfb8adf057191f837876f01fe'
-PARENT = 'e95a4e84bcba7f4974d8b188286b1e8f87139a2b'
-SOURCE_MAP = '6eea369d7a479956d508f1f1cab08d1afb83d62535b668215c47dd6bbeb9857a'
+SOURCE = '5d1036b7035a7d9e980cdab5afc88879fca5048c'
+PARENT = '98be4042d47fc6f7e55f0fcdac3e26cc8131ebca'
+SOURCE_MAP = 'ebc6e6815e7e951789fe58ec6bddb194013f8c9faaaa944a123231be69a6b1d0'
 PINS = {
-    'prepare-root-inputs-v2.sh': '34df8d912d1f0fb7833c21da1a5b9e816fab4b73248eeef7233b831f89e61d21',
-    'checkpoint-n01-n02-v5.sh': '3a98a6487b264b3112ca78dc9441190677b8eb567cf424e78baada456024e328',
-    'prepare-os-audit-v2.py': 'e0ed8adf4a0c75779c55ba0d44ac13e90f6dc2278f2569d7613751de1538c87d',
-    'source-review.json': '18a2f6f9bdb51b3ca2dc5506dd96d5ef28676bac99c9c02d1a8e061ecfa626cf',
-    'acquire-inbound.sh': 'd32c61b95560460d52813ea651bd7a82e54a4ceeedc215b7d086f7ff37d1be9f',
+    'prepare-root-inputs-v2.sh': 'dcfd5773a0e699a2cf677bca6d98e91691e1121efab0401346d66ef050eb61f6',
+    'checkpoint-n01-n02-v5.sh': '676939bd2e353691832fa505d4459d28b7e0bcfca53398f57778918949b9a93c',
+    'prepare-os-audit-v2.py': '314acbe4ad8f8eaf942fce615865671fb77bc42d63c6885b5309feeb17d4b3f7',
+    'source-review.json': '84f34613f597cd2226cd92b08ea6b3a9c8b02fa37bf5e752db8b38ab2a65eeee',
+    'acquire-inbound.sh': '9164f37cace08586a69ecf2f83265ca1735077a56ad9e1af97e9f70a303165a0',
     'retain-native.sh': '5e1d19d0e09e3733ced9c32182e978c1824f9f64c5ea332706abd42b524e8efb',
 }
 ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',
@@ -502,14 +502,53 @@ printf '%s  %s\n' "$3" "$2" | /usr/bin/sha256sum --check --strict --status
 '''
 
 DISPATCH = r'''
-set -euo pipefail; umask 077; ulimit -f 8192
+set -euo pipefail; umask 077
+# This is the existing audited payload-file envelope, not the per-log budget.
+ulimit -f 262144
+fixture_stdout_pid=; fixture_stderr_pid=
+fixture_stdout_fifo=; fixture_stderr_fifo=
+fixture_stdout_fifo_owned=0; fixture_stderr_fifo_owned=0
+finish_fixture_capture() {
+ local status=$1 pump_status=0 pid
+ trap - EXIT
+ for pid in "$fixture_stdout_pid" "$fixture_stderr_pid"; do
+  [[ -n $pid ]] || continue
+  pump_status=0; wait "$pid" || pump_status=$?
+  if ((status==0 && pump_status!=0)); then status=$pump_status; fi
+ done
+ if ((fixture_stdout_fifo_owned)); then
+  rm -f -- "$fixture_stdout_fifo" || { ((status!=0)) || status=1; }
+ fi
+ if ((fixture_stderr_fifo_owned)); then
+  rm -f -- "$fixture_stderr_fifo" || { ((status!=0)) || status=1; }
+ fi
+ # The prearmed root utility timer owns this entire join, including partial
+ # setup. A missing/failed pump or any earlier fixture failure cannot pass.
+ exit "$status"
+}
+capture_fixture() {
+ local stdout=$1 stderr=$2 fixture_status=0
+ shift 2
+ fixture_stdout_fifo=$stdout.pipe; fixture_stderr_fifo=$stderr.pipe
+ trap 'finish_fixture_capture "$?"' EXIT
+ # Each FIFO is created exclusively in the fixed root-owned private control
+ # directory. Retain every ordinary background child immediately for wait.
+ mkfifo -m 600 -- "$fixture_stdout_fifo"; fixture_stdout_fifo_owned=1
+ mkfifo -m 600 -- "$fixture_stderr_fifo"; fixture_stderr_fifo_owned=1
+ (trap - EXIT; ulimit -f 8192; ulimit -c 0; set -C; exec cat <"$fixture_stdout_fifo" >"$stdout") &
+ fixture_stdout_pid=$!
+ (trap - EXIT; ulimit -f 8192; ulimit -c 0; set -C; exec cat <"$fixture_stderr_fifo" >"$stderr") &
+ fixture_stderr_pid=$!
+ "$@" >"$fixture_stdout_fifo" 2>"$fixture_stderr_fifo" || fixture_status=$?
+ finish_fixture_capture "$fixture_status"
+}
 [[ $1 =~ ^[0-9a-f]{32}$ ]]; g=$1; hash=$2; shift 2
 root=/var/lib/appsurface-evidence-input-$g
 [[ ! -e /run/appsurface-evidence-fixture && ! -L /run/appsurface-evidence-fixture ]]
 [[ $(/usr/bin/stat -c '%u:%g:%a' -- "$root/control") == 0:0:700 ]]
 /usr/bin/jq -ncS --arg g "$g" '{schema:"issue779-native-dispatch-marker-v1",generation:$g,fixture_parent_absent:true}' >"$root/control/fixture-dispatch-marker.json"
 printf '%s  %s\n' "$hash" "$root/reviewed/checkpoint-n01-n02-v5.sh" | /usr/bin/sha256sum --check --strict --status
-exec /usr/bin/bash --noprofile --norc "$root/reviewed/checkpoint-n01-n02-v5.sh" "$@" >"$root/control/fixture-stdout.log" 2>"$root/control/fixture-stderr.log"
+capture_fixture "$root/control/fixture-stdout.log" "$root/control/fixture-stderr.log" /usr/bin/bash --noprofile --norc "$root/reviewed/checkpoint-n01-n02-v5.sh" "$@"
 '''
 
 READ_ROOT_ARCHIVE = r'''

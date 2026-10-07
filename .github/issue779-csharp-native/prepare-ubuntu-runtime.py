@@ -11,6 +11,7 @@ import time
 VERSION = '10.0.12-0ubuntu1~24.04.1'
 PACKAGES = ('dotnet-host-10.0', 'dotnet-hostfxr-10.0', 'dotnet-runtime-10.0', 'aspnetcore-runtime-10.0')
 ROOT = Path('/usr/lib/dotnet')
+RUNNER_SHA = '38ebe7325479bc2c2f0a3f460c5b908fb6b9044c84ce603a1ae635dbbd13b34c'
 
 
 def package_rows(data):
@@ -72,7 +73,8 @@ def main():
     parser.add_argument('--runner-sha256', required=True)
     args = parser.parse_args()
     here = Path(__file__)
-    if (not args.execute or hashlib.sha256(here.read_bytes()).hexdigest() != args.reviewed_script_sha256
+    if (not args.execute or args.runner_sha256 != RUNNER_SHA
+            or hashlib.sha256(here.read_bytes()).hexdigest() != args.reviewed_script_sha256
             or hashlib.sha256(here.with_name('run-native.py').read_bytes()).hexdigest() != args.runner_sha256):
         raise ValueError('reviewed-source-pin')
     spec = importlib.util.spec_from_file_location('reviewed_native_runner', here.with_name('run-native.py'))

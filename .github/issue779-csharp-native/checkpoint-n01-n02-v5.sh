@@ -7,7 +7,7 @@ readonly FIXTURE_SECONDS=600 CLEANUP_RESERVE=30
 readonly MAX_MANIFEST_BYTES=8388608 MAX_ROWS=32768 MAX_NODES=65536
 readonly MAX_INPUT_FILE_BYTES=2147483648 MAX_INPUT_TREE_BYTES=4294967296
 readonly MAX_NODE_JSON_BYTES=4194304 CORE_FILE_BYTES=268435456 CORE_TREE_BYTES=1073741824 CORE_NODES=8192
-mode=prepare-only; mode_selected=0; phase=work
+mode=prepare-only; mode_selected=0; phase=work; diagnostic_stage=arguments; diagnostic_failure_reported=0
 source_root= source_manifest= source_manifest_sha256= payload_root= payload_manifest= payload_manifest_sha256=
 runtime_root= runtime_manifest= runtime_manifest_sha256= source_review= source_review_sha256=
 build_receipt= build_receipt_sha256= os_audit= os_audit_sha256= reviewed_script_sha256=
@@ -34,7 +34,26 @@ readonly fixture_start hard_end=$((fixture_start+FIXTURE_SECONDS)) work_end=$((f
 left() { local now end=$work_end; [[ $phase != cleanup ]] || end=$hard_end; now=$(monotonic) || return 1; ((now<end)) || return 1; printf '%s' "$((end-now))"; }
 remaining() { left || fail fixture-deadline; }
 try_bounded() { local n; n=$(left) || return 124; timeout --signal=KILL "$n" "$@"; }
-bounded() { try_bounded "$@" || fail bounded-operation; remaining >/dev/null; }
+report_bounded_failure() {
+ local code=$1 tool=other stage=other
+ ((diagnostic_failure_reported==0)) || return 0
+ diagnostic_failure_reported=1
+ case "$diagnostic_stage" in
+  arguments|platform|source-input|tool-input|runtime-input|os-input|root-layout|tool-copy|runtime-copy|subject-copy|request-preparation|sealed-inputs|n02|n01) stage=$diagnostic_stage ;;
+ esac
+ case "${2##*/}" in
+  uname|stat|sha256sum|jq|head|find|readelf|readlink|install|cp|chown|chmod|date|getent|systemctl|sleep|ps|grep|mv|bash|strace|setpriv|setsid|timeout|awk|sort|cmp|od|tr|cut|cat|wc) tool=${2##*/} ;;
+ esac
+ [[ $code =~ ^[0-9]+$ ]] && ((code>=1 && code<=255)) || code=1
+ printf 'FIXTURE_BOUNDED_FAILURE:%s:%s:%d\n' "$stage" "$tool" "$code" >&2 || :
+}
+bounded() {
+ local code=0
+ try_bounded "$@" || code=$?
+ if ((code!=0)); then report_bounded_failure "$code" "${1:-}"; fail bounded-operation; fi
+ remaining >/dev/null
+}
+diagnostic_stage=platform
 [[ $(bounded uname -m) == x86_64 ]] || fail Linux-x64
 lexical() {
  local path=$1 s; [[ $path == /* && $path != / && $path != *'//'* && $path != */ && ${#path} -le 4096 && ! $path =~ [[:cntrl:]] ]] || fail absolute-path
@@ -244,15 +263,19 @@ pin_file "$build_receipt" "$build_receipt_sha256" "$MAX_NODE_JSON_BYTES"
 bounded jq -e --arg source "$source_revision" --arg sn "$source_nodes_sha256" --arg pn "$payload_nodes_sha256" --arg rn "$runtime_nodes_sha256" \
  --arg st "$source_manifest_sha256" --arg pt "$payload_manifest_sha256" --arg rt "$runtime_manifest_sha256" '
  .schema=="issue779-csharp-fdd-build-v5" and .exit==0 and
- .source_commit==$source and $source=="2993dcfaac1b9b6dfb8adf057191f837876f01fe" and
+ .source_commit==$source and $source=="5d1036b7035a7d9e980cdab5afc88879fca5048c" and
  .native_execution==false and .checkpoint_pass==false and .build_prerequisite_only==true and
  (.artifacts|type=="object" and keys==["runtime","source","tool"]) and
  .artifacts.source.nodes_sha256==$sn and .artifacts.tool.nodes_sha256==$pn and .artifacts.runtime.nodes_sha256==$rn and
  .artifacts.source.tsv_sha256==$st and .artifacts.tool.tsv_sha256==$pt and .artifacts.runtime.tsv_sha256==$rt
 ' "$build_receipt" >/dev/null || fail build-node-receipt-binding
+diagnostic_stage=source-input
 verify_tree "$source_root" "$source_manifest" "$source_manifest_sha256" "$source_nodes" "$source_nodes_sha256" source
+diagnostic_stage=tool-input
 verify_tree "$payload_root" "$payload_manifest" "$payload_manifest_sha256" "$payload_nodes" "$payload_nodes_sha256" tool
+diagnostic_stage=runtime-input
 verify_tree "$runtime_root" "$runtime_manifest" "$runtime_manifest_sha256" "$runtime_nodes" "$runtime_nodes_sha256" runtime
+diagnostic_stage=os-input
 pin_file "$source_review" "$source_review_sha256" 65536
 pin_file "$os_audit" "$os_audit_sha256" 1048576; pin_file "$payload_root/$entry" "$entry_sha256" "$MAX_INPUT_FILE_BYTES"
 [[ -f $payload_root/${entry%.dll}.deps.json && -f $payload_root/${entry%.dll}.runtimeconfig.json && ! -e $runtime_root/sdk ]] || fail normal-FDD-input
@@ -306,6 +329,7 @@ pin_file "$os_audit" "$os_audit_sha256" 1048576
 if [[ $mode == prepare-only ]]; then printf '%s\n' 'PREPARATION_INPUT_PINS_MATCHED:N01_NOT_RUN:N02_NOT_RUN'; exit 0; fi
 ((EUID==0)) || fail root-fixture
 sha "$reviewed_script_sha256"; absolute "${BASH_SOURCE[0]}"; pin_file "${BASH_SOURCE[0]}" "$reviewed_script_sha256" 131072
+diagnostic_stage=root-layout
 ancestor /var/lib; ancestor /run; ancestor /sys/fs/cgroup/system.slice
 [[ $(bounded stat -f -c %t /sys/fs/cgroup/system.slice) == 63677270 ]] || fail cgroup2-parent
 for root in "$source_root" "$payload_root" "$runtime_root"; do ancestor "$root"; [[ -z $(bounded find -P "$root" \( ! -uid 0 -o -perm /022 \) -print -quit) ]] || fail mutable-input; done
@@ -414,7 +438,10 @@ copy_tree() {
  bounded find -P "$dest" -type f -perm /111 -exec chmod 555 {} +
  bounded find -P "$dest" -type d -exec chmod 555 {} +
 }
-copy_tree "$payload_root" "$stage/tool"; copy_tree "$runtime_root" "$stage/runtime"; copy_tree "$source_root" "$stage/subject"
+diagnostic_stage=tool-copy; copy_tree "$payload_root" "$stage/tool"
+diagnostic_stage=runtime-copy; copy_tree "$runtime_root" "$stage/runtime"
+diagnostic_stage=subject-copy; copy_tree "$source_root" "$stage/subject"
+diagnostic_stage=request-preparation
 bounded chmod 555 "$stage"
 [[ $(bounded stat -c %a "$base") == 755 ]] || fail deployment-parent
 [[ -f $stage/subject/docs/designs/issue-779-csharp-supervision-core.md ]] || fail changed-path-source
@@ -447,6 +474,7 @@ absent_accounts() {
 }
 unit_absent() { local state; state=$(bounded systemctl show "$1" -p LoadState --value); [[ $state == not-found ]] || fail unit-collision; }
 absent_accounts; unit_absent "$owner"; unit_absent "$worker"
+diagnostic_stage=n02
 set +e
 (ulimit -f 2048; try_bounded strace -f -qq -e trace=openat,openat2,mkdir,mkdirat,unlink,unlinkat,rmdir,connect -o "$log/n02.trace" setpriv --reuid="$n02_uid" --regid="$n02_gid" --clear-groups /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp "$host" "$managed" evidence supervise --request "$request") >"$log/n02.stdout" 2>"$log/n02.stderr"
 n02=$?; set -e; remaining >/dev/null
@@ -461,6 +489,7 @@ printf '%s\n' "$G" >"$guard/armed"; bounded chmod 600 "$guard/armed"
 fixed_env=(PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp)
 unsafe='DOTNET_STARTUP_HOOKS DOTNET_ADDITIONAL_DEPS DOTNET_SHARED_STORE DOTNET_ROOT DOTNET_ROOT_X64 DOTNET_HOST_PATH DOTNET_ROLL_FORWARD DOTNET_ROLL_FORWARD_TO_PRERELEASE DOTNET_MULTILEVEL_LOOKUP CORECLR_ENABLE_PROFILING CORECLR_PROFILER CORECLR_PROFILER_PATH CORECLR_PROFILER_PATH_64 COR_ENABLE_PROFILING COR_PROFILER COR_PROFILER_PATH COMPlus_ReadyToRun COMPlus_ZapDisable'
 props=(--property=Type=exec --property=User=0 --property=Group=0 --property=KillMode=control-group --property=Restart=no --property=RemainAfterExit=no --property=SendSIGKILL=yes --property=FinalKillSignal=9 --property=RuntimeMaxSec=240s --property=TimeoutStopSec=5s "--property=ConditionPathExists=$guard/armed" --property=PassEnvironment= "--property=UnsetEnvironment=$unsafe" "--property=Environment=${fixed_env[*]}")
+diagnostic_stage=sealed-inputs
 # Full destination and alias checks immediately before native dispatch. No extra nodes are skipped.
 verify_tree "$stage/tool" "$payload_manifest" "$payload_manifest_sha256" "$payload_nodes" "$payload_nodes_sha256" tool 1 1
 verify_tree "$stage/runtime" "$runtime_manifest" "$runtime_manifest_sha256" "$runtime_nodes" "$runtime_nodes_sha256" runtime 1 0
@@ -469,6 +498,7 @@ pin_file "$build_receipt" "$build_receipt_sha256" "$MAX_NODE_JSON_BYTES"
 while IFS=$'\t' read -r p h; do verify_os_path "$p" "$h"; done <<<"$os_files"
 pin_file "$os_audit" "$os_audit_sha256" 1048576
 (( $(remaining)>246 && job_deadline_epoch-$(bounded date -u +%s)>245 )) || fail native-life-outside-fixture
+diagnostic_stage=n01
 launched=1
 (ulimit -f 8192; exec setsid timeout --signal=KILL "$(remaining)" systemd-run --quiet --wait --pipe --unit="$owner" "${props[@]}" /usr/bin/env -i "${fixed_env[@]}" "$host" "$managed" evidence supervise --request "$request" >"$log/n01.stdout" 2>"$log/n01.stderr") & launch_pid=$!
 pin_owned_pg "$launch_pid"

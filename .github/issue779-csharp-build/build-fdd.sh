@@ -17,12 +17,12 @@ import sys
 import tarfile
 import time
 
-HEAD = '2993dcfaac1b9b6dfb8adf057191f837876f01fe'
-PARENT = '4dd992ec1bc2df8220c73149115c5b478edb0085'
-HARNESS_PARENT = 'e95a4e84bcba7f4974d8b188286b1e8f87139a2b'
-TREE = '190d0b2066d4df980715f31642b4a38198094123'
-CAPTURE_SHA = 'b8772a5cd9686c3f5c7e65278102c397ea1d1c1af9b047140b9b4de15a997fb8'
-CAPTURE_PROJECTION_SHA = '5917596232d55365c39e460f611efeef46db9a74b289732c4c6f80d5388401d6'
+HEAD = '5d1036b7035a7d9e980cdab5afc88879fca5048c'
+PARENT = '2993dcfaac1b9b6dfb8adf057191f837876f01fe'
+HARNESS_PARENT = '98be4042d47fc6f7e55f0fcdac3e26cc8131ebca'
+TREE = '8ba2d1add22a4267316e8b435f60b788cbea08d8'
+CAPTURE_SHA = '51afcbd61af3c2319e814beee18e88714e589cb26132d755371248d045cfd64d'
+CAPTURE_PROJECTION_SHA = 'b3a7068c001d9d6ea09cb4c2df04d7c764ea3e41bc1a52cf7a0b7a34b556cfd9'
 SDK = '10.0.401'
 COUNT = 2819
 FILE_CAP = 256 * 1024 * 1024
@@ -511,8 +511,8 @@ def ubuntu_runtime_host():
     require(receipt['package_version'] == version and set(receipt['packages']) == set(expected_packages)
             and all(v == {'architecture': 'amd64', 'version': version, 'status': 'ii '}
                     for v in receipt['packages'].values()), 'ubuntu-runtime-packages')
-    require(receipt['prerequisite_script_sha256'] == 'c61bfb89941418774f83396420fb21c39f13362fbcf0520a809db1ef73651c23'
-            and receipt['runner_sha256'] == 'a66b3b66c1ab714a409e889864a47451838e3a4959bcf2bb7f180cbd654331e9',
+    require(receipt['prerequisite_script_sha256'] == 'dfcdfe9ae1ab567c7ef966b309c00ad446d0037dcdaac36b2fabc8a8ba2fc7f8'
+            and receipt['runner_sha256'] == '38ebe7325479bc2c2f0a3f460c5b908fb6b9044c84ce603a1ae635dbbd13b34c',
             'ubuntu-runtime-prerequisite-source')
     require(len(receipt['commands']) == 5
             and all(type(c['exit']) is int and c['exit'] == 0 and c['failure'] is None

@@ -1,64 +1,48 @@
-# Ubuntu execution runtime for the private C# checkpoint
+# C# native supervision checkpoint
 
-## Decision and measured failure
+This private workflow builds and runs the ordinary CLI with the reviewed
+[C# supervision core](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md).
+The [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md)
+requires real N01/N02 first and all sixteen native controls before producer,
+application or production cutover work.
 
-The frozen source remains `2993dcfaac1b9b6dfb8adf057191f837876f01fe` (2819 files).
-[Attempt 7](https://github.com/forge-trust/AppSurface/actions/runs/37670278485) built the
-ordinary CLI with SDK 10.0.401. The complete ELF audit then rejected the generic .NET
-10.0.12 `libcoreclrtraceptprovider.so`: its `liblttng-ust.so.0` dependency had zero RUNPATH
-and loader-cache candidates. The authenticated private failure sidecar records that fact.
+## Source and prerequisites
 
-Microsoft's [exact runtime source](https://github.com/dotnet/runtime/blob/v10.0.12/src/coreclr/pal/src/misc/tracepointprovider.cpp#L109-L113)
-tolerates failure to load this tracing component. Its [tracing guidance](https://learn.microsoft.com/en-us/dotnet/core/diagnostics/trace-perfcollect-lttng)
-describes the LTTng 2.12/2.13 incompatibility. This prerequisite stages the supported Ubuntu
-runtime while retaining the complete ELF audit and full deployment inventories.
-[Ubuntu's runtime package](https://packages.ubuntu.com/noble/dotnet-runtime-10.0)
-depends on `liblttng-ust1t64`. Package metadata supports trying that runtime; it does not
-establish the actual ELF closure or any native checkpoint success.
+The source is 5d1036b7035a7d9e980cdab5afc88879fca5048c, direct parent
+2993dcfaac1b9b6dfb8adf057191f837876f01fe. The actual source merge is
+98be4042d47fc6f7e55f0fcdac3e26cc8131ebca. All 2,819 source hashes and modes
+are bound by the capture receipt and checked around the build. The
+[source review](source-review.json) distinguishes the historical 997 local
+baseline from the 28 focused STOP/WAIT tests; these counts are not additive.
+Its pending-at-preparation field records the original handoff status.
 
-## Private preparation API and ordering
+The SDK is 10.0.401. Execution uses the exact Ubuntu 10.0.12 packages and
+frameworks, recorded by [the prerequisite](prepare-ubuntu-runtime.py).
+All runtime ELFs and their dependencies remain subject to the same-host
+[OS audit](prepare-os-audit-v2.py). Source hashes are verified before interpreter
+use. No runtime file is skipped, feature disabled or foreign library supplied.
 
-`prepare-ubuntu-runtime.py --execute --reviewed-script-sha256 SHA --runner-sha256 SHA`
-requires both externally reviewed script hashes before importing the existing private
-runner. The workflow verifies these source bytes before interpreter execution.
+## Staging and capture
 
-The fixed four Ubuntu packages are `dotnet-host-10.0`, `dotnet-hostfxr-10.0`,
-`dotnet-runtime-10.0`, and `aspnetcore-runtime-10.0`, each version
-`10.0.12-0ubuntu1~24.04.1` on amd64. A signed APT index refresh precedes candidate metadata
-and the exact-version install with unauthenticated and insecure repositories disabled.
-The existing root-tool runner owns the generated unit, prearmed absolute deadline,
-start guard, complete cgroup stop/join and original phase bounds. One 300-second
-prerequisite interval, including final reserve, must fit the original 2100-second job
-deadline. The update/install limits are 90/165 seconds, including their cleanup reserves.
+[The dispatcher](run-native.py) applies the existing 256 MiB payload-file
+limit to staging. Each stdout/stderr capture writer has its own 8 MiB limit,
+exclusive private log creation and core output disabled. Fixed private FIFOs
+join the writers to the fixture. Each child clears the parent EXIT trap before
+setup. The parent retains both PIDs, attempts both joins, and removes only
+FIFOs it successfully created. Fixture, pump, cleanup and containment failures
+remain failures. All waits use the prearmed root utility's original deadline.
+The fixed audit adds only mkfifo and rm at its existing trusted OS locations.
 
-After installation, exact installed package/version/architecture/status data and the
-single canonical root-owned nonwritable physical host are verified. The fixed private
-`issue779-csharp-ubuntu-runtime/receipt.json` retains every process, log, guard and group
-result. A failed, late or unsettled prerequisite prevents the build.
+## Diagnostic and acceptance limits
 
-The builder invokes SDK 10.0.401 explicitly through setup-dotnet's `DOTNET_ROOT`.
-Execution host, hostfxr and both frameworks come coherently from `/usr/lib/dotnet`.
-The framework-dependent CLI runtime configuration must select exactly 10.0.12 for each
-framework and hostfxr; another installed version is rejected before copying. Full selected framework contents are copied and
-hashed; SDK directories are not deployment content. Source, input and aggregate
-deployment bounds, all root/worker policies and the strict ELF audit remain unchanged.
+[The fixture](checkpoint-n01-n02-v5.sh) adds fixed internal stage labels and a
+best-effort closed stage/tool/exit marker before its existing bounded-operation
+rejection. It adds no paths, argv or exception text. Marker failure cannot
+replace the original rejection. The latch is per shell process, not a global
+claim. The earlier failing child remains unknown.
 
-## Pitfalls and validation status
-
-Do not assemble execution files from both the generic and Ubuntu installations. Do not
-fall back to another package version or host, delete the tracepoint provider, synthesize
-resolved dependency rows, or treat a package receipt as runtime admission. Actual complete
-ELF audit and N01/N02 remain required; the remaining fourteen checkpoint controls and
-producer/application/coverage/cutover gates are still pending.
-
-`test_ubuntu_runtime.py` defines eight pure metadata/provenance controls. They exercise
-package, host, failed/unjoined/forced/timed-out/root-guard and mixed-source rejection.
-They install no package and run no runtime, root command, native worker or systemd unit.
-Their actual terminal result is recorded separately after execution.
-
-The terminal publisher rechecks the original deadline after stdout flush. A late or
-failed terminal write preserves failure and records a bounded invalidation marker when
-the original reserve remains. The builder rejects that marker before reading provenance.
-Eight additional pure boundary controls exercise version rejection before copy and
-late/failing terminal output. Historical command-count mismatch and duplicate unittest
-discovery are retained honestly; the final boundary-only run passed eight cases.
+Root containment of validation tools does not prove supervisor or worker
+settlement. Existing native process credentials, cgroups, source custody,
+canonical files, NSS cleanup, deadlines and receipt predicates remain required.
+Preparation and local pipe tests establish no native case pass, qualification
+or Trusted admission. Production catalogue and proof registry remain closed.

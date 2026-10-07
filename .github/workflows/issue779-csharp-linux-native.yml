@@ -1,7 +1,7 @@
 name: C# candidate real N01/N02 bootstrap
 on:
   push:
-    branches: [codex/issue779-csharp-linux-native-20261007-retry-7]
+    branches: [codex/issue779-csharp-linux-native-20261007-retry-8]
 permissions:
   contents: read
 concurrency:
@@ -15,23 +15,24 @@ jobs:
       # Promotion requires frozen source reviews and a complete native handoff.
       # Promote only after full source composition review; no native passing claim.
       UBUNTU_RUNTIME_REVIEWED: 'true'
-      UBUNTU_RUNTIME_SCRIPT_SHA256: c61bfb89941418774f83396420fb21c39f13362fbcf0520a809db1ef73651c23
+      UBUNTU_RUNTIME_SCRIPT_SHA256: dfcdfe9ae1ab567c7ef966b309c00ad446d0037dcdaac36b2fabc8a8ba2fc7f8
       BUILD_REVIEWED: 'true'
-      BUILD_SCRIPT_SHA256: 2cff3e1ae49b348cc3c93b9d0581a83f86c4c0084f4981d131abd0dd1f73fc31
+      BUILD_SCRIPT_SHA256: 130e80508da009e40754fb5a395830abc04cecc84db8a80acfff443eb8ea9e16
       ROOT_TRANSPORT_REVIEWED: 'true'
-      ROOT_TRANSPORT_SHA256: 34df8d912d1f0fb7833c21da1a5b9e816fab4b73248eeef7233b831f89e61d21
+      ROOT_TRANSPORT_SHA256: dcfd5773a0e699a2cf677bca6d98e91691e1121efab0401346d66ef050eb61f6
       FIXTURE_REVIEWED: 'true'
-      FIXTURE_SHA256: 3a98a6487b264b3112ca78dc9441190677b8eb567cf424e78baada456024e328
+      FIXTURE_SHA256: 676939bd2e353691832fa505d4459d28b7e0bcfca53398f57778918949b9a93c
       OS_AUDIT_REVIEWED: 'true'
-      OS_AUDIT_SHA256: e0ed8adf4a0c75779c55ba0d44ac13e90f6dc2278f2569d7613751de1538c87d
-      SOURCE_REVIEW_SHA256: 18a2f6f9bdb51b3ca2dc5506dd96d5ef28676bac99c9c02d1a8e061ecfa626cf
+      OS_AUDIT_SHA256: 314acbe4ad8f8eaf942fce615865671fb77bc42d63c6885b5309feeb17d4b3f7
+      SOURCE_REVIEW_SHA256: 84f34613f597cd2226cd92b08ea6b3a9c8b02fa37bf5e752db8b38ab2a65eeee
       NATIVE_HANDOFF_REVIEWED: 'true'
       NATIVE_HANDOFF_IMPLEMENTED: 'true'
-      ACQUISITION_SHA256: d32c61b95560460d52813ea651bd7a82e54a4ceeedc215b7d086f7ff37d1be9f
+      ACQUISITION_SHA256: 9164f37cace08586a69ecf2f83265ca1735077a56ad9e1af97e9f70a303165a0
       RETENTION_SHA256: 5e1d19d0e09e3733ced9c32182e978c1824f9f64c5ea332706abd42b524e8efb
-      ORCHESTRATOR_SHA256: a66b3b66c1ab714a409e889864a47451838e3a4959bcf2bb7f180cbd654331e9
-      SOURCE_COMMIT: 2993dcfaac1b9b6dfb8adf057191f837876f01fe
-      HARNESS_PARENT: e95a4e84bcba7f4974d8b188286b1e8f87139a2b
+      ORCHESTRATOR_SHA256: 38ebe7325479bc2c2f0a3f460c5b908fb6b9044c84ce603a1ae635dbbd13b34c
+      CAPTURE_RECEIPT_SHA256: 51afcbd61af3c2319e814beee18e88714e589cb26132d755371248d045cfd64d
+      SOURCE_COMMIT: 5d1036b7035a7d9e980cdab5afc88879fca5048c
+      HARNESS_PARENT: 98be4042d47fc6f7e55f0fcdac3e26cc8131ebca
     steps:
       - name: Reject unreviewed or incomplete proposal before build
         shell: bash
@@ -41,7 +42,7 @@ jobs:
           for flag in UBUNTU_RUNTIME_REVIEWED BUILD_REVIEWED ROOT_TRANSPORT_REVIEWED FIXTURE_REVIEWED OS_AUDIT_REVIEWED NATIVE_HANDOFF_REVIEWED NATIVE_HANDOFF_IMPLEMENTED; do
             test "${!flag}" = true
           done
-          for pin in UBUNTU_RUNTIME_SCRIPT_SHA256 BUILD_SCRIPT_SHA256 ROOT_TRANSPORT_SHA256 FIXTURE_SHA256 OS_AUDIT_SHA256 SOURCE_REVIEW_SHA256 ACQUISITION_SHA256 RETENTION_SHA256 ORCHESTRATOR_SHA256; do
+          for pin in CAPTURE_RECEIPT_SHA256 UBUNTU_RUNTIME_SCRIPT_SHA256 BUILD_SCRIPT_SHA256 ROOT_TRANSPORT_SHA256 FIXTURE_SHA256 OS_AUDIT_SHA256 SOURCE_REVIEW_SHA256 ACQUISITION_SHA256 RETENTION_SHA256 ORCHESTRATOR_SHA256; do
             [[ "${!pin}" =~ ^[0-9a-f]{64}$ ]]
           done
           # This original job clock must also bracket final native publication.
@@ -62,6 +63,7 @@ jobs:
           import hashlib, os, stat, sys, time
           from pathlib import Path
           pins = (
+              ('.github/issue779-csharp-build/capture-receipt.json', 'CAPTURE_RECEIPT_SHA256', 4194304),
               ('.github/issue779-csharp-native/prepare-ubuntu-runtime.py', 'UBUNTU_RUNTIME_SCRIPT_SHA256', 131072),
               ('.github/issue779-csharp-build/build-fdd.sh', 'BUILD_SCRIPT_SHA256', 262144),
               ('.github/issue779-csharp-native/prepare-root-inputs-v2.sh', 'ROOT_TRANSPORT_SHA256', 131072),
