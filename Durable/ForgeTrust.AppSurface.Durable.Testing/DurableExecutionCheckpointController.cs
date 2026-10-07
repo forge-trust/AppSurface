@@ -238,13 +238,50 @@ public sealed class DurableExecutionCheckpointController : IDisposable, IAsyncDi
         }
     }
 
-    /// <summary>Waits for a matching observation, with the configured maximum wait and caller cancellation.</summary>
+    /// <summary>Waits for the first retained matching observation, with the configured maximum wait and caller cancellation.</summary>
     /// <remarks>The latest observation for a stage remains waitable after bounded history evicts it.</remarks>
-    public async ValueTask<DurableExecutionCheckpointObservation> WaitForObservationAsync(
+    public ValueTask<DurableExecutionCheckpointObservation> WaitForObservationAsync(
         DurableExecutionCheckpointName name,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        WaitForObservationAsyncCore(name, afterSequence: null, _maximumWait, cancellationToken);
+
+    /// <summary>Waits for a matching observation recorded after <paramref name="afterSequence"/>.</summary>
+    /// <param name="name">The checkpoint stage to observe.</param>
+    /// <param name="afterSequence">Exclusive global sequence cursor; must be non-negative and no greater than the current sequence.</param>
+    /// <param name="maximumWait">This wait's maximum duration; must be positive and no greater than the controller's configured maximum.</param>
+    /// <param name="cancellationToken">Token that can cancel the wait.</param>
+    /// <remarks>
+    /// The earliest qualifying observation still in bounded history is returned. If qualifying history was evicted,
+    /// the latest observation for the stage is returned when it is newer than the cursor. If that latest observation
+    /// is not newer than the cursor, the wait continues until a qualifying observation arrives or the wait expires.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">The cursor or wait duration is outside its valid bounds.</exception>
+    /// <exception cref="TimeoutException">No qualifying observation arrived within <paramref name="maximumWait"/>.</exception>
+    public ValueTask<DurableExecutionCheckpointObservation> WaitForObservationAsync(
+        DurableExecutionCheckpointName name,
+        long afterSequence,
+        TimeSpan maximumWait,
+        CancellationToken cancellationToken = default) =>
+        WaitForObservationAsyncCore(name, afterSequence, maximumWait, cancellationToken);
+
+    private async ValueTask<DurableExecutionCheckpointObservation> WaitForObservationAsyncCore(
+        DurableExecutionCheckpointName name,
+        long? afterSequence,
+        TimeSpan maximumWait,
+        CancellationToken cancellationToken)
     {
         ValidateName(name);
+        if (afterSequence is long cursor)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(cursor);
+        }
+
+        if (maximumWait <= TimeSpan.Zero || maximumWait > _maximumWait)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumWait), maximumWait,
+                "Observation waits must be greater than zero and no longer than the controller's configured maximum wait.");
+        }
+
         var started = Stopwatch.GetTimestamp();
         while (true)
         {
@@ -256,10 +293,19 @@ public sealed class DurableExecutionCheckpointController : IDisposable, IAsyncDi
                     throw new ObjectDisposedException(nameof(DurableExecutionCheckpointController));
                 }
 
-                var found = _observations.FirstOrDefault(item => item.Name == name);
-                if (found is null)
+                if (afterSequence is long sequence && sequence > _sequence)
                 {
-                    _latestObservations.TryGetValue(name, out found);
+                    throw new ArgumentOutOfRangeException(nameof(afterSequence), sequence,
+                        "The observation sequence cursor cannot be greater than the current sequence.");
+                }
+
+                var found = afterSequence is long minimumSequence
+                    ? _observations.FirstOrDefault(item => item.Name == name && item.Sequence > minimumSequence)
+                    : _observations.FirstOrDefault(item => item.Name == name);
+                if (found is null && _latestObservations.TryGetValue(name, out var latest) &&
+                    (afterSequence is null || latest.Sequence > afterSequence.Value))
+                {
+                    found = latest;
                 }
 
                 if (found is not null)
@@ -270,7 +316,7 @@ public sealed class DurableExecutionCheckpointController : IDisposable, IAsyncDi
                 changed = _changed.Task;
             }
 
-            var remaining = _maximumWait - Stopwatch.GetElapsedTime(started);
+            var remaining = maximumWait - Stopwatch.GetElapsedTime(started);
             if (remaining <= TimeSpan.Zero)
             {
                 throw ObservationTimeout(name);
@@ -281,7 +327,7 @@ public sealed class DurableExecutionCheckpointController : IDisposable, IAsyncDi
                 await changed.WaitAsync(remaining, cancellationToken).ConfigureAwait(false);
                 if (_afterObservationWaitWake is not null)
                 {
-                    var wakeRemaining = _maximumWait - Stopwatch.GetElapsedTime(started);
+                    var wakeRemaining = maximumWait - Stopwatch.GetElapsedTime(started);
                     if (wakeRemaining <= TimeSpan.Zero)
                     {
                         throw ObservationTimeout(name);

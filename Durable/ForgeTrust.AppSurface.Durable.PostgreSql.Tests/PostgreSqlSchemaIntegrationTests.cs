@@ -2645,7 +2645,8 @@ public sealed class PostgreSqlSchemaIntegrationTests
         await StartRoleRecipeContainerAsync(container, _output.WriteLine);
         _output.WriteLine("RoleRecipe pair-reconciliation test: PostgreSQL container started; applying schema.");
         await using var dataSource = NpgsqlDataSource.Create(container.GetConnectionString());
-        await new PostgreSqlDurableRuntimeSchemaManager(dataSource).ApplyAsync();
+        await new PostgreSqlDurableRuntimeSchemaManager(
+            dataSource, DurablePostgreSqlMigrationCatalog.Load().Take(11).ToArray()).ApplyAsync();
         await ExecuteNonQueryAsync(
             dataSource,
             """
@@ -2655,7 +2656,33 @@ public sealed class PostgreSqlSchemaIntegrationTests
             CREATE ROLE durable_retention LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
             """);
 
+        var manifest = CreateRolePairsManifest(("durable_dispatcher", "durable_runtime", "full"));
+        var historicalSnapshot = await ReadRoleRecipeCatalogSnapshotAsync(dataSource);
+        var historical = await RunRoleRecipeAsync(container, containerRecipePath, "durable_owner", manifest);
+        Assert.NotEqual(0, historical.ExitCode);
+        Assert.Contains("requires schema 12", historical.Stdout, StringComparison.Ordinal);
+        Assert.Contains("Cause:", historical.Stdout, StringComparison.Ordinal);
+        Assert.Contains("Fix:", historical.Stdout, StringComparison.Ordinal);
+        Assert.Contains("Guide: Durable/migrations/execution-policies-v1.md", historical.Stdout, StringComparison.Ordinal);
+        Assert.Equal(historicalSnapshot, await ReadRoleRecipeCatalogSnapshotAsync(dataSource));
+
+        // Missing metadata must receive the same refusal before catalog reconciliation, never a raw missing table.
+        await ExecuteNonQueryAsync(dataSource, "ALTER TABLE appsurface_durable.store_metadata RENAME TO unavailable_store_metadata;");
+        try
+        {
+            var missingSnapshot = await ReadRoleRecipeCatalogSnapshotAsync(dataSource);
+            var missing = await RunRoleRecipeAsync(container, containerRecipePath, "durable_owner", manifest);
+            Assert.NotEqual(0, missing.ExitCode);
+            Assert.Contains("requires schema 12", missing.Stdout, StringComparison.Ordinal);
+            Assert.Equal(missingSnapshot, await ReadRoleRecipeCatalogSnapshotAsync(dataSource));
+        }
+        finally
+        {
+            await ExecuteNonQueryAsync(dataSource, "ALTER TABLE appsurface_durable.unavailable_store_metadata RENAME TO store_metadata;");
+        }
+
         var schema = new PostgreSqlDurableRuntimeSchemaManager(dataSource);
+        await schema.ApplyAsync();
         var epoch = Guid.NewGuid();
         await schema.InitializeRuntimeEpochAsync(epoch, "role-pair-tests", "initial");
         var storeId = (await schema.GetStatusAsync()).StoreId;

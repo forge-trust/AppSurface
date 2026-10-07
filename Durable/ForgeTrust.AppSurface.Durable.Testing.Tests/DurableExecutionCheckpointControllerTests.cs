@@ -132,6 +132,107 @@ public sealed class DurableExecutionCheckpointControllerTests
     }
 
     [Fact]
+    public async Task Wait_after_sequence_returns_later_pause_attempt_and_legacy_wait_keeps_first_match()
+    {
+        const DurableExecutionCheckpointName name = DurableExecutionCheckpointName.AfterPermitCommit;
+        using var controller = new DurableExecutionCheckpointController(maximumWait: TimeSpan.FromSeconds(2));
+        controller.PauseOnce(name);
+
+        var firstReach = controller.ReachAsync(name, 1).AsTask();
+        var first = await controller.WaitForObservationAsync(name);
+        Assert.False(firstReach.IsCompleted);
+        Assert.True(controller.Release(name));
+        await firstReach;
+
+        controller.PauseOnce(name);
+        var secondReach = controller.ReachAsync(name, 2).AsTask();
+        var second = await controller.WaitForObservationAsync(name, first.Sequence, TimeSpan.FromSeconds(1));
+
+        Assert.True(second.Sequence > first.Sequence);
+        Assert.Equal(2, second.AttemptNumber);
+        Assert.False(secondReach.IsCompleted);
+        Assert.Equal(first.Sequence, (await controller.WaitForObservationAsync(name)).Sequence);
+        Assert.True(controller.Release(name));
+        await secondReach;
+    }
+
+    [Fact]
+    public async Task Wait_after_sequence_uses_only_newer_latest_fallback_after_eviction()
+    {
+        const DurableExecutionCheckpointName name = DurableExecutionCheckpointName.BeforePermit;
+        using var controller = new DurableExecutionCheckpointController(
+            maximumWait: TimeSpan.FromSeconds(1), maximumObservations: 1);
+        await controller.ReachAsync(name, 1);
+        var cursor = Assert.Single(controller.Observations).Sequence;
+        await controller.ReachAsync(DurableExecutionCheckpointName.AfterPermitCommit, 1);
+        await controller.ReachAsync(name, 2);
+        var newerSequence = controller.Observations.Single().Sequence;
+        await controller.ReachAsync(DurableExecutionCheckpointName.AfterPermitCommit, 2);
+
+        var evicted = await controller.WaitForObservationAsync(name, cursor, TimeSpan.FromMilliseconds(100));
+        Assert.Equal(newerSequence, evicted.Sequence);
+        Assert.Equal(2, evicted.AttemptNumber);
+
+        await Assert.ThrowsAsync<TimeoutException>(async () =>
+            await controller.WaitForObservationAsync(name, newerSequence, TimeSpan.FromMilliseconds(20)));
+    }
+
+    [Fact]
+    public async Task Wait_after_sequence_rechecks_latest_after_wake_and_eviction_race()
+    {
+        const DurableExecutionCheckpointName name = DurableExecutionCheckpointName.BeforePermit;
+        var waiterWoke = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resumeWaiter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var controller = new DurableExecutionCheckpointController(
+            maximumWait: TimeSpan.FromSeconds(2),
+            maximumObservations: 1,
+            timeProvider: null,
+            afterObservationWaitWake: async () =>
+            {
+                waiterWoke.TrySetResult();
+                await resumeWaiter.Task.ConfigureAwait(false);
+            });
+        await controller.ReachAsync(name, 1);
+        var cursor = Assert.Single(controller.Observations).Sequence;
+
+        var pending = controller.WaitForObservationAsync(name, cursor, TimeSpan.FromSeconds(1)).AsTask();
+        await controller.ReachAsync(name, 2);
+        await waiterWoke.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        await controller.ReachAsync(DurableExecutionCheckpointName.AfterPermitCommit, 3);
+        resumeWaiter.TrySetResult();
+
+        var observed = await pending.WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.True(observed.Sequence > cursor);
+        Assert.Equal(2, observed.AttemptNumber);
+    }
+
+    [Fact]
+    public async Task Wait_after_sequence_preserves_timeout_cancellation_and_disposal_behavior()
+    {
+        const DurableExecutionCheckpointName name = DurableExecutionCheckpointName.AfterProviderCall;
+        using var controller = new DurableExecutionCheckpointController(maximumWait: TimeSpan.FromMilliseconds(200));
+        await controller.ReachAsync(name, 1);
+        var cursor = Assert.Single(controller.Observations).Sequence;
+        using var cancellation = new CancellationTokenSource();
+        var pending = controller.WaitForObservationAsync(
+            name, cursor, TimeSpan.FromMilliseconds(100), cancellation.Token).AsTask();
+
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await pending);
+        var timeout = await Assert.ThrowsAsync<TimeoutException>(async () =>
+            await controller.WaitForObservationAsync(name, cursor, TimeSpan.FromMilliseconds(20)));
+        Assert.Contains(name.ToString(), timeout.Message, StringComparison.Ordinal);
+
+        var disposedController = new DurableExecutionCheckpointController();
+        await disposedController.ReachAsync(name, 1);
+        var disposedCursor = Assert.Single(disposedController.Observations).Sequence;
+        var pendingDispose = disposedController.WaitForObservationAsync(
+            name, disposedCursor, TimeSpan.FromSeconds(1)).AsTask();
+        await disposedController.DisposeAsync();
+        await Assert.ThrowsAsync<ObjectDisposedException>(async () => await pendingDispose);
+    }
+
+    [Fact]
     public async Task Throw_once_throws_safe_checkpoint_facts_then_is_consumed()
     {
         using var controller = new DurableExecutionCheckpointController();
@@ -297,6 +398,14 @@ public sealed class DurableExecutionCheckpointControllerTests
             await controller.ReachAsync(DurableExecutionCheckpointName.BeforePermit, 0));
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
             await controller.WaitForObservationAsync((DurableExecutionCheckpointName)99));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await controller.WaitForObservationAsync(DurableExecutionCheckpointName.BeforePermit, -1, TimeSpan.FromMilliseconds(1)));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await controller.WaitForObservationAsync(DurableExecutionCheckpointName.BeforePermit, 1, TimeSpan.FromMilliseconds(1)));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await controller.WaitForObservationAsync(DurableExecutionCheckpointName.BeforePermit, 0, TimeSpan.Zero));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await controller.WaitForObservationAsync(DurableExecutionCheckpointName.BeforePermit, 0, TimeSpan.FromMinutes(6)));
         Assert.Empty(controller.Observations);
     }
 

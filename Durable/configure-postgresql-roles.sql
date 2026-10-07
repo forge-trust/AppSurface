@@ -156,6 +156,25 @@ SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = :'migration_own
   SELECT 1 / 0;
 \endif
 
+-- Refuse historical or incomplete stores before reconciling any owner, grant, or policy.
+SELECT pg_catalog.to_regclass('appsurface_durable.store_metadata') IS NOT NULL AS has_store_metadata \gset
+\if :has_store_metadata
+  SELECT EXISTS (
+    SELECT 1 FROM appsurface_durable.store_metadata WHERE singleton AND schema_version >= 12
+  ) AND pg_catalog.to_regprocedure('appsurface_durable.work_execution_now()') IS NOT NULL
+    AS execution_policy_schema_ready \gset
+\else
+  SELECT false AS execution_policy_schema_ready \gset
+\endif
+\if :execution_policy_schema_ready
+\else
+  \echo 'Durable role recipe requires schema 12 or newer with the execution-policy clock function.'
+  \echo 'Cause: this store is historical, uninitialized, or missing a required schema-12 object.'
+  \echo 'Fix: use the matching historical package recipe, or complete the reviewed migration 0012 rollout before running this recipe.'
+  \echo 'Guide: Durable/migrations/execution-policies-v1.md (Schema 12 execution-policy rollout).'
+  SELECT 1 / 0;
+\endif
+
 -- Reject unexplained and omitted principals before changing owners, grants or policies.
 -- First report structural RLS drift with its dedicated diagnostic; it is checked
 -- again below immediately before any catalog mutation.

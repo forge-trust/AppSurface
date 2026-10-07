@@ -169,6 +169,11 @@ projections. The Provider package adds named execution-aware claim and inspectio
 constructors and nullable legacy `Execution` projections. Core and Provider API snapshots remain the exhaustive member
 inventory.
 
+The [Testing checkpoint controller](ForgeTrust.AppSurface.Durable.Testing/README.md#execution-checkpoints-and-timing-observations)
+adds a cursor overload of `WaitForObservationAsync(name, afterSequence, maximumWait, cancellationToken)` for later
+attempt observations while preserving the original name-and-cancellation signature. Its [Testing API snapshot](ForgeTrust.AppSurface.Durable.Testing/PublicAPI.Shipped.txt)
+is the exhaustive helper inventory; checkpoint observations remain descriptive test facts.
+
 No PostgreSQL public type or Workers-envelope metadata is added for this feature. Storage schema `12` adds nullable
 execution fields without backfilling legacy rows. Existing requests keep v1 fingerprint bytes; opt-in requests use v2.
 The [canonical chooser/reference](execution-policies-v1.md) and [migration checklist](migrations/execution-policies-v1.md)

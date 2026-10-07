@@ -68,8 +68,7 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
                       )
                 )
                 ORDER BY work_id
-                LIMIT @query_size
-                FOR UPDATE;
+                LIMIT @query_size;
                 """;
             await using var command = new NpgsqlCommand(sql, connection, transaction);
             command.Parameters.AddWithValue("scope_id", request.ScopeId.Value);
@@ -154,10 +153,12 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
                 SELECT activity_id, work_name, work_version, state, provider_safety, idempotency_key, attempt_number,
                        revision, accepted_at, due_at, updated_at, terminal_at, terminal_code, result_contract_id,
                        result_schema_version, result_classification, result_payload, result_sha256,
-                       result_retention_policy_id
+                       result_retention_policy_id,
+                       execution_policy_schema, attempt_plan_version, attempt_plan_offsets, maximum_circuit_microseconds,
+                       execution_not_after, maximum_attempts, maximum_elapsed, initial_retry_delay, maximum_retry_delay,
+                       lease_duration, lease_renewal_cadence, maximum_lease_lifetime, backoff_algorithm
                 FROM appsurface_durable.work
-                WHERE scope_id = @scope_id AND work_id = @work_id
-                FOR UPDATE;
+                WHERE scope_id = @scope_id AND work_id = @work_id;
                 """;
             await using var command = new NpgsqlCommand(sql, connection, transaction);
             command.Parameters.AddWithValue("scope_id", request.ScopeId.Value);
@@ -194,16 +195,11 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
                 reader.IsDBNull(11) ? null : ReadUtc(reader, 11),
                 reader.IsDBNull(12) ? null : reader.GetString(12),
                 result);
+            // The Work projection and descriptive timing facts come from one statement snapshot. Inspection
+            // takes no Work, dispatch, or permit locks and never interprets these facts as invocation permission.
+            var execution = PostgreSqlDurableWorkStore.ReadInspectionExecutionSnapshot(
+                reader, 19, snapshot.AcceptedAtUtc, snapshot.DueAtUtc, snapshot.AttemptNumber);
             await reader.CloseAsync().ConfigureAwait(false);
-
-            // Inspection observes the policy in the same scoped transaction and runtime epoch. It takes no
-            // authoritative mutation and never interprets the projection as invocation permission.
-            var execution = await PostgreSqlDurableWorkStore.ReadExecutionRowLockedAsync(
-                connection,
-                transaction,
-                request.ScopeId,
-                request.WorkId,
-                cancellationToken).ConfigureAwait(false);
             if (execution is not null)
             {
                 snapshot = DurableWorkSnapshot.CreateWithExecution(
@@ -223,7 +219,7 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
                     snapshot.TerminalAtUtc,
                     snapshot.TerminalCode,
                     snapshot.Result,
-                    execution.ExecutionSnapshot);
+                    execution);
             }
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);

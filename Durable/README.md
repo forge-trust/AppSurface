@@ -56,7 +56,7 @@ The source-linked Core example below checks the immutable offsets and one-slot v
 It does not simulate a database claim or external I/O. For authoritative behavior, see the
 [packed real-PostgreSQL five-slot proof](packed-consumers/PostgreSqlPolicyConsumer/PlannedRetryPostgreSqlConsumerTests.cs),
 the [overdue-slot boundary test](ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableWorkExecutionPolicyTests.cs#L11),
-and the [caller-owned delayed-commit proof](ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableWorkExecutionPolicyTests.cs#L735).
+and the [DelayedAcceptanceCommit_ConsumesWindowAndRollbackRemovesDomainAndWork](ForgeTrust.AppSurface.Durable.PostgreSql.Tests/PostgreSqlDurableWorkExecutionPolicyTests.cs).
 The [execution-policy reference](execution-policies-v1.md#validate-the-fixed-schedule-in-the-adopter) describes the
 provider boundary and rollout.
 
@@ -204,7 +204,7 @@ public, testable contracts without friend access to the application package. The
 The application package registers only passive registries. A provider is selected explicitly by the host. The PostgreSQL
 provider adds explicit migrations (`0001_work_shared`, `0002_forced_rls`, `0003_flow_protocol`,
 `0004_schedule_protocol`, `0005_runtime_heartbeat`, `0006_flow_trace_context`, `0007_flow_retention`,
-`0008_flow_repair`, `0009_work_contract_discovery`, `0010_runtime_health_observation`, and
+`0008_flow_repair`, `0009_work_contract_discovery`, `0010_runtime_health_observation`,
 `0011_runtime_heartbeat_retention`, and `0012_work_execution_policy`) plus one-operation-at-a-time Work, Flow, and
 Work-first Schedule persistence with versioned W3C causal evidence, verified retention, evidence-first Flow repair, and
 opt-in execution deadlines and fixed attempt plans. Schema 12 is the reader/writer compatibility floor for opted-in
@@ -239,7 +239,7 @@ The forward-only deployment order is:
 9. `0009_work_contract_discovery.sql`
 10. `0010_runtime_health_observation.sql`
 11. `0011_runtime_heartbeat_retention.sql`
-12. [`0012_work_execution_policy.sql`](https://github.com/forge-trust/AppSurface/blob/codex/make-it-so-765-retry-deadlines/Durable/ForgeTrust.AppSurface.Durable.PostgreSql/Migrations/0012_work_execution_policy.sql)
+12. [`0012_work_execution_policy.sql`](ForgeTrust.AppSurface.Durable.PostgreSql/Migrations/0012_work_execution_policy.sql)
 13. [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
 
 The preferred production flow is to generate and review the Durable schema script offline, drain and stop every pre-`0009`

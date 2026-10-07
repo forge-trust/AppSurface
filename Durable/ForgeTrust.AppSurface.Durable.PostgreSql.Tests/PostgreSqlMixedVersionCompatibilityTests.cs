@@ -685,7 +685,7 @@ public sealed class PostgreSqlMixedVersionCompatibilityTests
         "v1",
         DurableProviderSafety.Idempotent,
         new CurrentCompatibilityCodec("compatibility.current-schema12-work"),
-        new CurrentCompatibilityCodec("compatibility.current-schema10-result"))
+        new CurrentCompatibilityCodec("compatibility.current-schema12-result"))
     {
         private int _invocationCount;
 
@@ -699,7 +699,7 @@ public sealed class PostgreSqlMixedVersionCompatibilityTests
         {
             _ = WorkCodec.DecodeObject(work.Payload);
             return new CurrentCompatibilityPreparedWork(
-                ResultCodec.EncodeObject(Encoding.UTF8.GetBytes("schema10-result")),
+                ResultCodec.EncodeObject(Encoding.UTF8.GetBytes("schema12-result")),
                 () => Interlocked.Increment(ref _invocationCount));
         }
 

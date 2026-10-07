@@ -10,7 +10,7 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 public sealed class PostgreSqlDurableExecutionProjectionTests
 {
     [Fact]
-    public async Task Get_and_list_project_the_locked_execution_snapshot_and_keep_legacy_rows_null()
+    public async Task Get_and_list_project_a_coherent_execution_snapshot_and_keep_legacy_rows_null()
     {
         await using var lab = await Lab.CreateAsync();
         var workName = PostgreSqlTestWorkContracts.DeleteProviderAccessName(DurableProviderSafety.Idempotent);
@@ -169,6 +169,66 @@ public sealed class PostgreSqlDurableExecutionProjectionTests
         Assert.Single(last.Value!.Items);
         Assert.Null(last.Value.ContinuationToken);
         Assert.DoesNotContain(last.Value.Items[0].WorkId, page.Value.Items.Select(item => item.WorkId));
+    }
+
+    // Value: protects=operator inspection remains available during a worker transition;
+    // fails_when=inspection waits on Work, dispatch, or permit locks; seam=independent PostgreSQL transaction
+    [Theory]
+    [InlineData("work")]
+    [InlineData("dispatch")]
+    [InlineData("effect_permit")]
+    public async Task Get_and_list_read_committed_timing_without_waiting_for_worker_row_locks(string lockedTable)
+    {
+        await using var lab = await Lab.CreateAsync();
+        var workName = PostgreSqlTestWorkContracts.DeleteProviderAccessName(DurableProviderSafety.Idempotent);
+        var status = await new PostgreSqlDurableRuntimeSchemaManager(lab.Database.DataSource).GetStatusAsync();
+        var services = new ServiceCollection();
+        services.AddSingleton<DurableWorkRegistration>(lab.Registry.GetRequired(workName, "v1"));
+        services.AddAppSurfaceDurablePostgreSql(lab.Database.DataSource, lab.Database.CreateDataSource(),
+            new PostgreSqlDurableWorkOptions(lab.Epoch, status.StoreId), new PostgreSqlDurableScheduleOptions("appsurface"),
+            options => { options.WorkerId = "nonblocking-inspection"; options.SendWakeNotifications = false; });
+        await using var provider = services.BuildServiceProvider();
+        var accepted = await lab.Client.EnqueueAsync(Request("nonblocking-inspection", offsets: [0, 5]));
+        Assert.True(accepted.IsSuccess, accepted.Problem?.Problem);
+        var claim = Assert.IsType<PostgreSqlDurableWorkClaim>(await lab.Store.TryClaimAsync(
+            Assert.Single(await lab.Store.DiscoverAsync(10)), "nonblocking-worker"));
+        Assert.NotNull(await lab.Store.TryAcquireEffectPermitAsync(claim));
+        var scope = new DurableScopeId("execution-tests");
+        var workId = accepted.Value!.WorkId;
+        var control = provider.GetRequiredService<IDurableWorkControlClient>();
+        var baseline = await control.GetAsync(new DurableWorkGetRequest(scope, workId));
+        Assert.True(baseline.IsSuccess, baseline.Problem?.Problem);
+
+        await using var worker = await lab.Database.DataSource.OpenConnectionAsync();
+        await using var transaction = await worker.BeginTransactionAsync();
+        var lockSql = lockedTable switch
+        {
+            "work" => "UPDATE appsurface_durable.work SET revision = revision + 1, due_at = due_at + interval '1 minute' WHERE scope_id = @scope_id AND work_id = @work_id RETURNING work_id;",
+            "dispatch" => "SELECT aggregate_id FROM appsurface_durable.dispatch WHERE scope_id = @scope_id AND aggregate_kind = 'work' AND aggregate_id = @work_id FOR UPDATE;",
+            _ => "SELECT work_id FROM appsurface_durable.effect_permit WHERE scope_id = @scope_id AND work_id = @work_id FOR UPDATE;",
+        };
+        await using (var hold = new NpgsqlCommand(lockSql, worker, transaction))
+        {
+            hold.Parameters.AddWithValue("scope_id", scope.Value);
+            hold.Parameters.AddWithValue("work_id", workId.Value);
+            Assert.Equal(workId.Value, await hold.ExecuteScalarAsync());
+        }
+
+        // The worker transaction remains open until both reads complete. Work's uncommitted revision/due time
+        // must not leak into either projection, and inspection must not wait for dispatch or permit transactions.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var inspected = await control.GetAsync(new DurableWorkGetRequest(scope, workId), timeout.Token);
+        var listed = await control.ListAsync(new DurableWorkListRequest(scope), timeout.Token);
+        Assert.True(inspected.IsSuccess, inspected.Problem?.Problem);
+        Assert.True(listed.IsSuccess, listed.Problem?.Problem);
+        Assert.Equal(baseline.Value!.Revision, inspected.Value!.Revision);
+        Assert.Equal(baseline.Value.DueAtUtc, inspected.Value.DueAtUtc);
+        Assert.Equal(claim.Execution, inspected.Value.Execution);
+        var item = Assert.Single(listed.Value!.Items);
+        Assert.Equal(baseline.Value.Revision, item.Revision);
+        Assert.Equal(baseline.Value.DueAtUtc, item.DueAtUtc);
+        Assert.Equal(claim.Execution, item.Execution);
+        await transaction.RollbackAsync();
     }
 
     private sealed class CommandCounter : ILoggerProvider

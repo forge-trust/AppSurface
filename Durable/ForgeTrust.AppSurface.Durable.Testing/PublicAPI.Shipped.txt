@@ -4,6 +4,7 @@ type public sealed class ForgeTrust.AppSurface.Durable.Testing.DurableExecutionC
   method public System.Boolean Release(ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointName name)
   method public System.Threading.Tasks.ValueTask DisposeAsync()
   method public System.Threading.Tasks.ValueTask ReachAsync(ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointName name, System.Int32 attemptNumber, System.Threading.CancellationToken cancellationToken = default)
+  method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointObservation> WaitForObservationAsync(ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointName name, System.Int64 afterSequence, System.TimeSpan maximumWait, System.Threading.CancellationToken cancellationToken = default)
   method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointObservation> WaitForObservationAsync(ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointName name, System.Threading.CancellationToken cancellationToken = default)
   method public System.Void Dispose()
   method public System.Void PauseOnce(ForgeTrust.AppSurface.Durable.Testing.DurableExecutionCheckpointName name)

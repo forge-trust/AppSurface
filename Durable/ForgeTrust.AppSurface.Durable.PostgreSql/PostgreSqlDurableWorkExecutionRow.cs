@@ -178,7 +178,7 @@ internal partial class PostgreSqlDurableWorkStore
         return row with { DispatchId = id, NowUtc = await SampleExecutionTimeAsync(connection, transaction, cancellationToken).ConfigureAwait(false) };
     }
 
-    /// <summary>Projects immutable timing facts from a Work row already locked for authorized inspection.</summary>
+    /// <summary>Projects immutable timing facts from the same Work statement snapshot used for authorized inspection.</summary>
     /// <remarks>No dispatch/permit reads or clock sample are needed: this projection grants no admission.</remarks>
     internal static DurableWorkExecutionSnapshot? ReadInspectionExecutionSnapshot(NpgsqlDataReader reader,
         int offset, DateTimeOffset acceptedAtUtc, DateTimeOffset dueAtUtc, int attemptNumber)

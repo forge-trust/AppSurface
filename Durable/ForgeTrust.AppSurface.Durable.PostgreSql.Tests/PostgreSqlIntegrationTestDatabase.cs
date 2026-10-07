@@ -424,8 +424,23 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
         }
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync() => DisposeAsync(async maintenance =>
     {
+        await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{_databaseName}\" WITH (FORCE);", maintenance);
+        await drop.ExecuteNonQueryAsync();
+    });
+
+    /// <summary>Disposes this fixture with a replaceable database-drop operation for deterministic failure tests.</summary>
+    /// <param name="dropDatabaseAsync">The drop operation, supplied an open administrative maintenance connection.</param>
+    /// <remarks>
+    /// Clock-role cleanup always runs. If the isolated database survives, its uniquely owned clock function and grants
+    /// are removed before the cluster role is dropped. A cleanup failure is attached to the original drop exception's
+    /// Data under ExecutionClockCleanupException so it cannot replace the initial failure. This seam is test-only;
+    /// callers remain responsible for retrying database deletion after an injected failure.
+    /// </remarks>
+    internal async ValueTask DisposeAsync(Func<NpgsqlConnection, ValueTask> dropDatabaseAsync)
+    {
+        ArgumentNullException.ThrowIfNull(dropDatabaseAsync);
         foreach (var additionalDataSource in _additionalDataSources)
         {
             await additionalDataSource.DisposeAsync();
@@ -434,12 +449,44 @@ internal sealed class PostgreSqlIntegrationTestDatabase : IAsyncDisposable
         await DataSource.DisposeAsync();
         await using var maintenance = new NpgsqlConnection(_maintenanceConnectionString);
         await maintenance.OpenAsync();
-        await using var drop = new NpgsqlCommand($"DROP DATABASE \"{_databaseName}\" WITH (FORCE);", maintenance);
-        await drop.ExecuteNonQueryAsync();
-        if (_executionClockReaderRole is { } roleName)
+        Exception? databaseDropFailure = null;
+        try
         {
-            await using var dropRole = new NpgsqlCommand($"DROP ROLE \"{roleName}\";", maintenance);
-            await dropRole.ExecuteNonQueryAsync();
+            await dropDatabaseAsync(maintenance);
+        }
+        catch (Exception exception)
+        {
+            databaseDropFailure = exception;
+            throw;
+        }
+        finally
+        {
+            if (_executionClockReaderRole is { } roleName)
+            {
+                try
+                {
+                    await using var dependencies = new NpgsqlCommand(
+                        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname = @database) AND EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = @role);",
+                        maintenance);
+                    dependencies.Parameters.AddWithValue("database", _databaseName);
+                    dependencies.Parameters.AddWithValue("role", roleName);
+                    if ((bool)(await dependencies.ExecuteScalarAsync())!)
+                    {
+                        await using var survivingDatabase = new NpgsqlConnection(ConnectionString);
+                        await survivingDatabase.OpenAsync();
+                        await using var release = new NpgsqlCommand($"DROP OWNED BY \"{roleName}\";", survivingDatabase);
+                        await release.ExecuteNonQueryAsync();
+                    }
+
+                    await using var dropRole = new NpgsqlCommand($"DROP ROLE IF EXISTS \"{roleName}\";", maintenance);
+                    await dropRole.ExecuteNonQueryAsync();
+                    _executionClockReaderRole = null;
+                }
+                catch (Exception cleanupFailure) when (databaseDropFailure is not null)
+                {
+                    databaseDropFailure.Data["ExecutionClockCleanupException"] = cleanupFailure;
+                }
+            }
         }
     }
 
