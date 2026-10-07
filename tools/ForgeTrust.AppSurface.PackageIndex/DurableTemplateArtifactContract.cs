@@ -101,6 +101,9 @@ internal static class DurableTemplateArtifactContract
     /// generated content shape plus the native manifest and required NuGet metadata; the manifest is archive-only
     /// because <c>dotnet new</c> consumes it instead of copying it to generated output. Paths compare
     /// case-insensitively, and optional directory records must be ancestors of an allowlisted file.
+    /// Exactly one core-properties record is required: the case-sensitive path
+    /// <c>package/services/metadata/core-properties/nuget.psmdcp</c>, or the same directory with a legacy
+    /// hexadecimal/hyphen basename and lowercase <c>.psmdcp</c> suffix. Other names remain invalid.
     /// </remarks>
     internal static void ValidateArchive(string nupkgPath, string exactVersion, bool allowSigningEnvelope = false)
     {
@@ -238,7 +241,8 @@ internal static class DurableTemplateArtifactContract
                     if (path.StartsWith("package/services/metadata/core-properties/", StringComparison.OrdinalIgnoreCase))
                     {
                         metadataCount++;
-                        if (!Regex.IsMatch(path, @"\Apackage/services/metadata/core-properties/[0-9A-Fa-f-]+\.psmdcp\z", RegexOptions.CultureInvariant))
+                        if (!path.Equals("package/services/metadata/core-properties/nuget.psmdcp", StringComparison.Ordinal)
+                            && !Regex.IsMatch(path, @"\Apackage/services/metadata/core-properties/[0-9A-Fa-f-]+\.psmdcp\z", RegexOptions.CultureInvariant))
                         {
                             throw ContractFailure("candidate archive has malformed NuGet core metadata");
                         }

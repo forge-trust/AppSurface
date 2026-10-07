@@ -71,6 +71,29 @@ public sealed class DurableTemplateReleaseEvidenceTests : IDisposable
     }
 
     [Fact]
+    public void WellFormedGeneratedContentMismatchCannotAuthorizePublication()
+    {
+        var templateArchive = TestPathUtils.PathUnder(_root, $"{DurableTemplateStaging.PackageId}.{Version}.nupkg");
+        CreateTemplateArchive(templateArchive);
+        var archiveHash = PackageHash.ComputeSha512(templateArchive);
+        var manifest = new PackageArtifactManifest(1, Version, DateTimeOffset.UtcNow,
+            [new(DurableTemplateStaging.PackageId, "Durable.Templates.csproj", "publish", Path.GetFileName(templateArchive), archiveHash, false)]);
+        var receipt = _receipt with
+        {
+            Artifacts = [new(DurableTemplateStaging.PackageId, Version, archiveHash)],
+            GeneratedContentSha256 = DurableTemplateArtifactContract.ComputeGeneratedContentSha256(templateArchive, "FirstDurableWorker")
+        };
+        DurableTemplateReleaseEvidence.Validate(receipt, Source, manifest, _root, "linux-x64", true);
+
+        var wrongContentHash = new string(receipt.GeneratedContentSha256[0] == '0' ? '1' : '0', 64);
+        var error = Assert.Throws<PackageIndexException>(() => DurableTemplateReleaseEvidence.Validate(
+            receipt with { GeneratedContentSha256 = wrongContentHash }, Source, manifest, _root, "linux-x64", true));
+
+        Assert.Equal("Durable template generated content identity differs from the exact candidate payload.", error.Message);
+        Assert.Equal(archiveHash, PackageHash.ComputeSha512(templateArchive));
+    }
+
+    [Fact]
     public void RequireRejectsMalformedTimingReceiptAfterAllOsReceiptsPass()
     {
         WriteAll();
@@ -447,6 +470,37 @@ public sealed class DurableTemplateReleaseEvidenceTests : IDisposable
         if (fault == "sample-checkpoint") samples[0] = samples[0] with { Sample = samples[0].Sample! with { Checkpoints = new(false, true, true, true) } };
         if (fault.StartsWith("sample-", StringComparison.Ordinal)) receipt = receipt with { Samples = samples };
         Assert.Throws<PackageIndexException>(() => DurableTemplateReleaseEvidence.ValidateTiming(receipt, Source, manifest, DurableTemplateTimingMode.Primed));
+    }
+
+    [Theory]
+    [InlineData("schema")]
+    [InlineData("null-artifacts")]
+    [InlineData("null-samples")]
+    [InlineData("null-result")]
+    [InlineData("null-validation-failures")]
+    public void MalformedTimingBoundaryCannotAuthorizePublication(string fault)
+    {
+        var (manifest, receipt) = TimingFixture(DurableTemplateTimingMode.Primed);
+        DurableTemplateReleaseEvidence.ValidateTiming(receipt, Source, manifest, DurableTemplateTimingMode.Primed);
+        var invalid = fault switch
+        {
+            "schema" => receipt with { SchemaVersion = 2 },
+            "null-artifacts" => receipt with { Artifacts = null! },
+            "null-samples" => receipt with { Samples = null! },
+            "null-result" => receipt with { Samples = [null!, .. receipt.Samples.Skip(1)] },
+            "null-validation-failures" => receipt with
+            {
+                Samples = [receipt.Samples[0] with { ValidationFailures = null! }, .. receipt.Samples.Skip(1)]
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(fault))
+        };
+
+        var error = Assert.Throws<PackageIndexException>(() =>
+            DurableTemplateReleaseEvidence.ValidateTiming(invalid, Source, manifest, DurableTemplateTimingMode.Primed));
+
+        Assert.Equal(fault == "null-validation-failures"
+            ? "Durable template timing assertions or measured summaries do not pass their policy."
+            : "Durable template timing evidence is failed, incomplete or bound to another candidate.", error.Message);
     }
 
     private static (PackageArtifactManifest Manifest, DurableTemplateTimingProofReceipt Receipt) TimingFixture(

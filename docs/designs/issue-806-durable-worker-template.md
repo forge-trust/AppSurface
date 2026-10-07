@@ -305,7 +305,7 @@ CEO methodology: `/Users/andrew/.gstack/projects/forge-trust-AppSurface/autoplan
 
 ### CEO Step 0A — premise and outcome
 
-The real problem is repeated and error-prone host assembly, evidenced by the pinned Skoolit billing-lifecycle comparison in `Durable/evidence/executable-contract-adoption.md`. A first adopter needs a runnable composition that proves durable execution and authorization, not only a compiled sample or HTTP 200. Leaving the problem unchanged keeps each consumer responsible for rediscovering package, role, startup, health and exporter ordering.
+The real problem is repeated and error-prone host assembly, evidenced by the pinned Skoolit billing-lifecycle comparison in `Durable/evidence/executable-contract-adoption.md`. A first adopter needs an executable composition that proves durable execution and authorization, not only a compiled sample or HTTP 200. Leaving the problem unchanged keeps each consumer responsible for rediscovering package, role, startup, health and exporter ordering.
 
 The three-command goal addresses that problem directly when prerequisites and cache state are explicit. It does not prove time-to-first-production deployment, exactly-once external effects, or that arbitrary downstream auth policies are correct. The demand premise is credible within this repository and its adopter rail; broad-market demand and new measured adoption times remain unknown.
 
@@ -874,7 +874,7 @@ One feasibility dependency remains for Engineering to resolve explicitly: the al
 
 ### DX Pass 7: community and ecosystem
 
-Pass 7 reference read alone. Actual CONTRIBUTING links the GitHub bug/feature/docs-DX forms and private security reporting; licensing is Polyform Small Business, not an unrestricted permissive grant. Link the canonical licensing and contribution guidance rather than inventing commercial support, a free-tier promise for all users or a monitored chat SLA. Generated source is an extension seam for application code, while raw pump/provider routes preserve advanced integration. The first real lifecycle and replacement proof are runnable examples when implemented.
+Pass 7 reference read alone. Actual CONTRIBUTING links the GitHub bug/feature/docs-DX forms and private security reporting; licensing is Polyform Small Business, not an unrestricted permissive grant. Link the canonical licensing and contribution guidance rather than inventing commercial support, a free-tier promise for all users or a monitored chat SLA. Generated source is an extension seam for application code, while raw pump/provider routes preserve advanced integration. The first real lifecycle and replacement proof are executable examples when implemented.
 
 Finding DX-08: generated/canonical docs should point to the existing docs/DX feedback form with safe reproduction fields (package/version, command ID, failed phase, OS/SDK/cache mode) and warn against posting credentials/payloads. P4/P5 reuses that channel; do not add a feedback backend, community staffing promise or recurring process. Rating 6→6.5/10: findability can be specified, but responder capacity, broad ecosystem adoption and a second independent adopter remain unknown. A 10 would require demonstrated responsive support and multiple successful adopters, outside this release's evidence. No new TODO for hypothetical community growth.
 

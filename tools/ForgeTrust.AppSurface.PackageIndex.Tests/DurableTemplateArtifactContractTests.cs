@@ -59,6 +59,7 @@ public sealed partial class DurableTemplateArtifactContractTests : IDisposable
     [InlineData("folder/./file")]
     [InlineData("folder/../file")]
     [InlineData("C:/outside/file")]
+    [InlineData("con.data")]
     [InlineData("NUL.txt")]
     [InlineData("folder/trailing.")]
     [InlineData("folder/trailing ")]
@@ -73,6 +74,72 @@ public sealed partial class DurableTemplateArtifactContractTests : IDisposable
         var atLimit = string.Join('/', new string('a', 255), new string('b', 255), new string('c', 255), new string('d', 254), "e");
         Assert.Equal(atLimit, DurableTemplateArtifactContract.NormalizeArchivePath(atLimit));
         Assert.Throws<PackageIndexException>(() => DurableTemplateArtifactContract.NormalizeArchivePath(atLimit + "f"));
+    }
+
+    [Fact]
+    public void ArchivePathRejectsEmbeddedNullBeforeFilesystemUse()
+    {
+        var error = Assert.Throws<PackageIndexException>(() =>
+            DurableTemplateArtifactContract.NormalizeArchivePath("docs/guide\0ignored.md"));
+
+        Assert.Contains("rooted, aliased, non-normalized", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProjectGraphRejectsPackageReferenceListsBeforeCentralPinResolution()
+    {
+        var graph = CopyAuthoredTree();
+        var projectPath = TestPathUtils.PathUnder(graph, "src", "AppSurfaceDurableWorker", "AppSurfaceDurableWorker.csproj");
+        var document = XDocument.Load(projectPath);
+        document.Descendants().Single(element => element.Name.LocalName == "PackageReference"
+            && (string?)element.Attribute("Include") == "ForgeTrust.AppSurface.Durable")
+            .SetAttributeValue("Include", "ForgeTrust.AppSurface.Durable;Unreviewed.Package");
+        document.Save(projectPath);
+
+        var error = Assert.Throws<PackageIndexException>(() =>
+            DurableTemplateArtifactContract.ValidateProjectVersions(graph, Version));
+
+        Assert.Contains("dynamic or malformed package reference", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("no central version pin", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProjectGraphRejectsElementBasedVersionPinsEvenWhenCentralPinMatches()
+    {
+        var graph = CopyAuthoredTree();
+        var projectPath = TestPathUtils.PathUnder(graph, "src", "AppSurfaceDurableWorker", "AppSurfaceDurableWorker.csproj");
+        var document = XDocument.Load(projectPath);
+        var reference = document.Descendants().Single(element => element.Name.LocalName == "PackageReference"
+            && (string?)element.Attribute("Include") == "ForgeTrust.AppSurface.Durable");
+        reference.Add(new XElement(reference.Name.Namespace + "Version", Version));
+        document.Save(projectPath);
+
+        var error = Assert.Throws<PackageIndexException>(() =>
+            DurableTemplateArtifactContract.ValidateProjectVersions(graph, Version));
+
+        Assert.Contains("without a project-level version override", error.Message, StringComparison.Ordinal);
+    }
+
+    [LinkSupportTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AuthoredAndGeneratedGraphsRejectDanglingLinks(bool generated)
+    {
+        var graph = generated ? CreateGeneratedRoot() : CopyAuthoredTree();
+        var target = TestPathUtils.PathUnder(_root, "absent-link-target");
+        var link = TestPathUtils.PathUnder(graph, "unreviewed-link");
+        File.CreateSymbolicLink(link, target);
+        Assert.False(File.Exists(target));
+
+        var error = Assert.Throws<PackageIndexException>(() =>
+        {
+            if (generated) DurableTemplateArtifactContract.ValidateGenerated(graph, GeneratedName, Version);
+            else DurableTemplateArtifactContract.ValidateProjectVersions(graph, Version);
+        });
+
+        Assert.True(error.Message.Contains("symbolic links or reparse points", StringComparison.Ordinal)
+            || error.Message.Contains("unsupported filesystem entry", StringComparison.Ordinal), error.Message);
+        Assert.False(File.Exists(target));
     }
 
     [Fact]
@@ -141,6 +208,74 @@ public sealed partial class DurableTemplateArtifactContractTests : IDisposable
         WriteArchive(archive);
 
         DurableTemplateArtifactContract.ValidateArchive(archive, Version);
+    }
+
+    [Fact]
+    public void TemplateArchiveAcceptsCanonicalNuGetCoreMetadataWithoutChangingGeneratedIdentity()
+    {
+        var canonicalArchive = NewArchivePath();
+        WriteArchive(canonicalArchive, coreMetadataPath: "package/services/metadata/core-properties/nuget.psmdcp");
+        var legacyArchive = NewArchivePath();
+        WriteArchive(legacyArchive);
+
+        DurableTemplateArtifactContract.ValidateArchive(canonicalArchive, Version);
+        Assert.Equal(
+            DurableTemplateArtifactContract.ComputeGeneratedContentSha256(legacyArchive, GeneratedName),
+            DurableTemplateArtifactContract.ComputeGeneratedContentSha256(canonicalArchive, GeneratedName));
+    }
+
+    [Theory]
+    [InlineData("0123456789abcdef0123456789abcdef.psmdcp")]
+    [InlineData("01234567-89AB-CDEF-0123-456789ABCDEF.psmdcp")]
+    public void TemplateArchivePreservesLegacyNuGetCoreMetadataNames(string fileName)
+    {
+        var archive = NewArchivePath();
+        WriteArchive(archive, coreMetadataPath: "package/services/metadata/core-properties/" + fileName);
+
+        DurableTemplateArtifactContract.ValidateArchive(archive, Version);
+    }
+
+    [Theory]
+    [InlineData("package/services/metadata/core-properties/NuGet.psmdcp")]
+    [InlineData("package/services/metadata/core-properties/nuget.PSMDCP")]
+    [InlineData("package/services/metadata/core-properties/nuget.psmdcp.extra")]
+    [InlineData("package/services/metadata/core-properties/nuget2.psmdcp")]
+    [InlineData("package/services/metadata/core-properties/metadata.psmdcp")]
+    [InlineData("package/services/metadata/core-properties/nested/nuget.psmdcp")]
+    [InlineData("Package/services/metadata/core-properties/nuget.psmdcp")]
+    public void TemplateArchiveRejectsNearMissCanonicalNuGetCoreMetadataNames(string coreMetadataPath)
+    {
+        var archive = NewArchivePath();
+        WriteArchive(archive, coreMetadataPath: coreMetadataPath);
+
+        var exception = Assert.Throws<PackageIndexException>(() => DurableTemplateArtifactContract.ValidateArchive(archive, Version));
+        Assert.Contains("malformed NuGet core metadata", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TemplateArchiveRejectsCanonicalAndLegacyCoreMetadataTogether()
+    {
+        var archive = NewArchivePath();
+        WriteArchive(archive,
+            coreMetadataPath: "package/services/metadata/core-properties/nuget.psmdcp",
+            extraEntries: [("package/services/metadata/core-properties/0123456789abcdef.psmdcp", Encoding.UTF8.GetBytes("core properties"))]);
+
+        var exception = Assert.Throws<PackageIndexException>(() => DurableTemplateArtifactContract.ValidateArchive(archive, Version));
+        Assert.Contains("must contain one NuGet core-properties record", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("nuget.psmdcp")]
+    [InlineData("NuGet.psmdcp")]
+    public void TemplateArchiveRejectsCanonicalCoreMetadataDuplicatesAndCaseCollisions(string additionalFileName)
+    {
+        var archive = NewArchivePath();
+        WriteArchive(archive,
+            coreMetadataPath: "package/services/metadata/core-properties/nuget.psmdcp",
+            extraEntries: [("package/services/metadata/core-properties/" + additionalFileName, Encoding.UTF8.GetBytes("core properties"))]);
+
+        var exception = Assert.Throws<PackageIndexException>(() => DurableTemplateArtifactContract.ValidateArchive(archive, Version));
+        Assert.Contains("duplicate or case-colliding path", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -512,7 +647,8 @@ public sealed partial class DurableTemplateArtifactContractTests : IDisposable
         IReadOnlyList<(string Path, byte[] Content)>? extraEntries = null,
         IReadOnlyList<string>? extraDirectories = null,
         IReadOnlyList<(string Path, byte[] Content, int ExternalAttributes)>? specialEntries = null,
-        string? nuspecContent = null)
+        string? nuspecContent = null,
+        string? coreMetadataPath = null)
     {
         using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
         AddEntry(archive, "[Content_Types].xml", Encoding.UTF8.GetBytes("<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\" />"));
@@ -521,7 +657,7 @@ public sealed partial class DurableTemplateArtifactContractTests : IDisposable
             $"<package><metadata><id>{DurableTemplateArtifactContract.PackageId}</id><version>{Version}</version><packageTypes><packageType name=\"Template\" /></packageTypes></metadata></package>"));
         AddEntry(archive, "README.md", Encoding.UTF8.GetBytes("Package readme"));
         AddEntry(archive, "LICENSE", Encoding.UTF8.GetBytes("Package license"));
-        AddEntry(archive, $"package/services/metadata/core-properties/{Guid.NewGuid():N}.psmdcp", Encoding.UTF8.GetBytes("core properties"));
+        AddEntry(archive, coreMetadataPath ?? $"package/services/metadata/core-properties/{Guid.NewGuid():N}.psmdcp", Encoding.UTF8.GetBytes("core properties"));
 
         foreach (var file in Directory.EnumerateFiles(_templateRoot, "*", SearchOption.AllDirectories)
             .Where(file => !IsBuildOutput(file))
