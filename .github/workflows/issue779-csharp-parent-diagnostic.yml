@@ -1,0 +1,59 @@
+name: C# native fixed host parent diagnostic
+on:
+  push:
+    branches: [codex/issue779-csharp-linux-parent-diagnostic-20261007]
+permissions:
+  contents: read
+concurrency:
+  group: issue779-csharp-parent-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  parent-metadata:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Read fixed host parent metadata only
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          /usr/bin/timeout --signal=KILL 5 /usr/bin/python3 -B - <<'PY'
+          import json, os, pathlib, stat, sys, time
+          start = time.monotonic()
+          end = start + 4
+          if sys.platform != 'linux' or os.geteuid() == 0:
+              raise ValueError('unprivileged-linux-diagnostic')
+          paths = ('/', '/opt', '/var', '/var/lib', '/run')
+          rows = []
+          for name in paths:
+              if time.monotonic() >= end:
+                  raise TimeoutError('original-parent-probe-deadline')
+              s = os.lstat(name)
+              rows.append({'path': name, 'uid': s.st_uid, 'gid': s.st_gid,
+                           'mode': format(stat.S_IMODE(s.st_mode), '04o'),
+                           'is_directory': stat.S_ISDIR(s.st_mode),
+                           'is_symlink': stat.S_ISLNK(s.st_mode)})
+          parent = pathlib.Path(os.environ['RUNNER_TEMP']) / 'issue779-csharp-parent-diagnostic'
+          parent.mkdir(mode=0o700)
+          fd = os.open(parent / 'parent-metadata.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+          with os.fdopen(fd, 'w') as output:
+              json.dump({'schema': 'issue779-fixed-host-parent-diagnostic-v1',
+                         'exit': 0, 'rows': rows, 'native_execution': False,
+                         'authority': False, 'elapsed_seconds': time.monotonic() - start}, output,
+                        sort_keys=True, separators=(',', ':'))
+              output.write('\n')
+          if time.monotonic() >= end:
+              raise TimeoutError('late-parent-probe-publication')
+          print('PARENT_METADATA_CAPTURED:no-build:no-candidate-dispatch', flush=True)
+          PY
+      - name: Retain fixed diagnostic record
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: issue779-csharp-parent-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          include-hidden-files: true
+          path: ${{ runner.temp }}/issue779-csharp-parent-diagnostic/
