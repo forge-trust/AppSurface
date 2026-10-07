@@ -41,13 +41,20 @@ jobs:
           fd = os.open(parent / 'parent-metadata.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
           with os.fdopen(fd, 'w') as output:
               json.dump({'schema': 'issue779-fixed-host-parent-diagnostic-v1',
-                         'exit': 0, 'rows': rows, 'native_execution': False,
+                         'capture_status': 'observations-only', 'rows': rows, 'native_execution': False,
                          'authority': False, 'elapsed_seconds': time.monotonic() - start}, output,
                         sort_keys=True, separators=(',', ':'))
               output.write('\n')
-          if time.monotonic() >= end:
-              raise TimeoutError('late-parent-probe-publication')
+          def terminal_deadline():
+              if time.monotonic() >= end:
+                  failure_fd = os.open(parent / 'late-publication.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                  with os.fdopen(failure_fd, 'w') as failure:
+                      json.dump({'schema': 'issue779-parent-probe-failure-v1', 'status': 'late-publication'}, failure)
+                      failure.write('\n')
+                  raise TimeoutError('late-parent-probe-publication')
+          terminal_deadline()
           print('PARENT_METADATA_CAPTURED:no-build:no-candidate-dispatch', flush=True)
+          terminal_deadline()
           PY
       - name: Retain fixed diagnostic record
         if: always()
