@@ -313,6 +313,143 @@ public sealed class SupervisionControlSequenceTests
     }
 
     [Fact]
+    public async Task WaitJoinRetainsStopUntilOriginalCallbackAndWorkloadRegistrationBothJoin()
+    {
+        var ledger = new SupervisionWorkRegistry(); var workload = ledger.BeginWorkload();
+        using var handler = ledger.BeginControl();
+        var entered = Gate();
+        var actual = new TaskCompletionSource<SupervisionControlJoinFacts>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        var sequence = new SupervisionControlSequence(ledger, _ =>
+        {
+            Interlocked.Increment(ref calls); entered.SetResult(); return actual.Task;
+        });
+        var stop = sequence.StopAsync(default);
+        var waitJoin = sequence.JoinStartedStopAsync();
+        try
+        {
+            await entered.Task.WaitAsync(Guard);
+            Assert.False(waitJoin.IsCompleted); Reject(() => sequence.ClaimWait());
+            actual.SetResult(Joined());
+            Assert.False(waitJoin.IsCompleted); Assert.Equal(1, ledger.ActiveWorkloads);
+            Assert.Equal(1, ledger.ActiveControls);
+        }
+        finally
+        {
+            actual.TrySetResult(Joined()); workload.Complete();
+            await stop.WaitAsync(Guard); await waitJoin.WaitAsync(Guard);
+        }
+        Assert.Equal(1, calls); Assert.True(sequence.ClaimWait().Positive);
+        Assert.Equal(1, ledger.ActiveControls); Assert.False(ledger.IsControlAdmissionClosed);
+    }
+
+    [Fact]
+    public async Task WaitWithoutRegisteredStopRejectsWithoutDispatchOrClosingWork()
+    {
+        var ledger = new SupervisionWorkRegistry(); var calls = 0;
+        var sequence = new SupervisionControlSequence(ledger, _ =>
+        { Interlocked.Increment(ref calls); return Task.FromResult(Joined()); });
+        await RejectAsync(sequence.JoinStartedStopAsync());
+        Assert.Equal(0, calls); Assert.False(sequence.IsWorkAdmissionClosed); Assert.False(sequence.Failed);
+        var workload = ledger.BeginWorkload(); workload.Complete();
+        Reject(() => sequence.ClaimWait());
+        Assert.Equal(0, calls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WaitJoinObservesFailedOrCancelIgnoringStopOnlyAfterOwnedWorkSettles(bool cancelled)
+    {
+        var ledger = new SupervisionWorkRegistry(); var workload = ledger.BeginWorkload();
+        var entered = Gate();
+        var actual = new TaskCompletionSource<SupervisionControlJoinFacts>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancellation = new CancellationTokenSource();
+        var sequence = new SupervisionControlSequence(ledger, token =>
+        {
+            Assert.Equal(cancellation.Token, token); entered.SetResult(); return actual.Task;
+        });
+        var stop = sequence.StopAsync(cancellation.Token);
+        var waitJoin = sequence.JoinStartedStopAsync();
+        try
+        {
+            await entered.Task.WaitAsync(Guard);
+            if (cancelled) cancellation.Cancel();
+            Assert.False(waitJoin.IsCompleted);
+            if (cancelled) actual.SetResult(Joined());
+            else actual.SetException(new IOException("private-canary"));
+            Assert.False(waitJoin.IsCompleted); Assert.Equal(1, ledger.ActiveWorkloads);
+            Reject(() => sequence.ClaimWait());
+        }
+        finally
+        {
+            if (cancelled) { cancellation.Cancel(); actual.TrySetResult(Joined()); }
+            else actual.TrySetException(new IOException("private-canary"));
+            workload.Complete(); await waitJoin.WaitAsync(Guard); await RejectAsync(stop);
+        }
+        Assert.True(sequence.Failed); Assert.True(sequence.IsWorkAdmissionClosed);
+        Assert.Same(stop, sequence.StopAsync(default));
+        var wait = sequence.ClaimWait(); Assert.False(wait.Positive);
+        sequence.CompleteWrite(wait, true);
+        Assert.False(sequence.PositiveWaitAcknowledged); Reject(() => sequence.ClaimExit());
+        Reject(() => sequence.ClaimWait());
+    }
+
+    [Fact]
+    public async Task ConcurrentWaitJoinersShareStopButOnlyOneReplyClaimWins()
+    {
+        var entered = Gate();
+        var actual = new TaskCompletionSource<SupervisionControlJoinFacts>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        var sequence = new SupervisionControlSequence(new(), _ =>
+        { Interlocked.Increment(ref calls); entered.SetResult(); return actual.Task; });
+        var stop = sequence.StopAsync(default);
+        var joiners = Enumerable.Range(0, 8).Select(_ => sequence.JoinStartedStopAsync()).ToArray();
+        try
+        {
+            await entered.Task.WaitAsync(Guard);
+            Assert.All(joiners, join => Assert.False(join.IsCompleted));
+        }
+        finally
+        {
+            actual.TrySetResult(Joined());
+            await Task.WhenAll(joiners.Append(stop)).WaitAsync(Guard);
+        }
+        Assert.Equal(1, calls); Assert.Same(stop, sequence.StopAsync(default));
+        var winners = new ConcurrentBag<SupervisionControlSequence.Reply>();
+        var claims = Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+        {
+            try { winners.Add(sequence.ClaimWait()); }
+            catch (EvidenceAdmissionException error) { AssertClosed(error); }
+        })).ToArray();
+        await Task.WhenAll(claims).WaitAsync(Guard);
+        var wait = Assert.Single(winners); Assert.True(wait.Positive);
+        Assert.False(sequence.PositiveWaitAcknowledged);
+        sequence.CompleteWrite(wait, true); Assert.True(sequence.PositiveWaitAcknowledged);
+    }
+
+    [Fact]
+    public async Task StopCallbackCannotJoinItsOwnRegisteredStop()
+    {
+        var entered = Gate(); var finish = Gate();
+        SupervisionControlSequence? sequence = null;
+        sequence = new(new(), async _ =>
+        {
+            entered.SetResult(); await finish.Task;
+            await RejectAsync(sequence!.JoinStartedStopAsync());
+            return Joined();
+        });
+        var stop = sequence.StopAsync(default);
+        var waitJoin = sequence.JoinStartedStopAsync();
+        try { await entered.Task.WaitAsync(Guard); Assert.False(waitJoin.IsCompleted); }
+        finally
+        {
+            finish.TrySetResult(); await stop.WaitAsync(Guard); await waitJoin.WaitAsync(Guard);
+        }
+        Assert.False(sequence.Failed); Assert.True(sequence.ClaimWait().Positive);
+    }
+
+    [Fact]
     public void MissingActualOperationsCannotConstructSequence()
     {
         Assert.Throws<ArgumentNullException>(() => new SupervisionControlSequence(null!, _ => Task.FromResult(Joined())));

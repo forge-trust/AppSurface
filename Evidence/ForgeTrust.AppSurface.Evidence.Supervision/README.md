@@ -548,6 +548,21 @@ continuation runs. STOP may close work while a previously claimed READY is writi
 READY can still commit, while a new READY claim after STOP rejects. Failed writes consume their claim,
 latch failure, forbid EXIT success and permit only cleanup. Final worker exit and custody follow separately.
 
+`SupervisionControlSequence.JoinStartedStopAsync()` joins only the STOP task already registered by
+`StopAsync`. It rejects without dispatch when no STOP exists. The server awaits this join for WAIT
+**before** acquiring its reply semaphore, then calls `ClaimWait` while ordering response writes as before.
+The method snapshots the retained task under the sequence lock and awaits it outside that lock; it
+creates no cancellation source, replacement token or deadline. The first STOP's owner cleanup token
+continues to bound the actual procedure. Cancellation-ignoring callback or workload ownership remains
+pending until the original task settles. A failed STOP remains failed; after its callback and ledger drain
+join, bounded authenticated response I/O can commit only a negative WAIT, never a positive EXIT.
+
+Do not call `StopAsync` to implement WAIT: that would initiate containment when none was requested.
+Do not acquire reply ordering before joining STOP, join the requesting handler/worker as a workload,
+or use a canceled proxy wait as completion. Same-owner callback reentry is rejected to prevent self-join.
+Multiple WAIT joiners observe the same STOP, but `ClaimWait` still permits only one reply claim. These
+are [procedure and ledger checks](#pending-work-and-control-handlers), not native settlement or admission.
+
 Cleanup borrows the [owner-held collection/cleanup expiry](#terminal-root-custody-and-shared-teardown),
 capped by the original job. Unit stopping and request I/O retain their smaller local bounds. Fresh
 connections or repeated STOP/WAIT cannot replace the owner token, reset a failure or reopen work.
