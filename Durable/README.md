@@ -239,7 +239,7 @@ The forward-only deployment order is:
 9. `0009_work_contract_discovery.sql`
 10. `0010_runtime_health_observation.sql`
 11. `0011_runtime_heartbeat_retention.sql`
-12. [`0012_work_execution_policy.sql`](ForgeTrust.AppSurface.Durable.PostgreSql/Migrations/0012_work_execution_policy.sql)
+12. [`0012_work_execution_policy.sql`](https://github.com/forge-trust/AppSurface/blob/4732d187bc43af3d1b8e602caa9e8da56174d21b/Durable/ForgeTrust.AppSurface.Durable.PostgreSql/Migrations/0012_work_execution_policy.sql)
 13. [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
 
 The preferred production flow is to generate and review the Durable schema script offline, drain and stop every pre-`0009`

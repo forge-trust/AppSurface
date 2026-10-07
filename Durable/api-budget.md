@@ -171,7 +171,7 @@ inventory.
 
 The [Testing checkpoint controller](ForgeTrust.AppSurface.Durable.Testing/README.md#execution-checkpoints-and-timing-observations)
 adds a cursor overload of `WaitForObservationAsync(name, afterSequence, maximumWait, cancellationToken)` for later
-attempt observations while preserving the original name-and-cancellation signature. Its [Testing API snapshot](ForgeTrust.AppSurface.Durable.Testing/PublicAPI.Shipped.txt)
+attempt observations while preserving the original name-and-cancellation signature. Its [Testing API snapshot](https://github.com/forge-trust/AppSurface/blob/4732d187bc43af3d1b8e602caa9e8da56174d21b/Durable/ForgeTrust.AppSurface.Durable.Testing/PublicAPI.Shipped.txt)
 is the exhaustive helper inventory; checkpoint observations remain descriptive test facts.
 
 No PostgreSQL public type or Workers-envelope metadata is added for this feature. Storage schema `12` adds nullable

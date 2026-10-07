@@ -25,7 +25,7 @@ For fixed retry timing or an absolute execution deadline, read the canonical
 opt-in columns and advances the reader/writer compatibility floor to schema 12; legacy rows remain on legacy timing.
 The ordered [migration checklist](../migrations/execution-policies-v1.md) requires a stop/drain, migration-owner apply,
 role/schema preflight, compatible package deployment, and a new immutable Work version. The runtime applies no DDL.
-The fresh-feed [packed-consumer gate](../verify-packed-consumers.sh) includes the real PostgreSQL planned-policy proof
+The fresh-feed [packed-consumer gate](https://github.com/forge-trust/AppSurface/blob/4732d187bc43af3d1b8e602caa9e8da56174d21b/Durable/verify-packed-consumers.sh) includes the real PostgreSQL planned-policy proof
 and rejects skipped tests.
 
 ## Slice 7 discovery and reconciliation
@@ -40,7 +40,7 @@ The production migration order is `0001_work_shared.sql`, `0002_forced_rls.sql`,
 `0004_schedule_protocol.sql`, `0005_runtime_heartbeat.sql`, `0006_flow_trace_context.sql`,
 `0007_flow_retention.sql`, `0008_flow_repair.sql`, `0009_work_contract_discovery.sql`, and
 `0010_runtime_health_observation.sql`, `0011_runtime_heartbeat_retention.sql`, and
-[`0012_work_execution_policy.sql`](Migrations/0012_work_execution_policy.sql), followed by the matching released provider
+[`0012_work_execution_policy.sql`](https://github.com/forge-trust/AppSurface/blob/4732d187bc43af3d1b8e602caa9e8da56174d21b/Durable/ForgeTrust.AppSurface.Durable.PostgreSql/Migrations/0012_work_execution_policy.sql), followed by the matching released provider
 package's `contentFiles/any/any/configure-postgresql-roles.sql` role recipe. Migration 0012 raises the reader/writer floor
 to schema 12 before any deadline-only or planned Work is accepted. The package recipe is
 byte-identical to the canonical [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
