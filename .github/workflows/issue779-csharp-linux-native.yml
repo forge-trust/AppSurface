@@ -1,7 +1,7 @@
 name: C# N02 startup file-limit diagnostic
 on:
   push:
-    branches: [codex/issue779-csharp-linux-native-20261007-retry-9]
+    branches: [codex/issue779-csharp-linux-native-20261007-retry-10]
 permissions:
   contents: read
 concurrency:
@@ -15,9 +15,9 @@ jobs:
       # Promotion requires frozen source reviews and a complete native handoff.
       # Promote only after full source composition review; no native passing claim.
       UBUNTU_RUNTIME_REVIEWED: 'true'
-      UBUNTU_RUNTIME_SCRIPT_SHA256: 95bbdde4cedc173dd93271c6c8f4db5389c46e356992260478be9eaa77408b6c
+      UBUNTU_RUNTIME_SCRIPT_SHA256: cd64f2f46acff51378f2dd7a563ba10a37cff2ac7abe2b1bb72162912dd6ced9
       BUILD_REVIEWED: 'true'
-      BUILD_SCRIPT_SHA256: d01fa9663bc166d3c29b7d7e9698922edf78e7d34802de8c5adf0edbb65106d5
+      BUILD_SCRIPT_SHA256: 0bd76369adb809c406f30e2c37be4fd269fb1b05cd08d144d1929dab6a632b2a
       ROOT_TRANSPORT_REVIEWED: 'true'
       ROOT_TRANSPORT_SHA256: b181c7672fa3dbe9351fee15dcbf85b7ff99808d09077c8338bf4981c782ec6b
       FIXTURE_REVIEWED: 'true'
@@ -27,12 +27,12 @@ jobs:
       SOURCE_REVIEW_SHA256: ee6fa029cf2873a18b849f6e5590f3dd792ee71fa88f3409100ff802df3b4ca0
       NATIVE_HANDOFF_REVIEWED: 'true'
       NATIVE_HANDOFF_IMPLEMENTED: 'true'
-      ACQUISITION_SHA256: 152b3f275b4bbbb899ae96e4214ec66e4a658b1f7a45551a8c17f29af155fbf3
+      ACQUISITION_SHA256: b2558bb1238d896005c11aca03bc511e9c256435dd75baf067870e778744ed64
       RETENTION_SHA256: a6bc3da869386b440d0b8a2ad93eb3cb888a4e48aabe52febf6a609b33d45331
-      ORCHESTRATOR_SHA256: 874aa755eb1fa96a3d43e10ce03c356ee2527e7a48944e8c9dc18b8e39fabb39
+      ORCHESTRATOR_SHA256: 39da0a54157d6ef64032d40b559f34ccdc3120b4a91eb4235cbb05f158d38fcd
       CAPTURE_RECEIPT_SHA256: 51afcbd61af3c2319e814beee18e88714e589cb26132d755371248d045cfd64d
       SOURCE_COMMIT: 5d1036b7035a7d9e980cdab5afc88879fca5048c
-      HARNESS_PARENT: c97f07daea57b6330adac691f000c7da210581cd
+      HARNESS_PARENT: 18ab1ad31eec2a304c9121b33375d14a08e5deed
     steps:
       - name: Reject unreviewed or incomplete proposal before build
         shell: bash

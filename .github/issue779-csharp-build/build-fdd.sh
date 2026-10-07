@@ -19,10 +19,12 @@ import time
 
 HEAD = '5d1036b7035a7d9e980cdab5afc88879fca5048c'
 PARENT = '2993dcfaac1b9b6dfb8adf057191f837876f01fe'
-HARNESS_PARENT = 'c97f07daea57b6330adac691f000c7da210581cd'
+HARNESS_PARENT = '18ab1ad31eec2a304c9121b33375d14a08e5deed'
 TREE = '8ba2d1add22a4267316e8b435f60b788cbea08d8'
 CAPTURE_SHA = '51afcbd61af3c2319e814beee18e88714e589cb26132d755371248d045cfd64d'
 CAPTURE_PROJECTION_SHA = 'b3a7068c001d9d6ea09cb4c2df04d7c764ea3e41bc1a52cf7a0b7a34b556cfd9'
+UBUNTU_PREREQUISITE_SHA = 'cd64f2f46acff51378f2dd7a563ba10a37cff2ac7abe2b1bb72162912dd6ced9'
+NATIVE_RUNNER_SHA = '39da0a54157d6ef64032d40b559f34ccdc3120b4a91eb4235cbb05f158d38fcd'
 SDK = '10.0.401'
 COUNT = 2819
 FILE_CAP = 256 * 1024 * 1024
@@ -496,6 +498,14 @@ def select_framework(requested, available, roll):
     require(bool(candidates), 'compatible-runtime-missing')
     return max(candidates)
 
+def require_prerequisite_source(receipt):
+    # Closed compilation-bound provenance check, after schema/package checks and before host copying.
+    # Receipt data supplies no root execution, deployment or acceptance authority. Actual selected
+    # runtime files still undergo retained reads, full SHA/ELF auditing and independent containment.
+    require(receipt['prerequisite_script_sha256'] == UBUNTU_PREREQUISITE_SHA
+            and receipt['runner_sha256'] == NATIVE_RUNNER_SHA,
+            'ubuntu-runtime-prerequisite-source')
+
 def ubuntu_runtime_host():
     # Package data conveys provenance only. The complete selected tree is still copied, hashed and ELF-audited.
     prerequisite_root = OUT.parent / 'issue779-csharp-ubuntu-runtime'
@@ -511,9 +521,7 @@ def ubuntu_runtime_host():
     require(receipt['package_version'] == version and set(receipt['packages']) == set(expected_packages)
             and all(v == {'architecture': 'amd64', 'version': version, 'status': 'ii '}
                     for v in receipt['packages'].values()), 'ubuntu-runtime-packages')
-    require(receipt['prerequisite_script_sha256'] == 'dfcdfe9ae1ab567c7ef966b309c00ad446d0037dcdaac36b2fabc8a8ba2fc7f8'
-            and receipt['runner_sha256'] == '38ebe7325479bc2c2f0a3f460c5b908fb6b9044c84ce603a1ae635dbbd13b34c',
-            'ubuntu-runtime-prerequisite-source')
+    require_prerequisite_source(receipt)
     require(len(receipt['commands']) == 5
             and all(type(c['exit']) is int and c['exit'] == 0 and c['failure'] is None
                     and c['waited'] is True and c['group_absent'] is True
