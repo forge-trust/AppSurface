@@ -193,7 +193,8 @@ public sealed class PostgreSqlDurableWorkExecutionProcessTests
         {
             if (!process.HasExited)
             {
-                await KillAndWaitAsync(process, new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
+                using var cleanupTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                await KillAndWaitAsync(process, cleanupTimeout.Token);
             }
         }
     }

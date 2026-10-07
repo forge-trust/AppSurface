@@ -69,7 +69,7 @@ public sealed class PostgreSqlDurableExecutionProjectionTests
         // fails_when=a consumed slot is exposed as the next retry; why_new=pending-only inspection missed claims; seam=none
         for (var attempt = 1; attempt <= 2; attempt++)
         {
-            await lab.Database.SetExecutionTimeAsync(Anchor.AddMinutes((attempt - 1) * 5));
+            await lab.Database.SetExecutionTimeAsync(Anchor.AddMinutes((attempt - 1) * 5d));
             var candidate = Assert.Single(await lab.Store.DiscoverAsync(10), item => item.WorkId == optIn.Value!.WorkId);
             var claim = Assert.IsType<PostgreSqlDurableWorkClaim>(await lab.Store.TryClaimAsync(candidate, "projection-worker"));
             DateTimeOffset? expectedNext = attempt == 1 ? Anchor.AddMinutes(5) : null;

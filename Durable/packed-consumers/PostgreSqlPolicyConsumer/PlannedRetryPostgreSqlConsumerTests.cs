@@ -1,8 +1,8 @@
 using System.Text.Json.Serialization;
 using ForgeTrust.AppSurface.Durable;
 using ForgeTrust.AppSurface.Durable.PostgreSql;
-using ForgeTrust.AppSurface.Durable.Provider;
 using ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
+using ForgeTrust.AppSurface.Durable.Provider;
 using ForgeTrust.AppSurface.Workers;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -17,7 +17,7 @@ public sealed partial class PlannedRetryPostgreSqlConsumerTests
     [Fact]
     public async Task PackedProvider_HonorsAllFiveAcceptedPlanSlotsWithoutEarlyExecutions()
     {
-        RetryBeforeEffectExecutor.Reset();
+        var executor = new RetryBeforeEffectExecutor();
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
         var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
         await schema.ApplyAsync();
@@ -33,6 +33,7 @@ public sealed partial class PlannedRetryPostgreSqlConsumerTests
         var definition = CreateDefinition();
         var services = new ServiceCollection();
         services.AddDurableWork(definition.ExecutedByExit<RetryBeforeEffectExecutor>());
+        services.AddSingleton(executor);
         services.AddAppSurfaceDurablePostgreSql(
             dispatcher,
             database.DataSource,
@@ -58,7 +59,7 @@ public sealed partial class PlannedRetryPostgreSqlConsumerTests
             await database.SetExecutionTimeAsync(AcceptanceAnchor.AddMinutes(offsets[slot]));
             var due = await pump.TryRunOnceAsync(pass);
             Assert.Equal(DurableRuntimePumpAttemptKind.Completed, due.Kind);
-            Assert.Equal(slot + 1, Volatile.Read(ref RetryBeforeEffectExecutor.Calls));
+            Assert.Equal(slot + 1, Volatile.Read(ref executor.Calls));
 
             var observed = await control.GetAsync(new DurableWorkGetRequest(scope, accepted.Value!.WorkId));
             Assert.True(observed.IsSuccess, observed.Problem?.Problem);
@@ -78,17 +79,17 @@ public sealed partial class PlannedRetryPostgreSqlConsumerTests
             await database.SetExecutionTimeAsync(nextSlot.AddMinutes(-1));
             var early = await pump.TryRunOnceAsync(pass);
             Assert.Equal(DurableRuntimePumpAttemptKind.Completed, early.Kind);
-            Assert.Equal(slot + 1, Volatile.Read(ref RetryBeforeEffectExecutor.Calls));
+            Assert.Equal(slot + 1, Volatile.Read(ref executor.Calls));
         }
 
-        Assert.Equal(1, Volatile.Read(ref RetryBeforeEffectExecutor.LogicalEffects));
-        Assert.Equal(5, Volatile.Read(ref RetryBeforeEffectExecutor.Calls));
+        Assert.Equal(1, Volatile.Read(ref executor.LogicalEffects));
+        Assert.Equal(5, Volatile.Read(ref executor.Calls));
     }
 
     [Fact]
     public async Task PackedProvider_RefusesAnExpiredDeadlineBeforeCallingExecutor()
     {
-        RetryBeforeEffectExecutor.Reset();
+        var executor = new RetryBeforeEffectExecutor();
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
         var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
         await schema.ApplyAsync();
@@ -103,6 +104,7 @@ public sealed partial class PlannedRetryPostgreSqlConsumerTests
         var definition = CreateDefinition();
         var services = new ServiceCollection();
         services.AddDurableWork(definition.ExecutedByExit<RetryBeforeEffectExecutor>());
+        services.AddSingleton(executor);
         services.AddAppSurfaceDurablePostgreSql(
             dispatcher,
             database.DataSource,
@@ -125,8 +127,8 @@ public sealed partial class PlannedRetryPostgreSqlConsumerTests
         var pass = new DurableRuntimePumpRequest(maximumItems: 4, surfaces: DurableRuntimeSurface.Work);
         var attempted = await provider.GetRequiredService<IDurableRuntimePumpAdmission>().TryRunOnceAsync(pass);
         Assert.Equal(DurableRuntimePumpAttemptKind.Completed, attempted.Kind);
-        Assert.Equal(0, Volatile.Read(ref RetryBeforeEffectExecutor.Calls));
-        Assert.Equal(0, Volatile.Read(ref RetryBeforeEffectExecutor.LogicalEffects));
+        Assert.Equal(0, Volatile.Read(ref executor.Calls));
+        Assert.Equal(0, Volatile.Read(ref executor.LogicalEffects));
 
         var closed = await provider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
             new DurableWorkGetRequest(scope, accepted.Value!.WorkId));
@@ -139,8 +141,8 @@ public sealed partial class PlannedRetryPostgreSqlConsumerTests
     [Fact]
     public async Task PackedProvider_ReconcilesReadOnlyWithoutRepeatingTheLogicalEffect()
     {
-        AmbiguousEffectExecutor.Reset();
-        ReadOnlyEffectReconciler.Reset();
+        var executor = new AmbiguousEffectExecutor();
+        var reconciler = new ReadOnlyEffectReconciler(executor);
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
         var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
         await schema.ApplyAsync();
@@ -156,6 +158,8 @@ public sealed partial class PlannedRetryPostgreSqlConsumerTests
         var services = new ServiceCollection();
         services.AddDurableWork(definition.ExecutedBy<AmbiguousEffectExecutor>()
             .ReconciledBy<ReadOnlyEffectReconciler>());
+        services.AddSingleton(executor);
+        services.AddSingleton(reconciler);
         services.AddAppSurfaceDurablePostgreSql(
             dispatcher,
             database.DataSource,
@@ -177,8 +181,8 @@ public sealed partial class PlannedRetryPostgreSqlConsumerTests
         var pass = new DurableRuntimePumpRequest(maximumItems: 4, surfaces: DurableRuntimeSurface.Work);
         var first = await pump.TryRunOnceAsync(pass);
         Assert.Equal(DurableRuntimePumpAttemptKind.Completed, first.Kind);
-        Assert.Equal(1, Volatile.Read(ref AmbiguousEffectExecutor.Calls));
-        Assert.Equal(1, Volatile.Read(ref AmbiguousEffectExecutor.LogicalEffects));
+        Assert.Equal(1, Volatile.Read(ref executor.Calls));
+        Assert.Equal(1, Volatile.Read(ref executor.LogicalEffects));
 
         var control = provider.GetRequiredService<IDurableWorkControlClient>();
         var suspended = await control.GetAsync(new DurableWorkGetRequest(scope, accepted.Value!.WorkId));
@@ -196,16 +200,16 @@ public sealed partial class PlannedRetryPostgreSqlConsumerTests
         var reconciled = await operatorClient.ReconcileAsync(reconcile);
         Assert.True(reconciled.IsSuccess, reconciled.Problem?.Problem);
         Assert.Equal(DurableWorkState.Succeeded, reconciled.Value!.State);
-        Assert.Equal(1, Volatile.Read(ref ReadOnlyEffectReconciler.Calls));
-        Assert.Equal(1, Volatile.Read(ref AmbiguousEffectExecutor.Calls));
-        Assert.Equal(1, Volatile.Read(ref AmbiguousEffectExecutor.LogicalEffects));
+        Assert.Equal(1, Volatile.Read(ref reconciler.Calls));
+        Assert.Equal(1, Volatile.Read(ref executor.Calls));
+        Assert.Equal(1, Volatile.Read(ref executor.LogicalEffects));
 
         var duplicate = await operatorClient.ReconcileAsync(reconcile);
         Assert.True(duplicate.IsSuccess, duplicate.Problem?.Problem);
         Assert.Equal(DurableWorkOperatorOutcome.Duplicate, duplicate.Value!.Outcome);
-        Assert.Equal(1, Volatile.Read(ref ReadOnlyEffectReconciler.Calls));
-        Assert.Equal(1, Volatile.Read(ref AmbiguousEffectExecutor.Calls));
-        Assert.Equal(1, Volatile.Read(ref AmbiguousEffectExecutor.LogicalEffects));
+        Assert.Equal(1, Volatile.Read(ref reconciler.Calls));
+        Assert.Equal(1, Volatile.Read(ref executor.Calls));
+        Assert.Equal(1, Volatile.Read(ref executor.LogicalEffects));
     }
 
     private static DurableWorkDefinition<PlannedRetryWork, PlannedRetryResult> CreateDefinition(
@@ -238,14 +242,8 @@ public sealed partial class PlannedRetryPostgreSqlConsumerTests
 
     private sealed class RetryBeforeEffectExecutor : IDurableWorkExitExecutor<PlannedRetryWork, PlannedRetryResult>
     {
-        internal static int Calls;
-        internal static int LogicalEffects;
-
-        internal static void Reset()
-        {
-            Interlocked.Exchange(ref Calls, 0);
-            Interlocked.Exchange(ref LogicalEffects, 0);
-        }
+        internal int Calls;
+        internal int LogicalEffects;
 
         public ValueTask<DurableWorkExit<PlannedRetryResult>> ExecuteAsync(
             DurableWorkerEnvelope<PlannedRetryWork> work,
@@ -258,7 +256,7 @@ public sealed partial class PlannedRetryPostgreSqlConsumerTests
                 : CompleteLogicalEffect();
         }
 
-        private static ValueTask<DurableWorkExit<PlannedRetryResult>> CompleteLogicalEffect()
+        private ValueTask<DurableWorkExit<PlannedRetryResult>> CompleteLogicalEffect()
         {
             Interlocked.Increment(ref LogicalEffects);
             return ValueTask.FromResult(DurableWorkExit<PlannedRetryResult>.Succeeded(new PlannedRetryResult("done")));
@@ -267,14 +265,8 @@ public sealed partial class PlannedRetryPostgreSqlConsumerTests
 
     private sealed class AmbiguousEffectExecutor : IDurableWorkerExecutor<PlannedRetryWork, PlannedRetryResult>
     {
-        internal static int Calls;
-        internal static int LogicalEffects;
-
-        internal static void Reset()
-        {
-            Interlocked.Exchange(ref Calls, 0);
-            Interlocked.Exchange(ref LogicalEffects, 0);
-        }
+        internal int Calls;
+        internal int LogicalEffects;
 
         public ValueTask<PlannedRetryResult> ExecuteAsync(
             DurableWorkerEnvelope<PlannedRetryWork> work,
@@ -288,11 +280,9 @@ public sealed partial class PlannedRetryPostgreSqlConsumerTests
         }
     }
 
-    private sealed class ReadOnlyEffectReconciler : IDurableEffectReconciler<PlannedRetryWork, PlannedRetryResult>
+    private sealed class ReadOnlyEffectReconciler(AmbiguousEffectExecutor executor) : IDurableEffectReconciler<PlannedRetryWork, PlannedRetryResult>
     {
-        internal static int Calls;
-
-        internal static void Reset() => Interlocked.Exchange(ref Calls, 0);
+        internal int Calls;
 
         public ValueTask<DurableEffectReconciliation<PlannedRetryResult>> ReconcileAsync(
             DurableWorkerEnvelope<PlannedRetryWork> work,
@@ -301,7 +291,7 @@ public sealed partial class PlannedRetryPostgreSqlConsumerTests
             cancellationToken.ThrowIfCancellationRequested();
             _ = work.Payload ?? throw new InvalidOperationException("The packed reconciliation payload was not decoded.");
             Interlocked.Increment(ref Calls);
-            return ValueTask.FromResult(Volatile.Read(ref AmbiguousEffectExecutor.LogicalEffects) == 1
+            return ValueTask.FromResult(Volatile.Read(ref executor.LogicalEffects) == 1
                 ? DurableEffectReconciliation<PlannedRetryResult>.Applied(new PlannedRetryResult("observed-applied"))
                 : DurableEffectReconciliation<PlannedRetryResult>.Unknown());
         }

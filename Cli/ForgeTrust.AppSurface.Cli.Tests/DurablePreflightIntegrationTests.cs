@@ -752,15 +752,19 @@ public sealed class DurableSchemaPreflightIntegrationTests
     public async Task Successful_preflight_elapsed_includes_nonpooled_physical_close_and_fence_release()
     {
         await using var fixture = await Fixture.CreateAsync();
+        const string applicationName = "issue845-successful-physical-close";
+        using var completionDeadline = new CancellationTokenSource(DurableSchemaPreflightVerifier.TotalTimeout);
         var elapsed = Stopwatch.StartNew();
-        var result = await fixture.RunAsync(RuntimeA);
-        elapsed.Stop();
+        var result = await fixture.RunAsync(RuntimeA, applicationName: applicationName, cancellationToken: completionDeadline.Token);
 
         Assert.Empty(result.FailedChecks);
+        await fixture.AssertNoFenceLocksAsync();
+        // Client close has no server acknowledgement; observe backend exit within the same total budget.
+        await fixture.WaitForSessionExitAsync(applicationName, completionDeadline.Token);
+        Assert.Equal(0, await fixture.CountPreflightSessionsAsync());
+        elapsed.Stop();
         Assert.True(elapsed.Elapsed < DurableSchemaPreflightVerifier.TotalTimeout,
             $"Successful preflight including nonpooled connection disposal took {elapsed.Elapsed}.");
-        Assert.Equal(0, await fixture.CountPreflightSessionsAsync());
-        await fixture.AssertNoFenceLocksAsync();
     }
 
     private static string SocketProbeConnectionString(int port, int timeoutSeconds) =>

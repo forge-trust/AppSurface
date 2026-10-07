@@ -300,6 +300,29 @@ public sealed class DurableWorkDefinitionRequestTests
         Assert.Equal(1, codec.EncodeCalls);
     }
 
+    [Theory]
+    [InlineData("legacy")]
+    [InlineData("planned")]
+    [InlineData("deadline-only")]
+    public void Direct_execution_request_rejects_null_payload_for_every_timing_mode(string timingMode)
+    {
+        var retry = CreatePolicy("exponential-v1");
+        var policy = timingMode == "planned"
+            ? DurableWorkExecutionPolicy.ForAttemptPlan(retry,
+                new DurableAttemptPlan(DurableAttemptPlan.SupportedVersion,
+                    [TimeSpan.Zero, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(2)], TimeSpan.FromMinutes(3)))
+            : DurableWorkExecutionPolicy.FromRetryPolicy(retry);
+        var deadline = timingMode == "deadline-only"
+            ? new DurableExecutionDeadline(new DateTimeOffset(2026, 10, 4, 16, 0, 0, TimeSpan.Zero))
+            : null;
+
+        var failure = Assert.Throws<ArgumentNullException>(() =>
+            DurableWorkRequest.CreateWithExecutionPolicy(new("scope"), new("null-payload"), "key",
+                "work", "v2", null!, DurableProviderSafety.Idempotent, policy, executionDeadline: deadline));
+
+        Assert.Equal("payload", failure.ParamName);
+    }
+
     [Fact]
     public void Direct_execution_request_rejects_undefined_safety_and_a_planned_due_time()
     {

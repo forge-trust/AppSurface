@@ -86,6 +86,44 @@ public sealed class PostgreSqlExecutionOperatorDecisionTests
         Assert.False(suspended.Terminal);
     }
 
+    [Theory]
+    [InlineData("open", null)]
+    [InlineData("deadline", "deadline_elapsed")]
+    [InlineData("circuit", "circuit_elapsed")]
+    [InlineData("slots", "slots_exhausted")]
+    [InlineData("witness", "circuit_elapsed")]
+    public void NoEffectProofAfterCancellation_ClosesRequestedRetryWithoutLosingTimingFacts(string cutoff, string? timingReason)
+    {
+        foreach (var safety in Enum.GetValues<DurableProviderSafety>())
+        {
+            var row = Row(safety, cutoff, uncertain: true, prior: false, canceled: true);
+
+            var decision = PostgreSqlExecutionOperatorDecision.Evaluate(row, "retry_wait", DurableEffectReconciliationKind.NotApplied);
+
+            Assert.Equal("canceled_before_effect", decision.State);
+            Assert.Equal("canceled_before_effect", decision.Code);
+            Assert.True(decision.Terminal);
+            Assert.Equal(Accepted, decision.DueAtUtc);
+            Assert.Equal(timingReason, decision.TimingReason);
+        }
+    }
+
+    [Fact]
+    public void ExplicitSafeRetryAfterCancellation_PreservesTheNextPlannedSlot()
+    {
+        var row = Row(DurableProviderSafety.Idempotent, "open", uncertain: false, prior: false, canceled: true)
+            with
+        { State = "suspended_contract_unavailable" };
+
+        var decision = PostgreSqlExecutionOperatorDecision.Evaluate(row, "retry_wait", null);
+
+        Assert.Equal("retry_wait", decision.State);
+        Assert.Equal("operator_retry", decision.Code);
+        Assert.False(decision.Terminal);
+        Assert.Null(decision.TimingReason);
+        Assert.Equal(Accepted.AddMinutes(5), decision.DueAtUtc);
+    }
+
     private static PostgreSqlWorkExecutionRow Row(DurableProviderSafety safety, string cutoff, bool uncertain, bool prior, bool canceled)
     {
         var policy = DurableWorkExecutionPolicy.ForAttemptPlan(Retry(), new("attempt-plan-v1",
