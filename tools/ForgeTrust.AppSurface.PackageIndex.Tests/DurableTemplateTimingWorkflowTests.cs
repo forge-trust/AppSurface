@@ -101,6 +101,72 @@ public sealed class DurableTemplateTimingWorkflowTests : IDisposable
     }
 
     [Theory]
+    [InlineData(false, " ", false)]
+    [InlineData(true, " ", false)]
+    [InlineData(false, "", true)]
+    [InlineData(true, "", true)]
+    [InlineData(false, " ", true)]
+    [InlineData(true, " ", true)]
+    [InlineData(false, "\t ", true)]
+    [InlineData(true, "\t ", true)]
+    public async Task GeneratedConsoleTransportPreservesProofAndOriginalCleanupAllowance(
+        bool cold, string outputIndentation, bool uppercaseDatabaseIdentity)
+    {
+        // The detailed xUnit logger indents ITestOutputHelper lines; the real fixture emits uppercase hex.
+        var runner = new TimingRunner(this, cleanupElapsedMilliseconds: "15000",
+            outputIndentation: outputIndentation, uppercaseDatabaseIdentity: uppercaseDatabaseIdentity);
+        var receipt = await new DurableTemplateTimingWorkflow(runner, () => true).RunAsync(_input,
+            cold ? DurableTemplateTimingMode.Cold : DurableTemplateTimingMode.Primed,
+            cold ? ColdDockerHosts : [], CancellationToken.None);
+
+        Assert.True(receipt.Succeeded, receipt.FailureCode);
+        Assert.Equal(5, runner.FirstWorkCount);
+        Assert.All(receipt.Samples, result =>
+        {
+            Assert.Empty(result.ValidationFailures);
+            var sample = Assert.IsType<DurableTemplateTimingSample>(result.Sample);
+            Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("timing-db-" + sample.Ordinal))),
+                sample.DatabaseIdentity);
+            Assert.True(sample.CleanupComplete);
+        });
+        var cleanupRequests = FirstSampleCleanupRequests(runner);
+        Assert.Equal(2, cleanupRequests.Length);
+        Assert.All(cleanupRequests, request => Assert.InRange(request.TimeoutMilliseconds, 1, 5_000));
+        Assert.Equal(0, runner.ActiveCommands);
+        Assert.All(runner.PrivateRoots, path => Assert.False(Directory.Exists(path)));
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("duplicate")]
+    [InlineData("invalid")]
+    [InlineData("-1")]
+    [InlineData("2147483648")]
+    [InlineData("20000")]
+    [InlineData("20001")]
+    [InlineData("stdout-truncated")]
+    [InlineData("stderr-truncated")]
+    public async Task IndentedConsoleCleanupEvidenceStillFailsClosedWithoutRenewingItsBudget(string fault)
+    {
+        var runner = new TimingRunner(this,
+            cleanupElapsedMilliseconds: fault.EndsWith("-truncated", StringComparison.Ordinal) ? "0" : fault,
+            truncatedFirstWorkOrdinal: fault == "stdout-truncated" ? 1 : null,
+            truncatedFirstWorkErrorOrdinal: fault == "stderr-truncated" ? 1 : null,
+            outputIndentation: " ", uppercaseDatabaseIdentity: true);
+        var receipt = await new DurableTemplateTimingWorkflow(runner, () => true)
+            .RunAsync(_input, DurableTemplateTimingMode.Primed, [], CancellationToken.None);
+
+        Assert.False(receipt.Succeeded);
+        Assert.False(Assert.IsType<DurableTemplateTimingSample>(receipt.Samples[0].Sample).Succeeded);
+        var cleanupRequests = FirstSampleCleanupRequests(runner);
+        Assert.NotEmpty(cleanupRequests);
+        Assert.All(cleanupRequests, request => Assert.Equal(1, request.TimeoutMilliseconds));
+        Assert.Equal(0, runner.ActiveCommands);
+        Assert.DoesNotContain(SecretSentinel, File.ReadAllText(_reportPath), StringComparison.Ordinal);
+        Assert.All(runner.PrivateRoots, path => Assert.False(Directory.Exists(path)));
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task FailedAttemptIsRetainedWithCleanup(bool invalidMarker)
@@ -156,6 +222,113 @@ public sealed class DurableTemplateTimingWorkflowTests : IDisposable
         Assert.NotEmpty(runner.PrivateRoots);
         Assert.All(runner.PrivateRoots, path => Assert.False(Directory.Exists(path)));
         Assert.False(File.Exists(_reportPath));
+    }
+
+    [Fact]
+    public async Task ProducerVersionDisagreementRejectsBeforeLaunchingCommands()
+    {
+        var runner = new TimingRunner(this);
+        var input = _input with { PackageVersion = "0.2.0-preview.14" };
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
+            new DurableTemplateTimingWorkflow(runner, () => true)
+                .RunAsync(input, DurableTemplateTimingMode.Primed, [], CancellationToken.None));
+
+        Assert.Contains("Timing version differs from its producer.", error.Message, StringComparison.Ordinal);
+        Assert.Empty(runner.Requests);
+        Assert.Empty(runner.PrivateRoots);
+        Assert.False(File.Exists(_reportPath));
+    }
+
+    [Theory]
+    [InlineData(ProviderId)]
+    [InlineData(TestingId)]
+    public async Task ChangedCandidateArchiveRejectsBeforeLaunchingCommands(string packageId)
+    {
+        File.AppendAllText(_artifactPaths[packageId], SecretSentinel);
+        var runner = new TimingRunner(this);
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
+            new DurableTemplateTimingWorkflow(runner, () => true)
+                .RunAsync(_input, DurableTemplateTimingMode.Primed, [], CancellationToken.None));
+
+        Assert.Contains("Timing archive differs from its producer.", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(SecretSentinel, error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(runner.Requests);
+        Assert.Empty(runner.PrivateRoots);
+        Assert.False(File.Exists(_reportPath));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("9.0.100")]
+    [InlineData(SecretSentinel)]
+    public async Task UnsupportedSdkIdentityAbortsBeforeTemplateInstallationAndRemovesOwnedRoots(string sdkVersion)
+    {
+        var runner = new TimingRunner(this, sdkVersion: sdkVersion);
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
+            new DurableTemplateTimingWorkflow(runner, () => true)
+                .RunAsync(_input, DurableTemplateTimingMode.Primed, [], CancellationToken.None));
+
+        Assert.Contains("Timing SDK identity is missing or unsupported.", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(SecretSentinel, error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(runner.Requests, request => request.Arguments.Take(2).SequenceEqual(["new", "install"]));
+        Assert.Equal(0, runner.FirstWorkCount);
+        Assert.Equal(0, runner.ActiveCommands);
+        Assert.NotEmpty(runner.PrivateRoots);
+        Assert.All(runner.PrivateRoots, path => Assert.False(Directory.Exists(path)));
+        Assert.False(File.Exists(_reportPath));
+    }
+
+    [Theory]
+    [InlineData("invalid-started-ticks")]
+    [InlineData("stale-started-ticks")]
+    [InlineData("future-started-ticks")]
+    public async Task InvalidMonotonicCompletionBoundaryRetainsTheFailedSampleAndCleansUp(string fault)
+    {
+        var runner = new TimingRunner(this, markerFaultOrdinal: 1, markerFault: fault);
+
+        var receipt = await new DurableTemplateTimingWorkflow(runner, () => true)
+            .RunAsync(_input, DurableTemplateTimingMode.Cold, ColdDockerHosts, CancellationToken.None);
+
+        Assert.False(receipt.Succeeded);
+        Assert.Equal(5, runner.FirstWorkCount);
+        var failed = Assert.IsType<DurableTemplateTimingSample>(receipt.Samples[0].Sample);
+        Assert.False(failed.Succeeded);
+        Assert.Equal("sample-failed", failed.FailureCode);
+        Assert.True(failed.CleanupComplete);
+        Assert.Equal(3, failed.Commands.Count);
+        Assert.All(failed.Commands, command => Assert.Equal(0, command.ExitCode));
+        Assert.All(receipt.Samples.Skip(1), result => Assert.True(result.Sample!.Succeeded));
+        Assert.All(FirstSampleCleanupRequests(runner), request => Assert.InRange(request.TimeoutMilliseconds, 1, 19_999));
+        Assert.Equal(0, runner.ActiveCommands);
+        Assert.DoesNotContain(SecretSentinel, File.ReadAllText(_reportPath), StringComparison.Ordinal);
+        Assert.All(runner.PrivateRoots, path => Assert.False(Directory.Exists(path)));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AlteredGeneratedPayloadCannotPassWithOtherwiseSuccessfulFirstWorkEvidence(bool cold)
+    {
+        var runner = new TimingRunner(this, markerFaultOrdinal: 1, markerFault: "generated-content-mismatch");
+
+        var receipt = await new DurableTemplateTimingWorkflow(runner, () => true).RunAsync(_input,
+            cold ? DurableTemplateTimingMode.Cold : DurableTemplateTimingMode.Primed,
+            cold ? ColdDockerHosts : [], CancellationToken.None);
+
+        Assert.False(receipt.Succeeded);
+        var failed = Assert.IsType<DurableTemplateTimingSample>(receipt.Samples[0].Sample);
+        Assert.False(failed.Succeeded);
+        Assert.Equal("sample-failed", failed.FailureCode);
+        Assert.True(failed.CleanupComplete);
+        Assert.All(failed.Commands, command => Assert.Equal(0, command.ExitCode));
+        Assert.All(receipt.Samples.Skip(1), result => Assert.True(result.Sample!.Succeeded));
+        Assert.All(FirstSampleCleanupRequests(runner), request => Assert.InRange(request.TimeoutMilliseconds, 1, 19_999));
+        Assert.Equal(0, runner.ActiveCommands);
+        Assert.DoesNotContain(SecretSentinel, File.ReadAllText(_reportPath), StringComparison.Ordinal);
+        Assert.All(runner.PrivateRoots, path => Assert.False(Directory.Exists(path)));
     }
 
     [Fact]
@@ -733,7 +906,10 @@ public sealed class DurableTemplateTimingWorkflowTests : IDisposable
         int? wrongImageOrdinal = null,
         int? emptyDaemonOrdinal = null,
         int? templateRemainsInstalledOrdinal = null,
-        Action<ExternalCommandRequest>? afterRequest = null) : IExternalCommandRunner
+        Action<ExternalCommandRequest>? afterRequest = null,
+        string outputIndentation = "",
+        bool uppercaseDatabaseIdentity = false,
+        string sdkVersion = "10.0.100") : IExternalCommandRunner
     {
         private readonly Dictionary<string, int> _imageObservations = new(StringComparer.Ordinal);
         private readonly HashSet<string> _privateRoots = new(StringComparer.Ordinal);
@@ -772,7 +948,7 @@ public sealed class DurableTemplateTimingWorkflowTests : IDisposable
             if (request.FileName == "git") return Ok(SourceCommit + Environment.NewLine);
             if (request.FileName == "docker") return RunDocker(request);
             if (request.FileName != "dotnet") throw new InvalidOperationException("Unexpected fake executable.");
-            if (request.Arguments.SequenceEqual(["--version"], StringComparer.Ordinal)) return Ok("10.0.100\r\n");
+            if (request.Arguments.SequenceEqual(["--version"], StringComparer.Ordinal)) return Ok(sdkVersion + "\r\n");
             if (StartsWith(request, "new", "install") || StartsWith(request, "new", "uninstall")) return Ok();
             if (StartsWith(request, "new", "list"))
                 return Ok(templateRemainsInstalledOrdinal == ParseSampleOrdinal(request.WorkingDirectory)
@@ -853,8 +1029,27 @@ public sealed class DurableTemplateTimingWorkflowTests : IDisposable
                     output = output.Replace("[first-work-cleanup] elapsed-ms=duplicate", "[first-work-cleanup] elapsed-ms=1" + Environment.NewLine + "[first-work-cleanup] elapsed-ms=1", StringComparison.Ordinal);
                 var fault = markerFaultOrdinal == ordinal ? markerFault : null;
                 if (fault == "missing-started-ticks") output = output.Replace($"[timing-fixture] started-ticks={ticks}{Environment.NewLine}", string.Empty, StringComparison.Ordinal);
+                var invalidTicks = fault switch
+                {
+                    "invalid-started-ticks" => "not-monotonic-ticks",
+                    "stale-started-ticks" => "0",
+                    "future-started-ticks" => long.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    _ => null
+                };
+                if (invalidTicks is not null)
+                    output = output.Replace($"[timing-fixture] started-ticks={ticks}", $"[timing-fixture] started-ticks={invalidTicks}", StringComparison.Ordinal);
+                if (fault == "generated-content-mismatch")
+                    File.AppendAllText(TestPathUtils.PathUnder(generated, "README.md"), SecretSentinel);
                 if (fault == "duplicate-database-sha256") output += $"[timing-fixture] database-sha256={Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("duplicate")))}{Environment.NewLine}";
                 if (fault == "missing-cleanup-marker") output = output.Replace("[first-work-cleanup] elapsed-ms=1" + Environment.NewLine, string.Empty, StringComparison.Ordinal);
+                if (uppercaseDatabaseIdentity)
+                {
+                    var databaseHash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("timing-db-" + ordinal)));
+                    output = output.Replace(databaseHash, databaseHash.ToUpperInvariant(), StringComparison.Ordinal);
+                }
+                if (outputIndentation.Length != 0)
+                    output = string.Join(Environment.NewLine, output.Split(Environment.NewLine)
+                        .Select(line => line.Length == 0 ? line : outputIndentation + line));
                 return new(failFirstWorkOrdinal == ordinal ? 1 : 0, output, SecretSentinel,
                     StandardOutputTruncated: truncatedFirstWorkOrdinal == ordinal,
                     StandardErrorTruncated: truncatedFirstWorkErrorOrdinal == ordinal);

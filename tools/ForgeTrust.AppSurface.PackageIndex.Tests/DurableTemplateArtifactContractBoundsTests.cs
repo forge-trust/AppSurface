@@ -346,6 +346,86 @@ public sealed partial class DurableTemplateArtifactContractTests
         Assert.Throws<PackageIndexException>(() => DurableTemplateArtifactContract.ValidateGenerated(generated, "not-a-project", Version));
     }
 
+    [CaseSensitiveFileSystemFact]
+    public void GeneratedOutputRejectsCaseCollisionsBeforeValidatingTheFileInventory()
+    {
+        var generated = CreateGeneratedRoot();
+        DurableTemplateArtifactContract.ValidateGenerated(generated, GeneratedName, Version);
+        var readme = TestPathUtils.PathUnder(generated, "README.md");
+        var alias = TestPathUtils.PathUnder(generated, "readme.md");
+        File.WriteAllText(alias, "case-collision-content-sentinel");
+        Assert.NotEqual(File.ReadAllText(readme), File.ReadAllText(alias));
+
+        var error = Assert.Throws<PackageIndexException>(() =>
+            DurableTemplateArtifactContract.ValidateGenerated(generated, GeneratedName, Version));
+
+        Assert.Contains("generated project contains duplicate or case-colliding path 'readme.md'", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("case-collision-content-sentinel", error.Message, StringComparison.Ordinal);
+        File.Delete(alias);
+        DurableTemplateArtifactContract.ValidateGenerated(generated, GeneratedName, Version);
+    }
+
+    [CaseSensitiveFileSystemFact]
+    public void ProjectGraphRejectsCaseCollisionsEvenForFilesOutsideTheProjectGraph()
+    {
+        var graph = CopyAuthoredTree();
+        DurableTemplateArtifactContract.ValidateProjectVersions(graph, Version);
+        var readme = TestPathUtils.PathUnder(graph, "README.md");
+        var alias = TestPathUtils.PathUnder(graph, "readme.md");
+        File.WriteAllText(alias, "case-collision-content-sentinel");
+        Assert.NotEqual(File.ReadAllText(readme), File.ReadAllText(alias));
+
+        var error = Assert.Throws<PackageIndexException>(() =>
+            DurableTemplateArtifactContract.ValidateProjectVersions(graph, Version));
+
+        Assert.Contains("project graph contains duplicate or case-colliding path 'readme.md'", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("case-collision-content-sentinel", error.Message, StringComparison.Ordinal);
+        File.Delete(alias);
+        DurableTemplateArtifactContract.ValidateProjectVersions(graph, Version);
+    }
+
+    [Theory]
+    [InlineData("missing-content", "template content file inventory differs from the reviewed shape")]
+    [InlineData("duplicate-content", "duplicate or case-colliding path")]
+    [InlineData("duplicate-signature", "duplicate or case-colliding path")]
+    [InlineData("invalid-utf8", "template content 'README.md' is not UTF-8 text")]
+    public void GeneratedContentHashRejectsInvalidArchivesBeforeIssuingAReceipt(string fault, string diagnostic)
+    {
+        var archive = NewArchivePath();
+        WriteArchive(archive, contentOverrides: new Dictionary<string, byte[]>
+        {
+            ["README.md"] = Encoding.UTF8.GetBytes("hash-refusal-content-sentinel")
+        });
+        Assert.Matches("^[0-9a-f]{64}$", DurableTemplateArtifactContract.ComputeGeneratedContentSha256(archive, GeneratedName));
+
+        using (var zip = ZipFile.Open(archive, ZipArchiveMode.Update))
+        {
+            switch (fault)
+            {
+                case "missing-content":
+                    zip.GetEntry("content/durable-worker/README.md")!.Delete();
+                    break;
+                case "duplicate-content":
+                    AddEntry(zip, "content/durable-worker/readme.md", Encoding.UTF8.GetBytes("hash-refusal-content-sentinel"));
+                    break;
+                case "duplicate-signature":
+                    AddEntry(zip, ".signature.p7s", [1]);
+                    AddEntry(zip, ".signature.p7s", [2]);
+                    break;
+                case "invalid-utf8":
+                    zip.GetEntry("content/durable-worker/README.md")!.Delete();
+                    AddEntry(zip, "content/durable-worker/README.md", [0xFF]);
+                    break;
+            }
+        }
+
+        var error = Assert.Throws<PackageIndexException>(() =>
+            DurableTemplateArtifactContract.ComputeGeneratedContentSha256(archive, GeneratedName, allowSigningEnvelope: true));
+
+        Assert.Contains(diagnostic, error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("hash-refusal-content-sentinel", error.Message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("source-name-retained")]
     [InlineData("invalid-utf8")]

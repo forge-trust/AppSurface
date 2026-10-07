@@ -175,7 +175,7 @@ internal sealed class DurableTemplateTimingWorkflow(IExternalCommandRunner runne
             if (!long.TryParse(fixtureTicks, NumberStyles.None, CultureInfo.InvariantCulture, out var ticks) || ticks < started || ticks > Stopwatch.GetTimestamp())
                 throw new PackageIndexException("Timing fixture did not expose its monotonic build completion boundary.");
             setupSeconds = (ticks - started) / (double)Stopwatch.Frequency;
-            database = ReadMarker(result.StandardOutput, "database-sha256");
+            database = ReadMarker(result.StandardOutput, "database-sha256").ToLowerInvariant();
             if (!Regex.IsMatch(database, @"\A[0-9a-f]{64}\z", RegexOptions.CultureInvariant))
                 throw new PackageIndexException("Timing fixture database identity is missing.");
             if (mode == DurableTemplateTimingMode.Primed && setupSeconds > DurableTemplateTimingProof.PrimedSetupRestoreBuildLimitSeconds)
@@ -307,11 +307,12 @@ internal sealed class DurableTemplateTimingWorkflow(IExternalCommandRunner runne
     /// <param name="result">Completed FirstWork result; either truncated stream invalidates the observation.</param>
     /// <param name="elapsedMilliseconds">Observed nonnegative elapsed cleanup time when the observation is valid.</param>
     /// <returns>Whether one exact marker supplies a non-exhausted allowance; invalid evidence permits only a minimal attempt.</returns>
+    /// <remarks>The detailed test console logger may indent output-helper lines with horizontal whitespace.</remarks>
     private static bool TryReadChildCleanupMilliseconds(ExternalCommandResult result, out int elapsedMilliseconds)
     {
         elapsedMilliseconds = 0;
         if (result.StandardOutputTruncated || result.StandardErrorTruncated) return false;
-        var matches = Regex.Matches(result.StandardOutput, @"^\[first-work-cleanup\] elapsed-ms=([^\r\n]*)\r?$",
+        var matches = Regex.Matches(result.StandardOutput, @"^[ \t]*\[first-work-cleanup\] elapsed-ms=([^\r\n]*)\r?$",
             RegexOptions.Multiline | RegexOptions.CultureInvariant);
         return matches.Count == 1
             && int.TryParse(matches[0].Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out elapsedMilliseconds)

@@ -68,12 +68,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           if ($IsLinux) { $bin = '/usr/lib/postgresql/16/bin' }
           elseif ($IsMacOS) {
-            & brew --prefix postgresql@16 *> $null
-            if ($LASTEXITCODE -ne 0) {
-              & brew install postgresql@16
-              if ($LASTEXITCODE -ne 0) { throw 'Native PostgreSQL acquisition failed.' }
-            }
-            $bin = Join-Path ((& brew --prefix postgresql@16).Trim()) 'bin'
+            $bin = & bash .github/scripts/resolve-macos-native-postgresql.sh
+            if ($LASTEXITCODE -ne 0) { throw 'Native PostgreSQL acquisition failed.' }
           } else { $bin = $env:PGBIN }
           if ([string]::IsNullOrWhiteSpace($bin)) { throw 'Native PostgreSQL tool directory is missing.' }
           foreach ($tool in @('initdb', 'postgres', 'pg_ctl', 'psql')) {

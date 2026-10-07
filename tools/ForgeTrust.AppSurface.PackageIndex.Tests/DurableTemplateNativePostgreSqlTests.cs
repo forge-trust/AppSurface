@@ -1013,6 +1013,49 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         Assert.False(Directory.Exists(fixture.OwnedRoot));
     }
 
+    [Theory]
+    [InlineData("16.5 (Ubuntu 16.5-1.pgdg24.04+2)|160005\n")]
+    [InlineData("16.5 (Debian 16.5-1.pgdg120+1)|160005\n")]
+    public async Task DistributionServerVersionRetainsMatchingNumericToolIdentity(string serverVersion)
+    {
+        using var fixture = new NativeClusterFixture(_root);
+        fixture.Runner.ServerVersionOutput = serverVersion;
+        var cluster = await fixture.StartAsync();
+        try
+        {
+            Assert.Equal("16.5", cluster.ToolIdentity.ServerVersion);
+            Assert.Equal(160005, cluster.ToolIdentity.ServerVersionNumber);
+            Assert.True(fixture.Runtime.ServerRunning);
+        }
+        finally
+        {
+            await cluster.DisposeAsync();
+        }
+        Assert.False(fixture.Runtime.ServerRunning);
+        Assert.False(Directory.Exists(fixture.OwnedRoot));
+    }
+
+    [Theory]
+    [InlineData("16.5 (Ubuntu 16.5-1)|160006\n")]
+    [InlineData("16.5 (Ubuntu 16.5-1)|170005\n")]
+    [InlineData("16.6 (Ubuntu 16.6-1)|160006\n")]
+    [InlineData("16.999999999999999999|160005\n")]
+    [InlineData("16.5 arbitrary-text|160005\n")]
+    [InlineData("16.5 (unterminated|160005\n")]
+    [InlineData("16.5 ()|160005\n")]
+    [InlineData("16.5 ( )|160005\n")]
+    [InlineData("16.5 (\t)|160005\n")]
+    [InlineData("16.5 (nested (annotation))|160005\n")]
+    public async Task AnnotatedServerVersionStillRejectsMalformedOrMismatchedIdentity(string serverVersion)
+    {
+        using var fixture = new NativeClusterFixture(_root);
+        fixture.Runner.ServerVersionOutput = serverVersion;
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.StartAsync());
+        Assert.Contains("server version", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(fixture.Runtime.ServerRunning);
+        Assert.False(Directory.Exists(fixture.OwnedRoot));
+    }
+
     [Fact]
     public async Task OwnershipMarkerReplacementBlocksStopAndDeletion()
     {

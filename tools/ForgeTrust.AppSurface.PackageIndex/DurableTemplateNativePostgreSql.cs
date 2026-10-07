@@ -33,6 +33,9 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
     private static readonly Regex _versionPattern = new(
         @"PostgreSQL\)?\s+(?<version>\d+\.\d+(?:\.\d+)?)",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex _serverVersionPattern = new(
+        @"\A(?<version>[0-9]+\.[0-9]+(?:\.[0-9]+)?)(?: \((?<distribution>[^()\r\n|]+)\))?\z",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private readonly IExternalCommandRunner _commandRunner;
     private readonly INativePostgreSqlRuntime _runtime;
@@ -862,8 +865,13 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
     private static (string Version, int VersionNumber) ParseServerVersion(string output, string toolVersion)
     {
         var parts = output.Trim().Split('|', StringSplitOptions.TrimEntries);
+        // Distribution builds append a parenthesized label to server_version. Retain only
+        // the numeric version, then require its release identity to agree with server_version_num.
+        var versionMatch = parts.Length == 2 ? _serverVersionPattern.Match(parts[0]) : Match.Empty;
         if (parts.Length != 2
-            || !Version.TryParse(parts[0], out var serverVersion)
+            || !versionMatch.Success
+            || versionMatch.Groups["distribution"].Success && string.IsNullOrWhiteSpace(versionMatch.Groups["distribution"].Value)
+            || !Version.TryParse(versionMatch.Groups["version"].Value, out var serverVersion)
             || !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var versionNumber)
             || versionNumber < 160000)
         {
@@ -872,6 +880,8 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
 
         var toolParts = toolVersion.Split('.');
         if (toolParts.Length < 2
+            || versionNumber / 10000 != serverVersion.Major
+            || versionNumber % 10000 != serverVersion.Minor
             || serverVersion.Major.ToString(CultureInfo.InvariantCulture) != toolParts[0]
             || serverVersion.Minor.ToString(CultureInfo.InvariantCulture) != toolParts[1])
         {
