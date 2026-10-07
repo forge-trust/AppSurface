@@ -19,7 +19,7 @@ import time
 
 HEAD = '2993dcfaac1b9b6dfb8adf057191f837876f01fe'
 PARENT = '4dd992ec1bc2df8220c73149115c5b478edb0085'
-HARNESS_PARENT = '4100f73363fc33716923371aa3b3b26708398645'
+HARNESS_PARENT = 'e95a4e84bcba7f4974d8b188286b1e8f87139a2b'
 TREE = '190d0b2066d4df980715f31642b4a38198094123'
 CAPTURE_SHA = 'b8772a5cd9686c3f5c7e65278102c397ea1d1c1af9b047140b9b4de15a997fb8'
 CAPTURE_PROJECTION_SHA = '5917596232d55365c39e460f611efeef46db9a74b289732c4c6f80d5388401d6'
@@ -208,8 +208,11 @@ def run(argv, cwd, read_stdout=True, child_umask=-1):
             if process.poll() is not None:
                 record['exit'] = process.wait()
                 record['waited'] = True
-                require(group_absent(process.pid), 'surviving-command-group')
-                break
+                # Leader exit is not descendant completion. Join the same real
+                # process group within the ORIGINAL command/log bounds; never
+                # reset its allowance or accept forced cleanup as success.
+                if group_absent(process.pid):
+                    break
             time.sleep(min(.02, max(0, command_end - time.monotonic())))
     except BaseException as error:
         failure = error
@@ -250,6 +253,11 @@ def run(argv, cwd, read_stdout=True, child_umask=-1):
                 except BaseException as error:
                     record['logs'].append({'name': path.name, 'hash_error': type(error).__name__})
                     failure = failure or error
+        # Final bytes may arrive between the last poll and group absence.
+        # Reconcile the aggregate after final per-file hashing, preserving the
+        # first failure and every already-completed cleanup operation.
+        if LOG_BYTES > ALL_LOG_CAP:
+            failure = failure or BuildFailure('aggregate-log-bound')
         if time.monotonic() >= WORK:
             record['late_completion'] = True
             failure = failure or TimeoutError('late-command-completion')
