@@ -353,6 +353,12 @@ Enabled notification mode creates one dedicated `LISTEN appsurface_durable_wake`
 metadata-only notification payloads; polling remains the recovery path for lost, duplicate, delayed, or unavailable
 hints. A receipt never authorizes a claim.
 
+Listener connection failures and timeouts use the configured
+[`TransientFailureDelay`](#run-a-worker-host) before reconnecting. Stopping the hosted service cancels its dedicated
+listener token, including a pending retry delay, and completes without treating that expected cancellation as a
+shutdown failure. This stop does not require `ApplicationStopping` to have fired. Other listener faults remain
+observable, and the host's stop token still bounds how long shutdown waits.
+
 Resolve [`IDurableRuntimeHealth`](../ForgeTrust.AppSurface.Durable.Provider/README.md#public-api-by-audience) through
 an application-owned authorized health endpoint. `Healthy` is the only ready state; every other state is intentionally
 not ready, including `NotStarted`, `Stale`, `Draining`, `Incompatible`, and `Unavailable`. Snapshots contain aggregate counts and fixed codes only—never payload,

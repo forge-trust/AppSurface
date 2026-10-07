@@ -84,12 +84,25 @@ internal static class DurableTemplateCommand
             if (!result.StandardOutput.Contains("[native-smoke] read-only ordinary startup passed", StringComparison.Ordinal))
                 throw new PackageIndexException("Native ordinary-startup assertion checkpoint is missing.");
         }
+        catch (Exception exception)
+        {
+            NativePostgreSqlFailure.Annotate(exception, NativePostgreSqlFailureStage.Smoke);
+            throw;
+        }
         finally
         {
-            if (disposeClusterAsync is null)
-                await cluster.DisposeWithBudgetAsync(Math.Max(1, cleanupRemaining));
-            else
-                await disposeClusterAsync(cluster, Math.Max(1, cleanupRemaining));
+            try
+            {
+                if (disposeClusterAsync is null)
+                    await cluster.DisposeWithBudgetAsync(Math.Max(1, cleanupRemaining));
+                else
+                    await disposeClusterAsync(cluster, Math.Max(1, cleanupRemaining));
+            }
+            catch (Exception exception)
+            {
+                NativePostgreSqlFailure.Annotate(exception, NativePostgreSqlFailureStage.Cleanup);
+                throw;
+            }
         }
     }
 

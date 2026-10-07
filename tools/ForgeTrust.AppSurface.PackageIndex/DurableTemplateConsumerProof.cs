@@ -33,7 +33,8 @@ internal sealed record DurableTemplateProofPhase(string Id, double ElapsedSecond
 /// <summary>The version-one local receipt, emitted successfully only after assertions and owned cleanup finish.</summary>
 /// <remarks>Local receipts reuse trusted workflow provenance; this format asserts no portable authenticity.
 /// RunnerImage contains the hosted runner's ImageOS/ImageVersion identity, or is empty for a local diagnostic
-/// without those observations. An empty identity cannot authorize publication.</remarks>
+/// without those observations. An empty identity cannot authorize publication. Failed native proofs use a fixed
+/// native stage identifier in FailurePhase; raw exception messages and child output are never projected.</remarks>
 internal sealed record DurableTemplateProofReceipt(
     int SchemaVersion, string SourceCommit, string PackageVersion, string RuntimeIdentifier, string SdkVersion,
     string Image, string Mode, IReadOnlyList<DurableTemplateProofArtifact> Artifacts,
@@ -215,7 +216,9 @@ internal sealed class DurableTemplateConsumerProof(IExternalCommandRunner comman
         catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
         {
             failure = cancellationToken.IsCancellationRequested ? "TemplateProofCancelled" : "TemplateProofFailed";
-            failurePhase = currentPhase;
+            failurePhase = currentPhase == "native-smoke"
+                ? NativePostgreSqlFailure.ReadReceiptPhase(exception) ?? currentPhase
+                : currentPhase;
             // Raw process/provider errors can carry credentials. Receipt records only a stable phase/code and retry link.
             succeeded = false;
         }

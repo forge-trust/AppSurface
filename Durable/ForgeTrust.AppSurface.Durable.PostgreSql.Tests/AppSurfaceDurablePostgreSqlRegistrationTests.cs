@@ -1100,7 +1100,7 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
     }
 
     [Fact]
-    public async Task HostedLifecycle_RetriesAListenerConnectionFailureBeforeShutdownCancellation()
+    public async Task HostedStop_CancelsListenerConnectionFailureRetryWithoutThrowing()
     {
         using var dispatcher = CreateDataSource();
         using var runtime = NpgsqlDataSource.Create(
@@ -1115,15 +1115,16 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
             new TestHostApplicationLifetime(),
             "hosted-listener-retry-worker",
             sendWakeNotifications: true,
-            logger);
+            logger,
+            transientFailureDelay: TimeSpan.FromMinutes(1));
 
         await hosted.StartAsync(CancellationToken.None);
         await logger.RetryLogged.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await Assert.ThrowsAsync<TaskCanceledException>(() => hosted.StopAsync(CancellationToken.None));
+        await hosted.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
-    public async Task HostedLifecycle_RetriesAListenerTimeoutBeforeShutdownCancellation()
+    public async Task HostedStop_CancelsListenerTimeoutRetryWithoutThrowing()
     {
         using var dispatcher = CreateDataSource();
         var dataSourceBuilder = new NpgsqlDataSourceBuilder(
@@ -1142,11 +1143,12 @@ public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
             new TestHostApplicationLifetime(),
             "hosted-listener-timeout-worker",
             sendWakeNotifications: true,
-            logger);
+            logger,
+            transientFailureDelay: TimeSpan.FromMinutes(1));
 
         await hosted.StartAsync(CancellationToken.None);
         await logger.RetryLogged.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await Assert.ThrowsAsync<TaskCanceledException>(() => hosted.StopAsync(CancellationToken.None));
+        await hosted.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]

@@ -153,9 +153,12 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
         timeouts.Validate();
         if (host.IsRunningAsRoot)
         {
-            throw new PackageIndexException("Native PostgreSQL setup must run as the ordinary runner user, not root.");
+            var failure = new PackageIndexException("Native PostgreSQL setup must run as the ordinary runner user, not root.");
+            NativePostgreSqlFailure.Annotate(failure, NativePostgreSqlFailureStage.Ownership);
+            throw failure;
         }
 
+        var failureStage = NativePostgreSqlFailureStage.Acquisition;
         try
         {
             var acquisitionClock = Stopwatch.StartNew();
@@ -170,6 +173,7 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
                 acquisitionClock,
                 cancellationToken);
 
+            failureStage = NativePostgreSqlFailureStage.Ownership;
             RequireFreshOwnedRoot(ownedRoot);
             var root = Path.GetFullPath(ownedRoot);
             var port = host.ReserveLoopbackPort();
@@ -234,7 +238,15 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
             }
             catch (OperationCanceledException)
             {
-                await cluster.CleanupAfterFailedStartAsync();
+                try
+                {
+                    await cluster.CleanupAfterFailedStartAsync();
+                }
+                catch (Exception exception)
+                {
+                    NativePostgreSqlFailure.Annotate(exception, NativePostgreSqlFailureStage.Cleanup);
+                    throw;
+                }
                 throw;
             }
             catch
@@ -246,15 +258,26 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
                 }
                 catch (PackageIndexException)
                 {
-                    throw new PackageIndexException(
+                    var cleanupFailure = new PackageIndexException(
                         $"Native PostgreSQL setup failed during {failedPhase}; stop could not be verified, so the owned root was retained at '{root}'.");
+                    NativePostgreSqlFailure.Annotate(cleanupFailure, NativePostgreSqlFailureStage.Cleanup);
+                    throw cleanupFailure;
                 }
 
-                throw new PackageIndexException($"Native PostgreSQL setup failed during {failedPhase}; child diagnostics were suppressed.");
+                var failure = new PackageIndexException($"Native PostgreSQL setup failed during {failedPhase}; child diagnostics were suppressed.");
+                NativePostgreSqlFailure.Annotate(failure, failedPhase switch
+                {
+                    "initdb" => NativePostgreSqlFailureStage.InitDb,
+                    "SCRAM authentication" => NativePostgreSqlFailureStage.Authentication,
+                    "pg_ctl start" or "loopback port check" or "server version verification" => NativePostgreSqlFailureStage.Startup,
+                    _ => NativePostgreSqlFailureStage.Ownership
+                });
+                throw failure;
             }
         }
-        catch (PackageIndexException)
+        catch (PackageIndexException exception)
         {
+            NativePostgreSqlFailure.Annotate(exception, failureStage);
             throw;
         }
         catch (OperationCanceledException)
@@ -263,8 +286,10 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
         }
         catch (Exception exception)
         {
-            throw new PackageIndexException(
+            var failure = new PackageIndexException(
                 $"Native PostgreSQL setup failed ({exception.GetType().Name}); child diagnostics were suppressed.");
+            NativePostgreSqlFailure.Annotate(failure, failureStage);
+            throw failure;
         }
     }
 
@@ -1679,4 +1704,56 @@ internal sealed class NativePostgreSqlRuntime : INativePostgreSqlRuntime
 
     [DllImport("libc", EntryPoint = "geteuid")]
     private static extern uint GetEffectiveUserId();
+}
+
+/// <summary>Closed native failure categories; these identify an observation boundary, not a root cause.</summary>
+internal enum NativePostgreSqlFailureStage
+{
+    /// <summary>Tool directory, binary or version acquisition failed.</summary>
+    Acquisition,
+    /// <summary>Private cluster initialization failed.</summary>
+    InitDb,
+    /// <summary>Server startup, port or server-version verification failed.</summary>
+    Startup,
+    /// <summary>Private filesystem or process ownership validation failed.</summary>
+    Ownership,
+    /// <summary>The generated bootstrap credential was not accepted.</summary>
+    Authentication,
+    /// <summary>The generated ordinary-startup smoke did not complete its required proof.</summary>
+    Smoke,
+    /// <summary>Owned cluster cleanup could not be verified.</summary>
+    Cleanup
+}
+
+/// <summary>Attaches and projects closed native stages without inspecting or retaining exception diagnostics.</summary>
+/// <remarks>The private key prevents unrelated exception metadata from entering the receipt. The first annotation
+/// survives outer setup wrappers; only the fixed projection enters the existing version-one FailurePhase field.
+/// Exception types, messages, cancellation and cleanup behavior are unchanged.</remarks>
+internal static class NativePostgreSqlFailure
+{
+    private static readonly object StageKey = new();
+
+    /// <summary>Records a native boundary on an existing exception without replacing a more specific annotation.</summary>
+    /// <param name="exception">Original exception; its type and diagnostics remain owned by the caller.</param>
+    /// <param name="stage">Closed observation category; undefined values cannot produce receipt text.</param>
+    internal static void Annotate(Exception exception, NativePostgreSqlFailureStage stage)
+    {
+        if (!exception.Data.Contains(StageKey)) exception.Data[StageKey] = stage;
+    }
+
+    /// <summary>Returns a fixed receipt identifier, or null when no supported native annotation exists.</summary>
+    /// <param name="exception">Failure to inspect without reading its message or other metadata.</param>
+    /// <returns>A bounded native stage identifier, or null for an unannotated or unsupported category.</returns>
+    /// <remarks>Undefined enum values and arbitrary metadata never become receipt text.</remarks>
+    internal static string? ReadReceiptPhase(Exception exception) => exception.Data[StageKey] switch
+    {
+        NativePostgreSqlFailureStage.Acquisition => "native-acquisition",
+        NativePostgreSqlFailureStage.InitDb => "native-initdb",
+        NativePostgreSqlFailureStage.Startup => "native-startup",
+        NativePostgreSqlFailureStage.Ownership => "native-ownership",
+        NativePostgreSqlFailureStage.Authentication => "native-authentication",
+        NativePostgreSqlFailureStage.Smoke => "native-smoke-execution",
+        NativePostgreSqlFailureStage.Cleanup => "native-cleanup",
+        _ => null
+    };
 }

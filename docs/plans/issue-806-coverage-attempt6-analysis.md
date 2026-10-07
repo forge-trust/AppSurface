@@ -1,6 +1,6 @@
 # Issue #806 coverage attempt 6
 
-The [unchanged solution coverage command](../../scripts/coverage-solution.sh) ran with its actual native prerequisite:
+The [unchanged solution coverage command](https://github.com/forge-trust/AppSurface/blob/a628c7588b22732b4adc8131ce3be0b35fa973d6/scripts/coverage-solution.sh) ran with its actual native prerequisite:
 
 ```sh
 APPSURFACE_TEMPLATE_TEST_NATIVE_PG_BIN=/private/tmp/issue806-native-tools/install/bin ./scripts/coverage-solution.sh

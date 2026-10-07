@@ -237,6 +237,40 @@ public sealed class DurableTemplateConsumerProofTests : IDisposable
     }
 
     [Theory]
+    [InlineData(0, "native-acquisition")]
+    [InlineData(1, "native-initdb")]
+    [InlineData(2, "native-startup")]
+    [InlineData(3, "native-ownership")]
+    [InlineData(4, "native-authentication")]
+    [InlineData(5, "native-smoke-execution")]
+    [InlineData(6, "native-cleanup")]
+    [InlineData(99, "native-smoke")]
+    public async Task NativeFailureReceiptProjectsOnlyClosedStagesAndNeverCallbackDiagnostics(int stage, string expectedPhase)
+    {
+        var runner = new DeterministicRunner(_stagedTemplate, _providerArchive);
+        var receiptPath = Path.Join(_root, "native-stage-failure.json");
+        var failure = new InvalidOperationException(SecretSentinel);
+        NativePostgreSqlFailure.Annotate(failure, (NativePostgreSqlFailureStage)stage);
+
+        var receipt = await new DurableTemplateConsumerProof(runner).RunAsync(
+            CreateRequest(receiptPath, runNativeSmoke: true), CandidateArtifacts(),
+            nativeSmoke: (_, _, _) => throw failure);
+
+        Assert.Equal(1, receipt.SchemaVersion);
+        Assert.False(receipt.Succeeded);
+        Assert.Equal("TemplateProofFailed", receipt.FailureCode);
+        Assert.Equal(expectedPhase, receipt.FailurePhase);
+        Assert.True(receipt.CleanupComplete);
+        Assert.False(receipt.NativeSmoke);
+        Assert.Null(receipt.NativeTools);
+        Assert.False(receipt.SampleReplacement);
+        var serialized = File.ReadAllText(receiptPath);
+        Assert.Contains(expectedPhase, serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain(SecretSentinel, serialized, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(runner.ProofRoot));
+    }
+
+    [Theory]
     [InlineData("authored-restore")]
     [InlineData("authored-build")]
     [InlineData("authored-format")]

@@ -277,6 +277,7 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
 
         var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.StartAsync());
 
+        Assert.Equal("native-initdb", NativePostgreSqlFailure.ReadReceiptPhase(error));
         Assert.Contains("initdb", error.Message, StringComparison.OrdinalIgnoreCase);
         var bootstrap = Assert.IsType<NativePostgreSqlBootstrapRequest>(fixture.Bootstrap.Request);
         var secret = bootstrap.StandardInput.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)[0];
@@ -293,6 +294,7 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
 
         var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.StartAsync());
 
+        Assert.Equal("native-initdb", NativePostgreSqlFailure.ReadReceiptPhase(error));
         Assert.Contains("initdb", error.Message, StringComparison.OrdinalIgnoreCase);
         var bootstrap = Assert.IsType<NativePostgreSqlBootstrapRequest>(fixture.Bootstrap.Request);
         var secret = bootstrap.StandardInput.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)[0];
@@ -312,6 +314,7 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
 
         var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.StartAsync());
 
+        Assert.Equal("native-cleanup", NativePostgreSqlFailure.ReadReceiptPhase(error));
         Assert.Contains("retained", error.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("initdb", error.Message, StringComparison.OrdinalIgnoreCase);
         Assert.True(Directory.Exists(fixture.OwnedRoot));

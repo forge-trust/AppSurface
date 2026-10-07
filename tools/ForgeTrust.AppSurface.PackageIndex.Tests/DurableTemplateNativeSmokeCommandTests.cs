@@ -59,6 +59,7 @@ public sealed class DurableTemplateNativeSmokeCommandTests
 
         var error = await Assert.ThrowsAsync<PackageIndexException>(() => RunSmokeAsync(fixture, CreateEnvironment()));
 
+        Assert.Equal("native-smoke-execution", NativePostgreSqlFailure.ReadReceiptPhase(error));
         Assert.Contains("failed or its bounded capture was truncated", error.Message, StringComparison.Ordinal);
         Assert.Equal(19_750, Assert.Single(fixture.CleanupBudgets));
         AssertClusterWasCleaned(fixture, Assert.IsType<DurableTemplateNativePostgreSql>(fixture.StartedCluster));
@@ -120,6 +121,7 @@ public sealed class DurableTemplateNativeSmokeCommandTests
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => RunSmokeAsync(fixture, CreateEnvironment()));
 
+        Assert.Equal("native-smoke-execution", NativePostgreSqlFailure.ReadReceiptPhase(error));
         Assert.Equal("private runner detail", error.Message);
         Assert.Equal(20_000, Assert.Single(fixture.CleanupBudgets));
         AssertClusterWasCleaned(fixture, Assert.IsType<DurableTemplateNativePostgreSql>(fixture.StartedCluster));
@@ -174,6 +176,7 @@ public sealed class DurableTemplateNativeSmokeCommandTests
 
         var error = await Assert.ThrowsAsync<PackageIndexException>(() => RunSmokeAsync(fixture, CreateEnvironment()));
 
+        Assert.Equal("native-cleanup", NativePostgreSqlFailure.ReadReceiptPhase(error));
         Assert.Equal("owned cluster cleanup was not verified", error.Message);
         Assert.Equal(19_750, Assert.Single(fixture.CleanupBudgets));
         AssertClusterWasCleaned(fixture, Assert.IsType<DurableTemplateNativePostgreSql>(fixture.StartedCluster));

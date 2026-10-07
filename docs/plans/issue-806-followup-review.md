@@ -30,7 +30,7 @@ The user requested another review pass after approving final gate D1=A. The pass
 | Claude Code outside review | Unavailable | No outside-provider completion or cross-model consensus claimed. |
 | CEO/design/DX full re-review | Not rerun | Targeted follow-up; earlier phase findings/scores retained, Design remains inapplicable. |
 
-The exact final reviewer input was `94b8899d323641f70242307fc26b7524c803dbbe4998b08ff0db4432075d227a`. The native route requested combo/sub; provider/model identity was not reported. The full final verdict and immutable inputs are saved under [follow-up archive](/Users/andrew/.gstack/projects/forge-trust-AppSurface/issue806-review-followup-20261004T064120Z). The full final verdict follows with line-break spacing normalized; its original /tmp references identify the frozen input. Archived copies are the durable handoff.
+The exact final reviewer input was `94b8899d323641f70242307fc26b7524c803dbbe4998b08ff0db4432075d227a`. The native route requested combo/sub; provider/model identity was not reported. The full final verdict and immutable inputs are saved under follow-up archive (`/Users/andrew/.gstack/projects/forge-trust-AppSurface/issue806-review-followup-20261004T064120Z`). The full final verdict follows with line-break spacing normalized; its original /tmp references identify the frozen input. Archived copies are the durable handoff.
 
 # Issue #806 final engineering remedy recheck
 
