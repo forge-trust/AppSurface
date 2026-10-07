@@ -79,7 +79,7 @@ public sealed class FirstDurableWorkTests
                 [WorkerApplication.DevelopmentTokenKey] = token,
             });
             builder.Services.AddOpenTelemetry().WithTracing(tracing => tracing
-                .AddProcessor(new SimpleActivityExportProcessor(activityExporter)));
+                .AddProcessor(_ => new SimpleActivityExportProcessor(activityExporter)));
 
             using (var startup = new CancellationTokenSource(FixtureBudgets.HostStartup))
             {

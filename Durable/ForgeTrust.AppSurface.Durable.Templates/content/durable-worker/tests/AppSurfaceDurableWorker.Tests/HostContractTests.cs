@@ -350,6 +350,10 @@ public sealed class HostContractTests
     public async Task Failed_schema_identity_validation_disposes_sources_before_any_listener_is_built()
     {
         var builder = CreateStartupBuilder(Environments.Development);
+        var processorAllocations = 0;
+        using var exporter = new ActivityExporter();
+        builder.Services.AddOpenTelemetry().WithTracing(tracing => tracing
+            .AddProcessor(_ => CreateProcessor()));
         WorkerDataSources? createdSources = null;
         var mismatch = CompatibleSchemaStatus(storeId: Guid.NewGuid());
 
@@ -360,8 +364,15 @@ public sealed class HostContractTests
             TimeSpan.FromSeconds(2)));
 
         Assert.Contains("StoreId", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, processorAllocations);
         Assert.NotNull(createdSources);
         await AssertDataSourcesDisposedAsync(createdSources);
+
+        BaseProcessor<Activity> CreateProcessor()
+        {
+            processorAllocations++;
+            return new SimpleActivityExportProcessor(exporter);
+        }
     }
 
     [Fact]
