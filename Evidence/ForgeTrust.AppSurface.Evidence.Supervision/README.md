@@ -428,6 +428,21 @@ until the actual start has joined. `CloseWriteCopies` never closes systemd's tra
 and preserves close failure; cancellation cannot fabricate EOF. Its portable ownership seam supplies no
 native pipe or account authority.
 
+`LinuxOutputPipes.WrapOwnedRead(SafeFileHandle)` transfers an exclusively owned read handle to a
+4096-byte buffered read stream without duplicating the descriptor. The three-argument
+[`FileStream` handle constructor](https://learn.microsoft.com/dotnet/api/system.io.filestream.-ctor)
+derives the stream's asynchronous mode from the handle. A newly wrapped raw Unix descriptor is not
+marked asynchronous: passing `isAsync: true` explicitly rejects that handle before collection begins.
+The caller retains the handle if construction fails; successful construction transfers it to the stream.
+Do not toggle handle flags or force the Windows overlapped mode to work around this mismatch.
+`ReadAsync` remains available with the derived mode; the [counted collector](#counted-output) retains
+and joins both original read tasks. This wrapper is a stream-ownership seam, not a Linux pipe factory:
+the actual factory still performs every platform, root UID/GID, FIFO, access-mode and CLOEXEC check.
+Its real anonymous-pipe regression uses the same wrapper without root privileges, checks both byte
+prefixes and pending EOF while writers remain open, and closes readers only after the paired join.
+The test also collects on Windows without forcing Unix or overlapped flags; it makes no Linux
+factory, cgroup, account or native acceptance claim on any platform.
+
 At this foundation checkpoint the early supervisor role remained closed until root server dispatch, worker/kernel binding, final
 custody and all sixteen native controls are complete. These account/workspace paths do not enroll a
 production catalogue entry or qualify Trusted execution.

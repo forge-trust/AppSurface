@@ -1,5 +1,6 @@
 using System.IO.Pipes;
 using System.Text;
+using Microsoft.Win32.SafeHandles;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
 
@@ -337,6 +338,86 @@ public sealed class LinuxOutputPipesTests
         }
         Assert.Equal(1, first.CloseCount);
         Assert.Equal(1, second.CloseCount);
+    }
+
+    [Fact]
+    public async Task OwnedRawPipeReadWrappingUsesHandleModeAndJoinsBothEofs()
+    {
+        var stdout = PortablePipe();
+        using var stdoutServer = stdout.Read;
+        using var stdoutWriter = stdout.Write;
+        var stderr = PortablePipe();
+        using var stderrServer = stderr.Read;
+        using var stderrWriter = stderr.Write;
+        var stdoutWriteHandle = stdoutWriter.SafePipeHandle;
+        var stderrWriteHandle = stderrWriter.SafePipeHandle;
+        using var stdoutHandle = TakeOwnedReadHandle(stdoutServer);
+        using var stderrHandle = TakeOwnedReadHandle(stderrServer);
+        using var stdoutRead = LinuxOutputPipes.WrapOwnedRead(stdoutHandle);
+        using var stderrRead = LinuxOutputPipes.WrapOwnedRead(stderrHandle);
+        if (!OperatingSystem.IsWindows())
+        {
+            // The actual Unix raw-handle wrapping path must not force an asynchronous handle flag.
+            Assert.False(stdoutRead.IsAsync);
+            Assert.False(stderrRead.IsAsync);
+        }
+        Assert.Same(stdoutHandle, stdoutRead.SafeFileHandle);
+        Assert.Same(stderrHandle, stderrRead.SafeFileHandle);
+        await using var owner = new SupervisionOutputPipeOwnership(stdoutRead, stderrRead,
+            stdoutWriter, stderrWriter);
+        var collection = owner.BeginCollectAsync(default, receivedByteLimit: 128 * 1024, prefixByteLimit: 32);
+        var output = Encoding.UTF8.GetBytes("stdout-data");
+        var error = Encoding.UTF8.GetBytes("stderr-data");
+        try
+        {
+            await stdoutWriter.WriteAsync(output).AsTask().WaitAsync(Guard);
+            await stderrWriter.WriteAsync(error).AsTask().WaitAsync(Guard);
+            await stdoutWriter.FlushAsync().WaitAsync(Guard);
+            await stderrWriter.FlushAsync().WaitAsync(Guard);
+            Assert.Same(collection, owner.JoinAsync());
+            Assert.False(collection.IsCompleted);
+            Assert.False(stdoutHandle.IsClosed);
+            Assert.False(stderrHandle.IsClosed);
+        }
+        finally
+        {
+            owner.CloseWriteCopies();
+            await collection.WaitAsync(Guard);
+        }
+        var receipt = await owner.JoinAsync();
+        Assert.True(receipt.Successful);
+        Assert.True(receipt.Stdout.EndOfStream);
+        Assert.True(receipt.Stderr.EndOfStream);
+        Assert.Equal(output.Length + error.Length, receipt.ReceivedBytes);
+        Assert.Equal(0, receipt.DiscardedBytes);
+        Assert.Equal(output, receipt.Stdout.Prefix.ToArray());
+        Assert.Equal(error, receipt.Stderr.Prefix.ToArray());
+        Assert.True(stdoutWriteHandle.IsClosed);
+        Assert.True(stderrWriteHandle.IsClosed);
+        Assert.False(stdoutHandle.IsClosed);
+        Assert.False(stderrHandle.IsClosed);
+        await owner.DisposeAsync();
+        Assert.True(stdoutHandle.IsClosed);
+        Assert.True(stderrHandle.IsClosed);
+    }
+
+    /// <summary>Moves one actual fixture read endpoint from its pipe handle to one owned file handle.</summary>
+    /// <remarks>The server remains retained; its shared writer closes only through the original pipe owner.</remarks>
+    private static SafeFileHandle TakeOwnedReadHandle(AnonymousPipeServerStream server)
+    {
+        var original = server.SafePipeHandle;
+        var retained = false;
+        try
+        {
+            original.DangerousAddRef(ref retained);
+            var owned = new SafeFileHandle(original.DangerousGetHandle(), ownsHandle: true);
+            original.SetHandleAsInvalid(); // Prevent a second owner from closing the transferred descriptor.
+            return owned;
+        }
+        finally
+        {
+            if (retained) original.DangerousRelease();
+        }
     }
 
     private static (AnonymousPipeServerStream Read, AnonymousPipeClientStream Write) PortablePipe()
