@@ -15,15 +15,15 @@ import tarfile
 import time
 import uuid
 
-SOURCE = '5d1036b7035a7d9e980cdab5afc88879fca5048c'
-PARENT = '1e3c586ef2a3d196f7abcb2ba7aaa6956c1fe21d'
-SOURCE_MAP = 'ebc6e6815e7e951789fe58ec6bddb194013f8c9faaaa944a123231be69a6b1d0'
+SOURCE = '64b1c8ee6a9b7e4c1acec0f192150147a429cb91'
+PARENT = '10a2f2038694ceb047fa8cf9f5068737529f8eef'
+SOURCE_MAP = '98938d9b273b2207a916d27cb9c1a3e1a5355564e8506fdd0e7dfb6114a23852'
 PINS = {
-    'prepare-root-inputs-v2.sh': 'd222bc236610245731b97dce16a9d26bde1822ba6d15547c14df1738563da9e2',
-    'checkpoint-n01-n02-v5.sh': 'fc4a8ffa9e9aad8f392f7f719e1265ec3d84168f669cbee58a9c9a045af4a21c',
+    'prepare-root-inputs-v2.sh': '423df7eb31969718682820484e8d100fa8e205f0f5728602ff81bc630c2277a2',
+    'checkpoint-n01-n02-v5.sh': '3582c6f80898d641b80359b6977b596b24b89c59347d9f1f407d3d69ad252aeb',
     'prepare-os-audit-v2.py': 'a76d3ec9521f021e799b8b56a6c57afdbeb6d4abdb21a55f42899a834eed4604',
-    'source-review.json': 'ee6fa029cf2873a18b849f6e5590f3dd792ee71fa88f3409100ff802df3b4ca0',
-    'acquire-inbound.sh': '03c4d63d0c86de4e8ee45b0f19a4c6419c77904637826f90a9e01355b7eb3033',
+    'source-review.json': 'd5684ca322312399925d397ba5b3a94ddba47e12a060ecc35782edd488e9665b',
+    'acquire-inbound.sh': '765cff4e086d5ebd839338cbe3856b028fd5777dce30df085b4e4d9a076d18c5',
     'retain-native.sh': 'a6bc3da869386b440d0b8a2ad93eb3cb888a4e48aabe52febf6a609b33d45331',
 }
 ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',
@@ -188,7 +188,7 @@ def validate_build(receipt, maps):
                 and row['forced_cleanup'] is False, 'build-command-terminal')
     for phase in ('source_before', 'source_after_assets', 'source_after_build', 'source_final'):
         fact = receipt[phase]
-        require(fact['head'] == SOURCE and fact['count'] == 2819 and fact['source_map_sha256'] == SOURCE_MAP
+        require(fact['head'] == SOURCE and fact['count'] == 2821 and fact['source_map_sha256'] == SOURCE_MAP
                 and all(fact[name] is True for name in ('index_tree_matches', 'physical_git_sha1', 'physical_sha256_modes')), 'build-source')
     require(set(receipt['artifacts']) == {'source', 'tool', 'runtime'}, 'build-map-set')
     for name, fact in receipt['artifacts'].items():
@@ -200,7 +200,7 @@ def validate_build(receipt, maps):
                 'node-schema')
         require(len(nodes['files']) == fact['file_count'] and len(nodes['files']) + len(nodes['directories']) == fact['node_count']
                 and sum(row['bytes'] for row in nodes['files'].values()) == fact['total_bytes'], 'node-counts')
-    require(receipt['artifacts']['source']['file_count'] == 2819, 'source-count')
+    require(receipt['artifacts']['source']['file_count'] == 2821, 'source-count')
 
 
 def absent(pid):

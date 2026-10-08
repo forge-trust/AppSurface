@@ -454,7 +454,7 @@ pin_file "$build_receipt" "$build_receipt_sha256" "$MAX_NODE_JSON_BYTES"
 bounded jq -e --arg source "$source_revision" --arg sn "$source_nodes_sha256" --arg pn "$payload_nodes_sha256" --arg rn "$runtime_nodes_sha256" \
  --arg st "$source_manifest_sha256" --arg pt "$payload_manifest_sha256" --arg rt "$runtime_manifest_sha256" '
  .schema=="issue779-csharp-fdd-build-v5" and .exit==0 and
- .source_commit==$source and $source=="5d1036b7035a7d9e980cdab5afc88879fca5048c" and
+ .source_commit==$source and $source=="64b1c8ee6a9b7e4c1acec0f192150147a429cb91" and
  .native_execution==false and .checkpoint_pass==false and .build_prerequisite_only==true and
  (.artifacts|type=="object" and keys==["runtime","source","tool"]) and
  .artifacts.source.nodes_sha256==$sn and .artifacts.tool.nodes_sha256==$pn and .artifacts.runtime.nodes_sha256==$rn and
@@ -748,7 +748,12 @@ pin_owned_pg "$launch_pid"
  done; exit 1
 ' -- "$work_end" "$worker" "$host" "$managed" "/run/appsurface-evidence-$G/worker/broker/control.sock" "${names[0]}" "$private/worker-live.json" >"$log/observer.stdout" 2>"$log/observer.stderr") & observer_pid=$!
 pin_owned_pg "$observer_pid"
-set +e; join_owned launch_pid; n01=$?; join_owned observer_pid; observed=$?; set -e
+set +e; join_owned launch_pid; n01=$?; set -e
+if ((n01 != 0)); then
+ printf 'FIXTURE_N01_LAUNCH_JOIN_STATUS:%d\n' "$n01" >&2
+ fail N01-launch-outcome
+fi
+set +e; join_owned observer_pid; observed=$?; set -e
 # The join retires every fully settled registration; failed exits stay failed.
 [[ $n01 == 0 && $observed == 0 && -s $private/worker-live.json ]] || fail N01-outcome
 [[ $(bounded stat -c %s "$log/n01.stdout") -le 4096 && ! -s $log/n01.stderr ]] || fail N01-console-bound

@@ -1,7 +1,7 @@
 name: C# Linux native N01/N02 checkpoint
 on:
   push:
-    branches: [codex/issue779-csharp-linux-native-20261008-retry-13]
+    branches: [codex/issue779-csharp-linux-native-20261008-retry-14]
 permissions:
   contents: read
 concurrency:
@@ -15,25 +15,25 @@ jobs:
       # Promotion requires frozen source reviews and a complete native handoff.
       # Promote only after full source composition review; no native passing claim.
       UBUNTU_RUNTIME_REVIEWED: 'true'
-      UBUNTU_RUNTIME_SCRIPT_SHA256: ffdad082e9cb53e2d2709a1b44e036b25d9345aa1a1f30d0fa8b1b9a70540ca7
+      UBUNTU_RUNTIME_SCRIPT_SHA256: 25804b816155e1bba931a23d4cfe7abf63b5366aa6c4b0a00ec4380d691fbfbf
       BUILD_REVIEWED: 'true'
-      BUILD_SCRIPT_SHA256: 09387684b042e8fa6aaee9c885680476d787b028466ab6bf59f832b4aadb71d5
+      BUILD_SCRIPT_SHA256: 55d85fa75ade71f9e909a07ae071638d0c3255d3354dddddb559524ab1d32c49
       ROOT_TRANSPORT_REVIEWED: 'true'
-      ROOT_TRANSPORT_SHA256: d222bc236610245731b97dce16a9d26bde1822ba6d15547c14df1738563da9e2
+      ROOT_TRANSPORT_SHA256: 423df7eb31969718682820484e8d100fa8e205f0f5728602ff81bc630c2277a2
       FIXTURE_REVIEWED: 'true'
-      FIXTURE_SHA256: fc4a8ffa9e9aad8f392f7f719e1265ec3d84168f669cbee58a9c9a045af4a21c
+      FIXTURE_SHA256: 3582c6f80898d641b80359b6977b596b24b89c59347d9f1f407d3d69ad252aeb
       OS_AUDIT_REVIEWED: 'true'
       OS_AUDIT_SHA256: a76d3ec9521f021e799b8b56a6c57afdbeb6d4abdb21a55f42899a834eed4604
-      SOURCE_REVIEW_SHA256: ee6fa029cf2873a18b849f6e5590f3dd792ee71fa88f3409100ff802df3b4ca0
+      SOURCE_REVIEW_SHA256: d5684ca322312399925d397ba5b3a94ddba47e12a060ecc35782edd488e9665b
       NATIVE_HANDOFF_REVIEWED: 'true'
       NATIVE_HANDOFF_IMPLEMENTED: 'true'
-      ACQUISITION_SHA256: 03c4d63d0c86de4e8ee45b0f19a4c6419c77904637826f90a9e01355b7eb3033
+      ACQUISITION_SHA256: 765cff4e086d5ebd839338cbe3856b028fd5777dce30df085b4e4d9a076d18c5
       RETENTION_SHA256: a6bc3da869386b440d0b8a2ad93eb3cb888a4e48aabe52febf6a609b33d45331
-      ORCHESTRATOR_SHA256: 04750fce7e41b022a0e7d8416c942b88e3ea9dc16316e48801a588a31ccb1fff
-      CAPTURE_RECEIPT_SHA256: 51afcbd61af3c2319e814beee18e88714e589cb26132d755371248d045cfd64d
+      ORCHESTRATOR_SHA256: 891869859e4e9abf8179f741f25c05551d54aa676ded168bb4746133c34a3504
+      CAPTURE_RECEIPT_SHA256: 3e150fc0e656b99213de4cbb15239eba867275de375bdc0814a8d06204e1e1ce
       BATCH_PARSER_TEST_SHA256: aa0be812dc09f8c9c24874849b342809212faa9a6988030e5750daac627feca3
-      SOURCE_COMMIT: 5d1036b7035a7d9e980cdab5afc88879fca5048c
-      HARNESS_PARENT: 1e3c586ef2a3d196f7abcb2ba7aaa6956c1fe21d
+      SOURCE_COMMIT: 64b1c8ee6a9b7e4c1acec0f192150147a429cb91
+      HARNESS_PARENT: 10a2f2038694ceb047fa8cf9f5068737529f8eef
     steps:
       - name: Reject unreviewed or incomplete proposal before build
         shell: bash
@@ -218,7 +218,7 @@ jobs:
                   raise ValueError()
               for phase in ('source_before', 'source_after_assets', 'source_after_build', 'source_final'):
                   fact = receipt[phase]
-                  if fact['head'] != os.environ['SOURCE_COMMIT'] or fact['count'] != 2819 or any(fact[k] is not True for k in ('index_tree_matches', 'physical_git_sha1', 'physical_sha256_modes')):
+                  if fact['head'] != os.environ['SOURCE_COMMIT'] or fact['count'] != 2821 or any(fact[k] is not True for k in ('index_tree_matches', 'physical_git_sha1', 'physical_sha256_modes')):
                       raise ValueError()
               if not receipt['commands']:
                   raise ValueError()
@@ -239,11 +239,11 @@ jobs:
                       raise ValueError()
                   if sum(row['bytes'] for row in inventory['files'].values()) != fact['total_bytes']:
                       raise ValueError()
-              if receipt['artifacts']['source']['file_count'] != 2819:
+              if receipt['artifacts']['source']['file_count'] != 2821:
                   raise ValueError()
               if time.monotonic_ns() >= int(os.environ['JOB_DEADLINE_MONOTONIC_NS']):
                   raise ValueError()
-              print('BUILD_TERMINAL_VERIFIED:source2819:no-native-execution', flush=True)
+              print('BUILD_TERMINAL_VERIFIED:source2821:no-native-execution', flush=True)
               if time.monotonic_ns() >= int(os.environ['JOB_DEADLINE_MONOTONIC_NS']):
                   raise ValueError()
           except Exception:
