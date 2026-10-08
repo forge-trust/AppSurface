@@ -902,3 +902,21 @@ The nullable sixth field `control_failure` appears only when the outer first-fai
 `WorkerTerminalTaskCompleted` is recorded only at the final protocol rejection after handler joins when the original worker terminal task has completed and EXIT is still uncommitted; it does not invent a worker exit status, successful OS exit or physical settlement. Caught handler or cleanup faults retain their actual fixed stages and operation, and cannot overwrite an earlier retained projection. Expected pending accept cancellation during listener drain is not captured as an execution fault. Listener disposal independently records an unexpected drain failure. This diagnostic observes the first retained catch/category, not global chronological ordering among concurrent native events. No code reconstructs raw bytes, peer identities, messages, stacks, PIDs or paths.
 
 Attempt37730854250 reached actual worker/server construction and then ServerRun/Admission/ASEVD410; the first underlying server cause remains unmeasured. Repeated protected-plan hashing and connect timing are candidates only, with no measured expiry and no justified clock change. The initial source handoff defined nine data-only regression facts without execution. Subsequent local [supervision test-project](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj) validation passed **1038/1038**, including **37** native-failure diagnostic cases, with zero failures/skips/compiler diagnostics. Locked restore, two exact-file formatting commands and the source test all exited zero in **10.016 seconds / 180 seconds**; no formatter changes occurred. Receipt `/private/tmp/issue779-csharp-control-first-fault-validation/attempt-1/receipt.json` SHA-256 `12ff97e34dc282fc1dc6b995646b37f37e81de76ab22a935fd4bda439fe17a11`; TRX SHA-256 `8eab8d78f680abddcf7c5aaf31326fc89e7296f5d7e0ca7d2fceea4ef17268b3`. Independent runtime review cleared the diagnostic-only execution flow; this paragraph corrects the earlier preparation status after validation. Linux native proof and the actual inner ServerRun cause remain pending.
+
+### Listener acceptance failure checkpoints
+
+The [native first-failure diagnostic](EvidenceNativeObservationFailure.cs) keeps its
+existing `evidence-native-observation-failure-v3` shape. When actual listener
+acceptance fails, `control_failure.stage` identifies the last original check:
+listener state, cancellation, workspace, parent, socket metadata/name, endpoint,
+worker selection, owner identity, worker identity, descriptor, native accept or
+accepted peer. These are diagnostic categories and provide no authentication,
+admission, physical-exit or cleanup authority.
+
+The [listener](LinuxControlListener.cs) retains only its first closed projection.
+The [server](LinuxEmptyObservationControlServer.cs) reads that same retained
+listener after an `Accept` or `AcceptJoin` failure; it never replaces an earlier
+server failure. Original exceptions, quarantine, socket disposal, checks, tokens,
+limits and account custody ordering remain in effect. A checkpoint identifies a
+failed check, not which underlying kernel fact failed. The portable projection
+controls cannot establish that a native check ran or that a worker was accepted.

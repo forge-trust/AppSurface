@@ -359,6 +359,32 @@ internal enum LinuxControlFailureStage
     WorkerTerminalTaskCompleted,
     /// <summary>Closed ReplyGateClose checkpoint.</summary>
     ReplyGateClose,
+    /// <summary>Existing listener closure/failure state check. Diagnostic checkpoint only.</summary>
+    ListenerState,
+    /// <summary>Original listener caller cancellation check. Diagnostic checkpoint only.</summary>
+    ListenerCancellation,
+    /// <summary>Original retained workspace control identity recheck. Diagnostic checkpoint only.</summary>
+    ListenerWorkspace,
+    /// <summary>Original listener parent metadata comparison. Diagnostic checkpoint only.</summary>
+    ListenerParent,
+    /// <summary>Original retained socket metadata comparison. Diagnostic checkpoint only.</summary>
+    ListenerSocketMetadata,
+    /// <summary>Original socket name to retained inode comparison. Diagnostic checkpoint only.</summary>
+    ListenerSocketName,
+    /// <summary>Original bound socket endpoint comparison. Diagnostic checkpoint only.</summary>
+    ListenerEndpoint,
+    /// <summary>Original worker generation/account/role selection comparison. Diagnostic checkpoint only.</summary>
+    ListenerWorkerSelection,
+    /// <summary>Original root owner control identity recheck. Diagnostic checkpoint only.</summary>
+    ListenerOwnerIdentity,
+    /// <summary>Original retained worker kernel identity recheck. Diagnostic checkpoint only.</summary>
+    ListenerWorkerIdentity,
+    /// <summary>Original sealed descriptor publication check. Diagnostic checkpoint only.</summary>
+    ListenerDescriptor,
+    /// <summary>Original native socket accept procedure. Diagnostic checkpoint only.</summary>
+    ListenerNativeAccept,
+    /// <summary>Original accepted connection root/worker peer authentication. Diagnostic checkpoint only.</summary>
+    ListenerAcceptedPeer,
 }
 
 /// <summary>Detached four-field first caught control fault; no bytes, identities, paths or exception objects survive.</summary>
@@ -398,11 +424,16 @@ internal sealed class LinuxControlFailureLatch
     /// <summary>Gets the first retained projection; null is not evidence of success.</summary>
     internal LinuxControlFailure? First => Volatile.Read(ref _first);
     /// <summary>Retains one closed projection atomically; later handlers and cleanup cannot replace it.</summary>
-    internal void Capture(LinuxControlFailureStage stage, EvidenceControlOperation? operation, Exception? error)
+    /// <param name="stage">Actual server checkpoint, never a caller-selected native operation.</param>
+    /// <param name="operation">Already parsed closed operation, or null.</param>
+    /// <param name="error">Original caught error, projected without retaining it.</param>
+    /// <param name="first">An actual listener's earlier closed failure; detached data supplies no native authority.</param>
+    internal void Capture(LinuxControlFailureStage stage, EvidenceControlOperation? operation, Exception? error,
+        LinuxControlFailure? first = null)
     {
         try
         {
-            if (First is null) Interlocked.CompareExchange(ref _first, LinuxControlFailure.Capture(stage, operation, error), null);
+            if (First is null) Interlocked.CompareExchange(ref _first, first ?? LinuxControlFailure.Capture(stage, operation, error), null);
         }
         catch (Exception) { /* Diagnostic capture cannot alter an original error or success. */ }
     }
