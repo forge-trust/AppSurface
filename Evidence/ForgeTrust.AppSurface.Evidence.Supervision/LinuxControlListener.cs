@@ -74,6 +74,12 @@ internal static class LinuxControlListenerPolicy
 /// never worker admission, procedure selection, workload exit or artifact custody.
 ///
 /// The server must register handler ownership before awaiting AcceptAsync and join handler I/O separately.
+/// CloseAcceptAdmissionAsync is the pre-EXIT-ACK barrier: it closes only listening admission, joins the
+/// pending accept/late close and keeps published connections plus named handles alive. The server must join
+/// its EXIT and other handlers before full disposal on this orderly path. An actually returned late socket
+/// still passes retained workspace/name/process/peer checks, even on cancellation. Its listening endpoint
+/// was checked before dispatch and cannot be queried after this owner's actual close; it grants no exemption
+/// from accepted-peer authentication. Unexpected checks fail even during closure.
 /// Dispose closes the listening socket, joins the original pending accept and every retained connection close,
 /// then closes native path handles. An accept ignoring cancellation remains owned until it really finishes or
 /// the independent OS owner lifetime terminates root. Closing the listener does not delete its pathname, output,
@@ -100,6 +106,8 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
     private int _socketClosed;
     private bool _failed;
     private bool _closing;
+    private bool _admissionClosing;
+    private Task? _admissionClose;
 
     private LinuxControlListener(LinuxOwnerActivation owner, LinuxRunAccounts accounts, LinuxRunWorkspace workspace,
         Socket socket, SafeFileHandle parent, SafeFileHandle namedSocket,
@@ -215,6 +223,16 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
     /// </remarks>
     internal Task<LinuxControlConnection> AcceptAsync(LinuxProcessIdentity worker, CancellationToken token)
     {
+        var registered = RegisterAccept(worker, token);
+        registered.Dispatch();
+        return registered.Task;
+    }
+
+    /// <summary>Atomically checks the worker and reserves its accept, without dispatching under caller locks.</summary>
+    /// <remarks>The server releases its execution gate before dispatch; the retained native checks remain unchanged.</remarks>
+    internal SupervisionAcceptOwnership<LinuxControlConnection>.RegisteredAccept RegisterAccept(
+        LinuxProcessIdentity worker, CancellationToken token)
+    {
         var stage = LinuxControlFailureStage.ListenerState;
         lock (_gate)
         {
@@ -228,11 +246,48 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
                 if (!_workspace.DescriptorWritten || (_worker is not null && !ReferenceEquals(_worker, worker)))
                     throw LinuxControlListenerPolicy.Invalid();
                 _worker = worker;
+                // Original prechecks and pending registration share the same native admission gate.
+                return _accepts.RegisterAccept(token);
             }
             catch (Exception error)
             { _failures.Capture(stage, null, error); Fail(); throw; }
         }
-        return _accepts.AcceptAsync(token);
+    }
+
+    /// <summary>Closes only new accept admission and joins the actual pending accept before EXIT response bytes.</summary>
+    /// <remarks>
+    /// The same original task is shared, including failure. Published connections and named/parent handles
+    /// remain retained through their handlers' ACK/write/close joins. Full DisposeAsync is still mandatory.
+    /// No new clock, token, worker grant, peer exemption or custody authority is introduced.
+    /// </remarks>
+    internal Task CloseAcceptAdmissionAsync()
+    {
+        var dispatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        SupervisionAcceptOwnership<LinuxControlConnection>.RegisteredAdmissionClose registered;
+        Task close;
+        lock (_gate)
+        {
+            registered = _accepts.RegisterAdmissionClose(); // Reject callback self-join even when already shared.
+            if (_admissionClose is not null) return _admissionClose;
+            _admissionClosing = true;
+            close = CloseAcceptAdmissionActualAsync(dispatch.Task, registered.Task);
+            _admissionClose = close;
+        }
+        dispatch.SetResult();
+        registered.Dispatch();
+        return close;
+    }
+
+    private async Task CloseAcceptAdmissionActualAsync(Task dispatch, Task drain)
+    {
+        await dispatch.ConfigureAwait(false);
+        try { await drain.ConfigureAwait(false); }
+        catch (Exception error) when (Recoverable(error))
+        {
+            lock (_gate) { _failures.Capture(LinuxControlFailureStage.ListenerState, null, error); Fail(); }
+            throw LinuxControlListenerPolicy.Invalid();
+        }
+        lock (_gate) if (_failed || _accepts.Failed) throw LinuxControlListenerPolicy.Invalid();
     }
 
     /// <summary>Joins one retained connection close; the handler must still join its original read/write tasks.</summary>
@@ -265,7 +320,7 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
         {
             lock (_gate)
             {
-                if (_closing || Volatile.Read(ref _socketClosed) != 0) throw new SupervisionAcceptShutdownException();
+                if (_admissionClosing || _closing || Volatile.Read(ref _socketClosed) != 0) throw new SupervisionAcceptShutdownException();
                 Check(token, ref stage);
             }
             using var cancellation = token.UnsafeRegister(static state => ((LinuxControlListener)state!).CloseSocket(), this);
@@ -281,11 +336,15 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
             lock (_gate)
             {
                 stage = LinuxControlFailureStage.ListenerState;
-                if (_closing || Volatile.Read(ref _socketClosed) != 0) throw new SupervisionAcceptShutdownException();
-                Check(token, ref stage);
+                // An actual late accepted socket still passes retained name/process/peer checks. The
+                // listener's endpoint was checked before accept; its own closed socket cannot be queried.
+                // Caller cancellation only interrupts network wait; the actually accepted socket still
+                // receives the same uncancelled native identity checks before its owned late close.
+                var checkToken = token.IsCancellationRequested ? default : token;
+                Check(checkToken, ref stage, allowClosedListener: true);
                 stage = LinuxControlFailureStage.ListenerWorkerSelection;
                 var worker = _worker ?? throw LinuxControlListenerPolicy.Invalid();
-                RequireWorker(worker, token, ref stage);
+                RequireWorker(worker, checkToken, ref stage);
                 stage = LinuxControlFailureStage.ListenerAcceptedPeer;
                 var result = LinuxControlConnection.Accept(accepted, _owner, worker);
                 accepted = null; // The connection factory owns the socket, including rejection.
@@ -295,12 +354,12 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
         catch (SupervisionAcceptShutdownException) { throw; }
         catch (OperationCanceledException error)
         {
-            lock (_gate) { if (!_closing) { _failures.Capture(stage, null, error); Fail(); } }
+            lock (_gate) { _failures.Capture(stage, null, error); Fail(); }
             throw;
         }
         catch (Exception error) when (Recoverable(error))
         {
-            lock (_gate) { if (!_closing) { _failures.Capture(stage, null, error); Fail(); } }
+            lock (_gate) { _failures.Capture(stage, null, error); Fail(); }
             throw LinuxControlListenerPolicy.Invalid();
         }
         finally { accepted?.Dispose(); }
@@ -314,10 +373,10 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
 
     // A ref checkpoint records ordering only. It cannot skip a native check, alter rejection,
     // authenticate a worker or construct a successful listener/connection.
-    private void Check(CancellationToken token, ref LinuxControlFailureStage stage)
+    private void Check(CancellationToken token, ref LinuxControlFailureStage stage, bool allowClosedListener = false)
     {
         stage = LinuxControlFailureStage.ListenerState;
-        if (_closing || _failed || Volatile.Read(ref _socketClosed) != 0) throw LinuxControlListenerPolicy.Invalid();
+        if (_failed || (!allowClosedListener && (_admissionClosing || _closing || Volatile.Read(ref _socketClosed) != 0))) throw LinuxControlListenerPolicy.Invalid();
         stage = LinuxControlFailureStage.ListenerCancellation;
         token.ThrowIfCancellationRequested();
         stage = LinuxControlFailureStage.ListenerWorkspace;
@@ -331,8 +390,12 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
         stage = LinuxControlFailureStage.ListenerSocketName;
         RequireNamed(_parent, _socketMetadata);
         stage = LinuxControlFailureStage.ListenerEndpoint;
-        if (!_socket.IsBound || _socket.LocalEndPoint is not UnixDomainSocketEndPoint endpoint
-            || endpoint.ToString() != SocketPath) throw LinuxControlListenerPolicy.Invalid();
+        if (Volatile.Read(ref _socketClosed) == 0)
+        {
+            if (!_socket.IsBound || _socket.LocalEndPoint is not UnixDomainSocketEndPoint endpoint
+                || endpoint.ToString() != SocketPath) throw LinuxControlListenerPolicy.Invalid();
+        }
+        else if (!allowClosedListener) throw LinuxControlListenerPolicy.Invalid();
         stage = LinuxControlFailureStage.ListenerCancellation;
         token.ThrowIfCancellationRequested();
     }

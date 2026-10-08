@@ -25,6 +25,7 @@ internal sealed class LinuxEmptyObservationControlServer
     private readonly SupervisionSingleAttempt _run = new();
     private readonly SemaphoreSlim _replyOrder = new(1, 1);
     private readonly TaskCompletionSource _exitCommitted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _exitIntent = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly object _executionGate = new();
     private Task? _execution;
     private int _ioJoined;
@@ -68,6 +69,9 @@ internal sealed class LinuxEmptyObservationControlServer
     /// its next request immediately after receiving LF while the prior server continuation still runs.
     /// No handler calls this drain or the worker's final stop/join. Caller cancellation closes actual I/O;
     /// every original operation remains joined before return, including ignored cancellation.
+    /// A valid EXIT claim signals intent, forbids further accept dispatch and joins listening admission before
+    /// ACK bytes. Intent grants no successful commit. Current handlers and connections remain retained through
+    /// writes, release and final owner checks, then full listener disposal closes the native named handles.
     /// </remarks>
     internal Task RunAsync(CancellationToken token)
     {
@@ -153,7 +157,7 @@ internal sealed class LinuxEmptyObservationControlServer
         Task<LinuxControlConnection>? pending = null;
         try
         {
-            while (!_exitCommitted.Task.IsCompleted && !naturalExit.IsCompleted)
+            while (!_exitIntent.Task.IsCompleted && !_exitCommitted.Task.IsCompleted && !naturalExit.IsCompleted)
             {
                 stage = LinuxControlFailureStage.AcceptLoop;
                 requests.Token.ThrowIfCancellationRequested();
@@ -169,24 +173,36 @@ internal sealed class LinuxEmptyObservationControlServer
                 if (handlers.Count == SupervisionWorkRegistry.MaximumActiveControls)
                 {
                     stage = LinuxControlFailureStage.CapacityWait;
-                    await Task.WhenAny(handlers.Append(_exitCommitted.Task).Append(naturalExit))
+                    await Task.WhenAny(handlers.Append(_exitIntent.Task).Append(_exitCommitted.Task).Append(naturalExit))
                         .WaitAsync(requests.Token).ConfigureAwait(false);
                     continue;
                 }
                 stage = LinuxControlFailureStage.Accept;
-                pending = _listener.AcceptAsync(peer, accepts.Token);
+                SupervisionAcceptOwnership<LinuxControlConnection>.RegisteredAccept registeredAccept;
+                lock (_executionGate)
+                {
+                    if (_exitIntent.Task.IsCompleted) break;
+                    registeredAccept = _listener.RegisterAccept(peer, accepts.Token);
+                }
+                pending = registeredAccept.Task;
+                registeredAccept.Dispatch(); // Actual accept work starts outside both admission gates.
                 stage = LinuxControlFailureStage.AcceptJoin;
-                var next = await Task.WhenAny(pending, _exitCommitted.Task, naturalExit)
+                var next = await Task.WhenAny(pending, _exitIntent.Task, _exitCommitted.Task, naturalExit)
                     .WaitAsync(requests.Token).ConfigureAwait(false);
-                if (!ReferenceEquals(next, pending)) break;
+                if (_exitIntent.Task.IsCompleted || !ReferenceEquals(next, pending)) break;
                 stage = LinuxControlFailureStage.AcceptJoin;
                 var connection = await pending.ConfigureAwait(false);
                 pending = null;
                 stage = LinuxControlFailureStage.ControlRegistration;
-                var control = _ledger.BeginControl();
-                // The handler scope already owns all I/O before the actual async procedure can run.
-                stage = LinuxControlFailureStage.HandlerDispatch;
-                handlers.Add(HandleAsync(connection, control, requests.Token));
+                var dispatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                lock (_executionGate)
+                {
+                    if (_exitIntent.Task.IsCompleted) break; // Published result remains listener-owned for final close.
+                    var control = _ledger.BeginControl();
+                    stage = LinuxControlFailureStage.HandlerDispatch;
+                    handlers.Add(HandleRegisteredAsync(dispatch.Task, connection, control, requests.Token));
+                }
+                dispatch.SetResult();
             }
         }
         catch (Exception error) when (Recoverable(error))
@@ -201,10 +217,15 @@ internal sealed class LinuxEmptyObservationControlServer
             stage = LinuxControlFailureStage.AcceptCancel;
             try { accepts.Cancel(); }
             catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); _sequence.RecordFailure(); }
-            // Close admission/socket/results first to interrupt pending I/O, then join the original
-            // accept and handler tasks. Dispose does not claim that their read/write tasks have joined.
+            // Valid EXIT intent retains live handlers through their writes. Failure without EXIT still
+            // closes all results first to interrupt their original I/O, as before.
+            var exitIntent = _exitIntent.Task.IsCompleted;
             stage = LinuxControlFailureStage.ListenerClose;
-            try { await _listener.DisposeAsync().ConfigureAwait(false); }
+            try
+            {
+                if (exitIntent) await _listener.CloseAcceptAdmissionAsync().ConfigureAwait(false);
+                else await _listener.DisposeAsync().ConfigureAwait(false);
+            }
             catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
             if (pending is not null)
             {
@@ -215,6 +236,12 @@ internal sealed class LinuxEmptyObservationControlServer
             stage = LinuxControlFailureStage.HandlersJoin;
             try { await Task.WhenAll(handlers).ConfigureAwait(false); }
             catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
+            if (exitIntent)
+            {
+                stage = LinuxControlFailureStage.ListenerClose;
+                try { await _listener.DisposeAsync().ConfigureAwait(false); }
+                catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
+            }
             stage = LinuxControlFailureStage.DescendantsStop;
             try { await _sequence.StopAsync(CleanupToken()).ConfigureAwait(false); }
             catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); _sequence.RecordFailure(); }
@@ -241,6 +268,13 @@ internal sealed class LinuxEmptyObservationControlServer
         }
         catch (Exception error) when (Recoverable(error))
         { _failures.Capture(stage, null, error); throw; }
+    }
+
+    private async Task HandleRegisteredAsync(Task dispatch, LinuxControlConnection connection,
+        SupervisionWorkRegistry.Control control, CancellationToken token)
+    {
+        await dispatch.ConfigureAwait(false);
+        await HandleAsync(connection, control, token).ConfigureAwait(false);
     }
 
     private async Task HandleAsync(LinuxControlConnection connection, SupervisionWorkRegistry.Control control,
@@ -323,6 +357,10 @@ internal sealed class LinuxEmptyObservationControlServer
                     _owner.RequireControlIdentity(io.Token);
                     stage = LinuxControlFailureStage.ExitClaim;
                     claim = _sequence.ClaimExit();
+                    lock (_executionGate) _exitIntent.TrySetResult(); // Intent is not ACK or success.
+                    stage = LinuxControlFailureStage.ListenerClose;
+                    await _listener.CloseAcceptAdmissionAsync().ConfigureAwait(false);
+                    RequireCleanupBound();
                     stage = LinuxControlFailureStage.ResponseData;
                     response = EvidenceCanonicalJson.Serialize(new { ok = true });
                     break;

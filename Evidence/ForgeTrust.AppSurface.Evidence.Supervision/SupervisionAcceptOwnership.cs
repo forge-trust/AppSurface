@@ -12,7 +12,7 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision;
 /// The actual accept operation must close its own partial acquisitions before faulting; this owner cannot close
 /// a resource that was never returned to it.
 /// Every dispatch/close task is registered before its delegate can run. Delegates run outside locks; same-owner
-/// AcceptAsync, ReleaseAsync and DisposeAsync reentrancy rejects before a shared-task wait. Cancellation closes
+/// AcceptAsync, ReleaseAsync, CloseAdmissionAsync and DisposeAsync reentrancy rejects before a shared-task wait. Cancellation closes
 /// the listener and joins the original accept, including an implementation that ignores cancellation. A late result is closed and joined,
 /// never published. No timer or cancellation proxy can detach these operations; the external root lifetime must
 /// contain stalls. Ordinary shutdown is closed, not a failure; unexpected accept or any close fault is sticky.
@@ -37,6 +37,7 @@ internal sealed class SupervisionAcceptOwnership<T> : IAsyncDisposable where T :
     private PendingAccept? _pending;
     private Task? _listenerClose;
     private Task? _disposal;
+    private Task? _admissionClose;
     private bool _closed;
     private bool _failed;
 
@@ -71,6 +72,19 @@ internal sealed class SupervisionAcceptOwnership<T> : IAsyncDisposable where T :
     /// </remarks>
     internal Task<T> AcceptAsync(CancellationToken token)
     {
+        var registered = RegisterAccept(token);
+        registered.Dispatch();
+        return registered.Task;
+    }
+
+    /// <summary>Reserves the original accept without dispatching its callback, for an enclosing admission gate.</summary>
+    /// <remarks>
+    /// Release the enclosing gate, then call Dispatch exactly once. Closure joins this reservation even
+    /// before dispatch; a reservation forgotten by its caller stays owned rather than becoming detached.
+    /// This portable procedure handle grants no native identity or authentication authority.
+    /// </remarks>
+    internal RegisteredAccept RegisterAccept(CancellationToken token)
+    {
         RequireOutsideProcedure();
         var dispatch = Gate();
         PendingAccept pending;
@@ -82,8 +96,7 @@ internal sealed class SupervisionAcceptOwnership<T> : IAsyncDisposable where T :
             _pending = pending;
             pending.Execution = AcceptCoreAsync(pending, dispatch.Task, token);
         }
-        dispatch.SetResult();
-        return pending.Completion.Task;
+        return new(pending.Completion.Task, dispatch);
     }
 
     /// <summary>Registers exactly one close for a known retained result, returning its shared actual completion.</summary>
@@ -102,6 +115,81 @@ internal sealed class SupervisionAcceptOwnership<T> : IAsyncDisposable where T :
         }
         dispatch?.SetResult();
         return close;
+    }
+
+    /// <summary>Irreversibly closes accept admission and joins its original pending procedure, preserving published results.</summary>
+    /// <returns>One shared original completion, including sticky listener/accept/late-close failure.</returns>
+    /// <remarks>
+    /// Registered before listener-close dispatch; no new accept can start after reservation. It closes the
+    /// listening resource once and joins an ignored-cancellation accept and any unpublished late-result close.
+    /// Already published results stay owned and usable until ReleaseAsync or full DisposeAsync. No caller
+    /// token detaches this join, and same-owner callback reentrancy rejects before sharing its task.
+    /// This is procedure bookkeeping, never handler settlement, native exit or an admission capability.
+    /// </remarks>
+    internal Task CloseAdmissionAsync()
+    {
+        var registered = RegisterAdmissionClose();
+        registered.Dispatch();
+        return registered.Task;
+    }
+
+    /// <summary>Reserves admission closure while deferring its actual callback until enclosing gates are released.</summary>
+    /// <remarks>Repeated reservations share the original close task; each handle dispatches only its own gate.</remarks>
+    internal RegisteredAdmissionClose RegisterAdmissionClose()
+    {
+        RequireOutsideProcedure();
+        var dispatch = Gate();
+        Task close;
+        lock (_gate)
+        {
+            if (_admissionClose is not null) return new(_admissionClose, dispatch);
+            _closed = true;
+            close = CloseAdmissionCoreAsync(dispatch.Task, _pending);
+            _admissionClose = close;
+        }
+        return new(close, dispatch);
+    }
+
+    /// <summary>A retained accept task and its single dispatch gate; detached procedure bookkeeping only.</summary>
+    internal sealed class RegisteredAccept(Task<T> task, TaskCompletionSource dispatch)
+    {
+        private int _dispatched;
+        /// <summary>Gets the original registered completion, including late-result closure.</summary>
+        internal Task<T> Task { get; } = task;
+        /// <summary>Releases callback dispatch once, after every enclosing admission lock is released.</summary>
+        internal void Dispatch()
+        {
+            if (Interlocked.Exchange(ref _dispatched, 1) != 0) throw Rejected();
+            dispatch.SetResult();
+        }
+    }
+
+    /// <summary>A retained closure task and single dispatch gate, with no native settlement authority.</summary>
+    internal sealed class RegisteredAdmissionClose(Task task, TaskCompletionSource dispatch)
+    {
+        private int _dispatched;
+        /// <summary>Gets the original shared close completion.</summary>
+        internal Task Task { get; } = task;
+        /// <summary>Releases actual close dispatch once, after every enclosing admission lock is released.</summary>
+        internal void Dispatch()
+        {
+            if (Interlocked.Exchange(ref _dispatched, 1) != 0) throw Rejected();
+            dispatch.SetResult();
+        }
+    }
+
+    private async Task CloseAdmissionCoreAsync(Task dispatch, PendingAccept? pending)
+    {
+        await dispatch.ConfigureAwait(false);
+        try { await EnsureListenerClose().ConfigureAwait(false); }
+        catch (Exception) { MarkFailed(); }
+        if (pending is not null)
+        {
+            try { await pending.Completion.Task.ConfigureAwait(false); }
+            catch (Exception) { } // Expected rejection is observed; unexpected cause is already sticky.
+            await pending.Execution.ConfigureAwait(false);
+        }
+        lock (_gate) if (_failed) throw Rejected();
     }
 
     /// <summary>Closes the listener first, joins pending accept, then attempts and joins all retained closes.</summary>
@@ -273,7 +361,7 @@ internal sealed class SupervisionAcceptOwnership<T> : IAsyncDisposable where T :
     private async Task DisposeCoreAsync(Task dispatch, PendingAccept? pending)
     {
         await dispatch.ConfigureAwait(false);
-        try { await EnsureListenerClose().ConfigureAwait(false); }
+        try { await CloseAdmissionAsync().ConfigureAwait(false); }
         catch (Exception) { MarkFailed(); }
         if (pending is not null)
         {

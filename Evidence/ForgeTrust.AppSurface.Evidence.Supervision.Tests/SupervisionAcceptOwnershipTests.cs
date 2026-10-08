@@ -511,10 +511,309 @@ public sealed class SupervisionAcceptOwnershipTests
         await RejectAsync(owner.DisposeAsync().AsTask());
     }
 
+    [Fact]
+    public async Task AdmissionClosePreservesPublishedConnectionAndSharesOriginalCompletion()
+    {
+        var item = new Item(); var listenerCloses = 0; var resultCloses = 0;
+        var owner = new SupervisionAcceptOwnership<Item>(_ => Task.FromResult(item),
+            () => Interlocked.Increment(ref listenerCloses), _ =>
+            { Interlocked.Increment(ref resultCloses); return ValueTask.CompletedTask; });
+        await owner.AcceptAsync(default).WaitAsync(Guard);
+        var close = owner.CloseAdmissionAsync();
+        Assert.Same(close, owner.CloseAdmissionAsync());
+        var contenders = await Task.WhenAll(Enumerable.Range(0, 16)
+            .Select(_ => Task.Run(() => new TaskHolder(owner.CloseAdmissionAsync())))).WaitAsync(Guard);
+        Assert.All(contenders, row => Assert.Same(close, row.Task));
+        await close.WaitAsync(Guard);
+        Assert.True(owner.IsClosed); Assert.False(owner.Failed);
+        Assert.Equal(1, listenerCloses); Assert.Equal(0, resultCloses);
+        Reject(() => owner.AcceptAsync(default));
+        await owner.ReleaseAsync(item).WaitAsync(Guard);
+        await owner.DisposeAsync().AsTask().WaitAsync(Guard);
+        Assert.Equal(1, resultCloses);
+    }
+
+    [Fact]
+    public async Task ExitAckWaitsForIgnoredAcceptAndLateCloseWhileExitConnectionRemainsOwned()
+    {
+        var exit = new Item(); var late = new Item(); var calls = 0; var exitCloses = 0;
+        var entered = Gate(); var listenerClosed = Gate(); var lateEntered = Gate(); var lateFinish = Gate();
+        var actual = new TaskCompletionSource<Item>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var owner = new SupervisionAcceptOwnership<Item>(_ =>
+        {
+            if (Interlocked.Increment(ref calls) == 1) return Task.FromResult(exit);
+            entered.SetResult(); return actual.Task;
+        }, () => listenerClosed.SetResult(), async item =>
+        {
+            if (ReferenceEquals(item, late)) { lateEntered.SetResult(); await lateFinish.Task; }
+            else { Assert.Same(exit, item); Interlocked.Increment(ref exitCloses); }
+        });
+        await owner.AcceptAsync(default).WaitAsync(Guard);
+        var pending = owner.AcceptAsync(default);
+        var sequence = await ExitReadySequenceAsync();
+        var claim = sequence.ClaimExit(); var writes = 0;
+        Task? ack = null;
+        async Task WriteAfterAdmissionAsync()
+        {
+            await owner.CloseAdmissionAsync();
+            Assert.Equal(0, exitCloses);
+            Interlocked.Increment(ref writes);
+            await owner.ReleaseAsync(exit);
+            sequence.CompleteWrite(claim, true);
+        }
+        try
+        {
+            await entered.Task.WaitAsync(Guard);
+            ack = WriteAfterAdmissionAsync();
+            await listenerClosed.Task.WaitAsync(Guard);
+            Assert.False(ack.IsCompleted); Assert.Equal(0, writes); Assert.False(sequence.ExitAcknowledged);
+            actual.SetResult(late);
+            await lateEntered.Task.WaitAsync(Guard);
+            Assert.False(ack.IsCompleted); Assert.Equal(0, writes); Assert.Equal(0, exitCloses);
+        }
+        finally
+        {
+            _ = owner.CloseAdmissionAsync();
+            actual.TrySetResult(late); lateFinish.TrySetResult();
+            await RejectAsync(pending);
+            if (ack is not null) await ack.WaitAsync(Guard);
+            await owner.DisposeAsync().AsTask().WaitAsync(Guard);
+        }
+        Assert.Equal(1, writes); Assert.Equal(1, exitCloses); Assert.True(sequence.ExitAcknowledged);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AdmissionCloseFaultCannotReachAckAndRemainsSticky(bool listenerFault)
+    {
+        var entered = Gate(); var closed = Gate(); var writes = 0;
+        var actual = new TaskCompletionSource<Item>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var owner = new SupervisionAcceptOwnership<Item>(_ => { entered.SetResult(); return actual.Task; },
+            () => { closed.SetResult(); if (listenerFault) throw new IOException("private-canary"); },
+            _ => ValueTask.CompletedTask);
+        var pending = owner.AcceptAsync(default);
+        async Task AckAsync() { await owner.CloseAdmissionAsync(); Interlocked.Increment(ref writes); }
+        Task? ack = null;
+        try
+        {
+            await entered.Task.WaitAsync(Guard); ack = AckAsync();
+            await closed.Task.WaitAsync(Guard); Assert.False(ack.IsCompleted);
+        }
+        finally
+        {
+            if (listenerFault) actual.TrySetException(new SupervisionAcceptShutdownException());
+            else actual.TrySetException(new IOException("private-canary"));
+            await RejectAsync(pending);
+            if (ack is not null) await RejectAsync(ack);
+            await RejectAsync(owner.DisposeAsync().AsTask());
+        }
+        Assert.Equal(0, writes); Assert.True(owner.Failed);
+        await RejectAsync(owner.CloseAdmissionAsync());
+    }
+
+    [Fact]
+    public async Task AdmissionLateCloseFailurePreventsAckButFullDisposeClosesPublishedConnection()
+    {
+        var current = new Item(); var late = new Item(); var calls = 0; var currentCloses = 0;
+        var entered = Gate(); var actual = new TaskCompletionSource<Item>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var owner = new SupervisionAcceptOwnership<Item>(_ =>
+        { if (++calls == 1) return Task.FromResult(current); entered.SetResult(); return actual.Task; },
+            () => { }, item =>
+            {
+                if (ReferenceEquals(item, late)) throw new IOException("private-canary");
+                Interlocked.Increment(ref currentCloses); return ValueTask.CompletedTask;
+            });
+        await owner.AcceptAsync(default).WaitAsync(Guard);
+        var pending = owner.AcceptAsync(default); await entered.Task.WaitAsync(Guard);
+        var admission = owner.CloseAdmissionAsync(); actual.SetResult(late);
+        await RejectAsync(pending); await RejectAsync(admission);
+        Assert.Equal(0, currentCloses); Assert.True(owner.Failed);
+        await RejectAsync(owner.DisposeAsync().AsTask());
+        Assert.Equal(1, currentCloses);
+    }
+
+    [Fact]
+    public async Task FailedExitWriteAfterAdmissionJoinCannotCommitSuccessfulExit()
+    {
+        var owner = new SupervisionAcceptOwnership<Item>(_ => Task.FromResult(new Item()), () => { },
+            _ => ValueTask.CompletedTask);
+        var sequence = await ExitReadySequenceAsync(); var exit = sequence.ClaimExit();
+        await owner.CloseAdmissionAsync().WaitAsync(Guard);
+        Reject(() => sequence.CompleteWrite(exit, false));
+        Assert.False(sequence.ExitAcknowledged); Assert.True(sequence.Failed);
+        await owner.DisposeAsync().AsTask().WaitAsync(Guard);
+    }
+
+    [Fact]
+    public async Task AdmissionAndFullDisposeBothJoinTheSameBlockedOriginalAccept()
+    {
+        var entered = Gate(); var closed = Gate(); var actual = new TaskCompletionSource<Item>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var owner = new SupervisionAcceptOwnership<Item>(_ => { entered.SetResult(); return actual.Task; },
+            () => closed.SetResult(), _ => ValueTask.CompletedTask);
+        var pending = owner.AcceptAsync(default); await entered.Task.WaitAsync(Guard);
+        var admission = owner.CloseAdmissionAsync(); var disposal = owner.DisposeAsync().AsTask();
+        try
+        {
+            await closed.Task.WaitAsync(Guard);
+            Assert.Same(admission, owner.CloseAdmissionAsync());
+            Assert.False(admission.IsCompleted); Assert.False(disposal.IsCompleted);
+        }
+        finally
+        {
+            actual.TrySetException(new SupervisionAcceptShutdownException());
+            await RejectAsync(pending); await admission.WaitAsync(Guard); await disposal.WaitAsync(Guard);
+        }
+        Assert.False(owner.Failed);
+    }
+
+    [Fact]
+    public async Task AdmittedPrecheckFaultDuringClosureRemainsFailureBeforeAnyAck()
+    {
+        var entered = Gate(); var release = Gate(); var listenerClosed = Gate(); var writes = 0;
+        var owner = new SupervisionAcceptOwnership<Item>(async _ =>
+        {
+            entered.SetResult(); await release.Task;
+            // An unexpected actual-procedure fault, not a fabricated live process or native check.
+            throw LinuxProcessIdentity.Rejected();
+        }, () => listenerClosed.SetResult(), _ => ValueTask.CompletedTask);
+        var pending = owner.AcceptAsync(default);
+        async Task AckAsync() { await owner.CloseAdmissionAsync(); Interlocked.Increment(ref writes); }
+        Task? ack = null;
+        try
+        {
+            await entered.Task.WaitAsync(Guard); ack = AckAsync();
+            await listenerClosed.Task.WaitAsync(Guard);
+            Assert.False(ack.IsCompleted); Assert.False(pending.IsCompleted);
+        }
+        finally
+        {
+            release.TrySetResult(); await RejectAsync(pending);
+            if (ack is not null) await RejectAsync(ack);
+            await RejectAsync(owner.DisposeAsync().AsTask());
+        }
+        Assert.Equal(0, writes); Assert.True(owner.Failed);
+    }
+
+    [Fact]
+    public async Task ClosingAdmissionJoinsReservedAcceptBeforeItsCallbackCanDispatch()
+    {
+        var gate = new object(); var calls = 0; var closes = 0;
+        var owner = new SupervisionAcceptOwnership<Item>(_ =>
+        { Interlocked.Increment(ref calls); return Task.FromResult(new Item()); },
+            () => Interlocked.Increment(ref closes), _ => ValueTask.CompletedTask);
+        SupervisionAcceptOwnership<Item>.RegisteredAccept accept;
+        SupervisionAcceptOwnership<Item>.RegisteredAdmissionClose close;
+        lock (gate)
+        {
+            accept = owner.RegisterAccept(default);
+            close = owner.RegisterAdmissionClose();
+            Assert.Equal(0, calls); Assert.Equal(0, closes);
+            Assert.False(accept.Task.IsCompleted); Assert.False(close.Task.IsCompleted);
+        }
+        close.Dispatch();
+        try
+        {
+            Assert.False(close.Task.IsCompleted); // Closure retains the original not-yet-dispatched accept.
+            Assert.Equal(0, calls);
+        }
+        finally
+        {
+            accept.Dispatch();
+            await RejectAsync(accept.Task);
+            await close.Task.WaitAsync(Guard);
+            await owner.DisposeAsync().AsTask().WaitAsync(Guard);
+        }
+        Assert.Equal(0, calls); Assert.Equal(1, closes); Assert.False(owner.Failed);
+        Reject(accept.Dispatch); Reject(close.Dispatch);
+    }
+
+    [Fact]
+    public async Task ReservedNativeProcedureCallbacksRunAfterEnclosingGateRelease()
+    {
+        var gate = new object(); var entered = Gate(); var closed = Gate();
+        var actual = new TaskCompletionSource<Item>(TaskCreationOptions.RunContinuationsAsynchronously);
+        void RequireUnlocked()
+        {
+            Assert.False(Monitor.IsEntered(gate));
+            var acquired = Monitor.TryEnter(gate);
+            try { Assert.True(acquired); }
+            finally { if (acquired) Monitor.Exit(gate); }
+        }
+        var owner = new SupervisionAcceptOwnership<Item>(_ =>
+        { RequireUnlocked(); entered.SetResult(); return actual.Task; },
+            () => { RequireUnlocked(); closed.SetResult(); }, _ => ValueTask.CompletedTask);
+        SupervisionAcceptOwnership<Item>.RegisteredAccept accept;
+        lock (gate)
+        {
+            accept = owner.RegisterAccept(default);
+            Assert.False(entered.Task.IsCompleted);
+        }
+        accept.Dispatch();
+        SupervisionAcceptOwnership<Item>.RegisteredAdmissionClose? close = null;
+        try
+        {
+            await entered.Task.WaitAsync(Guard);
+            lock (gate)
+            {
+                close = owner.RegisterAdmissionClose();
+                Assert.False(closed.Task.IsCompleted);
+            }
+            close.Dispatch();
+            await closed.Task.WaitAsync(Guard);
+            Assert.False(close.Task.IsCompleted);
+        }
+        finally
+        {
+            actual.TrySetException(new SupervisionAcceptShutdownException());
+            await RejectAsync(accept.Task);
+            if (close is not null) await close.Task.WaitAsync(Guard);
+            await owner.DisposeAsync().AsTask().WaitAsync(Guard);
+        }
+        Assert.False(owner.Failed);
+    }
+
+    [Fact]
+    public async Task RepeatedClosureReservationsShareJoinWithoutDetachingReservedAccept()
+    {
+        var closes = 0;
+        var owner = new SupervisionAcceptOwnership<Item>(_ => Task.FromResult(new Item()),
+            () => Interlocked.Increment(ref closes), _ => ValueTask.CompletedTask);
+        var accept = owner.RegisterAccept(default);
+        var first = owner.RegisterAdmissionClose(); var second = owner.RegisterAdmissionClose();
+        Assert.Same(first.Task, second.Task);
+        second.Dispatch(); // Dispatching this redundant gate cannot release the original reservation.
+        Assert.False(first.Task.IsCompleted); Assert.Equal(0, closes);
+        first.Dispatch();
+        var disposal = owner.DisposeAsync().AsTask();
+        try { Assert.False(first.Task.IsCompleted); Assert.False(disposal.IsCompleted); }
+        finally
+        {
+            accept.Dispatch(); await RejectAsync(accept.Task);
+            await first.Task.WaitAsync(Guard); await disposal.WaitAsync(Guard);
+        }
+        Assert.Equal(1, closes); Assert.False(owner.Failed);
+    }
+
+    // Only detached procedure join data, not Linux identity, kernel exit, lease or proof.
+    private static async Task<SupervisionControlSequence> ExitReadySequenceAsync()
+    {
+        var ledger = new SupervisionWorkRegistry();
+        var sequence = new SupervisionControlSequence(ledger, _ =>
+            Task.FromResult(new SupervisionControlJoinFacts(true, true, true)));
+        sequence.CompleteWrite(sequence.ClaimReady(), true);
+        await sequence.StopAsync(default).WaitAsync(Guard);
+        sequence.CompleteWrite(sequence.ClaimWait(), true);
+        return sequence;
+    }
+
     private static void RejectSelf(SupervisionAcceptOwnership<Item> owner, Item item)
     {
         Reject(() => owner.AcceptAsync(default));
+        Reject(() => owner.RegisterAccept(default));
         Reject(() => owner.ReleaseAsync(item));
+        Reject(() => owner.CloseAdmissionAsync());
+        Reject(() => owner.RegisterAdmissionClose());
         Reject(() => { _ = owner.DisposeAsync(); });
     }
 
@@ -533,6 +832,8 @@ public sealed class SupervisionAcceptOwnershipTests
         Assert.Equal("ASEVD410", error.Code); Assert.Null(error.InnerException);
         Assert.DoesNotContain("private-canary", error.ToString());
     }
+
+    private sealed record TaskHolder(Task Task);
 
     private sealed class Item
     {
