@@ -73,3 +73,7 @@ Direct installation child of `5beb94a919eec7d372f63d050577328bcf455c9f`; no sour
 The [actual cache peer review](/private/tmp/issue779-csharp-negative-slot-audit-cache-review-v1/readonly-review.json) (`844ba062b79cc673d07f24a46687c2bba914013c544f980af16ef519d3d8a635`) records clear source review and 12/12 data controls under the [retained validation](/private/tmp/issue779-csharp-negative-slot-audit-cache-v1/validation-attempt-1/receipt.json). These controls establish no Linux negative-case acceptance or measured timing improvement. The preceding attempt failed before case launch; this preparation grants no credit. The 570-second work / 30-second cleanup, 240-second root runtime and >246/>245 launch predicates remain unchanged.
 
 The fresh retry composition review and explicit driver gates must pass before any private Git preparation or ordinary same-branch publication.
+
+## Current ordinary OS batch retry
+
+This isolated child of 9ac59b49d435758e34d8d1a893a68244fa96d230 keeps the identical C# source and all original bounds. The complete ordinary OS files and ancestors receive fresh before/after metadata and full byte hashes in batches. Alias walks and ELF/dependency checks remain unchanged. Source review is recorded separately; performance and this negative control require a genuine Linux run. Historical failed setup runs remain failures.
