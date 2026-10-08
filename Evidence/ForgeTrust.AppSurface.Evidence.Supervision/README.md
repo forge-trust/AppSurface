@@ -519,6 +519,20 @@ The returned plan creates no context, admission, provider, process lease or acce
 data returns fixed ASEVD406 without input text; cancellation returns no plan. Native input errors retain
 their fixed diagnostic. The worker independently resolves and admits its own protected inputs.
 
+[`EvidenceEmptyObservationPlan.AsOptionalDiff(byte[]?)`](EvidenceEmptyObservationPlan.cs) is the
+data-only adapter used by `FromInput` after the retained diff read. Null means no declared diff and
+returns nullable absence (`HasValue == false`). Every array remains present, including an empty array;
+`Resolve` still rejects undeclared present bytes and declared empty bytes, and preserves its counted
+input and digest checks. The adapter views the supplied array rather than creating a protected input,
+copying native ownership or granting admission. `Resolve` performs its existing counted copy.
+
+The null branch must be explicitly typed as `ReadOnlyMemory<byte>?`: an untyped null in a conditional
+with a `ReadOnlyMemory<byte>` branch can use the array-to-memory implicit conversion and become a
+present empty struct before nullable wrapping. Existing tests passed nullable absence directly to
+`Resolve`, bypassing this adapter. The focused [planner/data regression controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/EvidenceEmptyObservationPlanTests.cs)
+now route absent, present-empty and declared valid bytes through the same adapter used by `FromInput`.
+They establish no native input, worker execution, cleanup or acceptance; native checkpoints remain pending.
+
 ### Authenticated control server and cleanup continuity
 
 `LinuxEmptyObservationControlServer.Create` binds reference-equal actual input, owner, account holder,

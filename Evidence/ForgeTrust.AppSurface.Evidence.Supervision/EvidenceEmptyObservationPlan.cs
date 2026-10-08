@@ -95,12 +95,23 @@ internal static class EvidenceEmptyObservationPlan
         input.Recheck(token);
         var policy = input.ReadPolicyBytes(token);
         var diff = input.ReadDiffBytes(token);
-        ReadOnlyMemory<byte>? diffMemory = diff is null ? null : new ReadOnlyMemory<byte>(diff);
+        var diffMemory = AsOptionalDiff(diff);
         var plan = Resolve(input.Request, policy, input.PolicySha256, diffMemory, token);
         input.Recheck(token);
         token.ThrowIfCancellationRequested();
         return plan;
     }
+
+    /// <summary>Preserves absence when adapting copied optional diff bytes to read-only memory.</summary>
+    /// <param name="diff">Copied diff bytes, or null when no diff is declared.</param>
+    /// <returns>Nullable absence for null; present memory for every array, including an empty array.</returns>
+    /// <remarks>
+    /// This data-only conversion does not validate bytes or create protected input or admission. The memory
+    /// views the supplied array; <see cref="Resolve"/> independently counts, copies and hash checks declared diff data.
+    /// Explicit nullable null avoids converting null through the array-to-memory operator into present empty memory.
+    /// </remarks>
+    internal static ReadOnlyMemory<byte>? AsOptionalDiff(byte[]? diff) =>
+        diff is null ? (ReadOnlyMemory<byte>?)null : new ReadOnlyMemory<byte>(diff);
 
     private static byte[] CopyCounted(ReadOnlyMemory<byte> bytes)
     {
