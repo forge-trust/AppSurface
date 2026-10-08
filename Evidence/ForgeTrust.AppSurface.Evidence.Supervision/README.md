@@ -1087,3 +1087,28 @@ Schema `issue779-negative-kernel-observation-v1` has twelve fixed root members: 
 `CreateDetached` is an intentional pure metadata seam, covered by [LinuxNegativeKernelObservationTests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxNegativeKernelObservationTests.cs). Constructing matching data or JSON does not authenticate a kernel observation, callback, peer, process, root owner, custody, lease, qualification or acceptance. The fixed `joins`/READY labels describe the production projection's checked provenance; detached test calls cannot establish it. Both native authority and acceptance remain false. Original cancellation propagates with its original token before encoding; no allowance resets. Malformed data yields only a fixed ASEVD410 without input or inner exception.
 
 This preparation defines38 new pure cases and runs none. Variant emitters and private fixtures are deliberately unwired: main must source-bind complete rebuilt N05/N06 images and wire bounded root-private observations only at their existing guarded postjoin points. Actual409 allocation output, unchanged occupied/symlink nodes and sentinel bytes, original root410, expected terminal status, quarantine/NSS disposition, genuine positive prerequisites and authenticated canonical retention remain separate checks. If existing ownership or terminal guards cannot pass, retain failure and the missing fact; never weaken those guards or treat copied observation fields as authority. No native N05/N06 or all-sixteen-control acceptance is claimed here.
+
+## N07 internal checkpoint candidate
+
+The [C# migration checkpoint plan](../../docs/plans/issue-779-csharp-supervision-migration.md)
+requires allocation-failure controls to retain the original process and work ownership. The private
+N07 candidate supplies no public checkpoint selector, injected transport, alternate deadline or
+Trusted proof. Its local tests verify data and ordering; native qualification remains required.
+
+`LinuxN07CheckpointOwner` reserves the original next control accept before dispatch and holds it
+through actual READY commit and the counted worker-stderr allocation-failure frame. The worker's
+internal `EvidenceN07PrecleanupFault` writes and flushes that bounded frame with the original stage
+token, then rethrows the original allocation exception. A frame by itself establishes no cleanup.
+
+`LinuxN07FailureSettlement` is failure-only data derived after the original worker monitor, unit
+inspection, work scopes and both output pumps join. It requires the original owners, input, account
+lease and workspace references; two EOFs, error-free exact byte accounting, physical group emptiness,
+and retained parent binding are independently required. Monitor faults and signal termination remain
+failures. This observation never sets normal physical settlement, custody or account-release flags.
+
+`LinuxN07FailureEmitter` prepares both private records before writing. The counted binary stream
+record contains zero stdout and at most 64 KiB of complete stderr, encoded as one private JSON line
+of at most 96 KiB. It is written before the closed settlement record using the original cleanup
+token. Partial, missing, duplicate, late or failed transfers remain unsuccessful. Raw bytes stay on
+private diagnostic stderr and never enter the public manifest or success JSON. Account/workspace
+quarantine follows the original first failure; neither record can authorize cleanup or publication.

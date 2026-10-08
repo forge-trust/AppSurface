@@ -37,6 +37,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     private TaskCompletionSource? _dispose;
     private LinuxUnitProperties? _naturalTerminal;
     private SupervisionOutputReceipt? _output;
+    private LinuxN07FailureSettlement? _failureSettlement; // Detached data only; no successful-settlement flag.
     private int _dispatchAttempted;
     private int _failed;
     private int _physicallySettled;
@@ -63,6 +64,17 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             if (!_lifetime.StopJoined || !PhysicallySettled) throw LinuxSystemdBackend.InvalidControl();
             return _output;
         }
+    }
+
+    /// <summary>Returns the original pipe observation to the reference-bound server checkpoint.</summary>
+    /// <remarks>No physical success, peer identity or lease is inferred from the returned data.</remarks>
+    internal Task<byte[]> N07Precleanup(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
+        LinuxRunAccounts accounts, LinuxRunWorkspace workspace)
+    {
+        if (!ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
+            || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace)
+            || !_lifetime.StartJoined || _pipes is null) throw LinuxSystemdBackend.InvalidControl();
+        return _pipes.N07Precleanup;
     }
 
     /// <summary>Claims a single holder using actual retained native owners, before startup or acquisition.</summary>
@@ -174,9 +186,33 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         var group = RequireCustodyOwnerCore(input, owner, accounts, workspace, server, token);
         if (_worker is null || _exit?.IsCompletedSuccessfully != true || _naturalTerminal is null || _output is null)
             throw LinuxSystemdBackend.InvalidControl();
-        var descriptor = server.RequireNegativeReadyDescriptor(input, owner, accounts, workspace, this, token);
+        var descriptor = server.RequireN07FailedReadyDescriptor(input, owner, accounts, workspace, this, token);
         return LinuxNegativeKernelObservation.CreateDetached(owner.RunId, _worker.SampledFacts,
             _naturalTerminal, group, _output, descriptor, token);
+    }
+
+    /// <summary>Reads a failure-only finalization record from this exact original joined holder.</summary>
+    /// <remarks>
+    /// Requires the unchanged server custody-owner/committed-READY data guard and live original root.
+    /// It never calls the successful worker custody guard or changes PhysicallySettled. Missing complete
+    /// data or failed server-local joins reject; no partial or external metadata fallback exists.
+    /// The tuple must be retained by a separately qualified bounded root emitter; no I/O occurs here.
+    /// </remarks>
+    internal (LinuxN07FailureSettlement Settlement, string ReadyDescriptorSha256) CaptureFailureSettlement(
+        EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner, LinuxRunAccounts accounts,
+        LinuxRunWorkspace workspace, LinuxEmptyObservationControlServer server, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        if (!ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
+            || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace)
+            || !_lifetime.StopJoined || Volatile.Read(ref _failed) == 0
+            || _pipes?.N07ObservationFailed != false)
+            throw LinuxSystemdBackend.InvalidControl();
+        owner.RequireCleanupLaunchInput(input, token);
+        var ready = server.RequireN07FailedReadyDescriptor(input, owner, accounts, workspace, this, token);
+        var data = Volatile.Read(ref _failureSettlement) ?? throw LinuxSystemdBackend.InvalidControl();
+        owner.RequireCleanupLaunchInput(input, token);
+        return (data, ready);
     }
 
     /// <summary>Reserves the entire one-attempt startup before any native pipe, connection or unit start.</summary>
@@ -386,6 +422,8 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         var unitJoined = groupJoined;
         var pipesClosed = _pipes is null;
         var monitorJoined = _exit is null;
+        LinuxUnitProperties? finalSelectedTerminal = null;
+        LinuxCgroupSample? finalSelectedGroup = null;
         try
         {
             if (!groupJoined)
@@ -435,7 +473,8 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                 // after pumps and the original monitor have joined. No renewed deadline is introduced.
                 var stopped = await _backend!.ReadUnitAsync(Unit, _cleanupDeadline!.Token).ConfigureAwait(false);
                 unitJoined &= _recipe!.HasStopped(stopped) && (_worker is null || stopped.ExecMainPid == _worker.Pid);
-                groupJoined &= LinuxAccountUtility.GroupEmpty(LinuxCgroupProbe.Read(Unit, default));
+                groupJoined &= LinuxAccountUtility.GroupEmpty(finalSelectedGroup = LinuxCgroupProbe.Read(Unit, default));
+                if (unitJoined) finalSelectedTerminal = stopped; // Only the original final selected-unit result.
             }
             _backend?.Dispose();
             var pending = _pending.Snapshot;
@@ -448,6 +487,22 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         // Even a failed inspection must attempt the original connection close, after all real task joins.
         try { _backend?.Dispose(); }
         catch { failed = true; Interlocked.Exchange(ref _physicallySettled, 0); }
+        // Record complete original facts best-effort even if the joined monitor faulted. No new OS calls.
+        // This occurs after both original backend-close attempts and cannot replace their failure.
+        try
+        {
+            if ((failed || Volatile.Read(ref _failed) != 0) && monitorJoined && _exit is { IsCompleted: true }
+                && _worker is not null && finalSelectedTerminal is not null && finalSelectedGroup is not null
+                && _output is not null)
+            {
+                var originalPending = _pending.Snapshot;
+                var data = LinuxN07FailureSettlement.CreateDetached(_owner.RunId, _worker.SampledFacts,
+                    finalSelectedTerminal, finalSelectedGroup, _output, _exit.Status,
+                    _lifetime.StartJoined, originalPending.StopJoined, unitJoined, groupJoined, pipesClosed);
+                Interlocked.CompareExchange(ref _failureSettlement, data, null);
+            }
+        }
+        catch (Exception) { } // Missing diagnostic facts cannot change the original failed cleanup.
         if (failed)
         {
             Interlocked.Exchange(ref _physicallySettled, 0);
