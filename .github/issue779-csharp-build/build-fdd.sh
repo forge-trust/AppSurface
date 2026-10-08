@@ -18,14 +18,14 @@ import tarfile
 import time
 import xml.etree.ElementTree as ET
 
-HEAD = 'df028a57d06687768137d910318703496ab864db'
-PARENT = '75f8164274e362fbf17847331e44d1d01843c1e5'
-HARNESS_PARENT = '12cc85baaaca3caf8069a2e395fd9374da2cea76'
-TREE = 'b567818e52b5dac1a5e8130813052686c70d7265'
-CAPTURE_SHA = '22bb32a9f9ac50bff10107f46e9fcfb3c9926d60a289b7524ea87c89c864957a'
-CAPTURE_PROJECTION_SHA = '35ed12894fb25a64fdc59e9256ef82aad58b491b76c68d5ab22344d769dfc63e'
-UBUNTU_PREREQUISITE_SHA = 'eccfe9e153fe17d1e902454ecf87cf45e08b10029924275ef67e435bd30ba13c'
-NATIVE_RUNNER_SHA = '93bd3d5b8c4686087ec4816d5b0d46e130047f74911cbba3f7b15984412c745a'
+HEAD = '77e1e1fbb83357df92e15fc6213d8a6dfa369fd8'
+PARENT = 'df028a57d06687768137d910318703496ab864db'
+HARNESS_PARENT = '97c083c266e2844755f3f4eff0dd7d44c9214457'
+TREE = '60bd4b6900561cb23e543d870b2212fd40f66d57'
+CAPTURE_SHA = '7c1315ff667536f53aa0cd35e5bdccdc74bdf0751fb39669ec75f22a006fd7a3'
+CAPTURE_PROJECTION_SHA = 'b55df35371621583523b3c0548a25b4623a7b8a913a99dc4ffb69bb2c5206aef'
+UBUNTU_PREREQUISITE_SHA = 'f7240d78c7ab9ff16885f8e548499b4462370953255d09d04f747554966f9d57'
+NATIVE_RUNNER_SHA = '9a9e746ac14d4e8ec1849d96cce9483f366bbeac6e064e2fffc0fd8c43bcc0ba'
 SDK = '10.0.401'
 COUNT = 2821
 FILE_CAP = 256 * 1024 * 1024
@@ -649,12 +649,7 @@ def main():
     source_merge = run(['git', 'show', '-s', '--format=%P', 'HEAD'], HARN).strip().decode()
     require(re.fullmatch('[0-9a-f]{40}', source_merge) is not None, 'normal-harness-child')
     require(run(['git', 'show', '-s', '--format=%P', source_merge], HARN).strip().decode() == HARNESS_PARENT + ' ' + HEAD, 'ordered-source-merge')
-    source_delta = {
-        'Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/EvidenceNativeObservationFailureTests.cs': 'M',
-        'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/EvidenceNativeObservationFailure.cs': 'M',
-        'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxProcessIdentity.cs': 'M',
-        'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md': 'M',
-    }
+    source_delta = {'Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionAcceptOwnershipTests.cs': 'M', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/SupervisionAcceptOwnership.cs': 'M', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxControlListener.cs': 'M', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationControlServer.cs': 'M', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md': 'M'}
     source_status = dict((name, status) for status, name in
                         (row.split('\t') for row in run(['git', 'diff', '--name-status', HARNESS_PARENT, source_merge], HARN).decode().splitlines()))
     require(source_status == source_delta, 'exact-source-merge-delta')

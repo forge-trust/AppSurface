@@ -1,3 +1,5 @@
+## HISTORICAL process-node inspection composition (source df028)
+
 ## HISTORICAL reviewed process-recheck composition (source75)
 
 ## HISTORICAL reviewed listener composition (source25)
@@ -33,3 +35,7 @@ Source `75f8164274e362fbf17847331e44d1d01843c1e5` is a five-file child of `25e44
 ## Process-node inspection diagnostic candidate
 
 Source `df028a57d06687768137d910318703496ab864db` is an exact four-file child of `75f8164274e362fbf17847331e44d1d01843c1e5`;2821 source SHA/modes are captured. Main supplies the actual local core/diagnostic counts and receipt pins; no native acceptance is inferred. Listener is unchanged. All four operational previous-harness constants are `12cc85baaaca3caf8069a2e395fd9374da2cea76`. The preparer validates full prior75 source, then normal ordered merge[12cc,new source] and exactly four source M paths, followed by a sole installation child. Actual merge/head are established only during later preparation. The43-command checks and clone/merge022 behavior are retained; no extra Git query is added. Removing Listener from the three source-delta guards is an explicit structural change. Every promotion/review flag remains false pending exact fresh review. Historical observations remain labeled historical. See the [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md).
+
+## Exit/accept admission correction candidate
+
+Source `77e1e1fbb83357df92e15fc6213d8a6dfa369fd8` is an exact five-file child of `df028a57d06687768137d910318703496ab864db` with full2821 captured SHA/modes. Current local core1078/ownership38/diagnostics66 and11 new data controls are bound to final supplied receipt/TRX/peer pins. These are portable source tests; no Linux/root authority or native acceptance is established. All16 native controls remain pending. All four operational parent pins are `97c083c266e2844755f3f4eff0dd7d44c9214457`, distinct from historical merge042a0bb. Preparation performs normal ordered merge[97c,new source], verifies five source M paths, and creates a sole installation child. The43-command checks, clone/merge022, private077 operations, and120/90-second supervisor bounds are unchanged. All eight workflow promotion flags are false until fresh review. The fixed source-delta guards are intentionally changed to five paths. See the [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md).
