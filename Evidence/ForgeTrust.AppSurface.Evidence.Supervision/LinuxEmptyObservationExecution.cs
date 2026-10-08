@@ -36,6 +36,7 @@ internal static class LinuxEmptyObservationExecution
         LinuxOwnerActivation? owner = null;
         LinuxRunAccounts? accounts = null;
         LinuxRunWorkspace? workspace = null;
+        LinuxRunWorkspace.SymlinkSlotInspection? symlinkNegative = null; // Fixed private N06 image only.
         LinuxControlListener? listener = null;
         LinuxWorkerProcess? worker = null;
         LinuxEmptyObservationControlServer? server = null;
@@ -80,6 +81,8 @@ internal static class LinuxEmptyObservationExecution
             accounts = await LinuxRunAccounts.CreateAsync(owner, job.Token).ConfigureAwait(false);
             phase = EvidenceNativeObservationPhase.WorkspaceCreate;
             workspace = LinuxRunWorkspace.Create(owner, accounts, job.Token);
+            symlinkNegative = workspace.PrepareSymlinkSlotNegative(owner, accounts, job.Token);
+            symlinkNegative.WriteSetupEvidence(job.Token); // Before listener or worker creation.
             phase = EvidenceNativeObservationPhase.ListenerBind;
             listener = LinuxControlListener.Bind(owner, accounts, workspace, job.Token);
             phase = EvidenceNativeObservationPhase.WorkerCreate;
@@ -129,6 +132,10 @@ internal static class LinuxEmptyObservationExecution
             if (worker is not null)
                 try { phase = EvidenceNativeObservationPhase.WorkerJoin; await worker.StopAndJoinAsync().ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            // Fixed N06 data comparison after the original physical ownership guard, never a custody waiver.
+            if (symlinkNegative is not null && input is not null && worker is not null && server is not null)
+                try { phase = EvidenceNativeObservationPhase.WorkerJoin; symlinkNegative.WritePostJoinEvidence(input, worker, server, cleanupToken); }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             if (custody is null && input is not null && owner is not null && accounts is not null
                 && workspace is not null && worker is not null && server is not null)
                 try
@@ -150,6 +157,8 @@ internal static class LinuxEmptyObservationExecution
                 try { phase = EvidenceNativeObservationPhase.WorkerClose; await worker.DisposeAsync().ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             try { phase = EvidenceNativeObservationPhase.CustodyClose; custody?.Dispose(); }
+            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            try { phase = EvidenceNativeObservationPhase.WorkspaceClose; symlinkNegative?.Dispose(); }
             catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             try { phase = EvidenceNativeObservationPhase.WorkspaceClose; workspace?.Dispose(); }
             catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
