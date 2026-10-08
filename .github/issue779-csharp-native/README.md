@@ -1,3 +1,5 @@
+## HISTORICAL exit/accept composition (source77e1)
+
 ## HISTORICAL process-node inspection composition (source df028)
 
 ## HISTORICAL reviewed process-recheck composition (source75)
@@ -39,3 +41,7 @@ Source `df028a57d06687768137d910318703496ab864db` is an exact four-file child of
 ## Exit/accept admission correction candidate
 
 Source `77e1e1fbb83357df92e15fc6213d8a6dfa369fd8` is an exact five-file child of `df028a57d06687768137d910318703496ab864db` with full2821 captured SHA/modes. Current local core1078/ownership38/diagnostics66 and11 new data controls are bound to final supplied receipt/TRX/peer pins. These are portable source tests; no Linux/root authority or native acceptance is established. All16 native controls remain pending. All four operational parent pins are `97c083c266e2844755f3f4eff0dd7d44c9214457`, distinct from historical merge042a0bb. Preparation performs normal ordered merge[97c,new source], verifies five source M paths, and creates a sole installation child. The43-command checks, clone/merge022, private077 operations, and120/90-second supervisor bounds are unchanged. All eight workflow promotion flags are false until fresh review. The fixed source-delta guards are intentionally changed to five paths. See the [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md).
+
+## Listener-close diagnostic candidate
+
+Source `a353970c67b7b2e02acaa248348dbff69efd3648` is an exact five-file diagnostic child of `77e1e1fbb83357df92e15fc6213d8a6dfa369fd8` with full2821 captured SHA/modes. Actual local counts, TRX and source-peer pins come only from the final SHA-bound packet; prior1078/Ownership38/Diagnostics66 are historical. No first cause, cancellation or connection-aborted disposal behavior is inferred from attempt28 ListenerClose/Admission/ASEVD402 with null operation. All four operational parent pins are `8eef98c502ad35ace08b36e77db2494580da38d5`. Preparation normally merges[8eef,new source] and creates a sole installation child. All limits,43 checks, clone/merge022 and other077 commands,19 inputs/40 edges, parser/N03 logic and original deadlines remain inherited. All eight promotion flags are false pending fresh exact-file review; all16 native controls and registry remain unaccepted. See the [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md).

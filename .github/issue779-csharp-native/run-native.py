@@ -17,20 +17,20 @@ import uuid
 
 N03_INDEPENDENT_REVIEW_CLEAR = True
 N03_SOURCE_REBIND_PENDING = False
-SOURCE = '77e1e1fbb83357df92e15fc6213d8a6dfa369fd8'
-PARENT = '97c083c266e2844755f3f4eff0dd7d44c9214457'
-SOURCE_MAP = 'd7eca8efdec2ac8bbbb317b4b22bbbdb5fdfdf1e5ba7c78e17b375951db95d36'
+SOURCE = 'a353970c67b7b2e02acaa248348dbff69efd3648'
+PARENT = '8eef98c502ad35ace08b36e77db2494580da38d5'
+SOURCE_MAP = '37442ad61b4280d8069e90701da561eb844d4fd94ae3a88017aa80aa33c641cc'
 PINS = {
     'build-helper.sh': '7bc0906967cfba542b3919e12855fb5f0e8946d0fe062a5d8371d4a5142101f4',
     'Program.cs': '02a28424a2d57c56213fae8618d50df1019986cadf89246e2ce11411a23c967a',
     'NativePeerBroker.csproj': '92da6c96d4c88fae754ece54af775a00c1d713c7e44b9a76bda7cc768773514e',
     'packages.lock.json': 'a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb',
 
-    'prepare-root-inputs-v2.sh': '1d539a29d9270f60e7ed267288ab11b3b96a447d0c86c708ff593bca43175843',
-    'checkpoint-n01-n02-v5.sh': '471d8d0eafc393a55b3ca2985b07df24581df6cfcb1e2e5f28d637c4221046a5',
+    'prepare-root-inputs-v2.sh': '3f5519982287ea3248d1deef86cb0c13c6d38e5c544b4a1b8042ecad13d52acc',
+    'checkpoint-n01-n02-v5.sh': 'd33e633904a32c0f4a9a7bda5a8aab133444746cad66b81d70e80893411e857d',
     'prepare-os-audit-v2.py': '0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b',
-    'source-review.json': 'e0977503b63b507df837376dba550d8bc841ba062528c64ad7801c3d315f55bc',
-    'acquire-inbound.sh': '899c635ed8ed440233b3c3ce690b7d9849de04dde27cb693f2875bb76d210645',
+    'source-review.json': '4e79ac1eeae8087dcda6650a4a3c6b30098579261a34f2113d327167dd137800',
+    'acquire-inbound.sh': '9e6f5a5807d67fe42a8503d8d9643d6b33383292ccb72312b953ae92c2c57499',
     'retain-native.sh': 'df77c52bae29828c12b1ad56c2dc0c150649c26a1fde1fe2c2f2c345ad54a9cd',
 }
 ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',
