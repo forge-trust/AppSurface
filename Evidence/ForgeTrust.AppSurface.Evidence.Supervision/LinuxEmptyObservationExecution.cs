@@ -17,7 +17,8 @@ internal static class LinuxEmptyObservationExecution
     /// <param name="token">Caller cancellation; independent cleanup uses the original owner/job reserve.</param>
     /// <returns>Detached informational Observation manifest data after normal exit and all required final closes.</returns>
     /// <exception cref="EvidenceAdmissionException">Fixed ASEVD402 for unsupported/unprivileged entry,
-    /// or ASEVD410 when execution or cleanup cannot be established.</exception>
+    /// before protected execution begins.</exception>
+    /// <exception cref="EvidenceNativeObservationException">Fixed ASEVD410 with closed first-fault data when execution or cleanup fails.</exception>
     /// <exception cref="OperationCanceledException">Original caller cancellation after all cleanup attempts join.</exception>
     /// <remarks>
     /// Plan resolution precedes account creation. A successful EXIT ACK is followed by the worker's original
@@ -43,6 +44,13 @@ internal static class LinuxEmptyObservationExecution
         CancellationTokenSource? serverLifetime = null;
         Task? serverTask = null;
         EvidenceManifest? manifest = null;
+        var failures = new EvidenceNativeObservationFailureLatch();
+        var phase = EvidenceNativeObservationPhase.Unknown;
+        void Record(Exception error)
+        {
+            try { failures.Capture(phase, error); }
+            catch (Exception) { } // Diagnostic capture cannot replace the actual execution/cleanup error.
+        }
         var failed = false;
         var cleanupFailed = false;
         var cleanupToken = CancellationToken.None;
@@ -50,104 +58,127 @@ internal static class LinuxEmptyObservationExecution
         TimeSpan finalCloseAllowance = TimeSpan.Zero;
         try
         {
+            phase = EvidenceNativeObservationPhase.CallerCancellation;
             token.ThrowIfCancellationRequested();
+            phase = EvidenceNativeObservationPhase.ProtectedInput;
             input = EvidenceProtectedLaunchInput.Open(requestPath, token);
+            phase = EvidenceNativeObservationPhase.JobDeadline;
             job = CancellationTokenSource.CreateLinkedTokenSource(token);
             job.CancelAfter(input.Remaining);
+            phase = EvidenceNativeObservationPhase.BackendConnect;
             backend = await LinuxSystemdBackend.ConnectAsync(job.Token).ConfigureAwait(false);
+            phase = EvidenceNativeObservationPhase.OwnerActivation;
             owner = await LinuxOwnerActivation.OpenAsync(input, backend, job.Token).ConfigureAwait(false);
+            phase = EvidenceNativeObservationPhase.Plan;
             _ = EvidenceEmptyObservationPlan.FromInput(input, job.Token);
+            phase = EvidenceNativeObservationPhase.AccountCreate;
             accounts = await LinuxRunAccounts.CreateAsync(owner, job.Token).ConfigureAwait(false);
+            phase = EvidenceNativeObservationPhase.WorkspaceCreate;
             workspace = LinuxRunWorkspace.Create(owner, accounts, job.Token);
+            phase = EvidenceNativeObservationPhase.ListenerBind;
             listener = LinuxControlListener.Bind(owner, accounts, workspace, job.Token);
+            phase = EvidenceNativeObservationPhase.WorkerCreate;
             worker = LinuxWorkerProcess.Create(input, owner, accounts, workspace, listener, job.Token);
+            phase = EvidenceNativeObservationPhase.WorkerStart;
             await worker.StartAsync(job.Token).ConfigureAwait(false);
+            phase = EvidenceNativeObservationPhase.ServerCreate;
             server = LinuxEmptyObservationControlServer.Create(input, owner, accounts, workspace, listener, worker, job.Token);
+            phase = EvidenceNativeObservationPhase.ServerLifetime;
             serverLifetime = CancellationTokenSource.CreateLinkedTokenSource(job.Token);
+            phase = EvidenceNativeObservationPhase.ServerRun;
             serverTask = server.RunAsync(serverLifetime.Token);
             await serverTask.ConfigureAwait(false);
+            phase = EvidenceNativeObservationPhase.ServerCompletion;
             server.RequireSuccessfulCompletion(job.Token);
+            phase = EvidenceNativeObservationPhase.WorkerExit;
             await worker.WaitForExitAsync().ConfigureAwait(false);
+            phase = EvidenceNativeObservationPhase.WorkerStop;
             await worker.StopAndJoinAsync().ConfigureAwait(false);
+            phase = EvidenceNativeObservationPhase.WorkerCompletion;
             worker.RequireSuccessfulCompletion();
+            phase = EvidenceNativeObservationPhase.BeginTeardown;
             owner.BeginRootTeardown();
             cleanupToken = owner.RootTeardownToken;
+            phase = EvidenceNativeObservationPhase.Custody;
             custody = await workspace.TakeRootCustodyAsync(input, owner, accounts, worker, server, cleanupToken).ConfigureAwait(false);
+            phase = EvidenceNativeObservationPhase.FileVerification;
             manifest = custody.VerifyObservationFiles(cleanupToken);
         }
-        catch (Exception error) when (Recoverable(error)) { failed = true; }
+        catch (Exception error) when (Recoverable(error)) { Record(error); failed = true; }
         finally
         {
             if (owner is not null)
             {
-                try { owner.BeginRootTeardown(); cleanupToken = owner.RootTeardownToken; }
-                catch (Exception error) when (Recoverable(error)) { cleanupFailed = true; }
+                try { phase = EvidenceNativeObservationPhase.CleanupBegin; owner.BeginRootTeardown(); cleanupToken = owner.RootTeardownToken; }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             }
             // Interrupt actual I/O before joining original tasks. This code runs outside every handler.
-            try { serverLifetime?.Cancel(); }
-            catch (Exception error) when (Recoverable(error)) { cleanupFailed = true; }
+            try { phase = EvidenceNativeObservationPhase.ServerCancel; serverLifetime?.Cancel(); }
+            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             if (listener is not null)
-                try { await listener.DisposeAsync().ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error)) { cleanupFailed = true; }
+                try { phase = EvidenceNativeObservationPhase.ListenerClose; await listener.DisposeAsync().ConfigureAwait(false); }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             if (serverTask is not null)
-                try { await serverTask.ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error)) { failed = true; }
+                try { phase = EvidenceNativeObservationPhase.ServerJoin; await serverTask.ConfigureAwait(false); }
+                catch (Exception error) when (Recoverable(error)) { Record(error); failed = true; }
             if (worker is not null)
-                try { await worker.StopAndJoinAsync().ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error)) { cleanupFailed = true; }
+                try { phase = EvidenceNativeObservationPhase.WorkerJoin; await worker.StopAndJoinAsync().ConfigureAwait(false); }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             if (custody is null && input is not null && owner is not null && accounts is not null
                 && workspace is not null && worker is not null && server is not null)
                 try
                 {
+                    phase = EvidenceNativeObservationPhase.CleanupCustody;
                     custody = await workspace.TakeRootCustodyAsync(input, owner, accounts, worker, server, cleanupToken)
                         .ConfigureAwait(false);
                 }
-                catch (Exception error) when (Recoverable(error)) { cleanupFailed = true; }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             if (custody is not null)
-                try { await custody.CloseAccountsAsync(cleanupToken).ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error)) { cleanupFailed = true; }
+                try { phase = EvidenceNativeObservationPhase.AccountsClose; await custody.CloseAccountsAsync(cleanupToken).ConfigureAwait(false); }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             else if (accounts is not null)
-                try { await accounts.CloseAsync(cleanupToken).ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error)) { cleanupFailed = true; }
+                try { phase = EvidenceNativeObservationPhase.AccountsClose; await accounts.CloseAsync(cleanupToken).ConfigureAwait(false); }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             // Transfer already closes original owners. Rejoining their same tasks is harmless and ensures
             // earlier setup failures also attempt every local close, without bypassing account custody.
             if (worker is not null)
-                try { await worker.DisposeAsync().ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error)) { cleanupFailed = true; }
-            try { custody?.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { cleanupFailed = true; }
-            try { workspace?.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { cleanupFailed = true; }
+                try { phase = EvidenceNativeObservationPhase.WorkerClose; await worker.DisposeAsync().ConfigureAwait(false); }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            try { phase = EvidenceNativeObservationPhase.CustodyClose; custody?.Dispose(); }
+            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            try { phase = EvidenceNativeObservationPhase.WorkspaceClose; workspace?.Dispose(); }
+            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             if (owner is not null)
                 try
                 {
+                    phase = EvidenceNativeObservationPhase.OwnerFinalCheck;
                     cleanupToken.ThrowIfCancellationRequested();
                     owner.RequireControlIdentity(cleanupToken);
                     finalCloseStarted = TimeProvider.System.GetTimestamp();
                     finalCloseAllowance = owner.CleanupRemaining;
                 }
-                catch (Exception error) when (Recoverable(error)) { cleanupFailed = true; }
-            try { serverLifetime?.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { cleanupFailed = true; }
-            try { job?.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { cleanupFailed = true; }
-            try { owner?.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { cleanupFailed = true; }
-            try { input?.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { cleanupFailed = true; }
-            try { backend?.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { cleanupFailed = true; }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            try { phase = EvidenceNativeObservationPhase.ServerLifetimeClose; serverLifetime?.Dispose(); }
+            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            try { phase = EvidenceNativeObservationPhase.JobClose; job?.Dispose(); }
+            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            try { phase = EvidenceNativeObservationPhase.OwnerClose; owner?.Dispose(); }
+            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            try { phase = EvidenceNativeObservationPhase.InputClose; input?.Dispose(); }
+            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            try { phase = EvidenceNativeObservationPhase.BackendClose; backend?.Dispose(); }
+            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             // Native owners are now closed, so bind the final publication check to the remaining
             // monotonic interval captured immediately before their closes; no new allowance is created.
             // Disposing the owner deliberately cancels borrowers; that expected cancellation is not
             // evidence of expiry. Check only the independent captured interval after those closes.
             if (owner is not null)
-                try { RequireFinalClose(TimeProvider.System, finalCloseStarted, finalCloseAllowance); }
-                catch (Exception error) when (Recoverable(error)) { cleanupFailed = true; }
+                try { phase = EvidenceNativeObservationPhase.FinalDeadline; RequireFinalClose(TimeProvider.System, finalCloseStarted, finalCloseAllowance); }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
         }
-        if (cleanupFailed) throw Rejected();
+        if (cleanupFailed) throw failures.Rejected();
         token.ThrowIfCancellationRequested();
-        if (failed || manifest is null) throw Rejected();
+        if (failed || manifest is null) throw failures.Rejected();
         return manifest;
     }
 

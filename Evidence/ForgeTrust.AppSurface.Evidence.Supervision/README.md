@@ -701,6 +701,50 @@ It has no supplied backend, account owner, plan, handler, producer, application 
 The fixed order is retained input → authenticated backend/owner activation → actual empty plan →
 accounts → workspace → listener → same-image worker → ready/stop/wait/exit server.
 
+### Closed native failure diagnostics
+
+The private checkpoint records the first recoverable root execution or cleanup fault with
+[`EvidenceNativeObservationFailure`](EvidenceNativeObservationFailure.cs). This is detached diagnostic
+data, never a native owner, admission, custody holder or accepted result. Each actual setup/await/check
+and cleanup operation supplies a fixed `EvidenceNativeObservationPhase` immediately before that
+operation. `EvidenceNativeObservationFailureLatch.Capture(phase, error)` retains only the first closed
+projection; later account, FD, backend or final-deadline failures cannot overwrite an earlier worker
+startup failure. Capture is best effort and cannot replace the original execution/cleanup outcome.
+No operation order, token, clock, gate, authority check, work grant or join is changed.
+
+The reserved supervisor entry emits one stderr JSON line with exactly four fields, followed by the
+unchanged fixed ASEVD410 admission message and numeric exit1:
+
+```json
+{"schema":"evidence-native-observation-failure-v1","phase":"WorkerStart","error_kind":"Admission","diagnostic_code":"ASEVD410"}
+```
+
+The example is shape documentation, not measured attempt14 cause. `phase` and `error_kind` are the
+closed PascalCase enum values in the [diagnostic source](EvidenceNativeObservationFailure.cs).
+`diagnostic_code` is nullable and allows only ASEVD402/404/407/409/410/420/421 from an actual
+`EvidenceAdmissionException.Code`; messages and inner exceptions are never searched. Known account,
+pipe and control-line classes have finite family labels; unrecognized exceptions map to `Unknown`.
+No arbitrary type name, message, stack, path, inner error or caller content survives the projection.
+`ToJson()` returns no LF; the entry writes the LF. All possible packets are below1024 UTF-8 bytes.
+The JSON is additional failure evidence, not a replacement for the original numeric process outcome.
+
+`EvidenceNativeObservationException` is internal and negative-only because the existing admission
+exception is sealed. It carries the closed packet and exactly the old fixed ASEVD410 text, without a
+raw inner exception. The final cleanup/result rejection throws it; only the selected reserved supervisor
+entry consumes it. Successful execution emits no diagnostic packet. Unsupported/unprivileged
+`RequirePlatform` remains before protected I/O and outside capture. The original final caller-cancellation
+check is unchanged: clean cancellation still produces the existing ASEVD402 cancellation outcome,
+without a new packet. Fatal exceptions excluded by the existing recoverability filter remain excluded.
+If no caught fault exists at a negative result check, the fallback is explicitly `ResultCheck`/`Unknown`,
+not an invented native exception or successful cleanup claim.
+
+The new portable controls exercise schema bounds, code filtering, canary rejection, actual closed
+exception families and first-fault/closure precedence only. They have been defined, not executed, in
+this private source-preparation lane. Build/peer review and genuine native execution remain pending.
+Attempt14 retained only a generic ASEVD410 and no worker-live/final files; its actual first cause remains
+unmeasured. This diagnostic adds observation for a subsequent run and waives none of the
+[native checkpoint requirements](../../docs/plans/issue-779-csharp-supervision-migration.md#checkpoint-1-one-real-supervised-worker).
+
 Success joins the original server task, then the worker's natural exit monitor **before** unit stop.
 Stopping immediately after EXIT could terminate the worker between its ACK and normal return. The
 server's `RequireSuccessfulCompletion` requires that original task to have succeeded, all protocol ACKs
