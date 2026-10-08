@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Unprivileged build prerequisite only. No sudo, fixture, managed entry, or OS audit.
+# Unprivileged build and actual pipe regression only. No sudo, supervisor/worker role, fixture or OS audit.
 set -euo pipefail
 umask 077
 [[ $# == 4 && "$1" == --execute ]] || { echo 'build-invocation-rejected' >&2; exit 1; }
@@ -16,15 +16,16 @@ import subprocess
 import sys
 import tarfile
 import time
+import xml.etree.ElementTree as ET
 
-HEAD = '87d94e1a487a2283862ab87930ed1341ec25200a'
-PARENT = '45f596cfdc800348266b03184088f0e3e42a904a'
-HARNESS_PARENT = 'be676550fb17e9a38a841147eb314503ac5c0382'
-TREE = 'db825a0a88fb76fb1b0e9243f72bca3299ed114b'
-CAPTURE_SHA = 'c20fcf095211a8e75fa9d12c1dd706888624f797ed78767173c224f76898f9a3'
-CAPTURE_PROJECTION_SHA = 'b074cece75e8f89c088195f5247b65139fe52003dfb4aa8a05603ede84a783f6'
-UBUNTU_PREREQUISITE_SHA = '5732dcfd40c7c18d58f01fda2c1a0fc0fd8c92b5c60d294f693e9f5f5b2d2165'
-NATIVE_RUNNER_SHA = 'fccced7770f8361f822b4aeee86e5e3eb2a943a48f665e86b186dc86c078df1f'
+HEAD = 'd5c8fe20dbef4903c3d438a31e2c092f8cd17eac'
+PARENT = '87d94e1a487a2283862ab87930ed1341ec25200a'
+HARNESS_PARENT = '76e5053d56ef65b3b539ab6aa0090a0355749ab5'
+TREE = '04e978bb45ae84a823bf64200f4be349190ab898'
+CAPTURE_SHA = '11b65feefeb52ab60523e5feb7821cdf08b31abc3a4b5a741fa5e54d3c3563b8'
+CAPTURE_PROJECTION_SHA = 'a7b9ffd3677666be45d3a348cdb497efe5de7c48ed95095da1ea8fa96201a2aa'
+UBUNTU_PREREQUISITE_SHA = '995c7bd728d0d50230fbceb31d6a5ed59cf598af685832b6db08619e7d9eb8c3'
+NATIVE_RUNNER_SHA = '16a72a286b972a1fb95247d3a1dd72cf5b331ec2db3b471d711467daecf23906'
 SDK = '10.0.401'
 COUNT = 2821
 FILE_CAP = 256 * 1024 * 1024
@@ -675,6 +676,35 @@ def main():
     run([str(selected_dotnet), 'publish', project, '--no-restore', '-c', 'Release',
          '-p:ContinuousIntegrationBuild=true', '-p:SelfContained=false', '-p:UseAppHost=false',
          '-p:UseSharedCompilation=false', '-nr:false', '-o', str(published)], clone)
+    # Linux library regression through the same owned raw-handle wrapper; no root factory or admission.
+    require(sys.platform == 'linux' and os.getuid() != 0 and os.geteuid() != 0, 'pipe-regression-platform-and-user')
+    pipe_project = str(clone / 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj')
+    pipe_results = OUT / 'receipts' / 'pipe-tests'
+    run([str(selected_dotnet), 'restore', pipe_project, '--locked-mode', '-p:UseSharedCompilation=false'], clone)
+    pipe_method = 'OwnedRawPipeReadWrappingUsesHandleModeAndJoinsBothEofs'
+    run([str(selected_dotnet), 'test', pipe_project, '--no-restore', '-p:UseSharedCompilation=false',
+         '--filter', 'FullyQualifiedName~' + pipe_method, '--logger', 'trx;LogFileName=pipe-handle.trx',
+         '--results-directory', str(pipe_results)], clone)
+    pipe_fact = regular(pipe_results / 'pipe-handle.trx', 256 * 1024, collect=True)
+    require(b'<!DOCTYPE' not in pipe_fact['data'] and b'<!ENTITY' not in pipe_fact['data'], 'pipe-trx-declaration')
+    pipe_doc = ET.fromstring(pipe_fact['data'])
+    pipe_ns = {'t': 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'}
+    pipe_counters = pipe_doc.findall('.//t:Counters', pipe_ns)
+    pipe_definitions = pipe_doc.findall('.//t:UnitTest', pipe_ns)
+    pipe_outcomes = pipe_doc.findall('.//t:UnitTestResult', pipe_ns)
+    require(len(pipe_counters) == len(pipe_definitions) == len(pipe_outcomes) == 1, 'pipe-trx-count')
+    counters = pipe_counters[0].attrib
+    require(all(counters.get(k) == '1' for k in ('total', 'executed', 'passed')) and
+            all(counters.get(k) == '0' for k in ('failed', 'error', 'notExecuted', 'timeout', 'aborted')), 'pipe-trx-outcome')
+    pipe_id = pipe_definitions[0].get('id')
+    require(isinstance(pipe_id, str) and re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', pipe_id) is not None, 'pipe-trx-id')
+    method = pipe_definitions[0].find('t:TestMethod', pipe_ns)
+    require(method is not None and method.get('className') == 'ForgeTrust.AppSurface.Evidence.Supervision.Tests.LinuxOutputPipesTests'
+            and method.get('name') == pipe_method and pipe_outcomes[0].get('outcome') == 'Passed'
+            and pipe_outcomes[0].get('testId') == pipe_id, 'pipe-trx-method')
+    RESULT['linux_pipe_regression'] = {'method': pipe_method, 'counters': counters, 'trx_sha256': pipe_fact['sha256'],
+                                       'unprivileged_library_behavior_only': True, 'root_factory_exercised': False,
+                                       'native_acceptance': False, 'runtime_basis': 'selected SDK dotnet host'}
     RESULT['source_after_build'] = source_check(clone, capture['source'])
     # Compiler/analyzer warnings are retained; none are suppressed or passed off as clean.
     diagnostics = []

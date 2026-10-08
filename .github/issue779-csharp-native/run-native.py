@@ -15,15 +15,15 @@ import tarfile
 import time
 import uuid
 
-SOURCE = '87d94e1a487a2283862ab87930ed1341ec25200a'
-PARENT = 'be676550fb17e9a38a841147eb314503ac5c0382'
-SOURCE_MAP = '03eed1bf0de7f36fc9d4fe207c2c98bcf2cd7aca8f09088fff711cba7764cf21'
+SOURCE = 'd5c8fe20dbef4903c3d438a31e2c092f8cd17eac'
+PARENT = '76e5053d56ef65b3b539ab6aa0090a0355749ab5'
+SOURCE_MAP = '7464425522a3e7503be32a7402c34c2a7df9c86571e1ce7f6c53702861c89f87'
 PINS = {
-    'prepare-root-inputs-v2.sh': '2adcab2714dd6ae4726de9d38b326b7bfdaab00d400ae65e3f11ad29c6fabf21',
-    'checkpoint-n01-n02-v5.sh': 'f372bb456e46e6e6a0e6fd6014418788e1c43c751e2dc92b64139991c0d050e3',
+    'prepare-root-inputs-v2.sh': 'da249051be9a48ee05b2e98732cbe936791f08cffb95df7ff94dea3f3b068254',
+    'checkpoint-n01-n02-v5.sh': '1de9594865cd8a770ed2fe6746478144a9e7ba3fbf5125b6bf7e17a65086a059',
     'prepare-os-audit-v2.py': 'a76d3ec9521f021e799b8b56a6c57afdbeb6d4abdb21a55f42899a834eed4604',
-    'source-review.json': 'c17cb433edd09788916a55ec37a82fd0b9e79e86d79644ecf2b4e26010460bd9',
-    'acquire-inbound.sh': '3591a4a51517b39ef1bb1d287306ea4d43a2ddb84cd88c11b88354703f1beae7',
+    'source-review.json': 'f5b11d5cbcf8ea874fe4ddd01ac57659a40f98a75d4c24202d6d33cebfd91e91',
+    'acquire-inbound.sh': 'fd1324618e3e1e5561dcfc2fa5f37210a0450aa01b3dbfceaedcca7f06cfb745',
     'retain-native.sh': 'a6bc3da869386b440d0b8a2ad93eb3cb888a4e48aabe52febf6a609b33d45331',
 }
 ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',
@@ -181,7 +181,15 @@ def validate_build(receipt, maps):
             and receipt['exit'] == 0 and receipt.get('failure') is None and receipt['diagnostics'] == []
             and receipt['source_commit'] == SOURCE and receipt['harness_parent'] == PARENT
             and receipt['native_execution'] is False and receipt['checkpoint_pass'] is False, 'build-terminal')
-    require(len(receipt['commands']) == 39 and [row['ordinal'] for row in receipt['commands']] == list(range(39)), 'build-commands')
+    require(len(receipt['commands']) == 41 and [row['ordinal'] for row in receipt['commands']] == list(range(41)), 'build-commands')
+    pipe = receipt.get('linux_pipe_regression')
+    require(type(pipe) is dict and set(pipe) == {'method', 'counters', 'trx_sha256', 'unprivileged_library_behavior_only', 'root_factory_exercised', 'native_acceptance', 'runtime_basis'}, 'pipe-regression-schema')
+    require(pipe['method'] == 'OwnedRawPipeReadWrappingUsesHandleModeAndJoinsBothEofs'
+            and type(pipe['counters']) is dict and all(pipe['counters'].get(k) == '1' for k in ('total', 'executed', 'passed'))
+            and all(pipe['counters'].get(k) == '0' for k in ('failed', 'error', 'notExecuted', 'timeout', 'aborted'))
+            and type(pipe['trx_sha256']) is str and re.fullmatch(r'[0-9a-f]{64}', pipe['trx_sha256']) is not None
+            and pipe['unprivileged_library_behavior_only'] is True and pipe['root_factory_exercised'] is False
+            and pipe['native_acceptance'] is False and pipe['runtime_basis'] == 'selected SDK dotnet host', 'pipe-regression-terminal')
     for row in receipt['commands']:
         require(type(row['exit']) is int and row['exit'] == 0 and row['failure'] is None
                 and row['waited'] is True and row['group_absent'] is True and row['timed_out'] is False

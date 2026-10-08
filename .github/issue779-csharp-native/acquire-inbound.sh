@@ -4,9 +4,9 @@
 set -euo pipefail
 export PATH=/usr/bin:/usr/sbin LC_ALL=C LANG=C
 umask 077
-readonly SOURCE=87d94e1a487a2283862ab87930ed1341ec25200a
-readonly PARENT=be676550fb17e9a38a841147eb314503ac5c0382
-readonly SOURCE_MAP=03eed1bf0de7f36fc9d4fe207c2c98bcf2cd7aca8f09088fff711cba7764cf21
+readonly SOURCE=d5c8fe20dbef4903c3d438a31e2c092f8cd17eac
+readonly PARENT=76e5053d56ef65b3b539ab6aa0090a0355749ab5
+readonly SOURCE_MAP=7464425522a3e7503be32a7402c34c2a7df9c86571e1ce7f6c53702861c89f87
 readonly FILE_CAP=268435456 TREE_CAP=1073741824 NODE_CAP=8192 RESERVE_MS=5000
 declare -A v=() roots=() maps=() nodes=() map_hash=() node_hash=()
 output=; work=; success=0
@@ -26,10 +26,10 @@ done
 for k in reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256; do
  [[ ${v[$k]} =~ ^[0-9a-f]{64}$ ]] || fail digest-shape
 done
-[[ ${v[transport-sha256]} == 2adcab2714dd6ae4726de9d38b326b7bfdaab00d400ae65e3f11ad29c6fabf21 &&
-   ${v[fixture-sha256]} == f372bb456e46e6e6a0e6fd6014418788e1c43c751e2dc92b64139991c0d050e3 &&
+[[ ${v[transport-sha256]} == da249051be9a48ee05b2e98732cbe936791f08cffb95df7ff94dea3f3b068254 &&
+   ${v[fixture-sha256]} == 1de9594865cd8a770ed2fe6746478144a9e7ba3fbf5125b6bf7e17a65086a059 &&
    ${v[audit-sha256]} == a76d3ec9521f021e799b8b56a6c57afdbeb6d4abdb21a55f42899a834eed4604 &&
-   ${v[source-review-sha256]} == c17cb433edd09788916a55ec37a82fd0b9e79e86d79644ecf2b4e26010460bd9 ]] || fail frozen-input-pins
+   ${v[source-review-sha256]} == f5b11d5cbcf8ea874fe4ddd01ac57659a40f98a75d4c24202d6d33cebfd91e91 ]] || fail frozen-input-pins
 mono() {
  local stamp rest whole fraction
  IFS=' ' read -r stamp rest </proc/uptime || return 1
@@ -93,7 +93,16 @@ bounded /usr/bin/jq -e --arg source "$SOURCE" --arg parent "$PARENT" --arg map "
  . as $r | .schema=="issue779-csharp-fdd-build-v5" and .exit==0 and (.failure?==null) and
  .source_commit==$source and .harness_parent==$parent and .diagnostics==[] and
  .native_execution==false and .checkpoint_pass==false and
- (.commands|length)==39 and (.commands|map(.ordinal))==[range(0;39)] and
+ (.linux_pipe_regression|type)=="object" and
+ (.linux_pipe_regression|keys)==["counters","method","native_acceptance","root_factory_exercised","runtime_basis","trx_sha256","unprivileged_library_behavior_only"] and
+ .linux_pipe_regression.method=="OwnedRawPipeReadWrappingUsesHandleModeAndJoinsBothEofs" and
+ (.linux_pipe_regression.counters|type)=="object" and
+ all(["total","executed","passed"][]; $r.linux_pipe_regression.counters[.]=="1") and
+ all(["failed","error","notExecuted","timeout","aborted"][]; $r.linux_pipe_regression.counters[.]=="0") and
+ (.linux_pipe_regression.trx_sha256|type=="string" and test("^[0-9a-f]{64}$")) and
+ .linux_pipe_regression.unprivileged_library_behavior_only==true and .linux_pipe_regression.root_factory_exercised==false and
+ .linux_pipe_regression.native_acceptance==false and .linux_pipe_regression.runtime_basis=="selected SDK dotnet host" and
+ (.commands|length)==41 and (.commands|map(.ordinal))==[range(0;41)] and
  all(.commands[]; .exit==0 and .failure==null and .waited==true and .group_absent==true and .timed_out==false and .forced_cleanup==false and (.logs|length)==2) and
  all(["source_before","source_after_assets","source_after_build","source_final"][];
   $r[.].head==$source and $r[.].count==2821 and $r[.].physical_sha256_modes==true and
