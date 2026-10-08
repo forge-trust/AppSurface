@@ -17,21 +17,23 @@ while (($#)); do
 done
 for key in "${!values[@]}"; do
  case "$key" in
- mode|reviewed-script-sha256|generation|deadline-monotonic-ms|source-commit|source-root|source-map|source-map-sha256|source-nodes|source-nodes-sha256|tool-root|tool-map|tool-map-sha256|tool-nodes|tool-nodes-sha256|runtime-root|runtime-map|runtime-map-sha256|runtime-nodes|runtime-nodes-sha256|source-review|source-review-sha256|build-receipt|build-receipt-sha256|fixture|fixture-sha256|os-audit-script|os-audit-script-sha256) ;;
+ mode|reviewed-script-sha256|generation|deadline-monotonic-ms|source-commit|source-root|source-map|source-map-sha256|source-nodes|source-nodes-sha256|tool-root|tool-map|tool-map-sha256|tool-nodes|tool-nodes-sha256|runtime-root|runtime-map|runtime-map-sha256|runtime-nodes|runtime-nodes-sha256|source-review|source-review-sha256|build-receipt|build-receipt-sha256|fixture|fixture-sha256|os-audit-script|os-audit-script-sha256|helper-root|helper-map|helper-map-sha256|helper-nodes|helper-nodes-sha256|helper-build-receipt|helper-build-receipt-sha256|helper-entry-sha256) ;;
  *) fail unknown-option ;;
  esac
 done
 if [[ $mode == prepare-only ]]; then
  printf '%s\n' 'PREPARATION_ONLY:NO_INPUTS_VERIFIED:NO_TRANSPORT:NO_FIXTURE_EXECUTION'; exit 0
 fi
+readonly N03_INDEPENDENT_REVIEW_CLEAR=0
+((N03_INDEPENDENT_REVIEW_CLEAR==1)) || fail n03-review-pending
 [[ $EUID == 0 && $OSTYPE == linux* ]] || fail trusted-linux-root-required
-for key in reviewed-script-sha256 generation deadline-monotonic-ms source-commit source-root source-map source-map-sha256 source-nodes source-nodes-sha256 tool-root tool-map tool-map-sha256 tool-nodes tool-nodes-sha256 runtime-root runtime-map runtime-map-sha256 runtime-nodes runtime-nodes-sha256 source-review source-review-sha256 build-receipt build-receipt-sha256 fixture fixture-sha256 os-audit-script os-audit-script-sha256; do
+for key in reviewed-script-sha256 generation deadline-monotonic-ms source-commit source-root source-map source-map-sha256 source-nodes source-nodes-sha256 tool-root tool-map tool-map-sha256 tool-nodes tool-nodes-sha256 runtime-root runtime-map runtime-map-sha256 runtime-nodes runtime-nodes-sha256 source-review source-review-sha256 build-receipt build-receipt-sha256 fixture fixture-sha256 os-audit-script os-audit-script-sha256 helper-root helper-map helper-map-sha256 helper-nodes helper-nodes-sha256 helper-build-receipt helper-build-receipt-sha256 helper-entry-sha256; do
  [[ -n ${values[$key]-} ]] || fail missing-input
 done
 hash_syntax() { [[ $1 =~ ^[0-9a-f]{64}$ ]] || fail digest-syntax; }
 for key in "${!values[@]}"; do [[ $key != *sha256 ]] || hash_syntax "${values[$key]}"; done
-[[ ${values[generation]} =~ ^[0-9a-f]{32}$ && ${values[source-commit]} == d5c8fe20dbef4903c3d438a31e2c092f8cd17eac ]] || fail source-generation-pin
-[[ ${values[fixture-sha256]} == 1de9594865cd8a770ed2fe6746478144a9e7ba3fbf5125b6bf7e17a65086a059 && ${values[os-audit-script-sha256]} == a76d3ec9521f021e799b8b56a6c57afdbeb6d4abdb21a55f42899a834eed4604 ]] || fail reviewed-source-pin
+[[ ${values[generation]} =~ ^[0-9a-f]{32}$ && ${values[source-commit]} == 31c9ff5c8782102e0917e0c992bbdecc35e115d0 ]] || fail source-generation-pin
+[[ ${values[fixture-sha256]} == b7941b8c018183afe1668e48af2941f81d55bc9949170cdb73f660d54134d5d3 && ${values[os-audit-script-sha256]} == 0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b ]] || fail reviewed-source-pin
 mono_ms() {
  local stamp rest whole fraction
  IFS=' ' read -r stamp rest </proc/uptime || return 1
@@ -82,21 +84,21 @@ pin() {
  [[ $before == "$after" && ${h:0:64} == "$expected" ]] || fail file-pin-changed
 }
 absolute "${BASH_SOURCE[0]}"; pin "${BASH_SOURCE[0]}" "${values[reviewed-script-sha256]}" 131072
-for kind in source tool runtime; do
+for kind in source tool runtime helper; do
  roots[$kind]=${values[$kind-root]}; maps[$kind]=${values[$kind-map]}; nodes[$kind]=${values[$kind-nodes]}
  map_shas[$kind]=${values[$kind-map-sha256]}; node_shas[$kind]=${values[$kind-nodes-sha256]}
  ancestors "${roots[$kind]}"; pin "${maps[$kind]}" "${map_shas[$kind]}" "$MAP_CAP"; pin "${nodes[$kind]}" "${node_shas[$kind]}" "$NODES_CAP"
 done
-for a in source tool runtime; do for b in source tool runtime; do
+for a in source tool runtime helper; do for b in source tool runtime helper; do
  [[ $a == "$b" ]] && continue
  [[ ${roots[$a]} != "${roots[$b]}" && ${roots[$a]} != "${roots[$b]}/"* ]] || fail overlapping-inputs
 done; done
-for spec in source-review:65536 build-receipt:1048576 fixture:131072 os-audit-script:131072; do
+for spec in source-review:65536 build-receipt:1048576 helper-build-receipt:1048576 fixture:131072 os-audit-script:131072; do
  key=${spec%:*}; pin "${values[$key]}" "${values[$key-sha256]}" "${spec#*:}"
 done
 output=/var/lib/appsurface-evidence-input-${values[generation]}
 ancestors /var/lib; [[ ! -e $output && ! -L $output ]] || fail reused-destination
-for kind in source tool runtime; do
+for kind in source tool runtime helper; do
  [[ $output != "${roots[$kind]}" && $output != "${roots[$kind]}/"* && ${roots[$kind]} != "$output/"* ]] || fail destination-overlap
 done
 # Failure keeps partial root-only paths. There is deliberately no recursive delete or success cleanup.
@@ -108,6 +110,20 @@ on_exit() {
   if ((now>=work_end)); then code=1; succeeded=0; fi
  fi
  if ((code!=0 || succeeded==0)); then
+  # Independent same-reserve helper quarantine; inability to confirm never succeeds.
+  if [[ -n ${helper_pin-} ]]; then
+   now=$(mono_ms) || now=$hard_end
+   if ((now<hard_end)); then
+    left=$((hard_end-now)); printf -v seconds '%d.%03d' "$((left/1000))" "$((left%1000))"
+    if [[ $(/usr/bin/timeout --signal=KILL "$seconds" /usr/bin/stat -c '%d:%i:%u:%g' -- "$helper_container" 2>/dev/null) == "$helper_pin" ]]; then
+     now=$(mono_ms) || now=$hard_end
+     if ((now<hard_end)); then
+      left=$((hard_end-now)); printf -v seconds '%d.%03d' "$((left/1000))" "$((left%1000))"
+      /usr/bin/timeout --signal=KILL "$seconds" /usr/bin/chmod 0700 -- "$helper_container" >/dev/null 2>&1 || :
+     fi
+    fi
+   fi
+  fi
   # Attempt only this retained generation, within the ORIGINAL reserved deadline.
   now=$(mono_ms) || now=$hard_end
   if ((now<hard_end)) && [[ -n ${root_pin-} ]]; then
@@ -153,11 +169,25 @@ copy_pinned() {
  pin "$target" "$sha" "$cap"; pin "$from" "$sha" "$cap"
 }
 phase=metadata
-for kind in source tool runtime; do
+pin "${values[helper-build-receipt]}" "${values[helper-build-receipt-sha256]}" "$CONTROL_CAP"
+bounded /usr/bin/jq -e 'def integer: type=="number" and floor==. and .>=0;
+def digest: type=="string" and test("^[0-9a-f]{64}$");
+keys==["authority","commands","exit","helper_bytes","helper_directories","helper_entry_sha256","helper_files","helper_nodes_sha256","helper_root","helper_tsv_sha256","native_execution","recipe_sha256","runtime_required","schema","sdk_required","sdk_sha256","source_pins"] and .schema=="issue779-n03-helper-build-handoff-v1" and .exit==0 and .authority==false and .native_execution==false and
+.recipe_sha256=="7bc0906967cfba542b3919e12855fb5f0e8946d0fe062a5d8371d4a5142101f4" and .sdk_required=="10.0.401" and .runtime_required=="10.0.12" and (.sdk_sha256|digest) and
+.source_pins=={"Program.cs":"02a28424a2d57c56213fae8618d50df1019986cadf89246e2ce11411a23c967a","NativePeerBroker.csproj":"92da6c96d4c88fae754ece54af775a00c1d713c7e44b9a76bda7cc768773514e","packages.lock.json":"a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb"} and
+(.helper_files|integer) and .helper_files>0 and (.helper_directories|integer) and .helper_directories>0 and (.helper_files+.helper_directories)<=8192 and
+(.helper_bytes|integer) and .helper_bytes<=1073741824 and (.helper_tsv_sha256|digest) and (.helper_nodes_sha256|digest) and (.helper_entry_sha256|digest) and
+(.commands|type=="array" and length==3) and all(.commands[]; keys==["error","exit","forced_cleanup","group_absent","log","log_bytes","waited"] and .exit==0 and .waited==true and .group_absent==true and .forced_cleanup==false and .error==false and (.log_bytes|integer) and .log_bytes<=8388608) and
+(.commands|map(.log))==["build-00.log","build-01.log","build-02.log"]' "${values[helper-build-receipt]}" >/dev/null
+bounded /usr/bin/jq -acS . "${values[helper-build-receipt]}" >"$work/helper-canonical.json"
+bounded /usr/bin/cmp -- "${values[helper-build-receipt]}" "$work/helper-canonical.json"
+bounded /usr/bin/jq -e --arg map "${values[helper-map-sha256]}" --arg nodes "${values[helper-nodes-sha256]}" --arg entry "${values[helper-entry-sha256]}" '.helper_tsv_sha256==$map and .helper_nodes_sha256==$nodes and .helper_entry_sha256==$entry' "${values[helper-build-receipt]}" >/dev/null
+
+for kind in source tool runtime helper; do
  copy_pinned "${maps[$kind]}" "$work/$kind.tsv" "${map_shas[$kind]}" "$MAP_CAP" 0600
  copy_pinned "${nodes[$kind]}" "$work/$kind-nodes.json" "${node_shas[$kind]}" "$NODES_CAP" 0600
  maps[$kind]=$work/$kind.tsv; nodes[$kind]=$work/$kind-nodes.json
- bounded /usr/bin/jq -e --arg name "$kind" '
+ bounded /usr/bin/jq -e --arg name "$(if [[ $kind == helper ]]; then printf tool; else printf %s "$kind"; fi)" '
   def hash: type=="string" and test("^[0-9a-f]{64}$");
   def mode: type=="string" and test("^0[0-7]{3}$");
   def rel:
@@ -238,38 +268,49 @@ verify_snapshot_and_hash() {
  bounded /usr/bin/cmp -- "$work/$kind-$label-before.txt" "$work/$kind-$label-after.txt"
 }
 
+bounded /usr/bin/jq -e --slurpfile receipt "${values[helper-build-receipt]}" --arg entry "${values[helper-entry-sha256]}" '.files["NativePeerBroker.dll"].sha256==$entry and (.files|length)==$receipt[0].helper_files and (.directories|length)==$receipt[0].helper_directories and ([.files[].bytes]|add)==$receipt[0].helper_bytes and all(.directories[];.mode=="0555") and all(.files[];.mode=="0444" or .mode=="0555")' "${nodes[helper]}" >/dev/null
 phase=inbound-validation
-for kind in source tool runtime; do
+for kind in source tool runtime helper; do
  verify_snapshot_and_hash "$kind" "${roots[$kind]}" input input-initial
 done
 phase=copy
-for kind in source tool runtime; do
- [[ ! -e $output/$kind && ! -L $output/$kind ]] || fail tree-copy-collision
+helper_parent=/var/lib/appsurface-evidence-n03-helpers
+if [[ ! -e $helper_parent ]]; then bounded /usr/bin/mkdir -m 0711 -- "$helper_parent"; fi
+ancestors "$helper_parent"; [[ $(bounded /usr/bin/stat -c '%u:%g:%a' -- "$helper_parent") == 0:0:711 ]] || fail helper-parent
+helper_container=$helper_parent/${values[generation]}
+[[ ! -e $helper_container && ! -L $helper_container ]] || fail helper-reused
+bounded /usr/bin/mkdir -m 0700 -- "$helper_container"
+helper_pin=$(bounded /usr/bin/stat -c '%d:%i:%u:%g' -- "$helper_container")
+for kind in source tool runtime helper; do
+ destination=$output/$kind; [[ $kind != helper ]] || destination=$helper_container/bundle
+ [[ ! -e $destination && ! -L $destination ]] || fail tree-copy-collision
  # No link following, no caller filter, no omission: complete tree, including empty dirs.
- bounded /usr/bin/cp --recursive --no-dereference --preserve=mode,timestamps -- "${roots[$kind]}" "$output/$kind"
- snapshot "$output/$kind" "$work/$kind-copied.txt"
+ bounded /usr/bin/cp --recursive --no-dereference --preserve=mode,timestamps -- "${roots[$kind]}" "$destination"
+ snapshot "$destination" "$work/$kind-copied.txt"
  validate_snapshot "$kind" "$work/$kind-copied.txt" input
- hash_tree "$kind" "$output/$kind" copied
+ hash_tree "$kind" "$destination" copied
  if [[ $kind != source ]]; then
-  bounded /usr/bin/find -P "$output/$kind" -type f -perm /111 -exec /usr/bin/chmod 0555 -- '{}' +
-  bounded /usr/bin/find -P "$output/$kind" -type f ! -perm /111 -exec /usr/bin/chmod 0444 -- '{}' +
+  bounded /usr/bin/find -P "$destination" -type f -perm /111 -exec /usr/bin/chmod 0555 -- '{}' +
+  bounded /usr/bin/find -P "$destination" -type f ! -perm /111 -exec /usr/bin/chmod 0444 -- '{}' +
  fi
- bounded /usr/bin/find -P "$output/$kind" -depth -type d -exec /usr/bin/chmod 0555 -- '{}' +
- bounded /usr/bin/sync -f -- "$output/$kind"
- verify_snapshot_and_hash "$kind" "$output/$kind" sealed sealed-final
+ bounded /usr/bin/find -P "$destination" -depth -type d -exec /usr/bin/chmod 0555 -- '{}' +
+ bounded /usr/bin/sync -f -- "$destination"
+ verify_snapshot_and_hash "$kind" "$destination" sealed sealed-final
 done
 phase=control
 copy_pinned "${values[source-review]}" "$work/source-review.json" "${values[source-review-sha256]}" 65536 0600
 copy_pinned "${values[build-receipt]}" "$work/build-receipt.json" "${values[build-receipt-sha256]}" "$CONTROL_CAP" 0600
+copy_pinned "${values[helper-build-receipt]}" "$work/helper-build-receipt.json" "${values[helper-build-receipt-sha256]}" "$CONTROL_CAP" 0600
 copy_pinned "${values[fixture]}" "$output/reviewed/checkpoint-n01-n02-v5.sh" "${values[fixture-sha256]}" 131072 0444
 copy_pinned "${values[os-audit-script]}" "$output/reviewed/prepare-os-audit-v2.py" "${values[os-audit-script-sha256]}" 131072 0444
 bounded /usr/bin/chmod 0555 -- "$output/reviewed"
 phase=final
-for kind in source tool runtime; do
+for kind in source tool runtime helper; do
  verify_snapshot_and_hash "$kind" "${roots[$kind]}" input input-final
  bounded /usr/bin/cmp -- "$work/$kind-input-initial-before.txt" "$work/$kind-input-final-after.txt"
  # No later process may modify sealed destination trees under the root-private generation.
- snapshot "$output/$kind" "$work/$kind-destination-final.txt"
+ destination=$output/$kind; [[ $kind != helper ]] || destination=$helper_container/bundle
+ snapshot "$destination" "$work/$kind-destination-final.txt"
  bounded /usr/bin/cmp -- "$work/$kind-sealed-final-after.txt" "$work/$kind-destination-final.txt"
  pin "${values[$kind-map]}" "${map_shas[$kind]}" "$MAP_CAP"
  pin "${values[$kind-nodes]}" "${node_shas[$kind]}" "$NODES_CAP"
@@ -284,6 +325,8 @@ bounded /usr/bin/jq -n --arg generation "${values[generation]}" --arg source "${
  ' >"$work/transport-receipt.json"
 bounded /usr/bin/sync -f -- "$work/transport-receipt.json"
 check; [[ $(bounded /usr/bin/stat -c '%d:%i:%u:%g' -- "$output") == "$root_pin" ]] || fail output-root-substitution
+[[ $(bounded /usr/bin/stat -c '%d:%i:%u:%g' -- "$helper_container") == "$helper_pin" ]] || fail helper-container-changed
+bounded /usr/bin/chmod 0711 -- "$helper_container"
 bounded /usr/bin/chmod 0711 -- "$output"
 check
 printf 'ROOT_TRANSPORT_COMPLETED:%s:NO_FIXTURE_EXECUTION:NO_NATIVE_ACCEPTANCE\n' "${values[generation]}"

@@ -504,14 +504,14 @@ class Audit:
         if not stat.S_ISDIR(info.st_mode):
             reject("runpath-directory")
 
-    def build(self, runtime, tool, include_tool):
-        self.roots = (runtime, tool)
+    def build(self, runtime, tool, include_tool, helper):
+        self.roots = (runtime, tool, helper)
         pending = list(self.commands.values())
         for root in self.roots:
             entries, hashes = self.inventory(root)
             self.trees[root] = (entries, hashes)
             for path, (_, prefix) in hashes.items():
-                if prefix.startswith(b"\x7fELF") and (root == runtime or include_tool):
+                if prefix.startswith(b"\x7fELF") and (root == runtime or root == helper or include_tool):
                     pending.append(path)
         while pending:
             self.check()
@@ -639,6 +639,7 @@ def main():
     parser = ClosedParser(description=__doc__)
     parser.add_argument("--runtime-root", required=True)
     parser.add_argument("--tool-root", required=True)
+    parser.add_argument("--helper-root", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--deadline-monotonic", required=True, type=float)
     parser.add_argument("--include-tool-elf", action="store_true")
@@ -657,7 +658,10 @@ def main():
             reject("output-in-input")
         audit = Audit(args.deadline_monotonic)
         audit.initialize_tools()
-        data = audit.build(runtime, tool, args.include_tool_elf)
+        helper = canonical_path(args.helper_root)
+        if any(helper == r or helper.startswith(r + "/") or r.startswith(helper + "/") for r in (runtime, tool)):
+            reject("helper-tree-overlap")
+        data = audit.build(runtime, tool, args.include_tool_elf, helper)
         publication_sha256 = hashlib.sha256(data).hexdigest()
         audit.publish(output, data)
         audit.check()

@@ -4,8 +4,8 @@
 set -euo pipefail
 export PATH=/usr/bin:/usr/sbin LC_ALL=C LANG=C
 umask 077
-readonly SOURCE=d5c8fe20dbef4903c3d438a31e2c092f8cd17eac
-readonly PARENT=76e5053d56ef65b3b539ab6aa0090a0355749ab5
+readonly SOURCE=31c9ff5c8782102e0917e0c992bbdecc35e115d0
+readonly PARENT=7101b86b2b68a2b53dfb86a8252be26d640e43b2
 readonly SOURCE_MAP=7464425522a3e7503be32a7402c34c2a7df9c86571e1ce7f6c53702861c89f87
 readonly FILE_CAP=268435456 TREE_CAP=1073741824 NODE_CAP=8192 RESERVE_MS=5000
 declare -A v=() roots=() maps=() nodes=() map_hash=() node_hash=()
@@ -14,22 +14,24 @@ fail() { printf 'INBOUND_REJECTED:%s\n' "$1" >&2; exit 1; }
 while (($#)); do
  case "$1" in
  --execute) [[ -z ${v[execute]+x} ]] || fail duplicate-option; v[execute]=1; shift ;;
- --generation|--build-root|--reviewed-root|--deadline-monotonic-ms|--reviewed-script-sha256|--transport-sha256|--fixture-sha256|--audit-sha256|--source-review-sha256)
+ --generation|--build-root|--reviewed-root|--deadline-monotonic-ms|--reviewed-script-sha256|--transport-sha256|--fixture-sha256|--audit-sha256|--source-review-sha256|--helper-build-root|--helper-build-receipt-sha256)
   (($#>=2)) || fail option-value; k=${1#--}; [[ -z ${v[$k]+x} ]] || fail duplicate-option; v[$k]=$2; shift 2 ;;
  *) fail unknown-option ;;
  esac
 done
-for k in execute generation build-root reviewed-root deadline-monotonic-ms reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256; do
+for k in execute generation build-root reviewed-root deadline-monotonic-ms reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256 helper-build-root helper-build-receipt-sha256; do
  [[ -n ${v[$k]-} ]] || fail missing-option
 done
+readonly N03_INDEPENDENT_REVIEW_CLEAR=0
+((N03_INDEPENDENT_REVIEW_CLEAR==1)) || fail n03-review-pending
 [[ $EUID == 0 && $OSTYPE == linux* && ${v[generation]} =~ ^[0-9a-f]{32}$ ]] || fail root-platform-generation
-for k in reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256; do
+for k in reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256 helper-build-receipt-sha256; do
  [[ ${v[$k]} =~ ^[0-9a-f]{64}$ ]] || fail digest-shape
 done
-[[ ${v[transport-sha256]} == da249051be9a48ee05b2e98732cbe936791f08cffb95df7ff94dea3f3b068254 &&
-   ${v[fixture-sha256]} == 1de9594865cd8a770ed2fe6746478144a9e7ba3fbf5125b6bf7e17a65086a059 &&
-   ${v[audit-sha256]} == a76d3ec9521f021e799b8b56a6c57afdbeb6d4abdb21a55f42899a834eed4604 &&
-   ${v[source-review-sha256]} == f5b11d5cbcf8ea874fe4ddd01ac57659a40f98a75d4c24202d6d33cebfd91e91 ]] || fail frozen-input-pins
+[[ ${v[transport-sha256]} == 0715a097cf99f1a9979258929c7cc42706e6237554db97bdd83190c85e72e3fc &&
+   ${v[fixture-sha256]} == b7941b8c018183afe1668e48af2941f81d55bc9949170cdb73f660d54134d5d3 &&
+   ${v[audit-sha256]} == 0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b &&
+   ${v[source-review-sha256]} == 45eb9809fa6da82e9c62c6d3901fc9603de06e6d8857ac474103f7812fdcf3a7 ]] || fail frozen-input-pins
 mono() {
  local stamp rest whole fraction
  IFS=' ' read -r stamp rest </proc/uptime || return 1
@@ -93,16 +95,7 @@ bounded /usr/bin/jq -e --arg source "$SOURCE" --arg parent "$PARENT" --arg map "
  . as $r | .schema=="issue779-csharp-fdd-build-v5" and .exit==0 and (.failure?==null) and
  .source_commit==$source and .harness_parent==$parent and .diagnostics==[] and
  .native_execution==false and .checkpoint_pass==false and
- (.linux_pipe_regression|type)=="object" and
- (.linux_pipe_regression|keys)==["counters","method","native_acceptance","root_factory_exercised","runtime_basis","trx_sha256","unprivileged_library_behavior_only"] and
- .linux_pipe_regression.method=="OwnedRawPipeReadWrappingUsesHandleModeAndJoinsBothEofs" and
- (.linux_pipe_regression.counters|type)=="object" and
- all(["total","executed","passed"][]; $r.linux_pipe_regression.counters[.]=="1") and
- all(["failed","error","notExecuted","timeout","aborted"][]; $r.linux_pipe_regression.counters[.]=="0") and
- (.linux_pipe_regression.trx_sha256|type=="string" and test("^[0-9a-f]{64}$")) and
- .linux_pipe_regression.unprivileged_library_behavior_only==true and .linux_pipe_regression.root_factory_exercised==false and
- .linux_pipe_regression.native_acceptance==false and .linux_pipe_regression.runtime_basis=="selected SDK dotnet host" and
- (.commands|length)==41 and (.commands|map(.ordinal))==[range(0;41)] and
+ (.commands|length)==39 and (.commands|map(.ordinal))==[range(0;39)] and
  all(.commands[]; .exit==0 and .failure==null and .waited==true and .group_absent==true and .timed_out==false and .forced_cleanup==false and (.logs|length)==2) and
  all(["source_before","source_after_assets","source_after_build","source_final"][];
   $r[.].head==$source and $r[.].count==2821 and $r[.].physical_sha256_modes==true and
@@ -155,27 +148,50 @@ copy_file() {
  trusted_pin "$to" "$hash" "$cap"; pin "$from" "$hash" "$cap"
 }
 copy_file "$receipt" "$work/build-receipt.json" "$receipt_hash" 1048576 0600
-for kind in source tool runtime; do
+absolute "${v[helper-build-root]}"; [[ -d ${v[helper-build-root]} && ! -L ${v[helper-build-root]} ]] || fail helper-build-root
+[[ ! -e ${v[helper-build-root]}/late-helper-publication-failure.json && ! -L ${v[helper-build-root]}/late-helper-publication-failure.json ]] || fail late-helper-publication
+helper_receipt=${v[helper-build-root]}/helper-build-receipt.json
+pin "$helper_receipt" "${v[helper-build-receipt-sha256]}" 1048576
+copy_file "$helper_receipt" "$work/helper-build-receipt.json" "${v[helper-build-receipt-sha256]}" 1048576 0600
+bounded /usr/bin/jq -e 'def integer: type=="number" and floor==. and .>=0;
+def digest: type=="string" and test("^[0-9a-f]{64}$");
+keys==["authority","commands","exit","helper_bytes","helper_directories","helper_entry_sha256","helper_files","helper_nodes_sha256","helper_root","helper_tsv_sha256","native_execution","recipe_sha256","runtime_required","schema","sdk_required","sdk_sha256","source_pins"] and .schema=="issue779-n03-helper-build-handoff-v1" and .exit==0 and .authority==false and .native_execution==false and
+.recipe_sha256=="7bc0906967cfba542b3919e12855fb5f0e8946d0fe062a5d8371d4a5142101f4" and .sdk_required=="10.0.401" and .runtime_required=="10.0.12" and (.sdk_sha256|digest) and
+.source_pins=={"Program.cs":"02a28424a2d57c56213fae8618d50df1019986cadf89246e2ce11411a23c967a","NativePeerBroker.csproj":"92da6c96d4c88fae754ece54af775a00c1d713c7e44b9a76bda7cc768773514e","packages.lock.json":"a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb"} and
+(.helper_files|integer) and .helper_files>0 and (.helper_directories|integer) and .helper_directories>0 and (.helper_files+.helper_directories)<=8192 and
+(.helper_bytes|integer) and .helper_bytes<=1073741824 and (.helper_tsv_sha256|digest) and (.helper_nodes_sha256|digest) and (.helper_entry_sha256|digest) and
+(.commands|type=="array" and length==3) and all(.commands[]; keys==["error","exit","forced_cleanup","group_absent","log","log_bytes","waited"] and .exit==0 and .waited==true and .group_absent==true and .forced_cleanup==false and .error==false and (.log_bytes|integer) and .log_bytes<=8388608) and
+(.commands|map(.log))==["build-00.log","build-01.log","build-02.log"]' "$work/helper-build-receipt.json" >/dev/null
+bounded /usr/bin/jq -acS . "$work/helper-build-receipt.json" >"$work/helper-receipt-canonical.json"
+bounded /usr/bin/cmp -- "$work/helper-build-receipt.json" "$work/helper-receipt-canonical.json"
+for kind in source tool runtime helper; do
  roots[$kind]=${v[build-root]}/handoff/$kind
+ [[ $kind != helper ]] || roots[$kind]=${v[helper-build-root]}/helper
  maps[$kind]=$work/$kind.tsv; nodes[$kind]=$work/$kind-nodes.json
+ if [[ $kind == helper ]]; then
+  map_hash[$kind]=$(bounded /usr/bin/jq -r .helper_tsv_sha256 "$work/helper-build-receipt.json")
+  node_hash[$kind]=$(bounded /usr/bin/jq -r .helper_nodes_sha256 "$work/helper-build-receipt.json")
+ else
  map_hash[$kind]=$(bounded /usr/bin/jq -r --arg name "$kind" '.artifacts[$name].tsv_sha256' "$work/build-receipt.json")
  node_hash[$kind]=$(bounded /usr/bin/jq -r --arg name "$kind" '.artifacts[$name].nodes_sha256' "$work/build-receipt.json")
- copy_file "${v[build-root]}/handoff/$kind.tsv" "${maps[$kind]}" "${map_hash[$kind]}" 1048576 0600
- copy_file "${v[build-root]}/handoff/$kind-nodes.json" "${nodes[$kind]}" "${node_hash[$kind]}" 4194304 0600
+ fi
+ metadata_base=${v[build-root]}/handoff; [[ $kind != helper ]] || metadata_base=${v[helper-build-root]}
+ copy_file "$metadata_base/$kind.tsv" "${maps[$kind]}" "${map_hash[$kind]}" 1048576 0600
+ copy_file "$metadata_base/$kind-nodes.json" "${nodes[$kind]}" "${node_hash[$kind]}" 4194304 0600
  bounded /usr/bin/jq -acS . "${nodes[$kind]}" >"$work/$kind-canonical.json"
  bounded /usr/bin/cmp -- "${nodes[$kind]}" "$work/$kind-canonical.json"
- bounded /usr/bin/jq -e --arg kind "$kind" --slurpfile receipt "$work/build-receipt.json" '
+ bounded /usr/bin/jq -e --arg kind "$kind" --slurpfile receipt "$work/build-receipt.json" --slurpfile helper "$work/helper-build-receipt.json" '
   def rel: type=="string" and utf8bytelength<=4096 and (test("[\u0000-\u001f\u007f\\\\:]")|not) and
    (split("/")|all(.[]; length>0 and .!="." and .!=".." and .!=".git" and utf8bytelength<=255));
-  . as $m | type=="object" and keys==["directories","files","root_name","schema"] and .schema=="issue779-build-node-inventory-v1" and .root_name==$kind and
+  . as $m | type=="object" and keys==["directories","files","root_name","schema"] and .schema=="issue779-build-node-inventory-v1" and .root_name==(if $kind=="helper" then "tool" else $kind end) and
   (.files|type=="object") and (.directories|type=="object") and .directories["."]!=null and
-  (.files|length)==$receipt[0].artifacts[$kind].file_count and
-  ((.files|length)+(.directories|length))==$receipt[0].artifacts[$kind].node_count and
+  (.files|length)==(if $kind=="helper" then $helper[0].helper_files else $receipt[0].artifacts[$kind].file_count end) and
+  ((.files|length)+(.directories|length))==(if $kind=="helper" then ($helper[0].helper_files+$helper[0].helper_directories) else $receipt[0].artifacts[$kind].node_count end) and
   all(.directories|to_entries[]; (.key=="." or (.key|rel)) and (.value|type=="object" and keys==["mode"] and .mode==(if $kind=="source" then "0700" else "0555" end))) and
   all(.files|to_entries[]; (.key|rel) and $m.directories[.key]==null and (.value|type=="object" and keys==["bytes","mode","sha256"] and
    (.sha256|type=="string" and test("^[0-9a-f]{64}$")) and (.bytes|type=="number" and floor==. and .>=0 and .<=268435456) and
    (if $kind=="source" then .mode=="0644" or .mode=="0755" else .mode=="0444" or .mode=="0555" end))) and
-  ([.files[].bytes]|add)==$receipt[0].artifacts[$kind].total_bytes and
+  ([.files[].bytes]|add)==(if $kind=="helper" then $helper[0].helper_bytes else $receipt[0].artifacts[$kind].total_bytes end) and
   (if $kind=="source" then (.files|length)==2821 else true end)
  ' "${nodes[$kind]}" > /dev/null
  bounded /usr/bin/jq -r '.files|to_entries|sort_by(.key)[]|[.value.mode,.value.sha256,.key]|@tsv' "${nodes[$kind]}" >"$work/$kind-derived.tsv"
@@ -215,8 +231,13 @@ verify() {
 }
 # Validate actual full source trees before the first tree copy. Original runner
 # ownership is data, not safe-live-snapshot authority; repeated whole checks reject drift.
-for kind in source tool runtime; do verify "$kind" "${roots[$kind]}" original original-first; done
-for kind in source tool runtime; do
+for a in source tool runtime helper; do for b in source tool runtime helper; do
+ [[ $a == "$b" ]] && continue
+ [[ ${roots[$a]} != "${roots[$b]}" && ${roots[$a]} != "${roots[$b]}/"* ]] || fail helper-overlap
+ done; done
+bounded /usr/bin/jq -e --arg entry "$(bounded /usr/bin/jq -r .helper_entry_sha256 "$work/helper-build-receipt.json")" '.files["NativePeerBroker.dll"].sha256==$entry' "${nodes[helper]}" >/dev/null
+for kind in source tool runtime helper; do verify "$kind" "${roots[$kind]}" original original-first; done
+for kind in source tool runtime helper; do
  bounded /usr/bin/cp --recursive --no-dereference --preserve=mode,timestamps -- "${roots[$kind]}" "$output/$kind"
  snapshot "$output/$kind" "$work/$kind-copied.txt"; validate "$kind" "$work/$kind-copied.txt" original
  bounded /usr/bin/find -P "$output/$kind" -exec /usr/bin/chown --no-dereference 0:0 -- '{}' +
@@ -224,8 +245,9 @@ for kind in source tool runtime; do
  verify "$kind" "$output/$kind" root destination-final
  verify "$kind" "${roots[$kind]}" original original-final
  bounded /usr/bin/cmp -- "$work/$kind-original-first-before.txt" "$work/$kind-original-final-after.txt"
- pin "${v[build-root]}/handoff/$kind.tsv" "${map_hash[$kind]}" 1048576
- pin "${v[build-root]}/handoff/$kind-nodes.json" "${node_hash[$kind]}" 4194304
+ metadata_base=${v[build-root]}/handoff; [[ $kind != helper ]] || metadata_base=${v[helper-build-root]}
+ pin "$metadata_base/$kind.tsv" "${map_hash[$kind]}" 1048576
+ pin "$metadata_base/$kind-nodes.json" "${node_hash[$kind]}" 4194304
 done
 for spec in prepare-root-inputs-v2.sh:transport checkpoint-n01-n02-v5.sh:fixture prepare-os-audit-v2.py:audit source-review.json:source-review; do
  name=${spec%:*}; key=${spec#*:}; cap=131072; destination=$output/scripts/$name; mode=0444
@@ -233,10 +255,12 @@ for spec in prepare-root-inputs-v2.sh:transport checkpoint-n01-n02-v5.sh:fixture
  trusted_pin "${v[reviewed-root]}/$name" "${v[$key-sha256]}" "$cap"
  copy_file "${v[reviewed-root]}/$name" "$destination" "${v[$key-sha256]}" "$cap" "$mode"
 done
+pin "$helper_receipt" "${v[helper-build-receipt-sha256]}" 1048576
+[[ ! -e ${v[helper-build-root]}/late-helper-publication-failure.json && ! -L ${v[helper-build-root]}/late-helper-publication-failure.json ]] || fail late-helper-publication
 pin "$receipt" "$receipt_hash" 1048576
 [[ $(identity "$receipt") == "$receipt_before" ]] || fail original-receipt-changed
 [[ ! -e ${v[build-root]}/receipts/late-publication-failure.json && ! -L ${v[build-root]}/receipts/late-publication-failure.json ]] || fail late-build-failure
-for kind in source tool runtime; do
+for kind in source tool runtime helper; do
  snapshot "$output/$kind" "$work/$kind-last.txt"
  bounded /usr/bin/cmp -- "$work/$kind-destination-final-after.txt" "$work/$kind-last.txt"
 done

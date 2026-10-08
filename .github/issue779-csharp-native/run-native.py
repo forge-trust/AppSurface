@@ -15,16 +15,23 @@ import tarfile
 import time
 import uuid
 
-SOURCE = 'd5c8fe20dbef4903c3d438a31e2c092f8cd17eac'
-PARENT = '76e5053d56ef65b3b539ab6aa0090a0355749ab5'
-SOURCE_MAP = '7464425522a3e7503be32a7402c34c2a7df9c86571e1ce7f6c53702861c89f87'
+N03_INDEPENDENT_REVIEW_CLEAR = False
+N03_SOURCE_REBIND_PENDING = False
+SOURCE = '31c9ff5c8782102e0917e0c992bbdecc35e115d0'
+PARENT = '7101b86b2b68a2b53dfb86a8252be26d640e43b2'
+SOURCE_MAP = '542983137c1f8fb9c1a4ba68a93a722c9403788c16d3768f21d099253ad5bc4b'
 PINS = {
-    'prepare-root-inputs-v2.sh': 'da249051be9a48ee05b2e98732cbe936791f08cffb95df7ff94dea3f3b068254',
-    'checkpoint-n01-n02-v5.sh': '1de9594865cd8a770ed2fe6746478144a9e7ba3fbf5125b6bf7e17a65086a059',
-    'prepare-os-audit-v2.py': 'a76d3ec9521f021e799b8b56a6c57afdbeb6d4abdb21a55f42899a834eed4604',
-    'source-review.json': 'f5b11d5cbcf8ea874fe4ddd01ac57659a40f98a75d4c24202d6d33cebfd91e91',
-    'acquire-inbound.sh': 'fd1324618e3e1e5561dcfc2fa5f37210a0450aa01b3dbfceaedcca7f06cfb745',
-    'retain-native.sh': 'a6bc3da869386b440d0b8a2ad93eb3cb888a4e48aabe52febf6a609b33d45331',
+    'build-helper.sh': '7bc0906967cfba542b3919e12855fb5f0e8946d0fe062a5d8371d4a5142101f4',
+    'Program.cs': '02a28424a2d57c56213fae8618d50df1019986cadf89246e2ce11411a23c967a',
+    'NativePeerBroker.csproj': '92da6c96d4c88fae754ece54af775a00c1d713c7e44b9a76bda7cc768773514e',
+    'packages.lock.json': 'a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb',
+
+    'prepare-root-inputs-v2.sh': '0715a097cf99f1a9979258929c7cc42706e6237554db97bdd83190c85e72e3fc',
+    'checkpoint-n01-n02-v5.sh': 'b7941b8c018183afe1668e48af2941f81d55bc9949170cdb73f660d54134d5d3',
+    'prepare-os-audit-v2.py': '0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b',
+    'source-review.json': '45eb9809fa6da82e9c62c6d3901fc9603de06e6d8857ac474103f7812fdcf3a7',
+    'acquire-inbound.sh': '8daf70b4c256a35f5c6efe110dd130213799a6f672daf7ee90ebcfafa0dd7cdf',
+    'retain-native.sh': 'df77c52bae29828c12b1ad56c2dc0c150649c26a1fde1fe2c2f2c345ad54a9cd',
 }
 ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',
                'LANG=C', 'LC_ALL=C', '/usr/bin/bash', '--noprofile', '--norc']
@@ -181,15 +188,7 @@ def validate_build(receipt, maps):
             and receipt['exit'] == 0 and receipt.get('failure') is None and receipt['diagnostics'] == []
             and receipt['source_commit'] == SOURCE and receipt['harness_parent'] == PARENT
             and receipt['native_execution'] is False and receipt['checkpoint_pass'] is False, 'build-terminal')
-    require(len(receipt['commands']) == 41 and [row['ordinal'] for row in receipt['commands']] == list(range(41)), 'build-commands')
-    pipe = receipt.get('linux_pipe_regression')
-    require(type(pipe) is dict and set(pipe) == {'method', 'counters', 'trx_sha256', 'unprivileged_library_behavior_only', 'root_factory_exercised', 'native_acceptance', 'runtime_basis'}, 'pipe-regression-schema')
-    require(pipe['method'] == 'OwnedRawPipeReadWrappingUsesHandleModeAndJoinsBothEofs'
-            and type(pipe['counters']) is dict and all(pipe['counters'].get(k) == '1' for k in ('total', 'executed', 'passed'))
-            and all(pipe['counters'].get(k) == '0' for k in ('failed', 'error', 'notExecuted', 'timeout', 'aborted'))
-            and type(pipe['trx_sha256']) is str and re.fullmatch(r'[0-9a-f]{64}', pipe['trx_sha256']) is not None
-            and pipe['unprivileged_library_behavior_only'] is True and pipe['root_factory_exercised'] is False
-            and pipe['native_acceptance'] is False and pipe['runtime_basis'] == 'selected SDK dotnet host', 'pipe-regression-terminal')
+    require(len(receipt['commands']) == 39 and [row['ordinal'] for row in receipt['commands']] == list(range(39)), 'build-commands')
     for row in receipt['commands']:
         require(type(row['exit']) is int and row['exit'] == 0 and row['failure'] is None
                 and row['waited'] is True and row['group_absent'] is True and row['timed_out'] is False
@@ -580,6 +579,20 @@ set -euo pipefail
 '''
 
 ARCHIVE_NAMES = {
+    'logs/n03/broker.events.jsonl',
+    'logs/n03/broker.stderr',
+    'logs/n03/worker.stdout',
+    'logs/n03/worker.stderr',
+    'logs/n03/worker-peer.trace',
+    'logs/n03/broker-live.json',
+    'logs/n03/broker-live.json.argv',
+    'logs/n03/broker-live-after.json',
+    'logs/n03/broker-live-after.json.argv',
+    'logs/n03/worker-live.json',
+    'logs/n03/worker-live.json.argv',
+    'logs/n03/result.json',
+    'logs/n03/failure.json',
+
     'retention-selection.json', 'fixture-stdout.log', 'fixture-stderr.log', 'fixture-result.json',
     'raw-evidence-plan.json', 'raw-evidence-manifest.json', 'raw-evidence-summary.json', 'worker-live.json',
     'request-policy.sha256', 'final-files.sha256', 'logs/n01.stdout', 'logs/n01.stderr', 'logs/n02.stdout',
@@ -620,9 +633,11 @@ def inspect_archive(data):
             with stream:
                 content = stream.read(member.size + 1)
             require(len(content) == member.size, 'archive-short-read')
-            if member.name in ('fixture-result.json', 'retention-selection.json'):
+            if member.name in ('fixture-result.json', 'retention-selection.json', 'logs/n03/result.json', 'logs/n03/worker-live.json', 'logs/n03/broker-live.json', 'logs/n03/broker-live-after.json'):
                 require(len(content) <= 4096, 'archive-json-size')
                 values[member.name] = decode(content)
+                if member.name == 'logs/n03/result.json':
+                    values['n03-result-sha256'] = sha(content)
     require(names == sorted(names) and 'retention-selection.json' in values, 'archive-order-or-selection')
     selection = values['retention-selection.json']
     require(set(selection) == {'schema', 'selection_status', 'data_file_count', 'data_bytes', 'missing_fixed_file_count'}
@@ -635,15 +650,71 @@ def inspect_archive(data):
 
 
 def validate_native_result(value):
-    require(value['schema'] == 'issue779-native-n01-n02-fixture-v5' and value['source_revision'] == SOURCE
+    require(set(value) == {'worker_unit', 'base_revision', 'file_inspection', 'n03_exit', 'canonical_verification', 'policy_sha256', 'n01_exit', 'n03_result_sha256', 'trusted_enabled', 'native_controls_executed', 'source_revision', 'generation', 'owned_process_groups_joined', 'schema', 'remaining_thirteen_controls', 'n02_exit', 'owner_unit'}, 'native-case-closed-fields')
+    require(value['schema'] == 'issue779-native-n01-n02-n03-fixture-v1' and value['source_revision'] == SOURCE
             and value['base_revision'] == '4dd992ec1bc2df8220c73149115c5b478edb0085'
             and re.fullmatch('[0-9a-f]{32}', value['generation']) and re.fullmatch('[0-9a-f]{64}', value['policy_sha256'])
             and value['owner_unit'] == 'appsurface-evidence-owner-' + value['generation'] + '.service'
             and value['worker_unit'] == 'appsurface-evidence-worker-' + value['generation'] + '.service'
             and type(value['n01_exit']) is int and value['n01_exit'] == 0
             and type(value['n02_exit']) is int and value['n02_exit'] == 1
-            and value['native_controls_executed'] == ['N01', 'N02'] and value['owned_process_groups_joined'] is True
-            and value['trusted_enabled'] is False and value['remaining_fourteen_controls'] == 'pending', 'native-case-receipt')
+            and type(value['n03_exit']) is int and value['n03_exit'] == 0 and re.fullmatch('[0-9a-f]{64}', value['n03_result_sha256']) and value['native_controls_executed'] == ['N02', 'N03', 'N01'] and value['owned_process_groups_joined'] is True
+            and value['trusted_enabled'] is False and value['remaining_thirteen_controls'] == 'pending', 'native-case-receipt')
+
+
+
+def validate_helper_handoff(value, recipe):
+    fields = {'authority','commands','exit','helper_bytes','helper_directories','helper_entry_sha256','helper_files','helper_nodes_sha256','helper_root','helper_tsv_sha256','native_execution','recipe_sha256','runtime_required','schema','sdk_required','sdk_sha256','source_pins'}
+    require(set(value) == fields and value['schema'] == 'issue779-n03-helper-build-handoff-v1' and type(value['exit']) is int and value['exit'] == 0 and value['authority'] is False and value['native_execution'] is False and value['recipe_sha256'] == recipe and value['sdk_required'] == '10.0.401' and value['runtime_required'] == '10.0.12', 'helper-receipt-schema')
+    require(value['source_pins'] == {k:PINS[k] for k in ('Program.cs','NativePeerBroker.csproj','packages.lock.json')}, 'helper-source-pins')
+    require(all(type(value[k]) is int and value[k]>0 for k in ('helper_files','helper_directories')) and value['helper_files']+value['helper_directories']<=8192 and type(value['helper_bytes']) is int and 0<=value['helper_bytes']<=1073741824, 'helper-bounds')
+    require(all(type(value[k]) is str and re.fullmatch('[0-9a-f]{64}',value[k]) for k in ('helper_tsv_sha256','helper_nodes_sha256','helper_entry_sha256','sdk_sha256')), 'helper-digests')
+    require(type(value['commands']) is list and len(value['commands'])==3, 'helper-command-count')
+    for i,row in enumerate(value['commands']):
+        require(set(row)=={'error','exit','forced_cleanup','group_absent','log','log_bytes','waited'} and type(row['exit']) is int and row['exit']==0 and row['waited'] is True and row['group_absent'] is True and row['forced_cleanup'] is False and row['error'] is False and row['log']=='build-%02d.log'%i and type(row['log_bytes']) is int and 0<=row['log_bytes']<=8388608, 'helper-command')
+
+"""Closed data validation candidate. It issues no admission, lease or native proof."""
+
+KEYS = {"asevd402_observed", "broker_exit", "broker_pid", "control", "descriptor_supplied", "kernel_peer_bound_to_owned_worker", "native_acceptance", "owned_process_groups_joined", "ready_request_observed", "request_bytes", "schema", "sent_bytes", "source_commit", "status", "stream_custody", "systemd_worker_authority", "worker_exit", "worker_pid", "worker_stdout_bytes"}
+
+def require_n03_result(raw, source):
+    def reject():
+        raise ValueError("n03-closed-data-rejected")
+    def unique(rows):
+        result = {}
+        for key, value in rows:
+            if key in result: reject()
+            result[key] = value
+        return result
+    def invalid_constant(value):
+        reject()
+    if not isinstance(raw, bytes) or not 0 < len(raw) <= 4096 or raw[-1:] != b"\n": reject()
+    value = json.loads(raw, object_pairs_hook=unique, parse_constant=invalid_constant)
+    if not isinstance(value, dict) or set(value) != KEYS: reject()
+    expected = {"schema":"issue779-n03-peer-observation-v1", "control":"N03", "status":"observed", "source_commit":source, "worker_exit":1, "broker_exit":0, "worker_stdout_bytes":0, "asevd402_observed":True, "kernel_peer_bound_to_owned_worker":True, "request_bytes":0, "sent_bytes":0, "ready_request_observed":False, "descriptor_supplied":False, "owned_process_groups_joined":True, "native_acceptance":False, "systemd_worker_authority":False, "stream_custody":"private-files-after-original-process-reap"}
+    if any(type(value[k]) is not type(v) or value[k] != v for k,v in expected.items()): reject()
+    if any(type(value[k]) is not int or not 0 < value[k] <= 2147483647 for k in ("worker_pid", "broker_pid")): reject()
+    if value["worker_pid"] == value["broker_pid"]: reject()
+    # Caller must independently require fixture numeric0, exact three case receipt,
+    # authenticated archive/custody, raw peer trace and live identity bindings.
+    return value
+
+
+def validate_n03_archive(values):
+    require('logs/n03/result.json' in values, 'n03-result-missing')
+    result = values['logs/n03/result.json']
+    require_n03_result((json.dumps(result,separators=(',',':'))+'\n').encode(), SOURCE)
+    require(values['fixture-result.json']['n03_result_sha256']==values['n03-result-sha256'], 'n03-result-binding')
+    fields={'schema','pid','start_ticks','uid4','gid4','cgroup','exact_managed_argv','image_pinned','empty_groups','no_new_privs','effective_capabilities_zero'}
+    for name,pid in [('worker-live.json',result['worker_pid']),('broker-live.json',result['broker_pid']),('broker-live-after.json',result['broker_pid'])]:
+        row=values.get('logs/n03/'+name)
+        require(type(row) is dict and set(row)==fields and row['schema']=='issue779-n03-owned-image-sample-v1' and type(row['pid']) is int and row['pid']==pid and type(row['start_ticks']) is str and re.fullmatch('[1-9][0-9]*',row['start_ticks']) and row['exact_managed_argv'] is True and row['image_pinned'] is True and row['empty_groups'] is True and type(row['no_new_privs']) is int and row['no_new_privs']==1 and row['effective_capabilities_zero'] is True, 'n03-live-binding')
+        for field in ('uid4','gid4'):
+            parts=row[field].split(':');require(len(parts)==4 and all(re.fullmatch('[1-9][0-9]*',x) for x in parts) and len(set(parts))==1,'n03-credentials')
+        require(re.fullmatch(r'0::/system.slice/issue779-native-tool-[0-9a-f]{32}-[0-9]+\.service',row['cgroup']), 'n03-cgroup')
+    require(values['logs/n03/broker-live.json']==values['logs/n03/broker-live-after.json'], 'n03-broker-continuity')
+    worker=values['logs/n03/worker-live.json'];broker=values['logs/n03/broker-live.json']
+    require(worker['uid4']!=broker['uid4'] and worker['gid4']==broker['gid4']=='65534:65534:65534:65534' and worker['cgroup']==broker['cgroup'], 'n03-selection-continuity')
 
 
 def main():
@@ -651,18 +722,22 @@ def main():
     parser.add_argument('--execute', action='store_true')
     parser.add_argument('--workspace', required=True)
     parser.add_argument('--build-root', required=True)
+    parser.add_argument('--helper-build-root', required=True)
     parser.add_argument('--output', required=True)
     parser.add_argument('--reviewed-script-sha256', required=True)
     args = parser.parse_args()
     job_end = int(os.environ['JOB_DEADLINE_MONOTONIC_NS']) / 1_000_000_000
     start = time.monotonic()
     final = min(job_end, start + 900)
+    require(N03_INDEPENDENT_REVIEW_CLEAR and not N03_SOURCE_REBIND_PENDING, 'n03-review-or-source-rebind-pending')
     require(args.execute and sys.platform == 'linux' and os.uname().machine == 'x86_64'
             and os.geteuid() > 0 and os.getegid() > 0 and final - start > 850, 'native-platform-or-job-budget')
     workspace, build, output = map(Path, (args.workspace, args.build_root, args.output))
     require(all(path.is_absolute() for path in (workspace, build, output)), 'absolute-paths')
     require(not output.exists() and not output.is_symlink(), 'output-reuse')
     output.mkdir(mode=0o700)
+    helper_build = Path(args.helper_build_root)
+    require(helper_build.is_absolute() and helper_build not in (workspace, build, output), 'helper-build-root')
     runner = Runner(output, final)
     result = {'schema': 'issue779-csharp-n01-n02-run-v1', 'source_commit': SOURCE, 'exit': 1,
               'commands': runner.records, 'native_dispatched': False, 'native_case_receipt_verified': False,
@@ -686,6 +761,17 @@ def main():
         result['build_receipt_sha256'] = sha(raw)
         result['generation'] = generation
         result['build_artifacts'] = receipt['artifacts']
+        require(not os.path.lexists(helper_build / 'late-helper-publication-failure.json'), 'late-helper-publication')
+        helper_raw = read(helper_build / 'helper-build-receipt.json', 1048576, final)
+        helper = decode(helper_raw)
+        validate_helper_handoff(helper, PINS['build-helper.sh'])
+        helper_maps = (read(helper_build / 'helper.tsv', 1048576, final), read(helper_build / 'helper-nodes.json', 4194304, final))
+        require(sha(helper_maps[0]) == helper['helper_tsv_sha256'] and sha(helper_maps[1]) == helper['helper_nodes_sha256'], 'helper-map-pins')
+        helper_nodes = decode(helper_maps[1])
+        require(set(helper_nodes) == {'schema','root_name','files','directories'} and helper_nodes['schema'] == 'issue779-build-node-inventory-v1' and helper_nodes['root_name'] == 'tool', 'helper-node-schema')
+        require(len(helper_nodes['files']) == helper['helper_files'] and len(helper_nodes['directories']) == helper['helper_directories'] and sum(v['bytes'] for v in helper_nodes['files'].values()) == helper['helper_bytes'] and helper_nodes['files']['NativePeerBroker.dll']['sha256'] == helper['helper_entry_sha256'], 'helper-membership-receipt')
+        result['helper_build_receipt_sha256'] = sha(helper_raw)
+        helper_root = Path('/var/lib/appsurface-evidence-n03-helpers') / generation / 'bundle'
         runner.phase = 'root-bootstrap'
         bootstrap = Path('/var/lib/appsurface-evidence-bootstrap-' + generation)
         triples = [part for name, pin in PINS.items() for part in (str(reviewed / name), name, pin)]
@@ -697,7 +783,7 @@ def main():
             '--build-root', str(build), '--reviewed-root', str(bootstrap), '--deadline-monotonic-ms', acquisition_ms,
             '--reviewed-script-sha256', PINS['acquire-inbound.sh'], '--transport-sha256', PINS['prepare-root-inputs-v2.sh'],
             '--fixture-sha256', PINS['checkpoint-n01-n02-v5.sh'], '--audit-sha256', PINS['prepare-os-audit-v2.py'],
-            '--source-review-sha256', PINS['source-review.json']], acquisition_end)
+            '--source-review-sha256', PINS['source-review.json'], '--helper-build-root', str(helper_build), '--helper-build-receipt-sha256', sha(helper_raw)], acquisition_end)
         inbound = Path('/var/lib/appsurface-evidence-inbound-' + generation)
         transport = ['--execute', '--reviewed-script-sha256', PINS['prepare-root-inputs-v2.sh'], '--generation', generation,
                      '--deadline-monotonic-ms', acquisition_ms, '--source-commit', SOURCE]
@@ -706,6 +792,7 @@ def main():
             transport += ['--' + name + '-root', str(inbound / name), '--' + name + '-map', str(inbound / 'control' / (name + '.tsv')),
                           '--' + name + '-map-sha256', fact['tsv_sha256'], '--' + name + '-nodes', str(inbound / 'control' / (name + '-nodes.json')),
                           '--' + name + '-nodes-sha256', fact['nodes_sha256']]
+        transport += ['--helper-root', str(inbound / 'helper'), '--helper-map', str(inbound / 'control/helper.tsv'), '--helper-map-sha256', helper['helper_tsv_sha256'], '--helper-nodes', str(inbound / 'control/helper-nodes.json'), '--helper-nodes-sha256', helper['helper_nodes_sha256'], '--helper-build-receipt', str(inbound / 'control/helper-build-receipt.json'), '--helper-build-receipt-sha256', sha(helper_raw), '--helper-entry-sha256', helper['helper_entry_sha256']]
         transport += ['--source-review', str(inbound / 'control/source-review.json'), '--source-review-sha256', PINS['source-review.json'],
                       '--build-receipt', str(inbound / 'control/build-receipt.json'), '--build-receipt-sha256', sha(raw),
                       '--fixture', str(inbound / 'scripts/checkpoint-n01-n02-v5.sh'), '--fixture-sha256', PINS['checkpoint-n01-n02-v5.sh'],
@@ -718,7 +805,7 @@ def main():
         audit_end = min(final - 5, time.monotonic() + 60)
         try:
             runner.run(['/usr/bin/python3', '-B', str(root / 'reviewed/prepare-os-audit-v2.py'), '--runtime-root', str(root / 'runtime'),
-                        '--tool-root', str(root / 'tool'), '--output', str(audit_dir / 'os-audit.json'),
+                        '--tool-root', str(root / 'tool'), '--helper-root', str(helper_root), '--output', str(audit_dir / 'os-audit.json'),
                         '--deadline-monotonic', str(audit_end)], audit_end)
         except BaseException:
             try:
@@ -740,6 +827,7 @@ def main():
             fixture += ['--' + flag + '-root', str(root / name), '--' + flag + '-manifest', str(root / 'control' / (name + '.tsv')),
                         '--' + flag + '-manifest-sha256', fact['tsv_sha256'], '--' + flag + '-nodes', str(root / 'control' / (name + '-nodes.json')),
                         '--' + flag + '-nodes-sha256', fact['nodes_sha256']]
+        fixture += ['--n03-helper-root', str(helper_root), '--n03-helper-map', str(root / 'control/helper.tsv'), '--n03-helper-map-sha256', helper['helper_tsv_sha256'], '--n03-helper-nodes', str(root / 'control/helper-nodes.json'), '--n03-helper-nodes-sha256', helper['helper_nodes_sha256'], '--n03-helper-entry-sha256', helper['helper_entry_sha256'], '--n03-helper-generation', generation]
         fixture += ['--source-review', str(root / 'control/source-review.json'), '--source-review-sha256', PINS['source-review.json'],
                     '--build-receipt', str(root / 'control/build-receipt.json'), '--build-receipt-sha256', sha(raw),
                     '--os-audit', str(root / 'control/os-audit.json'), '--os-audit-sha256', audit_hash,
@@ -776,8 +864,9 @@ def main():
                 if not failure:
                     require(result.get('fixture_exit') == 0 and 'fixture-result.json' in values, 'successful-native-receipt-missing')
                     validate_native_result(values['fixture-result.json'])
+                    validate_n03_archive(values)
                     result['native_case_receipt_verified'] = True
-                    result['native_cases_passed'] = ['N01', 'N02']
+                    result['native_cases_passed'] = ['N01', 'N02', 'N03']
                 retained = True
             except BaseException as caught:
                 failure = failure or caught
