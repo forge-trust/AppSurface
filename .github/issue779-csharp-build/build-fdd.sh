@@ -18,14 +18,14 @@ import tarfile
 import time
 import xml.etree.ElementTree as ET
 
-HEAD = '25e449cef5169c47177d19ca813c79acaab265a0'
-PARENT = '31c9ff5c8782102e0917e0c992bbdecc35e115d0'
-HARNESS_PARENT = '079d1932211efbce2689adf107ac0cb3b3c3e372'
-TREE = 'd8b6a93a440aafd638dd4023bbde8636c3d0fb6a'
-CAPTURE_SHA = '8c38614458315c44e61cca049ffcbb0423d785acd59a9f956969bb7d77eba8bc'
-CAPTURE_PROJECTION_SHA = '770bf5a9191a2308759bda9e99ac917b731fdc223043049848393a66019ca115'
-UBUNTU_PREREQUISITE_SHA = '33bdcfad759243b032222da583f085d7ab9577ea9525f362714048fdb639e7d6'
-NATIVE_RUNNER_SHA = 'a7f850fdad53a53c72ad0594e487f7a5bc1063837d84c9b29c96e13587c77511'
+HEAD = '75f8164274e362fbf17847331e44d1d01843c1e5'
+PARENT = '25e449cef5169c47177d19ca813c79acaab265a0'
+HARNESS_PARENT = '844bb8fa1d0da659cce62d940344c87db69ab905'
+TREE = 'a24156d3083cd104312ec0a86f000e1d2fb7d3b4'
+CAPTURE_SHA = '442746389d8c4da8733bc70fe6ab3feda28263f09f162587deb85c92726a26c7'
+CAPTURE_PROJECTION_SHA = 'bbe49b56d35a9587d5eb967fa8758af2daeac787489eded9ad87b211875d2235'
+UBUNTU_PREREQUISITE_SHA = 'fc7831ab7be0380af6f07cf99444ba965217cabd09b14ee0f5f43917bdbe3e20'
+NATIVE_RUNNER_SHA = '4d71ede2bcab3a4015d7eb2fb68dce503542fabc4ac673ac0857fbcfead5baa7'
 SDK = '10.0.401'
 COUNT = 2821
 FILE_CAP = 256 * 1024 * 1024
@@ -653,7 +653,7 @@ def main():
         'Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/EvidenceNativeObservationFailureTests.cs': 'M',
         'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/EvidenceNativeObservationFailure.cs': 'M',
         'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxControlListener.cs': 'M',
-        'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationControlServer.cs': 'M',
+        'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxProcessIdentity.cs': 'M',
         'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md': 'M',
     }
     source_status = dict((name, status) for status, name in

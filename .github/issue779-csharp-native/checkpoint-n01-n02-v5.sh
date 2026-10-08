@@ -471,7 +471,7 @@ pin_file "$build_receipt" "$build_receipt_sha256" "$MAX_NODE_JSON_BYTES"
 bounded jq -e --arg source "$source_revision" --arg sn "$source_nodes_sha256" --arg pn "$payload_nodes_sha256" --arg rn "$runtime_nodes_sha256" \
  --arg st "$source_manifest_sha256" --arg pt "$payload_manifest_sha256" --arg rt "$runtime_manifest_sha256" '
  .schema=="issue779-csharp-fdd-build-v5" and .exit==0 and
- .source_commit==$source and $source=="25e449cef5169c47177d19ca813c79acaab265a0" and
+ .source_commit==$source and $source=="75f8164274e362fbf17847331e44d1d01843c1e5" and
  .native_execution==false and .checkpoint_pass==false and .build_prerequisite_only==true and
  (.artifacts|type=="object" and keys==["runtime","source","tool"]) and
  .artifacts.source.nodes_sha256==$sn and .artifacts.tool.nodes_sha256==$pn and .artifacts.runtime.nodes_sha256==$rn and
@@ -711,7 +711,7 @@ n03_validate_event_data() {
 n03_run() (
  set -euo pipefail; umask 077
  n03_fd_owner_pid=$BASHPID; readonly n03_fd_owner_pid
- [[ $# == 11 && $EUID == 0 && $source_revision == 25e449cef5169c47177d19ca813c79acaab265a0 ]] || fail N03-input
+ [[ $# == 11 && $EUID == 0 && $source_revision == 75f8164274e362fbf17847331e44d1d01843c1e5 ]] || fail N03-input
  helper_root=$1 helper_map=$2 helper_map_sha=$3 helper_nodes=$4 helper_nodes_sha=$5 helper_entry_sha=$6
  broker_name=$7 worker_name=$8 shared_name=$9 startup_kib=${10} helper_generation=${11}
  n03_broker_pid= n03_worker_pid= release_fd= dir_fd= socket_pin= first_failure= result_status=rejected
