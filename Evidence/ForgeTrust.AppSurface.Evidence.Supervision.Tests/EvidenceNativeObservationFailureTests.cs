@@ -29,7 +29,7 @@ public sealed class EvidenceNativeObservationFailureTests
         Assert.Null(EvidenceNativeObservationFailure.FilterCode(code));
 
     [Fact]
-    public void EveryClosedPhaseProducesExactlyFiveBoundedFields()
+    public void EveryClosedPhaseProducesExactlySixBoundedFields()
     {
         foreach (var phase in Enum.GetValues<EvidenceNativeObservationPhase>())
         {
@@ -38,9 +38,9 @@ public sealed class EvidenceNativeObservationFailureTests
             Assert.True(Encoding.UTF8.GetByteCount(json) <= 1024);
             Assert.DoesNotContain("private-canary", json);
             using var parsed = JsonDocument.Parse(json);
-            Assert.Equal(new[] { "schema", "phase", "error_kind", "diagnostic_code", "account_failure" },
+            Assert.Equal(new[] { "schema", "phase", "error_kind", "diagnostic_code", "account_failure", "control_failure" },
                 parsed.RootElement.EnumerateObject().Select(p => p.Name).ToArray());
-            Assert.Equal("evidence-native-observation-failure-v2", parsed.RootElement.GetProperty("schema").GetString());
+            Assert.Equal("evidence-native-observation-failure-v3", parsed.RootElement.GetProperty("schema").GetString());
             Assert.Equal(phase.ToString(), parsed.RootElement.GetProperty("phase").GetString());
             Assert.Equal("Io", parsed.RootElement.GetProperty("error_kind").GetString());
             Assert.Equal(JsonValueKind.Null, parsed.RootElement.GetProperty("diagnostic_code").ValueKind);
@@ -263,6 +263,133 @@ public sealed class EvidenceNativeObservationFailureTests
         Assert.Equal(LinuxAccountUtilityStage.Start, latch.First!.UtilityStage);
         Assert.Equal(LinuxSystemdStartError.AccessDenied, latch.First.DBusCategory);
         Assert.Equal(EvidenceNativeObservationErrorKind.Io, latch.First.ErrorKind);
+    }
+
+    [Fact]
+    public void AllClosedControlStagesAndOperationsHaveExactlyFourBoundedFields()
+    {
+        foreach (var stage in Enum.GetValues<LinuxControlFailureStage>())
+        foreach (var operation in Enum.GetValues<EvidenceControlOperation>())
+        {
+            var detail = LinuxControlFailure.Capture(stage, operation, new IOException("canary"));
+            using var parsed = JsonDocument.Parse(detail.ToJson());
+            Assert.Equal(new[] { "stage", "operation", "error_kind", "diagnostic_code" },
+                parsed.RootElement.EnumerateObject().Select(p => p.Name).ToArray());
+            Assert.Equal(stage.ToString(), parsed.RootElement.GetProperty("stage").GetString());
+            Assert.Equal(operation.ToString(), parsed.RootElement.GetProperty("operation").GetString());
+            Assert.DoesNotContain("canary", detail.ToJson());
+        }
+    }
+
+    [Fact]
+    public void InvalidControlStageOperationAndMessageCodesClampWithoutLeaking()
+    {
+        var detail = LinuxControlFailure.Capture((LinuxControlFailureStage)int.MaxValue,
+            (EvidenceControlOperation)int.MaxValue, new CanaryException("ASEVD410-private-canary", new IOException("inner")));
+        Assert.Equal(LinuxControlFailureStage.Unknown, detail.Stage);
+        Assert.Null(detail.Operation);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Unknown, detail.ErrorKind);
+        Assert.Null(detail.DiagnosticCode);
+        Assert.DoesNotContain("canary", detail.ToJson());
+        Assert.DoesNotContain("inner", detail.ToJson());
+    }
+
+    [Fact]
+    public void ActualAdmissionCodeAndControlLineFamilyUseExistingProjection()
+    {
+        var attempt = new SupervisionSingleAttempt(); attempt.Claim();
+        var admission = Assert.Throws<EvidenceAdmissionException>(attempt.Claim);
+        var detail = LinuxControlFailure.Capture(LinuxControlFailureStage.ReadyClaim, EvidenceControlOperation.Ready, admission);
+        Assert.Equal("ASEVD410", detail.DiagnosticCode);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Admission, detail.ErrorKind);
+        foreach (var failure in Enum.GetValues<ControlLineFailure>())
+        {
+            var line = LinuxControlFailure.Capture(LinuxControlFailureStage.RequestRead, null, new ControlLineException(failure));
+            Assert.Equal(EvidenceNativeObservationErrorKind.ControlLine, line.ErrorKind);
+            Assert.Null(line.DiagnosticCode);
+            Assert.Null(line.Operation);
+        }
+    }
+
+    [Fact]
+    public void FirstControlFaultSurvivesCleanupAndConcurrentLaterCapture()
+    {
+        var latch = new LinuxControlFailureLatch();
+        latch.Capture(LinuxControlFailureStage.RequestRead, null, new IOException("first"));
+        var first = latch.First;
+        Parallel.For(0, 64, _ => latch.Capture(LinuxControlFailureStage.ConnectionRelease,
+            EvidenceControlOperation.Exit, new ObjectDisposedException("later")));
+        Assert.Same(first, latch.First);
+        Assert.Equal(LinuxControlFailureStage.RequestRead, latch.First!.Stage);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Io, latch.First.ErrorKind);
+    }
+
+    [Fact]
+    public void ConcurrentFirstControlCapturePublishesOneConsistentProjection()
+    {
+        var latch = new LinuxControlFailureLatch();
+        Parallel.For(0, 64, index => latch.Capture(index % 2 == 0 ? LinuxControlFailureStage.RequestRead : LinuxControlFailureStage.Stop,
+            index % 2 == 0 ? null : EvidenceControlOperation.Stop, index % 2 == 0 ? new IOException("private") : new TimeoutException("private")));
+        var first = latch.First!;
+        if (first.Stage == LinuxControlFailureStage.RequestRead)
+        { Assert.Null(first.Operation); Assert.Equal(EvidenceNativeObservationErrorKind.Io, first.ErrorKind); }
+        else
+        { Assert.Equal(LinuxControlFailureStage.Stop, first.Stage); Assert.Equal(EvidenceControlOperation.Stop, first.Operation); Assert.Equal(EvidenceNativeObservationErrorKind.Timeout, first.ErrorKind); }
+        latch.Capture(LinuxControlFailureStage.ListenerClose, null, new Exception("later"));
+        Assert.Same(first, latch.First);
+    }
+
+    [Fact]
+    public void ControlDetailIsNullableAndAttachedOnlyToActualServerPhases()
+    {
+        var detail = LinuxControlFailure.Capture(LinuxControlFailureStage.ResponseWrite, EvidenceControlOperation.Ready, new IOException("private"));
+        foreach (var phase in Enum.GetValues<EvidenceNativeObservationPhase>())
+        {
+            var root = EvidenceNativeObservationFailure.Capture(phase, new IOException("private"), detail);
+            if (phase is EvidenceNativeObservationPhase.ServerRun or EvidenceNativeObservationPhase.ServerCompletion)
+                Assert.Same(detail, root.ControlFailure);
+            else Assert.Null(root.ControlFailure);
+            Assert.True(Encoding.UTF8.GetByteCount(root.ToJson()) + 1 <= 1024);
+        }
+        Assert.Null(EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.ServerRun, null).ControlFailure);
+    }
+
+    [Fact]
+    public void RootFirstFaultRetainsControlDetailDespiteLaterCleanup()
+    {
+        var detail = LinuxControlFailure.Capture(LinuxControlFailureStage.ReadyData, EvidenceControlOperation.Ready, new IOException("private"));
+        var latch = new EvidenceNativeObservationFailureLatch();
+        latch.Capture(EvidenceNativeObservationPhase.ServerRun, new IOException("outer"), detail);
+        latch.Capture(EvidenceNativeObservationPhase.ListenerClose, new ObjectDisposedException("later"));
+        Assert.Same(detail, latch.Rejected().Failure.ControlFailure);
+        using var parsed = JsonDocument.Parse(latch.Rejected().Failure.ToJson());
+        Assert.Equal("evidence-native-observation-failure-v3", parsed.RootElement.GetProperty("schema").GetString());
+        Assert.Equal("ReadyData", parsed.RootElement.GetProperty("control_failure").GetProperty("stage").GetString());
+    }
+
+    [Fact]
+    public void CompletedWorkerTaskCategoryDoesNotInventErrorCodeStatusOrOperation()
+    {
+        var detail = LinuxControlFailure.Capture(LinuxControlFailureStage.WorkerTerminalTaskCompleted, null, null);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Unknown, detail.ErrorKind);
+        Assert.Null(detail.DiagnosticCode);
+        Assert.Null(detail.Operation);
+        Assert.DoesNotContain("pid", detail.ToJson());
+        Assert.DoesNotContain("status", detail.ToJson());
+    }
+
+    [Fact]
+    public void ClosureOnlyControlFaultIsFirstWithoutClearingOtherRootFailure()
+    {
+        var controls = new LinuxControlFailureLatch();
+        Assert.Null(controls.First);
+        controls.Capture(LinuxControlFailureStage.ListenerClose, null, new ObjectDisposedException("private"));
+        Assert.Equal(EvidenceNativeObservationErrorKind.Disposed, controls.First!.ErrorKind);
+        var roots = new EvidenceNativeObservationFailureLatch();
+        roots.Capture(EvidenceNativeObservationPhase.Plan, new IOException("first"));
+        roots.Capture(EvidenceNativeObservationPhase.ServerCompletion, new Exception("later"), controls.First);
+        Assert.Equal(EvidenceNativeObservationPhase.Plan, roots.First!.Phase);
+        Assert.Null(roots.First.ControlFailure);
     }
 
     private sealed class CanaryException(string message, Exception inner) : Exception(message, inner);

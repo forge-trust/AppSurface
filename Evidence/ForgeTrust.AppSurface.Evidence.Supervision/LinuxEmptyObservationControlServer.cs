@@ -30,6 +30,10 @@ internal sealed class LinuxEmptyObservationControlServer
     private int _ioJoined;
     private int _localOwnersClosed;
     private int _connectionCloseFailed;
+    private readonly LinuxControlFailureLatch _failures = new();
+
+    /// <summary>Gets first caught server-fault data; this establishes no protocol or native outcome.</summary>
+    internal LinuxControlFailure? FirstFailure => _failures.First;
 
     private LinuxEmptyObservationControlServer(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
         LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxControlListener listener, LinuxWorkerProcess worker)
@@ -123,7 +127,8 @@ internal sealed class LinuxEmptyObservationControlServer
         {
             var closed = true;
             try { _replyOrder.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { closed = false; _sequence.RecordFailure(); }
+            catch (Exception error) when (Recoverable(error))
+            { _failures.Capture(LinuxControlFailureStage.ReplyGateClose, null, error); closed = false; _sequence.RecordFailure(); }
             if (!closed) throw Rejected();
             Interlocked.Exchange(ref _localOwnersClosed, 1);
         }
@@ -131,72 +136,106 @@ internal sealed class LinuxEmptyObservationControlServer
 
     private async Task RunCoreAsync(CancellationToken token)
     {
+        var stage = LinuxControlFailureStage.PeerCheck;
+        try
+        {
         var peer = _worker.RequireWorker(token);
+        stage = LinuxControlFailureStage.WorkerExitTask;
         var naturalExit = _worker.WaitForExitAsync();
+        stage = LinuxControlFailureStage.RequestLifetime;
         using var requests = CancellationTokenSource.CreateLinkedTokenSource(token, _owner.TeardownCancellation);
+        stage = LinuxControlFailureStage.RequestLifetime;
         requests.CancelAfter(_owner.CleanupRemaining);
+        stage = LinuxControlFailureStage.RequestLifetime;
         using var accepts = CancellationTokenSource.CreateLinkedTokenSource(requests.Token);
+        stage = LinuxControlFailureStage.RequestLifetime;
         var handlers = new List<Task>(SupervisionWorkRegistry.MaximumActiveControls);
         Task<LinuxControlConnection>? pending = null;
         try
         {
             while (!_exitCommitted.Task.IsCompleted && !naturalExit.IsCompleted)
             {
+                stage = LinuxControlFailureStage.AcceptLoop;
                 requests.Token.ThrowIfCancellationRequested();
                 // Join each original completed handler before removing its retained task. No proxy
                 // wait or success snapshot substitutes for observing the actual procedure.
                 for (var index = handlers.Count - 1; index >= 0; index--)
                     if (handlers[index].IsCompleted)
                     {
+                        stage = LinuxControlFailureStage.HandlerJoin;
                         await handlers[index].ConfigureAwait(false);
                         handlers.RemoveAt(index);
                     }
                 if (handlers.Count == SupervisionWorkRegistry.MaximumActiveControls)
                 {
+                    stage = LinuxControlFailureStage.CapacityWait;
                     await Task.WhenAny(handlers.Append(_exitCommitted.Task).Append(naturalExit))
                         .WaitAsync(requests.Token).ConfigureAwait(false);
                     continue;
                 }
+                stage = LinuxControlFailureStage.Accept;
                 pending = _listener.AcceptAsync(peer, accepts.Token);
+                stage = LinuxControlFailureStage.AcceptJoin;
                 var next = await Task.WhenAny(pending, _exitCommitted.Task, naturalExit)
                     .WaitAsync(requests.Token).ConfigureAwait(false);
                 if (!ReferenceEquals(next, pending)) break;
+                stage = LinuxControlFailureStage.AcceptJoin;
                 var connection = await pending.ConfigureAwait(false);
                 pending = null;
+                stage = LinuxControlFailureStage.ControlRegistration;
                 var control = _ledger.BeginControl();
                 // The handler scope already owns all I/O before the actual async procedure can run.
+                stage = LinuxControlFailureStage.HandlerDispatch;
                 handlers.Add(HandleAsync(connection, control, requests.Token));
             }
         }
-        catch (Exception error) when (Recoverable(error)) { _sequence.RecordFailure(); }
+        catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); _sequence.RecordFailure(); }
         finally
         {
             var ioJoined = true;
+            stage = LinuxControlFailureStage.AcceptCancel;
             try { accepts.Cancel(); }
-            catch (Exception error) when (Recoverable(error)) { _sequence.RecordFailure(); }
+            catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); _sequence.RecordFailure(); }
             // Close admission/socket/results first to interrupt pending I/O, then join the original
             // accept and handler tasks. Dispose does not claim that their read/write tasks have joined.
+            stage = LinuxControlFailureStage.ListenerClose;
             try { await _listener.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception error) when (Recoverable(error)) { ioJoined = false; _sequence.RecordFailure(); }
+            catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
             if (pending is not null)
             {
+                stage = LinuxControlFailureStage.PendingAcceptJoin;
                 try { await pending.ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error)) { /* Listener drain independently latches unexpected failure. */ }
+                catch (Exception error) when (Recoverable(error)) { /* Listener drain independently latches unexpected failure; pending accept cancellation is expected. */ }
             }
+            stage = LinuxControlFailureStage.HandlersJoin;
             try { await Task.WhenAll(handlers).ConfigureAwait(false); }
-            catch (Exception error) when (Recoverable(error)) { ioJoined = false; _sequence.RecordFailure(); }
+            catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
+            stage = LinuxControlFailureStage.DescendantsStop;
             try { await _sequence.StopAsync(CleanupToken()).ConfigureAwait(false); }
-            catch (Exception error) when (Recoverable(error)) { _sequence.RecordFailure(); }
+            catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); _sequence.RecordFailure(); }
+            stage = LinuxControlFailureStage.ControlsJoin;
             try { await _ledger.CloseAndJoinControlsAsync().ConfigureAwait(false); }
-            catch (Exception error) when (Recoverable(error)) { ioJoined = false; _sequence.RecordFailure(); }
+            catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
             if (ioJoined && Volatile.Read(ref _connectionCloseFailed) == 0)
                 Interlocked.Exchange(ref _ioJoined, 1);
         }
+        stage = LinuxControlFailureStage.FinalCancellation;
         token.ThrowIfCancellationRequested();
+        stage = LinuxControlFailureStage.CleanupBound;
         RequireCleanupBound();
+        stage = LinuxControlFailureStage.OwnerCheck;
         _owner.RequireControlIdentity(default);
-        if (!_sequence.ExitAcknowledged || !_ledger.IsSettled) throw Rejected();
+        if (!_sequence.ExitAcknowledged || !_ledger.IsSettled)
+        {
+            _failures.Capture(naturalExit.IsCompleted && !_exitCommitted.Task.IsCompleted
+                ? LinuxControlFailureStage.WorkerTerminalTaskCompleted : LinuxControlFailureStage.ProtocolIncomplete, null, null);
+            throw Rejected();
+        }
+        stage = LinuxControlFailureStage.CleanupBound;
         RequireCleanupBound();
+        }
+        catch (Exception error) when (Recoverable(error))
+        { _failures.Capture(stage, null, error); throw; }
     }
 
     private async Task HandleAsync(LinuxControlConnection connection, SupervisionWorkRegistry.Control control,
@@ -208,15 +247,23 @@ internal sealed class LinuxEmptyObservationControlServer
         var committedExit = false;
         CancellationTokenRegistration cleanupCancellation = default;
         var isCleanupRequest = false;
+        var stage = LinuxControlFailureStage.RequestLifetime;
+        EvidenceControlOperation? operation = null;
+        try
+        {
         using var io = CancellationTokenSource.CreateLinkedTokenSource(rootToken);
         try
         {
             io.CancelAfter(TimeSpan.FromTicks(Math.Min(_owner.CleanupRemaining.Ticks,
                 TimeSpan.FromSeconds(_input.Request.AdmissionSeconds).Ticks)));
+            stage = LinuxControlFailureStage.RequestRead;
             var request = await connection.ReadRequestAsync(io.Token).ConfigureAwait(false);
+            operation = request.Operation;
+            stage = LinuxControlFailureStage.RequestClassify;
             isCleanupRequest = request is EvidenceStopControlRequest or EvidenceWaitControlRequest or EvidenceExitControlRequest;
             if (isCleanupRequest)
             {
+                stage = LinuxControlFailureStage.CleanupRegistration;
                 var cleanupToken = CleanupToken();
                 cleanupCancellation = cleanupToken.UnsafeRegister(static state =>
                     ((CancellationTokenSource)state!).Cancel(), io);
@@ -225,47 +272,72 @@ internal sealed class LinuxEmptyObservationControlServer
             // STOP closes work admission before waiting behind an earlier response. It never joins
             // this control handler or the worker that issued the request.
             if (request is EvidenceStopControlRequest)
+            {
+                stage = LinuxControlFailureStage.Stop;
                 await _sequence.StopAsync(CleanupToken()).ConfigureAwait(false);
+            }
             // WAIT joins only an already owned STOP, outside response ordering. It never starts
             // containment itself or holds the reply gate while that original procedure is pending.
             else if (request is EvidenceWaitControlRequest)
+            {
+                stage = LinuxControlFailureStage.WaitJoin;
                 await _sequence.JoinStartedStopAsync().ConfigureAwait(false);
+            }
+            stage = LinuxControlFailureStage.ReplyGate;
             await _replyOrder.WaitAsync(io.Token).ConfigureAwait(false);
             heldReplyOrder = true;
             byte[] response;
             switch (request)
             {
                 case EvidenceReadyControlRequest:
+                    stage = LinuxControlFailureStage.ReadyAuthorization;
                     _owner.RequireActive(io.Token);
+                    stage = LinuxControlFailureStage.ReadyClaim;
                     claim = _sequence.ClaimReady();
+                    stage = LinuxControlFailureStage.ReadyData;
                     response = _worker.CreateReadyData(io.Token).ReadyBytes;
                     break;
                 case EvidenceStopControlRequest:
+                    stage = LinuxControlFailureStage.CleanupBound;
                     RequireCleanupBound();
+                    stage = LinuxControlFailureStage.ResponseData;
                     response = EvidenceCanonicalJson.Serialize(new { ok = true });
                     break;
                 case EvidenceWaitControlRequest:
+                    stage = LinuxControlFailureStage.CleanupBound;
                     RequireCleanupBound();
+                    stage = LinuxControlFailureStage.WaitClaim;
                     claim = _sequence.ClaimWait();
+                    stage = LinuxControlFailureStage.ResponseData;
                     response = EvidenceCanonicalJson.Serialize(new { ok = true, owned_exit = claim.Positive });
                     break;
                 case EvidenceExitControlRequest:
+                    stage = LinuxControlFailureStage.CleanupBound;
                     RequireCleanupBound();
+                    stage = LinuxControlFailureStage.OwnerCheck;
                     _owner.RequireControlIdentity(io.Token);
+                    stage = LinuxControlFailureStage.ExitClaim;
                     claim = _sequence.ClaimExit();
+                    stage = LinuxControlFailureStage.ResponseData;
                     response = EvidenceCanonicalJson.Serialize(new { ok = true });
                     break;
                 default:
                     throw Rejected();
             }
+            stage = LinuxControlFailureStage.ResponseWrite;
             await connection.WriteResponseAsync(response, io.Token).ConfigureAwait(false);
+            stage = LinuxControlFailureStage.ConnectionRelease;
             await _listener.ReleaseAsync(connection).ConfigureAwait(false);
             released = true;
+            stage = LinuxControlFailureStage.PostWriteCheck;
             if (isCleanupRequest) RequireCleanupBound();
+            stage = LinuxControlFailureStage.OwnerCheck;
             _owner.RequireControlIdentity(io.Token);
+            stage = LinuxControlFailureStage.PostWriteCheck;
             if (isCleanupRequest) RequireCleanupBound();
             if (claim is not null)
             {
+                stage = LinuxControlFailureStage.ReplyCommit;
                 _sequence.CompleteWrite(claim, true);
                 committedExit = claim.Operation == EvidenceControlOperation.Exit;
                 claim = null;
@@ -273,10 +345,11 @@ internal sealed class LinuxEmptyObservationControlServer
         }
         catch (Exception error) when (Recoverable(error))
         {
+            _failures.Capture(stage, operation, error);
             if (claim is not null)
             {
                 try { _sequence.CompleteWrite(claim, false); }
-                catch (EvidenceAdmissionException) { /* Failed write remains consumed and latched. */ }
+                catch (EvidenceAdmissionException commitError) { _failures.Capture(LinuxControlFailureStage.HandlerFailureCommit, operation, commitError); /* Failed write remains consumed and latched. */ }
             }
             _sequence.RecordFailure();
         }
@@ -284,15 +357,23 @@ internal sealed class LinuxEmptyObservationControlServer
         {
             if (!released)
             {
+                stage = LinuxControlFailureStage.ConnectionRelease;
                 try { await _listener.ReleaseAsync(connection).ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error))
-                { Interlocked.Exchange(ref _connectionCloseFailed, 1); _sequence.RecordFailure(); }
+                { _failures.Capture(stage, operation, error); Interlocked.Exchange(ref _connectionCloseFailed, 1); _sequence.RecordFailure(); }
             }
+            stage = LinuxControlFailureStage.ReplyGateRelease;
             if (heldReplyOrder) _replyOrder.Release();
+            stage = LinuxControlFailureStage.ControlRelease;
             control.Dispose();
+            stage = LinuxControlFailureStage.CleanupRegistrationClose;
             cleanupCancellation.Dispose();
+            stage = LinuxControlFailureStage.ExitCommit;
             if (committedExit) _exitCommitted.TrySetResult();
         }
+        }
+        catch (Exception error) when (Recoverable(error))
+        { _failures.Capture(stage, operation, error); throw; }
     }
 
     private Task<SupervisionControlJoinFacts> StopEmptyDescendantsAsync(CancellationToken token)
