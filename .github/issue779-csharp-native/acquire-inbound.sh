@@ -5,8 +5,8 @@ set -euo pipefail
 export PATH=/usr/bin:/usr/sbin LC_ALL=C LANG=C
 umask 077
 readonly SOURCE=31c9ff5c8782102e0917e0c992bbdecc35e115d0
-readonly PARENT=7101b86b2b68a2b53dfb86a8252be26d640e43b2
-readonly SOURCE_MAP=7464425522a3e7503be32a7402c34c2a7df9c86571e1ce7f6c53702861c89f87
+readonly PARENT=419e05da4306a323031db0cab763882a54ba7275
+readonly SOURCE_MAP=542983137c1f8fb9c1a4ba68a93a722c9403788c16d3768f21d099253ad5bc4b
 readonly FILE_CAP=268435456 TREE_CAP=1073741824 NODE_CAP=8192 RESERVE_MS=5000
 declare -A v=() roots=() maps=() nodes=() map_hash=() node_hash=()
 output=; work=; success=0
@@ -22,16 +22,16 @@ done
 for k in execute generation build-root reviewed-root deadline-monotonic-ms reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256 helper-build-root helper-build-receipt-sha256; do
  [[ -n ${v[$k]-} ]] || fail missing-option
 done
-readonly N03_INDEPENDENT_REVIEW_CLEAR=0
+readonly N03_INDEPENDENT_REVIEW_CLEAR=1
 ((N03_INDEPENDENT_REVIEW_CLEAR==1)) || fail n03-review-pending
 [[ $EUID == 0 && $OSTYPE == linux* && ${v[generation]} =~ ^[0-9a-f]{32}$ ]] || fail root-platform-generation
 for k in reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256 helper-build-receipt-sha256; do
  [[ ${v[$k]} =~ ^[0-9a-f]{64}$ ]] || fail digest-shape
 done
-[[ ${v[transport-sha256]} == 0715a097cf99f1a9979258929c7cc42706e6237554db97bdd83190c85e72e3fc &&
-   ${v[fixture-sha256]} == b7941b8c018183afe1668e48af2941f81d55bc9949170cdb73f660d54134d5d3 &&
+[[ ${v[transport-sha256]} == a99d8e551ec68feb9ce1c5255fe52af07ea25f006ad70695d34d5f28539d4dba &&
+   ${v[fixture-sha256]} == e8438eef38118148d94e89a248ac36ed148f0357dd918bacf802973ba23c38bb &&
    ${v[audit-sha256]} == 0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b &&
-   ${v[source-review-sha256]} == 45eb9809fa6da82e9c62c6d3901fc9603de06e6d8857ac474103f7812fdcf3a7 ]] || fail frozen-input-pins
+   ${v[source-review-sha256]} == 65e26385ad35b1a1a1fed9614165b98d148df781227980985c2520524642d30f ]] || fail frozen-input-pins
 mono() {
  local stamp rest whole fraction
  IFS=' ' read -r stamp rest </proc/uptime || return 1

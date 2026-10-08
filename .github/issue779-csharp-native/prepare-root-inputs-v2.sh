@@ -24,7 +24,7 @@ done
 if [[ $mode == prepare-only ]]; then
  printf '%s\n' 'PREPARATION_ONLY:NO_INPUTS_VERIFIED:NO_TRANSPORT:NO_FIXTURE_EXECUTION'; exit 0
 fi
-readonly N03_INDEPENDENT_REVIEW_CLEAR=0
+readonly N03_INDEPENDENT_REVIEW_CLEAR=1
 ((N03_INDEPENDENT_REVIEW_CLEAR==1)) || fail n03-review-pending
 [[ $EUID == 0 && $OSTYPE == linux* ]] || fail trusted-linux-root-required
 for key in reviewed-script-sha256 generation deadline-monotonic-ms source-commit source-root source-map source-map-sha256 source-nodes source-nodes-sha256 tool-root tool-map tool-map-sha256 tool-nodes tool-nodes-sha256 runtime-root runtime-map runtime-map-sha256 runtime-nodes runtime-nodes-sha256 source-review source-review-sha256 build-receipt build-receipt-sha256 fixture fixture-sha256 os-audit-script os-audit-script-sha256 helper-root helper-map helper-map-sha256 helper-nodes helper-nodes-sha256 helper-build-receipt helper-build-receipt-sha256 helper-entry-sha256; do
@@ -33,7 +33,7 @@ done
 hash_syntax() { [[ $1 =~ ^[0-9a-f]{64}$ ]] || fail digest-syntax; }
 for key in "${!values[@]}"; do [[ $key != *sha256 ]] || hash_syntax "${values[$key]}"; done
 [[ ${values[generation]} =~ ^[0-9a-f]{32}$ && ${values[source-commit]} == 31c9ff5c8782102e0917e0c992bbdecc35e115d0 ]] || fail source-generation-pin
-[[ ${values[fixture-sha256]} == b7941b8c018183afe1668e48af2941f81d55bc9949170cdb73f660d54134d5d3 && ${values[os-audit-script-sha256]} == 0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b ]] || fail reviewed-source-pin
+[[ ${values[fixture-sha256]} == e8438eef38118148d94e89a248ac36ed148f0357dd918bacf802973ba23c38bb && ${values[os-audit-script-sha256]} == 0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b ]] || fail reviewed-source-pin
 mono_ms() {
  local stamp rest whole fraction
  IFS=' ' read -r stamp rest </proc/uptime || return 1

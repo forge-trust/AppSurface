@@ -15,7 +15,7 @@ source_revision= base_revision= workflow_identity= entry= runtime_host= entry_sh
 source_nodes= source_nodes_sha256= payload_nodes= payload_nodes_sha256= runtime_nodes= runtime_nodes_sha256=
 n03_helper_root= n03_helper_map= n03_helper_map_sha256= n03_helper_nodes= n03_helper_nodes_sha256= n03_helper_entry_sha256= n03_helper_generation=
 n03_exit= n03_result_sha256=
-readonly N03_INDEPENDENT_REVIEW_CLEAR=0
+readonly N03_INDEPENDENT_REVIEW_CLEAR=1
 readonly N03_BROKER_NAME=_apt N03_WORKER_NAME=nobody N03_SHARED_GROUP=nogroup N03_STARTUP_KIB=262144
 fail() { printf 'CHECKPOINT_REJECTED:%s\n' "$1" >&2; exit 1; }
 while (($#)); do

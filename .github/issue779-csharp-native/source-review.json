@@ -90,6 +90,14 @@
     "validation_receipt_sha256": "12ff97e34dc282fc1dc6b995646b37f37e81de76ab22a935fd4bda439fe17a11"
   },
   "current_full_suite_executed": true,
+  "current_publication_promotion": {
+    "native_execution": false,
+    "parent": "419e05da4306a323031db0cab763882a54ba7275",
+    "reviewed_source_composition_sha256": "455ddfd333a12efb14ea4fee4872540ea5fd023292f59d993e2c35db6c29c86e",
+    "scope": "Source31c9, N03v4 and all16 requirements unchanged; this promotes reviewed source-execution gates only",
+    "status": "independent promotion review pending",
+    "trusted_enabled": false
+  },
   "historical_baseline": {
     "cli_entry_tests": 10,
     "core_tests": 987,
