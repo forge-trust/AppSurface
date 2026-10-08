@@ -983,3 +983,44 @@ inode/type ordering, each metadata field, first-fault precedence and closed boun
 projection. They are defined and unexecuted at source freeze. These controls cannot establish
 native inspection, worker acceptance, a kernel transition or N01–N16 completion. Actual native
 cause and any runtime correction remain pending fresh measured evidence.
+
+
+## EXIT accept-admission quiescence
+
+The closed [empty Observation server](LinuxEmptyObservationControlServer.cs) separates EXIT intent from
+successful response commit. After the existing `ClaimExit` prerequisites, intent prevents any additional
+accept/handler dispatch. The server joins [the listener's](LinuxControlListener.cs)
+`CloseAcceptAdmissionAsync()` before writing the final ACK. Admission quiescence closes the listening socket
+once and joins the original pending accept and any unpublished late-result close. It retains the already
+published EXIT connection and original named/parent handles until that handler's write, release, cleanup-bound
+and owner checks finish. An accepted result which wins the same `WhenAny` race as intent is retained for later
+close, never newly dispatched. Intent itself sets neither `ExitAcknowledged` nor the final completion signal.
+
+The portable [accept owner](SupervisionAcceptOwnership.cs) exposes internal `Task CloseAdmissionAsync()`.
+One original task is reserved under its admission gate before callbacks; concurrent/repeated calls share
+completion, including sticky failure. It closes no already published result. Full `DisposeAsync()` still joins
+that admission task and attempts every retained result close. Native listener prechecks and pending registration
+share the same gate as closure. A late actual socket still undergoes retained workspace, name, worker and peer
+checks before its owned close; cancellation cannot convert a corrupt identity into ordinary shutdown. Only the
+listener's own endpoint query is unavailable after its actual close, having been checked before native accept.
+No timer, grant, quota, admission token, lease or kernel-exit fact is created by these procedure APIs.
+
+On orderly EXIT intent, the root joins original registered handlers before full listener disposal so the EXIT
+connection remains writable through its ACK. On non-EXIT failure it retains the original full-close-first
+interruption path. Callbacks must not reenter their same owner: accept, release, admission close and full disposal
+reject fixed ASEVD410 before a self-join. An ignored cancellation or blocked late close remains owned and awaited;
+independent containment and the original root deadlines must handle a stall. A close, pending accept, peer check
+or response failure cannot commit successful EXIT and still requires all cleanup attempts.
+
+The added deterministic controls in [SupervisionAcceptOwnershipTests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionAcceptOwnershipTests.cs)
+exercise retained live connections, original pending/late-close barriers, shared completion, unexpected faults,
+callback reentry and failed ACK commit through intentional portable bookkeeping. They do not construct a Linux
+owner or prove native admission, worker exit, account deletion or coverage qualification. Source preparation
+executes no tests. The source-supported EXIT ordering hazard is independent of attempt27's measured retained
+PID-directory UID mismatch: numeric UID values and its temporal relation to EXIT remain unmeasured.
+
+### Reserve under a gate; dispatch after releasing it
+
+`SupervisionAcceptOwnership<T>.RegisterAccept` and `RegisterAdmissionClose` return portable procedure handles with the original `Task` and a one-time `Dispatch` operation. Registration does not invoke the supplied native callback. The enclosing listener can therefore combine its existing worker precheck with reservation atomically, release its gate and the server execution gate, and then dispatch. Closing admission joins a reserved accept even if its caller has not dispatched yet; forgetting to dispatch leaves that original work owned and cannot establish successful cleanup. Repeated closure reservations share the original completion, and a redundant dispatch gate cannot release the first reservation. These internal handles provide bookkeeping only and cannot construct a Linux listener, process identity or protected admission.
+
+The [control server](LinuxEmptyObservationControlServer.cs) reserves the actual accept under its execution gate and dispatches afterward. The [listener](LinuxControlListener.cs) reserves the pending operation under the same gate as its worker prechecks, and reserves admission closure before releasing that gate. Existing callbacks, endpoint/name checks, peer authentication and sticky failures remain required. Three additional [portable ownership controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionAcceptOwnershipTests.cs) exercise the registration/closure gap, callback dispatch outside an enclosing gate, and repeated closure while an original accept remains reserved. They supply no Linux execution or physical-exit evidence.
