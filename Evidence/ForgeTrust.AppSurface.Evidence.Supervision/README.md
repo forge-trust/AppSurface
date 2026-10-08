@@ -741,11 +741,11 @@ projection; later account, FD, backend or final-deadline failures cannot overwri
 startup failure. Capture is best effort and cannot replace the original execution/cleanup outcome.
 No operation order, token, clock, gate, authority check, work grant or join is changed.
 
-The reserved supervisor entry emits one stderr JSON line with exactly five fields, followed by the
+The reserved supervisor entry emits one stderr JSON line with exactly six fields, followed by the
 unchanged fixed ASEVD410 admission message and numeric exit1:
 
 ```json
-{"schema":"evidence-native-observation-failure-v2","phase":"WorkerStart","error_kind":"Admission","diagnostic_code":"ASEVD410","account_failure":null}
+{"schema":"evidence-native-observation-failure-v3","phase":"WorkerStart","error_kind":"Admission","diagnostic_code":"ASEVD410","account_failure":null,"control_failure":null}
 ```
 
 The example is shape documentation, not measured attempt14 cause. `phase` and `error_kind` are the
@@ -891,3 +891,14 @@ formatters changed no bytes; all 72 before/after hashes matched and all six proc
 The [migration record](../../docs/plans/issue-779-csharp-supervision-migration.md#2026-10-06-guarded-same-image-cli-candidate-and-worker-bootstrap)
 binds the receipt/TRXs and five built-CLI QA outcomes, and preserves the initial QA heading mismatch.
 These local macOS checks establish no native Linux process/custody or N01–N16 acceptance.
+
+
+#### Control first-fault detail (v3)
+
+The private [empty Observation control server](LinuxEmptyObservationControlServer.cs) retains a sticky, best-effort [LinuxControlFailure](EvidenceNativeObservationFailure.cs) projection at actual setup, handler and cleanup catches. It stores no exception object. Each core procedure and concurrent handler has its own fixed stage; parsed operation is null until actual request decoding completes. Capture allocation failure is swallowed and changes no admission, failure latch, original exception, task join, token or clock. The original peer check before the existing core try is covered by a diagnostic-only rethrow wrapper. Existing sequence failure and response/cleanup order are preserved.
+
+The nullable sixth field `control_failure` appears only when the outer first-failure projection is ServerRun or ServerCompletion. It contains exactly `stage`, `operation`, `error_kind`, `diagnostic_code`, with clamped closed enums and existing error/code projection. Consumers must explicitly require the v3 six-field schema; v2 exact-field consumers cannot silently accept it. Existing nine-field account detail is unchanged. Whole packet plus LF stays below1KiB.
+
+`WorkerTerminalTaskCompleted` is recorded only at the final protocol rejection after handler joins when the original worker terminal task has completed and EXIT is still uncommitted; it does not invent a worker exit status, successful OS exit or physical settlement. Caught handler or cleanup faults retain their actual fixed stages and operation, and cannot overwrite an earlier retained projection. Expected pending accept cancellation during listener drain is not captured as an execution fault. Listener disposal independently records an unexpected drain failure. This diagnostic observes the first retained catch/category, not global chronological ordering among concurrent native events. No code reconstructs raw bytes, peer identities, messages, stacks, PIDs or paths.
+
+Attempt37730854250 reached actual worker/server construction and then ServerRun/Admission/ASEVD410; the first underlying server cause remains unmeasured. Repeated protected-plan hashing and connect timing are candidates only, with no measured expiry and no justified clock change. The initial source handoff defined nine data-only regression facts without execution. Subsequent local [supervision test-project](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj) validation passed **1038/1038**, including **37** native-failure diagnostic cases, with zero failures/skips/compiler diagnostics. Locked restore, two exact-file formatting commands and the source test all exited zero in **10.016 seconds / 180 seconds**; no formatter changes occurred. Receipt `/private/tmp/issue779-csharp-control-first-fault-validation/attempt-1/receipt.json` SHA-256 `12ff97e34dc282fc1dc6b995646b37f37e81de76ab22a935fd4bda439fe17a11`; TRX SHA-256 `8eab8d78f680abddcf7c5aaf31326fc89e7296f5d7e0ca7d2fceea4ef17268b3`. Independent runtime review cleared the diagnostic-only execution flow; this paragraph corrects the earlier preparation status after validation. Linux native proof and the actual inner ServerRun cause remain pending.

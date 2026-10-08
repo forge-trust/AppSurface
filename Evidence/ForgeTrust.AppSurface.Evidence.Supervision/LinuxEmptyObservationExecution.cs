@@ -48,7 +48,9 @@ internal static class LinuxEmptyObservationExecution
         var phase = EvidenceNativeObservationPhase.Unknown;
         void Record(Exception error)
         {
-            try { failures.Capture(phase, error); }
+            try { failures.Capture(phase, error,
+                phase is EvidenceNativeObservationPhase.ServerRun or EvidenceNativeObservationPhase.ServerCompletion
+                    ? server?.FirstFailure : null); }
             catch (Exception) { } // Diagnostic capture cannot replace the actual execution/cleanup error.
         }
         var failed = false;

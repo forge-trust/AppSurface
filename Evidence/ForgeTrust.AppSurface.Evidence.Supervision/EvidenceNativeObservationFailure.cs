@@ -268,12 +268,152 @@ internal sealed class LinuxAccountFailureLatch
     }
 }
 
-/// <summary>Detached five-field diagnostic data; construction issues no execution, admission or cleanup authority.</summary>
+/// <summary>Closed server checkpoints; names are diagnostic data, never a protocol or physical-exit assertion.</summary>
+internal enum LinuxControlFailureStage
+{
+    /// <summary>Closed Unknown checkpoint.</summary>
+    Unknown,
+    /// <summary>Closed PeerCheck checkpoint.</summary>
+    PeerCheck,
+    /// <summary>Closed WorkerExitTask checkpoint.</summary>
+    WorkerExitTask,
+    /// <summary>Closed RequestLifetime checkpoint.</summary>
+    RequestLifetime,
+    /// <summary>Closed AcceptLoop checkpoint.</summary>
+    AcceptLoop,
+    /// <summary>Closed HandlerJoin checkpoint.</summary>
+    HandlerJoin,
+    /// <summary>Closed CapacityWait checkpoint.</summary>
+    CapacityWait,
+    /// <summary>Closed Accept checkpoint.</summary>
+    Accept,
+    /// <summary>Closed AcceptJoin checkpoint.</summary>
+    AcceptJoin,
+    /// <summary>Closed ControlRegistration checkpoint.</summary>
+    ControlRegistration,
+    /// <summary>Closed HandlerDispatch checkpoint.</summary>
+    HandlerDispatch,
+    /// <summary>Closed RequestRead checkpoint.</summary>
+    RequestRead,
+    /// <summary>Closed RequestClassify checkpoint.</summary>
+    RequestClassify,
+    /// <summary>Closed CleanupRegistration checkpoint.</summary>
+    CleanupRegistration,
+    /// <summary>Closed Stop checkpoint.</summary>
+    Stop,
+    /// <summary>Closed WaitJoin checkpoint.</summary>
+    WaitJoin,
+    /// <summary>Closed ReplyGate checkpoint.</summary>
+    ReplyGate,
+    /// <summary>Closed ReadyAuthorization checkpoint.</summary>
+    ReadyAuthorization,
+    /// <summary>Closed ReadyClaim checkpoint.</summary>
+    ReadyClaim,
+    /// <summary>Closed ReadyData checkpoint.</summary>
+    ReadyData,
+    /// <summary>Closed ResponseData checkpoint.</summary>
+    ResponseData,
+    /// <summary>Closed WaitClaim checkpoint.</summary>
+    WaitClaim,
+    /// <summary>Closed ExitClaim checkpoint.</summary>
+    ExitClaim,
+    /// <summary>Closed ResponseWrite checkpoint.</summary>
+    ResponseWrite,
+    /// <summary>Closed ConnectionRelease checkpoint.</summary>
+    ConnectionRelease,
+    /// <summary>Closed PostWriteCheck checkpoint.</summary>
+    PostWriteCheck,
+    /// <summary>Closed ReplyCommit checkpoint.</summary>
+    ReplyCommit,
+    /// <summary>Closed HandlerFailureCommit checkpoint.</summary>
+    HandlerFailureCommit,
+    /// <summary>Closed ReplyGateRelease checkpoint.</summary>
+    ReplyGateRelease,
+    /// <summary>Closed ControlRelease checkpoint.</summary>
+    ControlRelease,
+    /// <summary>Closed CleanupRegistrationClose checkpoint.</summary>
+    CleanupRegistrationClose,
+    /// <summary>Closed ExitCommit checkpoint.</summary>
+    ExitCommit,
+    /// <summary>Closed AcceptCancel checkpoint.</summary>
+    AcceptCancel,
+    /// <summary>Closed ListenerClose checkpoint.</summary>
+    ListenerClose,
+    /// <summary>Closed PendingAcceptJoin checkpoint.</summary>
+    PendingAcceptJoin,
+    /// <summary>Closed HandlersJoin checkpoint.</summary>
+    HandlersJoin,
+    /// <summary>Closed DescendantsStop checkpoint.</summary>
+    DescendantsStop,
+    /// <summary>Closed ControlsJoin checkpoint.</summary>
+    ControlsJoin,
+    /// <summary>Closed FinalCancellation checkpoint.</summary>
+    FinalCancellation,
+    /// <summary>Closed CleanupBound checkpoint.</summary>
+    CleanupBound,
+    /// <summary>Closed OwnerCheck checkpoint.</summary>
+    OwnerCheck,
+    /// <summary>Closed ProtocolIncomplete checkpoint.</summary>
+    ProtocolIncomplete,
+    /// <summary>Closed WorkerTerminalTaskCompleted checkpoint.</summary>
+    WorkerTerminalTaskCompleted,
+    /// <summary>Closed ReplyGateClose checkpoint.</summary>
+    ReplyGateClose,
+}
+
+/// <summary>Detached four-field first caught control fault; no bytes, identities, paths or exception objects survive.</summary>
+internal sealed class LinuxControlFailure
+{
+    private LinuxControlFailure(LinuxControlFailureStage stage, EvidenceControlOperation? operation,
+        EvidenceNativeObservationErrorKind kind, string? code)
+    { Stage = stage; Operation = operation; ErrorKind = kind; DiagnosticCode = code; }
+    /// <summary>Gets the clamped fixed server checkpoint.</summary>
+    internal LinuxControlFailureStage Stage { get; }
+    /// <summary>Gets the closed parsed operation; null means none was parsed or invalid data.</summary>
+    internal EvidenceControlOperation? Operation { get; }
+    /// <summary>Gets the existing closed exception family.</summary>
+    internal EvidenceNativeObservationErrorKind ErrorKind { get; }
+    /// <summary>Gets an existing allowlisted admission code only from its actual exception.</summary>
+    internal string? DiagnosticCode { get; }
+    /// <summary>Projects data only, ignoring messages, inner errors and arbitrary type names.</summary>
+    internal static LinuxControlFailure Capture(LinuxControlFailureStage stage,
+        EvidenceControlOperation? operation, Exception? error)
+    {
+        var projected = EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.ServerRun, error);
+        return new(Enum.IsDefined(stage) ? stage : LinuxControlFailureStage.Unknown,
+            operation is { } value && Enum.IsDefined(value) ? value : null,
+            projected.ErrorKind, projected.DiagnosticCode);
+    }
+    /// <summary>Serializes exactly four finite fields; this issues no authority or completion receipt.</summary>
+    internal string ToJson() => "{\"stage\":\"" + Stage + "\",\"operation\":"
+        + (Operation is { } operation ? "\"" + operation + "\"" : "null")
+        + ",\"error_kind\":\"" + ErrorKind + "\",\"diagnostic_code\":"
+        + (DiagnosticCode is null ? "null" : "\"" + DiagnosticCode + "\"") + "}";
+}
+
+/// <summary>Best-effort sticky control-fault data; capture failures never replace actual lifecycle errors.</summary>
+internal sealed class LinuxControlFailureLatch
+{
+    private LinuxControlFailure? _first;
+    /// <summary>Gets the first retained projection; null is not evidence of success.</summary>
+    internal LinuxControlFailure? First => Volatile.Read(ref _first);
+    /// <summary>Retains one closed projection atomically; later handlers and cleanup cannot replace it.</summary>
+    internal void Capture(LinuxControlFailureStage stage, EvidenceControlOperation? operation, Exception? error)
+    {
+        try
+        {
+            if (First is null) Interlocked.CompareExchange(ref _first, LinuxControlFailure.Capture(stage, operation, error), null);
+        }
+        catch (Exception) { /* Diagnostic capture cannot alter an original error or success. */ }
+    }
+}
+
+/// <summary>Detached six-field diagnostic data; construction issues no execution, admission or cleanup authority.</summary>
 internal sealed class EvidenceNativeObservationFailure
 {
     private EvidenceNativeObservationFailure(EvidenceNativeObservationPhase phase,
-        EvidenceNativeObservationErrorKind kind, string? code, LinuxAccountFailure? account)
-    { Phase = phase; ErrorKind = kind; DiagnosticCode = code; AccountFailure = account; }
+        EvidenceNativeObservationErrorKind kind, string? code, LinuxAccountFailure? account, LinuxControlFailure? control)
+    { Phase = phase; ErrorKind = kind; DiagnosticCode = code; AccountFailure = account; ControlFailure = control; }
 
     /// <summary>Gets the validated closed checkpoint.</summary>
     internal EvidenceNativeObservationPhase Phase { get; }
@@ -283,9 +423,12 @@ internal sealed class EvidenceNativeObservationFailure
     internal string? DiagnosticCode { get; }
     /// <summary>Gets closed first account-fault data only from an actual account lifecycle exception.</summary>
     internal LinuxAccountFailure? AccountFailure { get; }
+    /// <summary>Gets first server-fault data only for ServerRun or ServerCompletion failure projection.</summary>
+    internal LinuxControlFailure? ControlFailure { get; }
 
     /// <summary>Projects only an actual exception's family and allowlisted admission code, without retaining it.</summary>
-    internal static EvidenceNativeObservationFailure Capture(EvidenceNativeObservationPhase phase, Exception? error)
+    internal static EvidenceNativeObservationFailure Capture(EvidenceNativeObservationPhase phase, Exception? error,
+        LinuxControlFailure? control = null)
     {
         if (!Enum.IsDefined(phase)) phase = EvidenceNativeObservationPhase.Unknown;
         var kind = error switch
@@ -312,19 +455,21 @@ internal sealed class EvidenceNativeObservationFailure
             LinuxRunAccountCancelledException cancelled => cancelled.FirstFailure,
             _ => null,
         };
-        return new(phase, kind, FilterCode(code), accountFailure);
+        return new(phase, kind, FilterCode(code), accountFailure,
+            phase is EvidenceNativeObservationPhase.ServerRun or EvidenceNativeObservationPhase.ServerCompletion ? control : null);
     }
 
     /// <summary>Filters detached code data; this never creates an admission exception or execution authority.</summary>
     internal static string? FilterCode(string? code) => code is "ASEVD402" or "ASEVD404" or "ASEVD407"
         or "ASEVD409" or "ASEVD410" or "ASEVD420" or "ASEVD421" ? code : null;
 
-    /// <summary>Returns exactly five JSON fields, without LF; all values are closed and the packet is below 1 KiB.</summary>
+    /// <summary>Returns exactly six JSON fields, without LF; all values are closed and the packet is below 1 KiB.</summary>
     /// <remarks>This data serialization never reads native state, inspects inner errors or changes a failure outcome.</remarks>
-    internal string ToJson() => "{\"schema\":\"evidence-native-observation-failure-v2\",\"phase\":\"" + Phase
+    internal string ToJson() => "{\"schema\":\"evidence-native-observation-failure-v3\",\"phase\":\"" + Phase
         + "\",\"error_kind\":\"" + ErrorKind + "\",\"diagnostic_code\":"
         + (DiagnosticCode is null ? "null" : "\"" + DiagnosticCode + "\"")
-        + ",\"account_failure\":" + (AccountFailure?.ToJson() ?? "null") + "}";
+        + ",\"account_failure\":" + (AccountFailure?.ToJson() ?? "null")
+        + ",\"control_failure\":" + (ControlFailure?.ToJson() ?? "null") + "}";
 }
 
 /// <summary>Sticky first-failure data latch. Later cleanup cannot replace an earlier execution fault.</summary>
@@ -334,8 +479,8 @@ internal sealed class EvidenceNativeObservationFailureLatch
     /// <summary>Gets the retained data, or null before any fault. Null does not prove successful native execution.</summary>
     internal EvidenceNativeObservationFailure? First => Volatile.Read(ref _first);
     /// <summary>Retains the first closed projection; does not store the original exception or grant authority.</summary>
-    internal void Capture(EvidenceNativeObservationPhase phase, Exception error) =>
-        Interlocked.CompareExchange(ref _first, EvidenceNativeObservationFailure.Capture(phase, error), null);
+    internal void Capture(EvidenceNativeObservationPhase phase, Exception error, LinuxControlFailure? control = null) =>
+        Interlocked.CompareExchange(ref _first, EvidenceNativeObservationFailure.Capture(phase, error, control), null);
     /// <summary>Builds a negative-only exception, with a closed missing-result fallback if no exception was caught.</summary>
     internal EvidenceNativeObservationException Rejected() => new(First
         ?? EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.ResultCheck, null));
