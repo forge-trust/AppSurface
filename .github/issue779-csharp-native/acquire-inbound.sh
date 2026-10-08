@@ -5,7 +5,7 @@ set -euo pipefail
 export PATH=/usr/bin:/usr/sbin LC_ALL=C LANG=C
 umask 077
 readonly SOURCE=5d1036b7035a7d9e980cdab5afc88879fca5048c
-readonly PARENT=37b04e5ea28bdf8c6e566b588bd97d09695bec39
+readonly PARENT=1e3c586ef2a3d196f7abcb2ba7aaa6956c1fe21d
 readonly SOURCE_MAP=ebc6e6815e7e951789fe58ec6bddb194013f8c9faaaa944a123231be69a6b1d0
 readonly FILE_CAP=268435456 TREE_CAP=1073741824 NODE_CAP=8192 RESERVE_MS=5000
 declare -A v=() roots=() maps=() nodes=() map_hash=() node_hash=()
@@ -26,8 +26,8 @@ done
 for k in reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256; do
  [[ ${v[$k]} =~ ^[0-9a-f]{64}$ ]] || fail digest-shape
 done
-[[ ${v[transport-sha256]} == 36a93eb3cecc3c829c537d247b7193dd473f168e50fedda77ad9bc890d419e13 &&
-   ${v[fixture-sha256]} == 43c5c837cb152b284ac1bc23f58fbb36479a1e51539552ea4d9db952fd261cb0 &&
+[[ ${v[transport-sha256]} == d222bc236610245731b97dce16a9d26bde1822ba6d15547c14df1738563da9e2 &&
+   ${v[fixture-sha256]} == fc4a8ffa9e9aad8f392f7f719e1265ec3d84168f669cbee58a9c9a045af4a21c &&
    ${v[audit-sha256]} == a76d3ec9521f021e799b8b56a6c57afdbeb6d4abdb21a55f42899a834eed4604 &&
    ${v[source-review-sha256]} == ee6fa029cf2873a18b849f6e5590f3dd792ee71fa88f3409100ff802df3b4ca0 ]] || fail frozen-input-pins
 mono() {

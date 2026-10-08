@@ -1,35 +1,23 @@
-# C# N02 startup file-limit diagnostic
+# C# Linux native N01/N02 checkpoint
 
-This private workflow builds the ordinary CLI and investigates a fixture limit before any native acceptance credit. The [C# supervision core](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md) and [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md) still require all sixteen native controls.
+This private workflow builds the ordinary CLI and executes the first two real controls from the [C# supervision migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md). The [C# core](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md) uses the same CLI executable for root supervision and the isolated worker. Python here prepares validation inputs and collects private receipts; it provides no production supervision or admission authority.
 
-## Binding and baseline
+## Source and execution binding
 
-Product source remains 5d1036b7035a7d9e980cdab5afc88879fca5048c, direct parent 2993dcfaac1b9b6dfb8adf057191f837876f01fe. This harness is a direct child of 37b04e5ea28bdf8c6e566b588bd97d09695bec39. All 2,819 source hashes/modes, source tree and historical 997 local tests plus separate 28 focused STOP/WAIT tests remain bound by [source-review.json](source-review.json). The SDK remains 10.0.401; the execution runtime is the pinned Ubuntu 10.0.12 packages. Every ELF/dependency remains subject to [the OS audit](prepare-os-audit-v2.py).
+Product source remains `5d1036b7035a7d9e980cdab5afc88879fca5048c`, direct parent `2993dcfaac1b9b6dfb8adf057191f837876f01fe`. The harness is a direct child of `1e3c586ef2a3d196f7abcb2ba7aaa6956c1fe21d`. All 2,819 source hashes/modes remain bound by [source-review.json](source-review.json), the complete build receipt and OS audit. Historical local 997 tests and separate 28 STOP/WAIT tests are source-bound local verification, not native acceptance. SDK10.0.401 builds the CLI; signed Ubuntu10.0.12 execution packages undergo the full [OS audit](prepare-os-audit-v2.py).
 
-## Diagnostic contract
+## Measured startup limit correction
 
-[The fixture](checkpoint-n01-n02-v5.sh) runs the same unprivileged supervise command sequentially under 2048 KiB and 262144 KiB file limits. Both children uniformly disable core dumps. The second value is the existing 256 MiB deployment-file envelope. Image, request, selected UID/GID, cleared groups, environment and argv remain identical. The original monotonic 600-second fixture interval and cleanup reserve remain. Extended fixed strace records actual memory/limit/credential calls. Missing kernel facts remain unknown.
+Run37708079779 compared the same fixed unprivileged command using 2MiB and 256MiB file limits. The lower case exited134 with runtime out-of-memory; the higher case exited1 with ASEVD402 and no stdout. Both sampled actual kernel UID/GID1001 and uniformly disabled core dumps. The precise failed allocation was not measured. Actual strace argv is ellipsized; identical complete invocation is established by the source-owned single function and image/request hashes. The diagnostic intentionally exited1 and attempted no N01.
 
-Attempt 9 measured runtime out-of-memory and SIGABRT; it did not measure the failed allocation. [Pinned .NET runtime source](https://github.com/dotnet/runtime/blob/v10.0.12/src/coreclr/minipal/Unix/doublemapping.cpp#L107-L122) clips executable-code backing storage by the file limit. This is the reason for the comparison, not a measured cause. Both results and private raw traces are preserved, including the lower failure. Trace caps of 1 MiB and stdio caps of 1024 bytes are verified after each synchronous case; there is no claim of an independent live trace writer cap. The root utility cgroup/deadline containment is unchanged.
+[The normal fixture](checkpoint-n01-n02-v5.sh) restores the original root-rejection assertions at a 262144KiB startup file limit with core0, equal to the existing256MiB deployment-file envelope. All functional argv/environment, N01 assertions, original600s interval/cleanup30, UID/cgroup/unit guards and custody checks remain. No C# worker policy, memory/task cap, security flag, timer, production catalogue or acceptance registry changes. N01 and N02 are pending until actual positive/negative receipts satisfy the unchanged normal validator. All other fourteen controls remain pending.
 
-The final result is the closed issue779-n02-startup-limit-diagnostic-v1 shape. It has empty native_controls_executed, false n01_attempted and false native_acceptance. Completion intentionally exits nonzero even if the larger limit reaches ASEVD402. The normal native result validator is unchanged and cannot accept this run. All N01/other controls remain pending.
+## Audit, settlement and retention
 
-## Private retention and ordering
+The reviewed batched audit verifies complete membership, file/node/byte/depth envelopes and pre/post identities and content hashes without a cache or deadline extension. Its fourteen actual Bash parser controls passed in the prior Linux run; they run again before this dispatch. [The root transport](prepare-root-inputs-v2.sh) pins both the fixture and OS auditor before root execution. Every dependent acquisition/runner/runtime/builder/workflow pin is checked together.
 
-[The dispatcher](run-native.py) retains the reviewed FIFO capture with separate 8 MiB writers, exclusive root-private files, both PID joins and the original deadline. [The retainer](retain-native.sh) adds only the fifteen fixed diagnostic names listed in the source review; no discovery, authority or original-result override is added. Every retained source remains root 0600/single-link/no-follow; fixed canonical USTAR and 32 MiB total bounds remain. Externally verified hashes precede interpreter use.
+[The dispatcher](run-native.py) preserves bounded FIFO writers, exclusive private files, process-group joins, root tool cgroup guards and the original deadline. [The retainer](retain-native.sh) accepts only fixed names, root0600/single-link/no-follow, canonical USTAR and32MiB total bounds. The previous diagnostic names remain allowable but absent in this normal fixture. Trace and stdio bounds remain post-join checks, with no claim of an independent live trace quota. Retention cannot turn a failure into success.
 
-Nine pure jq/static controls passed; they establish no native result. No worker security policy, cap, timer, production catalogue or acceptance registry is changed. Root-owned validation-tool settlement cannot establish C# supervisor/worker settlement. The initial diagnostic preparation had seven false promotion flags. Main may promote exactly those flags only after independent composition review; the diagnostic remains nonzero.
+## Result and sharp edges
 
-## Provenance regression
-
-Attempt 10 compiled the unchanged CLI with 33 successful commands and zero compiler diagnostics, then rejected the handoff as ubuntu-runtime-prerequisite-source. Its builder still embedded obsolete prerequisite/runner hashes. The named startup diagnostic did not run. Historical receipts remain unchanged.
-
-The builder now names both required hashes as compilation-bound constants and uses require_prerequisite_source after the existing result, package and schema checks and before runtime host copying. It checks exact equality and preserves the same fixed BuildFailure category. This helper validates metadata only; it cannot construct execution, admission or completion authority. All command settlement, selected runtime reads, ELFs, tree bounds, native checks and deadlines remain required. Five pure regression controls execute only the actual guard definitions and verify the current file-to-pin chain; no SDK/root/runtime is launched.
-
-## Private batched input audit
-
-The prior attempt exhausted the original fixture deadline before N02. This candidate batches full input checks, preserves the early named-root identity and all file/node/depth envelopes, and separately tests the actual parser on unprivileged Linux data before root dispatch. The diagnostic retains 600 seconds and cleanup30 and always rejects; it cannot establish N01/N02 acceptance. The C# product source is unchanged.
-
-## Transport guard correction after attempt 12
-
-The digest-verified run 37704476269 rejected at `reviewed-source-pin` before OS auditing or either startup comparison. The root transport still required the older fixture and auditor hashes. This private-only correction updates exactly those two pins and their dependent acquisition, runner, Ubuntu prerequisite, builder and workflow hashes. The new harness is one ordinary child of `37b04e5ea28bdf8c6e566b588bd97d09695bec39`. Product source, batched tree audit, startup cases, original deadlines, unit policy and retention remain byte-identical. No startup cause or native success was measured by this failed run. The missing two root-transport edges are now explicit in the pin inventory.
+Normal success requires actual N01 exit0, N02 exit1 with root rejection before protected I/O, real supervisor/worker settlement and strict account/workspace/FD cleanup. The unchanged closed native validator requires those facts; root validation-tool settlement alone is insufficient. No native pass or Trusted enablement is claimed by this preparation. Earlier failures and the startup comparison remain immutable historical evidence.
