@@ -127,20 +127,56 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxEmptyObservationControlServer server,
         CancellationToken token)
     {
+        _ = RequireCustodyOwnerCore(input, owner, accounts, workspace, server, token);
+    }
+
+    private LinuxCgroupSample RequireCustodyOwnerCore(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
+        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxEmptyObservationControlServer server,
+        CancellationToken token)
+    {
         if (!ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
             || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace))
             throw LinuxSystemdBackend.InvalidControl();
         server.RequireCustodyOwner(input, owner, accounts, workspace, this, token);
         owner.RequireControlIdentity(token);
         var pending = _pending.Snapshot;
+        LinuxCgroupSample? group = null;
         if (!_lifetime.StopJoined || !PhysicallySettled || !pending.StopJoined || pending.IsFailed
             || (pending.StartReserved && !pending.StartJoined) || _exit?.IsCompleted != true
             || _output is not { Successful: true }
-            || !LinuxAccountUtility.GroupEmpty(LinuxCgroupProbe.Read(Unit, token)))
+            || !LinuxAccountUtility.GroupEmpty(group = LinuxCgroupProbe.Read(Unit, token)))
             throw LinuxSystemdBackend.InvalidControl();
         owner.RequireControlIdentity(token);
         input.Recheck(token);
         owner.RequireControlIdentity(token);
+        return group!; // The unchanged short-circuit guard must have read and validated this sample.
+    }
+
+    /// <summary>Copies bounded negative-control facts only from this original physically joined native holder.</summary>
+    /// <param name="input">Reference-equal original protected input, never a reconstructed request.</param>
+    /// <param name="owner">Original authenticated owner.</param>
+    /// <param name="accounts">Original retained actual accounts.</param>
+    /// <param name="workspace">Original workspace retaining the descriptor and negative objects.</param>
+    /// <param name="server">Original joined peer-authenticated server.</param>
+    /// <param name="token">Original cleanup token; no allowance is renewed.</param>
+    /// <returns>Immutable detached observation; it grants no custody, admission, proof or acceptance.</returns>
+    /// <remarks>
+    /// Reuses the existing custody guard's one fresh selected-group read. PID/starttime/UID4/GID4/group
+    /// come only from the original retained identity; terminal data comes only from its successfully
+    /// joined natural monitor. A failed monitor or missing committed READY cannot be replaced by stop,
+    /// a generic exit code or caller metadata. No post-exit live proc recapture is attempted.
+    /// Main must separately wire fixed variant emitters and authenticate bounded private fixture retention.
+    /// </remarks>
+    internal LinuxNegativeKernelObservation CaptureNegativeObservation(EvidenceProtectedLaunchInput input,
+        LinuxOwnerActivation owner, LinuxRunAccounts accounts, LinuxRunWorkspace workspace,
+        LinuxEmptyObservationControlServer server, CancellationToken token)
+    {
+        var group = RequireCustodyOwnerCore(input, owner, accounts, workspace, server, token);
+        if (_worker is null || _exit?.IsCompletedSuccessfully != true || _naturalTerminal is null || _output is null)
+            throw LinuxSystemdBackend.InvalidControl();
+        var descriptor = server.RequireNegativeReadyDescriptor(input, owner, accounts, workspace, this, token);
+        return LinuxNegativeKernelObservation.CreateDetached(owner.RunId, _worker.SampledFacts,
+            _naturalTerminal, group, _output, descriptor, token);
     }
 
     /// <summary>Reserves the entire one-attempt startup before any native pipe, connection or unit start.</summary>
