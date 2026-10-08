@@ -70,7 +70,12 @@ while IFS= read -r -d '' row; do
   d|f) (((8#$mode & 0022)==0)) || fail stdlib-node-write ;;
   l)
    real=$(bounded /usr/bin/readlink -e -- "$p")
-   [[ $real == /usr/* ]] || fail stdlib-alias-target
+   # Ubuntu noble's packaged sitecustomize link is outside /usr. Permit only
+   # that exact declaration; root_file below still rejects writable/linked parents,
+   # non-root ownership, multiple links or a writable target. -S never imports it.
+   if [[ $real != /usr/* ]]; then
+    [[ $p == /usr/lib/python3.12/sitecustomize.py && $real == /etc/python3.12/sitecustomize.py && $(bounded /usr/bin/readlink -- "$p") == /etc/python3.12/sitecustomize.py && -f $real && ! -L $real ]] || fail stdlib-alias-target
+   fi
    if [[ -d $real ]]; then root_directory "$real"; else root_file "$real"; fi ;;
   *) fail stdlib-node-type ;;
  esac

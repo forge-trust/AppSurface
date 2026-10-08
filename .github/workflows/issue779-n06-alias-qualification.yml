@@ -1,7 +1,7 @@
 name: N06 Ubuntu strict alias qualification
 on:
   push:
-    branches: [codex/issue779-csharp-n06-alias-qualification-20261008]
+    branches: [codex/issue779-csharp-n06-alias-qualification-20261008-v2]
 permissions:
   contents: read
 jobs:
@@ -12,7 +12,7 @@ jobs:
       SOURCE_REVIEW_CLEAR: 'true'
       BOOTSTRAP_REVIEW_CLEAR: 'true'
       RUNNER_REVIEW_CLEAR: 'true'
-      BOOTSTRAP_SHA256: '4edc5535bfe12ad909274fd3dbe76e4c45458feb89a98147b76f1b61a0134dce'
+      BOOTSTRAP_SHA256: 'cc8f8ce2b662f6d3b75c5da8fa6525dfef809a1976b855325ebeac64d2a8ce33'
       PHYSICAL_REVIEW_SHA256: 'afd3cb36a89307eaeaec45c73a83c7c53788da707e9c25db34d5a633c7331f36'
     steps:
       - name: Require reviewed test-only proposal
