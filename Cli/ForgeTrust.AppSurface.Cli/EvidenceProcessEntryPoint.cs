@@ -23,11 +23,15 @@ internal static class EvidenceProcessEntryPoint
     /// <remarks>
     /// Supervisor success emits only canonical Mode, ClaimKind, Eligibility, ExecutionVerdict and
     /// CleanupCompleted fields from the actual returned manifest, after native execution and cleanup
-    /// return. Capturing this console cannot replace the protected execution or inject a positive result.
+    /// return. Root execution/cleanup rejection emits one closed four-field diagnostic on stderr, then
+    /// the unchanged fixed ASEVD410 message. Unsupported/unprivileged entry and clean caller cancellation
+    /// keep their original ASEVD402 behavior without this packet. Capturing this console cannot replace
+    /// the protected execution or inject a positive result.
     /// </remarks>
     internal static async Task<int> RunAsync(string[] arguments, IConsole console)
     {
         ArgumentNullException.ThrowIfNull(console);
+        var supervisorSelected = false;
         try
         {
             var selected = EvidenceProcessRoleParser.Parse(arguments);
@@ -41,6 +45,7 @@ internal static class EvidenceProcessEntryPoint
 
             if (selected.Role == EvidenceProcessRole.Supervisor)
             {
+                supervisorSelected = true;
                 var manifest = await LinuxEmptyObservationExecution.RunAsync(selected.Path!,
                     console.RegisterCancellationHandler()).ConfigureAwait(false);
                 var summary = EvidenceCanonicalJson.Serialize(new
@@ -57,6 +62,13 @@ internal static class EvidenceProcessEntryPoint
 
             await new EvidenceWorkerCommand { ControlChannel = selected.Path }.ExecuteAsync(console).ConfigureAwait(false);
             return 0;
+        }
+        catch (EvidenceNativeObservationException error) when (supervisorSelected)
+        {
+            try { await console.Error.WriteLineAsync(error.Failure.ToJson()); }
+            catch (Exception) { } // Diagnostic output cannot replace the original fixed negative outcome.
+            await console.Error.WriteLineAsync(error.Message);
+            return 1;
         }
         catch (EvidenceAdmissionException error)
         {
