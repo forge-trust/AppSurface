@@ -146,11 +146,31 @@ internal static class LinuxProcessData
     internal static void RequireExpected(LinuxProcessSample sample, uint pid, uint uid, uint gid,
         LinuxUnitName unit, LinuxProcessSamplingRole role)
     {
+        var stage = LinuxControlFailureStage.Unknown;
+        RequireExpected(sample, pid, uid, gid, unit, role, ref stage);
+    }
+
+    /// <summary>Runs the same expected-sample guards while recording their closed checkpoint.</summary>
+    /// <remarks>Detached sample data and checkpoints cannot create a retained process identity.</remarks>
+    internal static void RequireExpected(LinuxProcessSample sample, uint pid, uint uid, uint gid,
+        LinuxUnitName unit, LinuxProcessSamplingRole role, ref LinuxControlFailureStage stage)
+    {
+        stage = LinuxControlFailureStage.ProcessSelection;
         RequireSelection(pid, uid, gid, unit, role);
-        if (sample is null || sample.Stat.Pid != pid || sample.Stat.StartTimeTicks == 0
-            || !"RSDTtKWPI".Contains(sample.Stat.State) || !sample.Uids.AllEqual(uid) || !sample.Gids.AllEqual(gid)
-            || sample.ControlGroup != "/system.slice/" + unit.Value)
-            throw LinuxProcessIdentity.Rejected();
+        stage = LinuxControlFailureStage.ProcessExpectedSample;
+        if (sample is null) throw LinuxProcessIdentity.Rejected();
+        stage = LinuxControlFailureStage.ProcessExpectedPid;
+        if (sample.Stat.Pid != pid) throw LinuxProcessIdentity.Rejected();
+        stage = LinuxControlFailureStage.ProcessExpectedStartTime;
+        if (sample.Stat.StartTimeTicks == 0) throw LinuxProcessIdentity.Rejected();
+        stage = LinuxControlFailureStage.ProcessExpectedLiveState;
+        if (!"RSDTtKWPI".Contains(sample.Stat.State)) throw LinuxProcessIdentity.Rejected();
+        stage = LinuxControlFailureStage.ProcessExpectedUid;
+        if (!sample.Uids.AllEqual(uid)) throw LinuxProcessIdentity.Rejected();
+        stage = LinuxControlFailureStage.ProcessExpectedGid;
+        if (!sample.Gids.AllEqual(gid)) throw LinuxProcessIdentity.Rejected();
+        stage = LinuxControlFailureStage.ProcessExpectedCgroup;
+        if (sample.ControlGroup != "/system.slice/" + unit.Value) throw LinuxProcessIdentity.Rejected();
     }
 
     /// <summary>Requires identity continuity, allowing ordinary running/sleeping state transitions only.</summary>
@@ -217,6 +237,7 @@ internal sealed class LinuxProcessIdentity : IDisposable
     private readonly ProcNodeMetadata[] _metadata;
     private bool _closed;
     private bool _rejected;
+    private readonly LinuxControlFailureLatch _failures = new();
 
     private LinuxProcessIdentity(SafeFileHandle[] handles, ProcNodeMetadata[] metadata, LinuxProcessSample initial,
         uint uid, uint gid, LinuxUnitName unit, LinuxProcessSamplingRole role)
@@ -241,6 +262,9 @@ internal sealed class LinuxProcessIdentity : IDisposable
     internal string ControlGroup => _initial.ControlGroup;
     /// <summary>Gets detached initial data; it cannot be converted back into this live object.</summary>
     internal LinuxProcessSample SampledFacts => _initial;
+    /// <summary>Gets first closed recheck-fault data; null establishes no successful inspection.</summary>
+    /// <remarks>Caller cancellation remains unlatched; no exception or sampled kernel tuple is retained.</remarks>
+    internal LinuxControlFailure? FirstFailure => _failures.First;
 
     /// <summary>Captures a generated nonroot worker, or explicitly the generated owner with UID/GID zero.</summary>
     /// <remarks>The closed generated unit role selects the tuple policy; zero IDs never select a worker.</remarks>
@@ -297,22 +321,26 @@ internal sealed class LinuxProcessIdentity : IDisposable
     {
         lock (_sync)
         {
+            var stage = LinuxControlFailureStage.ProcessState;
             try
             {
                 token.ThrowIfCancellationRequested();
                 if (_closed || _rejected) throw Rejected();
-                CheckBindings(token);
-                var before = ReadRound(_handles, token);
-                LinuxProcessData.RequireExpected(before, Pid, Uid, Gid, Unit, Role);
+                CheckBindings(token, ref stage);
+                var before = ReadRound(_handles, token, ref stage);
+                LinuxProcessData.RequireExpected(before, Pid, Uid, Gid, Unit, Role, ref stage);
+                stage = LinuxControlFailureStage.ProcessInitialContinuity;
                 LinuxProcessData.RequireSameIdentity(_initial, before);
-                var after = ReadRound(_handles, token);
-                LinuxProcessData.RequireExpected(after, Pid, Uid, Gid, Unit, Role);
+                var after = ReadRound(_handles, token, ref stage);
+                LinuxProcessData.RequireExpected(after, Pid, Uid, Gid, Unit, Role, ref stage);
+                stage = LinuxControlFailureStage.ProcessRepeatedContinuity;
                 LinuxProcessData.RequireSameIdentity(before, after);
-                CheckBindings(token);
+                CheckBindings(token, ref stage);
                 token.ThrowIfCancellationRequested();
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
-            catch (Exception error) when (Recoverable(error)) { _rejected = true; throw Rejected(); }
+            catch (Exception error) when (Recoverable(error))
+            { _failures.Capture(stage, null, error); _rejected = true; throw Rejected(); }
         }
     }
 
@@ -327,15 +355,31 @@ internal sealed class LinuxProcessIdentity : IDisposable
         }
     }
 
-    private void CheckBindings(CancellationToken token)
+    private void CheckBindings(CancellationToken token, ref LinuxControlFailureStage stage)
     {
         for (var i = 0; i < _handles.Length; i++)
         {
             token.ThrowIfCancellationRequested();
+            stage = i switch
+            {
+                0 => LinuxControlFailureStage.ProcessRetainedProcRoot,
+                1 => LinuxControlFailureStage.ProcessRetainedProcess,
+                2 => LinuxControlFailureStage.ProcessRetainedStatus,
+                3 => LinuxControlFailureStage.ProcessRetainedStat,
+                _ => LinuxControlFailureStage.ProcessRetainedCgroup,
+            };
             if (Inspect(_handles[i], i < 2) != _metadata[i]) throw Rejected();
             var parent = i == 0 ? -100 : Fd(_handles[i == 1 ? 0 : 1]);
             var name = i switch { 0 => "/proc", 1 => Pid.ToString(CultureInfo.InvariantCulture),
                 2 => "status", 3 => "stat", _ => "cgroup" };
+            stage = i switch
+            {
+                0 => LinuxControlFailureStage.ProcessNamedProcRoot,
+                1 => LinuxControlFailureStage.ProcessNamedProcess,
+                2 => LinuxControlFailureStage.ProcessNamedStatus,
+                3 => LinuxControlFailureStage.ProcessNamedStat,
+                _ => LinuxControlFailureStage.ProcessNamedCgroup,
+            };
             using var named = OpenAt2(parent, name, NamedFlags, 0, i == 0 ? 0x02 | 0x04 : ChildResolution);
             if (Inspect(named, i < 2) != _metadata[i]) throw Rejected();
             token.ThrowIfCancellationRequested();
@@ -344,10 +388,30 @@ internal sealed class LinuxProcessIdentity : IDisposable
 
     private static LinuxProcessSample ReadRound(SafeFileHandle[] handles, CancellationToken token)
     {
-        var first = LinuxProcessData.ParseStat(ReadBounded(handles[3], LinuxProcessData.MaximumStatBytes, token));
-        var ids = LinuxProcessData.ParseStatus(ReadBounded(handles[2], LinuxProcessData.MaximumStatusBytes, token));
-        var group = LinuxProcessData.ParseCgroup(ReadBounded(handles[4], LinuxProcessData.MaximumCgroupBytes, token));
-        var last = LinuxProcessData.ParseStat(ReadBounded(handles[3], LinuxProcessData.MaximumStatBytes, token));
+        var stage = LinuxControlFailureStage.Unknown;
+        return ReadRound(handles, token, ref stage);
+    }
+
+    private static LinuxProcessSample ReadRound(SafeFileHandle[] handles, CancellationToken token,
+        ref LinuxControlFailureStage stage)
+    {
+        stage = LinuxControlFailureStage.ProcessFirstStatRead;
+        var firstBytes = ReadBounded(handles[3], LinuxProcessData.MaximumStatBytes, token);
+        stage = LinuxControlFailureStage.ProcessFirstStatParse;
+        var first = LinuxProcessData.ParseStat(firstBytes);
+        stage = LinuxControlFailureStage.ProcessStatusRead;
+        var statusBytes = ReadBounded(handles[2], LinuxProcessData.MaximumStatusBytes, token);
+        stage = LinuxControlFailureStage.ProcessStatusParse;
+        var ids = LinuxProcessData.ParseStatus(statusBytes);
+        stage = LinuxControlFailureStage.ProcessCgroupRead;
+        var cgroupBytes = ReadBounded(handles[4], LinuxProcessData.MaximumCgroupBytes, token);
+        stage = LinuxControlFailureStage.ProcessCgroupParse;
+        var group = LinuxProcessData.ParseCgroup(cgroupBytes);
+        stage = LinuxControlFailureStage.ProcessLastStatRead;
+        var lastBytes = ReadBounded(handles[3], LinuxProcessData.MaximumStatBytes, token);
+        stage = LinuxControlFailureStage.ProcessLastStatParse;
+        var last = LinuxProcessData.ParseStat(lastBytes);
+        stage = LinuxControlFailureStage.ProcessReadContinuity;
         if (first.Pid != last.Pid || first.StartTimeTicks != last.StartTimeTicks) throw Rejected();
         return new(last, ids.Uids, ids.Gids, group);
     }

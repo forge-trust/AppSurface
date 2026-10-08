@@ -920,3 +920,32 @@ server failure. Original exceptions, quarantine, socket disposal, checks, tokens
 limits and account custody ordering remain in effect. A checkpoint identifies a
 failed check, not which underlying kernel fact failed. The portable projection
 controls cannot establish that a native check ran or that a worker was accepted.
+
+
+### Closed retained-process recheck diagnostics
+
+[`LinuxProcessIdentity.FirstFailure`](LinuxProcessIdentity.cs) retains diagnostic data from the first
+recoverable integrity rejection in `Recheck`, before its existing sticky rejection and fixed
+`ASEVD402` normalization. The original caller-cancellation catch remains unchanged and does not
+latch an integrity failure. `Process*` values in the existing
+[`LinuxControlFailureStage`](EvidenceNativeObservationFailure.cs) distinguish closure/rejection,
+each retained and named proc node, bounded reads from parsing, selected PID/nonzero start time/live
+state/all-four UID/all-four GID/exact cgroup, and initial, within-read and repeated continuity checks.
+They use the existing four-field control object and six-field v3 root envelope; no proc bytes, PID,
+ID values, paths, unit names or exception objects are retained. Every original check must still pass.
+
+The [`listener`](LinuxControlListener.cs) preserves an actual worker's earlier `FirstFailure` when
+its existing `RequireWorker` recheck throws, then rethrows the same error. Existing listener and
+server first-fault latches retain an earlier fault instead of replacing it with later process or
+cleanup data. A stage identifies the existing operation/check which rejected; it does not establish
+why the kernel state changed, prove that a process exited, or grant authority. A null detail is not
+proof of success. Retained/named node stages cover the original inspection/open/comparison together;
+no new native read, syscall, timer, cancellation rule or process selection is introduced.
+
+The diagnostic `LinuxProcessData.RequireExpected(..., ref stage)` overload shares the original
+ordered sample predicates with the existing overload. It accepts detached data for procedure tests,
+not a native identity, owner, lease or admission. New data controls cover each failed sample predicate
+with a valid neighbor, closed owner selection, first-fault propagation/precedence and all finite
+process stages' unchanged schema and byte bound. They are defined but not executed at source freeze.
+Attempt25 measured `ListenerWorkerIdentity/ASEVD402`; its exact inner predicate and native cause remain
+unmeasured. This source preparation makes no Linux or native acceptance claim.

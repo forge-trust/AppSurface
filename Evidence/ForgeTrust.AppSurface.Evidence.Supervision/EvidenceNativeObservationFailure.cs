@@ -385,6 +385,66 @@ internal enum LinuxControlFailureStage
     ListenerNativeAccept,
     /// <summary>Original accepted connection root/worker peer authentication. Diagnostic checkpoint only.</summary>
     ListenerAcceptedPeer,
+    /// <summary>Original retained process closure/rejection check. Diagnostic data only.</summary>
+    ProcessState,
+    /// <summary>Original selected PID, role, account and generated-unit validation. Diagnostic data only.</summary>
+    ProcessSelection,
+    /// <summary>Original nonnull sampled-data check. Diagnostic data only.</summary>
+    ProcessExpectedSample,
+    /// <summary>Original exact selected PID comparison. Diagnostic data only.</summary>
+    ProcessExpectedPid,
+    /// <summary>Original nonzero kernel start-time check. Diagnostic data only.</summary>
+    ProcessExpectedStartTime,
+    /// <summary>Original permitted live-state check. Diagnostic data only.</summary>
+    ProcessExpectedLiveState,
+    /// <summary>Original all-four selected UID comparison. Diagnostic data only.</summary>
+    ProcessExpectedUid,
+    /// <summary>Original all-four selected GID comparison. Diagnostic data only.</summary>
+    ProcessExpectedGid,
+    /// <summary>Original exact selected unified cgroup comparison. Diagnostic data only.</summary>
+    ProcessExpectedCgroup,
+    /// <summary>Original initial-to-current identity comparison. Diagnostic data only.</summary>
+    ProcessInitialContinuity,
+    /// <summary>Original repeated-round identity comparison. Diagnostic data only.</summary>
+    ProcessRepeatedContinuity,
+    /// <summary>Original first/last stat PID and start-time comparison. Diagnostic data only.</summary>
+    ProcessReadContinuity,
+    /// <summary>Original retained ProcRoot proc identity and metadata inspection. Diagnostic data only.</summary>
+    ProcessRetainedProcRoot,
+    /// <summary>Original retained Process proc identity and metadata inspection. Diagnostic data only.</summary>
+    ProcessRetainedProcess,
+    /// <summary>Original retained Status proc identity and metadata inspection. Diagnostic data only.</summary>
+    ProcessRetainedStatus,
+    /// <summary>Original retained Stat proc identity and metadata inspection. Diagnostic data only.</summary>
+    ProcessRetainedStat,
+    /// <summary>Original retained Cgroup proc identity and metadata inspection. Diagnostic data only.</summary>
+    ProcessRetainedCgroup,
+    /// <summary>Original named ProcRoot proc identity and metadata inspection. Diagnostic data only.</summary>
+    ProcessNamedProcRoot,
+    /// <summary>Original named Process proc identity and metadata inspection. Diagnostic data only.</summary>
+    ProcessNamedProcess,
+    /// <summary>Original named Status proc identity and metadata inspection. Diagnostic data only.</summary>
+    ProcessNamedStatus,
+    /// <summary>Original named Stat proc identity and metadata inspection. Diagnostic data only.</summary>
+    ProcessNamedStat,
+    /// <summary>Original named Cgroup proc identity and metadata inspection. Diagnostic data only.</summary>
+    ProcessNamedCgroup,
+    /// <summary>Original FirstStat bounded proc read. Diagnostic data only.</summary>
+    ProcessFirstStatRead,
+    /// <summary>Original FirstStat bounded proc parse. Diagnostic data only.</summary>
+    ProcessFirstStatParse,
+    /// <summary>Original Status bounded proc read. Diagnostic data only.</summary>
+    ProcessStatusRead,
+    /// <summary>Original Status bounded proc parse. Diagnostic data only.</summary>
+    ProcessStatusParse,
+    /// <summary>Original Cgroup bounded proc read. Diagnostic data only.</summary>
+    ProcessCgroupRead,
+    /// <summary>Original Cgroup bounded proc parse. Diagnostic data only.</summary>
+    ProcessCgroupParse,
+    /// <summary>Original LastStat bounded proc read. Diagnostic data only.</summary>
+    ProcessLastStatRead,
+    /// <summary>Original LastStat bounded proc parse. Diagnostic data only.</summary>
+    ProcessLastStatParse,
 }
 
 /// <summary>Detached four-field first caught control fault; no bytes, identities, paths or exception objects survive.</summary>
@@ -393,7 +453,7 @@ internal sealed class LinuxControlFailure
     private LinuxControlFailure(LinuxControlFailureStage stage, EvidenceControlOperation? operation,
         EvidenceNativeObservationErrorKind kind, string? code)
     { Stage = stage; Operation = operation; ErrorKind = kind; DiagnosticCode = code; }
-    /// <summary>Gets the clamped fixed server checkpoint.</summary>
+    /// <summary>Gets the clamped fixed control or process checkpoint.</summary>
     internal LinuxControlFailureStage Stage { get; }
     /// <summary>Gets the closed parsed operation; null means none was parsed or invalid data.</summary>
     internal EvidenceControlOperation? Operation { get; }
@@ -424,10 +484,10 @@ internal sealed class LinuxControlFailureLatch
     /// <summary>Gets the first retained projection; null is not evidence of success.</summary>
     internal LinuxControlFailure? First => Volatile.Read(ref _first);
     /// <summary>Retains one closed projection atomically; later handlers and cleanup cannot replace it.</summary>
-    /// <param name="stage">Actual server checkpoint, never a caller-selected native operation.</param>
+    /// <param name="stage">Actual control or process checkpoint, never a caller-selected native operation.</param>
     /// <param name="operation">Already parsed closed operation, or null.</param>
     /// <param name="error">Original caught error, projected without retaining it.</param>
-    /// <param name="first">An actual listener's earlier closed failure; detached data supplies no native authority.</param>
+    /// <param name="first">An actual listener or process's earlier closed failure; detached data supplies no native authority.</param>
     internal void Capture(LinuxControlFailureStage stage, EvidenceControlOperation? operation, Exception? error,
         LinuxControlFailure? first = null)
     {

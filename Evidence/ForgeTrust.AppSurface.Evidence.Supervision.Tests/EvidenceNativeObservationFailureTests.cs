@@ -7,6 +7,103 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
 /// <summary>Pure diagnostic projection/latching controls; none acquires a native owner or proves root execution.</summary>
 public sealed class EvidenceNativeObservationFailureTests
 {
+    [Theory]
+    [InlineData(0, (int)LinuxControlFailureStage.ProcessExpectedSample)]
+    [InlineData(1, (int)LinuxControlFailureStage.ProcessExpectedPid)]
+    [InlineData(2, (int)LinuxControlFailureStage.ProcessExpectedStartTime)]
+    [InlineData(3, (int)LinuxControlFailureStage.ProcessExpectedLiveState)]
+    [InlineData(4, (int)LinuxControlFailureStage.ProcessExpectedUid)]
+    [InlineData(5, (int)LinuxControlFailureStage.ProcessExpectedGid)]
+    [InlineData(6, (int)LinuxControlFailureStage.ProcessExpectedCgroup)]
+    public void ActualExpectedSampleGuardRetainsItsExactProcessCheckpoint(int variant, int expected)
+    {
+        var unit = LinuxUnitName.Create(LinuxUnitRole.Worker, Guid.Parse("5e5d63d7-2ff6-4e21-922f-51c53ef18236"));
+        var valid = new LinuxProcessSample(new(123, 456, 'S'), new(65010, 65010, 65010, 65010),
+            new(65011, 65011, 65011, 65011), "/system.slice/" + unit.Value);
+        var sample = variant switch
+        {
+            0 => null!,
+            1 => valid with { Stat = valid.Stat with { Pid = 124 } },
+            2 => valid with { Stat = valid.Stat with { StartTimeTicks = 0 } },
+            3 => valid with { Stat = valid.Stat with { State = 'Z' } },
+            4 => valid with { Uids = valid.Uids with { FileSystem = 65012 } },
+            5 => valid with { Gids = valid.Gids with { Saved = 65012 } },
+            _ => valid with { ControlGroup = "/private/canary-ASEVD410" },
+        };
+        var stage = LinuxControlFailureStage.Unknown;
+        var error = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxProcessData.RequireExpected(sample, 123, 65010, 65011, unit, LinuxProcessSamplingRole.Worker, ref stage));
+        Assert.Equal((LinuxControlFailureStage)expected, stage);
+        var first = LinuxControlFailure.Capture(stage, null, error);
+        Assert.Equal("ASEVD402", first.DiagnosticCode);
+        Assert.Null(first.Operation);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Admission, first.ErrorKind);
+        Assert.DoesNotContain("canary", first.ToJson());
+        stage = LinuxControlFailureStage.Unknown;
+        LinuxProcessData.RequireExpected(valid, 123, 65010, 65011, unit, LinuxProcessSamplingRole.Worker, ref stage);
+        Assert.Equal(LinuxControlFailureStage.ProcessExpectedCgroup, stage);
+        LinuxProcessData.RequireExpected(valid, 123, 65010, 65011, unit, LinuxProcessSamplingRole.Worker);
+    }
+
+    [Fact]
+    public void ProcessSelectionRejectsBeforeSampleAndRetainsExistingOwnerRolePolicy()
+    {
+        var unit = LinuxUnitName.Create(LinuxUnitRole.Worker, Guid.Parse("5e5d63d7-2ff6-4e21-922f-51c53ef18236"));
+        var stage = LinuxControlFailureStage.Unknown;
+        Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxProcessData.RequireExpected(null!, 123, 0, 0, unit, LinuxProcessSamplingRole.Worker, ref stage));
+        Assert.Equal(LinuxControlFailureStage.ProcessSelection, stage);
+        var owner = LinuxUnitName.Create(LinuxUnitRole.Owner, Guid.Parse("5e5d63d7-2ff6-4e21-922f-51c53ef18236"));
+        var sample = new LinuxProcessSample(new(123, 456, 'R'), new(0, 0, 0, 0), new(0, 0, 0, 0), "/system.slice/" + owner.Value);
+        LinuxProcessData.RequireExpected(sample, 123, 0, 0, owner, LinuxProcessSamplingRole.Owner, ref stage);
+        Assert.Equal(LinuxControlFailureStage.ProcessExpectedCgroup, stage);
+    }
+
+    [Fact]
+    public void FirstProcessFaultSurvivesListenerServerWrappersAndLaterConcurrentCleanup()
+    {
+        var error = Assert.Throws<EvidenceAdmissionException>(() => LinuxProcessData.ParseCgroup("canary"u8));
+        var process = new LinuxControlFailureLatch();
+        process.Capture(LinuxControlFailureStage.ProcessCgroupParse, null, error);
+        var first = process.First;
+        var listener = new LinuxControlFailureLatch();
+        listener.Capture(LinuxControlFailureStage.ListenerWorkerIdentity, null, new IOException("wrapper-canary"), first);
+        var server = new LinuxControlFailureLatch();
+        server.Capture(LinuxControlFailureStage.Accept, null, new IOException("outer-canary"), listener.First);
+        Parallel.For(0, 32, _ => process.Capture(LinuxControlFailureStage.ProcessState, null, new Exception("later-canary")));
+        Assert.Same(first, process.First);
+        Assert.Same(first, listener.First);
+        Assert.Same(first, server.First);
+        var root = EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.ServerRun,
+            new IOException("root-canary"), server.First);
+        Assert.Same(first, root.ControlFailure);
+        Assert.True(Encoding.UTF8.GetByteCount(root.ToJson()) + 1 <= 1024);
+        Assert.DoesNotContain("canary", root.ToJson());
+        var earlier = new LinuxControlFailureLatch();
+        earlier.Capture(LinuxControlFailureStage.RequestRead, EvidenceControlOperation.Ready, new IOException("earlier"));
+        var reserved = earlier.First;
+        earlier.Capture(LinuxControlFailureStage.Accept, null, error, first);
+        Assert.Same(reserved, earlier.First);
+    }
+
+    [Fact]
+    public void EveryProcessCheckpointKeepsTheExistingFourFieldSchemaAndBoundedRootProjection()
+    {
+        var error = Assert.Throws<EvidenceAdmissionException>(() => LinuxProcessData.ParseCgroup("private-canary"u8));
+        foreach (var stage in Enum.GetValues<LinuxControlFailureStage>().Where(value => value.ToString().StartsWith("Process", StringComparison.Ordinal)))
+        {
+            var detail = LinuxControlFailure.Capture(stage, null, error);
+            using var parsed = JsonDocument.Parse(detail.ToJson());
+            Assert.Equal(new[] { "stage", "operation", "error_kind", "diagnostic_code" },
+                parsed.RootElement.EnumerateObject().Select(property => property.Name).ToArray());
+            Assert.Equal(stage.ToString(), parsed.RootElement.GetProperty("stage").GetString());
+            Assert.Null(detail.Operation);
+            var root = EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.ServerRun, error, detail);
+            Assert.True(Encoding.UTF8.GetByteCount(root.ToJson()) + 1 <= 1024);
+            Assert.DoesNotContain("private-canary", root.ToJson());
+        }
+    }
+
     [Fact]
     public void ActualListenerPolicyFailureSurvivesTheOuterAcceptWrapperAsClosedData()
     {
