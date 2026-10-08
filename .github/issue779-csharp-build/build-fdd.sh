@@ -20,12 +20,12 @@ import xml.etree.ElementTree as ET
 
 HEAD = '5b2a125b0d5bc72d10b11aeea62176d4a0ac2fec'
 PARENT = 'bf6fd3339a0eb44c276c264383535fbbfc102a66'
-HARNESS_PARENT = '4c6bf8df30f07c6854a72909777cd141e9808143'
+HARNESS_PARENT = '25667b73d59ac22111191d73439a3ebb4e665263'
 TREE = '99990dfd63595c180d1caeb1dfefec9f551ebbc2'
 CAPTURE_SHA = '85fbf5ec6048c3e33343c2d441286ce35d35b2087356e785797306a8e37e8fd3'
 CAPTURE_PROJECTION_SHA = 'aef00868b75f583f1a3d15a8e76d1ba9c27b8a6c2e3e43f237909e9b0fc863db'
-UBUNTU_PREREQUISITE_SHA = '2efe062d83a20b129cc9f6f4e5ee9d26971474b11b003fb625d35b6fe83c0458'
-NATIVE_RUNNER_SHA = '7392e46301cfd691edd668fdf4b0fdbcadbcc56f2ad83e9284302b41a3765e8e'
+UBUNTU_PREREQUISITE_SHA = '956eaa8b90ba09f952e239252d121492a2faaa35cc7afb024f1115bb4bd73977'
+NATIVE_RUNNER_SHA = 'c65fba5978bd60aeef812f999f89f563829b2f1e85d5698404e3059dc33e55a9'
 SDK = '10.0.401'
 COUNT = 2827
 FILE_CAP = 256 * 1024 * 1024
@@ -648,13 +648,13 @@ def main():
     harness_head = run(['git', 'rev-parse', 'HEAD'], HARN).strip().decode()
     retry_parent = run(['git', 'show', '-s', '--format=%P', 'HEAD'], HARN).strip().decode()
     require(retry_parent == HARNESS_PARENT, 'direct-retry-parent')
-    require(run(['git', 'show', '-s', '--format=%P', retry_parent], HARN).strip().decode() == 'b6fbe29947b4cfb298c687b15282ef9f729d7276', 'published-parent-topology')
+    require(run(['git', 'show', '-s', '--format=%P', retry_parent], HARN).strip().decode() == '4c6bf8df30f07c6854a72909777cd141e9808143', 'published-parent-topology')
     installation_delta = {'.github/issue779-csharp-build/build-fdd.sh': 'M', '.github/issue779-csharp-native/README.md': 'M', '.github/issue779-csharp-native/acquire-inbound.sh': 'M', '.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh': 'M', '.github/issue779-csharp-native/prepare-root-inputs-v2.sh': 'M', '.github/issue779-csharp-native/prepare-ubuntu-runtime.py': 'M', '.github/issue779-csharp-native/run-native.py': 'M', '.github/issue779-csharp-native/source-review.json': 'M', '.github/workflows/issue779-csharp-linux-native.yml': 'M'}
     installation_status = dict((name, status) for status, name in
                               (row.split('\t') for row in run(['git', 'diff', '--name-status', HARNESS_PARENT, 'HEAD'], HARN).decode().splitlines()))
     require(installation_status == installation_delta, 'exact-retry-installation-delta')
     RESULT['harness_retry_parent'] = retry_parent
-    RESULT['harness_retry_parent_parent'] = 'b6fbe29947b4cfb298c687b15282ef9f729d7276'
+    RESULT['harness_retry_parent_parent'] = '4c6bf8df30f07c6854a72909777cd141e9808143'
     RESULT['harness_retry_installation_delta'] = installation_status
     run(['git', 'merge-base', '--is-ancestor', HEAD, 'HEAD'], HARN)
     RESULT['harness_parent'] = HARNESS_PARENT

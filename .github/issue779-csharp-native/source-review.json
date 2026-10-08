@@ -198,15 +198,11 @@
   "composition_review_pending_at_preparation": true,
   "current_full_suite_executed": true,
   "current_publication_promotion": {
-    "independent_reviews_clear": true,
+    "independent_composition_review": null,
     "native_acceptance": false,
-    "status": "Reviewed fixed negative image; native control not yet executed",
-    "trusted_enabled": false
+    "promoted": false
   },
-  "final_composition_peer": {
-    "path": "/private/tmp/issue779-csharp-negative-slot-composition-peer-review-v1/review.json",
-    "sha256": "7238d01081be5b7cc5cc551485a170f276b1bc3e57bce47f450f69147dc79cc0"
-  },
+  "final_composition_peer": null,
   "fixed_negative_slot_preparation": {
     "case": "N06",
     "common_base_cumulative_delta": {
@@ -517,6 +513,16 @@
     "source_review_sha256": "671ab29e1ca020291182e4125c5ad050622f7ca89712b37254bf9317e8980268",
     "status": "HISTORICAL"
   },
+  "historical_predecessor_final_composition_peer": {
+    "path": "/private/tmp/issue779-csharp-negative-slot-composition-peer-review-v1/review.json",
+    "sha256": "7238d01081be5b7cc5cc551485a170f276b1bc3e57bce47f450f69147dc79cc0"
+  },
+  "historical_predecessor_publication_promotion": {
+    "independent_reviews_clear": true,
+    "native_acceptance": false,
+    "status": "Reviewed fixed negative image; native control not yet executed",
+    "trusted_enabled": false
+  },
   "historical_previous_candidate": {
     "record": {
       "capture_projection_sha256": "b3a7068c001d9d6ea09cb4c2df04d7c764ea3e41bc1a52cf7a0b7a34b556cfd9",
@@ -705,6 +711,39 @@
     "v4_source_packet_sha256": "41e4e1a55d9997c5bf019c20de574af373645339d0fba83daa5a12b62502b5a5",
     "v4_test_scope": "Two extracted procedure controls passed0/2 in0.063570792seconds; no nativecredit",
     "v4_validation_sha256": "6dc34d02592974b85b58b1a35f94fe79c29d8d3a48760ba5f92f31c2234d22ae"
+  },
+  "n06_alias_declaration_cache_retry": {
+    "cache": {
+      "data_validation": {
+        "path": "/private/tmp/issue779-csharp-n06-alias-metadata-cache-data-validation-v1/receipt.json",
+        "recorded_exit": 0,
+        "recorded_passed_methods": 10,
+        "sha256": "feb3b8e7d6c7e9aa66a0c10a20933cb19f2475fd86af7dab625cff33476680cf"
+      },
+      "donor_fixture_sha256": "567ff45b41645dc17d7178c82e5b4ebb7a364ae8812d40f656b19dbd46f696f8",
+      "filesystem_results_cached": false,
+      "fixture_bytes": 130637,
+      "fixture_sha256": "e0c1cb20e78c2103f5ac1595c06a163d5d5f9fd4ae1be5731941aee82baca85e",
+      "linux_nounset_qualification": null,
+      "native_acceptance": false,
+      "native_execution": false,
+      "performance_measured": false,
+      "physical_alias_equivalence_review": null,
+      "source_review": {
+        "path": "/private/tmp/issue779-csharp-n06-alias-metadata-cache-review-v1/review.json",
+        "sha256": "2a5260eb3921c8ce5ea38430c48bd6415d80e7900b7dd62256db01e586d99b05"
+      }
+    },
+    "parent": "25667b73d59ac22111191d73439a3ebb4e665263",
+    "prior_native_failure": {
+      "failed_before_negative_python_or_CSharp_launch": true,
+      "native_credit": false,
+      "path": "/private/tmp/issue779-csharp-negative-n06-ordinary-batch-artifact-analysis-v1/prelaunch-diagnosis.json",
+      "sha256": "825a1d4355aca3557df10d3acd70999eeb6a05b49683d683a213ab00b6f1fc19",
+      "substage_cost_measured": false
+    },
+    "source": "5b2a125b0d5bc72d10b11aeea62176d4a0ac2fec",
+    "source_count": 2827
   },
   "native_execution": false,
   "native_fixture_cases_pending": [

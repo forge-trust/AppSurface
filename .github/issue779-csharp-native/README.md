@@ -77,3 +77,12 @@ The fresh retry composition review and explicit driver gates must pass before an
 ## Current ordinary OS batch retry
 
 This isolated child of 4c6bf8df30f07c6854a72909777cd141e9808143 keeps the identical C# source and all original bounds. The complete ordinary OS files and ancestors receive fresh before/after metadata and full byte hashes in batches. Alias walks and ELF/dependency checks remain unchanged. Source review is recorded separately; performance and this negative control require a genuine Linux run. Historical failed setup runs remain failures.
+
+
+## N06 alias declaration cache retry — preparation only
+
+The next branch is `codex/issue779-csharp-linux-native-20261008-n06-alias-cache-v1`, with one ordinary installation commit whose sole parent is `25667b73d59ac22111191d73439a3ebb4e665263`. Its published predecessor parent remains `4c6bf8df30f07c6854a72909777cd141e9808143`. The whole source image remains `5b2a125b0d5bc72d10b11aeea62176d4a0ac2fec`, 2827 files. The raw source parent and prior captures remain unchanged.
+
+Only immutable declarations are indexed; every physical alias walk, metadata comparison, resolved-byte hash, ELF and Python qualification remains fresh. The actual declaration DATA suite recorded 10 methods passed, exit 0; it supplies no kernel, physical alias or native qualification. The prior measured prelaunch rejection is history; per-substage cost and future performance are unmeasured.
+
+Fresh composition review and workflow promotion are pending. Physical alias equivalence and Linux strict-nounset qualification required by the cache review are explicitly pending. Driver execution rejects these missing prerequisites. Preparation does not run Git, build, test, native code or either harness driver. All original source, unit, root240, fixture570+30/600, life checks and file bounds remain unchanged.

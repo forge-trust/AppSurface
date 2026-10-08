@@ -77,6 +77,15 @@ bounded() {
  if ((code!=0)); then report_bounded_failure "$code" "${1:-}"; fail bounded-operation; fi
  remaining >/dev/null
 }
+fixture_stage_observation() {
+ local event=$1 stage_name=$2 now left_seconds
+ case "$event" in begin|end) ;; *) fail timing-event ;; esac
+ case "$stage_name" in declaration-cache|ordinary-os-initial|elf-closure|sealed-trees|ordinary-os-final|negative-python-qualification) ;; *) fail timing-stage ;; esac
+ now=$(monotonic) || fail monotonic-clock
+ left_seconds=$(remaining)
+ printf '{"schema":"issue779-fixture-stage-observation-v1","status":"observations-only","stage":"%s","event":"%s","elapsed_seconds":%d,"remaining_seconds":%d}\n' "$stage_name" "$event" "$((now-fixture_start))" "$left_seconds" >&2 || fail timing-write
+ remaining >/dev/null
+}
 diagnostic_stage=platform
 [[ $(bounded uname -m) == x86_64 ]] || fail Linux-x64
 lexical() {
@@ -430,19 +439,94 @@ normalize_os_target() {
  ((${#out[@]}>0)) || fail alias-root-target
  local joined; joined=$(IFS=/; printf '%s' "${out[*]}"); printf '/%s' "$joined"
 }
+# BEGIN N06 alias declaration cache candidate
+# Immutable DECLARATIONS only, never a cached filesystem check/result.
+os_alias_declarations_ready=0
+declare -a os_alias_resolved=() os_alias_hashes=() os_alias_starts=() os_alias_counts=()
+declare -a os_alias_link_paths=() os_alias_link_targets=() os_alias_link_metadata=()
+negative_os_alias_index() {
+ local LC_ALL=C p=$1 low=0 high=$((${#os_cache_alias_paths[@]}-1)) mid
+ [[ $os_cache_ready == 1 && $os_alias_declarations_ready == 1 ]] || return 1
+ while ((low<=high)); do
+  mid=$(((low+high)/2))
+  if [[ $p == "${os_cache_alias_paths[$mid]}" ]]; then printf '%s' "$mid"; return 0
+  elif [[ $p < "${os_cache_alias_paths[$mid]}" ]]; then high=$((mid-1))
+  else low=$((mid+1)); fi
+ done
+ return 1
+}
+negative_os_alias_declarations_initialize() {
+ local rows kind ai ordinal path target metadata extra next=0 current=-1 seen=0 count=0 expected
+ [[ $os_alias_declarations_ready == 0 && ${#os_alias_resolved[@]} == 0 && ${#os_alias_link_paths[@]} == 0 ]] || fail alias-declaration-replay
+ rows=$(bounded jq -r '
+  .aliases|sort_by(.literal)|to_entries[] | .key as $i | .value as $a |
+  (["A",$i,$a.literal,$a.resolved_path,$a.resolved_sha256,($a.links|length)]|map(tostring)|join("\u001f")),
+  ($a.links|to_entries[] | ["L",$i,.key,.value.path,.value.target,
+   "\(.value.uid):\(.value.gid):\(.value.mode):\(.value.device):\(.value.inode)"]|map(tostring)|join("\u001f"))
+ ' "$os_audit")
+ [[ ${#rows} -le 1048576 ]] || fail alias-declaration-bytes
+ expected=${#os_cache_alias_paths[@]}
+ ((expected<=64)) || fail alias-declaration-count
+ if [[ -n $rows ]]; then
+  while IFS=$'\x1f' read -r kind ai ordinal path target metadata extra; do
+   [[ -z $extra && $ai =~ ^[0-9]{1,2}$ ]] || fail alias-declaration-row
+   ai=$((10#$ai))
+   if [[ $kind == A ]]; then
+    ((current<0 || seen==count)) || fail alias-declaration-incomplete
+    ((ai==next && ai<expected)) || fail alias-declaration-order
+    # Header columns: tag, alias index, literal, resolved path, hash, link count.
+    [[ $ordinal == "${os_cache_alias_paths[$ai]}" && $metadata =~ ^[0-9]{1,2}$ ]] || fail alias-declaration-header
+    lexical "$path"; sha "$target"
+    count=$((10#$metadata)); ((count>=1 && count<=16)) || fail alias-declaration-links
+    [[ $(negative_os_file_hash_during_initialize "$ordinal") == "$target" ]] || fail alias-declaration-hash
+    os_alias_resolved+=("$path"); os_alias_hashes+=("$target")
+    os_alias_starts+=("${#os_alias_link_paths[@]}"); os_alias_counts+=("$count")
+    current=$ai; next=$((next+1)); seen=0
+   elif [[ $kind == L ]]; then
+    ((current>=0 && ai==current && seen<count)) || fail alias-declaration-link-order
+    [[ $ordinal =~ ^[0-9]{1,2}$ ]] || fail alias-declaration-link-index
+    ((10#$ordinal==seen)) || fail alias-declaration-link-index
+    lexical "$path"
+    [[ -n $target && ${#target}<=4096 && ! $target =~ [[:cntrl:]] && $metadata =~ ^0:0:777:[0-9]+:[1-9][0-9]*$ ]] || fail alias-declaration-link
+    os_alias_link_paths+=("$path"); os_alias_link_targets+=("$target"); os_alias_link_metadata+=("$metadata")
+    seen=$((seen+1))
+   else fail alias-declaration-kind; fi
+  done <<<"$rows"
+ fi
+ ((next==expected && (current<0 || seen==count) && ${#os_alias_resolved[@]}==expected && ${#os_alias_hashes[@]}==expected && ${#os_alias_starts[@]}==expected && ${#os_alias_counts[@]}==expected)) || fail alias-declaration-membership
+ ((${#os_alias_link_paths[@]}==${#os_alias_link_targets[@]} && ${#os_alias_link_paths[@]}==${#os_alias_link_metadata[@]} && ${#os_alias_link_paths[@]}<=1024)) || fail alias-declaration-link-membership
+ os_alias_declarations_ready=1
+ readonly os_alias_declarations_ready
+ readonly -a os_alias_resolved os_alias_hashes os_alias_starts os_alias_counts os_alias_link_paths os_alias_link_targets os_alias_link_metadata
+}
+# Initialization runs BEFORE os_cache_ready is published. Lookup is declaration-only.
+negative_os_file_hash_during_initialize() {
+ local LC_ALL=C p=$1 low=0 high=$((${#os_cache_file_paths[@]}-1)) mid
+ while ((low<=high)); do
+  mid=$(((low+high)/2))
+  if [[ $p == "${os_cache_file_paths[$mid]}" ]]; then printf '%s' "${os_cache_file_hashes[$mid]}"; return 0
+  elif [[ $p < "${os_cache_file_paths[$mid]}" ]]; then high=$((mid-1))
+  else low=$((mid+1)); fi
+ done
+ return 1
+}
+# END N06 alias declaration cache candidate
 alias_walk() {
- local record=$1 literal current= seg target metadata expected lp index=0 steps=0 rest resolved
- literal=$(bounded jq -r .literal <<<"$record"); lexical "$literal"
+ local alias_id=$1 literal current= seg target metadata expected lp index=0 steps=0 rest resolved slot
+ [[ $os_alias_declarations_ready == 1 && $alias_id =~ ^[0-9]{1,2}$ ]] || fail alias-declaration-index
+ alias_id=$((10#$alias_id)); ((alias_id<${#os_cache_alias_paths[@]})) || fail alias-declaration-index
+ literal=${os_cache_alias_paths[$alias_id]}; lexical "$literal"
  local -a queue=("${components[@]}")
  while ((${#queue[@]})); do
   remaining >/dev/null; steps=$((steps+1)); ((steps<=256)) || fail alias-step-bound
   seg=${queue[0]}; queue=("${queue[@]:1}"); current+=/$seg
   if [[ -L $current ]]; then
-   lp=$(bounded jq -r --argjson i "$index" '.links[$i].path//""' <<<"$record"); [[ $lp == "$current" ]] || fail alias-unreviewed-link
+   ((index<os_alias_counts[alias_id])) || fail alias-unreviewed-link
+   slot=$((os_alias_starts[alias_id]+index)); lp=${os_alias_link_paths[$slot]}; [[ $lp == "$current" ]] || fail alias-unreviewed-link
    metadata=$(bounded stat -c '%u:%g:%a:%d:%i' -- "$current")
-   expected=$(bounded jq -r --argjson i "$index" '.links[$i]|"\(.uid):\(.gid):\(.mode):\(.device):\(.inode)"' <<<"$record")
+   expected=${os_alias_link_metadata[$slot]}
    [[ $metadata == "$expected" ]] || fail alias-lstat-pin
-   target=$(bounded readlink -- "$current"); [[ $target == "$(bounded jq -r --argjson i "$index" '.links[$i].target' <<<"$record")" ]] || fail alias-target-pin
+   target=$(bounded readlink -- "$current"); [[ $target == "${os_alias_link_targets[$slot]}" ]] || fail alias-target-pin
    [[ $(bounded stat -c '%u:%g:%a:%d:%i' -- "$current") == "$metadata" ]] || fail alias-link-changed
    [[ $target == /* ]] || target=${current%/*}/$target
    resolved=$(normalize_os_target "$target"); lexical "$resolved"
@@ -453,7 +537,7 @@ alias_walk() {
    if ((${#queue[@]})); then [[ -d $current ]] || fail alias-parent; fi
   fi
  done
- [[ $index == "$(bounded jq -r '.links|length' <<<"$record")" && $current == "$(bounded jq -r .resolved_path <<<"$record")" ]] || fail alias-resolution
+ [[ $index == "${os_alias_counts[$alias_id]}" && $current == "${os_alias_resolved[$alias_id]}" ]] || fail alias-resolution
  [[ -f $current && ! -L $current ]] || fail alias-final-file
  printf '%s' "$current"
 }
@@ -522,6 +606,7 @@ negative_os_cache_initialize() {
   done <<<"$rows"
  fi
  ((${#os_cache_alias_paths[@]}==expected_aliases && ${#os_cache_alias_rows[@]}==expected_aliases)) || fail OS-cache-alias-membership
+ negative_os_alias_declarations_initialize
  os_cache_ready=1
  readonly os_cache_ready
  readonly -a os_cache_file_paths os_cache_file_hashes os_cache_alias_paths os_cache_alias_rows
@@ -532,9 +617,9 @@ verify_os_path() {
  [[ $os_cache_ready == 1 ]] || fail OS-cache-uninitialized
  resolved=$(negative_os_file_hash "$p") || fail OS-cache-file-unpinned
  [[ $resolved == "$h" ]] || fail OS-cache-file-hash
- if row=$(negative_os_alias_record "$p"); then count=1; else count=0; fi
+ if row=$(negative_os_alias_index "$p"); then count=1; else count=0; fi
  if [[ $count == 1 ]]; then
-  [[ $(bounded jq -r .resolved_sha256 <<<"$row") == "$h" ]] || fail alias-hash-binding
+  [[ ${os_alias_hashes[$row]} == "$h" ]] || fail alias-hash-binding
   first=$(alias_walk "$row"); before=$(bounded stat -c '%d:%i:%s:%f:%h:%u:%g' -- "$first")
   pin_file "$first" "$h" "$MAX_INPUT_FILE_BYTES"
   resolved=$(alias_walk "$row"); after=$(bounded stat -c '%d:%i:%s:%f:%h:%u:%g' -- "$resolved")
@@ -777,9 +862,14 @@ bounded jq -e '
  ([.aliases[].literal]|length== (unique|length)) and
  all(.elf[]; [.resolved[].soname]|length==(unique|length))
 ' "$os_audit" >/dev/null || fail OS-audit-schema
+fixture_stage_observation begin declaration-cache
 negative_os_cache_initialize
+fixture_stage_observation end declaration-cache
 os_files=$(bounded jq -r '.files[]|[.path,.sha256]|@tsv' "$os_audit")
+fixture_stage_observation begin ordinary-os-initial
 ordinary_os_batch_full_pass initial
+fixture_stage_observation end ordinary-os-initial
+fixture_stage_observation begin elf-closure
 runtime_files=$(bounded find -P "$runtime_root" -type f -print)
 while IFS= read -r p; do
  magic=$(bounded head -c 4 "$p" | od -An -tx1 | tr -d ' \n'); [[ $magic == 7f454c46 ]] || continue
@@ -799,9 +889,10 @@ while IFS= read -r record; do
  deps=$(bounded jq -r '.resolved[]|[.path,.sha256]|@tsv' <<<"$record")
  while IFS=$'\t' read -r dep digest; do
   [[ -n $dep ]] || continue; verify_os_path "$dep" "$digest"
-  bounded jq -e --arg p "$dep" --arg h "$digest" 'any(.files[];.path==$p and .sha256==$h) or any(.elf[];.path==$p and .sha256==$h)' "$os_audit" >/dev/null || fail dependency-unpinned
+  # Dominated: successful verify_os_path above already required this exact file declaration/hash.
  done <<<"$deps"
 done <<<"$elf_records"
+fixture_stage_observation end elf-closure
 [[ $(bounded head -c 4 "$runtime_root/$runtime_host" | od -An -tx1 | tr -d ' \n') == 7f454c46 ]] || fail runtime-not-ELF
 pin_file "$os_audit" "$os_audit_sha256" 1048576
 if [[ $mode == prepare-only ]]; then printf '%s\n' 'PREPARATION_INPUT_PINS_MATCHED:N01_NOT_RUN:N02_NOT_RUN'; exit 0; fi
@@ -1207,12 +1298,16 @@ fixed_env=(PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETR
 unsafe='DOTNET_STARTUP_HOOKS DOTNET_ADDITIONAL_DEPS DOTNET_SHARED_STORE DOTNET_ROOT DOTNET_ROOT_X64 DOTNET_HOST_PATH DOTNET_ROLL_FORWARD DOTNET_ROLL_FORWARD_TO_PRERELEASE DOTNET_MULTILEVEL_LOOKUP CORECLR_ENABLE_PROFILING CORECLR_PROFILER CORECLR_PROFILER_PATH CORECLR_PROFILER_PATH_64 COR_ENABLE_PROFILING COR_PROFILER COR_PROFILER_PATH COMPlus_ReadyToRun COMPlus_ZapDisable'
 props=(--property=Type=exec --property=User=0 --property=Group=0 --property=KillMode=control-group --property=Restart=no --property=RemainAfterExit=no --property=SendSIGKILL=yes --property=FinalKillSignal=9 --property=RuntimeMaxSec=240s --property=TimeoutStopSec=5s "--property=ConditionPathExists=$guard/armed" --property=PassEnvironment= "--property=UnsetEnvironment=$unsafe" "--property=Environment=${fixed_env[*]}")
 diagnostic_stage=sealed-inputs
+fixture_stage_observation begin sealed-trees
 # Full destination and alias checks immediately before native dispatch. No extra nodes are skipped.
 verify_tree "$stage/tool" "$payload_manifest" "$payload_manifest_sha256" "$payload_nodes" "$payload_nodes_sha256" tool 1 1
 verify_tree "$stage/runtime" "$runtime_manifest" "$runtime_manifest_sha256" "$runtime_nodes" "$runtime_nodes_sha256" runtime 1 0
 verify_tree "$stage/subject" "$source_manifest" "$source_manifest_sha256" "$source_nodes" "$source_nodes_sha256" source 1 0
 pin_file "$build_receipt" "$build_receipt_sha256" "$MAX_NODE_JSON_BYTES"
+fixture_stage_observation end sealed-trees
+fixture_stage_observation begin ordinary-os-final
 ordinary_os_batch_full_pass final
+fixture_stage_observation end ordinary-os-final
 pin_file "$os_audit" "$os_audit_sha256" 1048576
 native_life_remaining=$(remaining)
 if ! ((native_life_remaining>246 && job_deadline_epoch-$(bounded date -u +%s)>245)); then
@@ -1235,6 +1330,7 @@ workspace=/run/appsurface-evidence-$G
 # The immutable holder currently emits hash/count JSON only. Independent raw stream retention is missing.
 # This fixed gate remains false until separately reviewed original-holder producer integration exists.
 ((NEGATIVE_RAW_STREAM_PRODUCER_CLEAR==1 && NEGATIVE_PYTHON_TRUST_CLEAR==1 && NEGATIVE_ROOT_TERMINAL_CLEAR==1)) || fail negative-prerequisite-pending
+fixture_stage_observation begin negative-python-qualification
 for alternate_python_path in /usr/lib/python312.zip /usr/bin/pyvenv.cfg /usr/pyvenv.cfg; do
  [[ ! -e $alternate_python_path && ! -L $alternate_python_path ]] || fail negative-python-alternate-prefix
 done
@@ -1262,7 +1358,7 @@ while IFS= read -r python_file; do
  verify_os_path "$python_file" "$python_hash"
  if [[ $(bounded head -c 4 "$python_file" | od -An -tx1 | tr -d ' \n') == 7f454c46 ]]; then
   python_resolved=$python_file
-  if python_alias=$(negative_os_alias_record "$python_file"); then
+  if python_alias=$(negative_os_alias_index "$python_file"); then
    python_resolved=$(alias_walk "$python_alias")
   fi
   bounded jq -e --arg p "$python_resolved" '[.elf[]|select(.path==$p)]|length==1' "$os_audit" >/dev/null || fail negative-stdlib-elf-unreviewed
@@ -1272,6 +1368,7 @@ stdlib_after=$(negative_stdlib_inventory)
 negative_stdlib_exact "$stdlib_expected" "$stdlib_after" || fail negative-stdlib-membership-after
 pin_file "$os_audit" "$os_audit_sha256" 1048576
 remaining >/dev/null
+fixture_stage_observation end negative-python-qualification
 bounded /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C /usr/bin/python3.12 -I -S -B - "$private" "$workspace" "$G" "$policy_sha" <<'NEGATIVE_PY'
 
 import hashlib,json,os,re,stat,sys
