@@ -1,0 +1,78 @@
+{
+  "byte_identical_functions": [
+    "fail",
+    "monotonic",
+    "left",
+    "remaining",
+    "try_bounded",
+    "report_bounded_failure",
+    "bounded",
+    "lexical",
+    "absolute",
+    "sha",
+    "pin_file",
+    "ancestor",
+    "normalize_os_target",
+    "negative_os_file_hash",
+    "negative_os_alias_record"
+  ],
+  "candidate_sha256": "e0c1cb20e78c2103f5ac1595c06a163d5d5f9fd4ae1be5731941aee82baca85e",
+  "clear": true,
+  "concrete_findings": [],
+  "donor_sha256": "567ff45b41645dc17d7178c82e5b4ebb7a364ae8812d40f656b19dbd46f696f8",
+  "executed_native": false,
+  "guard_findings": {
+    "arrays_readonly_after_initialize": true,
+    "declaration_cache_only": true,
+    "extra_declaration_count_order_membership_and_index_guards_reject": true,
+    "fresh_link_lstat_before_and_after_readlink": true,
+    "fresh_nonlink_owner_mode_type_checks": true,
+    "no_filesystem_result_cache": true,
+    "same_first_walk_stat_actual_sha_second_walk_stat_identity_comparison": true,
+    "same_link_path_target_and_metadata_comparisons": true,
+    "same_normalization_and_256_step_bound": true,
+    "same_original_deadlines_and_byte_caps": true,
+    "same_regular_single_link_size_and_hash_before_after_pin": true
+  },
+  "kind": "physical_alias_equivalence_review",
+  "limitations": [
+    "Earlier rejection of malformed declarations is possible and is outside the legitimate-input equivalence claim.",
+    "No claim of atomic filesystem snapshot or concurrency proof.",
+    "No measured performance benefit.",
+    "Strict Linux Bash nounset paired qualification remains required.",
+    "No N06 control credit, kernel execution, C# admission, Trusted or acceptance proof."
+  ],
+  "native_acceptance": false,
+  "reviewed_changed_functions": [
+    "negative_os_cache_initialize",
+    "negative_os_alias_declarations_initialize",
+    "negative_os_alias_index",
+    "negative_os_file_hash_during_initialize",
+    "alias_walk",
+    "verify_os_path"
+  ],
+  "reviewer": "main",
+  "schema": "issue779-n06-physical-alias-equivalence-source-review-v1",
+  "scope": "Source equivalence for legitimate, closed, hash-pinned OS audit declarations; no physical walk or Linux runtime execution credited.",
+  "selection_sha256": "8d7ad4496dc921c6950e145f327178bdec386c9df6b71864764a1fa5d894d281",
+  "source_hold_released": true,
+  "source_sha256": {
+    "candidate-full-source.data": "e0c1cb20e78c2103f5ac1595c06a163d5d5f9fd4ae1be5731941aee82baca85e",
+    "candidate-functions.sh": "66f1107153050b7680ec52d693daa192d58c62a27a14af84b23003f1c977d63b",
+    "donor-full-source.data": "567ff45b41645dc17d7178c82e5b4ebb7a364ae8812d40f656b19dbd46f696f8",
+    "donor-functions.sh": "1478ad682d0206b711a278a7af7d927c4350db1dc6300f64aa1be653e8890748"
+  },
+  "static_byte_audit": {
+    "command": [
+      "python3",
+      "-I",
+      "-B",
+      "/private/tmp/issue779-csharp-n06-alias-linux-qualification-preparation-v1/audit-selection.py"
+    ],
+    "exit_code": 0,
+    "fixture_executed": false,
+    "output": "EXACT_ALIAS_FUNCTION_SELECTION_OK\n"
+  },
+  "trusted_enabled": false,
+  "utc": "2026-10-08T20:46:56.610000+00:00"
+}
