@@ -74,9 +74,9 @@ internal sealed partial class LinuxOutputPipes : IAsyncDisposable
             LinuxProtectedDeployment.RequirePlatform();
             (stdoutRead, stdoutWrite) = CreatePair();
             (stderrRead, stderrWrite) = CreatePair();
-            stdout = new FileStream(stdoutRead, FileAccess.Read, bufferSize: 4096, isAsync: true);
+            stdout = WrapOwnedRead(stdoutRead);
             stdoutRead = null; // FileStream owns the original read handle, without an extra descriptor copy.
-            stderr = new FileStream(stderrRead, FileAccess.Read, bufferSize: 4096, isAsync: true);
+            stderr = WrapOwnedRead(stderrRead);
             stderrRead = null;
             return new(stdout, stderr, stdoutWrite, stderrWrite);
         }
@@ -92,6 +92,20 @@ internal sealed partial class LinuxOutputPipes : IAsyncDisposable
             throw new SupervisionOutputPipeException(SupervisionOutputPipeFailure.InvalidPipe);
         }
     }
+
+    /// <summary>Transfers an owned read handle to a 4096-byte buffered stream using the handle's actual mode.</summary>
+    /// <param name="readHandle">An exclusively owned readable handle; the caller retains it if construction fails.</param>
+    /// <returns>A read stream owning the same handle, without duplicating the native descriptor.</returns>
+    /// <remarks>
+    /// The three-argument constructor derives asynchronous mode from the SafeFileHandle. A raw Unix
+    /// descriptor wrapped by SafeFileHandle is not marked asynchronous; forcing isAsync:true rejects it.
+    /// ReadAsync remains available on the derived-mode stream and the paired collector owns every read.
+    /// On Windows the constructor likewise follows the handle's mode; this helper does not change it.
+    /// This intentional wrapping seam creates no LinuxOutputPipes instance or native identity authority.
+    /// Production acquisition still validates platform, FIFO identity, access modes and CLOEXEC first.
+    /// </remarks>
+    internal static FileStream WrapOwnedRead(SafeFileHandle readHandle) =>
+        new(readHandle, FileAccess.Read, bufferSize: 4096);
 
     /// <summary>Registers the one owned collector task before either pump can dispatch.</summary>
     /// <param name="token">Cancellation from the existing owner deadline/stop; no new timer is created.</param>
