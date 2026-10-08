@@ -457,11 +457,83 @@ alias_walk() {
  [[ -f $current && ! -L $current ]] || fail alias-final-file
  printf '%s' "$current"
 }
+# Data tables are built once from the already completely validated, SHA-pinned
+# audit. They cache no filesystem results. Lookups use sorted indexed arrays and
+# integer subscripts, never eval or caller-supplied associative-array subscripts.
+os_cache_ready=0
+declare -a os_cache_file_paths=() os_cache_file_hashes=() os_cache_alias_paths=() os_cache_alias_rows=()
+negative_os_file_hash() {
+ local LC_ALL=C p=$1 low=0 high=$((${#os_cache_file_paths[@]}-1)) mid
+ [[ $os_cache_ready == 1 ]] || return 1
+ while ((low<=high)); do
+  mid=$(((low+high)/2))
+  if [[ $p == "${os_cache_file_paths[$mid]}" ]]; then printf '%s' "${os_cache_file_hashes[$mid]}"; return 0
+  elif [[ $p < "${os_cache_file_paths[$mid]}" ]]; then high=$((mid-1))
+  else low=$((mid+1)); fi
+ done
+ return 1
+}
+negative_os_alias_record() {
+ local LC_ALL=C p=$1 low=0 high=$((${#os_cache_alias_paths[@]}-1)) mid
+ [[ $os_cache_ready == 1 ]] || return 1
+ while ((low<=high)); do
+  mid=$(((low+high)/2))
+  if [[ $p == "${os_cache_alias_paths[$mid]}" ]]; then printf '%s' "${os_cache_alias_rows[$mid]}"; return 0
+  elif [[ $p < "${os_cache_alias_paths[$mid]}" ]]; then high=$((mid-1))
+  else low=$((mid+1)); fi
+ done
+ return 1
+}
+negative_os_cache_initialize() {
+ local LC_ALL=C rows p h row previous= expected_files expected_aliases file_hash
+ [[ $os_cache_ready == 0 && ${#os_cache_file_paths[@]} == 0 && ${#os_cache_alias_paths[@]} == 0 ]] || fail OS-cache-replay
+ expected_files=$(bounded jq -er '.files|length' "$os_audit")
+ expected_aliases=$(bounded jq -er '.aliases|length' "$os_audit")
+ [[ $expected_files =~ ^[0-9]+$ && $expected_aliases =~ ^[0-9]+$ ]] && ((expected_files>0 && expected_files<=4096 && expected_aliases<=64)) || fail OS-cache-count
+ rows=$(bounded jq -r '.files|sort_by(.path)|.[]|[.path,.sha256]|@tsv' "$os_audit")
+ [[ -n $rows && ${#rows} -le 1048576 ]] || fail OS-cache-file-bytes
+ while IFS=$'\t' read -r p h; do
+  lexical "$p"; sha "$h"
+  [[ -z $previous || $previous < "$p" ]] || fail OS-cache-file-order
+  previous=$p; os_cache_file_paths+=("$p"); os_cache_file_hashes+=("$h")
+ done <<<"$rows"
+ ((${#os_cache_file_paths[@]}==expected_files && ${#os_cache_file_hashes[@]}==expected_files)) || fail OS-cache-file-membership
+ rows=$(bounded jq -c '.aliases|sort_by(.literal)|.[]' "$os_audit")
+ [[ ${#rows} -le 1048576 ]] || fail OS-cache-alias-bytes
+ previous=
+ if [[ -n $rows ]]; then
+  while IFS= read -r row; do
+   p=$(bounded jq -er '.literal' <<<"$row"); lexical "$p"
+   h=$(bounded jq -er '.resolved_sha256' <<<"$row"); sha "$h"
+   [[ -z $previous || $previous < "$p" ]] || fail OS-cache-alias-order
+   previous=$p; os_cache_alias_paths+=("$p"); os_cache_alias_rows+=("$row")
+   # Alias metadata remains the exact validated row; require its literal file
+   # digest to match before it can be used by any physical audit operation.
+   local low=0 high=$((${#os_cache_file_paths[@]}-1)) mid found=0
+   while ((low<=high)); do
+    mid=$(((low+high)/2))
+    if [[ $p == "${os_cache_file_paths[$mid]}" ]]; then
+     [[ $h == "${os_cache_file_hashes[$mid]}" ]] || fail OS-cache-alias-file-hash
+     found=1; break
+    elif [[ $p < "${os_cache_file_paths[$mid]}" ]]; then high=$((mid-1))
+    else low=$((mid+1)); fi
+   done
+   ((found==1)) || fail OS-cache-alias-file-membership
+  done <<<"$rows"
+ fi
+ ((${#os_cache_alias_paths[@]}==expected_aliases && ${#os_cache_alias_rows[@]}==expected_aliases)) || fail OS-cache-alias-membership
+ os_cache_ready=1
+ readonly os_cache_ready
+ readonly -a os_cache_file_paths os_cache_file_hashes os_cache_alias_paths os_cache_alias_rows
+}
+
 verify_os_path() {
  local p=$1 h=$2 count row resolved first before after
- count=$(bounded jq --arg p "$p" '[.aliases[]|select(.literal==$p)]|length' "$os_audit")
+ [[ $os_cache_ready == 1 ]] || fail OS-cache-uninitialized
+ resolved=$(negative_os_file_hash "$p") || fail OS-cache-file-unpinned
+ [[ $resolved == "$h" ]] || fail OS-cache-file-hash
+ if row=$(negative_os_alias_record "$p"); then count=1; else count=0; fi
  if [[ $count == 1 ]]; then
-  row=$(bounded jq -c --arg p "$p" '.aliases[]|select(.literal==$p)' "$os_audit")
   [[ $(bounded jq -r .resolved_sha256 <<<"$row") == "$h" ]] || fail alias-hash-binding
   first=$(alias_walk "$row"); before=$(bounded stat -c '%d:%i:%s:%f:%h:%u:%g' -- "$first")
   pin_file "$first" "$h" "$MAX_INPUT_FILE_BYTES"
@@ -517,6 +589,7 @@ bounded jq -e '
  ([.aliases[].literal]|length== (unique|length)) and
  all(.elf[]; [.resolved[].soname]|length==(unique|length))
 ' "$os_audit" >/dev/null || fail OS-audit-schema
+negative_os_cache_initialize
 os_files=$(bounded jq -r '.files[]|[.path,.sha256]|@tsv' "$os_audit")
 while IFS=$'\t' read -r p h; do verify_os_path "$p" "$h"; done <<<"$os_files"
 runtime_files=$(bounded find -P "$runtime_root" -type f -print)
@@ -953,7 +1026,12 @@ verify_tree "$stage/subject" "$source_manifest" "$source_manifest_sha256" "$sour
 pin_file "$build_receipt" "$build_receipt_sha256" "$MAX_NODE_JSON_BYTES"
 while IFS=$'\t' read -r p h; do verify_os_path "$p" "$h"; done <<<"$os_files"
 pin_file "$os_audit" "$os_audit_sha256" 1048576
-(( $(remaining)>246 && job_deadline_epoch-$(bounded date -u +%s)>245 )) || fail native-life-outside-fixture
+native_life_remaining=$(remaining)
+if ! ((native_life_remaining>246 && job_deadline_epoch-$(bounded date -u +%s)>245)); then
+ # Closed failure-only timing data. This does not renew an interval or dispatch native work.
+ printf '{"schema":"issue779-negative-audit-cost-v1","stage":"sealed-inputs","elapsed_seconds":%d,"remaining_seconds":%d,"file_count":%d,"alias_count":%d}\n' "$(( $(monotonic)-fixture_start ))" "$native_life_remaining" "${#os_cache_file_paths[@]}" "${#os_cache_alias_paths[@]}" >&2
+ fail native-life-outside-fixture
+fi
 diagnostic_stage=n01
 launched=1
 (ulimit -f 8192; exec setsid timeout --signal=KILL "$(remaining)" systemd-run --quiet --wait --pipe --unit="$owner" "${props[@]}" /usr/bin/env -i "${fixed_env[@]}" "$host" "$managed" evidence supervise --request "$request" >"$log/n01.stdout" 2>"$log/n01.stderr") & launch_pid=$!
@@ -992,12 +1070,11 @@ negative_stdlib_exact "$stdlib_expected" "$stdlib_files" || fail negative-stdlib
 # Literal file aliases use the exact recorded root-owned chain; directory aliases reject.
 while IFS= read -r python_file; do
  [[ $python_file == /usr/lib/python3.12/* && $python_file != *$'\t'* && $python_file != *$'\n'* ]] || fail negative-stdlib-name
- python_hash=$(bounded jq -er --arg p "$python_file" '[.files[]|select(.path==$p)] as $rows | if ($rows|length)==1 then $rows[0].sha256 else error("missing-fixed-pin") end' "$os_audit")
+ python_hash=$(negative_os_file_hash "$python_file") || fail negative-stdlib-file-unpinned
  verify_os_path "$python_file" "$python_hash"
  if [[ $(bounded head -c 4 "$python_file" | od -An -tx1 | tr -d ' \n') == 7f454c46 ]]; then
   python_resolved=$python_file
-  if [[ $(bounded jq -r --arg p "$python_file" '[.aliases[]|select(.literal==$p)]|length' "$os_audit") == 1 ]]; then
-   python_alias=$(bounded jq -c --arg p "$python_file" ' .aliases[]|select(.literal==$p)' "$os_audit")
+  if python_alias=$(negative_os_alias_record "$python_file"); then
    python_resolved=$(alias_walk "$python_alias")
   fi
   bounded jq -e --arg p "$python_resolved" '[.elf[]|select(.path==$p)]|length==1' "$os_audit" >/dev/null || fail negative-stdlib-elf-unreviewed
