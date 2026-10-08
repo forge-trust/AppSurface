@@ -36,7 +36,6 @@ internal static class LinuxEmptyObservationExecution
         LinuxOwnerActivation? owner = null;
         LinuxRunAccounts? accounts = null;
         LinuxRunWorkspace? workspace = null;
-        LinuxRunWorkspace.OccupiedSlotInspection? slotNegative = null; // Fixed private N05 image only.
         LinuxControlListener? listener = null;
         LinuxWorkerProcess? worker = null;
         LinuxEmptyObservationControlServer? server = null;
@@ -81,8 +80,6 @@ internal static class LinuxEmptyObservationExecution
             accounts = await LinuxRunAccounts.CreateAsync(owner, job.Token).ConfigureAwait(false);
             phase = EvidenceNativeObservationPhase.WorkspaceCreate;
             workspace = LinuxRunWorkspace.Create(owner, accounts, job.Token);
-            slotNegative = workspace.PrepareOccupiedSlotNegative(owner, accounts, job.Token);
-            slotNegative.WriteSetupEvidence(job.Token); // Before listener creation or any worker dispatch.
             phase = EvidenceNativeObservationPhase.ListenerBind;
             listener = LinuxControlListener.Bind(owner, accounts, workspace, job.Token);
             phase = EvidenceNativeObservationPhase.WorkerCreate;
@@ -132,11 +129,16 @@ internal static class LinuxEmptyObservationExecution
             if (worker is not null)
                 try { phase = EvidenceNativeObservationPhase.WorkerJoin; await worker.StopAndJoinAsync().ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-            // Fixed N05 comparison only: the existing native guard inside this method requires actual
-            // worker/pending-start/group/pump and server-handler joins; no caller Boolean supplies proof.
-            // A failed guard emits no postjoin line and preserves the original root first-fault latch.
-            if (slotNegative is not null && input is not null && worker is not null && server is not null)
-                try { phase = EvidenceNativeObservationPhase.WorkerJoin; slotNegative.WritePostJoinEvidence(input, worker, server, cleanupToken); }
+            // Fixed private N07 data publication after the original server, worker, monitor and pumps
+            // have actually completed their joins, before any account/custody close. No failure is cleared.
+            if (failed && input is not null && owner is not null && accounts is not null && workspace is not null
+                && worker is not null && server is not null)
+                try
+                {
+                    var evidence = worker.CaptureFailureSettlement(input, owner, accounts, workspace, server, cleanupToken);
+                    await LinuxN07FailureEmitter.WriteAsync(evidence.Settlement, evidence.ReadyDescriptorSha256,
+                        server.N07ExecutionStatus, cleanupToken).ConfigureAwait(false);
+                }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             if (custody is null && input is not null && owner is not null && accounts is not null
                 && workspace is not null && worker is not null && server is not null)
@@ -159,8 +161,6 @@ internal static class LinuxEmptyObservationExecution
                 try { phase = EvidenceNativeObservationPhase.WorkerClose; await worker.DisposeAsync().ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             try { phase = EvidenceNativeObservationPhase.CustodyClose; custody?.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-            try { phase = EvidenceNativeObservationPhase.WorkspaceClose; slotNegative?.Dispose(); }
             catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             try { phase = EvidenceNativeObservationPhase.WorkspaceClose; workspace?.Dispose(); }
             catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
