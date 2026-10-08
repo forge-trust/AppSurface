@@ -18,14 +18,14 @@ import tarfile
 import time
 import xml.etree.ElementTree as ET
 
-HEAD = '75f8164274e362fbf17847331e44d1d01843c1e5'
-PARENT = '25e449cef5169c47177d19ca813c79acaab265a0'
-HARNESS_PARENT = '844bb8fa1d0da659cce62d940344c87db69ab905'
-TREE = 'a24156d3083cd104312ec0a86f000e1d2fb7d3b4'
-CAPTURE_SHA = '442746389d8c4da8733bc70fe6ab3feda28263f09f162587deb85c92726a26c7'
-CAPTURE_PROJECTION_SHA = 'bbe49b56d35a9587d5eb967fa8758af2daeac787489eded9ad87b211875d2235'
-UBUNTU_PREREQUISITE_SHA = 'fc7831ab7be0380af6f07cf99444ba965217cabd09b14ee0f5f43917bdbe3e20'
-NATIVE_RUNNER_SHA = '4d71ede2bcab3a4015d7eb2fb68dce503542fabc4ac673ac0857fbcfead5baa7'
+HEAD = 'df028a57d06687768137d910318703496ab864db'
+PARENT = '75f8164274e362fbf17847331e44d1d01843c1e5'
+HARNESS_PARENT = '12cc85baaaca3caf8069a2e395fd9374da2cea76'
+TREE = 'b567818e52b5dac1a5e8130813052686c70d7265'
+CAPTURE_SHA = '22bb32a9f9ac50bff10107f46e9fcfb3c9926d60a289b7524ea87c89c864957a'
+CAPTURE_PROJECTION_SHA = '35ed12894fb25a64fdc59e9256ef82aad58b491b76c68d5ab22344d769dfc63e'
+UBUNTU_PREREQUISITE_SHA = 'eccfe9e153fe17d1e902454ecf87cf45e08b10029924275ef67e435bd30ba13c'
+NATIVE_RUNNER_SHA = '93bd3d5b8c4686087ec4816d5b0d46e130047f74911cbba3f7b15984412c745a'
 SDK = '10.0.401'
 COUNT = 2821
 FILE_CAP = 256 * 1024 * 1024
@@ -652,7 +652,6 @@ def main():
     source_delta = {
         'Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/EvidenceNativeObservationFailureTests.cs': 'M',
         'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/EvidenceNativeObservationFailure.cs': 'M',
-        'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxControlListener.cs': 'M',
         'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxProcessIdentity.cs': 'M',
         'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md': 'M',
     }

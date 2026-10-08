@@ -23,7 +23,7 @@ n03_validate_event_data() {
 n03_run() (
  set -euo pipefail; umask 077
  n03_fd_owner_pid=$BASHPID; readonly n03_fd_owner_pid
- [[ $# == 11 && $EUID == 0 && $source_revision == 75f8164274e362fbf17847331e44d1d01843c1e5 ]] || fail N03-input
+ [[ $# == 11 && $EUID == 0 && $source_revision == df028a57d06687768137d910318703496ab864db ]] || fail N03-input
  helper_root=$1 helper_map=$2 helper_map_sha=$3 helper_nodes=$4 helper_nodes_sha=$5 helper_entry_sha=$6
  broker_name=$7 worker_name=$8 shared_name=$9 startup_kib=${10} helper_generation=${11}
  n03_broker_pid= n03_worker_pid= release_fd= dir_fd= socket_pin= first_failure= result_status=rejected

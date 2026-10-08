@@ -1,3 +1,5 @@
+## HISTORICAL reviewed process-recheck composition (source75)
+
 ## HISTORICAL reviewed listener composition (source25)
 
 # C# control-fault and N03 validation candidate
@@ -27,3 +29,7 @@ The four operational parent pins are `079d1932211efbce2689adf107ac0cb3b3c3e372`.
 ## Process recheck candidate
 
 Source `75f8164274e362fbf17847331e44d1d01843c1e5` is a five-file child of `25e449cef5169c47177d19ca813c79acaab265a0`;2821 full source SHA/modes are captured. Main records1051 local core source tests passing; this is not native acceptance. Previous listener records remain historical. The four operational previous-harness constants are `844bb8fa1d0da659cce62d940344c87db69ab905`. The preparer validates the prior full25 source, creates ordered merge[844,new source], validates exactly the five M paths and current full capture, then makes the installation child. Receipt parent is the actual merge, distinct from harness_previous. The existing43-command checks and exact clone/merge022 umask are retained, not reapplied; no new logged topology calls are added. The sole source-delta guard change replaces the former server path with LinuxProcessIdentity.cs. All promotion flags and independent review are false. The current native run supplies no acceptance claim here. See the [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md).
+
+## Process-node inspection diagnostic candidate
+
+Source `df028a57d06687768137d910318703496ab864db` is an exact four-file child of `75f8164274e362fbf17847331e44d1d01843c1e5`;2821 source SHA/modes are captured. Main supplies the actual local core/diagnostic counts and receipt pins; no native acceptance is inferred. Listener is unchanged. All four operational previous-harness constants are `12cc85baaaca3caf8069a2e395fd9374da2cea76`. The preparer validates full prior75 source, then normal ordered merge[12cc,new source] and exactly four source M paths, followed by a sole installation child. Actual merge/head are established only during later preparation. The43-command checks and clone/merge022 behavior are retained; no extra Git query is added. Removing Listener from the three source-delta guards is an explicit structural change. Every promotion/review flag remains false pending exact fresh review. Historical observations remain labeled historical. See the [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md).
