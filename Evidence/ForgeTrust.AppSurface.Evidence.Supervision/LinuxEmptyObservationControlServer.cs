@@ -25,6 +25,7 @@ internal sealed class LinuxEmptyObservationControlServer
     private readonly SupervisionSingleAttempt _run = new();
     private readonly SemaphoreSlim _replyOrder = new(1, 1);
     private readonly TaskCompletionSource _exitCommitted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _negativeReadyCommitted; // A past authenticated write event, not whole-protocol success.
     private readonly TaskCompletionSource _exitIntent = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly object _executionGate = new();
     private Task? _execution;
@@ -102,6 +103,28 @@ internal sealed class LinuxEmptyObservationControlServer
                 || !_ledger.IsControlAdmissionClosed || _ledger.ActiveControls != 0
                 || !_ledger.IsWorkloadAdmissionClosed || _ledger.ActiveWorkloads != 0) throw Rejected();
         owner.RequireControlIdentity(token);
+    }
+
+    /// <summary>Gets descriptor data only after an actual peer-bound READY write committed and handlers joined.</summary>
+    /// <param name="input">Reference-equal original protected input.</param>
+    /// <param name="owner">Original actual owner.</param>
+    /// <param name="accounts">Original actual accounts.</param>
+    /// <param name="workspace">Original retained workspace and immutable sealed descriptor.</param>
+    /// <param name="worker">Original selected worker, never caller PID data.</param>
+    /// <param name="token">Original cleanup token, not a new deadline.</param>
+    /// <returns>Descriptor SHA256 data; it authenticates neither an external record nor a subsequent action.</returns>
+    /// <remarks>
+    /// Unlike successful-sequence ReadyAcknowledged, the past event remains observable after a later
+    /// negative outcome. It is set only after existing authenticated response I/O, connection release,
+    /// owner checks and CompleteWrite succeed. Missing events reject; no failure flag is cleared.
+    /// </remarks>
+    internal string RequireNegativeReadyDescriptor(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
+        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
+    {
+        RequireCustodyOwner(input, owner, accounts, workspace, worker, token);
+        if (Volatile.Read(ref _negativeReadyCommitted) != 1 || _workspace.DescriptorSha256 is not { } descriptor)
+            throw Rejected();
+        return descriptor;
     }
 
     /// <summary>Obtains the actual drained listener's original named-inode comparison data for native custody.</summary>
@@ -382,6 +405,8 @@ internal sealed class LinuxEmptyObservationControlServer
             {
                 stage = LinuxControlFailureStage.ReplyCommit;
                 _sequence.CompleteWrite(claim, true);
+                if (claim.Operation == EvidenceControlOperation.Ready)
+                    Interlocked.Exchange(ref _negativeReadyCommitted, 1);
                 committedExit = claim.Operation == EvidenceControlOperation.Exit;
                 claim = null;
             }
