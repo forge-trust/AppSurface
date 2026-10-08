@@ -445,6 +445,30 @@ internal enum LinuxControlFailureStage
     ProcessLastStatRead,
     /// <summary>Original LastStat bounded proc parse. Diagnostic data only.</summary>
     ProcessLastStatParse,
+    /// <summary>Retained PID-directory fstatfs call/result; no errno is retained.</summary>
+    ProcessFileSystemInspect,
+    /// <summary>Retained PID-directory proc filesystem type guard.</summary>
+    ProcessFileSystemType,
+    /// <summary>Retained PID-directory StatFd call, including its original required mask.</summary>
+    ProcessDirectoryStat,
+    /// <summary>Retained PID-directory nonzero inode guard.</summary>
+    ProcessDirectoryInode,
+    /// <summary>Retained PID-directory type guard.</summary>
+    ProcessDirectoryType,
+    /// <summary>First unequal retained PID-directory device major field.</summary>
+    ProcessRetainedProcessDeviceMajor,
+    /// <summary>First unequal retained PID-directory device minor field.</summary>
+    ProcessRetainedProcessDeviceMinor,
+    /// <summary>First unequal retained PID-directory inode field.</summary>
+    ProcessRetainedProcessInode,
+    /// <summary>First unequal retained PID-directory owner field.</summary>
+    ProcessRetainedProcessUid,
+    /// <summary>First unequal retained PID-directory group field.</summary>
+    ProcessRetainedProcessGid,
+    /// <summary>First unequal retained PID-directory complete mode field.</summary>
+    ProcessRetainedProcessMode,
+    /// <summary>Original complete retained PID-directory metadata equality guard.</summary>
+    ProcessRetainedProcessMetadata,
 }
 
 /// <summary>Detached four-field first caught control fault; no bytes, identities, paths or exception objects survive.</summary>

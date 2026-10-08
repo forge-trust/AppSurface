@@ -8,6 +8,131 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
 public sealed class EvidenceNativeObservationFailureTests
 {
     [Theory]
+    [InlineData(-1, 0x9fa0, (int)LinuxControlFailureStage.ProcessFileSystemInspect)]
+    [InlineData(1, 0x9fa0, (int)LinuxControlFailureStage.ProcessFileSystemInspect)]
+    [InlineData(0, 0, (int)LinuxControlFailureStage.ProcessFileSystemType)]
+    [InlineData(0, 0x9fa1, (int)LinuxControlFailureStage.ProcessFileSystemType)]
+    public void RetainedDirectoryFileSystemDataRejectsAtTheOriginalPredicate(int result, int type, int expected)
+    {
+        var stage = LinuxControlFailureStage.Unknown;
+        var error = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxProcessData.RequireProcFileSystem(result, type, ref stage));
+        Assert.Equal((LinuxControlFailureStage)expected, stage);
+        var failure = LinuxControlFailure.Capture(stage, null, error);
+        Assert.Equal("ASEVD402", failure.DiagnosticCode);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Admission, failure.ErrorKind);
+        Assert.Null(failure.Operation);
+        LinuxProcessData.RequireProcFileSystem(0, 0x9fa0, ref stage);
+        Assert.Equal(LinuxControlFailureStage.ProcessFileSystemType, stage);
+    }
+
+    [Theory]
+    [InlineData(0, 0x416d, (int)LinuxControlFailureStage.ProcessDirectoryInode)]
+    [InlineData(0, 0x8000, (int)LinuxControlFailureStage.ProcessDirectoryInode)]
+    [InlineData(1, 0x81a4, (int)LinuxControlFailureStage.ProcessDirectoryType)]
+    [InlineData(1, 0xc180, (int)LinuxControlFailureStage.ProcessDirectoryType)]
+    public void RetainedDirectoryStatDataKeepsNonzeroInodeThenExactType(int inode, int mode, int expected)
+    {
+        var stage = LinuxControlFailureStage.Unknown;
+        var error = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxProcessData.RequireProcessDirectory((ulong)inode, (ushort)mode, ref stage));
+        Assert.Equal((LinuxControlFailureStage)expected, stage);
+        Assert.Equal("ASEVD402", LinuxControlFailure.Capture(stage, null, error).DiagnosticCode);
+        LinuxProcessData.RequireProcessDirectory(1, 0x416d, ref stage);
+        Assert.Equal(LinuxControlFailureStage.ProcessDirectoryType, stage);
+        // Permissions are compared with the original metadata later, not newly constrained here.
+        LinuxProcessData.RequireProcessDirectory(1, 0x41c0, ref stage);
+        Assert.Equal(LinuxControlFailureStage.ProcessDirectoryType, stage);
+    }
+
+    [Theory]
+    [InlineData(0, (int)LinuxControlFailureStage.ProcessRetainedProcessDeviceMajor)]
+    [InlineData(1, (int)LinuxControlFailureStage.ProcessRetainedProcessDeviceMinor)]
+    [InlineData(2, (int)LinuxControlFailureStage.ProcessRetainedProcessInode)]
+    [InlineData(3, (int)LinuxControlFailureStage.ProcessRetainedProcessUid)]
+    [InlineData(4, (int)LinuxControlFailureStage.ProcessRetainedProcessGid)]
+    [InlineData(5, (int)LinuxControlFailureStage.ProcessRetainedProcessMode)]
+    public void RetainedDirectoryMetadataRejectsEachChangedFieldWithAnExactNeighbor(int variant, int expectedStage)
+    {
+        var expected = new LinuxProcessIdentity.ProcNodeMetadata(0, 5, 123, 65010, 65011, 0x416d);
+        var actual = variant switch
+        {
+            0 => expected with { Major = 1 },
+            1 => expected with { Minor = 6 },
+            2 => expected with { Inode = 124 },
+            3 => expected with { Uid = 65012 },
+            4 => expected with { Gid = 65012 },
+            _ => expected with { Mode = 0x41c0 },
+        };
+        var stage = LinuxControlFailureStage.Unknown;
+        var error = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxProcessData.RequireRetainedProcessMetadata(actual, expected, ref stage));
+        Assert.Equal((LinuxControlFailureStage)expectedStage, stage);
+        Assert.Equal("ASEVD402", LinuxControlFailure.Capture(stage, null, error).DiagnosticCode);
+        LinuxProcessData.RequireRetainedProcessMetadata(expected, expected, ref stage);
+        Assert.Equal(LinuxControlFailureStage.ProcessRetainedProcessMetadata, stage);
+    }
+
+    [Fact]
+    public void FirstRetainedDirectoryFieldAndFaultSurviveLaterWrappersAndCleanup()
+    {
+        var expected = new LinuxProcessIdentity.ProcNodeMetadata(0, 5, 123, 65010, 65011, 0x416d);
+        var actual = new LinuxProcessIdentity.ProcNodeMetadata(1, 6, 124, 65012, 65013, 0x41c0);
+        var stage = LinuxControlFailureStage.Unknown;
+        var error = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxProcessData.RequireRetainedProcessMetadata(actual, expected, ref stage));
+        Assert.Equal(LinuxControlFailureStage.ProcessRetainedProcessDeviceMajor, stage);
+        var process = new LinuxControlFailureLatch();
+        process.Capture(stage, null, error);
+        var first = process.First;
+        var listener = new LinuxControlFailureLatch();
+        listener.Capture(LinuxControlFailureStage.ListenerWorkerIdentity, null, new IOException("wrapper-canary"), first);
+        Parallel.For(0, 16, _ => process.Capture(LinuxControlFailureStage.ProcessDirectoryStat,
+            null, new IOException("cleanup-canary")));
+        Assert.Same(first, process.First);
+        Assert.Same(first, listener.First);
+        var root = EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.ServerRun,
+            new IOException("root-canary"), listener.First);
+        Assert.Same(first, root.ControlFailure);
+        Assert.DoesNotContain("canary", root.ToJson());
+        Assert.True(Encoding.UTF8.GetByteCount(root.ToJson()) + 1 <= 1024);
+    }
+
+    [Fact]
+    public void RetainedDirectorySubchecksKeepClosedShapeAndNeverRetainNativeValuesOrMessages()
+    {
+        var stages = new[]
+        {
+            LinuxControlFailureStage.ProcessFileSystemInspect, LinuxControlFailureStage.ProcessFileSystemType,
+            LinuxControlFailureStage.ProcessDirectoryStat, LinuxControlFailureStage.ProcessDirectoryInode,
+            LinuxControlFailureStage.ProcessDirectoryType, LinuxControlFailureStage.ProcessRetainedProcessDeviceMajor,
+            LinuxControlFailureStage.ProcessRetainedProcessDeviceMinor, LinuxControlFailureStage.ProcessRetainedProcessInode,
+            LinuxControlFailureStage.ProcessRetainedProcessUid, LinuxControlFailureStage.ProcessRetainedProcessGid,
+            LinuxControlFailureStage.ProcessRetainedProcessMode, LinuxControlFailureStage.ProcessRetainedProcessMetadata,
+        };
+        var errors = new Exception[]
+        {
+            new IOException("/proc/private-canary"), new PlatformNotSupportedException("native-canary"),
+            new CanaryException("private-canary", new IOException("inner-canary")),
+        };
+        foreach (var stage in stages)
+        foreach (var error in errors)
+        {
+            var detail = LinuxControlFailure.Capture(stage, null, error);
+            using var parsed = JsonDocument.Parse(detail.ToJson());
+            Assert.Equal(new[] { "stage", "operation", "error_kind", "diagnostic_code" },
+                parsed.RootElement.EnumerateObject().Select(property => property.Name).ToArray());
+            Assert.Equal(stage.ToString(), parsed.RootElement.GetProperty("stage").GetString());
+            Assert.Null(detail.Operation);
+            Assert.Null(detail.DiagnosticCode);
+            var root = EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.ServerRun, error, detail);
+            Assert.True(Encoding.UTF8.GetByteCount(root.ToJson()) + 1 <= 1024);
+            Assert.DoesNotContain("canary", root.ToJson());
+            Assert.DoesNotContain("/proc/", root.ToJson());
+        }
+    }
+
+    [Theory]
     [InlineData(0, (int)LinuxControlFailureStage.ProcessExpectedSample)]
     [InlineData(1, (int)LinuxControlFailureStage.ProcessExpectedPid)]
     [InlineData(2, (int)LinuxControlFailureStage.ProcessExpectedStartTime)]

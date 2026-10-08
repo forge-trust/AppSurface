@@ -949,3 +949,37 @@ with a valid neighbor, closed owner selection, first-fault propagation/precedenc
 process stages' unchanged schema and byte bound. They are defined but not executed at source freeze.
 Attempt25 measured `ListenerWorkerIdentity/ASEVD402`; its exact inner predicate and native cause remain
 unmeasured. This source preparation makes no Linux or native acceptance claim.
+
+#### Retained PID-directory inspection subchecks
+
+Attempt26 retained the closed `ProcessRetainedProcess/Admission/ASEVD402` checkpoint. It does not
+distinguish an inspection rejection from changed metadata. The separate fixture observer's
+post-exec credential/image sample does not establish proc-directory metadata continuity across
+that root check; its `ready_protocol_observed:false` field is a literal, not a wire observation.
+
+Only the retained PID-directory branch of [`LinuxProcessIdentity.CheckBindings`](LinuxProcessIdentity.cs)
+now refines that checkpoint. It uses one original `fstatfs` result, the unchanged shared
+[`StatFd`](../ForgeTrust.AppSurface.Evidence.Contracts/EvidenceLinuxFileSystem.cs) call with its existing
+required mask, the nonzero-inode and directory-type predicates, then the original complete
+device-major/device-minor/inode/UID/GID/mode equality rejection. Finite
+[`LinuxControlFailureStage`](EvidenceNativeObservationFailure.cs) values identify the operation or
+the first unequal field in that order. No native result is read twice, and no extra probe, retry,
+timer, token, permission rule or process selection is introduced. All other retained nodes and
+all named-node checks retain their existing inspections. The same stages cover both original
+binding passes and do not distinguish which pass failed.
+
+[`LinuxProcessData`](LinuxProcessIdentity.cs) exposes pure filesystem-result/type, inode/mode and
+detached metadata comparison guards used by that actual branch. Its immutable
+`LinuxProcessIdentity.ProcNodeMetadata` record holds sampled values only; constructing it creates
+no descriptor, live process, admission, lease or authority. The helpers preserve the original
+predicates. In particular, the type guard adds no permission requirement, and the final equality
+guard still rejects every changed field. Native call exceptions retain their original family;
+the existing recoverable catch and sticky first-fault latch remain responsible for rejection.
+
+The existing four-field control object, six-field v3 root envelope and 1KiB bound remain unchanged.
+No values, errno, paths, process IDs, messages or exception objects are added to the projection.
+Sixteen new pure cases in five methods cover native-result data failures with valid neighbors,
+inode/type ordering, each metadata field, first-fault precedence and closed bounded canary-safe
+projection. They are defined and unexecuted at source freeze. These controls cannot establish
+native inspection, worker acceptance, a kernel transition or N01–N16 completion. Actual native
+cause and any runtime correction remain pending fresh measured evidence.

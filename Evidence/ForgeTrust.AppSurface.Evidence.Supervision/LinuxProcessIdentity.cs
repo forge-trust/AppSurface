@@ -181,6 +181,41 @@ internal static class LinuxProcessData
             throw LinuxProcessIdentity.Rejected();
     }
 
+    /// <summary>Checks detached fstatfs result/type data with the original proc filesystem predicates.</summary>
+    /// <remarks>No descriptor, live process or authority is constructed from these values.</remarks>
+    internal static void RequireProcFileSystem(int result, long type, ref LinuxControlFailureStage stage)
+    {
+        stage = LinuxControlFailureStage.ProcessFileSystemInspect;
+        if (result != 0) throw LinuxProcessIdentity.Rejected();
+        stage = LinuxControlFailureStage.ProcessFileSystemType;
+        if (type != 0x9fa0) throw LinuxProcessIdentity.Rejected();
+    }
+
+    /// <summary>Checks detached statx inode/mode fields for the retained PID directory.</summary>
+    /// <remarks>The native caller still uses the unchanged StatFd required-mask check.</remarks>
+    internal static void RequireProcessDirectory(ulong inode, ushort mode, ref LinuxControlFailureStage stage)
+    {
+        stage = LinuxControlFailureStage.ProcessDirectoryInode;
+        if (inode == 0) throw LinuxProcessIdentity.Rejected();
+        stage = LinuxControlFailureStage.ProcessDirectoryType;
+        if ((mode & 0xf000) != 0x4000) throw LinuxProcessIdentity.Rejected();
+    }
+
+    /// <summary>Reports the first unequal field and retains the original complete metadata equality guard.</summary>
+    /// <remarks>Both records are detached data; no sampled values appear in the diagnostic.</remarks>
+    internal static void RequireRetainedProcessMetadata(LinuxProcessIdentity.ProcNodeMetadata actual,
+        LinuxProcessIdentity.ProcNodeMetadata expected, ref LinuxControlFailureStage stage)
+    {
+        stage = actual.Major != expected.Major ? LinuxControlFailureStage.ProcessRetainedProcessDeviceMajor
+            : actual.Minor != expected.Minor ? LinuxControlFailureStage.ProcessRetainedProcessDeviceMinor
+            : actual.Inode != expected.Inode ? LinuxControlFailureStage.ProcessRetainedProcessInode
+            : actual.Uid != expected.Uid ? LinuxControlFailureStage.ProcessRetainedProcessUid
+            : actual.Gid != expected.Gid ? LinuxControlFailureStage.ProcessRetainedProcessGid
+            : actual.Mode != expected.Mode ? LinuxControlFailureStage.ProcessRetainedProcessMode
+            : LinuxControlFailureStage.ProcessRetainedProcessMetadata;
+        if (actual != expected) throw LinuxProcessIdentity.Rejected();
+    }
+
     private static LinuxProcessIds ParseIds(string row)
     {
         var values = row.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries);
@@ -368,7 +403,12 @@ internal sealed class LinuxProcessIdentity : IDisposable
                 3 => LinuxControlFailureStage.ProcessRetainedStat,
                 _ => LinuxControlFailureStage.ProcessRetainedCgroup,
             };
-            if (Inspect(_handles[i], i < 2) != _metadata[i]) throw Rejected();
+            if (i == 1)
+            {
+                var actual = InspectRetainedProcess(_handles[i], ref stage);
+                LinuxProcessData.RequireRetainedProcessMetadata(actual, _metadata[i], ref stage);
+            }
+            else if (Inspect(_handles[i], i < 2) != _metadata[i]) throw Rejected();
             var parent = i == 0 ? -100 : Fd(_handles[i == 1 ? 0 : 1]);
             var name = i switch { 0 => "/proc", 1 => Pid.ToString(CultureInfo.InvariantCulture),
                 2 => "status", 3 => "stat", _ => "cgroup" };
@@ -432,6 +472,17 @@ internal sealed class LinuxProcessIdentity : IDisposable
         throw Rejected();
     }
 
+    private static ProcNodeMetadata InspectRetainedProcess(SafeFileHandle handle, ref LinuxControlFailureStage stage)
+    {
+        stage = LinuxControlFailureStage.ProcessFileSystemInspect;
+        var result = FstatFs(handle, out var data);
+        LinuxProcessData.RequireProcFileSystem(result, data.Type, ref stage);
+        stage = LinuxControlFailureStage.ProcessDirectoryStat;
+        var stat = StatFd(handle);
+        LinuxProcessData.RequireProcessDirectory(stat.Inode, stat.Mode, ref stage);
+        return new(stat.DeviceMajor, stat.DeviceMinor, stat.Inode, stat.Uid, stat.Gid, stat.Mode);
+    }
+
     private static ProcNodeMetadata Inspect(SafeFileHandle handle, bool directory)
     {
         RequireProc(handle);
@@ -463,7 +514,14 @@ internal sealed class LinuxProcessIdentity : IDisposable
     internal static EvidenceAdmissionException Rejected() =>
         new("ASEVD402", "The selected Linux process identity is unavailable or changed.");
 
-    private readonly record struct ProcNodeMetadata(
+    /// <summary>Detached proc node fields; construction grants no descriptor or live process identity.</summary>
+    /// <param name="Major">Sampled device major number.</param>
+    /// <param name="Minor">Sampled device minor number.</param>
+    /// <param name="Inode">Sampled inode number.</param>
+    /// <param name="Uid">Sampled owner ID.</param>
+    /// <param name="Gid">Sampled group ID.</param>
+    /// <param name="Mode">Sampled complete type and permission bits.</param>
+    internal readonly record struct ProcNodeMetadata(
         uint Major, uint Minor, ulong Inode, uint Uid, uint Gid, ushort Mode);
     [StructLayout(LayoutKind.Explicit, Size = 120)]
     private struct ProcFileSystem { [FieldOffset(0)] internal long Type; }
