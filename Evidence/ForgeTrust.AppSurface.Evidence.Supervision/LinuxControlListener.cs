@@ -94,6 +94,7 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
     private readonly LinuxProtectedMetadata _parentMetadata;
     private readonly LinuxProtectedMetadata _socketMetadata;
     private readonly SupervisionAcceptOwnership<LinuxControlConnection> _accepts;
+    private readonly LinuxControlFailureLatch _failures = new();
     private LinuxProcessIdentity? _worker;
     private TaskCompletionSource? _disposeCompletion;
     private int _socketClosed;
@@ -112,6 +113,10 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
 
     /// <summary>Gets the fixed bound path as data; it cannot create another listener or authenticate a peer.</summary>
     internal string SocketPath => _workspace.ControlSocket;
+
+    /// <summary>Gets the first closed accept checkpoint; absence is not connection or native success.</summary>
+    /// <remarks>Contains no peer, pathname, raw exception or capability; only the actual server reads this data after failure.</remarks>
+    internal LinuxControlFailure? FirstFailure => _failures.First;
 
     /// <summary>Returns original socket comparison metadata only after this actual listener's successful native drain.</summary>
     /// <remarks>These fields grant no custody; the native transfer must reopen and compare the same named inode.</remarks>
@@ -210,18 +215,22 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
     /// </remarks>
     internal Task<LinuxControlConnection> AcceptAsync(LinuxProcessIdentity worker, CancellationToken token)
     {
+        var stage = LinuxControlFailureStage.ListenerState;
         lock (_gate)
         {
             try
             {
-                Check(token);
+                Check(token, ref stage);
+                stage = LinuxControlFailureStage.ListenerWorkerSelection;
                 ArgumentNullException.ThrowIfNull(worker);
-                RequireWorker(worker, token);
+                RequireWorker(worker, token, ref stage);
+                stage = LinuxControlFailureStage.ListenerDescriptor;
                 if (!_workspace.DescriptorWritten || (_worker is not null && !ReferenceEquals(_worker, worker)))
                     throw LinuxControlListenerPolicy.Invalid();
                 _worker = worker;
             }
-            catch { Fail(); throw; }
+            catch (Exception error)
+            { _failures.Capture(stage, null, error); Fail(); throw; }
         }
         return _accepts.AcceptAsync(token);
     }
@@ -251,14 +260,16 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
     private async Task<LinuxControlConnection> AcceptActualAsync(CancellationToken token)
     {
         Socket? accepted = null;
+        var stage = LinuxControlFailureStage.ListenerState;
         try
         {
             lock (_gate)
             {
                 if (_closing || Volatile.Read(ref _socketClosed) != 0) throw new SupervisionAcceptShutdownException();
-                Check(token);
+                Check(token, ref stage);
             }
             using var cancellation = token.UnsafeRegister(static state => ((LinuxControlListener)state!).CloseSocket(), this);
+            stage = LinuxControlFailureStage.ListenerNativeAccept;
             try { accepted = await _socket.AcceptAsync(token).ConfigureAwait(false); }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             { throw new SupervisionAcceptShutdownException(); }
@@ -269,20 +280,27 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
             { throw new SupervisionAcceptShutdownException(); }
             lock (_gate)
             {
+                stage = LinuxControlFailureStage.ListenerState;
                 if (_closing || Volatile.Read(ref _socketClosed) != 0) throw new SupervisionAcceptShutdownException();
-                Check(token);
+                Check(token, ref stage);
+                stage = LinuxControlFailureStage.ListenerWorkerSelection;
                 var worker = _worker ?? throw LinuxControlListenerPolicy.Invalid();
-                RequireWorker(worker, token);
+                RequireWorker(worker, token, ref stage);
+                stage = LinuxControlFailureStage.ListenerAcceptedPeer;
                 var result = LinuxControlConnection.Accept(accepted, _owner, worker);
                 accepted = null; // The connection factory owns the socket, including rejection.
                 return result;
             }
         }
         catch (SupervisionAcceptShutdownException) { throw; }
-        catch (OperationCanceledException) { lock (_gate) { if (!_closing) Fail(); } throw; }
+        catch (OperationCanceledException error)
+        {
+            lock (_gate) { if (!_closing) { _failures.Capture(stage, null, error); Fail(); } }
+            throw;
+        }
         catch (Exception error) when (Recoverable(error))
         {
-            lock (_gate) { if (!_closing) Fail(); }
+            lock (_gate) { if (!_closing) { _failures.Capture(stage, null, error); Fail(); } }
             throw LinuxControlListenerPolicy.Invalid();
         }
         finally { accepted?.Dispose(); }
@@ -290,27 +308,49 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
 
     private void Check(CancellationToken token)
     {
+        var stage = LinuxControlFailureStage.Unknown;
+        Check(token, ref stage);
+    }
+
+    // A ref checkpoint records ordering only. It cannot skip a native check, alter rejection,
+    // authenticate a worker or construct a successful listener/connection.
+    private void Check(CancellationToken token, ref LinuxControlFailureStage stage)
+    {
+        stage = LinuxControlFailureStage.ListenerState;
         if (_closing || _failed || Volatile.Read(ref _socketClosed) != 0) throw LinuxControlListenerPolicy.Invalid();
+        stage = LinuxControlFailureStage.ListenerCancellation;
         token.ThrowIfCancellationRequested();
+        stage = LinuxControlFailureStage.ListenerWorkspace;
         _workspace.RequireControlOwnedBy(_owner, _accounts, token);
+        stage = LinuxControlFailureStage.ListenerParent;
         var parent = LinuxProtectedMetadata.From(StatFd(_parent));
         if (!parent.SameAncestorAs(_parentMetadata)) throw LinuxControlListenerPolicy.Invalid();
+        stage = LinuxControlFailureStage.ListenerSocketMetadata;
         LinuxControlListenerPolicy.RequireSameSocket(LinuxProtectedMetadata.From(StatFd(_namedSocket)),
             _socketMetadata, _workspace.Layout.WorkerGid);
+        stage = LinuxControlFailureStage.ListenerSocketName;
         RequireNamed(_parent, _socketMetadata);
+        stage = LinuxControlFailureStage.ListenerEndpoint;
         if (!_socket.IsBound || _socket.LocalEndPoint is not UnixDomainSocketEndPoint endpoint
             || endpoint.ToString() != SocketPath) throw LinuxControlListenerPolicy.Invalid();
+        stage = LinuxControlFailureStage.ListenerCancellation;
         token.ThrowIfCancellationRequested();
     }
 
-    private void RequireWorker(LinuxProcessIdentity worker, CancellationToken token)
+    private void RequireWorker(LinuxProcessIdentity worker, CancellationToken token, ref LinuxControlFailureStage stage)
     {
+        stage = LinuxControlFailureStage.ListenerWorkerSelection;
         LinuxControlListenerPolicy.RequireWorkerSelection(_owner.RunId, worker.Pid, worker.Uid, worker.Gid,
             worker.Unit, worker.Role, _workspace.Layout.AccountData.WorkerUid, _workspace.Layout.WorkerGid);
+        stage = LinuxControlFailureStage.ListenerCancellation;
         token.ThrowIfCancellationRequested();
+        stage = LinuxControlFailureStage.ListenerOwnerIdentity;
         _owner.RequireControlIdentity(default);
+        stage = LinuxControlFailureStage.ListenerWorkerIdentity;
         worker.Recheck(default);
+        stage = LinuxControlFailureStage.ListenerOwnerIdentity;
         _owner.RequireControlIdentity(default);
+        stage = LinuxControlFailureStage.ListenerCancellation;
         token.ThrowIfCancellationRequested();
     }
 

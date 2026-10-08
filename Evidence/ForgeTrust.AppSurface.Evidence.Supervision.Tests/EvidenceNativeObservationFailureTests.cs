@@ -7,6 +7,66 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
 /// <summary>Pure diagnostic projection/latching controls; none acquires a native owner or proves root execution.</summary>
 public sealed class EvidenceNativeObservationFailureTests
 {
+    [Fact]
+    public void ActualListenerPolicyFailureSurvivesTheOuterAcceptWrapperAsClosedData()
+    {
+        // This policy rejection is sampled data only; no listener, worker or native ownership is created.
+        var error = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxControlListenerPolicy.RequireSealed(default, 123));
+        var first = LinuxControlFailure.Capture(LinuxControlFailureStage.ListenerSocketMetadata, null, error);
+        var server = new LinuxControlFailureLatch();
+        server.Capture(LinuxControlFailureStage.Accept, null, new IOException("outer-canary"), first);
+        Assert.Same(first, server.First);
+        Assert.Equal(LinuxControlFailureStage.ListenerSocketMetadata, server.First!.Stage);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Admission, server.First.ErrorKind);
+        Assert.Equal("ASEVD402", server.First.DiagnosticCode);
+        var attempt = new SupervisionSingleAttempt(); attempt.Claim();
+        var wrapper = Assert.Throws<EvidenceAdmissionException>(attempt.Claim);
+        var outer = EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.ServerRun, wrapper, server.First);
+        Assert.Same(first, outer.ControlFailure);
+        Assert.Equal("ASEVD410", outer.DiagnosticCode);
+        Assert.DoesNotContain("outer-canary", outer.ToJson());
+        Assert.True(Encoding.UTF8.GetByteCount(outer.ToJson()) + 1 <= 1024);
+    }
+
+    [Fact]
+    public void OriginalListenerCancellationFamilyIsRetainedBeforeWrapperAndLaterCleanup()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var error = Assert.Throws<OperationCanceledException>(cancellation.Token.ThrowIfCancellationRequested);
+        var first = LinuxControlFailure.Capture(LinuxControlFailureStage.ListenerCancellation, null, error);
+        var server = new LinuxControlFailureLatch();
+        var attempt = new SupervisionSingleAttempt(); attempt.Claim();
+        var wrapper = Assert.Throws<EvidenceAdmissionException>(attempt.Claim);
+        server.Capture(LinuxControlFailureStage.AcceptJoin, null, wrapper, first);
+        server.Capture(LinuxControlFailureStage.ListenerClose, null, new IOException("cleanup-canary"));
+        Assert.Same(first, server.First);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Cancelled, first.ErrorKind);
+        Assert.Null(first.DiagnosticCode);
+        Assert.Null(first.Operation);
+        Assert.DoesNotContain("canary", first.ToJson());
+    }
+
+    [Fact]
+    public void EarlierServerFaultIsNotReplacedByLaterListenerProjectionOrConcurrentCleanup()
+    {
+        var server = new LinuxControlFailureLatch();
+        server.Capture(LinuxControlFailureStage.RequestRead, EvidenceControlOperation.Ready,
+            new IOException("first-canary"));
+        var reserved = server.First;
+        var error = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxControlListenerPolicy.RequireSealed(default, 123));
+        var later = LinuxControlFailure.Capture(LinuxControlFailureStage.ListenerWorkerIdentity, null, error);
+        Parallel.For(0, 32, _ => server.Capture(LinuxControlFailureStage.AcceptJoin, null,
+            new InvalidOperationException("last-canary"), later));
+        Assert.Same(reserved, server.First);
+        Assert.Equal(LinuxControlFailureStage.RequestRead, server.First!.Stage);
+        Assert.Equal(EvidenceControlOperation.Ready, server.First.Operation);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Io, server.First.ErrorKind);
+        Assert.DoesNotContain("canary", server.First.ToJson());
+    }
+
     [Theory]
     [InlineData("ASEVD402")]
     [InlineData("ASEVD404")]

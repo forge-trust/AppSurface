@@ -189,7 +189,12 @@ internal sealed class LinuxEmptyObservationControlServer
                 handlers.Add(HandleAsync(connection, control, requests.Token));
             }
         }
-        catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); _sequence.RecordFailure(); }
+        catch (Exception error) when (Recoverable(error))
+        {
+            _failures.Capture(stage, null, error,
+                stage is LinuxControlFailureStage.Accept or LinuxControlFailureStage.AcceptJoin ? _listener.FirstFailure : null);
+            _sequence.RecordFailure();
+        }
         finally
         {
             var ioJoined = true;
