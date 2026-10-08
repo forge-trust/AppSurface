@@ -111,13 +111,30 @@ if [[ -e $parent || -L $parent ]]; then
 fi
 # No discovery below these fixed names. Missing files are retained as missing counts.
 inner=(logs/n03/broker.events.jsonl logs/n03/broker.stderr logs/n03/worker.stdout logs/n03/worker.stderr logs/n03/worker-peer.trace logs/n03/broker-live.json logs/n03/broker-live.json.argv logs/n03/broker-live-after.json logs/n03/broker-live-after.json.argv logs/n03/worker-live.json logs/n03/worker-live.json.argv logs/n03/result.json logs/n03/failure.json fixture-result.json raw-evidence-plan.json raw-evidence-manifest.json raw-evidence-summary.json worker-live.json request-policy.sha256 final-files.sha256 logs/n01.stdout logs/n01.stderr logs/n02.stdout logs/n02.stderr logs/n02.trace logs/observer.stdout logs/observer.stderr logs/kill.log logs/stop.log logs/n02.file-limit logs/n02.limits logs/n02.facts.json logs/n02.io.trace logs/n02.credentials.json logs/n02-higher.stdout logs/n02-higher.stderr logs/n02-higher.trace logs/n02-higher.file-limit logs/n02-higher.limits logs/n02-higher.facts.json logs/n02-higher.io.trace logs/n02-higher.credentials.json n02-startup-limit-diagnostic.pending n02-startup-limit-diagnostic.json)
+inner+=(negative-setup.json negative-post-join.json negative-worker-projection.json negative-kernel-observation.json negative-worker-raw.json negative-root-failure.json negative-root-terminal.txt negative-descriptor.json negative-account-ids.tsv n05-worker.stdout n05-worker.stderr n06-worker.stdout n06-worker.stderr)
+
 declare -a sources=() targets=() identities=() hashes=()
 total=0; present=0; missing=0
 add_file() {
- local from=$1 relative=$2 before size hash
+ local from=$1 relative=$2 before size hash cap=$FILE_CAP
  check
  if [[ ! -e $from && ! -L $from ]]; then missing=$((missing+1)); return; fi
- file_fact "$from" "$FILE_CAP"; before=$(identity "$from"); size=$(bounded /usr/bin/stat -c %s -- "$from")
+ case "$relative" in
+  negative-setup.json) cap=1024 ;;
+  negative-post-join.json) cap=1024 ;;
+  negative-worker-projection.json) cap=1024 ;;
+  negative-kernel-observation.json) cap=4097 ;;
+  negative-worker-raw.json) cap=4097 ;;
+  negative-root-failure.json) cap=1024 ;;
+  negative-root-terminal.txt) cap=1024 ;;
+  negative-descriptor.json) cap=65536 ;;
+  negative-account-ids.tsv) cap=128 ;;
+  n05-worker.stdout) cap=0 ;;
+  n05-worker.stderr) cap=2048 ;;
+  n06-worker.stdout) cap=0 ;;
+  n06-worker.stderr) cap=2048 ;;
+ esac
+ file_fact "$from" "$cap"; before=$(identity "$from"); size=$(bounded /usr/bin/stat -c %s -- "$from")
  ((total+size<=TOTAL_CAP)) || fail retained-total-bound
  hash=$(bounded /usr/bin/sha256sum -- "$from"); hash=${hash:0:64}
  [[ $(identity "$from") == "$before" ]] || fail source-changed

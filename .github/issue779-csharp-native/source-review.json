@@ -155,15 +155,52 @@
     "operation": null,
     "source": "77e1e1fbb83357df92e15fc6213d8a6dfa369fd8"
   },
-  "capture_projection_sha256": "ee06978e09acd2c0d014c0c6d1521c234e9595082ac2cc488ef1d82d5eee6421",
-  "capture_receipt_sha256": "19d673a29d32272c9e802d779db2ba150064c5b52d63a5b6cdbf05875ffa92ac",
+  "capture_projection_sha256": "28a72da7bd4e4568b471e89bc3fa86041b876f7ee3c60fa7230eb80c20a39839",
+  "capture_receipt_sha256": "aef1ff3abea337ed53611bc7b592aff518c54414d0e58694c23ab1f59488629c",
   "composition_review_pending_at_preparation": true,
   "current_full_suite_executed": true,
   "current_publication_promotion": {
-    "independent_reviews_clear": false,
+    "independent_reviews_clear": true,
     "native_acceptance": false,
-    "status": "PENDING fresh exact-file review",
+    "status": "Reviewed fixed negative image; native control not yet executed",
     "trusted_enabled": false
+  },
+  "final_composition_peer": {
+    "path": "/private/tmp/issue779-csharp-negative-slot-composition-peer-review-v1/review.json",
+    "sha256": "7238d01081be5b7cc5cc551485a170f276b1bc3e57bce47f450f69147dc79cc0"
+  },
+  "fixed_negative_slot_preparation": {
+    "case": "N05",
+    "common_base_cumulative_delta": {
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/N05JoinedWorkerOutputTests.cs": "A",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationExecution.cs": "M",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.SlotNegative.cs": "A",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/N05JoinedWorkerOutput.cs": "A"
+    },
+    "full1192_executed": false,
+    "native_acceptance": false,
+    "operational_merge_delta": {
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxNegativeKernelObservationTests.cs": "A",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/N05JoinedWorkerOutputTests.cs": "A",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationControlServer.cs": "M",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationExecution.cs": "M",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxNegativeKernelObservation.cs": "A",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.SlotNegative.cs": "A",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerProcess.cs": "M",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/N05JoinedWorkerOutput.cs": "A",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md": "M"
+    },
+    "prior_full1190_historical": true,
+    "raw_immediate_delta": {
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/N05JoinedWorkerOutputTests.cs": "M",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.SlotNegative.cs": "M",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/N05JoinedWorkerOutput.cs": "M"
+    },
+    "targeted_passed": 22,
+    "targeted_validation": {
+      "path": "/private/tmp/issue779-csharp-n05-full-stream-variant-v1/validation-attempt-1/receipt.json",
+      "sha256": "7b11f524d7871cb486c076776c6f5b4dc816235b7c046d1bb70434796dfbb94b"
+    }
   },
   "historical_baseline": {
     "cli_entry_tests": 10,
@@ -172,6 +209,44 @@
     "source_commit": "2993dcfaac1b9b6dfb8adf057191f837876f01fe",
     "source_review_sha256": "18a2f6f9bdb51b3ca2dc5506dd96d5ef28676bac99c9c02d1a8e061ecfa626cf",
     "status": "HISTORICAL"
+  },
+  "historical_common_negative_kernel_observation": {
+    "changed_paths": 5,
+    "facts_reported_by_main": true,
+    "local_core_passed": 1170,
+    "local_diagnostic_class_passed": 96,
+    "local_endpoint_class_passed": 24,
+    "local_ownership_class_passed": 38,
+    "native_acceptance": false,
+    "native_execution": false,
+    "new_data_cases": 38,
+    "parent": "806301fd259197f7d448157795259489ac01d9f1",
+    "source": "a358d47ef36939718536b13c27b038faf307299b",
+    "source_peer_sha256": "bf7ec875219e8d3caf71b4d83b81f44cc90ba4c2c09fb14ca78fd8f14b73b5c1",
+    "source_sha256_modes": {
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxNegativeKernelObservationTests.cs": {
+        "mode": "0644",
+        "sha256": "ba9e8cd05bb40702205109ce2daba1e1a788c9535ae86a0beab54a34afb901a8"
+      },
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationControlServer.cs": {
+        "mode": "0644",
+        "sha256": "4c19143446a95db80a6ad8fad3331911dfe9d4c92a1328722615122b2699597d"
+      },
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxNegativeKernelObservation.cs": {
+        "mode": "0644",
+        "sha256": "9d8afdd73b232149806d57213c31b734e76fc57fa1f83bbd65df284c7d14e98a"
+      },
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerProcess.cs": {
+        "mode": "0644",
+        "sha256": "0830661f907d2196e82041850e31cd6818872e0217cf9d900167515725d66d89"
+      },
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md": {
+        "mode": "0644",
+        "sha256": "9c76833f2f60f6f53cf78aacc6a2b0831b6aadf4c90ba107a87042172553a5a4"
+      }
+    },
+    "trx_sha256": "50559ef35af0bcc210c83751c7543feeae37ee379bb19047d2fe85aec12f131a",
+    "validation_receipt_sha256": "50cf50fa0971dc30788164772bcc42910b14af87e9ee43196859719f6d2a1f51"
   },
   "historical_control_first_fault_candidate": {
     "capture_receipt_sha256": "0283ec6b71e46f2888444f4d3efb85ba1cc21771bed41b61d0b91c96b0f0ea7b",
@@ -352,6 +427,61 @@
     "source_review_sha256": "1eba6136561215abdfbedf36f5a5bab4570cdaf2d2cbc2ab709aef1c5dc10280",
     "status": "HISTORICAL"
   },
+  "historical_owned_socket_custody_candidate": {
+    "record": {
+      "changed_paths": 8,
+      "facts_reported_by_main": true,
+      "local_core_passed": 1132,
+      "local_diagnostic_class_passed": 96,
+      "local_endpoint_class_passed": 24,
+      "local_ownership_class_passed": 38,
+      "native_acceptance": false,
+      "native_execution": false,
+      "new_data_cases": 38,
+      "parent": "a353970c67b7b2e02acaa248348dbff69efd3648",
+      "source": "806301fd259197f7d448157795259489ac01d9f1",
+      "source_peer_sha256": "7fa24effaf5ef755031148b5e96b93f957abbda763b8418434638d62e4781492",
+      "source_sha256_modes": {
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/EvidenceNativeObservationFailureTests.cs": {
+          "mode": "0644",
+          "sha256": "b5adf017b9eaf19e45042d43aa2fec5a68226608a9a1eec75c675866da396a0a"
+        },
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxOwnedUnixEndPointTests.cs": {
+          "mode": "0644",
+          "sha256": "bccdc4a1b07d33346a033ebce2b2c50004873e9c9f115d03811564d8db4e1d3c"
+        },
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/EvidenceNativeObservationFailure.cs": {
+          "mode": "0644",
+          "sha256": "db4a151365676a484475bef0002fc016b08d73039e0497fb8e5167afda5a9c87"
+        },
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxControlListener.cs": {
+          "mode": "0644",
+          "sha256": "8590f98074bacd8f8a436661f393550998644050cf9e55c4298fa29c602f4fd4"
+        },
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationExecution.cs": {
+          "mode": "0644",
+          "sha256": "b78edfd0055c69a164fb464bd14c9d4ca4b2548a7421a7163ec55df55f536e00"
+        },
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxOwnedUnixEndPoint.cs": {
+          "mode": "0644",
+          "sha256": "949482562b7c9a2e1cd362bcc482abbd1e8d87594309fcdca9b5d9ce8babcc8b"
+        },
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.Custody.cs": {
+          "mode": "0644",
+          "sha256": "68a1edf967f2916e8df16d8f72a025241980f2484dfaf340eda796b97ae4cd5b"
+        },
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md": {
+          "mode": "0644",
+          "sha256": "4c849fdbc472e3b5496daf081f8cf716984d6ff91e26ffcf00ddd12216b3c803"
+        }
+      },
+      "trx_sha256": "0c908c7b38ee7d0df9f1e4b737d833e4ab9b80312b2b55d75003adf6606d6e2f",
+      "validation_receipt_sha256": "629139bb576bd4568ba9e92af9f5a6d63809d90f24a5b22c527d9d1ed917522a"
+    },
+    "source": "806301fd259197f7d448157795259489ac01d9f1",
+    "source_review_sha256": "671ab29e1ca020291182e4125c5ad050622f7ca89712b37254bf9317e8980268",
+    "status": "HISTORICAL"
+  },
   "historical_previous_candidate": {
     "record": {
       "capture_projection_sha256": "b3a7068c001d9d6ea09cb4c2df04d7c764ea3e41bc1a52cf7a0b7a34b556cfd9",
@@ -528,12 +658,12 @@
       "nobody",
       "nogroup"
     ],
-    "harness_parent_status": "Ordered source merge with previous harness 4de73baf29c0388b3c1cb5b1bf7e655f20d25bbe pending execution",
+    "harness_parent_status": "Ordered source merge with previous harness ca3b3b99e32c2c22a1420b357203e8f40f57415a pending execution",
     "independent_reviews_clear": true,
     "native_acceptance": false,
     "proof_registry": false,
     "required_primary_gid": 65534,
-    "source_binding_status": "Intentional source-pin-only rebind to 806301fd259197f7d448157795259489ac01d9f1",
+    "source_binding_status": "Intentional source-pin-only rebind to a358d47ef36939718536b13c27b038faf307299b",
     "startup_budget_semantics": "A single captured cutoff=min(original work_end, inherited uptime+15); dynamic private startup scope caps shared left/remaining/try_bounded/bounded and all nested synchronous calls. Cleanup ignores startup scope and uses original hard_end. Work resumes only after actual owned worker exit, authenticated peer/EOF and broker continuity.",
     "startup_lower_seconds": 15,
     "uid_selection": "actual bounded root getent distinct nonzero uint32, no fixed UID",
@@ -607,57 +737,7 @@
     "status": "HISTORICAL",
     "validation_receipt_sha256": "e778a36dce64edad99de739153d24b1d10fd2023e8ecaf80223f4ebe8f65f364"
   },
-  "owned_socket_custody_correction": {
-    "changed_paths": 8,
-    "facts_reported_by_main": true,
-    "local_core_passed": 1132,
-    "local_diagnostic_class_passed": 96,
-    "local_endpoint_class_passed": 24,
-    "local_ownership_class_passed": 38,
-    "native_acceptance": false,
-    "native_execution": false,
-    "new_data_cases": 38,
-    "parent": "a353970c67b7b2e02acaa248348dbff69efd3648",
-    "source": "806301fd259197f7d448157795259489ac01d9f1",
-    "source_peer_sha256": "7fa24effaf5ef755031148b5e96b93f957abbda763b8418434638d62e4781492",
-    "source_sha256_modes": {
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/EvidenceNativeObservationFailureTests.cs": {
-        "mode": "0644",
-        "sha256": "b5adf017b9eaf19e45042d43aa2fec5a68226608a9a1eec75c675866da396a0a"
-      },
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxOwnedUnixEndPointTests.cs": {
-        "mode": "0644",
-        "sha256": "bccdc4a1b07d33346a033ebce2b2c50004873e9c9f115d03811564d8db4e1d3c"
-      },
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/EvidenceNativeObservationFailure.cs": {
-        "mode": "0644",
-        "sha256": "db4a151365676a484475bef0002fc016b08d73039e0497fb8e5167afda5a9c87"
-      },
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxControlListener.cs": {
-        "mode": "0644",
-        "sha256": "8590f98074bacd8f8a436661f393550998644050cf9e55c4298fa29c602f4fd4"
-      },
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationExecution.cs": {
-        "mode": "0644",
-        "sha256": "b78edfd0055c69a164fb464bd14c9d4ca4b2548a7421a7163ec55df55f536e00"
-      },
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxOwnedUnixEndPoint.cs": {
-        "mode": "0644",
-        "sha256": "949482562b7c9a2e1cd362bcc482abbd1e8d87594309fcdca9b5d9ce8babcc8b"
-      },
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.Custody.cs": {
-        "mode": "0644",
-        "sha256": "68a1edf967f2916e8df16d8f72a025241980f2484dfaf340eda796b97ae4cd5b"
-      },
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md": {
-        "mode": "0644",
-        "sha256": "4c849fdbc472e3b5496daf081f8cf716984d6ff91e26ffcf00ddd12216b3c803"
-      }
-    },
-    "trx_sha256": "0c908c7b38ee7d0df9f1e4b737d833e4ab9b80312b2b55d75003adf6606d6e2f",
-    "validation_receipt_sha256": "629139bb576bd4568ba9e92af9f5a6d63809d90f24a5b22c527d9d1ed917522a"
-  },
-  "parent_commit": "a353970c67b7b2e02acaa248348dbff69efd3648",
+  "parent_commit": "55079eb96608246c6c396b1ae7b01c01cfbf7ba8",
   "phase_diagnostic": {
     "command_exits": [
       0,
@@ -832,13 +912,13 @@
     "validation_receipt_sha256": "406e046ab439a3dc5ac43ef7e5699ed3a977eef6f7d6a0f062543dd0b2873ae4"
   },
   "production_registry_enabled": false,
-  "projection_receipt_sha256": "682f3bb7d6d99240199b2a2c2da1bea30642192d3c4d182ccc3b4333762650a0",
+  "projection_receipt_sha256": "cef2162052606e8984dca4ca6a557e6c8d4aa23368f7b08973e45e9d7a47e037",
   "root_trust_issuer": false,
   "schema": "issue779-reviewed-csharp-candidate-v1",
-  "source_commit": "806301fd259197f7d448157795259489ac01d9f1",
-  "source_count": 2823,
-  "source_map_sha256": "3609d645da23c550e88fadb7f8df8175206c5fd4af02bc73341a2ec87b7fb009",
-  "source_tree": "626eb0e95fb31bfe12c3ce9d794337731d3ebaf5",
+  "source_commit": "5214a278cf710bfcf3ebca9f9ea4db557ee2adbb",
+  "source_count": 2828,
+  "source_map_sha256": "c98df9733cfa6f9f8b17a4463a7026ef3466a81df3c335f0bd0b1fec6914aa12",
+  "source_tree": "e6f322983b431ca69bfe2dfbdd24857c1b4ab603",
   "startup_limit_diagnostic": {
     "additional_fixed_retention_names": [
       "logs/n02.file-limit",

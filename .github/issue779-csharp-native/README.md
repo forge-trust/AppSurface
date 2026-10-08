@@ -1,3 +1,7 @@
+## HISTORICAL common-core composition
+
+## HISTORICAL prior ordinary composition
+
 ## HISTORICAL listener-close composition (source a353)
 
 ## HISTORICAL exit/accept composition (source77e1)
@@ -51,3 +55,13 @@ Source `a353970c67b7b2e02acaa248348dbff69efd3648` is an exact five-file diagnost
 ## Owned-socket custody candidate
 
 Source `806301fd259197f7d448157795259489ac01d9f1` is a six-modified/two-added child of `a353970c67b7b2e02acaa248348dbff69efd3648` with2823 SHA/mode-pinned files. Current counts, endpoint/diagnostic cases, TRX and peer pins come only from final actual receipts; prior1094/Diagnostics82/Ownership38 remain historical. The pure endpoint wrapper and optional custody diagnostics do not establish a native cause, acceptance, or permission to skip named custody checks. Operational parent is `4de73baf29c0388b3c1cb5b1bf7e655f20d25bbe`; preparation creates normal ordered merge then a sole installation child on retry-17. All43 command checks, original deadlines, clone/merge022/private077, audit/SDK/runtime/caps and19 inputs/40 pins are retained. Eight promotion flags are false until independent generated-file review; all16 native controls and Trusted/registry remain unaccepted.
+
+## Current ordinary negative-kernel data core (review pending)
+
+Source `a358d47ef36939718536b13c27b038faf307299b` is the three-modified/two-added child of `806301fd259197f7d448157795259489ac01d9f1`; count derives from the full pinned capture. The detached DTO does not change normal Run, issue authority, or include variant emitters. Local1170/96 diagnostics/24 endpoint/38 ownership and38 new data cases are receipt-bound. Previous owned-socket records are historical; N01-N03 must be rechecked on this ordinary image. Operational parent `ca3b3b99e32c2c22a1420b357203e8f40f57415a`; intended ordered merge then sole installation child on retry19. All43 commands, original deadlines, clone/merge022/private077, SDK/runtime/audit/caps,19 inputs/40 pins stay fixed. Eight promotion flags and independent composition review are false; no native qualification is added. Drivers are materialized as source only, with unchanged nonmain function ASTs. Independent generated composition/driver review and explicit authorization remain required before preparation/publication.
+
+This packet is the common ordinary-core baseline for subsequent fixed N05/N06 integration. No separate ordinary CI run is proposed here; any combined candidate must recheck genuine ordinary N01-N03 where practical. Existing source reviews and local cases are not native credit.
+
+## Fixed N05 preparation (review pending)
+
+Final image 5214a278cf710bfcf3ebca9f9ea4db557ee2adbb; immediate parent 55079eb96608246c6c396b1ae7b01c01cfbf7ba8; count 2828. Immediate3M/2M, common1M3A/1M2A and operational4M5A/4M4A are distinct. Targeted22 only; prior full1190 historical; no full1192 claim. Fixed reviewed fixture bytes occupy existing checkpoint-n01-n02-v5.sh path. Negative-only credit; N02/N03 are prerequisites, no N01 pass is asserted. All native/Trust/registry claims remain pending; budgets/caps/clocks unchanged. Independent review and eight workflow flags remain false.

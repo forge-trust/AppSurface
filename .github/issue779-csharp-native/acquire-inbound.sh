@@ -4,9 +4,9 @@
 set -euo pipefail
 export PATH=/usr/bin:/usr/sbin LC_ALL=C LANG=C
 umask 077
-readonly SOURCE=806301fd259197f7d448157795259489ac01d9f1
-readonly PARENT=4de73baf29c0388b3c1cb5b1bf7e655f20d25bbe
-readonly SOURCE_MAP=3609d645da23c550e88fadb7f8df8175206c5fd4af02bc73341a2ec87b7fb009
+readonly SOURCE=5214a278cf710bfcf3ebca9f9ea4db557ee2adbb
+readonly PARENT=ca3b3b99e32c2c22a1420b357203e8f40f57415a
+readonly SOURCE_MAP=c98df9733cfa6f9f8b17a4463a7026ef3466a81df3c335f0bd0b1fec6914aa12
 readonly FILE_CAP=268435456 TREE_CAP=1073741824 NODE_CAP=8192 RESERVE_MS=5000
 declare -A v=() roots=() maps=() nodes=() map_hash=() node_hash=()
 output=; work=; success=0
@@ -28,10 +28,10 @@ readonly N03_INDEPENDENT_REVIEW_CLEAR=1
 for k in reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256 helper-build-receipt-sha256; do
  [[ ${v[$k]} =~ ^[0-9a-f]{64}$ ]] || fail digest-shape
 done
-[[ ${v[transport-sha256]} == 0f214f68198b1e84047258b7d0cf8658af4db420c436646aa17fc064e2d760c8 &&
-   ${v[fixture-sha256]} == d94f221faa7d1a89bbb9d1f66ab78431a1b2b98c6d676c1b29888e822ee6673f &&
-   ${v[audit-sha256]} == 0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b &&
-   ${v[source-review-sha256]} == 671ab29e1ca020291182e4125c5ad050622f7ca89712b37254bf9317e8980268 ]] || fail frozen-input-pins
+[[ ${v[transport-sha256]} == 2806c2ab1f43d872d3c5e7eb621c1c9d1938d12e34307120790dfdb1f1e30f9a &&
+   ${v[fixture-sha256]} == 8bb1fc24429b171823eb889727ffefc3577b04628c08615337f4bb79e16ce477 &&
+   ${v[audit-sha256]} == b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0 &&
+   ${v[source-review-sha256]} == 6ad02d0d8a706544d23f12b96e300644502f3cfcb9eb8e82c9f4982867aa58dc ]] || fail frozen-input-pins
 mono() {
  local stamp rest whole fraction
  IFS=' ' read -r stamp rest </proc/uptime || return 1
@@ -107,7 +107,7 @@ bounded /usr/bin/jq -e --arg source "$SOURCE" --arg parent "$PARENT" --arg map "
  (.commands|length)==43 and (.commands|map(.ordinal))==[range(0;43)] and
  all(.commands[]; .exit==0 and .failure==null and .waited==true and .group_absent==true and .timed_out==false and .forced_cleanup==false and (.logs|length)==2) and
  all(["source_before","source_after_assets","source_after_build","source_final"][];
-  $r[.].head==$source and $r[.].count==2823 and $r[.].physical_sha256_modes==true and
+  $r[.].head==$source and $r[.].count==2828 and $r[.].physical_sha256_modes==true and
   $r[.].physical_git_sha1==true and $r[.].index_tree_matches==true and $r[.].source_map_sha256==$map) and
  (.artifacts|keys)==["runtime","source","tool"] and
  all(.artifacts[]; (.tsv_sha256|type=="string" and test("^[0-9a-f]{64}$")) and
@@ -201,7 +201,7 @@ for kind in source tool runtime helper; do
    (.sha256|type=="string" and test("^[0-9a-f]{64}$")) and (.bytes|type=="number" and floor==. and .>=0 and .<=268435456) and
    (if $kind=="source" then .mode=="0644" or .mode=="0755" else .mode=="0444" or .mode=="0555" end))) and
   ([.files[].bytes]|add)==(if $kind=="helper" then $helper[0].helper_bytes else $receipt[0].artifacts[$kind].total_bytes end) and
-  (if $kind=="source" then (.files|length)==2823 else true end)
+  (if $kind=="source" then (.files|length)==2828 else true end)
  ' "${nodes[$kind]}" > /dev/null
  bounded /usr/bin/jq -r '.files|to_entries|sort_by(.key)[]|[.value.mode,.value.sha256,.key]|@tsv' "${nodes[$kind]}" >"$work/$kind-derived.tsv"
  bounded /usr/bin/cmp -- "${maps[$kind]}" "$work/$kind-derived.tsv"
@@ -276,7 +276,7 @@ done
 trusted_pin "${BASH_SOURCE[0]}" "${v[reviewed-script-sha256]}" 131072
 bounded /usr/bin/jq -ncS --arg g "${v[generation]}" --arg source "$SOURCE" --argjson deadline "$hard_end" --arg receipt "$receipt_hash" '
  {schema:"issue779-native-inbound-acquisition-v1",generation:$g,source_commit:$source,build_receipt_sha256:$receipt,
- original_deadline_monotonic_ms:$deadline,source_count:2823,acquired_code_executed:false,native_acceptance_claim:false}
+ original_deadline_monotonic_ms:$deadline,source_count:2828,acquired_code_executed:false,native_acceptance_claim:false}
  ' >"$work/acquisition-receipt.json"
 bounded /usr/bin/sync -f -- "$work/acquisition-receipt.json"
 [[ $(bounded /usr/bin/stat -c '%d:%i:%u:%g:%a' -- "$output") == "$outer_pin" ]] || fail final-outer-identity

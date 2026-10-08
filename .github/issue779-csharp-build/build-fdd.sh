@@ -18,16 +18,16 @@ import tarfile
 import time
 import xml.etree.ElementTree as ET
 
-HEAD = '806301fd259197f7d448157795259489ac01d9f1'
-PARENT = 'a353970c67b7b2e02acaa248348dbff69efd3648'
-HARNESS_PARENT = '4de73baf29c0388b3c1cb5b1bf7e655f20d25bbe'
-TREE = '626eb0e95fb31bfe12c3ce9d794337731d3ebaf5'
-CAPTURE_SHA = '19d673a29d32272c9e802d779db2ba150064c5b52d63a5b6cdbf05875ffa92ac'
-CAPTURE_PROJECTION_SHA = 'ee06978e09acd2c0d014c0c6d1521c234e9595082ac2cc488ef1d82d5eee6421'
-UBUNTU_PREREQUISITE_SHA = '8320dc862a63693b9776ce82dffb38277bcb5b45d8b745822d75b0df0f567fac'
-NATIVE_RUNNER_SHA = '1f921e4e32fd227f5de26b96f44fe4ff77244c1ff0a3395f29240262e2b5d020'
+HEAD = '5214a278cf710bfcf3ebca9f9ea4db557ee2adbb'
+PARENT = '55079eb96608246c6c396b1ae7b01c01cfbf7ba8'
+HARNESS_PARENT = 'ca3b3b99e32c2c22a1420b357203e8f40f57415a'
+TREE = 'e6f322983b431ca69bfe2dfbdd24857c1b4ab603'
+CAPTURE_SHA = 'aef1ff3abea337ed53611bc7b592aff518c54414d0e58694c23ab1f59488629c'
+CAPTURE_PROJECTION_SHA = '28a72da7bd4e4568b471e89bc3fa86041b876f7ee3c60fa7230eb80c20a39839'
+UBUNTU_PREREQUISITE_SHA = '0c44b9844c1eab8daae55f010faaa1a484542285547d7e68d02a10a24ea89808'
+NATIVE_RUNNER_SHA = 'c13acb9f3d6ad24b5f99556335c3de6389a96c6190102c761d259244d8772602'
 SDK = '10.0.401'
-COUNT = 2823
+COUNT = 2828
 FILE_CAP = 256 * 1024 * 1024
 TREE_CAP = 1024 * 1024 * 1024
 NODE_CAP = 8192
@@ -649,7 +649,7 @@ def main():
     source_merge = run(['git', 'show', '-s', '--format=%P', 'HEAD'], HARN).strip().decode()
     require(re.fullmatch('[0-9a-f]{40}', source_merge) is not None, 'normal-harness-child')
     require(run(['git', 'show', '-s', '--format=%P', source_merge], HARN).strip().decode() == HARNESS_PARENT + ' ' + HEAD, 'ordered-source-merge')
-    source_delta = {'Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/EvidenceNativeObservationFailureTests.cs': 'M', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxOwnedUnixEndPointTests.cs': 'A', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/EvidenceNativeObservationFailure.cs': 'M', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxControlListener.cs': 'M', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationExecution.cs': 'M', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxOwnedUnixEndPoint.cs': 'A', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.Custody.cs': 'M', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md': 'M'}
+    source_delta = {'Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxNegativeKernelObservationTests.cs': 'A', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/N05JoinedWorkerOutputTests.cs': 'A', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationControlServer.cs': 'M', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationExecution.cs': 'M', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxNegativeKernelObservation.cs': 'A', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.SlotNegative.cs': 'A', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerProcess.cs': 'M', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/N05JoinedWorkerOutput.cs': 'A', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md': 'M'}
     source_status = dict((name, status) for status, name in
                         (row.split('\t') for row in run(['git', 'diff', '--name-status', HARNESS_PARENT, source_merge], HARN).decode().splitlines()))
     require(source_status == source_delta, 'exact-source-merge-delta')
