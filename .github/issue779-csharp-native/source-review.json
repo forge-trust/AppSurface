@@ -84,6 +84,19 @@
     "run": 37740286537,
     "source": "31c9ff5c8782102e0917e0c992bbdecc35e115d0"
   },
+  "attempt23_nested_audit_fd_failure": {
+    "artifact_sha256": "f03e7d00d0cfc4aea01f8739b8182f44b5a4f3e2e865ec99559265f8fb72e2a4",
+    "canonical_receipt_sha256": "f13ca34286616a723aa950a194c6c9dd0b95877be33d6c05f089f84747267a0e",
+    "correction": "Bind shared tree-audit FD checks to the actual holder shell; remove an unused N03 cleanup variable.",
+    "head": "27747517454fdaeb11215ec72f989b4b3f309919",
+    "n01_executed": false,
+    "native_acceptance": false,
+    "native_dispatched": true,
+    "run": 37743123788,
+    "selection_receipt_sha256": "ddef62d15ccf92c523c6ea601d0141d21f184d9dcd304b1721bdb63cc0e7b943",
+    "source": "31c9ff5c8782102e0917e0c992bbdecc35e115d0",
+    "source_ready_sha256": "471e7c08f14862314b4f0687de33ed64bd64e4c4d20430f822fee4acd01d6ea4"
+  },
   "capture_projection_sha256": "214997205813e52f622388e1311e2293c1bdb302731c1389035c8c89f0e99e40",
   "capture_receipt_sha256": "0283ec6b71e46f2888444f4d3efb85ba1cc21771bed41b61d0b91c96b0f0ea7b",
   "composition_review_pending_at_preparation": true,

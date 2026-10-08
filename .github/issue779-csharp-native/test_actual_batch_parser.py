@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+import sys
 
 FIXTURE = None
 END = None
@@ -243,16 +244,91 @@ printf 'PARSER_DATA_OK\\n'
         (self.tree / "file").write_bytes(b"abd")
         self.assertEqual(1, invoke(["/usr/bin/sha256sum", "--check", "--strict", "--status", "--", str(check)])[0])
 
+class NestedAuditFDControls(unittest.TestCase):
+    """Actual FD comparison slice and EXIT scope; no full root-audit acceptance."""
+    def fixture_lines(self):
+        text = FIXTURE
+        capture = next(line for line in text.splitlines()
+                       if line.startswith(" local -r batch_fd_owner_pid="))
+        body = text[text.index("batch_scratch_pin() {"):text.index("batch_snapshot() {")]
+        named = next(line for line in body.splitlines() if line.startswith(" named=$("))
+        opened = next(line for line in body.splitlines() if line.startswith(" opened=$("))
+        same = next(line for line in body.splitlines() if "[[ $named == \"$opened\" ]]" in line)
+        return capture, named, opened, same
+
+    def compare_fd(self, inherited_outer_pid=False):
+        capture, named, opened, same = self.fixture_lines()
+        if inherited_outer_pid:
+            opened = opened.replace("$batch_fd_owner_pid", "$$")
+        with tempfile.TemporaryDirectory(prefix="issue779-fd-data-") as directory:
+            leaf = Path(directory) / "data"
+            leaf.write_bytes(b"fixed-data-only")
+            # Only named/open identity equality is exercised. The root0 custody,
+            # protected ancestors, full tree audit and authority checks are excluded.
+            script = ("set -euo pipefail\nbounded() { \"$@\"; }\n"
+                      "fail() { exit 29; }\nf() (\nverify() {\n" + capture + "\n"
+                      " local path=$1 fd named opened\nexec {fd}<\"$path\"\n" + named + "\n"
+                      + opened + "\n" + same + "\nexec {fd}<&-\n"
+                      "printf 'FD_IDENTITY_MATCHED\\n'\n}\nverify \"$1\"\n)\nf \"$1\"\n")
+            return invoke(["/bin/bash", "-c", script, "--", str(leaf)])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux /proc FD control deferred on macOS")
+    def test_actual_batched_fd_comparison_in_nested_shell(self):
+        code, (output, error) = self.compare_fd()
+        self.assertEqual(0, code, error)
+        self.assertEqual(b"FD_IDENTITY_MATCHED\n", output)
+        self.assertEqual(b"", error)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux /proc FD control deferred on macOS")
+    def test_inherited_outer_pid_cannot_inspect_subshell_fd(self):
+        code, (output, error) = self.compare_fd(inherited_outer_pid=True)
+        self.assertNotEqual(0, code)
+        self.assertNotIn(b"FD_IDENTITY_MATCHED", output)
+        self.assertIn(b"No such file or directory", error)
+
+    def cleanup_scope(self, old_unused_read_fd):
+        body = FIXTURE[FIXTURE.index("n03_run() ("):]
+        state = next(line for line in body.splitlines()
+                     if "n03_broker_pid= n03_worker_pid= release_fd=" in line)
+        self.assertNotIn("read_fd=", state)
+        if old_unused_read_fd:
+            state = state.replace("release_fd= dir_fd=", "release_fd= read_fd= dir_fd=")
+        branch = ('if [[ -n $read_fd ]]; then exec {read_fd}<&-; fi\n'
+                  if old_unused_read_fd else '')
+        # Supply the uninitialized audit-local state observed by the native
+        # cleanup branch. Invoke it while that local is active; this is a
+        # branch/state control, not a claim about platform-specific EXIT unwind.
+        script = ("f() (\nset -euo pipefail\n" + state + "\n"
+                  "cleanup() { local original=$?; trap - EXIT;\n" + branch
+                  + "printf 'ORIGINAL:%s\\n' \"$original\"; exit \"$original\"; }\n"
+                  "audit() { local read_fd; unset read_fd; set +e; (exit 23); cleanup; }\naudit\n)\nf\n")
+        return invoke(["/bin/bash", "-c", script])
+
+    def test_old_cleanup_rejects_observed_uninitialized_audit_local(self):
+        code, (output, error) = self.cleanup_scope(old_unused_read_fd=True)
+        self.assertNotEqual(0, code)
+        self.assertNotIn(b"ORIGINAL:", output)
+        self.assertIn(b"read_fd: unbound variable", error)
+
+    def test_corrected_cleanup_retains_failure_with_uninitialized_audit_local(self):
+        code, (output, error) = self.cleanup_scope(old_unused_read_fd=False)
+        self.assertEqual(23, code)
+        self.assertEqual(b"ORIGINAL:23\n", output)
+        self.assertEqual(b"", error)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--fixture", type=Path, required=True)
     parser.add_argument("--sha256", required=True)
+    parser.add_argument("--fd-scope-only", action="store_true", help="Run only FD/scope data controls; no root audit")
     args = parser.parse_args()
     raw = args.fixture.read_bytes()
     if hashlib.sha256(raw).hexdigest() != args.sha256:
         raise SystemExit("parser-fixture-pin")
     text = raw.decode()
+    FIXTURE = text
     LEXICAL = text[text.index("lexical() {"):text.index("sha() {")]
     BLOCK = text[text.index("batch_check_time() {"):text.index("# OS aliases ONLY:")]
     END = time.monotonic()+45
-    unittest.main(argv=[__file__, "-v"])
+    unittest.main(argv=[__file__, "NestedAuditFDControls", "-v"] if args.fd_scope_only else [__file__, "-v"])

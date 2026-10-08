@@ -26,7 +26,7 @@ n03_run() (
  [[ $# == 11 && $EUID == 0 && $source_revision == 31c9ff5c8782102e0917e0c992bbdecc35e115d0 ]] || fail N03-input
  helper_root=$1 helper_map=$2 helper_map_sha=$3 helper_nodes=$4 helper_nodes_sha=$5 helper_entry_sha=$6
  broker_name=$7 worker_name=$8 shared_name=$9 startup_kib=${10} helper_generation=${11}
- n03_broker_pid= n03_worker_pid= release_fd= read_fd= dir_fd= socket_pin= first_failure= result_status=rejected
+ n03_broker_pid= n03_worker_pid= release_fd= dir_fd= socket_pin= first_failure= result_status=rejected
  n03_startup_active=0
  broker_exit= worker_exit=0 sampled_pid= sampled_start= broker_actual_pid= trace_peer_seen=0 observed=0
  broker_pw= worker_pw= group_row= bu= bg= wu= wg= gu= gid= peer_pid= candidate= broker_ready= peer_ready= eof_ready=
@@ -44,7 +44,6 @@ n03_run() (
   for name in n03_worker_pid n03_broker_pid; do
    if [[ -n ${!name} ]]; then join_owned "$name" || bad=1; fi
   done
-  if [[ -n $read_fd ]]; then exec {read_fd}<&- || bad=1; fi
   if [[ -n $dir_fd ]]; then
    s=$(try_bounded stat -Lc '%d:%i:%u:%g:%a' "/proc/$n03_fd_owner_pid/fd/$dir_fd") || bad=1
    [[ $s == "$before_dir" ]] || bad=1; exec {dir_fd}<&- || bad=1
