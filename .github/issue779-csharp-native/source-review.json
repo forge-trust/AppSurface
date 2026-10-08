@@ -49,6 +49,18 @@
     "status": "HISTORICAL",
     "validation_receipt_sha256": "e050ead3f1a0f2e81ad93db2a0a4239d67f05d5c0ac7b44e4017a1f3c4dfcf38"
   },
+  "attempt20_retention_failure": {
+    "artifact_count": 0,
+    "correction": "fixed helper receipt/map/log paths; excludes package caches and build trees",
+    "head": "66a9b1d2102e63501ca42eb5f1475a008c1e51e1",
+    "native_result": null,
+    "public_build_steps_passed": true,
+    "retention_error": "upload rejected colon in nested NuGet HTTP cache filename",
+    "root_step_exit": 1,
+    "run": 37736419284,
+    "source": "31c9ff5c8782102e0917e0c992bbdecc35e115d0",
+    "source_backed_handoff_correction": "restore prior reviewed41-command and exactpipe-regression checks in Python/jq validators; actualcurrent inner failure unmeasured withoutartifact"
+  },
   "capture_projection_sha256": "214997205813e52f622388e1311e2293c1bdb302731c1389035c8c89f0e99e40",
   "capture_receipt_sha256": "0283ec6b71e46f2888444f4d3efb85ba1cc21771bed41b61d0b91c96b0f0ea7b",
   "composition_review_pending_at_preparation": true,
@@ -92,10 +104,10 @@
   "current_full_suite_executed": true,
   "current_publication_promotion": {
     "native_execution": false,
-    "parent": "419e05da4306a323031db0cab763882a54ba7275",
+    "parent": "66a9b1d2102e63501ca42eb5f1475a008c1e51e1",
     "reviewed_source_composition_sha256": "455ddfd333a12efb14ea4fee4872540ea5fd023292f59d993e2c35db6c29c86e",
     "scope": "Source31c9, N03v4 and all16 requirements unchanged; this promotes reviewed source-execution gates only",
-    "status": "independent promotion review pending",
+    "status": "source preparation independently reviewed; historical binding",
     "trusted_enabled": false
   },
   "historical_baseline": {

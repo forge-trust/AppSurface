@@ -18,7 +18,7 @@ import uuid
 N03_INDEPENDENT_REVIEW_CLEAR = True
 N03_SOURCE_REBIND_PENDING = False
 SOURCE = '31c9ff5c8782102e0917e0c992bbdecc35e115d0'
-PARENT = '419e05da4306a323031db0cab763882a54ba7275'
+PARENT = '66a9b1d2102e63501ca42eb5f1475a008c1e51e1'
 SOURCE_MAP = '542983137c1f8fb9c1a4ba68a93a722c9403788c16d3768f21d099253ad5bc4b'
 PINS = {
     'build-helper.sh': '7bc0906967cfba542b3919e12855fb5f0e8946d0fe062a5d8371d4a5142101f4',
@@ -29,8 +29,8 @@ PINS = {
     'prepare-root-inputs-v2.sh': 'a99d8e551ec68feb9ce1c5255fe52af07ea25f006ad70695d34d5f28539d4dba',
     'checkpoint-n01-n02-v5.sh': 'e8438eef38118148d94e89a248ac36ed148f0357dd918bacf802973ba23c38bb',
     'prepare-os-audit-v2.py': '0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b',
-    'source-review.json': '65e26385ad35b1a1a1fed9614165b98d148df781227980985c2520524642d30f',
-    'acquire-inbound.sh': '4396bcd36ee1673761543acc993132fc8ef9aae5cfdaac8e78a7fab44324dced',
+    'source-review.json': 'd048af6b12705c3668e2b7f3d95cdac0a6f96f08767c5c96d4b41a4a5aee2903',
+    'acquire-inbound.sh': '58a0e56e7b90caffc9400f6cbe8ae0be009f6a50ff09a6327a28c4437facbb00',
     'retain-native.sh': 'df77c52bae29828c12b1ad56c2dc0c150649c26a1fde1fe2c2f2c345ad54a9cd',
 }
 ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',
@@ -188,7 +188,15 @@ def validate_build(receipt, maps):
             and receipt['exit'] == 0 and receipt.get('failure') is None and receipt['diagnostics'] == []
             and receipt['source_commit'] == SOURCE and receipt['harness_parent'] == PARENT
             and receipt['native_execution'] is False and receipt['checkpoint_pass'] is False, 'build-terminal')
-    require(len(receipt['commands']) == 39 and [row['ordinal'] for row in receipt['commands']] == list(range(39)), 'build-commands')
+    require(len(receipt['commands']) == 41 and [row['ordinal'] for row in receipt['commands']] == list(range(41)), 'build-commands')
+    pipe = receipt.get('linux_pipe_regression')
+    require(type(pipe) is dict and set(pipe) == {'method', 'counters', 'trx_sha256', 'unprivileged_library_behavior_only', 'root_factory_exercised', 'native_acceptance', 'runtime_basis'}, 'pipe-regression-schema')
+    require(pipe['method'] == 'OwnedRawPipeReadWrappingUsesHandleModeAndJoinsBothEofs'
+            and type(pipe['counters']) is dict and all(pipe['counters'].get(k) == '1' for k in ('total', 'executed', 'passed'))
+            and all(pipe['counters'].get(k) == '0' for k in ('failed', 'error', 'notExecuted', 'timeout', 'aborted'))
+            and type(pipe['trx_sha256']) is str and re.fullmatch(r'[0-9a-f]{64}', pipe['trx_sha256']) is not None
+            and pipe['unprivileged_library_behavior_only'] is True and pipe['root_factory_exercised'] is False
+            and pipe['native_acceptance'] is False and pipe['runtime_basis'] == 'selected SDK dotnet host', 'pipe-regression-terminal')
     for row in receipt['commands']:
         require(type(row['exit']) is int and row['exit'] == 0 and row['failure'] is None
                 and row['waited'] is True and row['group_absent'] is True and row['timed_out'] is False

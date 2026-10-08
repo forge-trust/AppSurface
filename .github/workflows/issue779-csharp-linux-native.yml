@@ -15,23 +15,23 @@ jobs:
       # Promotion requires frozen source reviews and a complete native handoff.
       # Promote only after full source composition review; no native passing claim.
       UBUNTU_RUNTIME_REVIEWED: 'true'
-      UBUNTU_RUNTIME_SCRIPT_SHA256: 37813b5a98e96e6c12b651181292eb9e750e9691c1ab6cb242b22797a011ce8e
+      UBUNTU_RUNTIME_SCRIPT_SHA256: 32ea28fbbd621122873ae1b56c6a443507e13615fb7d2cb22fb3226390b3af3c
       N03_INDEPENDENT_REVIEW_CLEAR: 'true'
       N03_SOURCE_REBIND_PENDING: 'false'
       BUILD_REVIEWED: 'true'
-      BUILD_SCRIPT_SHA256: 53ab03bf392bcf37f717ef0d01a8caaa290cd7b723271b06145f25cc09e17023
+      BUILD_SCRIPT_SHA256: 943b9bdf1aa63a7da8a161c00fb3c9fab1cf85f4c715fef4e06b7e2183e0558e
       ROOT_TRANSPORT_REVIEWED: 'true'
       ROOT_TRANSPORT_SHA256: a99d8e551ec68feb9ce1c5255fe52af07ea25f006ad70695d34d5f28539d4dba
       FIXTURE_REVIEWED: 'true'
       FIXTURE_SHA256: e8438eef38118148d94e89a248ac36ed148f0357dd918bacf802973ba23c38bb
       OS_AUDIT_REVIEWED: 'true'
       OS_AUDIT_SHA256: 0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b
-      SOURCE_REVIEW_SHA256: 65e26385ad35b1a1a1fed9614165b98d148df781227980985c2520524642d30f
+      SOURCE_REVIEW_SHA256: d048af6b12705c3668e2b7f3d95cdac0a6f96f08767c5c96d4b41a4a5aee2903
       NATIVE_HANDOFF_REVIEWED: 'true'
       NATIVE_HANDOFF_IMPLEMENTED: 'true'
-      ACQUISITION_SHA256: 4396bcd36ee1673761543acc993132fc8ef9aae5cfdaac8e78a7fab44324dced
+      ACQUISITION_SHA256: 58a0e56e7b90caffc9400f6cbe8ae0be009f6a50ff09a6327a28c4437facbb00
       RETENTION_SHA256: df77c52bae29828c12b1ad56c2dc0c150649c26a1fde1fe2c2f2c345ad54a9cd
-      ORCHESTRATOR_SHA256: 2bcd63dd66d74393084deb78e66e559126c61d2fc59a56d6648fad6595913ff1
+      ORCHESTRATOR_SHA256: da148d1c3260d83b3eda9159dee107f377120d33244dbed25f32d443240fd608
       CAPTURE_RECEIPT_SHA256: 0283ec6b71e46f2888444f4d3efb85ba1cc21771bed41b61d0b91c96b0f0ea7b
       BATCH_PARSER_TEST_SHA256: aa0be812dc09f8c9c24874849b342809212faa9a6988030e5750daac627feca3
       N03_HELPER_RECIPE_SHA256: 7bc0906967cfba542b3919e12855fb5f0e8946d0fe062a5d8371d4a5142101f4
@@ -39,7 +39,7 @@ jobs:
       N03_HELPER_PROJECT_SHA256: 92da6c96d4c88fae754ece54af775a00c1d713c7e44b9a76bda7cc768773514e
       N03_HELPER_LOCK_SHA256: a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb
       SOURCE_COMMIT: 31c9ff5c8782102e0917e0c992bbdecc35e115d0
-      HARNESS_PARENT: 419e05da4306a323031db0cab763882a54ba7275
+      HARNESS_PARENT: 66a9b1d2102e63501ca42eb5f1475a008c1e51e1
     steps:
       - name: Reject unreviewed or incomplete proposal before build
         shell: bash
@@ -328,5 +328,12 @@ jobs:
             ${{ runner.temp }}/issue779-csharp-native-build/receipts/
             ${{ runner.temp }}/issue779-csharp-native-build/handoff/
             ${{ runner.temp }}/issue779-csharp-native-run/
-            ${{ runner.temp }}/issue779-n03-helper-build/
+            ${{ runner.temp }}/issue779-n03-helper-build/helper-build-receipt.json
+            ${{ runner.temp }}/issue779-n03-helper-build/helper-build-receipt.pending.json
+            ${{ runner.temp }}/issue779-n03-helper-build/late-helper-publication-failure.json
+            ${{ runner.temp }}/issue779-n03-helper-build/helper-nodes.json
+            ${{ runner.temp }}/issue779-n03-helper-build/helper.tsv
+            ${{ runner.temp }}/issue779-n03-helper-build/build-00.log
+            ${{ runner.temp }}/issue779-n03-helper-build/build-01.log
+            ${{ runner.temp }}/issue779-n03-helper-build/build-02.log
             ${{ runner.temp }}/issue779-csharp-ubuntu-runtime/
