@@ -1,3 +1,5 @@
+## HISTORICAL listener-close composition (source a353)
+
 ## HISTORICAL exit/accept composition (source77e1)
 
 ## HISTORICAL process-node inspection composition (source df028)
@@ -45,3 +47,7 @@ Source `77e1e1fbb83357df92e15fc6213d8a6dfa369fd8` is an exact five-file child of
 ## Listener-close diagnostic candidate
 
 Source `a353970c67b7b2e02acaa248348dbff69efd3648` is an exact five-file diagnostic child of `77e1e1fbb83357df92e15fc6213d8a6dfa369fd8` with full2821 captured SHA/modes. Actual local counts, TRX and source-peer pins come only from the final SHA-bound packet; prior1078/Ownership38/Diagnostics66 are historical. No first cause, cancellation or connection-aborted disposal behavior is inferred from attempt28 ListenerClose/Admission/ASEVD402 with null operation. All four operational parent pins are `8eef98c502ad35ace08b36e77db2494580da38d5`. Preparation normally merges[8eef,new source] and creates a sole installation child. All limits,43 checks, clone/merge022 and other077 commands,19 inputs/40 edges, parser/N03 logic and original deadlines remain inherited. All eight promotion flags are false pending fresh exact-file review; all16 native controls and registry remain unaccepted. See the [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md).
+
+## Owned-socket custody candidate
+
+Source `806301fd259197f7d448157795259489ac01d9f1` is a six-modified/two-added child of `a353970c67b7b2e02acaa248348dbff69efd3648` with2823 SHA/mode-pinned files. Current counts, endpoint/diagnostic cases, TRX and peer pins come only from final actual receipts; prior1094/Diagnostics82/Ownership38 remain historical. The pure endpoint wrapper and optional custody diagnostics do not establish a native cause, acceptance, or permission to skip named custody checks. Operational parent is `4de73baf29c0388b3c1cb5b1bf7e655f20d25bbe`; preparation creates normal ordered merge then a sole installation child on retry-17. All43 command checks, original deadlines, clone/merge022/private077, audit/SDK/runtime/caps and19 inputs/40 pins are retained. Eight promotion flags are false until independent generated-file review; all16 native controls and Trusted/registry remain unaccepted.

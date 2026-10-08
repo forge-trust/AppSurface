@@ -1,7 +1,7 @@
 name: C# Linux native N01/N02/N03 candidate
 on:
   push:
-    branches: [codex/issue779-csharp-linux-native-20261008-retry-16]
+    branches: [codex/issue779-csharp-linux-native-20261008-retry-18]
 permissions:
   contents: read
 concurrency:
@@ -15,31 +15,31 @@ jobs:
       # Promotion requires frozen source reviews and a complete native handoff.
       # Promote only after full source composition review; no native passing claim.
       UBUNTU_RUNTIME_REVIEWED: 'true'
-      UBUNTU_RUNTIME_SCRIPT_SHA256: f01ad7343248baee7a01b4aa2dd1ec4173d719e5307a6aa4d20996259032f6ed
+      UBUNTU_RUNTIME_SCRIPT_SHA256: 8320dc862a63693b9776ce82dffb38277bcb5b45d8b745822d75b0df0f567fac
       N03_INDEPENDENT_REVIEW_CLEAR: 'true'
       N03_SOURCE_REBIND_PENDING: 'false'
       BUILD_REVIEWED: 'true'
-      BUILD_SCRIPT_SHA256: 67019b9c63cdf96dd0f7b0978a5b374a8d6cd4a13550c611ed31a3444ce7fb18
+      BUILD_SCRIPT_SHA256: 2c0a55ba687f29bfad44a1182ce986b0ec26cfa47b7a5ae8d75ca1f4619ebefb
       ROOT_TRANSPORT_REVIEWED: 'true'
-      ROOT_TRANSPORT_SHA256: 3f5519982287ea3248d1deef86cb0c13c6d38e5c544b4a1b8042ecad13d52acc
+      ROOT_TRANSPORT_SHA256: 0f214f68198b1e84047258b7d0cf8658af4db420c436646aa17fc064e2d760c8
       FIXTURE_REVIEWED: 'true'
-      FIXTURE_SHA256: d33e633904a32c0f4a9a7bda5a8aab133444746cad66b81d70e80893411e857d
+      FIXTURE_SHA256: d94f221faa7d1a89bbb9d1f66ab78431a1b2b98c6d676c1b29888e822ee6673f
       OS_AUDIT_REVIEWED: 'true'
       OS_AUDIT_SHA256: 0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b
-      SOURCE_REVIEW_SHA256: 4e79ac1eeae8087dcda6650a4a3c6b30098579261a34f2113d327167dd137800
+      SOURCE_REVIEW_SHA256: 671ab29e1ca020291182e4125c5ad050622f7ca89712b37254bf9317e8980268
       NATIVE_HANDOFF_REVIEWED: 'true'
       NATIVE_HANDOFF_IMPLEMENTED: 'true'
-      ACQUISITION_SHA256: 9e6f5a5807d67fe42a8503d8d9643d6b33383292ccb72312b953ae92c2c57499
+      ACQUISITION_SHA256: 47c6223ca999b3b598c28e58b86b3c9b82251b725b3a4d03e67b173f4e0b700c
       RETENTION_SHA256: df77c52bae29828c12b1ad56c2dc0c150649c26a1fde1fe2c2f2c345ad54a9cd
-      ORCHESTRATOR_SHA256: dd1e6e817c65390b1dc11c39c1a4a35e6f3b92adc24d19fe6135efd7ef70d49b
-      CAPTURE_RECEIPT_SHA256: 95bdb80dcf0b0a99f8d930602e3626a09f9e9e1d93d878c1c44675d3577535bf
+      ORCHESTRATOR_SHA256: 1f921e4e32fd227f5de26b96f44fe4ff77244c1ff0a3395f29240262e2b5d020
+      CAPTURE_RECEIPT_SHA256: 19d673a29d32272c9e802d779db2ba150064c5b52d63a5b6cdbf05875ffa92ac
       BATCH_PARSER_TEST_SHA256: 4460190a9746b05e30e46bf5f666c333053ac1afa8ea6eb5af082e0a42f11188
       N03_HELPER_RECIPE_SHA256: 7bc0906967cfba542b3919e12855fb5f0e8946d0fe062a5d8371d4a5142101f4
       N03_HELPER_PROGRAM_SHA256: 02a28424a2d57c56213fae8618d50df1019986cadf89246e2ce11411a23c967a
       N03_HELPER_PROJECT_SHA256: 92da6c96d4c88fae754ece54af775a00c1d713c7e44b9a76bda7cc768773514e
       N03_HELPER_LOCK_SHA256: a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb
-      SOURCE_COMMIT: a353970c67b7b2e02acaa248348dbff69efd3648
-      HARNESS_PARENT: 8eef98c502ad35ace08b36e77db2494580da38d5
+      SOURCE_COMMIT: 806301fd259197f7d448157795259489ac01d9f1
+      HARNESS_PARENT: 4de73baf29c0388b3c1cb5b1bf7e655f20d25bbe
     steps:
       - name: Reject unreviewed or incomplete proposal before build
         shell: bash
@@ -248,7 +248,7 @@ jobs:
                   raise ValueError()
               for phase in ('source_before', 'source_after_assets', 'source_after_build', 'source_final'):
                   fact = receipt[phase]
-                  if fact['head'] != os.environ['SOURCE_COMMIT'] or fact['count'] != 2821 or any(fact[k] is not True for k in ('index_tree_matches', 'physical_git_sha1', 'physical_sha256_modes')):
+                  if fact['head'] != os.environ['SOURCE_COMMIT'] or fact['count'] != 2823 or any(fact[k] is not True for k in ('index_tree_matches', 'physical_git_sha1', 'physical_sha256_modes')):
                       raise ValueError()
               if not receipt['commands']:
                   raise ValueError()
@@ -269,11 +269,11 @@ jobs:
                       raise ValueError()
                   if sum(row['bytes'] for row in inventory['files'].values()) != fact['total_bytes']:
                       raise ValueError()
-              if receipt['artifacts']['source']['file_count'] != 2821:
+              if receipt['artifacts']['source']['file_count'] != 2823:
                   raise ValueError()
               if time.monotonic_ns() >= int(os.environ['JOB_DEADLINE_MONOTONIC_NS']):
                   raise ValueError()
-              print('BUILD_TERMINAL_VERIFIED:source2821:no-native-execution', flush=True)
+              print('BUILD_TERMINAL_VERIFIED:source2823:no-native-execution', flush=True)
               if time.monotonic_ns() >= int(os.environ['JOB_DEADLINE_MONOTONIC_NS']):
                   raise ValueError()
           except Exception:
