@@ -19,7 +19,7 @@ NEGATIVE_CASE = 'N06'
 N03_INDEPENDENT_REVIEW_CLEAR = True
 N03_SOURCE_REBIND_PENDING = False
 SOURCE = '5b2a125b0d5bc72d10b11aeea62176d4a0ac2fec'
-PARENT = 'b6fbe29947b4cfb298c687b15282ef9f729d7276'
+PARENT = '4c6bf8df30f07c6854a72909777cd141e9808143'
 SOURCE_MAP = '4646023026038186150959700bd6cd83bb067234c6f127ac9bd45113bcaed346'
 PINS = {
     'build-helper.sh': '7bc0906967cfba542b3919e12855fb5f0e8946d0fe062a5d8371d4a5142101f4',
@@ -27,11 +27,11 @@ PINS = {
     'NativePeerBroker.csproj': '92da6c96d4c88fae754ece54af775a00c1d713c7e44b9a76bda7cc768773514e',
     'packages.lock.json': 'a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb',
 
-    'prepare-root-inputs-v2.sh': '94467ba8863a6e6ba54e0768ebc4012746b313100ff1a9fd17d98e33707ad7a3',
-    'checkpoint-n01-n02-v5.sh': '61b2cad4787504445629282507c9c0b85d1c19561b4db7e317317207c8f45259',
+    'prepare-root-inputs-v2.sh': '69b388bd066edc6bb3c325a73a796849abb163c0e2224cb534640f7df89fe6d3',
+    'checkpoint-n01-n02-v5.sh': '567ff45b41645dc17d7178c82e5b4ebb7a364ae8812d40f656b19dbd46f696f8',
     'prepare-os-audit-v2.py': 'b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0',
-    'source-review.json': 'afb0d518a4ab83c5a9df5492d4625d8e2b65fb2c141d1d158d54dbee5a2944ef',
-    'acquire-inbound.sh': '1adc2e3a49910aee0b5c91e1a3818f822eabeec45bb6330c2ab244b9332d8e8a',
+    'source-review.json': '45affe24a8e4ea1caea6d247136bcb90594897d40875fb177809ac1bcba679c6',
+    'acquire-inbound.sh': 'c416ae624465f88941ae1ad7696d2e3c67ba52588e3ef9370f1b70e73b553803',
     'retain-native.sh': 'a6427331feee6fb9c065fa4f1e5461d7b5e2a3751bdbeb320840a63ac506fc3e',
 }
 ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',

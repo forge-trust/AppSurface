@@ -542,6 +542,194 @@ verify_os_path() {
  else [[ $count == 0 ]] || fail duplicate-alias; ancestor "${p%/*}"; pin_file "$p" "$h" "$MAX_INPUT_FILE_BYTES"; fi
 }
 
+# BEGIN ordinary-os-batch candidate definitions
+# Source definitions only. Requires the unchanged fixture clock, cache, custody,
+# bounded-command, lexical, and alias helpers. No standalone/root entry point.
+# All arrays are indexed by integer; path text is never an evaluated subscript.
+ordinary_os_batch_alias_index() {
+ local p=$1 low=0 high=$((${#os_cache_alias_paths[@]}-1)) mid
+ osb_alias_index=-1
+ while ((low<=high)); do
+  remaining >/dev/null
+  mid=$(((low+high)/2))
+  if [[ $p == "${os_cache_alias_paths[$mid]}" ]]; then osb_alias_index=$mid; return 0
+  elif [[ $p < "${os_cache_alias_paths[$mid]}" ]]; then high=$((mid-1))
+  else low=$((mid+1)); fi
+ done
+}
+ordinary_os_batch_leaf_index() {
+ local p=$1 low=0 high=$((${#osb_leaf_paths[@]}-1)) mid
+ osb_leaf_index=-1
+ while ((low<=high)); do
+  remaining >/dev/null
+  mid=$(((low+high)/2))
+  if [[ $p == "${osb_leaf_paths[$mid]}" ]]; then osb_leaf_index=$mid; return 0
+  elif [[ $p < "${osb_leaf_paths[$mid]}" ]]; then high=$((mid-1))
+  else low=$((mid+1)); fi
+ done
+}
+ordinary_os_batch_decimal_at_most() {
+ local value=$1 cap=$2
+ [[ $value =~ ^(0|[1-9][0-9]{0,19})$ && $cap =~ ^(0|[1-9][0-9]{0,19})$ ]] || return 1
+ ((${#value}<${#cap})) && return 0
+ ((${#value}==${#cap})) && [[ $value == "$cap" || $value < "$cap" ]]
+}
+# Detached physical-stat data parser. The full-pass owner supplies exact ordered
+# node/leaf sets, retained input FD, and pre records through Bash dynamic scope.
+# Tests can exercise this parser without constructing a root/native owner.
+ordinary_os_batch_parse_snapshot() {
+ local pass=$1 read_fd=$2 field n i=0 p record mode leaf
+ local -a fields=()
+ [[ $pass == pre || $pass == post ]] || fail OS-batch-pass
+ while :; do
+  remaining >/dev/null; fields=(); field=
+  if ! IFS= read -r -d '' field <&"$read_fd"; then [[ -z $field ]] || fail OS-batch-partial-row; break; fi
+  fields+=("$field")
+  for ((n=1;n<10;n++)); do field=; IFS= read -r -d '' field <&"$read_fd" || fail OS-batch-partial-row; fields+=("$field"); done
+  ((i<${#osb_node_paths[@]})) || fail OS-batch-node-count
+  p=${fields[0]}; [[ $p == "${osb_node_paths[$i]}" ]] || fail OS-batch-node-order
+  for n in 1 2 3 5 6 7; do [[ ${fields[$n]} =~ ^(0|[1-9][0-9]{0,19})$ ]] || fail OS-batch-stat-number; done
+  [[ ${fields[2]} != 0 && ${fields[4]} =~ ^[0-9a-f]{1,8}$ ]] || fail OS-batch-stat-mode
+  for n in 8 9; do [[ -n ${fields[$n]} && ${#fields[$n]} -le 64 && ! ${fields[$n]} =~ [[:cntrl:]] ]] || fail OS-batch-stat-time; done
+  mode=$((16#${fields[4]}))
+  [[ ${fields[6]} == 0 ]] && (( (mode & 0022)==0 )) || fail OS-batch-owner-mode
+  ordinary_os_batch_leaf_index "$p"; leaf=$osb_leaf_index
+  if ((leaf>=0)); then
+   (( (mode & 0170000)==0100000 )) && [[ ${fields[5]} == 1 ]] || fail OS-batch-file-type-links
+   ordinary_os_batch_decimal_at_most "${fields[3]}" "$MAX_INPUT_FILE_BYTES" || fail OS-batch-file-bytes
+  else (( (mode & 0170000)==0040000 )) || fail OS-batch-ancestor-type; fi
+  record=${fields[1]}
+  for ((n=2;n<10;n++)); do record+=$'\t'${fields[$n]}; done
+  if [[ $pass == pre ]]; then osb_pre_records+=("$record")
+  else [[ $record == "${osb_pre_records[$i]}" ]] || fail OS-batch-before-after; fi
+  ((i+=1))
+ done
+ ((i==${#osb_node_paths[@]})) || fail OS-batch-node-count
+}
+# All stat invocations use physical/default (no -L) semantics. Exact ancestor
+# membership and types are checked in BOTH snapshots, including / itself.
+ordinary_os_batch_snapshot() {
+ local path=$1 fd=$2 i=0 arg_bytes row_bytes projected=0 n
+ local -a chunk=()
+ # GNU stat's fixed numeric/timestamp fields are bounded. Reserve 1024 bytes
+ # per row beyond its exact path bytes before dispatch; the parser additionally
+ # enforces each numeric/time field length and the retained-file 16 MiB cap.
+ for ((n=0;n<${#osb_node_paths[@]};n++)); do
+  remaining >/dev/null
+  ((projected+=${#osb_node_paths[$n]}+1024))
+  ((projected<=16777216)) || fail OS-batch-inventory-bytes
+ done
+ while ((i<${#osb_node_paths[@]})); do
+  remaining >/dev/null; chunk=(); arg_bytes=0
+  while ((i<${#osb_node_paths[@]} && ${#chunk[@]}<32)); do
+   row_bytes=$((${#osb_node_paths[$i]}+1))
+   ((arg_bytes+row_bytes<=16384)) || break
+   chunk+=("${osb_node_paths[$i]}"); ((arg_bytes+=row_bytes)); ((i+=1))
+  done
+  ((${#chunk[@]}>0)) || fail OS-batch-argument-bound
+  # No pipeline/function child inherits the fixture cleanup trap. The original
+  # bounded dispatcher joins this one trusted stat command before FD pinning.
+  bounded stat --printf '%n\0%d\0%i\0%s\0%f\0%h\0%u\0%g\0%y\0%z\0' -- "${chunk[@]}" >&"$fd"
+  batch_scratch_pin "$path" "$fd" 16777216
+  osb_snapshot_bytes=$(bounded stat -c %s -- "$path")
+  remaining >/dev/null
+ done
+}
+# The manifest path is selected by the full-pass owner; this separately testable
+# procedure performs no qualification and can return only command success/fault.
+ordinary_os_batch_check_hashes() {
+ remaining >/dev/null
+ bounded sha256sum --check --strict --status -- "$1"
+ remaining >/dev/null
+}
+ordinary_os_batch_verify_aliases() {
+ local i p h
+ for ((i=0;i<${#os_cache_alias_paths[@]};i++)); do
+  remaining >/dev/null; p=${os_cache_alias_paths[$i]}; h=$(negative_os_file_hash "$p") || fail OS-cache-file-unpinned
+  verify_os_path "$p" "$h"
+ done
+}
+# Fixed full-pass API; accepts neither paths nor a replacement owner/token.
+ordinary_os_batch_full_pass() {
+ local pass=$1 uuid scratch root_before root_after p h parent i bytes=0 rows=0 row_bytes previous=
+ local osb_alias_index=-1 osb_leaf_index=-1 osb_snapshot_bytes=0 ordinary_count=0 alias_count=0
+ local paths_fd sorted_fd pre_fd post_fd checks_fd read_fd
+ local -r batch_fd_owner_pid=$BASHPID
+ local -a osb_leaf_paths=() osb_leaf_hashes=() osb_node_paths=() osb_pre_records=()
+ [[ $pass == initial || $pass == final ]] || fail OS-batch-pass
+ [[ $os_cache_ready == 1 ]] || fail OS-cache-uninitialized
+ ((${#os_cache_file_paths[@]}>=1 && ${#os_cache_file_paths[@]}<=4096 && ${#os_cache_file_paths[@]}==${#os_cache_file_hashes[@]} && ${#os_cache_alias_paths[@]}<=64)) || fail OS-batch-cache-count
+ remaining >/dev/null
+ IFS= read -r uuid </proc/sys/kernel/random/uuid || fail OS-batch-scratch-name
+ [[ $uuid =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || fail OS-batch-scratch-name
+ scratch=/run/appsurface-evidence-os-audit-$uuid
+ ancestor /run; [[ ! -e $scratch && ! -L $scratch ]] || fail audit-scratch-collision
+ bounded install -d -o 0 -g 0 -m 700 -- "$scratch"
+ root_before=$(bounded stat -c '%d:%i:%f:%u:%g:%a' -- "$scratch")
+ [[ $(bounded stat -c '%u:%g:%a' -- "$scratch") == 0:0:700 ]] || fail audit-scratch-custody
+ for p in paths sorted pre post checks; do batch_create_scratch_leaf "$scratch/$p"; done
+ exec {paths_fd}<>"$scratch/paths"; exec {sorted_fd}<>"$scratch/sorted"
+ exec {pre_fd}<>"$scratch/pre"; exec {post_fd}<>"$scratch/post"; exec {checks_fd}<>"$scratch/checks"
+ for ((i=0;i<${#os_cache_file_paths[@]};i++)); do
+  remaining >/dev/null; p=${os_cache_file_paths[$i]}; h=${os_cache_file_hashes[$i]}
+  lexical "$p"; [[ $p != *\\* ]] || fail OS-batch-hash-name; sha "$h"
+  [[ -z $previous || $previous < "$p" ]] || fail OS-batch-cache-order; previous=$p
+  ordinary_os_batch_alias_index "$p"
+  if ((osb_alias_index>=0)); then ((alias_count+=1)); continue; fi
+  osb_leaf_paths+=("$p"); osb_leaf_hashes+=("$h"); ((ordinary_count+=1))
+  parent=$p
+  while :; do
+   remaining >/dev/null; row_bytes=$((${#parent}+1)); ((bytes+=row_bytes)); ((rows+=1))
+   ((bytes<=16777216 && rows<=65536)) || fail OS-batch-inventory-bound
+   printf '%s\n' "$parent" >&"$paths_fd"
+   [[ $parent != / ]] || break
+   parent=${parent%/*}; [[ -n $parent ]] || parent=/
+  done
+ done
+ ((ordinary_count+alias_count==${#os_cache_file_paths[@]} && alias_count==${#os_cache_alias_paths[@]})) || fail OS-batch-file-membership
+ batch_scratch_pin "$scratch/paths" "$paths_fd" 16777216
+ # Sorted output cannot exceed the already counted input bytes.
+ bounded sort --temporary-directory="$scratch" -u -- "$scratch/paths" >&"$sorted_fd"
+ batch_scratch_pin "$scratch/sorted" "$sorted_fd" 16777216
+ exec {read_fd}<"$scratch/sorted"; batch_scratch_pin "$scratch/sorted" "$read_fd" 16777216
+ previous=
+ while IFS= read -r p <&"$read_fd"; do
+  remaining >/dev/null; [[ -n $p && ! $p =~ [[:cntrl:]] && $p != *\\* && ${#p} -le 4096 && ( -z $previous || $previous < "$p" ) ]] || fail OS-batch-node-order
+  [[ $p == / ]] || lexical "$p"
+  osb_node_paths+=("$p"); previous=$p; ((${#osb_node_paths[@]}<=65536)) || fail OS-batch-node-count
+ done
+ exec {read_fd}<&-
+ ordinary_os_batch_snapshot "$scratch/pre" "$pre_fd"
+ exec {read_fd}<"$scratch/pre"; batch_scratch_pin "$scratch/pre" "$read_fd" 16777216
+ ordinary_os_batch_parse_snapshot pre "$read_fd"; exec {read_fd}<&-
+ bytes=0
+ for ((i=0;i<${#osb_leaf_paths[@]};i++)); do
+  remaining >/dev/null; row_bytes=$((64+2+${#osb_leaf_paths[$i]}+1)); ((bytes+=row_bytes))
+  ((bytes<=8388608)) || fail OS-batch-check-bytes
+  printf '%s  %s\n' "${osb_leaf_hashes[$i]}" "${osb_leaf_paths[$i]}" >&"$checks_fd"
+ done
+ batch_scratch_pin "$scratch/checks" "$checks_fd" 8388608
+ if ((ordinary_count>0)); then ordinary_os_batch_check_hashes "$scratch/checks"; fi
+ osb_snapshot_bytes=0; ordinary_os_batch_snapshot "$scratch/post" "$post_fd"
+ exec {read_fd}<"$scratch/post"; batch_scratch_pin "$scratch/post" "$read_fd" 16777216
+ ordinary_os_batch_parse_snapshot post "$read_fd"; exec {read_fd}<&-
+ # Alias literal membership was counted above; unchanged verify_os_path performs
+ # BOTH original alias walks and original resolved-file pin checks on each pass.
+ ordinary_os_batch_verify_aliases
+ for p in paths sorted pre post checks; do
+  case $p in paths) i=$paths_fd;; sorted) i=$sorted_fd;; pre) i=$pre_fd;; post) i=$post_fd;; checks) i=$checks_fd;; esac
+  if [[ $p == checks ]]; then batch_scratch_pin "$scratch/$p" "$i" 8388608
+  else batch_scratch_pin "$scratch/$p" "$i" 16777216; fi
+ done
+ root_after=$(bounded stat -c '%d:%i:%f:%u:%g:%a' -- "$scratch")
+ [[ $root_after == "$root_before" ]] || fail audit-scratch-substitution
+ exec {paths_fd}>&-; exec {sorted_fd}>&-; exec {pre_fd}>&-; exec {post_fd}>&-; exec {checks_fd}>&-
+ bounded rm -- "$scratch/paths" "$scratch/sorted" "$scratch/pre" "$scratch/post" "$scratch/checks"
+ bounded rm -d -- "$scratch"
+ remaining >/dev/null
+}
+# END ordinary-os-batch candidate definitions
+
 for key in source_root source_manifest source_manifest_sha256 source_nodes source_nodes_sha256 payload_root payload_manifest payload_manifest_sha256 payload_nodes payload_nodes_sha256 runtime_root runtime_manifest runtime_manifest_sha256 runtime_nodes runtime_nodes_sha256 source_review source_review_sha256 build_receipt build_receipt_sha256 os_audit os_audit_sha256 source_revision base_revision workflow_identity entry runtime_host entry_sha256 n02_uid n02_gid; do [[ -n ${!key} ]] || fail missing-input; done
 [[ $source_revision =~ ^[0-9a-f]{40}$ && $base_revision =~ ^[0-9a-f]{40}$ ]] || fail revisions
 [[ $workflow_identity =~ ^[A-Za-z0-9/._:@-]{1,256}$ ]] || fail workflow
@@ -591,7 +779,7 @@ bounded jq -e '
 ' "$os_audit" >/dev/null || fail OS-audit-schema
 negative_os_cache_initialize
 os_files=$(bounded jq -r '.files[]|[.path,.sha256]|@tsv' "$os_audit")
-while IFS=$'\t' read -r p h; do verify_os_path "$p" "$h"; done <<<"$os_files"
+ordinary_os_batch_full_pass initial
 runtime_files=$(bounded find -P "$runtime_root" -type f -print)
 while IFS= read -r p; do
  magic=$(bounded head -c 4 "$p" | od -An -tx1 | tr -d ' \n'); [[ $magic == 7f454c46 ]] || continue
@@ -1024,7 +1212,7 @@ verify_tree "$stage/tool" "$payload_manifest" "$payload_manifest_sha256" "$paylo
 verify_tree "$stage/runtime" "$runtime_manifest" "$runtime_manifest_sha256" "$runtime_nodes" "$runtime_nodes_sha256" runtime 1 0
 verify_tree "$stage/subject" "$source_manifest" "$source_manifest_sha256" "$source_nodes" "$source_nodes_sha256" source 1 0
 pin_file "$build_receipt" "$build_receipt_sha256" "$MAX_NODE_JSON_BYTES"
-while IFS=$'\t' read -r p h; do verify_os_path "$p" "$h"; done <<<"$os_files"
+ordinary_os_batch_full_pass final
 pin_file "$os_audit" "$os_audit_sha256" 1048576
 native_life_remaining=$(remaining)
 if ! ((native_life_remaining>246 && job_deadline_epoch-$(bounded date -u +%s)>245)); then

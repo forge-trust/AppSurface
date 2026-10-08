@@ -772,6 +772,16 @@
     "status": "HISTORICAL",
     "validation_receipt_sha256": "e778a36dce64edad99de739153d24b1d10fd2023e8ecaf80223f4ebe8f65f364"
   },
+  "ordinary_os_batch_retry": {
+    "alias_ELF_policy_and_deadline_unchanged": true,
+    "functional_delta": "one function insertion and exactly two full-pass loop replacements",
+    "module_sha256": "251e8d6608ae2a99a6376b4e84aefdab7008b15d87cf692831aca3efc4d28f3c",
+    "native_credit": false,
+    "parent": "4c6bf8df30f07c6854a72909777cd141e9808143",
+    "performance_measured": false,
+    "prior_failed_parent": "b6fbe29947b4cfb298c687b15282ef9f729d7276",
+    "source_review_sha256": "6f38420d48b67022cdb107b25f9d17d31439e4b75d8e213d1621c63c4d6c2f41"
+  },
   "parent_commit": "bf6fd3339a0eb44c276c264383535fbbfc102a66",
   "phase_diagnostic": {
     "command_exits": [
