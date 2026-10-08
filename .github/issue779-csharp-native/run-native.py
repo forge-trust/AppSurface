@@ -15,15 +15,15 @@ import tarfile
 import time
 import uuid
 
-SOURCE = '45f596cfdc800348266b03184088f0e3e42a904a'
-PARENT = 'e1e7aebb3a0acfc1597f97194a74f1bb2efa893d'
-SOURCE_MAP = '5f38bd4421d3c7b6bbe385fd3a2b2b90c116517160efa53fe2b0f01fff1fd6e9'
+SOURCE = '87d94e1a487a2283862ab87930ed1341ec25200a'
+PARENT = 'be676550fb17e9a38a841147eb314503ac5c0382'
+SOURCE_MAP = '03eed1bf0de7f36fc9d4fe207c2c98bcf2cd7aca8f09088fff711cba7764cf21'
 PINS = {
-    'prepare-root-inputs-v2.sh': '9348b2eebf53633808c1813df9ec2ef93688f6ef4584910bacfe4fc75036ade5',
-    'checkpoint-n01-n02-v5.sh': '0cfd215b1bfa32870cba899d9df4c437228898ff86c279b474cd7485c678e4a6',
+    'prepare-root-inputs-v2.sh': '2adcab2714dd6ae4726de9d38b326b7bfdaab00d400ae65e3f11ad29c6fabf21',
+    'checkpoint-n01-n02-v5.sh': 'f372bb456e46e6e6a0e6fd6014418788e1c43c751e2dc92b64139991c0d050e3',
     'prepare-os-audit-v2.py': 'a76d3ec9521f021e799b8b56a6c57afdbeb6d4abdb21a55f42899a834eed4604',
-    'source-review.json': '1eba6136561215abdfbedf36f5a5bab4570cdaf2d2cbc2ab709aef1c5dc10280',
-    'acquire-inbound.sh': '5a98c70a57f1f3f65634cbb8a69c8d1367fa552cc1d32b9468311ccf7944c1f8',
+    'source-review.json': 'c17cb433edd09788916a55ec37a82fd0b9e79e86d79644ecf2b4e26010460bd9',
+    'acquire-inbound.sh': '3591a4a51517b39ef1bb1d287306ea4d43a2ddb84cd88c11b88354703f1beae7',
     'retain-native.sh': 'a6bc3da869386b440d0b8a2ad93eb3cb888a4e48aabe52febf6a609b33d45331',
 }
 ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',

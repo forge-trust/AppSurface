@@ -1,3 +1,13 @@
+# Account diagnostic v2 composition — reviewed for preparation
+
+Source `87d94e1a487a2283862ab87930ed1341ec25200a`, 2821 files, ordered harness merge `be676550fb17e9a38a841147eb314503ac5c0382`. Kierkegaard completed the exact composition review and incremental review-hash correction. Main verified all 13 inputs and 28 literal pin edges. The SHA-bound [composition review](composition-review.json) authorizes separate [preparation](prepare-harness.py) and [publication](publish-harness.py) operations, which have not run at this recorded promotion. Current local core validation passed 1028 tests with no failures, skips or compiler diagnostics; its receipt is `e050ead3f1a0f2e81ad93db2a0a4239d67f05d5c0ac7b44e4017a1f3c4dfcf38`. This did not rerun CLI entry tests or establish native success. All sixteen native controls remain pending; the production registry remains disabled.
+
+See [source-review.json](source-review.json) for actual supplied v2 first-fault source/validation evidence and historical optional-diff/phase records, and [source-ready-pending-review.json](source-ready-pending-review.json) for all13inputs/28edges. Fixture/native/account policy, limits, timeouts, retention and validator bodies are unchanged except explicit binding pins. N03 is excluded.
+
+## Historical unchanged interface reference
+
+The following prior package reference is historical for source pins, counts and review status.
+
 # Optional-diff native checkpoint preparation
 
 This frozen preparation binds source `45f596cfdc800348266b03184088f0e3e42a904a` (tree `ca9c76080a88b15f8156d8ff8c4a6f00367fe4e5`, 2821 files), parent `64b1c8ee6a9b7e4c1acec0f192150147a429cb91`, and the reviewed harness merge `e1e7aebb3a0acfc1597f97194a74f1bb2efa893d` on retry15. The initial [source-ready packet](source-ready-pending-review.json) and [unpromoted inputs](unpromoted-history/) preserve the historical pending-review status. At 2026-10-08 03:05 UTC, Beauvoir completed the 13-input/28-edge review and Kierkegaard completed the driver/publisher/workflow review. The seven workflow flags are now true. The SHA-bound [composition review](composition-review.json) authorizes the separate [preparation](prepare-harness.py) and [publication](publish-harness.py) commands. Those commands had not run at this recorded promotion; all sixteen native acceptance controls remain pending.
