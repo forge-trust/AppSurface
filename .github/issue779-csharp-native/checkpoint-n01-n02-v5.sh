@@ -454,7 +454,7 @@ pin_file "$build_receipt" "$build_receipt_sha256" "$MAX_NODE_JSON_BYTES"
 bounded jq -e --arg source "$source_revision" --arg sn "$source_nodes_sha256" --arg pn "$payload_nodes_sha256" --arg rn "$runtime_nodes_sha256" \
  --arg st "$source_manifest_sha256" --arg pt "$payload_manifest_sha256" --arg rt "$runtime_manifest_sha256" '
  .schema=="issue779-csharp-fdd-build-v5" and .exit==0 and
- .source_commit==$source and $source=="64b1c8ee6a9b7e4c1acec0f192150147a429cb91" and
+ .source_commit==$source and $source=="45f596cfdc800348266b03184088f0e3e42a904a" and
  .native_execution==false and .checkpoint_pass==false and .build_prerequisite_only==true and
  (.artifacts|type=="object" and keys==["runtime","source","tool"]) and
  .artifacts.source.nodes_sha256==$sn and .artifacts.tool.nodes_sha256==$pn and .artifacts.runtime.nodes_sha256==$rn and
