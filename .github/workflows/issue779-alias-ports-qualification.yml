@@ -1,0 +1,106 @@
+name: N04 and N07 Ubuntu strict alias qualification
+on:
+  push:
+    branches: [codex/issue779-csharp-alias-ports-qualification-20261008-v1]
+permissions:
+  contents: read
+jobs:
+  qualify:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - case: N04
+            bootstrap_sha: 5930c43c304c61aee22cb2bee636ef39888b2403cf7c2a91fb4431335e3de9d6
+            physical_sha: a61e85abe15c4dee85e2cf34f83e9f2635749c0a1316ca73bb0e29660a070d3f
+          - case: N07
+            bootstrap_sha: f1a69a9897a8b9b6bc04a93f96dac68333710075fe7b288ca8e5bcbce184a38d
+            physical_sha: 2bc177e5bce6d77875f06afbb04a413ee97813298cae21d441fde1fb86233baa
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    env:
+      SOURCE_REVIEW_CLEAR: 'true'
+      BOOTSTRAP_REVIEW_CLEAR: 'true'
+      RUNNER_REVIEW_CLEAR: 'true'
+      CASE: '${{ matrix.case }}'
+      BOOTSTRAP_SHA256: '${{ matrix.bootstrap_sha }}'
+      PHYSICAL_REVIEW_SHA256: '${{ matrix.physical_sha }}'
+    steps:
+      - name: Require reviewed test-only proposal
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_REVIEW_CLEAR" == true && "$BOOTSTRAP_REVIEW_CLEAR" == true && "$RUNNER_REVIEW_CLEAR" == true ]]
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Protected Ubuntu OS-only data bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          ulimit -f 1024
+          [[ "$CASE" == N04 || "$CASE" == N07 ]]
+          input="$GITHUB_WORKSPACE/.github/issue779-csharp-alias-ports-$CASE"
+          out="$RUNNER_TEMP/issue779-alias-qualification"
+          mkdir -m 700 -- "$out"
+          [[ -f "$input/bootstrap.sh" && ! -L "$input/bootstrap.sh" && $(stat -c %h -- "$input/bootstrap.sh") == 1 ]]
+          [[ $(sha256sum -- "$input/bootstrap.sh" | cut -c 1-64) == "$BOOTSTRAP_SHA256" ]]
+          [[ $(sha256sum -- "$input/physical-equivalence-review.data.json" | cut -c 1-64) == "$PHYSICAL_REVIEW_SHA256" ]]
+          for p in / /var /var/lib; do
+            [[ -d $p && ! -L $p ]]
+            read -r uid gid mode <<<"$(stat -c '%u %g %a' -- "$p")"
+            [[ $uid == 0 && $gid == 0 ]] && (((8#$mode & 0022)==0))
+          done
+          IFS= read -r uuid </proc/sys/kernel/random/uuid
+          generation=${uuid//-/}
+          [[ $generation =~ ^[0-9a-f]{32}$ ]]
+          stage=/var/lib/issue779-alias-$generation
+          sudo /usr/bin/mkdir -m 700 -- "$stage"
+          printf 'ALIAS_STAGE=%s\nALIAS_OUTPUT=%s\n' "$stage" "$out" >>"$GITHUB_ENV"
+          sudo /usr/bin/install -o 0 -g 0 -m 0500 -- "$input/bootstrap.sh" "$stage/bootstrap.sh"
+          [[ $(sudo /usr/bin/stat -c '%u:%g:%a:%h' -- "$stage/bootstrap.sh") == 0:0:500:1 ]]
+          [[ $(sudo /usr/bin/sha256sum -- "$stage/bootstrap.sh" | cut -c 1-64) == "$BOOTSTRAP_SHA256" ]]
+          # Interpret only the externally verified protected copy, never checkout bytes as root.
+          code=0
+          sudo /usr/bin/timeout --signal=TERM --kill-after=1s 95s /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C HOME=/nonexistent /usr/bin/bash --noprofile --norc "$stage/bootstrap.sh" "$input" "$stage" >"$out/bootstrap.stdout" 2>"$out/bootstrap.stderr" || code=$?
+          printf '%d\n' "$code" >"$out/operator-exit.txt"
+          printf 'ALIAS_OPERATOR_EXIT=%d\n' "$code"
+          exit "$code"
+      - name: Retain bounded fixed private qualification records
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ ${ALIAS_STAGE:-} =~ ^/var/lib/issue779-alias-[0-9a-f]{32}$ && ${ALIAS_OUTPUT:-} == "$RUNNER_TEMP/issue779-alias-qualification" ]] || exit 1
+          uid=$(id -u); gid=$(id -g); total=0; count=0
+          # Closed names only. No data-tree traversal, system/account cleanup or raw echo.
+          names=$(sudo /usr/bin/timeout --signal=KILL 5s /usr/bin/find -P "$ALIAS_STAGE/output" -mindepth 1 -maxdepth 1 -printf '%f\n')
+          [[ -n $names && ${#names} -le 16384 ]]
+          while IFS= read -r name; do
+            case "$name" in
+              qualification.json|qualification-late-failure.json|ownership-control.json|timeout-ownership-control.stdout|timeout-ownership-control.stderr|bash-version.stdout|bash-version.stderr) ;;
+              positive-donor.stdout|positive-donor.stderr|positive-candidate.stdout|positive-candidate.stderr|two-links-donor.stdout|two-links-donor.stderr|two-links-candidate.stdout|two-links-candidate.stderr|no-alias-donor.stdout|no-alias-donor.stderr|no-alias-candidate.stdout|no-alias-candidate.stderr) ;;
+              target-change-donor.*|target-change-candidate.*|link-substitution-donor.*|link-substitution-candidate.*|missing-link-donor.*|missing-link-candidate.*|unexpected-link-donor.*|unexpected-link-candidate.*|writable-parent-donor.*|writable-parent-candidate.*|byte-change-donor.*|byte-change-candidate.*|growth-donor.*|growth-candidate.*|hash-boundary-growth-donor.*|hash-boundary-growth-candidate.*|link-boundary-substitution-donor.*|link-boundary-substitution-candidate.*)
+                [[ $name =~ ^(target-change|link-substitution|missing-link|unexpected-link|writable-parent|byte-change|growth|hash-boundary-growth|link-boundary-substitution)-(donor|candidate)\.(stdout|stderr)$ ]] || exit 1 ;;
+              *) exit 1 ;;
+            esac
+            src=$ALIAS_STAGE/output/$name
+            before=$(sudo /usr/bin/stat -c '%d:%i:%s:%f:%h:%u:%g:%a:%y:%z' -- "$src")
+            read -r size owner group links mode <<<"$(sudo /usr/bin/stat -c '%s %u %g %h %a' -- "$src")"
+            [[ $owner == 0 && $group == 0 && $links == 1 && $mode == 600 && $size =~ ^[0-9]+$ ]] && ((size<=1048576))
+            count=$((count+1)); total=$((total+size)); ((count<=55 && total<=8388608))
+            sudo /usr/bin/test -f "$src"; sudo /usr/bin/test ! -L "$src"
+            hash=$(sudo /usr/bin/sha256sum -- "$src" | cut -c 1-64)
+            [[ ! -e $ALIAS_OUTPUT/$name && ! -L $ALIAS_OUTPUT/$name ]]
+            sudo /usr/bin/install -o "$uid" -g "$gid" -m 0600 -- "$src" "$ALIAS_OUTPUT/$name"
+            [[ $(sudo /usr/bin/stat -c '%d:%i:%s:%f:%h:%u:%g:%a:%y:%z' -- "$src") == "$before" && $(sha256sum -- "$ALIAS_OUTPUT/$name" | cut -c 1-64) == "$hash" ]]
+          done <<<"$names"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: issue779-alias-ports-${{ matrix.case }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/issue779-alias-qualification
+          if-no-files-found: error
+          retention-days: 1
