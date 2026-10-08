@@ -65,3 +65,11 @@ This packet is the common ordinary-core baseline for subsequent fixed N05/N06 in
 ## Fixed N05 preparation (review pending)
 
 Final image 5214a278cf710bfcf3ebca9f9ea4db557ee2adbb; immediate parent 55079eb96608246c6c396b1ae7b01c01cfbf7ba8; count 2828. Immediate3M/2M, common1M3A/1M2A and operational4M5A/4M4A are distinct. Targeted22 only; prior full1190 historical; no full1192 claim. Fixed reviewed fixture bytes occupy existing checkpoint-n01-n02-v5.sh path. Negative-only credit; N02/N03 are prerequisites, no N01 pass is asserted. All native/Trust/registry claims remain pending; budgets/caps/clocks unchanged. Independent review and eight workflow flags remain false.
+
+## Prepared audit-cache retry for N05
+
+Direct installation child of `5beb94a919eec7d372f63d050577328bcf455c9f`; no source merge, reset or rebase. The source stays `5214a278cf710bfcf3ebca9f9ea4db557ee2adbb` with 2828 files. Historical first-variant composition and earlier native records above retain their original scope.
+
+The [actual cache peer review](/private/tmp/issue779-csharp-negative-slot-audit-cache-review-v1/readonly-review.json) (`844ba062b79cc673d07f24a46687c2bba914013c544f980af16ef519d3d8a635`) records clear source review and 12/12 data controls under the [retained validation](/private/tmp/issue779-csharp-negative-slot-audit-cache-v1/validation-attempt-1/receipt.json). These controls establish no Linux negative-case acceptance or measured timing improvement. The preceding attempt failed before case launch; this preparation grants no credit. The 570-second work / 30-second cleanup, 240-second root runtime and >246/>245 launch predicates remain unchanged.
+
+The fresh retry composition review and explicit driver gates must pass before any private Git preparation or ordinary same-branch publication.

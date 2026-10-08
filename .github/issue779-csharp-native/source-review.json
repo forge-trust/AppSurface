@@ -155,6 +155,44 @@
     "operation": null,
     "source": "77e1e1fbb83357df92e15fc6213d8a6dfa369fd8"
   },
+  "audit_cache_retry": {
+    "cache_review": {
+      "clear": true,
+      "path": "/private/tmp/issue779-csharp-negative-slot-audit-cache-review-v1/readonly-review.json",
+      "released": true,
+      "sha256": "844ba062b79cc673d07f24a46687c2bba914013c544f980af16ef519d3d8a635"
+    },
+    "cache_validation": {
+      "path": "/private/tmp/issue779-csharp-negative-slot-audit-cache-v1/validation-attempt-1/receipt.json",
+      "recorded_command_exits": [
+        0,
+        0,
+        0
+      ],
+      "recorded_data_tests_passed": 12,
+      "recorded_elapsed_seconds": 1.8037867080129217,
+      "recorded_exit": 0,
+      "sha256": "ca65da37c81716d5bc02db7ed63290eb53fe31a2b842b1895a32a3fbd142cd85"
+    },
+    "native_acceptance": false,
+    "native_credit": false,
+    "policy_changed": false,
+    "prior_failure": {
+      "attribution": "parent diagnosis; no new native qualification",
+      "prior_published_head": "5beb94a919eec7d372f63d050577328bcf455c9f",
+      "status": "failed_prelaunch_attempt"
+    },
+    "published_parent": "5beb94a919eec7d372f63d050577328bcf455c9f",
+    "qualification_limits": [
+      "Data-only cache controls; physical dispatch stubs do not qualify Linux filesystem or kernel behavior.",
+      "No measured native timing improvement or negative-case pass.",
+      "Linux nounset and actual retry outcomes remain unexecuted."
+    ],
+    "schema": "issue779-fixed-negative-audit-cache-retry-data-v1",
+    "source_commit": "5214a278cf710bfcf3ebca9f9ea4db557ee2adbb",
+    "source_count": 2828,
+    "source_unchanged": true
+  },
   "capture_projection_sha256": "28a72da7bd4e4568b471e89bc3fa86041b876f7ee3c60fa7230eb80c20a39839",
   "capture_receipt_sha256": "aef1ff3abea337ed53611bc7b592aff518c54414d0e58694c23ab1f59488629c",
   "composition_review_pending_at_preparation": true,

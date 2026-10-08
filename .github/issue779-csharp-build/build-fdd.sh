@@ -20,12 +20,12 @@ import xml.etree.ElementTree as ET
 
 HEAD = '5214a278cf710bfcf3ebca9f9ea4db557ee2adbb'
 PARENT = '55079eb96608246c6c396b1ae7b01c01cfbf7ba8'
-HARNESS_PARENT = 'ca3b3b99e32c2c22a1420b357203e8f40f57415a'
+HARNESS_PARENT = '5beb94a919eec7d372f63d050577328bcf455c9f'
 TREE = 'e6f322983b431ca69bfe2dfbdd24857c1b4ab603'
 CAPTURE_SHA = 'aef1ff3abea337ed53611bc7b592aff518c54414d0e58694c23ab1f59488629c'
 CAPTURE_PROJECTION_SHA = '28a72da7bd4e4568b471e89bc3fa86041b876f7ee3c60fa7230eb80c20a39839'
-UBUNTU_PREREQUISITE_SHA = '0c44b9844c1eab8daae55f010faaa1a484542285547d7e68d02a10a24ea89808'
-NATIVE_RUNNER_SHA = 'c13acb9f3d6ad24b5f99556335c3de6389a96c6190102c761d259244d8772602'
+UBUNTU_PREREQUISITE_SHA = '74812429a496395852a0c4dd84f3c1696fb29fa8a821db3e1c258bdd68a7e2b5'
+NATIVE_RUNNER_SHA = 'dee6b0cc89c38ce4062525eee38c18ac7a3903e6134a1499ff87ee99369195be'
 SDK = '10.0.401'
 COUNT = 2828
 FILE_CAP = 256 * 1024 * 1024
@@ -646,15 +646,16 @@ def main():
     RESULT['environment_names_set'] = sorted(k for k in ENV if k in ('GIT_OPTIONAL_LOCKS', 'DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER', 'MSBUILDDISABLENODEREUSE', 'DOTNET_NOLOGO', 'DOTNET_CLI_TELEMETRY_OPTOUT'))
     PHASE = 'source'
     harness_head = run(['git', 'rev-parse', 'HEAD'], HARN).strip().decode()
-    source_merge = run(['git', 'show', '-s', '--format=%P', 'HEAD'], HARN).strip().decode()
-    require(re.fullmatch('[0-9a-f]{40}', source_merge) is not None, 'normal-harness-child')
-    require(run(['git', 'show', '-s', '--format=%P', source_merge], HARN).strip().decode() == HARNESS_PARENT + ' ' + HEAD, 'ordered-source-merge')
-    source_delta = {'Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxNegativeKernelObservationTests.cs': 'A', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/N05JoinedWorkerOutputTests.cs': 'A', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationControlServer.cs': 'M', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationExecution.cs': 'M', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxNegativeKernelObservation.cs': 'A', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.SlotNegative.cs': 'A', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerProcess.cs': 'M', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/N05JoinedWorkerOutput.cs': 'A', 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md': 'M'}
-    source_status = dict((name, status) for status, name in
-                        (row.split('\t') for row in run(['git', 'diff', '--name-status', HARNESS_PARENT, source_merge], HARN).decode().splitlines()))
-    require(source_status == source_delta, 'exact-source-merge-delta')
-    RESULT['harness_source_merge'] = source_merge
-    RESULT['harness_source_merge_parents'] = [HARNESS_PARENT, HEAD]
+    retry_parent = run(['git', 'show', '-s', '--format=%P', 'HEAD'], HARN).strip().decode()
+    require(retry_parent == HARNESS_PARENT, 'direct-retry-parent')
+    require(run(['git', 'show', '-s', '--format=%P', retry_parent], HARN).strip().decode() == '012d98785128243e3c3ff12272c656e98bc4681d', 'published-parent-topology')
+    installation_delta = {'.github/issue779-csharp-build/build-fdd.sh': 'M', '.github/issue779-csharp-native/README.md': 'M', '.github/issue779-csharp-native/acquire-inbound.sh': 'M', '.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh': 'M', '.github/issue779-csharp-native/prepare-root-inputs-v2.sh': 'M', '.github/issue779-csharp-native/prepare-ubuntu-runtime.py': 'M', '.github/issue779-csharp-native/run-native.py': 'M', '.github/issue779-csharp-native/source-review.json': 'M', '.github/workflows/issue779-csharp-linux-native.yml': 'M'}
+    installation_status = dict((name, status) for status, name in
+                              (row.split('\t') for row in run(['git', 'diff', '--name-status', HARNESS_PARENT, 'HEAD'], HARN).decode().splitlines()))
+    require(installation_status == installation_delta, 'exact-retry-installation-delta')
+    RESULT['harness_retry_parent'] = retry_parent
+    RESULT['harness_retry_parent_parent'] = '012d98785128243e3c3ff12272c656e98bc4681d'
+    RESULT['harness_retry_installation_delta'] = installation_status
     run(['git', 'merge-base', '--is-ancestor', HEAD, 'HEAD'], HARN)
     RESULT['harness_parent'] = HARNESS_PARENT
     RESULT['harness_commit'] = harness_head
