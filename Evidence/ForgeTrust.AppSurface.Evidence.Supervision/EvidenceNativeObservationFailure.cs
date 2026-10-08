@@ -556,12 +556,160 @@ internal sealed class LinuxControlFailureLatch
     }
 }
 
-/// <summary>Detached six-field diagnostic data; construction issues no execution, admission or cleanup authority.</summary>
+/// <summary>Fixed custody operations; these labels describe failure context, never filesystem authority.</summary>
+internal enum LinuxCustodyOperation
+{
+    /// <summary>Existing Unknown custody checkpoint; no native values are retained.</summary>
+    Unknown,
+    /// <summary>Existing Platform custody checkpoint; no native values are retained.</summary>
+    Platform,
+    /// <summary>Existing Settlement custody checkpoint; no native values are retained.</summary>
+    Settlement,
+    /// <summary>Existing AccountOwner custody checkpoint; no native values are retained.</summary>
+    AccountOwner,
+    /// <summary>Existing NodeSelection custody checkpoint; no native values are retained.</summary>
+    NodeSelection,
+    /// <summary>Existing Open custody checkpoint; no native values are retained.</summary>
+    Open,
+    /// <summary>Existing RetainedStat custody checkpoint; no native values are retained.</summary>
+    RetainedStat,
+    /// <summary>Existing AncestorPolicy custody checkpoint; no native values are retained.</summary>
+    AncestorPolicy,
+    /// <summary>Existing OriginalPolicy custody checkpoint; no native values are retained.</summary>
+    OriginalPolicy,
+    /// <summary>Existing BaselineComparison custody checkpoint; no native values are retained.</summary>
+    BaselineComparison,
+    /// <summary>Existing NamedOpen custody checkpoint; no native values are retained.</summary>
+    NamedOpen,
+    /// <summary>Existing NamedStat custody checkpoint; no native values are retained.</summary>
+    NamedStat,
+    /// <summary>Existing NamedComparison custody checkpoint; no native values are retained.</summary>
+    NamedComparison,
+    /// <summary>Existing InventoryRead custody checkpoint; no native values are retained.</summary>
+    InventoryRead,
+    /// <summary>Existing InventoryDecode custody checkpoint; no native values are retained.</summary>
+    InventoryDecode,
+    /// <summary>Existing InventoryPolicy custody checkpoint; no native values are retained.</summary>
+    InventoryPolicy,
+    /// <summary>Existing InventoryComparison custody checkpoint; no native values are retained.</summary>
+    InventoryComparison,
+    /// <summary>Existing HashRead custody checkpoint; no native values are retained.</summary>
+    HashRead,
+    /// <summary>Existing HashEof custody checkpoint; no native values are retained.</summary>
+    HashEof,
+    /// <summary>Existing HashFinalize custody checkpoint; no native values are retained.</summary>
+    HashFinalize,
+    /// <summary>Existing HashComparison custody checkpoint; no native values are retained.</summary>
+    HashComparison,
+    /// <summary>Existing Chown custody checkpoint; no native values are retained.</summary>
+    Chown,
+    /// <summary>Existing Chmod custody checkpoint; no native values are retained.</summary>
+    Chmod,
+    /// <summary>Existing TerminalPolicy custody checkpoint; no native values are retained.</summary>
+    TerminalPolicy,
+    /// <summary>Existing OriginalOwnerClose custody checkpoint; no native values are retained.</summary>
+    OriginalOwnerClose,
+    /// <summary>Existing retained final-file read checkpoint; no native values are retained.</summary>
+    FileRead,
+    /// <summary>Existing detached final-file verification checkpoint; no native values are retained.</summary>
+    FileVerification,
+    /// <summary>Existing strict account-release checkpoint; no native values are retained.</summary>
+    AccountRelease,
+    /// <summary>Existing RootRecheck custody checkpoint; no native values are retained.</summary>
+    RootRecheck,
+    /// <summary>Existing Cancellation custody checkpoint; no native values are retained.</summary>
+    Cancellation,
+    /// <summary>Existing HolderState custody checkpoint; no native values are retained.</summary>
+    HolderState,
+    /// <summary>Existing OwnerIdentity custody checkpoint; no native values are retained.</summary>
+    OwnerIdentity,
+}
+
+/// <summary>Detached five-field first custody failure; no native owner, path, exception or success receipt is retained.</summary>
+internal sealed class LinuxCustodyFailure
+{
+    private LinuxCustodyFailure(SupervisionCustodyFailure procedure, LinuxCustodyNodeKind? node,
+        LinuxCustodyOperation operation, EvidenceNativeObservationErrorKind kind, string? code)
+    { Procedure = procedure; NodeKind = node; Operation = operation; ErrorKind = kind; DiagnosticCode = code; }
+
+    /// <summary>Gets the actual transfer's closed first procedure category; None means no procedure fault was recorded.</summary>
+    internal SupervisionCustodyFailure Procedure { get; }
+    /// <summary>Gets the selected fixed node role, or null outside a node operation.</summary>
+    internal LinuxCustodyNodeKind? NodeKind { get; }
+    /// <summary>Gets the closed operation checkpoint, with Unknown for absent or invalid data.</summary>
+    internal LinuxCustodyOperation Operation { get; }
+    /// <summary>Gets the captured exception family without retaining that exception.</summary>
+    internal EvidenceNativeObservationErrorKind ErrorKind { get; }
+    /// <summary>Gets only an existing allowlisted diagnostic code; exception text is never searched.</summary>
+    internal string? DiagnosticCode { get; }
+
+    /// <summary>Projects detached comparison data only; this cannot issue root custody or account release.</summary>
+    internal static LinuxCustodyFailure Capture(SupervisionCustodyFailure procedure, LinuxCustodyNodeKind? node,
+        LinuxCustodyOperation operation, Exception? error)
+    {
+        var projected = EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.Custody, error);
+        return new(Enum.IsDefined(procedure) ? procedure : SupervisionCustodyFailure.None,
+            node is { } kind && Enum.IsDefined(kind) ? kind : null,
+            Enum.IsDefined(operation) ? operation : LinuxCustodyOperation.Unknown,
+            projected.ErrorKind, projected.DiagnosticCode);
+    }
+
+    /// <summary>Combines the completed original transfer's category with an earlier callback projection.</summary>
+    /// <remarks>
+    /// The native caller reads the original transfer category only after its task has joined. A prior token
+    /// cancellation may skip every forward callback; later close errors must not become its alleged cause.
+    /// In that case only Cancelled is retained, with no fabricated node, operation or error code.
+    /// Cancellation context is retained only from an explicit cancellation or a forward callback;
+    /// local closure and final recheck run during cleanup and cannot explain an earlier cancellation.
+    /// Mismatched callback categories are discarded rather than credited to another procedure.
+    /// </remarks>
+    internal static LinuxCustodyFailure FromTransfer(SupervisionCustodyFailure procedure,
+        LinuxCustodyFailure? first, Exception? normalized)
+    {
+        if (!Enum.IsDefined(procedure)) procedure = SupervisionCustodyFailure.None;
+        if (procedure == SupervisionCustodyFailure.Cancelled && first is not
+            { ErrorKind: EvidenceNativeObservationErrorKind.Cancelled,
+              Procedure: SupervisionCustodyFailure.Cancelled or SupervisionCustodyFailure.SettlementValidationFailed
+                  or SupervisionCustodyFailure.PreflightFailed or SupervisionCustodyFailure.MutationFailed })
+            return new(procedure, null, LinuxCustodyOperation.Unknown, EvidenceNativeObservationErrorKind.Cancelled, null);
+        if (first is not null && (first.Procedure == procedure || procedure == SupervisionCustodyFailure.None
+            || procedure == SupervisionCustodyFailure.Cancelled && first.ErrorKind == EvidenceNativeObservationErrorKind.Cancelled))
+            return new(procedure, first.NodeKind, first.Operation, first.ErrorKind, first.DiagnosticCode);
+        return Capture(procedure, null, LinuxCustodyOperation.Unknown, normalized);
+    }
+
+    /// <summary>Serializes exactly five closed fields; no native reads or raw supplied strings occur.</summary>
+    internal string ToJson() => "{\"procedure\":\"" + Procedure + "\",\"node_kind\":"
+        + (NodeKind is null ? "null" : "\"" + NodeKind + "\"") + ",\"operation\":\"" + Operation
+        + "\",\"error_kind\":\"" + ErrorKind + "\",\"diagnostic_code\":"
+        + (DiagnosticCode is null ? "null" : "\"" + DiagnosticCode + "\"") + "}";
+}
+
+/// <summary>Best-effort immutable first callback-fault data; cleanup cannot replace an earlier cause.</summary>
+internal sealed class LinuxCustodyFailureLatch
+{
+    private LinuxCustodyFailure? _first;
+    /// <summary>Gets closed data only; absence proves neither a successful procedure nor native custody.</summary>
+    internal LinuxCustodyFailure? First => Volatile.Read(ref _first);
+    /// <summary>Captures before normalization; allocation or projection failure cannot change the original outcome.</summary>
+    internal void Capture(SupervisionCustodyFailure procedure, LinuxCustodyNodeKind? node,
+        LinuxCustodyOperation operation, Exception? error)
+    {
+        try
+        {
+            if (First is null) Interlocked.CompareExchange(ref _first,
+                LinuxCustodyFailure.Capture(procedure, node, operation, error), null);
+        }
+        catch (Exception) { /* Diagnostics never replace an original operation or cleanup fault. */ }
+    }
+}
+
+/// <summary>Detached seven-field diagnostic data; construction issues no execution, admission or cleanup authority.</summary>
 internal sealed class EvidenceNativeObservationFailure
 {
     private EvidenceNativeObservationFailure(EvidenceNativeObservationPhase phase,
-        EvidenceNativeObservationErrorKind kind, string? code, LinuxAccountFailure? account, LinuxControlFailure? control)
-    { Phase = phase; ErrorKind = kind; DiagnosticCode = code; AccountFailure = account; ControlFailure = control; }
+        EvidenceNativeObservationErrorKind kind, string? code, LinuxAccountFailure? account, LinuxControlFailure? control, LinuxCustodyFailure? custody)
+    { Phase = phase; ErrorKind = kind; DiagnosticCode = code; AccountFailure = account; ControlFailure = control; CustodyFailure = custody; }
 
     /// <summary>Gets the validated closed checkpoint.</summary>
     internal EvidenceNativeObservationPhase Phase { get; }
@@ -574,9 +722,12 @@ internal sealed class EvidenceNativeObservationFailure
     /// <summary>Gets first server-fault data only for ServerRun or ServerCompletion failure projection.</summary>
     internal LinuxControlFailure? ControlFailure { get; }
 
+    /// <summary>Gets first actual custody-fault data only for custody, file-verification or account-close projection.</summary>
+    internal LinuxCustodyFailure? CustodyFailure { get; }
+
     /// <summary>Projects only an actual exception's family and allowlisted admission code, without retaining it.</summary>
     internal static EvidenceNativeObservationFailure Capture(EvidenceNativeObservationPhase phase, Exception? error,
-        LinuxControlFailure? control = null)
+        LinuxControlFailure? control = null, LinuxCustodyFailure? custody = null)
     {
         if (!Enum.IsDefined(phase)) phase = EvidenceNativeObservationPhase.Unknown;
         var kind = error switch
@@ -604,20 +755,23 @@ internal sealed class EvidenceNativeObservationFailure
             _ => null,
         };
         return new(phase, kind, FilterCode(code), accountFailure,
-            phase is EvidenceNativeObservationPhase.ServerRun or EvidenceNativeObservationPhase.ServerCompletion ? control : null);
+            phase is EvidenceNativeObservationPhase.ServerRun or EvidenceNativeObservationPhase.ServerCompletion ? control : null,
+            phase is EvidenceNativeObservationPhase.Custody or EvidenceNativeObservationPhase.CleanupCustody
+                    or EvidenceNativeObservationPhase.FileVerification or EvidenceNativeObservationPhase.AccountsClose ? custody : null);
     }
 
     /// <summary>Filters detached code data; this never creates an admission exception or execution authority.</summary>
     internal static string? FilterCode(string? code) => code is "ASEVD402" or "ASEVD404" or "ASEVD407"
         or "ASEVD409" or "ASEVD410" or "ASEVD420" or "ASEVD421" ? code : null;
 
-    /// <summary>Returns exactly six JSON fields, without LF; all values are closed and the packet is below 1 KiB.</summary>
+    /// <summary>Returns exactly seven JSON fields, without LF; all values are closed and the packet is below 1 KiB.</summary>
     /// <remarks>This data serialization never reads native state, inspects inner errors or changes a failure outcome.</remarks>
-    internal string ToJson() => "{\"schema\":\"evidence-native-observation-failure-v3\",\"phase\":\"" + Phase
+    internal string ToJson() => "{\"schema\":\"evidence-native-observation-failure-v4\",\"phase\":\"" + Phase
         + "\",\"error_kind\":\"" + ErrorKind + "\",\"diagnostic_code\":"
         + (DiagnosticCode is null ? "null" : "\"" + DiagnosticCode + "\"")
         + ",\"account_failure\":" + (AccountFailure?.ToJson() ?? "null")
-        + ",\"control_failure\":" + (ControlFailure?.ToJson() ?? "null") + "}";
+        + ",\"control_failure\":" + (ControlFailure?.ToJson() ?? "null")
+        + ",\"custody_failure\":" + (CustodyFailure?.ToJson() ?? "null") + "}";
 }
 
 /// <summary>Sticky first-failure data latch. Later cleanup cannot replace an earlier execution fault.</summary>
@@ -627,8 +781,9 @@ internal sealed class EvidenceNativeObservationFailureLatch
     /// <summary>Gets the retained data, or null before any fault. Null does not prove successful native execution.</summary>
     internal EvidenceNativeObservationFailure? First => Volatile.Read(ref _first);
     /// <summary>Retains the first closed projection; does not store the original exception or grant authority.</summary>
-    internal void Capture(EvidenceNativeObservationPhase phase, Exception error, LinuxControlFailure? control = null) =>
-        Interlocked.CompareExchange(ref _first, EvidenceNativeObservationFailure.Capture(phase, error, control), null);
+    internal void Capture(EvidenceNativeObservationPhase phase, Exception error, LinuxControlFailure? control = null,
+        LinuxCustodyFailure? custody = null) =>
+        Interlocked.CompareExchange(ref _first, EvidenceNativeObservationFailure.Capture(phase, error, control, custody), null);
     /// <summary>Builds a negative-only exception, with a closed missing-result fallback if no exception was caught.</summary>
     internal EvidenceNativeObservationException Rejected() => new(First
         ?? EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.ResultCheck, null));

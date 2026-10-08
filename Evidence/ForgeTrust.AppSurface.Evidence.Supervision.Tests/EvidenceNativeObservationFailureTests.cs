@@ -8,6 +8,182 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
 /// <summary>Pure diagnostic projection/latching controls; none acquires a native owner or proves root execution.</summary>
 public sealed class EvidenceNativeObservationFailureTests
 {
+    [Fact]
+    public void ActualProcedureCategoryKeepsTheOriginalCancellationFamilyWithoutReclassifyingCleanup()
+    {
+        var close = LinuxCustodyFailure.Capture(SupervisionCustodyFailure.LocalCloseFailed, null,
+            LinuxCustodyOperation.OriginalOwnerClose, new OperationCanceledException("canary"));
+        var swallowed = LinuxCustodyFailure.FromTransfer(SupervisionCustodyFailure.LocalCloseFailed, close,
+            new InvalidOperationException("wrapper-canary"));
+        Assert.Equal(SupervisionCustodyFailure.LocalCloseFailed, swallowed.Procedure);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Cancelled, swallowed.ErrorKind);
+        var read = LinuxCustodyFailure.Capture(SupervisionCustodyFailure.PreflightFailed,
+            LinuxCustodyNodeKind.Descriptor, LinuxCustodyOperation.HashRead, new OperationCanceledException("canary"));
+        var propagated = LinuxCustodyFailure.FromTransfer(SupervisionCustodyFailure.Cancelled, read, null);
+        Assert.Equal(SupervisionCustodyFailure.Cancelled, propagated.Procedure);
+        Assert.Equal(LinuxCustodyNodeKind.Descriptor, propagated.NodeKind);
+        Assert.Equal(LinuxCustodyOperation.HashRead, propagated.Operation);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Cancelled, propagated.ErrorKind);
+    }
+
+    [Theory]
+    [InlineData((int)SupervisionCustodyFailure.Cancelled)]
+    [InlineData((int)SupervisionCustodyFailure.SettlementValidationFailed)]
+    [InlineData((int)SupervisionCustodyFailure.PreflightFailed)]
+    [InlineData((int)SupervisionCustodyFailure.MutationFailed)]
+    [InlineData((int)SupervisionCustodyFailure.LocalCloseFailed)]
+    [InlineData((int)SupervisionCustodyFailure.FinalNativeRecheckFailed)]
+    public void OriginalCustodyCategoryAndErrorSurviveLaterNormalizationAndCleanup(int procedure)
+    {
+        var category = (SupervisionCustodyFailure)procedure;
+        Exception original = category == SupervisionCustodyFailure.Cancelled
+            ? new OperationCanceledException("original-canary") : new IOException("original-canary");
+        var callbacks = new LinuxCustodyFailureLatch();
+        callbacks.Capture(category, LinuxCustodyNodeKind.Descriptor, LinuxCustodyOperation.HashRead, original);
+        var first = callbacks.First;
+        callbacks.Capture(SupervisionCustodyFailure.LocalCloseFailed, null, LinuxCustodyOperation.OriginalOwnerClose,
+            new InvalidOperationException("cleanup-canary"));
+        Assert.Same(first, callbacks.First);
+        var normalized = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxCustodyData.RequireInventory(LinuxCustodyNodeKind.Descriptor, []));
+        var detail = LinuxCustodyFailure.FromTransfer(category, first, normalized);
+        Assert.Equal(category, detail.Procedure);
+        Assert.Equal(LinuxCustodyNodeKind.Descriptor, detail.NodeKind);
+        Assert.Equal(LinuxCustodyOperation.HashRead, detail.Operation);
+        Assert.Equal(category == SupervisionCustodyFailure.Cancelled
+            ? EvidenceNativeObservationErrorKind.Cancelled : EvidenceNativeObservationErrorKind.Io, detail.ErrorKind);
+        Assert.Null(detail.DiagnosticCode);
+        var roots = new EvidenceNativeObservationFailureLatch();
+        roots.Capture(EvidenceNativeObservationPhase.Custody, normalized, custody: detail);
+        roots.Capture(EvidenceNativeObservationPhase.CleanupCustody, new Exception("later-canary"));
+        Assert.Same(detail, roots.First!.CustodyFailure);
+        Assert.Equal("ASEVD402", roots.First.DiagnosticCode);
+        Assert.DoesNotContain("canary", roots.Rejected().Failure.ToJson());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CancellationBeforeForwardDispatchDoesNotInventLaterCleanupAsItsCause(bool cancelledCleanup)
+    {
+        var later = LinuxCustodyFailure.Capture(SupervisionCustodyFailure.LocalCloseFailed,
+            LinuxCustodyNodeKind.Socket, LinuxCustodyOperation.Chmod, cancelledCleanup
+                ? new OperationCanceledException("later-canary") : new IOException("later-canary"));
+        var detail = LinuxCustodyFailure.FromTransfer(SupervisionCustodyFailure.Cancelled, later,
+            new InvalidOperationException("wrapper-canary"));
+        Assert.Equal(SupervisionCustodyFailure.Cancelled, detail.Procedure);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Cancelled, detail.ErrorKind);
+        Assert.Null(detail.NodeKind);
+        Assert.Equal(LinuxCustodyOperation.Unknown, detail.Operation);
+        Assert.Null(detail.DiagnosticCode);
+        Assert.DoesNotContain("canary", detail.ToJson());
+    }
+
+    [Fact]
+    public void MismatchedProcedureAndUnknownDataCannotBeCreditedAsOriginalNodeFailure()
+    {
+        var later = LinuxCustodyFailure.Capture(SupervisionCustodyFailure.LocalCloseFailed,
+            LinuxCustodyNodeKind.Plan, LinuxCustodyOperation.HashRead, new IOException("canary"));
+        var detail = LinuxCustodyFailure.FromTransfer(SupervisionCustodyFailure.PreflightFailed, later,
+            new InvalidOperationException("normalized-canary"));
+        Assert.Equal(SupervisionCustodyFailure.PreflightFailed, detail.Procedure);
+        Assert.Null(detail.NodeKind);
+        Assert.Equal(LinuxCustodyOperation.Unknown, detail.Operation);
+        Assert.Equal(EvidenceNativeObservationErrorKind.InvalidOperation, detail.ErrorKind);
+        var unknown = LinuxCustodyFailure.Capture((SupervisionCustodyFailure)(-1),
+            (LinuxCustodyNodeKind)int.MaxValue, (LinuxCustodyOperation)(-1), new CanaryException("/private/canary", new Exception("inner-canary")));
+        Assert.Equal(SupervisionCustodyFailure.None, unknown.Procedure);
+        Assert.Null(unknown.NodeKind);
+        Assert.Equal(LinuxCustodyOperation.Unknown, unknown.Operation);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Unknown, unknown.ErrorKind);
+        Assert.Null(unknown.DiagnosticCode);
+        Assert.DoesNotContain("canary", unknown.ToJson());
+    }
+
+    [Fact]
+    public void EveryCustodyOperationAndNodeHasOnlyFiveClosedDataFields()
+    {
+        foreach (var operation in Enum.GetValues<LinuxCustodyOperation>())
+        foreach (var node in Enum.GetValues<LinuxCustodyNodeKind>())
+        {
+            var detail = LinuxCustodyFailure.Capture(SupervisionCustodyFailure.PreflightFailed,
+                node, operation, new IOException("/private/canary", new Exception("inner-canary")));
+            using var parsed = JsonDocument.Parse(detail.ToJson());
+            Assert.Equal(new[] { "procedure", "node_kind", "operation", "error_kind", "diagnostic_code" },
+                parsed.RootElement.EnumerateObject().Select(property => property.Name).ToArray());
+            Assert.Equal(operation.ToString(), parsed.RootElement.GetProperty("operation").GetString());
+            Assert.Equal(node.ToString(), parsed.RootElement.GetProperty("node_kind").GetString());
+            Assert.Equal("Io", parsed.RootElement.GetProperty("error_kind").GetString());
+            Assert.Equal(JsonValueKind.Null, parsed.RootElement.GetProperty("diagnostic_code").ValueKind);
+            Assert.DoesNotContain("canary", detail.ToJson());
+        }
+    }
+
+    [Fact]
+    public void CustodyAttachmentIsNullableAndRestrictedToTheActualCustodyPhases()
+    {
+        var custody = LinuxCustodyFailure.Capture(SupervisionCustodyFailure.MutationFailed,
+            LinuxCustodyNodeKind.Socket, LinuxCustodyOperation.Chown, new IOException("canary"));
+        var control = LinuxControlFailure.Capture(LinuxControlFailureStage.ListenerClose, null, new IOException("canary"));
+        foreach (var phase in Enum.GetValues<EvidenceNativeObservationPhase>())
+        {
+            var root = EvidenceNativeObservationFailure.Capture(phase, new IOException("canary"), control, custody);
+            if (phase is EvidenceNativeObservationPhase.Custody or EvidenceNativeObservationPhase.CleanupCustody
+                    or EvidenceNativeObservationPhase.FileVerification or EvidenceNativeObservationPhase.AccountsClose)
+                Assert.Same(custody, root.CustodyFailure);
+            else Assert.Null(root.CustodyFailure);
+            if (phase is EvidenceNativeObservationPhase.ServerRun or EvidenceNativeObservationPhase.ServerCompletion)
+                Assert.Same(control, root.ControlFailure);
+            else Assert.Null(root.ControlFailure);
+            using var parsed = JsonDocument.Parse(root.ToJson());
+            Assert.Equal(7, parsed.RootElement.EnumerateObject().Count());
+            Assert.Equal("evidence-native-observation-failure-v4", parsed.RootElement.GetProperty("schema").GetString());
+            Assert.True(Encoding.UTF8.GetByteCount(root.ToJson()) + 1 <= 1024);
+            Assert.DoesNotContain("canary", root.ToJson());
+        }
+        Assert.Null(EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.Custody, null).CustodyFailure);
+    }
+
+    [Fact]
+    public void ConcurrentCustodyFirstFaultIsCoherentAndCannotBeReplacedByCleanup()
+    {
+        var latch = new LinuxCustodyFailureLatch();
+        Parallel.For(0, 32, index => latch.Capture(index % 2 == 0
+            ? SupervisionCustodyFailure.PreflightFailed : SupervisionCustodyFailure.MutationFailed,
+            index % 2 == 0 ? LinuxCustodyNodeKind.Descriptor : LinuxCustodyNodeKind.Socket,
+            index % 2 == 0 ? LinuxCustodyOperation.HashRead : LinuxCustodyOperation.Chmod,
+            index % 2 == 0 ? new IOException("canary") : new UnauthorizedAccessException("canary")));
+        var first = latch.First!;
+        if (first.Procedure == SupervisionCustodyFailure.PreflightFailed)
+        {
+            Assert.Equal(LinuxCustodyNodeKind.Descriptor, first.NodeKind);
+            Assert.Equal(LinuxCustodyOperation.HashRead, first.Operation);
+            Assert.Equal(EvidenceNativeObservationErrorKind.Io, first.ErrorKind);
+        }
+        else
+        {
+            Assert.Equal(SupervisionCustodyFailure.MutationFailed, first.Procedure);
+            Assert.Equal(LinuxCustodyNodeKind.Socket, first.NodeKind);
+            Assert.Equal(LinuxCustodyOperation.Chmod, first.Operation);
+            Assert.Equal(EvidenceNativeObservationErrorKind.AccessDenied, first.ErrorKind);
+        }
+        latch.Capture(SupervisionCustodyFailure.FinalNativeRecheckFailed, null, LinuxCustodyOperation.RootRecheck,
+            new Exception("later-canary"));
+        Assert.Same(first, latch.First);
+    }
+
+    [Fact]
+    public void FailureBeforeTheProcedureStartsRetainsNoInventedProcedureCategory()
+    {
+        var detail = LinuxCustodyFailure.FromTransfer(SupervisionCustodyFailure.None, null,
+            new PlatformNotSupportedException("canary"));
+        Assert.Equal(SupervisionCustodyFailure.None, detail.Procedure);
+        Assert.Null(detail.NodeKind);
+        Assert.Equal(LinuxCustodyOperation.Unknown, detail.Operation);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Unsupported, detail.ErrorKind);
+        Assert.Null(detail.DiagnosticCode);
+    }
+
     [Theory]
     [InlineData((int)SocketError.OperationAborted, (int)LinuxControlFailureStage.ListenerNativeAcceptOperationAborted)]
     [InlineData((int)SocketError.Interrupted, (int)LinuxControlFailureStage.ListenerNativeAcceptInterrupted)]
@@ -415,7 +591,7 @@ public sealed class EvidenceNativeObservationFailureTests
         Assert.Null(EvidenceNativeObservationFailure.FilterCode(code));
 
     [Fact]
-    public void EveryClosedPhaseProducesExactlySixBoundedFields()
+    public void EveryClosedPhaseProducesExactlySevenBoundedFields()
     {
         foreach (var phase in Enum.GetValues<EvidenceNativeObservationPhase>())
         {
@@ -424,9 +600,9 @@ public sealed class EvidenceNativeObservationFailureTests
             Assert.True(Encoding.UTF8.GetByteCount(json) <= 1024);
             Assert.DoesNotContain("private-canary", json);
             using var parsed = JsonDocument.Parse(json);
-            Assert.Equal(new[] { "schema", "phase", "error_kind", "diagnostic_code", "account_failure", "control_failure" },
+            Assert.Equal(new[] { "schema", "phase", "error_kind", "diagnostic_code", "account_failure", "control_failure", "custody_failure" },
                 parsed.RootElement.EnumerateObject().Select(p => p.Name).ToArray());
-            Assert.Equal("evidence-native-observation-failure-v3", parsed.RootElement.GetProperty("schema").GetString());
+            Assert.Equal("evidence-native-observation-failure-v4", parsed.RootElement.GetProperty("schema").GetString());
             Assert.Equal(phase.ToString(), parsed.RootElement.GetProperty("phase").GetString());
             Assert.Equal("Io", parsed.RootElement.GetProperty("error_kind").GetString());
             Assert.Equal(JsonValueKind.Null, parsed.RootElement.GetProperty("diagnostic_code").ValueKind);
@@ -749,7 +925,7 @@ public sealed class EvidenceNativeObservationFailureTests
         latch.Capture(EvidenceNativeObservationPhase.ListenerClose, new ObjectDisposedException("later"));
         Assert.Same(detail, latch.Rejected().Failure.ControlFailure);
         using var parsed = JsonDocument.Parse(latch.Rejected().Failure.ToJson());
-        Assert.Equal("evidence-native-observation-failure-v3", parsed.RootElement.GetProperty("schema").GetString());
+        Assert.Equal("evidence-native-observation-failure-v4", parsed.RootElement.GetProperty("schema").GetString());
         Assert.Equal("ReadyData", parsed.RootElement.GetProperty("control_failure").GetProperty("stage").GetString());
     }
 
